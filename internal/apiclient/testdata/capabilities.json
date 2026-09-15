@@ -1,0 +1,1941 @@
+{
+  "_fixture": {
+    "what": "GET /v1/capabilities, verbatim wire body (admin tier).",
+    "source": "https://guerrilla.barkpark.cloud",
+    "captured_at": "2026-09-15T10:17:08Z",
+    "server_etag": "W/\"caps-9d0fa6ad35da65a2\"",
+    "regenerate": "internal/apiclient/testdata/regen-capabilities.sh",
+    "read_by": "internal/apiclient/manifest_path_drift_test.go",
+    "do_not": "Do NOT hand-edit to make the drift gate green. A red means the Go literals and the server disagree; fix whichever is wrong and re-run this script.",
+    "slimmed_to": [
+      "id",
+      "noun",
+      "verb",
+      "http.method",
+      "http.path_template"
+    ],
+    "commands_on_wire": 212,
+    "commands_kept": 212
+  },
+  "manifest_version": "1",
+  "auth_tier": "admin",
+  "etag": "W/\"caps-9d0fa6ad35da65a2\"",
+  "generated_at": "2026-09-15T10:17:07.706745Z",
+  "server": {
+    "api_version": "1",
+    "base_url": "https://guerrilla.barkpark.cloud",
+    "min_cli": "1.0.0",
+    "name": "barkpark",
+    "version": "0.1.0"
+  },
+  "commands": [
+    {
+      "id": "doc.get",
+      "noun": "doc",
+      "verb": "get",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/doc/:dataset/:type/:doc_id"
+      }
+    },
+    {
+      "id": "doc.ls",
+      "noun": "doc",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/query/:dataset/:type"
+      }
+    },
+    {
+      "id": "doc.backlinks",
+      "noun": "doc",
+      "verb": "backlinks",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/backlinks/:dataset/:id"
+      }
+    },
+    {
+      "id": "doc.related",
+      "noun": "doc",
+      "verb": "related",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/related/:dataset/:id"
+      }
+    },
+    {
+      "id": "tag.browse",
+      "noun": "tag",
+      "verb": "browse",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/tags/:dataset"
+      }
+    },
+    {
+      "id": "tag.docs",
+      "noun": "tag",
+      "verb": "docs",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/tags/:dataset/:tag"
+      }
+    },
+    {
+      "id": "doc.history",
+      "noun": "doc",
+      "verb": "history",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/history/:dataset/:type/:doc_id"
+      }
+    },
+    {
+      "id": "doc.revision",
+      "noun": "doc",
+      "verb": "revision",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/revision/:dataset/:rev_id"
+      }
+    },
+    {
+      "id": "doc.restore-revision",
+      "noun": "doc",
+      "verb": "restore-revision",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/revision/:dataset/:rev_id/restore"
+      }
+    },
+    {
+      "id": "dataset.stats",
+      "noun": "dataset",
+      "verb": "stats",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/analytics/:dataset"
+      }
+    },
+    {
+      "id": "data.counts",
+      "noun": "data",
+      "verb": "counts",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/counts/:dataset"
+      }
+    },
+    {
+      "id": "doc.query",
+      "noun": "doc",
+      "verb": "query",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/query/:dataset/:type"
+      }
+    },
+    {
+      "id": "doc.mutate",
+      "noun": "doc",
+      "verb": "mutate",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.publish",
+      "noun": "doc",
+      "verb": "publish",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.unpublish",
+      "noun": "doc",
+      "verb": "unpublish",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.discard-draft",
+      "noun": "doc",
+      "verb": "discard-draft",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.delete",
+      "noun": "doc",
+      "verb": "delete",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.create",
+      "noun": "doc",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.create-or-replace",
+      "noun": "doc",
+      "verb": "create-or-replace",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.create-if-not-exists",
+      "noun": "doc",
+      "verb": "create-if-not-exists",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "doc.patch",
+      "noun": "doc",
+      "verb": "patch",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/mutate/:dataset"
+      }
+    },
+    {
+      "id": "schema.ls",
+      "noun": "schema",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/schemas/:dataset"
+      }
+    },
+    {
+      "id": "schema.get",
+      "noun": "schema",
+      "verb": "get",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/schemas/:dataset/:name"
+      }
+    },
+    {
+      "id": "schema.apply",
+      "noun": "schema",
+      "verb": "apply",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/schemas/:dataset"
+      }
+    },
+    {
+      "id": "schema.delete",
+      "noun": "schema",
+      "verb": "delete",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/schemas/:dataset/:name"
+      }
+    },
+    {
+      "id": "media.ls",
+      "noun": "media",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset"
+      }
+    },
+    {
+      "id": "media.upload",
+      "noun": "media",
+      "verb": "upload",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/upload"
+      }
+    },
+    {
+      "id": "media.get",
+      "noun": "media",
+      "verb": "get",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/:id"
+      }
+    },
+    {
+      "id": "media.delete",
+      "noun": "media",
+      "verb": "delete",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/media/:dataset/:id"
+      }
+    },
+    {
+      "id": "media.relations",
+      "noun": "media",
+      "verb": "relations",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/:id/relations"
+      }
+    },
+    {
+      "id": "media.checkout",
+      "noun": "media",
+      "verb": "checkout",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/:id/checkout"
+      }
+    },
+    {
+      "id": "media.undo-checkout",
+      "noun": "media",
+      "verb": "undo-checkout",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/:id/undo-checkout"
+      }
+    },
+    {
+      "id": "media.search",
+      "noun": "media",
+      "verb": "search",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/search"
+      }
+    },
+    {
+      "id": "media.suggest",
+      "noun": "media",
+      "verb": "suggest",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/search/suggestions"
+      }
+    },
+    {
+      "id": "media.update",
+      "noun": "media",
+      "verb": "update",
+      "http": {
+        "method": "PATCH",
+        "path_template": "/v1/media/:dataset/:id"
+      }
+    },
+    {
+      "id": "media.collections",
+      "noun": "media",
+      "verb": "collections",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/collections"
+      }
+    },
+    {
+      "id": "media.collection",
+      "noun": "media",
+      "verb": "collection",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/collections/:id"
+      }
+    },
+    {
+      "id": "media.collection-assets",
+      "noun": "media",
+      "verb": "collection-assets",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/collections/:id/assets"
+      }
+    },
+    {
+      "id": "media.add-member",
+      "noun": "media",
+      "verb": "add-member",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/collections/:id/members"
+      }
+    },
+    {
+      "id": "media.remove-member",
+      "noun": "media",
+      "verb": "remove-member",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/media/:dataset/collections/:id/members/:asset_id"
+      }
+    },
+    {
+      "id": "media.share-collection",
+      "noun": "media",
+      "verb": "share-collection",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/collections/:id/share"
+      }
+    },
+    {
+      "id": "media.revoke-share",
+      "noun": "media",
+      "verb": "revoke-share",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/media/:dataset/collections/:id/share"
+      }
+    },
+    {
+      "id": "paper.access",
+      "noun": "paper",
+      "verb": "access",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/papers/:slug/access"
+      }
+    },
+    {
+      "id": "media.search-settings",
+      "noun": "media",
+      "verb": "search-settings",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/search/settings"
+      }
+    },
+    {
+      "id": "media.update-search-settings",
+      "noun": "media",
+      "verb": "update-search-settings",
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/media/:dataset/search/settings"
+      }
+    },
+    {
+      "id": "media.search-insights",
+      "noun": "media",
+      "verb": "search-insights",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/search/insights"
+      }
+    },
+    {
+      "id": "media.search-synonyms",
+      "noun": "media",
+      "verb": "search-synonyms",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/search/synonyms"
+      }
+    },
+    {
+      "id": "media.search-synonym-preview",
+      "noun": "media",
+      "verb": "search-synonym-preview",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/search/synonyms/preview"
+      }
+    },
+    {
+      "id": "media.create-search-synonym",
+      "noun": "media",
+      "verb": "create-search-synonym",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/search/synonyms"
+      }
+    },
+    {
+      "id": "media.promote-search-synonym",
+      "noun": "media",
+      "verb": "promote-search-synonym",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/search/synonyms/promote"
+      }
+    },
+    {
+      "id": "media.delete-search-synonym",
+      "noun": "media",
+      "verb": "delete-search-synonym",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/media/:dataset/search/synonyms/:id"
+      }
+    },
+    {
+      "id": "media.search-interaction",
+      "noun": "media",
+      "verb": "search-interaction",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/media/:dataset/search/interaction"
+      }
+    },
+    {
+      "id": "media.share-view",
+      "noun": "media",
+      "verb": "share-view",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/media/:dataset/share/:token"
+      }
+    },
+    {
+      "id": "search.query",
+      "noun": "search",
+      "verb": "query",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset"
+      }
+    },
+    {
+      "id": "search.suggestions",
+      "noun": "search",
+      "verb": "suggestions",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset/suggestions"
+      }
+    },
+    {
+      "id": "search.interaction",
+      "noun": "search",
+      "verb": "interaction",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/search/:dataset/interaction"
+      }
+    },
+    {
+      "id": "search.correction",
+      "noun": "search",
+      "verb": "correction",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/search/:dataset/correction"
+      }
+    },
+    {
+      "id": "search.reindex",
+      "noun": "search",
+      "verb": "reindex",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/search/:dataset/reindex"
+      }
+    },
+    {
+      "id": "search.settings",
+      "noun": "search",
+      "verb": "settings",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset/settings"
+      }
+    },
+    {
+      "id": "search.update-settings",
+      "noun": "search",
+      "verb": "update-settings",
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/data/search/:dataset/settings"
+      }
+    },
+    {
+      "id": "search.insights",
+      "noun": "search",
+      "verb": "insights",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset/insights"
+      }
+    },
+    {
+      "id": "search.synonyms",
+      "noun": "search",
+      "verb": "synonyms",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset/synonyms"
+      }
+    },
+    {
+      "id": "search.synonym-preview",
+      "noun": "search",
+      "verb": "synonym-preview",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/data/search/:dataset/synonyms/preview"
+      }
+    },
+    {
+      "id": "search.create-synonym",
+      "noun": "search",
+      "verb": "create-synonym",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/search/:dataset/synonyms"
+      }
+    },
+    {
+      "id": "search.promote-synonym",
+      "noun": "search",
+      "verb": "promote-synonym",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/data/search/:dataset/synonyms/promote"
+      }
+    },
+    {
+      "id": "search.delete-synonym",
+      "noun": "search",
+      "verb": "delete-synonym",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/data/search/:dataset/synonyms/:id"
+      }
+    },
+    {
+      "id": "workspace.ls",
+      "noun": "workspace",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/workspaces"
+      }
+    },
+    {
+      "id": "workspace.create",
+      "noun": "workspace",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/api/workspaces"
+      }
+    },
+    {
+      "id": "workspace.project-create",
+      "noun": "workspace",
+      "verb": "project-create",
+      "http": {
+        "method": "POST",
+        "path_template": "/api/workspaces/:workspace_slug/projects"
+      }
+    },
+    {
+      "id": "workspace.project-ls",
+      "noun": "workspace",
+      "verb": "project-ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/workspaces/:workspace_slug/projects"
+      }
+    },
+    {
+      "id": "workspace.dataset-ls",
+      "noun": "workspace",
+      "verb": "dataset-ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/api/workspaces/:workspace_slug/projects/:project_slug/datasets"
+      }
+    },
+    {
+      "id": "workspace.member-ls",
+      "noun": "workspace",
+      "verb": "member-ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/members"
+      }
+    },
+    {
+      "id": "workspace.member-add",
+      "noun": "workspace",
+      "verb": "member-add",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/members"
+      }
+    },
+    {
+      "id": "workspace.member-role",
+      "noun": "workspace",
+      "verb": "member-role",
+      "http": {
+        "method": "PATCH",
+        "path_template": "/v1/members/:principal_ref"
+      }
+    },
+    {
+      "id": "workspace.set-locale",
+      "noun": "workspace",
+      "verb": "set-locale",
+      "http": {
+        "method": "PATCH",
+        "path_template": "/v1/workspace/locale"
+      }
+    },
+    {
+      "id": "workspace.member-rm",
+      "noun": "workspace",
+      "verb": "member-rm",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/members/:principal_ref"
+      }
+    },
+    {
+      "id": "workspace.reinstate",
+      "noun": "workspace",
+      "verb": "reinstate",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/admin/workspaces/:slug/reinstate"
+      }
+    },
+    {
+      "id": "token.ls",
+      "noun": "token",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tokens"
+      }
+    },
+    {
+      "id": "token.revoke",
+      "noun": "token",
+      "verb": "revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/tokens/:id"
+      }
+    },
+    {
+      "id": "token.create",
+      "noun": "token",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tokens"
+      }
+    },
+    {
+      "id": "webhook.ls",
+      "noun": "webhook",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/webhooks/:dataset"
+      }
+    },
+    {
+      "id": "webhook.create",
+      "noun": "webhook",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/webhooks/:dataset"
+      }
+    },
+    {
+      "id": "webhook.get",
+      "noun": "webhook",
+      "verb": "get",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/webhooks/:dataset/:id"
+      }
+    },
+    {
+      "id": "webhook.delete",
+      "noun": "webhook",
+      "verb": "delete",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/webhooks/:dataset/:id"
+      }
+    },
+    {
+      "id": "webhook.update",
+      "noun": "webhook",
+      "verb": "update",
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/webhooks/:dataset/:id"
+      }
+    },
+    {
+      "id": "webhook.deliveries",
+      "noun": "webhook",
+      "verb": "deliveries",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/webhooks/:dataset/:id/deliveries"
+      }
+    },
+    {
+      "id": "webhook.replay",
+      "noun": "webhook",
+      "verb": "replay",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay"
+      }
+    },
+    {
+      "id": "webhook.rotate",
+      "noun": "webhook",
+      "verb": "rotate",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/webhooks/:dataset/:id/rotate"
+      }
+    },
+    {
+      "id": "webhook.reenable",
+      "noun": "webhook",
+      "verb": "reenable",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/webhooks/:dataset/:id/reenable"
+      }
+    },
+    {
+      "id": "webhook.test-send",
+      "noun": "webhook",
+      "verb": "test-send",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/webhooks/:dataset/:id/test-send"
+      }
+    },
+    {
+      "id": "plugin.ls",
+      "noun": "plugin",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins"
+      }
+    },
+    {
+      "id": "plugin.settings",
+      "noun": "plugin",
+      "verb": "settings",
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/plugins/settings/:plugin_name"
+      }
+    },
+    {
+      "id": "secret.ls",
+      "noun": "secret",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/secrets"
+      }
+    },
+    {
+      "id": "secret.get",
+      "noun": "secret",
+      "verb": "get",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/secrets/:name"
+      }
+    },
+    {
+      "id": "secret.set",
+      "noun": "secret",
+      "verb": "set",
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/secrets/:name"
+      }
+    },
+    {
+      "id": "secret.rm",
+      "noun": "secret",
+      "verb": "rm",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/secrets/:name"
+      }
+    },
+    {
+      "id": "secret.scoped-ls",
+      "noun": "secret",
+      "verb": "scoped-ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets"
+      }
+    },
+    {
+      "id": "secret.scoped-get",
+      "noun": "secret",
+      "verb": "scoped-get",
+      "http": {
+        "method": "GET",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+      }
+    },
+    {
+      "id": "secret.scoped-set",
+      "noun": "secret",
+      "verb": "scoped-set",
+      "http": {
+        "method": "PUT",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+      }
+    },
+    {
+      "id": "secret.scoped-rm",
+      "noun": "secret",
+      "verb": "scoped-rm",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+      }
+    },
+    {
+      "id": "share.ls",
+      "noun": "share",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/shares"
+      }
+    },
+    {
+      "id": "share.add",
+      "noun": "share",
+      "verb": "add",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/shares"
+      }
+    },
+    {
+      "id": "share.publish-media",
+      "noun": "share",
+      "verb": "publish-media",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/shares/media"
+      }
+    },
+    {
+      "id": "share.rm",
+      "noun": "share",
+      "verb": "rm",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/shares"
+      }
+    },
+    {
+      "id": "share.token-ls",
+      "noun": "share",
+      "verb": "token-ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/shares/tokens"
+      }
+    },
+    {
+      "id": "share.token-mint",
+      "noun": "share",
+      "verb": "token-mint",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/shares/tokens"
+      }
+    },
+    {
+      "id": "share.token-revoke",
+      "noun": "share",
+      "verb": "token-revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/shares/tokens/:token_id"
+      }
+    },
+    {
+      "id": "share.link-ls",
+      "noun": "share",
+      "verb": "link-ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/shares/links"
+      }
+    },
+    {
+      "id": "share.link-mint",
+      "noun": "share",
+      "verb": "link-mint",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/shares/links"
+      }
+    },
+    {
+      "id": "share.link-revoke",
+      "noun": "share",
+      "verb": "link-revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/shares/links/:id"
+      }
+    },
+    {
+      "id": "graph.corpus",
+      "noun": "graph",
+      "verb": "corpus",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/graph"
+      }
+    },
+    {
+      "id": "graph.show",
+      "noun": "graph",
+      "verb": "show",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/graph/:id"
+      }
+    },
+    {
+      "id": "graph.tasks",
+      "noun": "graph",
+      "verb": "tasks",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/graph/:id/tasks"
+      }
+    },
+    {
+      "id": "graph.orphans",
+      "noun": "graph",
+      "verb": "orphans",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/graph/orphans"
+      }
+    },
+    {
+      "id": "graph.dangling",
+      "noun": "graph",
+      "verb": "dangling",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/graph/dangling"
+      }
+    },
+    {
+      "id": "auth.register",
+      "noun": "auth",
+      "verb": "register",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/register"
+      }
+    },
+    {
+      "id": "auth.login",
+      "noun": "auth",
+      "verb": "login",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/login"
+      }
+    },
+    {
+      "id": "auth.verify-email",
+      "noun": "auth",
+      "verb": "verify-email",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/verify-email"
+      }
+    },
+    {
+      "id": "auth.request-reset",
+      "noun": "auth",
+      "verb": "request-reset",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/request-reset"
+      }
+    },
+    {
+      "id": "auth.reset",
+      "noun": "auth",
+      "verb": "reset",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/reset"
+      }
+    },
+    {
+      "id": "auth.me",
+      "noun": "auth",
+      "verb": "me",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/auth/me"
+      }
+    },
+    {
+      "id": "auth.logout",
+      "noun": "auth",
+      "verb": "logout",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/auth/logout"
+      }
+    },
+    {
+      "id": "auth.mfa-enroll",
+      "noun": "auth",
+      "verb": "mfa-enroll",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/mfa/enroll"
+      }
+    },
+    {
+      "id": "auth.mfa-verify",
+      "noun": "auth",
+      "verb": "mfa-verify",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/mfa/verify"
+      }
+    },
+    {
+      "id": "auth.mfa-disable",
+      "noun": "auth",
+      "verb": "mfa-disable",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/mfa/disable"
+      }
+    },
+    {
+      "id": "access.grant",
+      "noun": "access",
+      "verb": "grant",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/access"
+      }
+    },
+    {
+      "id": "access.ls",
+      "noun": "access",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/access"
+      }
+    },
+    {
+      "id": "access.show",
+      "noun": "access",
+      "verb": "show",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/access/:id"
+      }
+    },
+    {
+      "id": "access.revoke",
+      "noun": "access",
+      "verb": "revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/access/:id"
+      }
+    },
+    {
+      "id": "access.claim",
+      "noun": "access",
+      "verb": "claim",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/access/claim"
+      }
+    },
+    {
+      "id": "access.mine",
+      "noun": "access",
+      "verb": "mine",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/access/mine"
+      }
+    },
+    {
+      "id": "cycle.show",
+      "noun": "cycle",
+      "verb": "show",
+      "http": {
+        "method": "GET",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id"
+      }
+    },
+    {
+      "id": "cycle.open",
+      "noun": "cycle",
+      "verb": "open",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open"
+      }
+    },
+    {
+      "id": "cycle.release-gate-open",
+      "noun": "cycle",
+      "verb": "release-gate-open",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open"
+      }
+    },
+    {
+      "id": "cycle.release-paper-stage",
+      "noun": "cycle",
+      "verb": "release-paper-stage",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage"
+      }
+    },
+    {
+      "id": "cycle.release-gate-activate",
+      "noun": "cycle",
+      "verb": "release-gate-activate",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate"
+      }
+    },
+    {
+      "id": "cycle.seal",
+      "noun": "cycle",
+      "verb": "seal",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal"
+      }
+    },
+    {
+      "id": "cycle.assign",
+      "noun": "cycle",
+      "verb": "assign",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments"
+      }
+    },
+    {
+      "id": "cycle.result",
+      "noun": "cycle",
+      "verb": "result",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results"
+      }
+    },
+    {
+      "id": "cycle.quarantine",
+      "noun": "cycle",
+      "verb": "quarantine",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine"
+      }
+    },
+    {
+      "id": "cycle.promote",
+      "noun": "cycle",
+      "verb": "promote",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote"
+      }
+    },
+    {
+      "id": "cycle.rollback",
+      "noun": "cycle",
+      "verb": "rollback",
+      "http": {
+        "method": "POST",
+        "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback"
+      }
+    },
+    {
+      "id": "chat.create_session",
+      "noun": "chat",
+      "verb": "create-session",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions"
+      }
+    },
+    {
+      "id": "chat.list_sessions",
+      "noun": "chat",
+      "verb": "list-sessions",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/chat/sessions"
+      }
+    },
+    {
+      "id": "chat.get_session",
+      "noun": "chat",
+      "verb": "get-session",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/:id"
+      }
+    },
+    {
+      "id": "chat.update_session",
+      "noun": "chat",
+      "verb": "update-session",
+      "http": {
+        "method": "PATCH",
+        "path_template": "/v1/chat/sessions/:id"
+      }
+    },
+    {
+      "id": "chat.send_message",
+      "noun": "chat",
+      "verb": "send-message",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/messages"
+      }
+    },
+    {
+      "id": "chat.interrupt",
+      "noun": "chat",
+      "verb": "interrupt",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/interrupt"
+      }
+    },
+    {
+      "id": "chat.approve",
+      "noun": "chat",
+      "verb": "approve",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/approval"
+      }
+    },
+    {
+      "id": "chat.answer",
+      "noun": "chat",
+      "verb": "answer",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/answer"
+      }
+    },
+    {
+      "id": "chat.archive",
+      "noun": "chat",
+      "verb": "archive",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/archive"
+      }
+    },
+    {
+      "id": "chat.unarchive",
+      "noun": "chat",
+      "verb": "unarchive",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/unarchive"
+      }
+    },
+    {
+      "id": "chat.upload_attachment",
+      "noun": "chat",
+      "verb": "upload-attachment",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/chat/sessions/:id/attachments"
+      }
+    },
+    {
+      "id": "chat.get_attachment",
+      "noun": "chat",
+      "verb": "get-attachment",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/chat/sessions/:id/attachments/:attachment_id"
+      }
+    },
+    {
+      "id": "app_token.create",
+      "noun": "app_token",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/auth/app-tokens"
+      }
+    },
+    {
+      "id": "app_token.ls",
+      "noun": "app_token",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/auth/app-tokens"
+      }
+    },
+    {
+      "id": "app_token.revoke",
+      "noun": "app_token",
+      "verb": "revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/auth/app-tokens"
+      }
+    },
+    {
+      "id": "app_token.revoke-by-id",
+      "noun": "app_token",
+      "verb": "revoke-by-id",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/auth/app-tokens/:id"
+      }
+    },
+    {
+      "id": "app_token.revoke-current",
+      "noun": "app_token",
+      "verb": "revoke-current",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/auth/app-tokens/current"
+      }
+    },
+    {
+      "id": "fleet_support_token.create",
+      "noun": "fleet_support_token",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/fleet/support-tokens"
+      }
+    },
+    {
+      "id": "fleet_support_token.revoke",
+      "noun": "fleet_support_token",
+      "verb": "revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/fleet/support-tokens/:token_id"
+      }
+    },
+    {
+      "id": "incident.create",
+      "noun": "incident",
+      "verb": "create",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/status/incidents"
+      }
+    },
+    {
+      "id": "incident.resolve",
+      "noun": "incident",
+      "verb": "resolve",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/status/incidents/:id/resolve"
+      }
+    },
+    {
+      "id": "bulldocs.publish",
+      "noun": "bulldocs",
+      "verb": "publish",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/papers"
+      }
+    },
+    {
+      "id": "bulldocs.patch",
+      "noun": "bulldocs",
+      "verb": "patch",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/papers/:slug/ops"
+      }
+    },
+    {
+      "id": "bulldocs.propose",
+      "noun": "bulldocs",
+      "verb": "propose",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/papers/:slug/proposals"
+      }
+    },
+    {
+      "id": "bulldocs.intents",
+      "noun": "bulldocs",
+      "verb": "intents",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/bulldocs/intents"
+      }
+    },
+    {
+      "id": "bulldocs.intent-processed",
+      "noun": "bulldocs",
+      "verb": "intent-processed",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/intents/:id/processed"
+      }
+    },
+    {
+      "id": "session.open",
+      "noun": "session",
+      "verb": "open",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/sessions"
+      }
+    },
+    {
+      "id": "session.log",
+      "noun": "session",
+      "verb": "log",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/sessions/:slug/events"
+      }
+    },
+    {
+      "id": "session.publish",
+      "noun": "session",
+      "verb": "publish",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/sessions"
+      }
+    },
+    {
+      "id": "session.view",
+      "noun": "session",
+      "verb": "view",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/bulldocs/sessions/:slug"
+      }
+    },
+    {
+      "id": "session.link-task",
+      "noun": "session",
+      "verb": "link-task",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/sessions"
+      }
+    },
+    {
+      "id": "session.touch",
+      "noun": "session",
+      "verb": "touch",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/bulldocs/sessions/:slug/conversations"
+      }
+    },
+    {
+      "id": "github.adopt",
+      "noun": "github",
+      "verb": "adopt",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/github/adopt/:id"
+      }
+    },
+    {
+      "id": "github.status",
+      "noun": "github",
+      "verb": "status",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/github/status"
+      }
+    },
+    {
+      "id": "onixedit.export",
+      "noun": "onixedit",
+      "verb": "export",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/onixedit/export/:dataset/:id"
+      }
+    },
+    {
+      "id": "sheets.import",
+      "noun": "sheets",
+      "verb": "import",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/sheets/import"
+      }
+    },
+    {
+      "id": "sheets.ops",
+      "noun": "sheets",
+      "verb": "ops",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/sheets/:slug/ops"
+      }
+    },
+    {
+      "id": "sheets.export-xlsx",
+      "noun": "sheets",
+      "verb": "export-xlsx",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/sheets/:slug/export.xlsx"
+      }
+    },
+    {
+      "id": "sheets.export-csv",
+      "noun": "sheets",
+      "verb": "export-csv",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/sheets/:slug/export.csv"
+      }
+    },
+    {
+      "id": "sheets.export-tsv",
+      "noun": "sheets",
+      "verb": "export-tsv",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/sheets/:slug/export.tsv"
+      }
+    },
+    {
+      "id": "sheets.export-md",
+      "noun": "sheets",
+      "verb": "export-md",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/sheets/:slug/export.md"
+      }
+    },
+    {
+      "id": "sheets.export-html",
+      "noun": "sheets",
+      "verb": "export-html",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/sheets/:slug/export.html"
+      }
+    },
+    {
+      "id": "task.ls",
+      "noun": "task",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks"
+      }
+    },
+    {
+      "id": "task.ready",
+      "noun": "task",
+      "verb": "ready",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/ready"
+      }
+    },
+    {
+      "id": "task.prime",
+      "noun": "task",
+      "verb": "prime",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/prime"
+      }
+    },
+    {
+      "id": "task.events",
+      "noun": "task",
+      "verb": "events",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/events"
+      }
+    },
+    {
+      "id": "task.get",
+      "noun": "task",
+      "verb": "get",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/:doc_id"
+      }
+    },
+    {
+      "id": "task.claim",
+      "noun": "task",
+      "verb": "claim",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/claim"
+      }
+    },
+    {
+      "id": "task.close",
+      "noun": "task",
+      "verb": "close",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/close"
+      }
+    },
+    {
+      "id": "task.release",
+      "noun": "task",
+      "verb": "release",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/release"
+      }
+    },
+    {
+      "id": "task.landed",
+      "noun": "task",
+      "verb": "landed",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/landed"
+      }
+    },
+    {
+      "id": "task.stamp",
+      "noun": "task",
+      "verb": "stamp",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/stamp"
+      }
+    },
+    {
+      "id": "task.next",
+      "noun": "task",
+      "verb": "next",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/claim"
+      }
+    },
+    {
+      "id": "task.move",
+      "noun": "task",
+      "verb": "move",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/move"
+      }
+    },
+    {
+      "id": "task.stage",
+      "noun": "task",
+      "verb": "stage",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/stage"
+      }
+    },
+    {
+      "id": "task.pulse",
+      "noun": "task",
+      "verb": "pulse",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/pulse"
+      }
+    },
+    {
+      "id": "task.renew",
+      "noun": "task",
+      "verb": "renew",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/renew"
+      }
+    },
+    {
+      "id": "task.discharges",
+      "noun": "task",
+      "verb": "discharges",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/discharges"
+      }
+    },
+    {
+      "id": "fleet.roster",
+      "noun": "fleet",
+      "verb": "roster",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/fleet/roster"
+      }
+    },
+    {
+      "id": "fleet.beat",
+      "noun": "fleet",
+      "verb": "beat",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/fleet/beat"
+      }
+    },
+    {
+      "id": "ticket.inbox",
+      "noun": "ticket",
+      "verb": "inbox",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tickets/inbox"
+      }
+    },
+    {
+      "id": "ticket.show",
+      "noun": "ticket",
+      "verb": "show",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tickets/inbox/:id"
+      }
+    },
+    {
+      "id": "ticket.answer",
+      "noun": "ticket",
+      "verb": "answer",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tickets/:id/answer"
+      }
+    },
+    {
+      "id": "ticket.close",
+      "noun": "ticket",
+      "verb": "close",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tickets/:id/close"
+      }
+    },
+    {
+      "id": "ticket-key.mint",
+      "noun": "ticket-key",
+      "verb": "mint",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys"
+      }
+    },
+    {
+      "id": "ticket-key.ls",
+      "noun": "ticket-key",
+      "verb": "ls",
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/plugins/tickets/keys"
+      }
+    },
+    {
+      "id": "ticket-key.rotate",
+      "noun": "ticket-key",
+      "verb": "rotate",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/rotate"
+      }
+    },
+    {
+      "id": "ticket-key.pause",
+      "noun": "ticket-key",
+      "verb": "pause",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/pause"
+      }
+    },
+    {
+      "id": "ticket-key.unpause",
+      "noun": "ticket-key",
+      "verb": "unpause",
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/plugins/tickets/keys/:id/unpause"
+      }
+    },
+    {
+      "id": "ticket-key.revoke",
+      "noun": "ticket-key",
+      "verb": "revoke",
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/plugins/tickets/keys/:id"
+      }
+    }
+  ]
+}
