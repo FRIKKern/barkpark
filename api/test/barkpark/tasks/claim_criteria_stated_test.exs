@@ -121,6 +121,32 @@ defmodule Barkpark.Tasks.ClaimCriteriaStatedTest do
       assert msg =~ "Containers are exempt"
     end
 
+    # task-315edb78867619de. This refusal used to offer `bp doc patch --set
+    # acceptance_criteria` as the ONLY way to give a criteria-less row a bar —
+    # the raw content door, outside every task honesty gate, which
+    # task-00f5bc88af7de2e9 exists to stop being the sole way in. Since #18128
+    # `bp task stamp --miss --criterion-text` SEEDS the array through the
+    # fenced task door. If anyone reverts the message to the raw door alone,
+    # THIS test reds and names the missing door.
+    test "the refusal advertises the FENCED seed door, not only the raw content patch" do
+      msg = BarkparkWeb.TasksController.Params.criteria_unstated_message("task-abc", "w-cc")
+
+      assert msg =~ "bp task stamp",
+             "the refusal must name the task-door seed, not only `bp doc patch`"
+
+      assert msg =~ "--criterion-text",
+             "a seed without its text flag is not a runnable remedy"
+
+      assert msg =~ "--miss",
+             "the seed rides the miss outcome — a seeded criterion is born unmet"
+
+      # The raw door MAY remain listed; what is forbidden is it being the only
+      # one. This is the assertion that makes the claim above non-vacuous:
+      # both doors present, and the stamp door named alongside it.
+      assert msg =~ "bp doc patch task task-abc",
+             "the raw door is allowed to stay — this test is about it not being alone"
+    end
+
     test "the override lands, and it must be non-empty", %{scope: scope} do
       doc = mk!(scope, %{})
       doc_id = doc.doc_id
