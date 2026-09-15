@@ -1185,10 +1185,20 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
 //       form is safe for `app.js` (nobody writes "app.js <n>" as prose) and the
 //       shipped gate already catches the bare-space, the double-space-tilde and
 //       the range forms of `app.js` + a number — a tight-everywhere regex would
-//       DROP all three, a net loss. The three forms are spelled out literally in
-//       __app.test.mjs's E11 probe matrix (a fixture string, not source prose:
-//       grep -n "E11 probe matrix" __app.test.mjs); they cannot be written here,
-//       because this file is inside its own scan set.
+//       DROP all three, a net loss. The three forms are NOT spelled out as
+//       literal examples anywhere, and no fixture holds them: EVERY file in the
+//       scan set — this one, the test file, the harness sidecars — would red E11
+//       against ITSELF for writing one, which is why the test that needs a
+//       banned citation assembles it from parts at runtime instead of typing it
+//       (grep -n "NEVER WRITTEN WHOLE" __app.test.mjs). The separator forms are
+//       therefore DEFINED HERE AND ONLY HERE, as the two separator branches of
+//       the alternation itself:
+//         grep -n "^const CITATION_RULED_ALTERNATION" __css_check.mjs
+//       That single line IS the enumeration; diff its `app.js` branch's
+//       separator class against the widened branch's and the asymmetry this
+//       paragraph describes is the difference between them. If you came here
+//       looking for a fixture that lists the forms, there is none, and inventing
+//       one to satisfy a recipe would put a banned citation into the scan set.
 //       Loose for the new targets is toxic: it reds the `app.css <bytes> B`
 //       size records in __preview__/cssom-heads.baseline (count them, never
 //       quote them: `grep -cE 'app\.css [0-9]+ B' __preview__/cssom-heads.baseline`
