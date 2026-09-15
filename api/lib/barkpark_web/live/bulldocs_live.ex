@@ -1229,6 +1229,12 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_info({:paper_op, %{"op" => _} = op}, socket),
     do: {:noreply, Edit.apply_op(socket, op)}
 
+  # An atomic batch broadcasts one receipt for several blocks, without a
+  # per-block HTML fragment. Re-read the saved tree so connected readers keep
+  # every changed block and its unchanged siblings in the stream.
+  def handle_info({:paper_block, %{op_kind: :batch}}, socket),
+    do: {:noreply, refetch(socket)}
+
   def handle_info({:paper_block, frame}, socket) do
     cond do
       # A cached delta fragment cannot carry fresh metadata for `paper-links`.
