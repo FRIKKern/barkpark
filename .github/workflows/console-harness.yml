@@ -126,6 +126,7 @@ on:
       - "internal/agent/report.go"
       - "internal/builder/builder.go"
       - "internal/cli/cloud_status_cmd.go"
+      - "internal/cli/sites_cmd.go"
       - "internal/cloudclient/client.go"
       - "internal/pdrender/testdata/styleguide_tokens.txt"
       - "internal/pdrender/tokens_gen.go"
@@ -625,7 +626,25 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
-      # PIN 1453 — bumped 2026-09-15 from 1451 on console/e11-scan-set-reach.
+      # PIN 1454 — bumped 2026-09-15 from 1453 on console/internal-tree-blocking-coverage.
+      # This PR grows cloud/priv/static/__app.test.mjs by ONE arm: the in-flight
+      # status contract between the console's freshnessModel and the site cohort's
+      # BUILDING bucket in internal/cli/sites_cmd.go, which is declared in
+      # CONSOLE_PATHS by this same PR (dr-bl-internal-tree-has-no-blocking-gate).
+      # RE-MEASURED, never arithmetic. `bash scripts/console-harness.sh` on this
+      # branch resolved the declared Node 20 (v20.20.2, banner MATCHES
+      # __node-version, so the cchi-w61-bl self-guard PASSES and the pass count is
+      # the CI-comparable one) and printed `# tests 1454 / # pass 1454 / # fail 0`;
+      # THIS STEP'S OWN AWK summed 1454 over that log.
+      # THE DELTA IS CONFIRMED BY A CONTROL THAT TRAVELLED THE SAME PATH: the same
+      # command and the same awk on the UNMODIFIED worktree at origin/main
+      # d00378bbd sum 1453, this file's standing pin, so +1 is exactly this arm and
+      # nothing else.
+      # THE ARM HAS A SUBJECT, PROVEN BY MUTATION rather than asserted: rewriting the
+      # Go cohort's in-flight case arm to name "shipping" in place of "pushing" reds
+      # THIS test and only this test (1454 tests, 1453 pass, 1 fail); the Go file was
+      # restored byte-clean afterwards.
+      # Previously PIN 1453 — bumped 2026-09-15 from 1451 on console/e11-scan-set-reach.
       # This PR grows cloud/priv/static/__app.test.mjs by TWO arms, both about the
       # E11 citation scan set's REACH: "the scan set REACHES a nested subtree, and
       # the pre-change two-arm reach did NOT" (the paired control) and "E17 refuses
@@ -685,7 +704,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1453-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1454-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -701,14 +720,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1453 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1453 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1454 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1454 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1453 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1453 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1453 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1454 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1454 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1454 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1453 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1454 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

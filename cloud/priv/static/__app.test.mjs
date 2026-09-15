@@ -16443,6 +16443,69 @@ test("stw4 freshnessModel: amber-pulse ONLY for an in-flight content-auto rebuil
   assert.equal(manual.dot, "deploy");
 });
 
+// ── dr-bl-internal-tree-has-no-blocking-gate: internal/cli/** under a REQUIRED gate ──
+//
+// THE HOLE THIS CLOSES. `internal/cli/**` reaches no required context that
+// asserts anything about its Go behaviour, while .github/workflows/deploy.yml
+// lists `internal/**` in its push-to-main paths — merged IS live. Two files of
+// that tree were already pulled under `Console gate` by being declared in
+// CONSOLE_PATHS and read from this harness (internal/cli/cloud_status_cmd.go,
+// internal/builder/builder.go). This arm adds the third, and it is declared the
+// same way: ONE exact file, never `internal/cli/**`.
+//
+// THE CONTRACT, and it is a real one rather than a decorative pin. Both
+// surfaces answer the same question — "is this deployment still moving?" — and
+// they must answer it over the SAME status words:
+//
+//   * the console's `freshnessModel` computes `inFlight` from a status word and
+//     renders an in-flight row as a pulsing "Rebuilding"/"Deploying" pill;
+//   * the CLI's `classifySiteStatus` buckets the same word into
+//     `siteOutcomeBuilding`, which `siteCohort` counts as IN FLIGHT and
+//     deliberately keeps OUT of `Outcomes()`.
+//
+// A word that the CLI knows is still moving but the console does not falls to
+// `freshnessModel`'s generic else arm: dot "unknown", which `siteStatusPill`
+// maps to role NEUTRAL and `.fresh-badge--unknown` styles not at all — a build
+// still in flight resting on the list looking exactly as calm as a healthy one.
+// That is not a hypothetical: it is precisely the defect cch-w64-s6 fixed for
+// `deferred`, recorded in freshnessModel's own comment. This arm makes the
+// NEXT such word red instead of shipping quiet.
+//
+// BOTH SIDES ARE DERIVED FROM SOURCE — neither is a remembered list. Editing
+// either producer alone reds this test; editing this test to match is the
+// wrong repair, because the two surfaces would still disagree in front of a
+// person. Re-derive the arms with:
+//   grep -n -A1 'return siteOutcomeBuilding' internal/cli/sites_cmd.go
+//   grep -n 'var inFlight' cloud/priv/static/app.js
+//
+// ONLY the in-flight set is pinned. The two LIVE sets legitimately differ (the
+// CLI also accepts running/ready/active; the console renders those through its
+// else arm), so asserting equality there would pin a disagreement that is by
+// design.
+test("dr-bl-internal-tree: the console's in-flight status set and the CLI cohort's BUILDING arm name the same words", () => {
+  const goSrc = fs.readFileSync(path.join(REPO_ROOT, "internal/cli/sites_cmd.go"), "utf8");
+  const arm = goSrc.match(/case ([^\n:]+):\s*\n\s*return siteOutcomeBuilding\b/);
+  assert.ok(arm,
+    "internal/cli/sites_cmd.go no longer has a `case …: return siteOutcomeBuilding` arm — the CLI half of the " +
+    "in-flight contract lost its producer, so this assertion can no longer see what the cohort counts as in flight");
+  const goWords = (arm[1].match(/"([^"]*)"/g) || []).map((q) => q.slice(1, -1)).sort();
+  assert.ok(goWords.length > 0, "the siteOutcomeBuilding arm matched but carries no quoted status word");
+
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const decl = js.match(/var inFlight = ([^;]+);/);
+  assert.ok(decl,
+    "freshnessModel no longer computes `var inFlight = …` in app.js — the console half of the in-flight contract " +
+    "lost its producer");
+  const jsWords = [...decl[1].matchAll(/d\.status === "([^"]*)"/g)].map((m) => m[1]).sort();
+  assert.ok(jsWords.length > 0, "the inFlight declaration matched but compares against no status literal");
+
+  assert.deepEqual(jsWords, goWords,
+    "the console treats [" + jsWords.join(", ") + "] as in flight while internal/cli/sites_cmd.go's cohort " +
+    "counts [" + goWords.join(", ") + "] as building. A word only the CLI knows falls to freshnessModel's else " +
+    "arm and renders as a SETTLED-looking neutral pill; a word only the console knows is counted by the CLI as " +
+    "an outcome it is not. Add it to BOTH producers in the same PR — never to this list");
+});
+
 test("stw4 freshnessModel: settled rows state status · trigger · when", () => {
   const live = hooks.freshnessModel({ last_deployment: { status: "live", trigger: "content-auto", updated_at: new Date().toISOString() } });
   assert.equal(live.rebuilding, false);
