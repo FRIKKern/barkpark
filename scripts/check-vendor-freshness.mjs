@@ -83,15 +83,44 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const STAMP_REL = 'templates/VENDOR-STAMP.json'
 const TEMPLATES = ['templates/search-starter', 'templates/astro-search-starter']
 
-/** The vendored packages: stamp key -> where it comes from and what it lands as. */
+/**
+ * The vendored packages: stamp key -> where it comes from and what it lands as.
+ *
+ * `external` — build inputs that live OUTSIDE the package directory. Both
+ * packages run `tsup && node ../../scripts/post-build-dts.mjs`, so that script
+ * is a pack input: change what it copies and `dist` changes, with nothing
+ * inside js/packages/<pkg> moving a byte. The react build additionally copies
+ * api/assets/paper-surface/paper-surface.css into dist (tsup.config.ts
+ * `onSuccess`), and that config says so in as many words: "Because the source
+ * lives outside `js/`'s turbo+pnpm workspace, turbo's cache hash can't see
+ * edits to it." Neither could this gate's source digest until they were listed
+ * here — a real build input whose edit did not invalidate freshness.
+ *
+ * `copied` — source paths that land VERBATIM in the packed artifact, as
+ * `<repo-relative source>: <path inside the .tgz>`. These are the load-bearing
+ * half of the correspondence check below: they are the one place where a
+ * source byte and an ARTIFACT byte must be equal, which is what lets this gate
+ * refuse to bless a tarball whose build inputs have moved on.
+ */
 const VENDORED = {
-  '@barkpark/core': { source: 'js/packages/core', tarball: 'barkpark-core.tgz' },
-  '@barkpark/react': { source: 'js/packages/react', tarball: 'barkpark-react.tgz' },
+  '@barkpark/core': {
+    source: 'js/packages/core',
+    tarball: 'barkpark-core.tgz',
+    external: ['js/scripts/post-build-dts.mjs'],
+    copied: {},
+  },
+  '@barkpark/react': {
+    source: 'js/packages/react',
+    tarball: 'barkpark-react.tgz',
+    external: ['js/scripts/post-build-dts.mjs', 'api/assets/paper-surface/paper-surface.css'],
+    copied: { 'api/assets/paper-surface/paper-surface.css': 'package/dist/paper-surface.css' },
+  },
 }
 
-// The pack INPUTS — everything that can change what `pnpm pack` emits. `src` is
-// a directory (walked); the rest are single files, optional because not every
-// package carries every config.
+// The pack INPUTS inside the package directory — everything there that can
+// change what `pnpm pack` emits. `src` is a directory (walked); the rest are
+// single files, optional because not every package carries every config.
+// Inputs OUTSIDE the package dir are per-package: VENDORED[pkg].external.
 const SOURCE_INPUTS = {
   dirs: ['src'],
   files: ['package.json', 'tsup.config.ts', 'tsconfig.json'],
@@ -132,8 +161,18 @@ export function digestEntries(entries) {
   return `sha256:${h.digest('hex')}`
 }
 
-/** The pack-input digest of a package directory. */
-export function sourceDigest(pkgDir, inputs = SOURCE_INPUTS) {
+/**
+ * The pack-input digest of a package directory.
+ *
+ * `external` is a list of repo-root-relative paths to build inputs that live
+ * outside `pkgDir`. They are hashed under their repo-relative path (never a
+ * `../..` path, which would differ by where the package sits), so moving one
+ * is a difference exactly like renaming an in-package file. Unlike the
+ * in-package optional config files, an external input that does NOT EXIST is a
+ * THROW, not a skip: this list is hand-written, and a typo that silently
+ * hashed nothing would reinstate the very blindness it was added to close.
+ */
+export function sourceDigest(pkgDir, inputs = SOURCE_INPUTS, external = [], repoRoot = REPO_ROOT) {
   if (!existsSync(pkgDir)) throw new Error(`source package not found: ${pkgDir}`)
   const entries = []
   for (const d of inputs.dirs) {
@@ -145,6 +184,11 @@ export function sourceDigest(pkgDir, inputs = SOURCE_INPUTS) {
     const abs = join(pkgDir, f)
     if (existsSync(abs)) entries.push({ path: f, bytes: readFileSync(abs) })
   }
+  for (const rel of external) {
+    const abs = join(repoRoot, rel)
+    if (!existsSync(abs)) throw new Error(`external build input not found: ${rel} (listed in VENDORED[...].external)`)
+    entries.push({ path: `@repo/${rel}`, bytes: readFileSync(abs) })
+  }
   return digestEntries(entries)
 }
 
@@ -155,16 +199,172 @@ export function sourceDigest(pkgDir, inputs = SOURCE_INPUTS) {
  * run with zero npm dependencies so it can execute on a bare checkout, before
  * any install, in the same job that would otherwise not be worth adding.
  */
-export function tarballDigest(tgzPath) {
+export function tarballEntries(tgzPath) {
   if (!existsSync(tgzPath)) throw new Error(`vendored tarball not found: ${tgzPath}`)
   const dir = mkdtempSync(join(tmpdir(), 'bp-vendor-fresh-'))
   try {
     execFileSync('tar', ['-xzf', tgzPath, '-C', dir], { stdio: ['ignore', 'ignore', 'pipe'] })
-    const rels = walkFiles(dir)
-    return digestEntries(rels.map((r) => ({ path: r, bytes: readFileSync(join(dir, r)) })))
+    return walkFiles(dir).map((r) => ({ path: r, bytes: readFileSync(join(dir, r)) }))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+export function tarballDigest(tgzPath) {
+  return digestEntries(tarballEntries(tgzPath))
+}
+
+// ---------------------------------------------------------------------------
+// SOURCE -> ARTIFACT CORRESPONDENCE
+// ---------------------------------------------------------------------------
+//
+// The digest pair above answers "did the source move since the stamp was
+// written". It cannot answer "does this tarball actually contain a build of
+// that source", because the two digests are recorded INDEPENDENTLY: `--write`
+// reads the source, reads the tarball, and records both, agreeing with itself
+// no matter how far apart they are. Edit a package, run `--write` WITHOUT
+// re-cutting, and the gate goes green over a stale tarball — the stamp says
+// only "these were the bytes on the day someone ran --write".
+//
+// Re-deriving the whole build inside the gate is not available (it needs a
+// pnpm install, a tsup run and several minutes). What IS available are the
+// places where a SOURCE byte and an ARTIFACT byte must be equal, or where the
+// build's own contract is visible in the packed output. Those are checked
+// here, against the real tarball, and — the load-bearing part — they are
+// checked by `--write` TOO, which refuses to stamp when they fail. That is
+// what makes a stale tarball unblessable: the CSS a user imports is the CSS
+// the repo teaches, or nothing gets stamped.
+//
+//   COPIED-ASSET  a file copied verbatim into dist (today:
+//                 api/assets/paper-surface/paper-surface.css ->
+//                 package/dist/paper-surface.css) differs from its source.
+//                 Edit the stylesheet without re-cutting and this fires.
+//   MANIFEST      the packed package/package.json is not the source
+//                 package.json. Dependency specifiers are compared modulo
+//                 pnpm's `workspace:` rewrite — and a `workspace:` specifier
+//                 SURVIVING into the artifact is itself a failure, because
+//                 that is the npm-packed tarball scripts/recut-vendor-
+//                 tarballs.sh exists to prevent (uninstallable outside this
+//                 monorepo).
+//   DTS-PAIRING   js/scripts/post-build-dts.mjs copies every dist/<e>.d.ts to
+//                 <e>.d.mts; package.json `exports` resolves import.types
+//                 THERE. A packed dist missing a pair, or carrying a stale
+//                 one, means the post-build step did not run over these bytes.
+//                 Zero pairs is a failure, not a pass: a `dts: true` build
+//                 that emitted no declarations never happened.
+
+const WORKSPACE_DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+
+/**
+ * Compare a package's SOURCE against the contents of its packed artifact.
+ *
+ * Pure: `sources` is a Map of repo-relative path -> bytes and `entries` a Map
+ * of in-tarball path -> bytes, so the selftest drives every arm without a repo.
+ * Returns an array of detail strings; empty means the artifact corresponds.
+ */
+export function correspondenceFailures(spec, sources, entries) {
+  const out = []
+
+  // --- COPIED-ASSET ------------------------------------------------------
+  for (const [src, art] of Object.entries(spec.copied || {})) {
+    const want = sources.get(src)
+    if (!want) {
+      out.push(`COPIED-ASSET ${src} is not readable in the working tree — cannot verify ${art}`)
+      continue
+    }
+    const got = entries.get(art)
+    if (!got) {
+      out.push(`COPIED-ASSET the tarball has no ${art}, but ${src} is supposed to be copied there`)
+      continue
+    }
+    if (!Buffer.from(want).equals(Buffer.from(got))) {
+      const sha = (b) => createHash('sha256').update(b).digest('hex').slice(0, 16)
+      out.push(
+        `COPIED-ASSET ${art} is NOT the current ${src}\n` +
+          `       source   sha256:${sha(want)}… (${want.length} bytes)\n` +
+          `       artifact sha256:${sha(got)}… (${got.length} bytes)\n` +
+          `       the vendored SDK ships a stale copy of a file the repo has since changed`
+      )
+    }
+  }
+
+  // --- MANIFEST ----------------------------------------------------------
+  const srcManifestPath = `${spec.source}/package.json`
+  const srcManifestBytes = sources.get(srcManifestPath)
+  const artManifestBytes = entries.get('package/package.json')
+  if (!srcManifestBytes) out.push(`MANIFEST ${srcManifestPath} is not readable`)
+  else if (!artManifestBytes) out.push('MANIFEST the tarball has no package/package.json')
+  else {
+    let a = null
+    let b = null
+    try {
+      a = JSON.parse(Buffer.from(srcManifestBytes).toString('utf8'))
+      b = JSON.parse(Buffer.from(artManifestBytes).toString('utf8'))
+    } catch (err) {
+      out.push(`MANIFEST unparseable package.json: ${err.message}`)
+    }
+    if (a && b) {
+      for (const field of WORKSPACE_DEP_FIELDS) {
+        for (const [dep, range] of Object.entries((b[field] || {}))) {
+          if (typeof range === 'string' && range.startsWith('workspace:')) {
+            out.push(
+              `MANIFEST the packed manifest still carries ${field}.${dep} = "${range}"\n` +
+                `       a \`workspace:\` specifier is uninstallable outside this monorepo — this tarball was\n` +
+                `       packed with npm, not pnpm. Re-cut: bash scripts/recut-vendor-tarballs.sh`
+            )
+          }
+        }
+        // pnpm REWRITES workspace: ranges at pack time, so compare those keys by
+        // presence, not value; every other field compares exactly.
+        for (const [dep, range] of Object.entries((a[field] || {}))) {
+          if (typeof range === 'string' && range.startsWith('workspace:')) {
+            if (!(b[field] || {})[dep]) out.push(`MANIFEST the packed manifest dropped ${field}.${dep}`)
+            delete a[field][dep]
+            if (b[field]) delete b[field][dep]
+          }
+        }
+      }
+      const norm = (o) => JSON.stringify(o, Object.keys(o).sort())
+      if (norm(a) !== norm(b)) {
+        const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+        const moved = [...keys].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).sort()
+        out.push(
+          `MANIFEST ${srcManifestPath} does not match the packed package/package.json\n` +
+            `       fields that differ: ${moved.join(', ') || '(ordering only)'}\n` +
+            `       the tarball was packed from a different manifest than the one in the tree`
+        )
+      }
+    }
+  }
+
+  // --- DTS-PAIRING -------------------------------------------------------
+  let pairs = 0
+  for (const [path, bytes] of entries) {
+    if (!path.endsWith('.d.ts') || path.endsWith('.d.cts')) continue
+    const mts = `${path.slice(0, -'.d.ts'.length)}.d.mts`
+    const got = entries.get(mts)
+    if (!got) {
+      out.push(
+        `DTS-PAIRING the tarball has ${path} but no ${mts}\n` +
+          `       js/scripts/post-build-dts.mjs did not run over these bytes; package.json exports\n` +
+          `       resolves import.types to the missing file`
+      )
+      continue
+    }
+    if (!Buffer.from(bytes).equals(Buffer.from(got))) {
+      out.push(`DTS-PAIRING ${mts} is not a copy of ${path} — the post-build step ran over DIFFERENT bytes`)
+      continue
+    }
+    pairs += 1
+  }
+  if (pairs === 0) {
+    out.push(
+      'DTS-PAIRING the tarball carries no .d.ts/.d.mts pair at all — both packages build with ' +
+        '`dts: true`, so a pack with zero declarations is a build that never happened'
+    )
+  }
+
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +421,16 @@ export function adjudicate(stamp, measured) {
       }
     }
 
+    for (const [tpl, details] of Object.entries(m.correspondence || {})) {
+      for (const detail of details) {
+        failures.push({
+          reason: 'SOURCE-ARTIFACT-MISMATCH',
+          pkg,
+          detail: `${tpl}/vendor/${VENDORED[pkg] ? VENDORED[pkg].tarball : 'tarball'} does not correspond to its source\n       ${detail}`,
+        })
+      }
+    }
+
     if (m.sourceDigest !== s.source_digest) {
       failures.push({
         reason: 'STALE-SOURCE',
@@ -245,13 +455,25 @@ export function adjudicate(stamp, measured) {
 // Measurement against the real repo.
 // ---------------------------------------------------------------------------
 
-function measure(repoRoot = REPO_ROOT, templates = TEMPLATES) {
+export function measure(repoRoot = REPO_ROOT, templates = TEMPLATES) {
   const out = {}
   for (const [pkg, spec] of Object.entries(VENDORED)) {
     const pkgDir = join(repoRoot, spec.source)
+
+    // The source bytes the correspondence rules compare against: the manifest
+    // plus every file the build copies verbatim into dist.
+    const sources = new Map()
+    for (const rel of [`${spec.source}/package.json`, ...Object.keys(spec.copied || {})]) {
+      const abs = join(repoRoot, rel)
+      if (existsSync(abs)) sources.set(rel, readFileSync(abs))
+    }
+
     const tarballs = {}
+    const correspondence = {}
     for (const tpl of templates) {
-      tarballs[tpl] = tarballDigest(join(repoRoot, tpl, 'vendor', spec.tarball))
+      const entries = tarballEntries(join(repoRoot, tpl, 'vendor', spec.tarball))
+      tarballs[tpl] = digestEntries(entries)
+      correspondence[tpl] = correspondenceFailures(spec, sources, new Map(entries.map((e) => [e.path, e.bytes])))
     }
     let version = null
     try {
@@ -259,7 +481,12 @@ function measure(repoRoot = REPO_ROOT, templates = TEMPLATES) {
     } catch {
       /* a package with no readable package.json is caught by sourceDigest */
     }
-    out[pkg] = { sourceDigest: sourceDigest(pkgDir), version, tarballs }
+    out[pkg] = {
+      sourceDigest: sourceDigest(pkgDir, SOURCE_INPUTS, spec.external || [], repoRoot),
+      version,
+      tarballs,
+      correspondence,
+    }
   }
   return out
 }
@@ -278,10 +505,36 @@ function headCommit(repoRoot) {
   }
 }
 
+/**
+ * The correspondence mismatches that make a package UNSTAMPABLE.
+ *
+ * Exported so the selftest can drive `--write`'s refusal in both directions
+ * against REAL measurements, without a test that writes the real stamp file.
+ * `writeStamp` calls exactly this — there is no second copy of the rule.
+ */
+export function blessingRefusals(pkg, measuredPkg) {
+  return Object.entries(measuredPkg.correspondence || {}).flatMap(([tpl, ds]) => ds.map((d) => [tpl, d]))
+}
+
 function writeStamp(repoRoot = REPO_ROOT) {
   const measured = measure(repoRoot)
   const packages = {}
   for (const [pkg, m] of Object.entries(measured)) {
+    // THE BLESSING WALL. --write records the source digest and the tarball
+    // digest independently, so on its own it will happily stamp a tarball that
+    // predates the source it is being stamped against. Every correspondence
+    // rule that the gate enforces is enforced HERE FIRST: if the packed
+    // artifact does not match the source it claims to be built from, there is
+    // nothing legitimate to stamp, and the operator is sent to the re-cut.
+    const mismatches = blessingRefusals(pkg, m)
+    if (mismatches.length > 0) {
+      console.log(
+        `FAIL --write refuses to stamp ${pkg}: the packed artifact does not correspond to its source.\n` +
+          mismatches.map(([tpl, d]) => `     ${tpl}: ${d}`).join('\n') +
+          `\n     re-cut first: bash scripts/recut-vendor-tarballs.sh`
+      )
+      return false
+    }
     const digests = new Set(Object.values(m.tarballs))
     if (digests.size > 1) {
       console.log(
@@ -547,6 +800,243 @@ function selftest() {
       if (!stamp) throw new Error(`${STAMP_REL} does not exist`)
       for (const pkg of Object.keys(VENDORED)) {
         if (!stamp.packages || !stamp.packages[pkg]) throw new Error(`${STAMP_REL} has no entry for ${pkg}`)
+      }
+    })
+
+    // --- EXTERNAL BUILD INPUTS: the axis this gate used to be blind to -----
+    //
+    // Both packages build with `tsup && node ../../scripts/post-build-dts.mjs`,
+    // and the react build copies api/assets/paper-surface/paper-surface.css
+    // into dist. Neither file lives under js/packages/<pkg>, so until they were
+    // listed in VENDORED[pkg].external, editing a REAL BUILD INPUT left the
+    // source digest unmoved and the gate green over a tarball that no longer
+    // matched. These arms mutate the real files, prove the digest MOVES, and
+    // restore them byte-identically.
+    //
+    // The restore is in a `finally` and is verified: a selftest that leaves the
+    // working tree dirty would be a worse defect than the one it guards.
+
+    const realSourceDigest = (pkg) =>
+      sourceDigest(join(REPO_ROOT, VENDORED[pkg].source), SOURCE_INPUTS, VENDORED[pkg].external, REPO_ROOT)
+
+    /** Mutate a repo file; assert the digest moves for `moves` and NOT for `stays`; restore. */
+    const externalInputMutation = (relPath, moves, stays) => {
+      const abs = join(REPO_ROOT, relPath)
+      if (!existsSync(abs)) throw new Error(`${relPath} does not exist — cannot prove it is a build input`)
+      const original = readFileSync(abs)
+      const before = {}
+      for (const pkg of [...moves, ...stays]) before[pkg] = realSourceDigest(pkg)
+      try {
+        writeFileSync(abs, Buffer.concat([original, Buffer.from('\n/* vendor-freshness selftest mutant */\n')]))
+        // ASSERT THE MUTATION LANDED before measuring anything: a write that
+        // silently did nothing would make every arm below pass vacuously.
+        const mutated = readFileSync(abs)
+        if (mutated.equals(original)) throw new Error(`the mutation of ${relPath} did not land`)
+        if (!mutated.includes('vendor-freshness selftest mutant')) {
+          throw new Error(`the mutant text is not present in ${relPath} on disk`)
+        }
+        for (const pkg of moves) {
+          if (realSourceDigest(pkg) === before[pkg]) {
+            throw new Error(
+              `editing ${relPath} did not move ${pkg}'s source digest — the gate is blind to a real build input`
+            )
+          }
+        }
+        for (const pkg of stays) {
+          eq(realSourceDigest(pkg), before[pkg], `${pkg} digest while ${relPath} is mutated (it is not ${pkg}'s input)`)
+        }
+      } finally {
+        writeFileSync(abs, original)
+      }
+      if (!readFileSync(abs).equals(original)) throw new Error(`failed to restore ${relPath}`)
+      for (const pkg of [...moves, ...stays]) eq(realSourceDigest(pkg), before[pkg], `${pkg} digest after restoring ${relPath}`)
+    }
+
+    check('mutating js/scripts/post-build-dts.mjs invalidates freshness for BOTH packages; restoring passes', () => {
+      externalInputMutation('js/scripts/post-build-dts.mjs', ['@barkpark/core', '@barkpark/react'], [])
+    })
+
+    check('mutating api/assets/paper-surface/paper-surface.css invalidates freshness for @barkpark/react, and NOT for @barkpark/core; restoring passes', () => {
+      externalInputMutation('api/assets/paper-surface/paper-surface.css', ['@barkpark/react'], ['@barkpark/core'])
+    })
+
+    check('an external build input that does not exist THROWS instead of hashing nothing', () => {
+      let raised = false
+      try {
+        sourceDigest(join(REPO_ROOT, 'js/packages/core'), SOURCE_INPUTS, ['js/scripts/no-such-input.mjs'], REPO_ROOT)
+      } catch {
+        raised = true
+      }
+      if (!raised) throw new Error('a missing external input was skipped — a typo would reinstate the blindness')
+    })
+
+    check('every vendored package lists the post-build declaration script as a build input', () => {
+      for (const [pkg, spec] of Object.entries(VENDORED)) {
+        const manifest = JSON.parse(readFileSync(join(REPO_ROOT, spec.source, 'package.json'), 'utf8'))
+        const buildScript = (manifest.scripts || {}).build || ''
+        for (const m of buildScript.matchAll(/node\s+\.\.\/\.\.\/scripts\/([A-Za-z0-9._-]+)/g)) {
+          const rel = `js/scripts/${m[1]}`
+          if (!(spec.external || []).includes(rel)) {
+            throw new Error(`${pkg}'s build runs ${rel} but VENDORED['${pkg}'].external does not list it`)
+          }
+        }
+      }
+    })
+
+    // --- SOURCE -> ARTIFACT CORRESPONDENCE, pure arms ----------------------
+
+    const CORR_SPEC = {
+      source: 'js/packages/fix',
+      copied: { 'api/assets/x.css': 'package/dist/x.css' },
+    }
+    const buildCorr = (mut = (s, e) => {}) => {
+      const sources = new Map([
+        ['js/packages/fix/package.json', Buffer.from('{"name":"@fix/pkg","version":"1.0.0"}\n')],
+        ['api/assets/x.css', Buffer.from('.a{color:red}\n')],
+      ])
+      const entries = new Map([
+        ['package/package.json', Buffer.from('{"name":"@fix/pkg","version":"1.0.0"}\n')],
+        ['package/dist/x.css', Buffer.from('.a{color:red}\n')],
+        ['package/dist/index.d.ts', Buffer.from('export declare const a: number\n')],
+        ['package/dist/index.d.mts', Buffer.from('export declare const a: number\n')],
+        ['package/dist/index.d.cts', Buffer.from('export declare const a: number\n')],
+      ])
+      mut(sources, entries)
+      return correspondenceFailures(CORR_SPEC, sources, entries)
+    }
+
+    check('correspondenceFailures is GREEN when the artifact corresponds to the source', () => {
+      eq(buildCorr(), [], 'corresponding verdict')
+    })
+
+    check('correspondenceFailures reds COPIED-ASSET when the source stylesheet moved but the artifact did not', () => {
+      const f = buildCorr((sources) => sources.set('api/assets/x.css', Buffer.from('.a{color:blue}\n')))
+      if (f.length !== 1 || !f[0].startsWith('COPIED-ASSET')) throw new Error(`wrong verdict: ${JSON.stringify(f)}`)
+      if (!f[0].includes('package/dist/x.css')) throw new Error('the failure does not name the artifact path')
+    })
+
+    check('correspondenceFailures reds COPIED-ASSET when the artifact is missing the copied file entirely', () => {
+      const f = buildCorr((_s, entries) => entries.delete('package/dist/x.css'))
+      if (!f.some((d) => d.startsWith('COPIED-ASSET'))) throw new Error(`no copied-asset verdict: ${JSON.stringify(f)}`)
+    })
+
+    check('correspondenceFailures reds MANIFEST when the packed manifest is not the source manifest', () => {
+      const f = buildCorr((_s, entries) =>
+        entries.set('package/package.json', Buffer.from('{"name":"@fix/pkg","version":"9.9.9"}\n'))
+      )
+      if (!f.some((d) => d.startsWith('MANIFEST') && d.includes('version'))) {
+        throw new Error(`no manifest verdict naming version: ${JSON.stringify(f)}`)
+      }
+    })
+
+    check('correspondenceFailures ACCEPTS pnpm rewriting a workspace: specifier but REJECTS one that survived', () => {
+      const withDep = (srcRange, artRange) =>
+        buildCorr((sources, entries) => {
+          sources.set(
+            'js/packages/fix/package.json',
+            Buffer.from(`{"name":"@fix/pkg","version":"1.0.0","dependencies":{"@fix/core":"${srcRange}"}}\n`)
+          )
+          entries.set(
+            'package/package.json',
+            Buffer.from(`{"name":"@fix/pkg","version":"1.0.0","dependencies":{"@fix/core":"${artRange}"}}\n`)
+          )
+        })
+      eq(withDep('workspace:^', '^1.0.0'), [], 'pnpm-rewritten specifier')
+      const leaked = withDep('workspace:^', 'workspace:^')
+      if (!leaked.some((d) => d.includes('workspace:'))) {
+        throw new Error(`a leaked workspace: specifier was accepted: ${JSON.stringify(leaked)}`)
+      }
+    })
+
+    check('correspondenceFailures reds DTS-PAIRING when the .d.mts sibling is missing or stale', () => {
+      const missing = buildCorr((_s, entries) => entries.delete('package/dist/index.d.mts'))
+      if (!missing.some((d) => d.startsWith('DTS-PAIRING'))) throw new Error(`no pairing verdict: ${JSON.stringify(missing)}`)
+      const stale = buildCorr((_s, entries) =>
+        entries.set('package/dist/index.d.mts', Buffer.from('export declare const a: string\n'))
+      )
+      if (!stale.some((d) => d.startsWith('DTS-PAIRING'))) throw new Error(`a stale .d.mts was accepted: ${JSON.stringify(stale)}`)
+    })
+
+    check('correspondenceFailures reds a pack with NO declarations rather than passing vacuously', () => {
+      const f = buildCorr((_s, entries) => {
+        entries.delete('package/dist/index.d.ts')
+        entries.delete('package/dist/index.d.mts')
+      })
+      if (!f.some((d) => d.includes('no .d.ts/.d.mts pair at all'))) throw new Error(`empty dist passed: ${JSON.stringify(f)}`)
+    })
+
+    check('adjudicate surfaces a correspondence mismatch as SOURCE-ARTIFACT-MISMATCH', () => {
+      const m = JSON.parse(JSON.stringify(FRESH_MEASURED))
+      m['@barkpark/core'].correspondence = { 'templates/search-starter': ['COPIED-ASSET fixture mismatch'] }
+      const f = adjudicate(FRESH_STAMP, m)
+      eq(reasons(f), ['SOURCE-ARTIFACT-MISMATCH'], 'mismatch reasons')
+      if (!f[0].detail.includes('COPIED-ASSET fixture mismatch')) throw new Error('the detail was dropped')
+    })
+
+    // --- THE BLESSING WALL: --write cannot stamp a stale tarball ----------
+    //
+    // This is the defect the gate could not previously see. --write records the
+    // source digest and the tarball digest INDEPENDENTLY, so before this wall
+    // existed, editing a build input and running --write produced a green stamp
+    // over an unchanged, now-stale tarball. The arm below mutates a real build
+    // input on disk, re-measures the REAL repo, and proves --write's own
+    // refusal predicate fires — then restores and proves it stops firing.
+
+    check('RED/GREEN: --write REFUSES to bless the committed tarball after the paper-surface CSS changes, and stops refusing when it is restored', () => {
+      const rel = 'api/assets/paper-surface/paper-surface.css'
+      const abs = join(REPO_ROOT, rel)
+      const original = readFileSync(abs)
+
+      // GREEN before: the committed tarballs do correspond to the tree as it stands.
+      const greenBefore = measure()
+      for (const [pkg, m] of Object.entries(greenBefore)) {
+        eq(blessingRefusals(pkg, m), [], `${pkg} refusals before the mutation`)
+      }
+
+      let red = null
+      try {
+        writeFileSync(abs, Buffer.concat([original, Buffer.from('\n/* vendor-freshness selftest mutant */\n')]))
+        const onDisk = readFileSync(abs)
+        if (onDisk.equals(original)) throw new Error('the CSS mutation did not land')
+        if (!onDisk.includes('vendor-freshness selftest mutant')) throw new Error('the mutant text is not on disk')
+        red = measure()
+      } finally {
+        writeFileSync(abs, original)
+      }
+      if (!readFileSync(abs).equals(original)) throw new Error(`failed to restore ${rel}`)
+
+      // RED: react is unstampable, and the failure names the artifact.
+      const reactRefusals = blessingRefusals('@barkpark/react', red['@barkpark/react'])
+      if (reactRefusals.length === 0) {
+        throw new Error('--write would still have blessed the tarball after a build input changed')
+      }
+      if (!reactRefusals.every(([, d]) => d.includes('package/dist/paper-surface.css'))) {
+        throw new Error(`refusal does not name the stale artifact: ${JSON.stringify(reactRefusals)}`)
+      }
+      // The gate reds on the same measurement, with the named reason.
+      const gateFailures = adjudicate(readStamp(), red)
+      if (!gateFailures.some((f) => f.reason === 'SOURCE-ARTIFACT-MISMATCH' && f.pkg === '@barkpark/react')) {
+        throw new Error(`the gate did not red SOURCE-ARTIFACT-MISMATCH: ${JSON.stringify(gateFailures.map((f) => f.reason))}`)
+      }
+      // CONTROL: core vendors no copied asset, so it must stay stampable —
+      // a wall that refuses everything proves nothing.
+      eq(blessingRefusals('@barkpark/core', red['@barkpark/core']), [], '@barkpark/core refusals during the mutation')
+
+      // GREEN after: restoring the input makes the tarball stampable again.
+      const greenAfter = measure()
+      for (const [pkg, m] of Object.entries(greenAfter)) {
+        eq(blessingRefusals(pkg, m), [], `${pkg} refusals after restoring ${rel}`)
+      }
+    })
+
+    check('the committed tarballs correspond to the current source on every template', () => {
+      const m = measure()
+      for (const [pkg, meas] of Object.entries(m)) {
+        const seen = Object.keys(meas.correspondence || {})
+        eq(seen.sort(), [...TEMPLATES].sort(), `${pkg} correspondence templates measured`)
+        for (const [tpl, ds] of Object.entries(meas.correspondence)) {
+          if (ds.length > 0) throw new Error(`${pkg} @ ${tpl}: ${ds.join('; ')}`)
+        }
       }
     })
 
