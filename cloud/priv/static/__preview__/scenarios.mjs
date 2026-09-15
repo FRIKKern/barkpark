@@ -867,10 +867,15 @@ export const CRUEL_SITE_STRINGS = {
 };
 export const CRUEL_SITE_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000c9";
 export const ONE_LABEL_HOST_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000ca";
+// cch-w16-bl-no-preview-plus-production-console-fixture — THE ROW THE LIST PILL
+// AND THE DETAIL LADDER ARE COMPARED ON. Exported so overflow-guard's leg
+// DERIVES the id it drives instead of transcribing a uuid that can drift (the
+// W14 precedent: a transcribed id renders #overview and prints a phantom table).
+export const FRESHNESS_LADDER_SITE_ID = "5b2c1e00-0000-4000-8000-0000000000c3";
 
 const sitesListRows = [
   site({
-    id: "5b2c1e00-0000-4000-8000-0000000000c3",
+    id: FRESHNESS_LADDER_SITE_ID,
     name: "acme-web", slug: "acme-web", domains: ["acme.com", "www.acme.com"],
     framework: "nextjs", github_repo: "acme/web", github_branch: "main",
     github_webhook_configured: true,
@@ -2555,6 +2560,111 @@ const previewCruelRow = deployment({
   updated_at: tMinus(3600),
 });
 const siteStatesPreviews = [previewCruelRow, previewLiveRow, previewFailedRow];
+
+// ── cch-w16-bl-no-preview-plus-production-console-fixture ────────────────────
+// THE ADVERSARIAL SHAPE #8659 PINNED IN ExUnit, AND THE ONE NO CONSOLE FIXTURE
+// COULD CARRY: a site with a LIVE PRODUCTION deployment and a NEWER CANCELLED
+// PREVIEW. The list embed `last_deployment` is production-only, so the row's
+// freshness pill must read "Live" even though the site's newest deployment row
+// of ANY environment is a cancelled preview 300s old.
+//
+// WHY THE ROW THIS CLOSES EXISTS. The `sites` scenario carried NO per-site
+// deployments payload at all, so every detail ladder driven on it rendered
+// EMPTY (`ladder[0] = null`, `previews = []`) and a list-vs-ladder comparison
+// printed "0 sites disagree" while being STRUCTURALLY unable to disagree. An
+// equality assertion over two empty strings passes and measures nothing; the
+// non-emptiness of the ladder is the half that makes the rest mean anything,
+// which is why the leg that reads these rows asserts it first and refuses.
+//
+// THE LEDGER IS UNSPLIT ON PURPOSE. Every fixture before this line pre-split
+// production from preview BY HAND (`deployments:` vs `previews:`), which means
+// the two halves never met in one array and the production filter was a
+// property of how somebody TYPED the fixture rather than a line of code. The
+// server keeps ONE deployments table and splits it by `environment`
+// — `list_deployments/3`'s `filter_environment/2` clause, which the
+// /v1/sites/:id/deployments handler calls with `environment: "production"`
+// while the previews handler takes the preview side. Re-derive by symbol:
+//   grep -n 'def list_deployments\|defp filter_environment' cloud/lib/barkpark_cloud/registry.ex
+//   grep -n 'get "/v1/sites/:id/deployments"' -A 12 cloud/lib/barkpark_cloud/web/router.ex
+// `siteLedgerBySite` carries the ledger UNSPLIT and the route seam below
+// applies the filter, so defeating that filter is a one-line mutation a proof
+// can actually make — and does.
+//
+// EVERY STAMP AGREES WITH THE LIST EMBED BY CONSTRUCTION: the acme-web row's
+// `lastDeploy("live", "content-auto", 900)` is updated_at T-900 / inserted_at
+// T-1020, and the live production row below carries exactly those two stamps,
+// because on the server they are THE SAME ROW read through two serializers.
+const freshnessLadderLive = deployment({
+  id: depOf(3),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "live",
+  environment: "production",
+  trigger: "content-auto",
+  branch: "main",
+  git_ref: "7d41ba06c58e9f2a3b4c5d6e7f8091a2b3c4d5e6",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-7d41ba0.tar.gz",
+  became_live_at: tMinus(900),
+  inserted_at: tMinus(1020),
+  updated_at: tMinus(900),
+});
+// The last good build before it — the row "Roll back to this" is offered on, so
+// the ladder is PLURAL and a head-of-list read is a real choice rather than the
+// only row present.
+const freshnessLadderPrior = deployment({
+  id: depOf(2),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "live",
+  environment: "production",
+  trigger: "manual",
+  branch: "main",
+  git_ref: "1c0d9e8f7a6b5c4d3e2f10293847566a7b8c9d0e",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-1c0d9e8.tar.gz",
+  became_live_at: tMinus(90000),
+  inserted_at: tMinus(90400),
+  updated_at: tMinus(90000),
+});
+// THE NEWER CANCELLED PREVIEW. Newest row in the ledger by 600 seconds, and the
+// one that must NOT reach the list pill: a torn-down branch preview says
+// nothing about what production is serving. `cancelled` rather than `failed`
+// deliberately — `freshnessModel` spells a cancelled deploy "Cancelled" and
+// `cap(st)` spells the ladder pill "Cancelled", so the two surfaces would read
+// IDENTICALLY if the filter were defeated at only one of them. The disagreement
+// this fixture makes reachable is "Live" vs "Cancelled", which is legible.
+const freshnessLadderCancelledPreview = deployment({
+  id: depOf(6),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "cancelled",
+  environment: "preview",
+  trigger: "manual",
+  branch: "draft/pricing-table",
+  git_ref: "5a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+  preview_host: previewHostFor("acme-web", "draft/pricing-table", "3f91ba"),
+  preview_url: "https://" + previewHostFor("acme-web", "draft/pricing-table", "3f91ba"),
+  inserted_at: tMinus(360),
+  updated_at: tMinus(300),
+});
+// Newest first — the order /v1/sites/:id/deployments answers in, kept here so
+// the partition below never has to sort and a mis-ordered fixture is visible in
+// the source rather than inferred from a screenshot.
+const freshnessLadderBySite = {
+  [FRESHNESS_LADDER_SITE_ID]: [
+    freshnessLadderCancelledPreview,
+    freshnessLadderLive,
+    freshnessLadderPrior,
+  ],
+};
+// THE PRODUCTION FILTER, AT THE CONSOLE LAYER. One predicate, two call sites,
+// so the rule is a thing that can be defeated by a mutation and re-asserted by
+// a run — not a property of how a fixture was typed.
+const isPreviewDeploy = (d) => !!d && d.environment === "preview";
+// The unsplit ledger for one site, or null when this scenario does not carry
+// one (which is every scenario written before this line — they keep the
+// pre-split `deployments` / `deploymentsBySite` / `previews` seams unchanged).
+function siteLedger(data, siteId) {
+  const all = data && data.siteLedgerBySite;
+  if (!all || !Object.prototype.hasOwnProperty.call(all, siteId)) return null;
+  return all[siteId] || [];
+}
 // The site domain-status envelope (DomainStatus.check(%Site{})): a CF-proxied
 // apex (points_here classified `proxied` — informational, GR27) and a www
 // whose TLS is still issuing, with the server-owned remediation verbatim.
@@ -3471,6 +3581,14 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: sitesListRows,
       audit: [],
+      // cch-w16-bl-no-preview-plus-production-console-fixture: the acme-web
+      // row's own UNSPLIT deployment ledger — a live production deploy, its
+      // predecessor, and a CANCELLED PREVIEW 600 seconds NEWER than the live
+      // one. Until this key the scenario carried no per-site deployments
+      // payload at all, so its detail ladder rendered EMPTY and any
+      // list-vs-ladder comparison on it was vacuous by construction. The route
+      // seam partitions it by `environment`; see `freshnessLadderBySite`.
+      siteLedgerBySite: freshnessLadderBySite,
     },
   },
 
@@ -6836,13 +6954,28 @@ export function route(name, method, path, state) {
   // the census/residue blast radius twice for one measurement.
   const depMatch = p.match(/^\/v1\/sites\/([^/]+)\/deployments$/);
   if (depMatch) {
+    // cch-w16-bl: THE PRODUCTION FILTER. A scenario carrying an UNSPLIT ledger
+    // for this site gets the production partition here and the preview
+    // partition at /previews below — the split `list_deployments/3` does with
+    // `filter_environment/2`. Checked FIRST and returned FROM, so the two
+    // pre-split seams below keep their exact bytes for every scenario written
+    // before this line.
+    const ledger = siteLedger(d, depMatch[1]);
+    if (ledger) return { status: 200, body: { deployments: ledger.filter((x) => !isPreviewDeploy(x)) } };
     const bySite = d.deploymentsBySite || null;
     const own = bySite && Object.prototype.hasOwnProperty.call(bySite, depMatch[1]) ? bySite[depMatch[1]] : null;
     return { status: 200, body: { deployments: own || d.deployments || [] } };
   }
   // gr-p3: branch previews now come from the scenario (d.previews) so the
   // preview-rows section is observable; absent → the honest empty list.
-  if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: d.previews || [] } };
+  const prevMatch = p.match(/^\/v1\/sites\/([^/]+)\/previews$/);
+  if (prevMatch) {
+    // cch-w16-bl: the OTHER half of the same partition — see the deployments
+    // seam above. Same ledger, opposite side of `isPreviewDeploy`.
+    const ledger = siteLedger(d, prevMatch[1]);
+    if (ledger) return { status: 200, body: { previews: ledger.filter(isPreviewDeploy) } };
+    return { status: 200, body: { previews: d.previews || [] } };
+  }
   // gr-p3: the site domain-status checklist (same envelope as the instance
   // sibling, CF-mode-aware). MUST precede the /v1/ catch-all (its 200 {} would
   // read as "no domains" and no scenario could pin the rungs). Absent fixture →
