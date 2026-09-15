@@ -1275,6 +1275,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/pd-parity-completeness.sh --selftest
           bash scripts/pd-parity-completeness.sh
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The

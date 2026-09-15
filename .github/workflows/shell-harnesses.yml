@@ -489,6 +489,13 @@ on:
       - "scripts/landed-open-report-schedule.sh"
       - "scripts/landed-open-report-schedule.test.sh"
       - ".github/workflows/landed-open-report.yml"
+      # ── STALE PR-CITATION DETECTOR (task-6e7fa96e3b53c561) ────────────────
+      # Its --selftest is hermetic: it builds a throwaway git repo of fixtures
+      # and runs the REAL scan over it. Four of its arms bypass one noise-family
+      # rule each and require the SAME fixture to become a finding — a rule that
+      # changes no verdict when removed is decorative, and the first draft had
+      # four such rules passing 20 of 21 arms green.
+      - "scripts/stale-pr-citation-detector.sh"
       # ── TASK LEASE RENEW (task-16e56d05b809dd39) ────────────────────────────
       # Per file, D26 — plus scripts/pr-task-gate.sh for the SAME reason the
       # landed-mark block above names it: that file OWNS the `Task:` trailer
@@ -977,6 +984,13 @@ on:
       - "scripts/landed-open-report-schedule.sh"
       - "scripts/landed-open-report-schedule.test.sh"
       - ".github/workflows/landed-open-report.yml"
+      # ── STALE PR-CITATION DETECTOR (task-6e7fa96e3b53c561) ────────────────
+      # Its --selftest is hermetic: it builds a throwaway git repo of fixtures
+      # and runs the REAL scan over it. Four of its arms bypass one noise-family
+      # rule each and require the SAME fixture to become a finding — a rule that
+      # changes no verdict when removed is decorative, and the first draft had
+      # four such rules passing 20 of 21 arms green.
+      - "scripts/stale-pr-citation-detector.sh"
       # The renew lane's harness, on the push arm too: a lane wired on PRs only
       # goes dark the moment a merge lands.
       - "scripts/task-lease-renew.sh"
@@ -1430,6 +1444,7 @@ jobs:
           landed-mark scripts/landed-open-report-schedule.sh
           landed-mark scripts/landed-open-report-schedule.test.sh
           landed-mark .github/workflows/landed-open-report.yml
+          landed-mark scripts/stale-pr-citation-detector.sh
           doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
           doc-gates-paths-parity .github/workflows/doc-gates.yml
           merge-gate-bridge scripts/github-webhook-subscription-parity.sh
@@ -2956,6 +2971,20 @@ jobs:
         run: |
           bash scripts/landed-open-report.sh --selftest
           bash scripts/landed-open-report.test.sh
+
+      - name: a comment whose CLAIM the repo contradicts, where it cites a PR
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # scripts/stale-pr-citation-detector.sh --selftest ONLY. The live scan
+        # is an AUDIT AID, not a gate, and the file header carries the measured
+        # numbers that say so: on the full tree the wide arm scored ~14%
+        # precision (1 of 7 sampled), and --strict scored 1 of 2 over 2081
+        # citation lines. Neither earns the merge button; both are useful to a
+        # human. Running the live scan here would red main on prose.
+        #
+        # The selftest is hermetic (throwaway git repo, no network, no token)
+        # and asserts BOTH directions: a known-positive fixture IS detected and
+        # a known-negative is NOT, so it cannot pass with the detector deleted.
+        run: bash scripts/stale-pr-citation-detector.sh --selftest
 
       - name: the CONSUMER refuses a failed read, and that refusal is load-bearing
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
