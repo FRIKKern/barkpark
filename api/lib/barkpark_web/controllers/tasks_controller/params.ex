@@ -1479,8 +1479,15 @@ defmodule BarkparkWeb.TasksController.Params do
   About thirty agents drive `bp task claim` daily. A refusal that names no
   remedy costs every one of them a round trip to find one, and that cost is
   what turns a good gate into a resented one — so this names the row, states
-  what is missing, gives the exact command to fix it, and gives the override
+  what is missing, gives the exact commands to fix it, and gives the override
   verbatim rather than alluding to it.
+
+  BOTH doors, never just the raw one. `bp doc patch --set acceptance_criteria`
+  writes content outside every task honesty gate; since #18128 `bp task stamp
+  --miss --criterion-text` can SEED the array through the fenced task door
+  instead (holder-only, epoch-fenced, evented, born `met:false`). A refusal
+  that advertises only the raw door teaches raw content mutation as the one
+  way in, which is exactly what task-00f5bc88af7de2e9 set out to stop.
   """
   @spec criteria_unstated_message(String.t(), String.t()) :: String.t()
   def criteria_unstated_message(doc_id, worker_id) do
@@ -1489,9 +1496,20 @@ defmodule BarkparkWeb.TasksController.Params do
       ~s|say what the row was FOR. The close door already refuses this, and by then it is too | <>
       ~s|late: the criteria get written after the work, by whoever is trying to get the row | <>
       ~s|shut. Write them now, while they still shape the work:\n| <>
-      ~s|  bp task create is not what you want here — patch the row you are about to claim:\n| <>
-      ~s|  bp doc patch task #{doc_id} --set 'acceptance_criteria:=[{"criterion":"<measurable, checkable>","met":false,"evidence":""}]' --yes\n| <>
-      ~s|  bp task claim #{doc_id} #{worker_id} --yes\n| <>
+      ~s|  bp task create is not what you want here. TWO doors give this row a bar, and | <>
+      ~s|neither is the only one:\n| <>
+      ~s|  (1) bp doc patch — state the whole bar BEFORE claiming. Direct content write, | <>
+      ~s|outside every task honesty gate, so nothing but your own care checks it:\n| <>
+      ~s|    bp doc patch task #{doc_id} --set 'acceptance_criteria:=[{"criterion":"<measurable, checkable>","met":false,"evidence":""}]' --yes\n| <>
+      ~s|    bp task claim #{doc_id} #{worker_id} --yes\n| <>
+      ~s|  (2) bp task stamp --miss --criterion-text — SEED the bar through the task door, | <>
+      ~s|which is holder-only, epoch-fenced, emits a task.criterion event, and births the | <>
+      ~s|criterion met:false so a seed can never smuggle in a done. It needs a live claim, so | <>
+      ~s|claim with the override naming THIS plan, then write the bar as you find it:\n| <>
+      ~s|    bp task claim #{doc_id} #{worker_id} --set criteria_unstated_override="stating the bar by stamp as the work reveals it" --yes\n| <>
+      ~s|    bp task stamp #{doc_id} #{worker_id} --criterion 0 --criterion-text '<measurable, checkable>' --miss --note "<what is still open>" --yes\n| <>
+      ~s|  Pick (1) when you already know the bar; (2) when the work has to teach you it. | <>
+      ~s|Either way it is written down while it can still shape the work.\n| <>
       ~s|Containers are exempt already (a decision/goal label, a non-task kind, or a row with | <>
       ~s|children), so if this IS a container, label it rather than overriding. To claim anyway, | <>
       ~s|on the record: --set criteria_unstated_override="<why this row needs none>" — the reason | <>

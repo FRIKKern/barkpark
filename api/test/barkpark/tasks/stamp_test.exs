@@ -552,6 +552,85 @@ defmodule Barkpark.Tasks.StampTest do
       assert [%{"note" => "docs pending review"}] = second["attempts"]
     end
 
+    # task-315edb78867619de. The manifest sentence at
+    # `Plugins.Tasks` (stamp's summary) used to read "your own stamps never
+    # trip close's work-digest fence" FULL STOP. #18128 made a stamp able to
+    # SEED a criterion, and a seed writes criterion TEXT — the work-defining
+    # half of WorkDigest D5 — so the sentence stopped being true for the ONE
+    # stamp shape that can move the bar. This pins the BEHAVIOUR, not the
+    # prose: if anyone ever exempts the holder's own seed in
+    # `Close.check_work_digest/2`, this test reds and says so.
+    test "the holder's OWN SEED trips the fence; --set observed_rev is the way through",
+         %{scope: scope} do
+      doc_id = uniq("stamp-seed-fence")
+      task = mk_task!(doc_id, scope)
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      # Precondition, asserted rather than assumed: exactly two stored criteria,
+      # so index 2 is EXACTLY one past the end (the append seat) and not an
+      # out-of-range miss wearing the same error's clothes.
+      assert length(Repo.get!(Document, task.id).content["acceptance_criteria"]) == 2
+
+      assert {:ok, seeded} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 2,
+                 criterion_text: "the bar the work taught me",
+                 outcome: {:miss, "seeded mid-claim"}
+               )
+
+      assert length(seeded.content["acceptance_criteria"]) == 3,
+             "precondition: the seed actually grew the array"
+
+      # THE CLAIM UNDER TEST. Same worker, same live claim, its OWN stamp —
+      # and the DEFAULT-path close is refused, naming acceptance_criteria.
+      assert {:error, {:doc_changed_since_claim, current_rev, ["acceptance_criteria"]}} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 lifecycle_status: "blocked",
+                 reason: "stopping here"
+               )
+
+      # The refusal is recoverable exactly as the manifest now says: re-read,
+      # then pin the rev you read AFTER the seed.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 observed_rev: current_rev,
+                 lifecycle_status: "blocked",
+                 reason: "stopping here"
+               )
+
+      assert closed.content["lifecycle_status"] == "blocked"
+    end
+
+    # THE CONTROL for the test above, and the surviving half of the corrected
+    # sentence: a stamp to an EXISTING criterion still does NOT fence the
+    # holder's own default-path close. Without this arm, "the fence fires"
+    # could just as well mean D5 had been lost entirely.
+    test "a stamp to an EXISTING criterion still does not fence the same close",
+         %{scope: scope} do
+      doc_id = uniq("stamp-existing-nofence")
+      task = mk_task!(doc_id, scope)
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      assert {:ok, _} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 outcome: {:miss, "still open"}
+               )
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 lifecycle_status: "blocked",
+                 reason: "stopping here"
+               )
+
+      assert closed.content["lifecycle_status"] == "blocked"
+    end
+
     test "a foreign criterion-TEXT edit still trips doc_changed_since_claim", %{scope: scope} do
       doc_id = uniq("stamp-text-fence")
       task = mk_task!(doc_id, scope)
@@ -574,6 +653,45 @@ defmodule Barkpark.Tasks.StampTest do
 
       assert {:error, {:doc_changed_since_claim, _rev, ["acceptance_criteria"]}} =
                Close.close(task.id, "w", observed_epoch: epoch, lifecycle_status: "done")
+    end
+  end
+
+  # ─── (5b) the MANIFEST sentence the behaviour above pins ──────────────────
+
+  # task-315edb78867619de, defect 1's prose half. The run above is the strong
+  # pin; this is the cheap one that catches a prose-only revert, where the code
+  # stays right and the sentence goes back to promising a blanket exemption.
+  #
+  # NOTE the negative is written against the EXACT stale string
+  # ("your own stamps never trip"), which the CORRECTED sentence does not
+  # contain — the corrected one reads "stamps to an EXISTING criterion never
+  # trip". A refute that also matched the correction would be inert.
+  describe "the task.stamp manifest sentence matches the fence's actual behaviour" do
+    setup do
+      stamp =
+        Barkpark.Plugins.Tasks.cli_commands()
+        |> Enum.find(&(&1.id == "task.stamp"))
+
+      assert stamp, "precondition: the manifest still carries a task.stamp command"
+      %{summary: stamp.summary}
+    end
+
+    test "it still promises the EXEMPTION for an existing criterion", %{summary: summary} do
+      assert summary =~ "EXISTING criterion never trip"
+    end
+
+    test "it names the SEED as the exception and the 409 it produces", %{summary: summary} do
+      assert summary =~ "SEED IS THE EXCEPTION"
+      assert summary =~ "doc_changed_since_claim"
+    end
+
+    test "it gives the way through rather than leaving the reader stuck", %{summary: summary} do
+      assert summary =~ "--set observed_rev="
+    end
+
+    test "the blanket claim the seed falsified is GONE", %{summary: summary} do
+      refute summary =~ "your own stamps never trip",
+             "the manifest is promising a blanket exemption the work-digest fence does not give"
     end
   end
 
