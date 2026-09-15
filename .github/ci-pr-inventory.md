@@ -327,3 +327,110 @@ candidates; none is a safe venue move today.
 | `doc-gates.yml` | **move-to-push** | Measured step-level on PR run 34386237923: **118 s total, no dominant step** — 29 s / 19 s (checkout) / 13 s / 10 s (Go) / 8 s, then a long tail. There is no 573 s critic to lift out; it is 34 independent pre-merge gates plus ~33 s of setup. Worse, the **NEW-lineref gate loses its SUBJECT, not just its venue**: `scripts/new-lineref-check.sh` diffs against the PR merge base and `resolve_base` falls back to `origin/main`, so on a main push the diff is empty and it scans nothing. Moving the job wholesale deletes that gate's only reachable input. Preserving it needs a job SPLIT, which introduces a new job name and so a new `.exclusions` row. |
 | `security.yml` | **keep-on-PR** | Committed verdict is keep-on-PR — *"advisory, but real compute 42.5 s is under the 60 s floor"*. It appeared at 324 s in the 29-hour cost table because that sample caught its heavy tail: the inventory's own p90 for this workflow is **304 s against a 42.5 s median**. The median is the floor's subject; both numbers are right and they measure different things. Not movable, and the p90 is the thing to look at if it is ever revisited. |
 | `paper-editor.yml` | **keep-on-PR** | Committed verdict is keep-on-PR — genuinely path-filtered, fires on **0 of 20** sampled PR heads. The 53 runs it shows in the 29-hour table are real but concentrated in that window; on a PR that misses its paths it costs nothing, which is exactly the third clause of the venue rule. |
+
+### MOVED 2026-09-15 (task-dee226be3107a98b, PR gates-r19/pr-fanout)
+
+Three advisory workflows lost their `pull_request` arm outright. **This is a
+different edit from the 2026-09-09 move above**, and the difference is the whole
+point: that one was a job-level `if:`, which skips a job and still publishes its
+check run, so it moved COMPUTE and moved the check-run count by zero. **Removing
+the `pull_request` arm removes the workflow run, and with it every check run the
+workflow would have published** — the mechanism this repo's own workflow headers
+state over and over ("a paths-filtered workflow emits NO workflow run and NO
+check run at all"). It is safe here, and only here, because none of the three
+publishes a context in the required set: an absent context deadlocks a PR only
+if branch protection is waiting for it.
+
+**Method for both counts below (no estimate anywhere).** For each of the 10 most
+recently merged PRs, `gh pr list --state merged --limit 10 --json headRefOid`,
+then `/actions/runs?head_sha=<sha>&event=pull_request` paged to `total_count`,
+keeping the LATEST run per workflow file (a re-run is not a second PR push), then
+`/actions/runs/<id>/jobs` paged to `total_count` for each. **A check run is a
+job**, so the per-head count is the sum of job counts, attributed per workflow.
+Any page whose collected length missed its `total_count` raises CANNOT-READ
+rather than returning a short count. The AFTER column is the same measurement
+with the moved workflows' jobs subtracted — the subtraction is exact because a
+workflow with no `pull_request` arm starts no run.
+
+| workflow | check runs it published per PR | fired on | moved from | moved to | reason, in its own words |
+|---|---|---|---|---|---|
+| `cli-release-cadence.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: *"a red here is cleared by an ACT OF RELEASE, not by a change to the PR"*. A verdict that no PR can change has no business rendering on every PR — and it is in DRIFT today (5 commits past `cli-v1.21.0`), so it has been publishing an unclearable advisory red on every unrelated PR. |
+| `posix-vacuous-green-census.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: the *"population is derived from the tree on every run"*. The subject is the tree; `push: main` sees every new member within minutes of its merge, named, by the same predicate. |
+| `pipefail-sigpipe-scan.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: *"This gate asks a question about the REPO STATE, not about a diff, so its primary venue is push-to-main plus a schedule"*. The HIGH-confidence ratchet against `scripts/pipefail-sigpipe-baseline.txt` reds identically on a main push — a rise is a rise whichever side of the merge measures it. |
+
+All three already branch on `github.event_name != 'pull_request'` inside their
+dispatcher and **run everything** on that branch, so nothing below the dispatcher
+needed editing and no job silently stops running.
+`.github/required-checks.json` is byte-unchanged.
+`.github/main-push-workflows.txt` is byte-unchanged: its tiers are derived from
+the `push:` arm, which no edit here touches.
+`scripts/shim-trigger-filter-check.sh` reads floor 7, unchanged.
+
+| | before | after | change |
+|---|---|---|---|
+| check runs on a PR that matches no optional path (min over 10 heads) | **68** | **62** | −6 |
+| check runs on the median of the 10 most recently merged heads | **118** | **112** | −6 |
+| max over the 10 heads | **124** | **118** | −6 |
+
+### NOT MOVED, and the measurement that stopped it: `security.yml`
+
+`security.yml` was the largest advisory contributor on the PR path — **8 check
+runs on 10 of 10 sampled heads**, more than the three movers above combined —
+and it was moved in the first cut of this change. **It was reverted, because
+removing its `pull_request` trigger breaks the required-check spec gate's own
+mutation proof.** Recorded here so the next taker does not re-derive it.
+
+`scripts/required-checks-generate.sh` derives an exclusion stage from each
+workflow's own `on:` block. With no `pull_request` trigger, every context
+`security.yml` publishes is reclassified **`S4 STRUCTURALLY ABSENT ON EVERY PR
+HEAD`** — correctly, and by the generator's own words: *"the workflow carries no
+pull_request trigger, so on a PR this name is not SKIPPED, it is ABSENT."*
+
+But `scripts/required-checks.test.sh` §14b, §15 and §16 use `Security gate` and
+its three `needs:` leaves (`Dispatch (security paths)`, `Security gate shape
+ratchet`, `Sobelow baseline does not swallow its own inline waivers (blocking)`)
+as the **live fixture** proving two other things entirely: that an aggregator
+excluded `S5 RED ON MAIN` takes its leaves DOWN with it via `S6`, and that the
+hand-maintained `S7` hold survives a green fixture. Reclassifying the aggregator
+to `S4` removes those sections' premise. **Measured, both directions, hermetic:**
+clean `origin/main` → `352 passed, 0 failed`; the same suite with only the
+`security.yml` trigger removed → `335 passed, 17 failed`, six of them a separate
+prose-scan cause and **eleven** naming `Security gate` or its leaves.
+
+**The fix is not in this document's gift and must not be a re-pin.** Making the
+move would mean re-pointing a required-check spec gate's mutation fixture at a
+different aggregator — changing what that guard proves in order to land a cost
+reduction, which is the exact shape of remediation that does the most damage on a
+spec gate. It needs its own row, its own reading of §14b/§15/§16, and an owner.
+The 8 check runs stay on the PR path until then.
+
+## The "under 20" target, measured — and why no venue move can reach it
+
+The parent row's criterion asks for **under 20 check runs per PR push**. It is
+**not reachable by any trigger edit**, and the number that proves it is not a
+judgment call:
+
+**The four REQUIRED workflows alone publish 26 check runs on every single head.**
+Measured the same way, on all 10 heads, with no variance: `console-harness.yml`
+9 + `elixir.yml` 8 + `cloud.yml` 7 + `pr-task-gate.yml` 2 = **26**. Those four
+hold the entire required set, and removing any of their jobs from the PR path is
+removing the gate itself.
+
+So **26 is the floor a venue diet can reach, and 26 > 20.** Getting under 20
+requires folding JOB NAMES inside the required workflows (9 console jobs into
+fewer, 8 elixir jobs into fewer), which changes published context names, moves
+`.exclusions` rows, and is a branch-protection-adjacent owner ruling — not a
+trigger edit and not this document's to take. That is the honest resolution of
+the tension between this table's 42 `keep-on-PR` verdicts and the "under 20"
+target: **the verdicts were never the binding constraint; the required set's own
+job count is.**
+
+The next largest single lever, and it is larger than everything moved above:
+**`shell-harnesses.yml` publishes 50 check runs in one workflow** (52 jobs), and
+it is the entire difference between the 68-check-run floor and the 118-check-run
+median — it fired on 6 of the 10 heads. It is workflow-level paths-filtered, so
+on a head that misses its paths it costs exactly nothing, which is why the venue
+rule's third clause keeps it and why it is NOT moved here: its harnesses are the
+only lane that runs them, and they are triggered by the very files a PR edits.
+Its 50 are a JOB-COUNT problem, not a venue problem — nearly all of them skip —
+and folding them is the same class of work as folding the required four.
