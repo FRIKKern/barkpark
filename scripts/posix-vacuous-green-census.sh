@@ -396,62 +396,96 @@ v=$(cat @PSUB@printf 'x\n'))
 printf '[%s]' "$v"
 PROBE
 
-  # $POSIX_SH is the invocation a reader gets when they type `sh scripts/x.sh`:
-  # bash in POSIX mode. Overridable so the OTHER branch can be exercised
-  # deliberately on a host that only has one of the two worlds (see the
-  # PLATFORMS note in docs/ops/merge-gates.md, section 'PARSED BUT NOT RUN').
-  POSIX_SH="${CENSUS_SELFTEST_POSIX_SH:-bash --posix}"
+  # ONE PASS of the branched arms, against ONE invocation. Factored into a
+  # function because the selftest runs it against the PLATFORM DEFAULT
+  # unconditionally, and against an override only IN ADDITION.
+  #
+  # WHY ADDITIVE AND NOT A SWITCH. `CENSUS_SELFTEST_POSIX_SH` used to REPLACE the
+  # invocation. That put a knob outside this file in a position to change what
+  # the gate measures: anything exporting it in CI would have retired the
+  # refusing branch, reddened nothing, and left the arm printing a confident
+  # `ok`. That is this census's own failure mode installed in its configuration
+  # surface. The override can now only ADD a measurement, never remove one, and
+  # every pass says out loud which invocation it measured and whether it was the
+  # default — so "which world did this run actually measure" is answered in the
+  # verdict line rather than inferred from an environment nobody printed.
+  procsub_arms() {
+    local label="$1"; shift
+    local inv="$*"
+    local world ver det_out
 
-  $POSIX_SH "$DET" > "$TMPDIR_CENSUS/det.out" 2> "$TMPDIR_CENSUS/det.err"
-  DET_OUT=$(cat "$TMPDIR_CENSUS/det.out")
-  if [ "$DET_OUT" = "[x]" ]; then
-    PSUB_WORLD=allows
-  elif [ "$DET_OUT" = "[]" ] && grep -q "command substitution" "$TMPDIR_CENSUS/det.err"; then
-    PSUB_WORLD=refuses
-  else
-    echo "posix-vacuous-green-census --selftest: CANNOT READ — the procsub probe under '$POSIX_SH' answered neither '[x]' (allows) nor '[]' + an expansion-time command-substitution error (refuses). It printed '$DET_OUT' with stderr: $(cat "$TMPDIR_CENSUS/det.err"). This selftest cannot say which world it is in, so it asserts nothing rather than guessing." >&2
-    exit 2
-  fi
-  ok "procsub-under-posix[precondition]: '$POSIX_SH' (bash $BASH_VERSION) $PSUB_WORLD a process substitution nested in a command substitution — the branch below is chosen by this measurement, never by uname"
+    # The version is asked OF THE INTERPRETER THAT RAN, never taken from
+    # $BASH_VERSION: that is a builtin of the shell running this census, and it
+    # is only ever right about $inv by coincidence. Under an override to a
+    # different bash it would name the wrong interpreter at exactly the moment a
+    # reader consults the line to learn which world was measured.
+    ver=$($inv -c 'printf "%s" "${BASH_VERSION:-not bash}"' 2>/dev/null)
+    [ -n "$ver" ] || ver="unreadable"
 
-  $POSIX_SH -n "$VAC" > "$TMPDIR_CENSUS/vac.parse" 2>&1;            VAC_PARSE_RC=$?
-  $POSIX_SH    "$VAC" > "$TMPDIR_CENSUS/vac.out" 2> "$TMPDIR_CENSUS/vac.err"; VAC_RUN_RC=$?
-  bash         "$VAC" > "$TMPDIR_CENSUS/ctl.out" 2>&1;              VAC_CTL_RC=$?
-  $POSIX_SH    "$TWIN" > "$TMPDIR_CENSUS/twin.out" 2> "$TMPDIR_CENSUS/twin.err"; TWIN_RC=$?
+    $inv "$DET" > "$TMPDIR_CENSUS/det.out" 2> "$TMPDIR_CENSUS/det.err"
+    det_out=$(cat "$TMPDIR_CENSUS/det.out")
+    if [ "$det_out" = "[x]" ]; then
+      world=allows
+    elif [ "$det_out" = "[]" ] && grep -q "command substitution" "$TMPDIR_CENSUS/det.err"; then
+      world=refuses
+    else
+      echo "posix-vacuous-green-census --selftest: CANNOT READ — the procsub probe under '$inv' answered neither '[x]' (allows) nor '[]' + an expansion-time command-substitution error (refuses). It printed '$det_out' with stderr: $(cat "$TMPDIR_CENSUS/det.err"). This selftest cannot say which world it is in, so it asserts nothing rather than guessing." >&2
+      exit 2
+    fi
+    ok "procsub-under-posix[$label/precondition]: '$inv' (bash $ver, asked of that interpreter) $world a process substitution nested in a command substitution — the branch below is chosen by this measurement, never by uname"
 
-  [ "$VAC_PARSE_RC" -eq 0 ] \
-    && ok "procsub-under-posix[parse]: \`$POSIX_SH -n\` on the fixture EXITS $VAC_PARSE_RC — the static check answers 0 in BOTH worlds, which is why it is worth nothing in either" \
-    || no "procsub-under-posix[parse]: expected the parse check to exit 0, got rc=$VAC_PARSE_RC: $(cat "$TMPDIR_CENSUS/vac.parse")"
+    $inv -n "$VAC" > "$TMPDIR_CENSUS/vac.parse" 2>&1;            VAC_PARSE_RC=$?
+    $inv    "$VAC" > "$TMPDIR_CENSUS/vac.out" 2> "$TMPDIR_CENSUS/vac.err"; VAC_RUN_RC=$?
+    bash    "$VAC" > "$TMPDIR_CENSUS/ctl.out" 2>&1;              VAC_CTL_RC=$?
+    $inv    "$TWIN" > "$TMPDIR_CENSUS/twin.out" 2> "$TMPDIR_CENSUS/twin.err"; TWIN_RC=$?
 
-  if [ "$PSUB_WORLD" = refuses ]; then
-    { [ "$VAC_RUN_RC" -eq 0 ] && grep -q "FIXTURE TEST PASSED" "$TMPDIR_CENSUS/vac.out"; } \
-      && ok "procsub-under-posix[run/vacuous]: the run EXITS $VAC_RUN_RC and prints \"$(grep -- '---- ' "$TMPDIR_CENSUS/vac.out")\" + FIXTURE TEST PASSED — this is the variant a macOS reader gets" \
-      || no "procsub-under-posix[run/vacuous]: this interpreter refuses the construct, so the run must exit 0 announcing a pass, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
+    [ "$VAC_PARSE_RC" -eq 0 ] \
+      && ok "procsub-under-posix[$label/parse]: \`$inv -n\` on the fixture EXITS $VAC_PARSE_RC — the static check answers 0 in BOTH worlds, which is why it is worth nothing in either" \
+      || no "procsub-under-posix[$label/parse]: expected the parse check to exit 0, got rc=$VAC_PARSE_RC: $(cat "$TMPDIR_CENSUS/vac.parse")"
 
-    { grep -q "syntax error near unexpected token" "$TMPDIR_CENSUS/vac.err" \
-        && grep -q "command substitution" "$TMPDIR_CENSUS/vac.err"; } \
-      && ok "procsub-under-posix[compared-nothing]: stderr carries the EXPANSION-time \`command substitution: syntax error\` — both operands were empty, so the two checks compared nothing" \
-      || no "procsub-under-posix[compared-nothing]: expected an expansion-time command-substitution syntax error on stderr, got: $(cat "$TMPDIR_CENSUS/vac.err")"
+    if [ "$world" = refuses ]; then
+      { [ "$VAC_RUN_RC" -eq 0 ] && grep -q "FIXTURE TEST PASSED" "$TMPDIR_CENSUS/vac.out"; } \
+        && ok "procsub-under-posix[$label/run/vacuous]: the run EXITS $VAC_RUN_RC and prints \"$(grep -- '---- ' "$TMPDIR_CENSUS/vac.out")\" + FIXTURE TEST PASSED — this is the variant a macOS reader gets" \
+        || no "procsub-under-posix[$label/run/vacuous]: this interpreter refuses the construct, so the run must exit 0 announcing a pass, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
 
-    { [ "$VAC_CTL_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/ctl.out"; } \
-      && ok "procsub-under-posix[control]: real bash on the SAME file EXITS $VAC_CTL_RC and reds both comparisons — the 0 above was vacuous, not honest" \
-      || no "procsub-under-posix[control]: the fixture must FAIL under real bash or it proves nothing, got rc=$VAC_CTL_RC: $(cat "$TMPDIR_CENSUS/ctl.out")"
-  else
-    { [ "$VAC_RUN_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/vac.out" \
-        && grep -q "FAIL: right operand differs" "$TMPDIR_CENSUS/vac.out"; } \
-      && ok "procsub-under-posix[run/loud]: the run EXITS $VAC_RUN_RC and reds BOTH comparisons — where the construct is allowed the same class arrives loudly, and there is nothing vacuous left to hide in" \
-      || no "procsub-under-posix[run/loud]: this interpreter allows the construct, so the run must red both comparisons, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
+      { grep -q "syntax error near unexpected token" "$TMPDIR_CENSUS/vac.err" \
+          && grep -q "command substitution" "$TMPDIR_CENSUS/vac.err"; } \
+        && ok "procsub-under-posix[$label/compared-nothing]: stderr carries the EXPANSION-time \`command substitution: syntax error\` — both operands were empty, so the two checks compared nothing" \
+        || no "procsub-under-posix[$label/compared-nothing]: expected an expansion-time command-substitution syntax error on stderr, got: $(cat "$TMPDIR_CENSUS/vac.err")"
 
-    grep -q -- "---- 2 failure(s), 2 pass(es)" "$TMPDIR_CENSUS/vac.out" \
-      && ok "procsub-under-posix[compared-something]: the tally line says \"---- 2 failure(s), 2 pass(es)\" — both comparisons produced a verdict, the opposite of the vacuous branch" \
-      || no "procsub-under-posix[compared-something]: expected a 2-failure tally proving both comparisons ran, got: $(cat "$TMPDIR_CENSUS/vac.out")"
+      { [ "$VAC_CTL_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/ctl.out"; } \
+        && ok "procsub-under-posix[$label/control]: real bash on the SAME file EXITS $VAC_CTL_RC and reds both comparisons — the 0 above was vacuous, not honest" \
+        || no "procsub-under-posix[$label/control]: the fixture must FAIL under real bash or it proves nothing, got rc=$VAC_CTL_RC: $(cat "$TMPDIR_CENSUS/ctl.out")"
+    else
+      { [ "$VAC_RUN_RC" -ne 0 ] && grep -q "FAIL: left operand differs" "$TMPDIR_CENSUS/vac.out" \
+          && grep -q "FAIL: right operand differs" "$TMPDIR_CENSUS/vac.out"; } \
+        && ok "procsub-under-posix[$label/run/loud]: the run EXITS $VAC_RUN_RC and reds BOTH comparisons — where the construct is allowed the same class arrives loudly, and there is nothing vacuous left to hide in" \
+        || no "procsub-under-posix[$label/run/loud]: this interpreter allows the construct, so the run must red both comparisons, got rc=$VAC_RUN_RC: $(cat "$TMPDIR_CENSUS/vac.out") / $(cat "$TMPDIR_CENSUS/vac.err")"
 
-    # CONTROL for the loud branch: a twin with IDENTICAL operands. If the red
-    # above came from the fixture always reding rather than from a measured
-    # difference, this would red too.
-    { [ "$TWIN_RC" -eq 0 ] && ! grep -q "operand differs" "$TMPDIR_CENSUS/twin.out"; } \
-      && ok "procsub-under-posix[control]: the honest twin — same construct, IDENTICAL operands — EXITS $TWIN_RC green, so the red above is a measured difference, not a fixture that always reds" \
-      || no "procsub-under-posix[control]: the identical-operand twin must pass or the loud arm proves nothing, got rc=$TWIN_RC: $(cat "$TMPDIR_CENSUS/twin.out") / $(cat "$TMPDIR_CENSUS/twin.err")"
+      grep -q -- "---- 2 failure(s), 2 pass(es)" "$TMPDIR_CENSUS/vac.out" \
+        && ok "procsub-under-posix[$label/compared-something]: the tally line says \"---- 2 failure(s), 2 pass(es)\" — both comparisons produced a verdict, the opposite of the vacuous branch" \
+        || no "procsub-under-posix[$label/compared-something]: expected a 2-failure tally proving both comparisons ran, got: $(cat "$TMPDIR_CENSUS/vac.out")"
+
+      # CONTROL for the loud branch: a twin with IDENTICAL operands. If the red
+      # above came from the fixture always reding rather than from a measured
+      # difference, this would red too.
+      { [ "$TWIN_RC" -eq 0 ] && ! grep -q "operand differs" "$TMPDIR_CENSUS/twin.out"; } \
+        && ok "procsub-under-posix[$label/control]: the honest twin — same construct, IDENTICAL operands — EXITS $TWIN_RC green, so the red above is a measured difference, not a fixture that always reds" \
+        || no "procsub-under-posix[$label/control]: the identical-operand twin must pass or the loud arm proves nothing, got rc=$TWIN_RC: $(cat "$TMPDIR_CENSUS/twin.out") / $(cat "$TMPDIR_CENSUS/twin.err")"
+    fi
+  }
+
+  # The DEFAULT pass, always. This is the invocation a reader gets when they type
+  # `sh scripts/whatever.test.sh`: bash in POSIX mode. Nothing can switch it off.
+  procsub_arms default bash --posix
+
+  # The OVERRIDE pass, only when asked for, and only as an ADDITION. It exists so
+  # a host that has just one of the two worlds can still exercise the other — a
+  # macOS developer running `CENSUS_SELFTEST_POSIX_SH=bash` measures exactly what
+  # CI will measure, which is how the platform-specific red this arm used to
+  # carry would have been caught before it shipped.
+  if [ -n "${CENSUS_SELFTEST_POSIX_SH:-}" ] && [ "$CENSUS_SELFTEST_POSIX_SH" != "bash --posix" ]; then
+    procsub_arms override $CENSUS_SELFTEST_POSIX_SH
   fi
   echo
   echo "----"
@@ -462,7 +496,9 @@ PROBE
   # was written (2026-09-15), raised deliberately whenever an arm is added.
   # It is BRANCH-INVARIANT on purpose: the procsub-under-posix branches emit the
   # same number of verdicts, so a host that takes the other one cannot come in
-  # under the floor and read as a smaller, clean-looking green.
+  # under the floor and read as a smaller, clean-looking green. It is a FLOOR and
+  # not an equality, which is what lets the override pass ADD four arms (21) on a
+  # host that asks for one (22) without loosening anything for a host that does not.
   ARMS_FLOOR=17
   reported=$((passes + fails))
   if [ "$reported" -lt "$ARMS_FLOOR" ]; then
