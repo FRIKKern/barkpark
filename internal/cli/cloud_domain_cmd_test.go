@@ -270,15 +270,22 @@ func TestRunCloudDomainStageNameScrub(t *testing.T) {
 }
 
 // TestRunCloudDomainRefusal: a control-plane failure (e.g. a team-scoped 404)
-// routes through the shared cloudFail seam — a bp: sentence on stderr, generic
-// exit, clean stdout.
+// renders a bp: sentence on stderr with clean stdout.
+//
+// THE EXIT CHANGED ON PURPOSE (cch-w71 remainder, D866). This used to assert
+// exitGeneric, because the arm handed every refusal to the bare cloudFail and
+// four families collapsed onto 1. It now rides the #11784 status-family ladder,
+// so a team-scoped 404 is exitNotFound — the whole point of the row. The full
+// per-family table lives in cloud_read_refusal_exit_test.go; this test keeps
+// its original job of proving the STREAMS (a bp: sentence on stderr, nothing on
+// stdout) and now pins the family it names.
 func TestRunCloudDomainRefusal(t *testing.T) {
 	newDomainServer(t, 404, `{"error":"not_found"}`)
 	stdout, stderr, code := runDomain(t, "table", false, "status", testInstanceID)
-	if code != exitGeneric {
-		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	if code != exitNotFound {
+		t.Fatalf("exit = %d, want %d (not-found)", code, exitNotFound)
 	}
-	if !strings.Contains(stderr, "bp:") || !strings.Contains(stderr, "not_found") {
+	if !strings.Contains(stderr, "bp:") || !strings.Contains(stderr, "no such instance") {
 		t.Fatalf("want a bp:-prefixed failure sentence on stderr:\n%s", stderr)
 	}
 	if strings.TrimSpace(stdout) != "" {
