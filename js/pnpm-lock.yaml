@@ -505,9 +505,6 @@ importers:
       asciinema-player:
         specifier: ^3.8.0
         version: 3.17.0
-      esbuild:
-        specifier: 0.25.12
-        version: 0.25.12
       happy-dom:
         specifier: ^20.0.0
         version: 20.10.6

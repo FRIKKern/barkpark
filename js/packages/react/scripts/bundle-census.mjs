@@ -69,12 +69,40 @@
 //   node scripts/bundle-census.mjs --top 25        # rows per entry (default 30)
 //   node scripts/bundle-census.mjs --chunks        # dist-artifact table instead
 
-import esbuild from 'esbuild'
 import { gzipSync } from 'node:zlib'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+// Borrow the EXACT esbuild instance `@size-limit/esbuild` will run, by
+// resolving through the already-present `@size-limit/preset-small-lib` devDep
+// rather than declaring an `esbuild` dependency of our own.
+//
+// Two reasons, and the second is the load-bearing one:
+//   1. A declared `esbuild` here is a version PIN that can silently drift from
+//      whatever size-limit resolves, and the day it drifts this tool starts
+//      reporting a bundle nobody measures — quietly, because the numbers still
+//      look plausible. Resolving through size-limit cannot drift: it is the
+//      same file on disk.
+//   2. The repo-root pnpm workspace (`pnpm-workspace.yaml`: web, js/packages/*,
+//      apps/mobile) hoists a single esbuild, and `vite@8` there wants
+//      `^0.27 || ^0.28`. Adding `esbuild@0.25.12` to satisfy size-limit put an
+//      unmet peer on vite across the whole root workspace — a dev-only census
+//      tool has no business moving web/'s build toolchain.
+const req = createRequire(import.meta.url)
+const esbuild = await import(
+  pathToFileURL(
+    req.resolve('esbuild', {
+      paths: [
+        req.resolve('@size-limit/esbuild', {
+          paths: [req.resolve('@size-limit/preset-small-lib')],
+        }),
+      ],
+    }),
+  )
+).then(m => m.default ?? m)
 
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
