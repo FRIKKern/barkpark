@@ -41,10 +41,18 @@ defmodule Barkpark.Plugins.Github.Intake do
        re-delivery, and never surface a row an `adopt` could find). Instead we
        SURFACE the refusal (D7 spirit): a maintainer-visible comment on the
        issue, a findable `dedup_refused` dead-letter row via `Github.Conflicts`,
-       and a DISTINCT `{:refused, doc_id}` outcome the controller maps to 2xx
-       (accepted — GitHub never re-delivers, so the comment posts exactly once).
+       and a DISTINCT `{:refused, :dedup_recorded | :dedup_unrecorded, doc_id}`
+       outcome the controller maps to 2xx (accepted — GitHub never re-delivers,
+       so the comment posts exactly once). The dead-letter write is BEST-EFFORT
+       and can fail; the tag says WHICH happened, because a receipt that claims
+       a findable row exists when the write failed is the same class of defect
+       one layer down.
        A deterministic lifecycle-gate veto (`{:halted, reason}`) is logged and
-       returned as the same clean `{:refused, doc_id}` 2xx outcome: retrying an
+       returned as `{:refused, :vetoed, doc_id}` — also 2xx, but a SEPARATE tag,
+       because that arm writes NOTHING AT ALL: no comment, no dead-letter row.
+       One boolean standing for "we recorded it" and "we recorded nothing" left
+       every downstream reader unable to tell a quarantined issue from a
+       silently-dropped one. Retrying an
        unchanged issue can never make that write succeed. A genuine OTHER
        create error stays `{:error, reason}` → the controller answers 5xx
        (retryable — that transient IS worth retrying).
@@ -120,14 +128,28 @@ defmodule Barkpark.Plugins.Github.Intake do
                           "a maintainer will review it."
 
   @typedoc """
+  Why a birth was refused, and — for the dedup arm — whether the best-effort
+  dead-letter row actually landed. `:vetoed` writes nothing by construction.
+  """
+  @type refusal :: :dedup_recorded | :dedup_unrecorded | :vetoed
+
+  @typedoc """
   Intake outcome:
 
     * `{:ok, :born, doc}`   — a fresh task was born (backlink comment attempted)
     * `{:ok, :exists, doc}` — re-delivery; the task already existed (idempotent no-op)
-    * `{:refused, doc_id}`  — the birth was deterministically refused: either
-      Dedup judged it a look-alike (and surfaced a maintainer comment plus a
-      `dedup_refused` dead-letter row), or a lifecycle gate vetoed it (and the
-      reason was logged). The controller maps both to 2xx (accepted)
+    * `{:refused, :dedup_recorded, doc_id}` — Dedup judged it a look-alike; a
+      maintainer comment was attempted AND the `dedup_refused` dead-letter row
+      was written. A maintainer can find it.
+    * `{:refused, :dedup_unrecorded, doc_id}` — same verdict, but the
+      BEST-EFFORT dead-letter write FAILED or raised (it is logged and never
+      crashes intake). The refusal stands and is still 2xx — but NOTHING is
+      findable, so the receipt must not claim otherwise.
+    * `{:refused, :vetoed, doc_id}` — a deterministic lifecycle gate vetoed the
+      birth before persistence. No comment, no dead-letter row, no task: the
+      reason is LOGGED and that is all. The controller maps all three to 2xx
+      (accepted), with the tag echoed in the receipt so the three stay
+      distinguishable downstream
     * `:ignored`            — not an `issues.opened` event (D6)
     * `:dropped`            — the App's own `[bot]` sender (D4 cut #1)
     * `{:error, reason}`    — a genuine (non-dedup) Content create failure; the
@@ -135,7 +157,7 @@ defmodule Barkpark.Plugins.Github.Intake do
   """
   @type result ::
           {:ok, :born | :exists, Document.t()}
-          | {:refused, String.t()}
+          | {:refused, refusal(), String.t()}
           | :ignored
           | :dropped
           | {:error, term()}
@@ -224,7 +246,11 @@ defmodule Barkpark.Plugins.Github.Intake do
           {:error, {:halted, reason}} ->
             Logger.warning("github intake: lifecycle gate refused #{doc_id}: #{inspect(reason)}")
 
-            {:refused, doc_id}
+            # `:vetoed`, NOT a dedup tag: this arm wrote nothing — no comment,
+            # no dead-letter row. Collapsing it into the dedup refusal is how a
+            # single `refused: true` came to mean both "quarantined, go look at
+            # the row" and "gone, nothing was written".
+            {:refused, :vetoed, doc_id}
 
           # The dedup gate could not RUN (PDS wave 24). This looks like the
           # veto above and is its exact opposite: the veto is deterministic, so
@@ -253,15 +279,26 @@ defmodule Barkpark.Plugins.Github.Intake do
   # ── dedup-refusal surfacing (no outsider gets silence) ─────────────────────
 
   # The Dedup verdict refused a birth. Do the two visible things — comment +
-  # dead-letter row — then return the distinct `{:refused, doc_id}`. Neither
+  # dead-letter row — then return the tagged `{:refused, tag, doc_id}`. Neither
   # side effect may crash intake or force a redelivery: both are best-effort so
   # the maintainer comment posts EXACTLY ONCE (2xx, GitHub never re-delivers).
   # `doc_id` rides the outcome (the intended `gh-<num>`), but the recorded row
   # carries `doc_id: nil` — no task exists to point at.
+  #
+  # THE RULING on the best-effort dead-letter write: its outcome CHANGES the
+  # tag. `:dedup_recorded` means a row exists to find; `:dedup_unrecorded` means
+  # the write failed and nothing is findable. Swallowing that distinction would
+  # make the receipt assert a row it never wrote — the same one-receipt-for-two-
+  # outcomes defect this tag exists to remove, one layer down. The refusal
+  # itself still stands either way (still 2xx, still no redelivery), because a
+  # failed bookkeeping write is not a reason to re-post the maintainer comment.
   defp refused(doc_id, number, dataset, verdict, opts) do
     maybe_comment(number, @refused_comment_body, opts)
-    record_refusal(number, dataset, verdict, opts)
-    {:refused, doc_id}
+
+    case record_refusal(number, dataset, verdict, opts) do
+      :ok -> {:refused, :dedup_recorded, doc_id}
+      :error -> {:refused, :dedup_unrecorded, doc_id}
+    end
   end
 
   # Dead-letter the refusal into `github_sync_conflicts` (slice-1 recorder) so
@@ -270,6 +307,12 @@ defmodule Barkpark.Plugins.Github.Intake do
   # so a re-delivery UPDATES the same row instead of piling duplicates. The
   # recorder is out-of-band bookkeeping — it never touches `Content.*` or
   # `mutation_events`, so it can never re-trigger sync (no loop surface).
+  #
+  # BEST-EFFORT, but no longer SILENT: it still never crashes intake and never
+  # forces a redelivery, and it now REPORTS which happened — `:ok` (a row exists)
+  # or `:error` (failed or raised; logged). Its caller turns that into the tag
+  # the receipt echoes.
+  @spec record_refusal(integer(), String.t(), term(), keyword()) :: :ok | :error
   defp record_refusal(number, dataset, verdict, opts) do
     repo = Keyword.get(opts, :repo) || Settings.repo()
     record_fun = Keyword.get(opts, :conflict_fun, &default_record/1)
@@ -292,7 +335,7 @@ defmodule Barkpark.Plugins.Github.Intake do
           "github intake: recording dedup_refused for ##{number} failed: #{inspect(other)}"
         )
 
-        :ok
+        :error
     end
   rescue
     e ->
@@ -300,7 +343,7 @@ defmodule Barkpark.Plugins.Github.Intake do
         "github intake: recording dedup_refused for ##{number} raised: #{inspect(e)}"
       )
 
-      :ok
+      :error
   end
 
   # Default conflict recorder, resolved dynamically (the controller's

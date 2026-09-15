@@ -48,10 +48,22 @@ defmodule BarkparkWeb.GithubWebhookController do
 
   A verified-but-unactionable delivery (ping, non-`issues` event, non-`opened`
   action, bot-drop) returns 2xx so GitHub marks it delivered and does NOT
-  retry-storm. A dedup-REFUSED intake (`{:refused, _}` — the outsider issue
-  looked like existing tracked work) is likewise 2xx: Intake already posted the
-  maintainer comment and recorded a findable dead-letter row, so a redelivery
-  would only double-post — GitHub must never retry it. Only a genuine intake
+  retry-storm. A REFUSED intake is likewise 2xx, and the receipt NAMES which
+  refusal it was — `refused: true` alone once covered three different outcomes:
+
+    * `outcome: "dedup_refused", recorded: true` — look-alike of existing
+      tracked work; maintainer comment posted AND a findable `dedup_refused`
+      dead-letter row written.
+    * `outcome: "dedup_refused", recorded: false` — same verdict, but the
+      best-effort dead-letter write failed. Nothing is findable; the receipt
+      must not pretend otherwise.
+    * `outcome: "vetoed", recorded: false` — a deterministic lifecycle-gate
+      veto. NOTHING was written: no task, no comment, no row, only a log line.
+
+  All three stay 2xx because a redelivery would only double-post (or re-hit the
+  same veto) — GitHub must never retry them. The ingest receipt is likewise
+  split: `outcome: "born"` (a row was created) vs `outcome: "exists"` (an
+  idempotent re-delivery), both still carrying `ingested: true`. Only a genuine intake
   FAILURE (`{:error, _}` — e.g. a transient DB error) returns 5xx, inviting
   GitHub to redeliver; the deterministic `gh-<num>` doc_id makes that
   redelivery idempotent (no duplicate task).
@@ -144,8 +156,13 @@ defmodule BarkparkWeb.GithubWebhookController do
       # doc}` on an idempotent re-delivery — both are 2xx handled deliveries.
       # Match the TAG explicitly: a bare `{:ok, _doc}` (2-tuple) would miss the
       # real 3-tuple shape and CaseClauseError → a perpetual 500 GitHub retries.
-      {:ok, _tag, _doc} ->
-        json(conn, %{ok: true, ingested: true})
+      {:ok, tag, _doc} when tag in [:born, :exists] ->
+        # `ingested: true` is KEPT verbatim (every shipped reader matches it as
+        # a map subset), and `outcome` is ADDED so the receipt finally says
+        # WHICH ingest happened: a row was created (`born`) or a re-delivery
+        # found one already there (`exists`). The tag was previously matched and
+        # DISCARDED, so "ingested" covered both and named neither.
+        json(conn, %{ok: true, ingested: true, outcome: Atom.to_string(tag)})
 
       :dropped ->
         # D4 cut #1 — the App's own `[bot]` write. Handled by deliberately
@@ -156,12 +173,43 @@ defmodule BarkparkWeb.GithubWebhookController do
         # action != "opened" (edited/closed/labeled/reopened/…). Accepted, no-op.
         conn |> put_status(:accepted) |> json(%{ok: true, ignored: "action"})
 
-      {:refused, _doc_id} ->
+      {:refused, reason, _doc_id} when reason in [:dedup_recorded, :dedup_unrecorded] ->
         # Dedup judged the outsider issue a look-alike (D6). No task born, but
-        # Intake already posted a maintainer comment + recorded a findable
-        # dead-letter row. 2xx (accepted) so GitHub never redelivers — the
-        # comment must post exactly once.
-        conn |> put_status(:accepted) |> json(%{ok: true, refused: true})
+        # Intake posted a maintainer comment and ATTEMPTED a findable
+        # dead-letter row. That write is best-effort, so `recorded` says whether
+        # it actually landed — a receipt promising a row a maintainer can find,
+        # when the write failed, sends them hunting for nothing. 2xx (accepted)
+        # so GitHub never redelivers — the comment must post exactly once.
+        conn
+        |> put_status(:accepted)
+        |> json(%{
+          ok: true,
+          refused: true,
+          outcome: "dedup_refused",
+          recorded: reason == :dedup_recorded
+        })
+
+      {:refused, :vetoed, _doc_id} ->
+        # A deterministic lifecycle-gate veto. Also 2xx — retrying an unchanged
+        # issue hits the same veto forever — but a SEPARATE outcome, because
+        # this arm wrote NOTHING: no task, no comment, no dead-letter row. Only
+        # a log line exists. `refused: true` alone could not tell this apart
+        # from the quarantined case above, which is the whole defect: one
+        # boolean standing for "go look at the recorded row" and "there is
+        # nothing to look at".
+        conn
+        |> put_status(:accepted)
+        |> json(%{ok: true, refused: true, outcome: "vetoed", recorded: false})
+
+      {:refused, _doc_id} ->
+        # LEGACY 2-tuple. The real Intake no longer produces this shape, but a
+        # seam-injected stub (or an older release loaded beside a newer
+        # controller) still can, and a CaseClauseError here would be a 500 that
+        # GitHub retry-storms. Answer the same 2xx — and say `unspecified`
+        # rather than fabricate a `recorded` boolean nobody measured.
+        conn
+        |> put_status(:accepted)
+        |> json(%{ok: true, refused: true, outcome: "unspecified"})
 
       {:error, reason} ->
         # A genuine intake failure (transient DB, etc.). 5xx invites GitHub to
