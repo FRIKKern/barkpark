@@ -25,9 +25,12 @@
  * AND THE DERIVATION REFUSES RATHER THAN GOING BLIND. A parser that stops
  * matching would derive an empty ladder and `deepEqual([], [])` would pass:
  * clean-looking and completely blind. `ladderFrom` throws REFUSING TO MEASURE
- * on an unreadable file, on unparseable JSON, on a missing family and on a
- * family that yields zero steps, and the control test below drives all four
- * arms in-process so the refusal cannot itself rot. That refuse-on-empty arm is
+ * on an unreadable file, on unparseable JSON, and on every malformed family in
+ * design/ladder-refusal-fixture.json, and the two control tests below drive
+ * those arms in-process so the refusal cannot itself rot. The malformed-family
+ * half is SHARED with design/emit.mjs' typeLadderFrom and design/validate.mjs'
+ * chromeLadderAscending — see the conformance-table block below and
+ * design/ladder-refusal-conformance.test.mjs. That refuse-on-empty arm is
  * scripts/console-path-escape-check.test.sh case 6's, applied here.
  *
  * ORDER, NOT ONLY MEMBERSHIP. Display order is not tokens.json's key order —
@@ -120,16 +123,72 @@ test("the derivation actually read a ladder, and refuses when it cannot", () => 
     readingFromSource.length >= 3,
     `derived only ${readingFromSource.length} reading step(s) from ${TOKENS_PATH} — the derivation has gone blind`,
   );
-  // NEGATIVE CONTROLS, in-process: each way of seeing nothing must throw, not
-  // hand back an empty expectation.
+  // NEGATIVE CONTROLS on the READ, in-process: each way of failing to get any
+  // JSON at all must throw, not hand back an empty expectation. (The malformed
+  // FAMILY arms are the conformance table below — they are shared, these are not,
+  // because no other implementation reads a file.)
   assert.throws(() => parseTokens(""), new RegExp(REFUSE), "an empty read must refuse");
   assert.throws(() => parseTokens("{ not json"), new RegExp(REFUSE), "an unparseable read must refuse");
-  assert.throws(() => ladderFrom({}, "chrome"), new RegExp(REFUSE), "a missing family must refuse");
-  assert.throws(() => ladderFrom({ type: { chrome: { _note: "x" } } }, "chrome"), new RegExp(REFUSE), "a zero-step family must refuse");
-  assert.throws(
-    () => ladderFrom({ type: { chrome: { a: { size: 12 }, b: { size: 12 } } } }, "chrome"),
-    new RegExp(REFUSE),
-    "an ambiguous (tied-size) ladder must refuse",
+});
+
+// THE WEB ARM OF THE LADDER-REFUSAL CONFORMANCE TABLE (task-833f347eaa78a2a5).
+// The malformed families below are NOT written here: they come out of
+// design/ladder-refusal-fixture.json, the one list that design/emit.mjs'
+// typeLadderFrom and design/validate.mjs' chromeLadderAscending are driven
+// against too. Three implementations of one refusal contract, deliberately not
+// shared (design/ladder-refusal-conformance.test.mjs states the two grounds), and
+// on a well-formed tokens.json all three produce identical lists WHATEVER their
+// refusal semantics are — so a relaxed tie-refusal in one copy is observable only
+// on malformed input, which is what this fixture is.
+//
+// THIS ARM RUNS HERE AND NOT IN design/ FOR ONE MEASURED REASON: the doc-gates
+// design job runs Node 20, which cannot execute TypeScript. Same fixture,
+// different runner. design/ladder-refusal-conformance.test.mjs' enrolment arm
+// reds if this block stops reading the fixture.
+//
+// The four arms it used to carry inline were THREE — there was no non-object
+// family case — which is exactly the drift a per-site list produces.
+const REFUSAL_FIXTURE_PATH = at("../../design/ladder-refusal-fixture.json");
+const refusalFixture = JSON.parse(
+  readFileSync(REFUSAL_FIXTURE_PATH, "utf8"),
+) as {
+  sentinel: string;
+  cases: { id: string; kind: string; family?: unknown; why: string }[];
+};
+
+test("web: ladderFrom REFUSES every malformed family in the shared fixture", () => {
+  assert.equal(
+    refusalFixture.sentinel,
+    REFUSE,
+    `${REFUSAL_FIXTURE_PATH} declares a different sentinel than this file's REFUSE`,
+  );
+  assert.ok(
+    refusalFixture.cases.length >= 4,
+    `${REFUSAL_FIXTURE_PATH} carries only ${refusalFixture.cases.length} malformed case(s) — the loop below would prove almost nothing`,
+  );
+  for (const c of refusalFixture.cases) {
+    const doc = c.kind === "omit" ? { type: {} } : { type: { chrome: c.family } };
+    let refused: string | null = null;
+    let got: string[] | undefined;
+    try {
+      got = ladderFrom(doc, "chrome");
+    } catch (e) {
+      refused = String((e as Error).message);
+    }
+    assert.ok(
+      refused !== null,
+      `IMPLEMENTATION "web" (web/__tests__/type-ladder-emitted.test.ts ladderFrom) DIVERGED on ladder-refusal-fixture.json case "${c.id}": it returned ${JSON.stringify(got)} instead of refusing. ${c.why}`,
+    );
+    assert.ok(
+      refused.includes(REFUSE),
+      `IMPLEMENTATION "web" refused case "${c.id}" without the sentinel "${REFUSE}": ${refused}`,
+    );
+  }
+  // POSITIVE CONTROL: the real tokens.json still derives a ladder, so the loop
+  // above is not passing because ladderFrom refuses everything.
+  assert.ok(
+    chromeFromSource.length >= 4,
+    `derived only ${chromeFromSource.length} chrome step(s) from the real ${TOKENS_PATH} — the arm above proves nothing`,
   );
 });
 
