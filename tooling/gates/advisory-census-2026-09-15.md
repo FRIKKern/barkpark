@@ -167,6 +167,40 @@ evidence for any verdict**.
 
 ---
 
+## Addendum — the three workflows PR #18400 moves, measured at job level
+
+PR #18400 (a sibling in this lane) removes the `pull_request` trigger from
+`posix-vacuous-green-census.yml`, `pipefail-sigpipe-scan.yml` and `cli-release-cadence.yml`. This
+census reached two of those three independently. **Layer P is workflow-granular, so "94 failures"
+could have been a dispatcher or a selftest** — that gap was closed with a targeted job-level read
+of the **20 most recent failing PR runs** of each, which is a sample and is labelled one:
+
+| workflow | PR red rate | failing job, 20/20 sampled runs | red at merge, 40-PR sample |
+|---|---:|---|---:|
+| `posix-vacuous-green-census.yml` | **12.9%** (94/729) | `POSIX vacuous-green census` — the assertion itself | **0** |
+| `cli-release-cadence.yml` | 8.4% (50/595) | `bp CLI release cadence` — the assertion itself | **10** |
+| `pipefail-sigpipe-scan.yml` | 3.7% (55/1497) | `pipefail SIGPIPE scan` — the assertion itself | **0** |
+
+**All three red through their own census job, not through plumbing.** The shape argument — *the
+subject is the tree, so `push: main` sees it* — is sound for all three and is not disputed here.
+
+What the evidence separates is **whether the PR venue is buying anything**, and it separates them
+in opposite directions:
+
+- **`bp CLI release cadence` reds, and 10 of 40 merged PRs shipped that red uncleared.** Its PR
+  seat is already buying nothing — nobody clears it. Moving it is *supported* by this data.
+- **`POSIX vacuous-green census` reds on 1 PR run in 8 and appears on no merged head in the
+  sample.** Its reds are not shipping. The honest reading is that they are being cleared before
+  merge, which is what a working pre-merge check looks like.
+
+**Stated at the strength the data supports and no further:** a PR can red early and go green before
+merge, so 12.9% of *runs* is not 12.9% of *merges*, and 0-of-40 is a **contrast** with
+cli-release-cadence's 10-of-40, **not a significance claim**. It is enough to say the two are not
+the same case, and that moving them on one shared "census shape" ground treats them as if they
+were. Routing that is the lead's call; the numbers are here so it is a call and not an assumption.
+
+---
+
 ## The single largest finding: a check that cannot be red
 
 `reland-check.yml` — `Re-land advisory (already-landed overlap)`
