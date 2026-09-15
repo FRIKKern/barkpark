@@ -113,17 +113,23 @@ STUB
   # THE DESCENT. A run that says success while a job inside it failed must be counted RED and
   # ANNOTATED with what the run claimed, or the laundering is invisible again.
   _arm "laundered run counted red" many success "Spec drift (advisory)" "" 1 "RUN said success; FAILING JOB(S): Spec drift (advisory)"
-  # THE VACUITY GUARD -- AND THE EXACT BOUND OF WHAT IT COVERS. With no databaseId the descent
-  # cannot run and the tool annotates the row "job descent NOT performed". MEASURED 2026-09-16,
-  # in both directions with a control: that annotation is emitted ONLY from the
-  # failure|timed_out|startup_failure arm, because the `success)` arm increments green and
-  # prints nothing. So a run with NO databaseId that reads `success` is counted GREEN and the
-  # warning is DISCARDED -- silent on precisely the class where a missing descent could hide a
-  # laundered red. This arm therefore asserts the narrow, true thing (loud ON REDS) and NOT the
-  # broad, false one; widening its label without widening the code would be the assertion
-  # certifying a gap it never measured. Reported upstream rather than patched here: this file is
-  # vendored, and changing a verdict path is the tool owner's call, not the vendor's.
-  _arm "no-databaseId loud on reds"  many failure ""  1 1 "job descent NOT performed"
+  # THE VACUITY GUARD. With no databaseId the descent cannot run and the tool annotates the
+  # row "job descent NOT performed". HISTORY, kept because it is the reason these arms exist:
+  # when this file was vendored (PR #18469) that annotation was emitted ONLY from the
+  # failure|timed_out|startup_failure arm -- the `success)` arm incremented green and printed
+  # nothing. So an UNDESCENDED row that read `success` was counted GREEN with the warning
+  # DISCARDED, silent on precisely the class where a missing descent can hide a laundered red.
+  # MEASURED in both directions before the fix: NOID+success -> green 53, exit 0, annotation
+  # count 0; NOID+failure -> 53 emissions. The vendoring arm was therefore deliberately
+  # NARROW ("loud on reds"), because widening the label without widening the code would be an
+  # assertion certifying a gap it never measured. THE CODE IS NOW WIDENED, so the assertions
+  # are too -- both directions, plus a noise control.
+  _arm "no-databaseId loud on reds"    many failure ""  1 1 "job descent NOT performed"
+  _arm "no-databaseId loud on GREENS"  many success ""  1 0 "UNDESCENDED-GREEN"
+  # THE NOISE CONTROL, and it is what makes the arm above mean something: when the descent DID
+  # run, a green must stay SILENT. Without this, a rule that shouted UNDESCENDED-GREEN on every
+  # green would pass the arm above and be useless.
+  _arm "descended green stays silent"  many success ""  "" 0 "red 0" "UNDESCENDED-GREEN"
   # The tags-only partition must fire against this repo's real workflows.
   out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success MRP_FJOB= MRP_NOID= bash "$_MRP_SELF" acme/widget 2>&1)
   case "$out" in
@@ -231,7 +237,21 @@ PYEOF
   case "$CONC" in
     failure|timed_out|startup_failure)
       red=$((red+1)); printf '%s\t%s\t%s\t%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$LAUNDERED" >> "$RED_LIST";;
-    success) green=$((green+1));;
+    success)
+      # THE NO-DESCENT WARNING MUST FIRE ON GREEN TOO. Found by gates-r19-w11 while
+      # vendoring this file, measured with a control: NOID+success -> green 53, exit 0,
+      # annotation count 0; NOID+failure -> 53 emissions. The annotation exists to say
+      # "this row is RUN-LEVEL ONLY", and it was emitted from the RED arm alone -- so it
+      # was SILENT ON EXACTLY THE CLASS IT EXISTS FOR: an undescended row that reads
+      # GREEN is precisely the one that might be laundering a failing job.
+      # A WARNING THAT ONLY FIRES WHEN YOU WERE ALREADY GOING TO LOOK IS NOT A WARNING.
+      # The verdict is deliberately NOT changed -- an undescended green is not a red,
+      # it is an UNMEASURED green, and it belongs in the unseen list where debt accrues.
+      green=$((green+1))
+      case "$LAUNDERED" in
+        *"NOT performed"*)
+          printf 'UNDESCENDED-GREEN\t%s\t%s\t%s%s\n' "$SHA" "$WHEN" "$BASE" "$LAUNDERED" >> "$UNSEEN_LIST";;
+      esac;;
     *) unseen=$((unseen+1))
        # A CANCEL DESTROYS A VERDICT; IT DOES NOT DESTROY THE RUN RECORD (cli, 2026-09-15).
        # A cancelled run still EXISTS in the runs list with conclusion=cancelled, so
