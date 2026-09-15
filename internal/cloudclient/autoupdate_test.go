@@ -34,8 +34,11 @@ func TestBarkparkDecodesFullUpdateTruth(t *testing.T) {
 	if b.UpdateRunningRelease != "1.4.2" || b.UpdateLatestRelease != "1.5.0" {
 		t.Fatalf("releases = %q → %q", b.UpdateRunningRelease, b.UpdateLatestRelease)
 	}
-	if b.UpdateCheckedAt != "2026-07-10T10:00:00Z" {
-		t.Fatalf("checked_at = %q", b.UpdateCheckedAt)
+	if b.UpdateCheckedAt == nil || *b.UpdateCheckedAt != "2026-07-10T10:00:00Z" {
+		t.Fatalf("checked_at = %v, want present 2026-07-10T10:00:00Z", b.UpdateCheckedAt)
+	}
+	if b.UpdateCheckedAtMissing {
+		t.Fatalf("checked_at was emitted, Missing must be false")
 	}
 	if b.AutoupdateEnabled == nil || *b.AutoupdateEnabled != false {
 		t.Fatalf("autoupdate_enabled = %v, want present false", b.AutoupdateEnabled)
@@ -53,8 +56,16 @@ func TestBarkparkToleratesOlderControlPlane(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &b); err != nil {
 		t.Fatalf("decode older CP row errored: %v", err)
 	}
-	if b.UpdateRunningRelease != "" || b.UpdateLatestRelease != "" || b.UpdateCheckedAt != "" {
+	if b.UpdateRunningRelease != "" || b.UpdateLatestRelease != "" {
 		t.Fatalf("absent release fields should be empty: %+v", b)
+	}
+	// A *string, not "": an older CP that never emitted the key must not hand a
+	// consumer an empty timestamp it can try to parse (cch-w65-bl).
+	if b.UpdateCheckedAt != nil {
+		t.Fatalf("absent update_checked_at should be nil (no check recorded), got %q", *b.UpdateCheckedAt)
+	}
+	if !b.UpdateCheckedAtMissing {
+		t.Fatalf("an omitted update_checked_at must set UpdateCheckedAtMissing")
 	}
 	if b.AutoupdateEnabled != nil {
 		t.Fatalf("absent autoupdate_enabled should be nil (unknown), got %v", *b.AutoupdateEnabled)

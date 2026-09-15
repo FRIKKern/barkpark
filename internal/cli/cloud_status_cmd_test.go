@@ -1439,7 +1439,7 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		"url": true, "status": true, "bucket": true, "rank": true, "detail": true,
 		"health_status": true, "agent_status": true, "update_state": true,
 		"suspended": true, "update_running_release": true, "update_latest_release": true,
-		"update_checked_at": true, "commit_ancestry": true,
+		"commit_ancestry":            true,
 		"commit_distance_checked_at": true, "autoupdate_paused": true,
 		"pinned_release": true, "channel": true,
 		// dr-w5-followup: the 5xx tri-state node — ALWAYS present, and its
@@ -1455,6 +1455,13 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 	// so their absence here is the contract, not a gap.
 	optional := map[string]bool{
 		"autoupdate_enabled": true, "commit_distance": true,
+		// cch-w65-bl: emitted only when the plane actually RECORDED a check.
+		// cch-w65-s2 stopped stamping the column on the three of nine unknown
+		// rungs that return before a request is built, so those rows serve an
+		// explicit null; as an always-present string that null and an older
+		// plane's omitted key both rendered "" and no consumer could tell them
+		// apart — or tell either from a value it could parse.
+		"update_checked_at": true,
 		// jpf-w1-queue-age-alarm: emitted only when the plane reported a queued
 		// row — absent is "nothing queued / older CP", never a fabricated 0.
 		"queued_deploy_age_seconds": true,
