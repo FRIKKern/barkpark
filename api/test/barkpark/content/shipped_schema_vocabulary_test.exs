@@ -10,11 +10,14 @@ defmodule Barkpark.Content.ShippedSchemaVocabularyTest do
 
   alias Barkpark.Content.Schema
 
+  # The repo-root `templates/` mirror is deliberately NOT read: the provisioner
+  # catalog is the source the workspace import journey reads, and the Elixir
+  # path-escape ratchet (scripts/elixir-path-escape-check.sh) does not
+  # dispatch on the whole mirror.
   @roots [
     "priv/plugins",
     "priv/templates",
-    "../internal/provisioner/catalog/templates",
-    "../templates"
+    "../internal/provisioner/catalog/templates"
   ]
 
   defp shipped_schema_files do
