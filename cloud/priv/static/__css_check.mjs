@@ -343,9 +343,26 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
+
+// ── THE MAIN GUARD (cch-bl-css-check-gate-body-not-importable) ─────────────
+// TRUE only when this file IS the process entry point. The gate body at the
+// bottom used to be bare top-level statements ending in process.exit(1), so
+// `import`ing this module ran the whole gate over the importer's stdout and,
+// on any error, NEVER RETURNED — which made every helper the file defines
+// unreachable from a unit test. The cost was specific, not aesthetic: a REACH
+// bug (the scan set quietly not looking at a kind of file) could only be
+// caught by running the gate on a mutated mirror tree, so nothing cheap ever
+// asked citationScanFiles() what it actually returns. With the body behind
+// runGate(), __app.test.mjs asserts the SET directly.
+//
+// `node -e` leaves argv[1] undefined and `node --test x.test.mjs` sets it to
+// the test file, so both read FALSE; a spawned `node <path>/__css_check.mjs`
+// (including the mirror-tree harness, which copies this file to a tmpdir)
+// reads TRUE, because argv[1] is already the resolved absolute path.
+const IS_CLI = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 // REFUSAL IS NOT A FINDING. Every sibling in this instrument family
 // (__reason_arm_census, __me_envelope_census, __agent_event_vocabulary_census,
 // __unknown_census, __binding_census) exits 2 when it cannot read its input,
@@ -1345,7 +1362,7 @@ function isTextFile(abs) {
 //
 // Re-derive the whole set, and what the widening cost, with
 // `node __css_check.mjs --citation-inventory` — never from a number quoted here.
-function citationScanFiles(root = dir) {
+export function citationScanFiles(root = dir) {
   const out = [];
   if (!fs.existsSync(root)) return out;
   const walk = (absDir, rel) => {
@@ -1393,7 +1410,7 @@ function citationScanFiles(root = dir) {
 // nothing asserted it. The self-membership arm applies only to the real root: it
 // is a claim about THIS tree and means nothing about a directory the inventory
 // mode was merely pointed at.
-function citationScanSetRefusals(files, root = dir) {
+export function citationScanSetRefusals(files, root = dir) {
   const out = [];
   if (!files.length) {
     return [
@@ -1454,11 +1471,11 @@ function citationScanSetRefusals(files, root = dir) {
 // `(?::~?|\s~)` for every widened target so that prose like "the app.css 273 raw
 // px font-size lines" and the sidecar's `app.css <bytes> B` records stay clean.
 //
-// IT IS A `const` DECLARED BELOW ITS ONLY OTHER CONSUMER ON PURPOSE — this file
-// has no main guard, and every call site (the inventory mode, the gate body,
-// external importers) runs after module evaluation reaches this line, so the TDZ
-// window is empty. Keeping the regex beside its ruling prose beats splitting the
-// argument from the pattern.
+// IT IS A `const` DECLARED BELOW ITS ONLY OTHER CONSUMER ON PURPOSE — every call
+// site (the inventory mode, runGate() at the bottom, external importers) runs
+// after module evaluation has reached this line, so the TDZ window is empty.
+// Keeping the regex beside its ruling prose beats splitting the argument from
+// the pattern.
 //
 // IT LIVES HERE, NOT IN A TASK ROW, BECAUSE EVERY QUOTED FIGURE FOR IT HAS
 // ROTTED. The widening's cost has been recorded as 8, then 14, then 16/18, then
@@ -1529,15 +1546,14 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
 // --wrap-parity-check above, and placed here for the same structural reason
 // they are: it must run BEFORE the gate body.
 //
-// WHY A SUB-MODE AND NOT AN EXPORT. `citationScanFiles` was a bare unexported
-// function, and this file has no main guard of any kind — the gate runs during
-// MODULE EVALUATION and ends in process.exit(). So a consumer that `import`s
-// this module to derive the inventory (a) has the whole gate's stdout dumped
-// over its own output and (b) NEVER GETS CONTROL BACK when the gate is red —
-// which is precisely the moment the inventory is wanted, because the widening
-// commit reds the gate by construction. Exporting the function alone would have
-// been a trap that works only while the gate is green. The sub-mode is immune to
-// the gate's exit status by construction, and is spawnSync-able.
+// WHY A SUB-MODE AS WELL AS AN EXPORT. `citationScanFiles` is exported now (the
+// gate body sits behind IS_CLI, so an importer gets control back), but the
+// sub-mode is NOT redundant: it reports the set as the CLI process actually
+// derives it, which is the only way to check the export against the thing the
+// gate runs — __app.test.mjs asserts list equality between the two. It is also
+// immune to the gate's exit status by construction and is spawnSync-able, which
+// matters exactly when the gate is red: the widening commit reds it by
+// construction, and that is the moment the inventory is wanted.
 //
 // WHAT THE TWO COLUMNS BUY. `ruled` is what E11 would flag after the widening;
 // `E11` is what it flags today. Their DIFFERENCE is the widening's real cost,
@@ -2583,6 +2599,16 @@ function externalHostFindings(src, file, isHtml) {
 }
 
 // ── Evaluate ─────────────────────────────────────────────────────────────────
+//
+// EVERYTHING BELOW IS THE GATE BODY, and it runs only from runGate(). Exported
+// so a test can drive it deliberately; called at the bottom only when IS_CLI.
+//
+// THE BODY IS LEFT AT ITS ORIGINAL INDENTATION ON PURPOSE. Re-indenting ~545
+// lines would bury the one structural change in a wall of whitespace AND would
+// risk altering the gate's own output: the diagnostics below are multi-line
+// template literals, whose interior newline-plus-whitespace is DATA. The
+// indentation is cosmetic; the strings are the contract.
+export function runGate() {
 
 const errors = [];
 
@@ -3128,3 +3154,7 @@ if (errors.length) {
   for (const e of errors) console.error("FAIL  " + e);
   process.exit(1);
 }
+
+} // end runGate
+
+if (IS_CLI) runGate();

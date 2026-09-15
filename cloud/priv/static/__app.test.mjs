@@ -2953,13 +2953,14 @@ test("cch-w12-bl-e12: the shipped .inst-sites-card case reds once its focus fix 
 // no file matches left the whole gate at exit 0 with `0 error(s)`. With E17 the
 // same mutation exits 1 and names the collapse.
 //
-// THE DERIVATION HERE IS DELIBERATELY INDEPENDENT. These arms re-walk the two
-// directories from the documented rule rather than importing the gate's own
-// function — importing __css_check.mjs runs its whole gate during module
-// evaluation and ends in process.exit(), so an import can never return, which is
-// the exact reason --citation-inventory is a SUB-MODE and not an export. A
-// second implementation that must agree with the first is the point: change the
-// filter and this reds.
+// THE DERIVATION HERE IS DELIBERATELY INDEPENDENT. These arms re-walk the tree
+// from the documented rule rather than calling the gate's own function. The
+// gate's derivation IS importable now (cch-bl-css-check-gate-body-not-importable
+// put the gate body behind a main guard, and the arms at the end of this section
+// pin the export to the set the CLI process scans) — which is exactly why this
+// one must stay a SECOND implementation: an assertion that calls the subject to
+// compute its own expectation measures nothing. Change either predicate in one
+// place and this reds.
 // Mirrors BOTH halves of the gate's documented rule: the TEXT-SHAPE predicate
 // (cchi-w18 — a member is a regular file whose 4096-byte sniff window holds no
 // NUL) and the REACH predicate (this row — anywhere under the scan root, found
@@ -3133,11 +3134,12 @@ test("cchi-w20: E17 refuses when the recursive DESCENT of the derivation collaps
 });
 
 test("cchi-w20: --citation-inventory runs ABOVE the gate body, so a red gate cannot swallow it", () => {
-  // THE WHOLE REASON THIS IS A SUB-MODE. The gate runs at module top level and
-  // ends in process.exit(1) on any error, so an inventory derived by importing
-  // the module dies exactly when it is most wanted — the E11 widening commit
-  // reds the gate by construction. If the block ever slides below the gate body,
-  // the gate's own census banner appears in this output and this test reds.
+  // WHY THE SUB-MODE STILL RUNS ABOVE THE GATE BODY. The mode must report the
+  // scan set whatever the gate's verdict is — the E11 widening commit reds the
+  // gate by construction, and that is the moment the inventory is wanted. The
+  // body ends in process.exit(1) on any error, so a mode placed after it would
+  // never print. If the block ever slides below the gate body, the gate's own
+  // census banner appears in this output and this test reds.
   const r = runCssCheck("--citation-inventory");
   assert.equal(r.status, 0, r.out);
   assert.ok(!/classes checked/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
@@ -3182,6 +3184,80 @@ test("cchi-w20: E17 refuses when the TOP-LEVEL arm of the derivation collapses",
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
   }
+});
+
+// ── cch-bl-css-check-gate-body-not-importable · THE GATE IS IMPORTABLE ──────
+//
+// Until this row __css_check.mjs ran its ENTIRE gate at module evaluation and
+// ended in process.exit(1), so importing it dumped the gate's census over the
+// importer's stdout and, on any error, never returned. Every helper the file
+// defines was therefore unreachable from a unit test, and the E11 SCAN SET —
+// the list of files the citation ban is enforced over — could only be checked
+// by running the gate on a mutated mirror tree. A REACH bug (the set quietly
+// not covering a kind of file) is exactly the defect that hides behind that
+// cost, because nothing cheap ever asked the derivation what it returns.
+//
+// The gate body now sits in runGate(), called only when IS_CLI. These three
+// arms are what that buys: the import returns, the SET is asserted directly,
+// and the exported derivation is pinned to the one the CLI process runs.
+const importCssCheck = () => import(new URL("./__css_check.mjs", import.meta.url).href);
+
+test("cch-bl: __css_check.mjs IMPORTS without running its gate or exiting", async () => {
+  const m = await importCssCheck();
+  // The import returning at all is the claim; naming the exports is what makes
+  // a later regression (a helper quietly un-exported) red here rather than in
+  // the arms below, where it would read as a scan-set failure.
+  for (const name of ["citationScanFiles", "citationScanSetRefusals", "runGate", "bannedSourceCitationErrors"])
+    assert.equal(typeof m[name], "function", `${name} must be exported for the set to be checkable: ${Object.keys(m).join(", ")}`);
+});
+
+test("cch-bl: the E11 SCAN SET contains app.css and EVERY top-level *.mjs", async () => {
+  const { citationScanFiles } = await importCssCheck();
+  const files = citationScanFiles();
+  // NON-VACUITY FIRST, and the floor is DERIVED, not quoted: a collapsed set
+  // would make every `includes` below fail loudly, but a set that collapsed to
+  // exactly the members named here would pass while covering nothing.
+  assert.ok(files.length > 10, `the scan set must be real, got ${files.length} file(s)`);
+
+  assert.ok(
+    files.includes("app.css"),
+    `app.css must be in the E11 scan set — the stylesheet carries citations too: ${files.join(", ")}`,
+  );
+
+  const topLevelMjs = fs
+    .readdirSync(STATIC_DIR, { withFileTypes: true })
+    .filter((e) => e.isFile() && !e.isSymbolicLink() && e.name.endsWith(".mjs"))
+    .map((e) => e.name)
+    .sort();
+  assert.ok(topLevelMjs.length > 5, `the *.mjs floor must be real, got ${topLevelMjs.length}`);
+  const missing = topLevelMjs.filter((f) => !files.includes(f));
+  assert.deepEqual(missing, [], `every top-level *.mjs must be scanned; unscanned: ${missing.join(", ")}`);
+  // The gate's own file, named explicitly: the header has CLAIMED "Scans this
+  // file too" since the widening landed, and E17's self-membership arm is the
+  // only other thing that says so.
+  assert.ok(files.includes("__css_check.mjs"), "the gate must scan itself");
+});
+
+test("cch-bl: the IMPORTED citationScanFiles() equals the set the GATE actually scans", async () => {
+  const { citationScanFiles } = await importCssCheck();
+  const imported = citationScanFiles();
+
+  // THE GATE'S ACTUAL SET, read off a real CLI process rather than re-derived
+  // in-process. --citation-inventory prints one `ruled=N  E11=N  <rel>` line
+  // per member of the list the gate body's E11 loop iterates, so parsing them
+  // recovers that process's own derivation. Export presence proves nothing on
+  // its own: an exported helper that returns a DIFFERENT list than the gate
+  // walks is indistinguishable, from the badge, from one that covers it.
+  const r = runCssCheck("--citation-inventory");
+  assert.equal(r.status, 0, "the real tree's scan set is intact, so the mode must exit 0:\n" + r.out);
+  const fromGate = [...r.out.matchAll(/^ {2}ruled=\s*\d+ {2}E11=\s*\d+ {2}(.+)$/gm)].map((m) => m[1]).sort();
+  assert.ok(fromGate.length > 10, `the parse must recover a real set, got ${fromGate.length}:\n` + r.out);
+  assert.deepEqual(imported, fromGate, "the exported derivation must BE the one the CLI gate runs");
+
+  // And against the independent re-implementation above, so a change to the
+  // predicate or the reach that moved BOTH the export and the sub-mode (they
+  // share one function) still reds.
+  assert.deepEqual(imported, citationScanSetFrom(STATIC_DIR), "and the prose's independent derivation");
 });
 
 // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ───────────────────────
