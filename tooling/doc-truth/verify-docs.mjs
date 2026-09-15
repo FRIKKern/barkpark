@@ -576,9 +576,9 @@ function unitSuffixed(scan, idx) {
 // `FAILED`, `exit`). MEASURED on the live corpus: that reads 27 of the 1006
 // lineref claims as instrument output, and ALL 27 ARE GENUINE CITATIONS \u2014
 //
-//     ops.ex:429) \u2014 the ONE cap path that does not route through
-//     writer.ex:1202): **13 tests, 8 failures** \u2014 four
-//     internal/hetzner/dns.go:74 \u2014 hetzner dns upsert %q: %w
+//     ops.ex:429) \u2014 the ONE cap path that does not route through   [lineref-ok]
+//     writer.ex:1202): **13 tests, 8 failures** \u2014 four   [lineref-ok]
+//     internal/hetzner/dns.go:74 \u2014 hetzner dns upsert %q: %w   [lineref-ok]
 //
 // \u2014 while removing exactly ZERO false positives. A span-level tell is a pure
 // blind spot, which is the same trade the "any letter after whitespace" fix
@@ -591,8 +591,8 @@ function unitSuffixed(scan, idx) {
 // reason, also measured: `over` and `below` are ordinary prose next to a
 // citation \u2014
 //
-//     Sync.Finch:~51 below),
-//     app.js:674-682 over instanceLifecycle :2375-2383
+//     Sync.Finch:~51 below),                                           [lineref-ok]
+//     app.js:674-682 over instanceLifecycle :2375-2383                  [lineref-ok]
 //
 // \u2014 so they count only when a BUDGET noun follows them. `exceeds` needs no such
 // escort; nothing in this corpus writes it as connective prose after a line

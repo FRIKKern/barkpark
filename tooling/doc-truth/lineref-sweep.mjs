@@ -1193,9 +1193,10 @@ function selftest() {
       }
 
       // (s-control-b) A VERDICT WORD LATER IN THE SENTENCE IS PROSE. Shape taken
-      // from the live corpus: `ops.ex:429) — the ONE cap path that does not route
-      // through`. The word `cap` is there; it is not what the number is being
-      // compared against.
+      // from the live corpus — quoted EVIDENCE for the measurement, not a
+      // citation this file is making, so re-pointing it would destroy the datum:
+      // `ops.ex:429) — the ONE cap path that does not route through`  [lineref-ok]
+      // The word `cap` is there; it is not what the number is compared against.
       writeFileSync(
         probeAbs,
         "defmodule LinerefSelftestProbe do\n" +
@@ -1212,7 +1213,7 @@ function selftest() {
       }
 
       // (s-control-c) A BARE DIRECTION WORD IS PROSE. Live specimens:
-      // `Sync.Finch:~51 below),` and `app.js:674-682 over instanceLifecycle`.
+      // `Sync.Finch:~51 below),` and `app.js:674-682 over instanceLifecycle`. lineref-ok
       // `over`/`below` count only with a BUDGET NOUN behind them.
       writeFileSync(
         probeAbs,
