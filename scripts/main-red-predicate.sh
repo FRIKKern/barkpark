@@ -30,27 +30,35 @@ set -uo pipefail
 # `main-red-predicate.sh --selftest` proves WITHOUT ONE NETWORK CALL that the file is not
 # truncated, that its FOUR interpreters exist (bash, gh, jq AND python3 — the tags-only
 # partition is a python3 heredoc, and a missing python3 would silently mis-bucket every
-# workflow), and that the two verdicts that matter still discriminate:
-#   * a feed that sees ONE workflow name must REFUSE (exit 4), never report an empty red set —
-#     this is the fail-closed control the file's own header promises;
-#   * the same run with a healthy feed must CLASSIFY (red vs green vs tags-only N/A).
-# The green arm is not decoration: a tool that answered RED to everything would pass the red
-# arm while measuring nothing. Both arms run against this repo's REAL .github/workflows, so the
-# tags-only partition (cli-release.yml, release.yml) is exercised for real.
+# workflow), and that the verdicts that matter still discriminate.
+#
+# THE ARM THAT EARNS ITS KEEP IS "laundered run counted red". The job descent added on
+# 2026-09-16 exists because a RUN conclusion launders a failing job: continue-on-error makes
+# the run read `success` while a job inside it reads `failure`. The FIRST draft of that descent
+# was VACUOUS — it keyed on `.databaseId` while the `gh run list --json` projection did not ASK
+# for databaseId, so it would have printed "job descent NOT performed" for every workflow
+# forever while looking like a fix. That arm reds if the descent cannot fire, and the
+# "no-databaseId is loud" arm pins the branch that made the vacuity visible in the first place.
+# A fix that cannot fire is the same disease one layer out, so it gets its own assertion.
 _MRP_SELF="${BASH_SOURCE[0]}"; case "$_MRP_SELF" in */*) _MRP_DIR="${_MRP_SELF%/*}";; *) _MRP_DIR=".";; esac
 _MRP_DIR=$(cd "$_MRP_DIR" 2>/dev/null && pwd) || _MRP_DIR="."
 _MRP_SELF="$_MRP_DIR/${_MRP_SELF##*/}"
 
 _mrp_selftest() {
   local d fails=0 pass=0 out rc
-  _ok(){ printf 'PASS %-26s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
-  _no(){ printf 'FAIL %-26s %s\n' "$1" "${2:-}"; fails=$((fails+1)); }
+  _ok(){ printf 'PASS %-28s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
+  _no(){ printf 'FAIL %-28s %s\n' "$1" "${2:-}"; fails=$((fails+1)); }
 
   if bash -n "$_MRP_SELF" 2>/dev/null; then _ok "parses" "bash -n clean"
   else _no "parses" "bash -n FAILED — file truncated or malformed"; fi
   if grep -qF 'CANNOT READ: run feed shows' "$_MRP_SELF" \
   && grep -qF 'branch-driven push workflows' "$_MRP_SELF"; then _ok "not truncated" "control text + summary line both present"
   else _no "not truncated" "a load-bearing line is missing — file truncated"; fi
+  # THE DESCENT MUST BE ABLE TO FIRE. The run-list projection must ASK for databaseId, or the
+  # descent keys on a field that is never delivered and silently degrades to a run-level read.
+  if grep -q 'json conclusion,headSha,createdAt,status,databaseId' "$_MRP_SELF" \
+  && grep -q 'actions/runs/\$RID/jobs' "$_MRP_SELF"; then _ok "descent can fire" "databaseId requested AND runs/<id>/jobs called"
+  else _no "descent can fire" "the job descent cannot fire — databaseId not requested, or no runs/<id>/jobs call"; fi
   for t in gh jq python3 git; do
     if command -v "$t" >/dev/null 2>&1; then _ok "dep $t" "$(command -v "$t")"
     else _no "dep $t" "NOT ON PATH — this tool cannot run correctly"; fi
@@ -60,9 +68,15 @@ _mrp_selftest() {
   mkdir -p "$d/bin"
   cat > "$d/bin/gh" <<'STUB'
 #!/usr/bin/env bash
-# MRP_FEED drives the discrimination CONTROL, MRP_CONC the per-workflow verdict.
-# Nothing here reaches the network.
+# MRP_FEED drives the discrimination CONTROL, MRP_CONC the per-workflow RUN conclusion,
+# MRP_FJOB the name of a FAILING JOB inside that run (empty = no failing job), and
+# MRP_NOID drops databaseId from the run row to exercise the loud no-descent branch.
+# Nothing here reaches the network. The /jobs arm must come FIRST.
 case " $* " in
+  *"/jobs"*)
+    if [ -n "${MRP_FJOB:-}" ]; then printf '{"jobs":[{"name":"%s","conclusion":"failure"}]}\n' "$MRP_FJOB"
+    else printf '{"jobs":[{"name":"fine","conclusion":"success"}]}\n'; fi
+    exit 0;;
   *"--json name"*)
     case "${MRP_FEED:-many}" in
       dead) exit 1;;
@@ -70,37 +84,55 @@ case " $* " in
       *)    echo '[{"name":"a"},{"name":"b"},{"name":"c"}]'; exit 0;;
     esac;;
   *"--json conclusion,headSha,createdAt,status"*)
-    printf '[{"conclusion":"%s","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed"}]\n' "${MRP_CONC:-failure}"
+    if [ -n "${MRP_NOID:-}" ]; then
+      printf '[{"conclusion":"%s","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed"}]\n' "${MRP_CONC:-failure}"
+    else
+      printf '[{"conclusion":"%s","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed","databaseId":4242}]\n' "${MRP_CONC:-failure}"
+    fi
     exit 0;;
 esac
 exit 1
 STUB
   chmod +x "$d/bin/gh"
 
-  _arm(){ # label FEED CONC want-exit needle [forbidden]
-    local lbl="$1" feed="$2" conc="$3" wrc="$4" need="$5" bad="${6:-}"
-    out=$(PATH="$d/bin:$PATH" MRP_FEED="$feed" MRP_CONC="$conc" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
+  _arm(){ # label FEED CONC FJOB NOID want-exit needle [forbidden]
+    local lbl="$1" feed="$2" conc="$3" fjob="$4" noid="$5" wrc="$6" need="$7" bad="${8:-}"
+    out=$(PATH="$d/bin:$PATH" MRP_FEED="$feed" MRP_CONC="$conc" MRP_FJOB="$fjob" MRP_NOID="$noid" \
+          bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
     if [ "$rc" != "$wrc" ]; then _no "$lbl" "exit=$rc (want $wrc) | $(printf '%s\n' "$out" | tail -1)"; return; fi
     case "$out" in *"$need"*) : ;; *) _no "$lbl" "output lacks [$need]"; return;; esac
     if [ -n "$bad" ]; then case "$out" in *"$bad"*) _no "$lbl" "output CONTAINS the forbidden [$bad]"; return;; esac; fi
     _ok "$lbl" "$(printf '%s\n' "$out" | grep -m1 'branch-driven push workflows' || printf '%s\n' "$out" | tail -1)"
   }
   # FAIL CLOSED. A feed that cannot discriminate must refuse, never report "no reds".
-  _arm "one-name feed refuses" one    failure 4 "cannot discriminate" "RED ON MAIN"
-  _arm "dead feed refuses"     dead   failure 4 "CANNOT READ"         "RED ON MAIN"
+  _arm "one-name feed refuses" one  failure ""  "" 4 "cannot discriminate" "RED ON MAIN"
+  _arm "dead feed refuses"     dead failure ""  "" 4 "CANNOT READ"         "RED ON MAIN"
   # CLASSIFIES. Red and green must reach DIFFERENT verdicts, or neither measured anything.
-  _arm "reds are reported"     many   failure 1 "RED ON MAIN"
-  _arm "greens are not reds"   many   success 0 "red 0"               "failure"
-  # The tags-only partition must fire against this repo's real workflows, or a tags-only
-  # workflow gets booked as debt it can never discharge.
-  out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success bash "$_MRP_SELF" acme/widget 2>&1)
+  _arm "reds are reported"     many failure ""  "" 1 "RED ON MAIN"
+  _arm "greens are not reds"   many success ""  "" 0 "red 0"               "RUN said success"
+  # THE DESCENT. A run that says success while a job inside it failed must be counted RED and
+  # ANNOTATED with what the run claimed, or the laundering is invisible again.
+  _arm "laundered run counted red" many success "Spec drift (advisory)" "" 1 "RUN said success; FAILING JOB(S): Spec drift (advisory)"
+  # THE VACUITY GUARD -- AND THE EXACT BOUND OF WHAT IT COVERS. With no databaseId the descent
+  # cannot run and the tool annotates the row "job descent NOT performed". MEASURED 2026-09-16,
+  # in both directions with a control: that annotation is emitted ONLY from the
+  # failure|timed_out|startup_failure arm, because the `success)` arm increments green and
+  # prints nothing. So a run with NO databaseId that reads `success` is counted GREEN and the
+  # warning is DISCARDED -- silent on precisely the class where a missing descent could hide a
+  # laundered red. This arm therefore asserts the narrow, true thing (loud ON REDS) and NOT the
+  # broad, false one; widening its label without widening the code would be the assertion
+  # certifying a gap it never measured. Reported upstream rather than patched here: this file is
+  # vendored, and changing a verdict path is the tool owner's call, not the vendor's.
+  _arm "no-databaseId loud on reds"  many failure ""  1 1 "job descent NOT performed"
+  # The tags-only partition must fire against this repo's real workflows.
+  out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success MRP_FJOB= MRP_NOID= bash "$_MRP_SELF" acme/widget 2>&1)
   case "$out" in
     *"tags-only push arm"*) _ok "tags-only partition" "$(printf '%s\n' "$out" | grep -m1 'branch-driven push workflows')" ;;
     *) _no "tags-only partition" "no tags-only workflow was partitioned — the python3 arm is not firing" ;;
   esac
   rm -rf "$d"
   local total=$((pass+fails))
-  if [ "$total" -lt 8 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
+  if [ "$total" -lt 10 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
   [ "$fails" = 0 ] && { echo "SELFTEST: $pass/$total arms pass"; return 0; }
   echo "SELFTEST: $fails of $total arm(s) FAILED"; return 1
 }
@@ -163,7 +195,7 @@ PYEOF
   # PER-WORKFLOW, NOT WINDOWED. Take the most recent run with a real conclusion:
   # an in-progress run has conclusion null and must never be read as a verdict.
   ROW=$(gh run list --repo "$REPO" --workflow="$BASE" --branch main --limit 20 \
-          --json conclusion,headSha,createdAt,status 2>/dev/null \
+          --json conclusion,headSha,createdAt,status,databaseId 2>/dev/null \
         | jq -r '[.[]|select(.status=="completed" and .conclusion!=null and .conclusion!="")]
                  | sort_by(.createdAt) | reverse | .[0] // empty')
   if [ -z "$ROW" ]; then
@@ -172,9 +204,33 @@ PYEOF
   # (the unread annotation below uses cli's discriminator — see the *: arm)
   CONC=$(printf '%s' "$ROW" | jq -r '.conclusion'); SHA=$(printf '%s' "$ROW" | jq -r '.headSha[0:9]')
   WHEN=$(printf '%s' "$ROW" | jq -r '.createdAt')
+  # ── DESCEND TO JOBS. A RUN CONCLUSION LAUNDERS A FAILING JOB. ──────────────
+  # Found 2026-09-15 by gates, after vendoring this file put it in front of the
+  # repo's own run-level-reader census, which refused it BY NAME.
+  # Job-level `continue-on-error: true` launders the RUN conclusion and
+  # `needs.<job>.result` — it does NOT launder the job or its check run.
+  # SPECIMEN, 3 of 3 on required-checks-drift.yml:
+  #   run 34968620058 / 34964650694 / 34964615333  RUN=success
+  #   failing job each time: "Required-check spec drift (advisory)"
+  # So every count this file produced before today was a FLOOR, not a count.
+  # THE IRONY ON THE RECORD: "read JOBS, not runs" was written into the round's
+  # brief while the instrument producing every main-red count read runs.
+  # Nobody looked, because it was the thing doing the looking.
+  RID=$(printf '%s' "$ROW" | jq -r '.databaseId // empty')
+  if [ -n "$RID" ]; then
+    FJOBS=$(gh api "repos/$REPO/actions/runs/$RID/jobs" --paginate 2>/dev/null \
+      | jq -s -r '[.[].jobs[]?|select(.conclusion=="failure")|.name]|join(", ")')
+    if [ -n "$FJOBS" ] && [ "$CONC" = "success" ]; then
+      CONC="failure"; LAUNDERED=" [RUN said success; FAILING JOB(S): $FJOBS]"
+    else
+      LAUNDERED=""
+    fi
+  else
+    LAUNDERED=" [no databaseId — job descent NOT performed, this row is RUN-LEVEL ONLY]"
+  fi
   case "$CONC" in
     failure|timed_out|startup_failure)
-      red=$((red+1)); printf '%s\t%s\t%s\t%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" >> "$RED_LIST";;
+      red=$((red+1)); printf '%s\t%s\t%s\t%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$LAUNDERED" >> "$RED_LIST";;
     success) green=$((green+1));;
     *) unseen=$((unseen+1))
        # A CANCEL DESTROYS A VERDICT; IT DOES NOT DESTROY THE RUN RECORD (cli, 2026-09-15).
