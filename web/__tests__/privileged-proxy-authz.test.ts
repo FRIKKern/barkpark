@@ -46,13 +46,13 @@ const API_ROOT = path.join(WEB_ROOT, "app", "api");
  * per-entry syscall — not filtered out after the walk. Both reasons matter:
  *
  *  1. CORRECTNESS UNDER PARALLELISM. `node --test` runs the suite's files in
- *     parallel processes, and four siblings each write a temp ES module INSIDE
- *     `web/components/` and then unlink it in an `after()` hook:
- *       __tests__/bench.test.ts:57 / :60
- *       __tests__/listings-map-bounds.test.ts:75 / :78
- *       __tests__/listings-map-href.test.ts:52 / :55
- *       __tests__/sheet-grid-render.test.ts:48 / :51
- *     all named `components/.<name>.test-<pid>.mjs` — a dotfile with a `.mjs`
+ *     parallel processes, and four siblings each `writeFileSync` a temp ES
+ *     module INSIDE `web/components/` and `unlinkSync` it from an `after()`
+ *     hook. Enumerate them, and re-derive rather than trusting this list — the
+ *     pathspec excludes THIS file, which would otherwise match its own comment:
+ *       git grep -l 'writeFileSync(tmpPath' -- '__tests__/*.test.ts' ':!*privileged-proxy*'
+ *     — today bench, listings-map-bounds, listings-map-href, sheet-grid-render.
+ *     All named `components/.<name>.test-<pid>.mjs` — a dotfile with a `.mjs`
  *     extension, i.e. squarely inside the referrer scan's own filter. The old
  *     shape did `readdirSync` -> `statSync` -> (post-walk filter) ->
  *     `readFileSync`, so a sibling's unlink landing in either gap threw
