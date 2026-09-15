@@ -7,23 +7,40 @@
 // -----------------------
 // cch-w16-s2 edited cloud/priv/static/__preview__/breakpoint-sweep.mjs. Its
 // DECIDE-authored gate ran the sweep and the sweep's own unit suite. It did NOT
-// run cloud/priv/static/__css_check.mjs — which scans EVERY .js/.mjs/.css file
-// directly inside cloud/priv/static/ and cloud/priv/static/__preview__/ for E11
-// (banned `app.js:<line>` source-line citations). The slice shipped three. The
+// run cloud/priv/static/__css_check.mjs — which subjects that file to E11
+// (banned source-line citations) BY ITS LOCATION UNDER THE SCAN ROOT, whatever
+// it is called and however deep it sits. The slice shipped three. The
 // slice's own gate was green; the wired node-20 console-unit job would have
 // reded on a rule this epic itself wrote. Nobody's gate asked about it, because
 // "who reads breakpoint-sweep.mjs?" was answered from memory.
 //
-// __css_check does not import breakpoint-sweep.mjs. It does not name it. It
-// READS THE DIRECTORY (__css_check.mjs:1068-1070):
+// THE PROPERTY THE EDGE RESTS ON, which is the only thing this header may
+// state about it: __css_check does not import breakpoint-sweep.mjs, does not
+// name it, and nothing in the repo names the PAIR. __css_check builds its own
+// file set from the FILESYSTEM, so membership is by LOCATION UNDER THE SCAN
+// ROOT, never by import. That is what puts the edge outside any import graph,
+// and it is the whole of what this tool needs: it holds however the set is
+// walked and however the per-file predicate decides. Only a reader that models
+// SCAN SITES — readdir, glob, find, git ls-files, literal path — can see it.
 //
-//     for (const f of fs.readdirSync(root)) if (scanned(f)) out.push(f);
-//     const pv = path.join(root, "__preview__");
-//     if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) ...
+// DO NOT restate today's extensions, directory arms or traversal shape here.
+// Two earlier versions of this paragraph did, and both rotted inside one wave:
+// the extension allowlist it named became a CONTENT predicate, and the two
+// hardcoded readdir arms it quoted became a RECURSIVE DESCENT. A header that
+// names the mechanism rots every time the mechanism improves; one that names
+// the invariant does not. Never quote the set, and never quote the code that
+// builds it — RUN the derivation:
 //
-// So an import graph cannot find this edge. A DIRECTORY SCAN is the edge, and
-// only a reader that models scan sites — readdir, glob, find, git ls-files,
-// literal path — can see it.
+//     node tooling/gate-map/gate-map.mjs --for cloud/priv/static/__preview__/breakpoint-sweep.mjs
+//
+// lists __css_check among the instruments that read that path, each line
+// carrying the live scan site it was derived from, and
+//
+//     node cloud/priv/static/__css_check.mjs --citation-inventory
+//
+// prints the scan set itself, one line per file. Both are re-derived at run
+// time, and `--citation-inventory` REFUSES non-zero (E17) on an empty set, so a
+// short or empty answer from either is evidence rather than silence.
 //
 // WHAT THIS IS AND IS NOT
 // -----------------------
@@ -49,8 +66,9 @@
 // SIBLING: scripts/preview-census-gate-check.mjs answers a DIFFERENT question —
 // "did the scenarios.mjs census move, and which census owners must therefore
 // run". That tool is corpus-delta keyed and emits four owners; __css_check is
-// not among them (it appears there only as a replayed wave-21 gate FIXTURE at
-// preview-census-gate-check.mjs:440). The two compose; neither subsumes.
+// not among them (it appears there only as a replayed wave-21 gate FIXTURE —
+// locate it by name, never by line: `grep -n '^  const wave21Gate' \
+// scripts/preview-census-gate-check.mjs`). The two compose; neither subsumes.
 //
 // USAGE
 //   node tooling/gate-map/gate-map.mjs --population
