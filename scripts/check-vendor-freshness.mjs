@@ -324,13 +324,20 @@ export function correspondenceFailures(spec, sources, entries) {
           }
         }
       }
-      const norm = (o) => JSON.stringify(o, Object.keys(o).sort())
-      if (norm(a) !== norm(b)) {
-        const keys = new Set([...Object.keys(a), ...Object.keys(b)])
-        const moved = [...keys].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).sort()
+      // Compare FIELD BY FIELD, each serialised on its own. NOT
+      // `JSON.stringify(o, Object.keys(o).sort())` — the array form of the
+      // second argument is a property WHITELIST applied at every depth, not a
+      // key order, so it flattens `exports` to `{}` and makes every nested
+      // difference invisible. (Measured: two manifests differing only in
+      // `exports["."].import` compared EQUAL under that shape.) Key order
+      // inside a field is not normalised on purpose — a reordered manifest is
+      // still a manifest that was not the one packed.
+      const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])]
+      const moved = keys.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).sort()
+      if (moved.length > 0) {
         out.push(
           `MANIFEST ${srcManifestPath} does not match the packed package/package.json\n` +
-            `       fields that differ: ${moved.join(', ') || '(ordering only)'}\n` +
+            `       fields that differ: ${moved.join(', ')}\n` +
             `       the tarball was packed from a different manifest than the one in the tree`
         )
       }
@@ -927,6 +934,31 @@ function selftest() {
       if (!f.some((d) => d.startsWith('MANIFEST') && d.includes('version'))) {
         throw new Error(`no manifest verdict naming version: ${JSON.stringify(f)}`)
       }
+    })
+
+    check('correspondenceFailures reds a MANIFEST difference NESTED inside exports, not just a top-level field', () => {
+      // The regression control for a bug this file shipped for one commit:
+      // `JSON.stringify(o, Object.keys(o).sort())` treats its array argument as
+      // a property whitelist at EVERY depth, so it serialised `exports` as `{}`
+      // and two manifests differing only inside it compared equal.
+      const nested = (importPath) =>
+        Buffer.from(`{"name":"@fix/pkg","version":"1.0.0","exports":{".":{"import":"${importPath}"}}}\n`)
+      const f = buildCorr((sources, entries) => {
+        sources.set('js/packages/fix/package.json', nested('./dist/index.mjs'))
+        entries.set('package/package.json', nested('./dist/DIFFERENT.mjs'))
+      })
+      if (!f.some((d) => d.startsWith('MANIFEST') && d.includes('exports'))) {
+        throw new Error(`a nested exports difference was not seen: ${JSON.stringify(f)}`)
+      }
+      // ...and the same shape with no difference must still be GREEN.
+      eq(
+        buildCorr((sources, entries) => {
+          sources.set('js/packages/fix/package.json', nested('./dist/index.mjs'))
+          entries.set('package/package.json', nested('./dist/index.mjs'))
+        }),
+        [],
+        'identical nested manifests'
+      )
     })
 
     check('correspondenceFailures ACCEPTS pnpm rewriting a workspace: specifier but REJECTS one that survived', () => {
