@@ -110,9 +110,13 @@ func writeEnvelope(w http.ResponseWriter, status int, body string) {
 // Three rows, one per STATUS state: active → ok, auto-disabled (disable_reason
 // present) → failed, manually switched off (active:false, NO disable_reason) →
 // inactive.
+//
+// The rows also span the three TYPES shapes the box can store: a real filter
+// (two doc types), the empty-array match-everything sentinel, and a row with
+// no "types" key at all (an older record) — which means match-everything too.
 const listEnvelope = `{"ok":true,"resource":"webhook","data":{"webhooks":[` +
-	`{"id":"wh_1","name":"prod","url":"https://a.test/hook","dataset":"production","events":["create","update"],"active":true,"consecutive_failures":0,"disable_reason":null},` +
-	`{"id":"wh_2","name":"stale","url":"https://b.test/h","dataset":"production","events":[],"active":false,"consecutive_failures":5,"disable_reason":"too_many_failures"},` +
+	`{"id":"wh_1","name":"prod","url":"https://a.test/hook","dataset":"production","events":["create","update"],"types":["article","page"],"active":true,"consecutive_failures":0,"disable_reason":null},` +
+	`{"id":"wh_2","name":"stale","url":"https://b.test/h","dataset":"production","events":[],"types":[],"active":false,"consecutive_failures":5,"disable_reason":"too_many_failures"},` +
 	`{"id":"wh_3","name":"paused","url":"https://c.test/h","dataset":"production","events":["publish"],"active":false,"consecutive_failures":0,"disable_reason":null}` +
 	`]}}`
 
@@ -182,6 +186,59 @@ func TestWebhookListTableGolden(t *testing.T) {
 	}
 	if rtrimLines(stripANSI(colored)) != rtrimLines(stdout) {
 		t.Fatalf("colored (ansi-stripped) != piped:\n%s", stripANSI(colored))
+	}
+}
+
+// TestWebhookListTypesColumnDisambiguates is the assertion that FAILS if the
+// types column is missing, unlabelled, or reading the wrong key. It does not
+// consult the golden: it names the three cell shapes directly.
+//
+//   - wh_1 carries types ["article","page"] → the cell must show BOTH names.
+//   - wh_2 carries types []                 → the match-everything label.
+//   - wh_3 carries no types key at all      → the same label (same meaning).
+//
+// The last check is the one the row exists for: a scoped webhook's cell and an
+// unscoped one's cell must not be the same string, or the table reproduces the
+// ambiguity this column was added to kill.
+func TestWebhookListTypesColumnDisambiguates(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, listEnvelope)
+	})
+	stdout, _, code := runWebhook(t, "table", false, "list", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stdout, "types") {
+		t.Fatalf("no types column in the header:\n%s", stdout)
+	}
+	var scoped, empty, missing string
+	for _, line := range strings.Split(stdout, "\n") {
+		switch {
+		case strings.HasPrefix(line, "wh_1"):
+			scoped = line
+		case strings.HasPrefix(line, "wh_2"):
+			empty = line
+		case strings.HasPrefix(line, "wh_3"):
+			missing = line
+		}
+	}
+	if scoped == "" || empty == "" || missing == "" {
+		t.Fatalf("missing a row (wh_1/wh_2/wh_3) in:\n%s", stdout)
+	}
+	for _, want := range []string{"article", "page"} {
+		if !strings.Contains(scoped, want) {
+			t.Fatalf("scoped row must name its doc type %q, got: %q", want, scoped)
+		}
+	}
+	const sentinel = "match everything"
+	if !strings.Contains(empty, sentinel) {
+		t.Fatalf("empty types[] must be labelled %q, got: %q", sentinel, empty)
+	}
+	if !strings.Contains(missing, sentinel) {
+		t.Fatalf("absent types key must be labelled %q, got: %q", sentinel, missing)
+	}
+	if strings.Contains(scoped, sentinel) {
+		t.Fatalf("a scoped webhook must NOT read as match-everything: %q", scoped)
 	}
 }
 
