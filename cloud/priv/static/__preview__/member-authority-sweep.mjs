@@ -283,6 +283,13 @@ const HOOKS = [
   { key: "button#inst-cli-toggle", route: null, what: "disclose the bp CLI lifecycle rail", source: "markup: aria-controls disclosure" },
   { key: "button.deploy-console-toggle", route: null, what: "expand a deploy's build console", source: "markup: local disclosure" },
   { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: null, what: "deliveries filter chip", source: "markup: client-side filter" },
+  // cch-w36-bl: the ACTIVITY feed's filter chips are NOT a HOOKS row — they are
+  // a WATCHED one (see WATCHED below, id `activity-filter-chip`). A HOOKS row
+  // here would be a DEAD ROW every run, exactly as the /new wizard's fenced
+  // verbs are: on the fixed tree a refused member renders no chip at all, so the
+  // table would claim a control the member corpus never paints. The claim worth
+  // making is an ABSENCE against a positive control, and that is the WATCHED
+  // arm's shape.
   { key: "input#notif-del-event", route: null, what: "deliveries event filter input", source: "markup: client-side filter" },
   { key: "button#notif-del-load-more", route: "GET /v1/notifications/deliveries", what: "paginate deliveries", source: "census: read path; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
   { key: "button#site-new-btn", route: "POST /v1/sites", what: "open the create-site modal", source: "census PIN: openCreateSiteModal — any member may create a site" },
@@ -481,6 +488,34 @@ const WATCHED = [
     minted: "cch-r16-w11 — newRenderFailed reads newWriteAuthority() and draws Retry setup through adminWriteControlHtml(…, \"wizard-block\"), whose refusal arm drops the id; this is the THIRD offer site of the verb #12996 fenced twice",
     fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads retryInstance/newRenderFailed as Auth.require_team_admin",
   },
+  // ── cch-w36-bl: THE ACTIVITY FILTER ROW, and the first WATCHED row whose
+  // route is a READ ─────────────────────────────────────────────────────────
+  // Every row above withholds a WRITE. This one withholds an axis of controls
+  // over a READ the server refuses — GET /v1/audit is team-admin-only
+  // (Auth.require_current_team_admin; now carried by __route_fence.mjs), and
+  // each chip re-issues exactly that GET through activityQuery. Offering them
+  // to a refused member is offering thirteen controls that can only 403.
+  //
+  // `assert: true` IS EARNED, and by the strongest twin in this table: the
+  // member `activity-denied` and the owner `activity` differ in exactly two
+  // fixture fields (me()'s role argument and auditDenied), so the twin's
+  // non-zero is not a different screen — it is the SAME screen, un-refused.
+  // A member ZERO here is therefore a losable measurement, never a statement
+  // about markup nobody renders (BLIND SPOT B3's argument).
+  //
+  // WHAT IT GUARDS, AND WHY IT IS NOT A MEMORY OF ITS OWN FIX. This sweep is
+  // what FOUND the defect: `activity-denied` landed and the sweep reported 13
+  // findings ("a control rendered to a MEMBER … the server will refuse"),
+  // because paintActivityFilters ran before the read and a second painter
+  // (ensureActivityActors, on roster arrival) repainted after it. The fix is a
+  // state flag every painter reads, and this row is what reds if that flag is
+  // removed, inverted, or out-raced again by a third painter.
+  {
+    id: "activity-filter-chip", sel: "[data-actfilter-axis]",
+    mount: "activity-filters", scenario: "activity-denied", twin: "activity",
+    route: "GET /v1/audit", assert: true,
+    minted: "cch-w36-bl — paintActivityFilters renders the empty string while activityDenied is set, so a refused trail carries no filter row",
+  },
 ];
 for (const w of WATCHED) {
   if (!w.sel) w.sel = "#" + w.id;
@@ -539,7 +574,15 @@ const KNOWN = [
 // ── PINS ─────────────────────────────────────────────────────────────────────
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
-const PIN_MEMBER_SCENARIOS = 14;
+// 14 -> 15, and the corpus 132 -> 133 (cch-w36-bl): `activity-denied`, a plain
+// MEMBER on #activity whose GET /v1/audit is refused — the first member actor
+// ever to reach the Activity screen, and the first fixture of any role able to
+// render loadActivity's refusal arm. It is a member actor, so BOTH pins move:
+// the second case the note above allows (the member slice itself moved). Both
+// numbers were RE-DERIVED by RUNNING this sweep and reading what it PRINTED
+// ("the member-actor corpus is 15, pinned at 14" and "the committed corpus grew
+// to 133 scenario(s), pinned at 132"), never by adding one.
+const PIN_MEMBER_SCENARIOS = 15;
 // 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
 // (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
@@ -667,7 +710,7 @@ const PIN_MEMBER_SCENARIOS = 14;
 // this sweep and reading what it PRINTED ("the member-actor corpus is 14,
 // pinned at 12" and "the committed corpus grew to 132 scenario(s), pinned at
 // 129"), never by adding three and two.
-const PIN_TOTAL_SCENARIOS = 132;
+const PIN_TOTAL_SCENARIOS = 133;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

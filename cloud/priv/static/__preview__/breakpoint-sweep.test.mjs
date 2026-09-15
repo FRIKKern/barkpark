@@ -1005,20 +1005,30 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 //   test whose title is BUILT from scenarioReport (grep: `the census
 //   reconciles:`). Six numbers, all from ONE measurement:
 //
-//     r.total            125   grep `assert.equal(r.total, 125)`
+//     r.total            133   grep `assert.equal(r.total, 133)`
 //     r.cells             25   grep `assert.equal(r.cells, 25)`
 //     r.distinctCovered   24   grep `mixed-fleet is used twice`
-//     r.residue          101   grep `101 is the RESIDUE, not the census`
-//     r.families          13   grep `assert.equal(r.families, 13)`
-//     SCENARIO_RESIDUE   101   grep `the COMMITTED literal, counted from the
+//     r.residue          109   grep `109 is the RESIDUE, not the census`
+//     r.families          14   grep `assert.equal(r.families, 14)`
+//     SCENARIO_RESIDUE   109   grep `the COMMITTED literal, counted from the
 //                              committed bytes` — this is residue typed a
 //                              SECOND time, deliberately, against the committed
 //                              bytes rather than the report. Move BOTH or the
 //                              file contradicts itself.
 //
+//   THIS TABLE IS ITSELF UNGUARDED, and cch-w36-bl found it stale rather than
+//   wrong-by-one: on origin/main it read 125 / 101 / 13 while the same tree's
+//   own `>> scenarios` line printed 132 · 108 · 13, so it had been carrying a
+//   seven-scenario, seven-residue drift under a fully green harness. No arm in
+//   this file parses these bytes — the coverage walk above covers the ownership
+//   map in breakpoint-sweep.mjs, NOT this table — which is the same shape the
+//   census five were in before D527, and it deserves the same remedy. Until an
+//   arm reads it, treat every numeral here as a hint and the `>> scenarios`
+//   line as the fact.
+//
 //   RE-DERIVE, never increment: `node cloud/priv/static/__preview__/breakpoint-sweep.mjs`
 //   prints the whole set on its `>> scenarios` line —
-//   `125 scenarios · 24 distinct covered by 25 cells · 101 residue over 13
+//   `133 scenarios · 24 distinct covered by 25 cells · 109 residue over 14
 //   families (committed literal)`. Read that line and copy from it.
 //
 // OWNER 2 — cloud/priv/static/__binding_census.mjs (NOT under __preview__, and
@@ -1164,13 +1174,42 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // the `>> scenarios` line it PRINTED (`132 scenarios · 24 distinct covered by
   // 25 cells · 108 residue over 13 families`), never by adding three to the
   // line above.
-  assert.equal(r.total, 132);
+  // cch-w36-bl moves it by ONE, and it is the first block in this chronicle to
+  // move the FAMILY count: `activity-denied` — a plain MEMBER on #activity whose
+  // /v1/audit is refused, so the first fixture in this corpus able to reach
+  // loadActivity's refusal arm at all — is the corpus's first residue entry in
+  // the `hash:#activity` family. Total 132 -> 133, residue 108 -> 109, families
+  // 13 -> 14. CELLS (25) and distinctCovered (24) are DELIBERATELY UNMOVED: it
+  // lands in the residue, not a cell.
+  //
+  // THE SECOND-ORDER REFUSAL, WHICH THIS BLOCK EXISTS TO WRITE DOWN. Adding the
+  // SCENARIO_RESIDUE entry alone does NOT clear the sweep: `hash:#activity` was
+  // a FOURTEENTH family over a RESIDUE_FAMILY_REASONS that held thirteen keys,
+  // so the sweep went on exiting 2 with `UNEXPLAINED residue family
+  // hash:#activity` until a written reason landed beside the entry — and that
+  // reason is pinned at MORE THAN 60 CHARACTERS by "every residue family has a
+  // written reason". A family-creating residue entry is therefore TWO edits in
+  // breakpoint-sweep.mjs, never one, and the sweep names neither until the
+  // other is done.
+  //
+  // AND IT MOVED A THIRD THING NO EARLIER BLOCK HAD TO. `hash:#activity` was one
+  // of the two ZERO-residue families named by hand below; gaining an entry left
+  // exactly ONE, so the arm's typed pair, this file's regex over the ownership
+  // map's bullet, and that bullet's own wording all moved together. Six tests in
+  // this file refused before these numbers were re-read — 66, 68, 71, 72, 73 and
+  // 76 — alongside the bare sweep (exit 2, twice, for two different reasons) and
+  // smoke.mjs (exit 1, `CENSUS: 1 committed scenario(s) have NO expectation`).
+  // Every integer here was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on
+  // this branch and reading the `>> scenarios` line it PRINTED (`133 scenarios ·
+  // 24 distinct covered by 25 cells · 109 residue over 14 families`), never by
+  // adding one to the line above.
+  assert.equal(r.total, 133);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 108, "108 is the RESIDUE, not the census");
-  assert.equal(r.families, 13);
+  assert.equal(r.residue, 109, "109 is the RESIDUE, not the census");
+  assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 108, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 109, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
@@ -1186,7 +1225,7 @@ test("familyOf reads the artifact: pathname, else the deepLink head, else no-dee
 
 test("every residue family has a written reason, and no reason outlives its family", () => {
   const used = new Set(Object.values(SCENARIO_RESIDUE));
-  assert.equal(used.size, 13);
+  assert.equal(used.size, 14);
   for (const f of used) assert.ok(RESIDUE_FAMILY_REASONS[f] && RESIDUE_FAMILY_REASONS[f].length > 60, `family ${f} needs a written reason`);
   assert.deepEqual(Object.keys(RESIDUE_FAMILY_REASONS).filter((f) => !used.has(f)), []);
 });
@@ -1274,11 +1313,13 @@ test("every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
 test("every `These N` clause in RESIDUE_FAMILY_REASONS is recounted from the literal", () => {
   const derived = derivedFamilyCounts();
   // HONEST COVERAGE, STATED RATHER THAN IMPLIED: this arm checks only the
-  // reasons that actually SPELL a count. Five families phrase their reason
+  // reasons that actually SPELL a count. Six families phrase their reason
   // without one ("Routes whose head is a bare `#`…", the modal family,
-  // /activate, /new, #signup) and are SKIPPED here — untouched by this arm, not
+  // /activate, /new, #signup, and cch-w36-bl's #activity — a one-entry family
+  // whose reason names the fixture instead of counting it) and are SKIPPED here
+  // — untouched by this arm, not
   // proven by it. Their membership is still pinned, but by the header arm
-  // above, which covers all 13. A reason that GAINS a `These N` joins this arm
+  // above, which covers all 14. A reason that GAINS a `These N` joins this arm
   // automatically; one that loses it silently leaves — which is the honest cost
   // of guarding prose, and the reason the header arm is the one that counts
   // families.
@@ -1295,17 +1336,22 @@ test("every `These N` clause in RESIDUE_FAMILY_REASONS is recounted from the lit
   assert.ok(checked.length > 0, "no reason spells a count any more — this arm has gone vacuous and should be retired, not kept green");
 });
 
-test("the two ZERO-residue families are named, and 15 families over all scenarios is not 13", () => {
+test("the ONE ZERO-residue family is named, and 15 families over all scenarios is not 14", () => {
   // breakpoint-sweep.mjs's header prose is the ONE place a reader learns that
-  // `familyOf` over all scenarios gives 15 while the residue spans 13. It was
+  // `familyOf` over all scenarios gives 15 while the residue spans 14. It was
   // asserted by nothing. These three lines are that assertion.
+  // cch-w36-bl: this arm USED to name two — `hash:#activity` and `hash:#sites`.
+  // `activity-denied` gave the first of them its first residue entry, and the
+  // typed pair below refused, by name, before it was re-read. That refusal is
+  // the arm working: a family leaving this list is exactly the event it exists
+  // to catch.
   const allFamilies = new Set(Object.values(SCENARIOS).map((s) => familyOf(s)));
   const residueFamilies = derivedFamilyCounts();
   assert.equal(allFamilies.size, 15, "familyOf over every committed scenario");
   const zeroResidue = [...allFamilies].filter((f) => !residueFamilies.has(f)).sort();
-  assert.deepEqual(zeroResidue, ["hash:#activity", "hash:#sites"],
+  assert.deepEqual(zeroResidue, ["hash:#sites"],
     "the families every one of whose scenarios is rendered by a cell");
-  // the relation, derived rather than typed: 15 - 13 IS the two above
+  // the relation, derived rather than typed: 15 - 14 IS the one above
   assert.equal(allFamilies.size - residueFamilies.size, zeroResidue.length);
 });
 
@@ -1392,7 +1438,7 @@ const BLOCK_NUMERAL = /(?<![\w#.-])\d+(?![\w-])/g;
 // over above the HISTORICAL rule is, by definition, unowned.
 const OWNED_BLOCK_SITES = [
   { what: "the census five bullet", owner: "the census five in breakpoint-sweep.mjs's prose are recounted from the derived report", re: /\*\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+—\s+"the census five/g },
-  { what: "the ZERO-residue bullet's family total", owner: "the ownership map's own family numerals are recounted from the literal", re: /\*\s+(\d+), and the two ZERO-residue names/g },
+  { what: "the ZERO-residue bullet's family total", owner: "the ownership map's own family numerals are recounted from the literal", re: /\*\s+(\d+), and the ONE ZERO-residue name/g },
   { what: 'the quoted "N families over all scenarios is not N"', owner: "the ownership map's own family numerals are recounted from the literal", re: /(\d+)\s+families over all\s+scenarios is not\s+(\d+)/g },
   { what: "the header arm's family span", owner: "the ownership map's own family numerals are recounted from the literal", re: /which spans all\s+(\d+)/g },
   { what: "the `exits N` refusal claim", owner: "the ownership map's `exits N` claim is read from the sweep's refusal helper", re: /exits\s+(\d+)\s+—/g },
@@ -1405,7 +1451,7 @@ test("the ownership map's own family numerals are recounted from the literal", (
   const block = ownershipMapBlock();
   const allFamilies = new Set(Object.values(SCENARIOS).map((s) => familyOf(s)));
   const residueFamilies = derivedFamilyCounts();
-  const lead = [...block.matchAll(/\*\s+(\d+), and the two ZERO-residue names/g)];
+  const lead = [...block.matchAll(/\*\s+(\d+), and the ONE ZERO-residue name/g)];
   assert.equal(lead.length, 1,
     "match-count floor: the ownership map's ZERO-residue bullet lead matched " +
     `${lead.length} times, expected exactly 1 — re-point this regex at the wording on disk`);
@@ -1423,10 +1469,78 @@ test("the ownership map's own family numerals are recounted from the literal", (
     `match-count floor: the header arm's "spans all N" matched ${span.length} times, expected exactly 1`);
   assert.equal(Number(span[0][1]), residueFamilies.size,
     `the ownership map says the header arm spans all ${span[0][1]} families; the literal holds ${residueFamilies.size}`);
-  // and the two names, which are the reason that bullet exists at all
+  // and the names, which are the reason that bullet exists at all
   for (const family of [...allFamilies].filter((f) => !residueFamilies.has(f))) {
     assert.ok(block.includes(`\`${family}\``),
       `${family} has ZERO residue entries but the ownership map does not name it`);
+  }
+
+  // ── the ZERO-residue bullet's NAMES, in the direction nobody guarded ───────
+  //
+  // cch-w36-bl. The loop directly above walks the DERIVED zero-residue families
+  // and asserts the bullet names each one. That is ONE direction, and it is the
+  // direction that cannot rot: a family with zero residue entries is not going
+  // anywhere. The other direction was open — a family the bullet NAMES as
+  // zero-residue, which has since GAINED its first residue entry, was invisible
+  // to every arm in this file. The bullet went on asserting, in prose, a
+  // property the literal no longer had, and the sweep exits 0 over it:
+  // `scenarioReport` derives its report from the object and structurally cannot
+  // read the comment above it. The forward loop cannot catch it either — it
+  // simply stops asking about a family that left its set.
+  //
+  // That is not hypothetical. It is exactly what `activity-denied` does: the
+  // FIRST residue entry in the `hash:#activity` family, a family this bullet had
+  // named as zero-residue since the bullet was written. MEASURED, not argued:
+  // with the entry committed and the bullet left naming both families, the
+  // assertions below are the ONLY ones in this file that red — the other 81 arms
+  // stay green, including every census pin, because none of them reads the
+  // bullet's names. The rule generalises past this wave: it is the same refusal
+  // for every family-creating residue entry after this one.
+  //
+  // THE PARSE IS SCOPED TO THE BULLET'S LEAD — the segment between the words
+  // `ZERO-residue name(s)` and the first em dash — because the prose AFTER that
+  // dash legitimately discusses families that are no longer zero-residue (this
+  // wave's own clause names `hash:#activity` as the family that just left). A
+  // parser that swept the whole bullet would red on its own explanation.
+  // THE MATCH-COUNT FLOOR IS LOAD-BEARING, same law as every other arm here: a
+  // wording drift that slid out from under this regex would leave these
+  // assertions vacuous-green over a bullet nothing reads. If the floor reds,
+  // re-point the regex at the wording on disk — never lower the floor, and never
+  // delete the arm.
+  //
+  // IT LIVES INSIDE THIS TEST RATHER THAN BESIDE IT ON PURPOSE: this file's test
+  // count is pinned EXACTLY (two-sided) at 82 in .github/workflows/
+  // console-harness.yml, and the assertions belong to the bullet this test
+  // already owns. A separate `test()` would have been a clearer failure NAME at
+  // the cost of a workflow bump in a file this change has no business touching.
+  const leads = [...block.matchAll(/ZERO-residue names?\s+([\s\S]*?)\s+—/g)];
+  assert.equal(leads.length, 1,
+    `match-count floor: the ZERO-residue bullet's lead segment matched ${leads.length} times, expected exactly 1 — ` +
+    "re-point this regex at the wording on disk, never lower the floor");
+  const named = [...leads[0][1].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.ok(named.length > 0,
+    "the ZERO-residue bullet's lead names no family at all — this arm has gone vacuous and should be re-pointed, not kept green");
+
+  // THE DIRECTION THIS ARM EXISTS FOR: nothing the bullet names may carry residue.
+  for (const family of named) {
+    assert.ok(!residueFamilies.has(family),
+      `the ownership map's ZERO-residue bullet names ${family} as having no residue entries, but SCENARIO_RESIDUE now carries ` +
+      `${residueFamilies.get(family)} of them — the bullet is asserting a property the literal lost. Re-read the bullet ` +
+      "(and the singular/plural wording, and the arm title that quotes it) from the literal.");
+  }
+
+  // …and the set is EXACT in both directions, so neither a name that outlived
+  // its property nor one that was never added can hide behind the other.
+  assert.deepEqual(
+    [...named].sort(),
+    [...allFamilies].filter((f) => !residueFamilies.has(f)).sort(),
+    "the families the ZERO-residue bullet names are not the families that HAVE zero residue entries");
+
+  // every name it does carry is a real family, never a typo that would make the
+  // deepEqual above red for the wrong reason
+  for (const family of named) {
+    assert.ok(allFamilies.has(family),
+      `the ZERO-residue bullet names ${family}, which familyOf derives for no committed scenario`);
   }
 });
 

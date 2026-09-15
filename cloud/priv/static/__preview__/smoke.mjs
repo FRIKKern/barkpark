@@ -4124,6 +4124,56 @@ const EXPECTATIONS = {
     },
   },
 
+  // cch-w36-bl — THE REFUSAL ARM OF THE ACTIVITY SCREEN, REACHED FOR THE FIRST
+  // TIME. loadActivity's `!r.ok` branch (grep app.js for `Couldn't load
+  // activity`) was unreachable from every committed scenario before this
+  // fixture: the corpus's only #activity scenario is an owner, and its only
+  // auditDenied fixture sits on the instance timeline. Every assertion below is
+  // FAULT-DEPENDENT — each one reds against the `activity` twin, whose fixture
+  // is byte-identical apart from me()'s role argument and the auditDenied flag.
+  "activity-denied": {
+    what: "a plain MEMBER on #activity — /v1/audit 403 replaces the feed with the honest authority sentence, and never the billing copy",
+    check(reg) {
+      const body = (reg.get("activity-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#activity-body rendered empty");
+      // The refusal card, not the feed.
+      assert.ok(body.includes("empty-state"), "the refusal renders as an .empty-state block");
+      assert.ok(body.includes("Couldn&#39;t load activity") || body.includes("Couldn't load activity"),
+        "the refusal states WHICH read failed");
+      // THE SENTENCE, from server evidence. forbiddenEvidenceCopy maps
+      // {required:"admin", scope:"team"} through FORBIDDEN_ROLE_COPY — the
+      // caller's own "You don't have access to this activity." fallback is
+      // deliberately NOT what wins, because the server said something more
+      // specific than the caller could.
+      assert.ok(body.includes("You need the admin role on this team"),
+        "the server's `required: admin` evidence becomes the sentence");
+      // THE REGRESSION THIS FIXTURE EXISTS TO HOLD DOWN. Before cch-w35-s4's
+      // evidence fence, ERRORS.forbidden won at every friendly() site and a
+      // member refused by the admin-gated /v1/audit was told, on the Activity
+      // screen, that only the team owner can manage billing: wrong subject,
+      // wrong remedy, and confident. No committed fixture could see it.
+      assert.ok(!body.includes("Only the team owner can manage billing."),
+        "the billing copy never surfaces on the Activity screen's refusal");
+      // …and the feed is GONE, not merely empty — every marker the `activity`
+      // twin asserts must be absent here.
+      assert.ok(!body.includes("tlv-row"), "no feed row survives the refusal");
+      assert.ok(!body.includes("tlv-coalesce"), "no coalesced group survives the refusal");
+      assert.ok(!body.includes("ada@acme.com"), "the POPULATED trail is not rendered behind the refusal");
+      // The keyset control is retracted (toggleActivityMore(false)).
+      assert.equal((reg.get("activity-more") || {}).hidden, true, "the Load more control is hidden on a refused read");
+      // AND THE FILTER ROW IS CLEARED WITH IT. This fixture is what found that
+      // it was not: paintActivityFilters runs before the read is issued, so a
+      // refused member used to be left holding a live chip row over a feed the
+      // server would not give them — every chip re-issues the same admin-gated
+      // GET and lands back on this refusal. member-authority-sweep.mjs counted
+      // thirteen such controls against this scenario. On a refused read the
+      // body's .empty-state is the ONLY thing #activity carries.
+      const filters = (reg.get("activity-filters") || {}).innerHTML || "";
+      assert.equal(filters, "", "the filter chips are cleared with the feed they filter — no control that can only 403");
+      assert.ok(!filters.includes("actfilter-chip"), "not one filter chip survives a refused read");
+    },
+  },
+
   // ── gr-p4-billing (G-01): plain-member gate + the post-cancel grace state ────
   "billing-member": {
     what: "a plain member of a paid team — read-only plan, the owner-gate copy, and NO billing write button anywhere",

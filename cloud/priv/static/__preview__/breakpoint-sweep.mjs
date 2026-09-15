@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  132 scenarios, 24 rendered, 108 in a COMMITTED residue literal.
+//   SCENARIO  133 scenarios, 24 rendered, 109 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -510,9 +510,10 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
+  "hash:#activity": "The Activity feed is swept by the `activity` cell at all 18 widths. cch-w36-bl's `activity-denied` is the plain-MEMBER twin of that same screen, and it renders STRICTLY LESS: /v1/audit answers 403, so loadActivity replaces the whole coalesced feed with ONE .empty-state block — the identical geometry the refusal fixtures in `hash:#operator` and `hash:#billing` already occupy, and narrower at every width than the grid the cell walks. What it exists to measure is an AUTHORITY answer, not a width: it was the first fixture in this corpus able to reach that refusal arm at all, because the only other #activity scenario is an owner and the only other auditDenied fixture sits on the instance timeline, where the same 403 degrades to events-only instead of taking over the view.",
 };
 
-// THE RESIDUE — 96 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 109 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
@@ -524,8 +525,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 132 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 108 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 133 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 109 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -682,16 +683,19 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 132 / 25 / 24 / 108 / 13 — "the census five in breakpoint-sweep.mjs's
+//   * 133 / 25 / 24 / 109 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
 //     site. The census test's own TITLE is built from `scenarioReport` by
 //     template literal rather than typed, so the printed line has no second
 //     copy left to rot.
-//   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
-//     "the two ZERO-residue families are named, and 15 families over all
-//     scenarios is not 13", which owns those numbers as VALUES, plus "the
+//   * 15, and the ONE ZERO-residue name `hash:#sites` — cch-w36-bl's
+//     `activity-denied` took `hash:#activity` off this list by giving it its
+//     first residue entry, which is why the wording here is singular and the
+//     residue-family count it contrasts with went up by one —
+//     "the ONE ZERO-residue family is named, and 15 families over all
+//     scenarios is not 14", which owns those numbers as VALUES, plus "the
 //     ownership map's own family numerals are recounted from the literal",
 //     which owns THESE BYTES: the family total this bullet leads with, the
 //     residue-family count it says that total is NOT, and the span the header
@@ -701,9 +705,9 @@ export const RESIDUE_FAMILY_REASONS = {
 //     "every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
 //     the literal itself".
 //   * each `These N` in RESIDUE_FAMILY_REASONS above — "every `These N` clause
-//     in RESIDUE_FAMILY_REASONS is recounted from the literal". Five reasons
+//     in RESIDUE_FAMILY_REASONS is recounted from the literal". Six reasons
 //     spell no count and are honestly SKIPPED by that arm; their membership is
-//     covered by the header arm, which spans all 13.
+//     covered by the header arm, which spans all 14.
 //   * the chronicle ordinals above ("the Nth scenario / Mth residue entry") —
 //     "the chronicle's ordinals strictly increase and stay inside the census —
 //     in this file and the bare sweep", which reads THESE bytes and reds on a
@@ -896,6 +900,8 @@ export const SCENARIO_RESIDUE = {
   "fleet-cruel-content": "hash:#fleet",
   // hash:#signup — 1
   "loggedout-signup": "hash:#signup",
+  // hash:#activity — 1
+  "activity-denied": "hash:#activity",
 };
 
 // `--cell a,b,c` — SELECTION, AND A PER-NAME REFUSAL. The per-name check is the
