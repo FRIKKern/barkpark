@@ -48,7 +48,14 @@ name: pipefail SIGPIPE scan
 on:
   push:
     branches: [main]
-  pull_request:
+  # ── NO `pull_request:` ARM (2026-09-15, task-dee226be3107a98b) ───────────────
+  # Removed, on this file's own reasoning. The header above states it outright:
+  # "This gate asks a question about the REPO STATE, not about a diff, so its
+  # primary venue is push-to-main plus a schedule". It is advisory and blocks
+  # nothing, and the HIGH-confidence ratchet against
+  # scripts/pipefail-sigpipe-baseline.txt reds identically on the `push: main`
+  # arm — a rise is a rise whichever side of the merge measures it. Measured
+  # 2026-09-15: fired on 10/10 of the last 10 merged heads, 2 check runs each.
   schedule:
     # Weekly. A latent class does not need a fast loop; it needs a loop that
     # never stops. Offset off the hour because GitHub queues cron under load —

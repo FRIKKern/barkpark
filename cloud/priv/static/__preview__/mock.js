@@ -123,6 +123,23 @@
   //     correct lifetime — a reload is a fresh fixture, a refetch is not.
   var fixtureState = {};
 
+  // ── RESIDUAL 1 OF 2 (cch-w34-bl-preview-scenario-for-a-failed-sites-read):
+  //     A NEVER-SETTLING READ IS INEXPRESSIBLE HERE, AND IN smoke.mjs TOO.
+  //     Every arm of scenarios.mjs's route() RESOLVES — there is no hang, no
+  //     reject and no abort arm anywhere in that file — and this stub is TOTAL
+  //     over that: it wraps route()'s answer in an already-resolved promise and
+  //     falls through to a 404 JSON when nothing matched, so a request handed to
+  //     it ALWAYS lands. smoke.mjs's stub does the same (`grep -n 'function
+  //     fetchStub' smoke.mjs`). The consequence is a whole class of screen this
+  //     harness cannot paint: the PENDING state — app.js's "Loading sites…" box,
+  //     the operator console's "Checking operator access…" spinner, every
+  //     card-level loading slot — held open, which is what a real control plane
+  //     that has stopped answering does to a person. A STATUS CODE IS NOT A
+  //     SUBSTITUTE: a 500 settles, and a settled failure is precisely the state
+  //     a hung read is NOT. Reaching it would mean returning a promise nobody
+  //     resolves, which changes route()'s contract for every caller and every
+  //     committed scenario; it is deliberately NOT done here, and is recorded as
+  //     a known limit rather than left to be rediscovered by the next reader.
   window.fetch = function (input, init) {
     var url = typeof input === "string" ? input : (input && input.url) || "";
     var method = (init && init.method) || (input && input.method) || "GET";
@@ -254,6 +271,19 @@
   //    on its own (a screenshot must be deterministic), but exposes a manual
   //    push hook for demos: `__preview.push("fleet")` drives handleLiveEvent.
   var streams = [];
+  // ── RESIDUAL 2 OF 2 (cch-w34-bl-preview-scenario-for-a-failed-sites-read):
+  //     SSE DEATH IS NOT CONTRASTABLE IN THIS HARNESS, and it needs a seam that
+  //     does not exist. This stub reports `readyState = 1` — OPEN — from the
+  //     moment it is constructed and then never fires anything on its own: no
+  //     `open`, no `error`, no close the app did not ask for. `__preview.push()`
+  //     below can make it SPEAK, but nothing anywhere can make it DIE, so a
+  //     stream that has dropped and a stream that is merely quiet render
+  //     BYTE-IDENTICALLY and no instrument in this repo can tell them apart.
+  //     Separating them needs a `__preview.drop()` beside `__preview.push()` —
+  //     roughly: set `readyState = 2`, fire `onerror` and the registered `error`
+  //     listeners on every open stream — so that the console's live-tick
+  //     degradation has a state to be asserted against. That seam is NOT added
+  //     here; this comment is the record that it is missing, not a plan.
   function PreviewEventSource(streamUrl) {
     this.url = streamUrl;
     this.readyState = 1; // OPEN — but silent

@@ -710,7 +710,22 @@ const PIN_MEMBER_SCENARIOS = 15;
 // this sweep and reading what it PRINTED ("the member-actor corpus is 14,
 // pinned at 12" and "the committed corpus grew to 132 scenario(s), pinned at
 // 129"), never by adding three and two.
-const PIN_TOTAL_SCENARIOS = 133;
+// 133 -> 134 (cch-w34-bl-preview-scenario-for-a-failed-sites-read):
+// `instance-sites-unreadable`, the first fixture able to fail the /v1/sites
+// read. Its actor is an OWNER, so the member slice does not move and
+// PIN_MEMBER_SCENARIOS stays where it is — the first case the note above
+// allows. RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 134 scenario(s), pinned at 133"), never by adding one.
+// 134 -> 135 (cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority):
+// `members-self-role-drift`, the first fixture in which the acting user's ROSTER
+// role and their resolved `team_authority` disagree. Its actor is an OWNER (the
+// roster row is the thing that says "member", and `meRole()` reads the /v1/me
+// envelope, not the roster), so the member slice does not move and
+// PIN_MEMBER_SCENARIOS stays where it is — the same case `instance-sites-
+// unreadable` above set. RE-DERIVED by RUNNING this sweep and reading what it
+// PRINTED ("the committed corpus grew to 135 scenario(s), pinned at 134") and
+// the actor-set line, which still says 15, never by adding one.
+const PIN_TOTAL_SCENARIOS = 135;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

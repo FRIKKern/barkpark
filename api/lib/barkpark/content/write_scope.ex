@@ -315,7 +315,24 @@ defmodule Barkpark.Content.WriteScope do
   # read via that scope. Refusal
   # degrades to nothing existing; a shared-layer write degrades to everyone
   # holding it.
-  defp resolve_write_scope(opts) do
+  #
+  # PUBLIC, deliberately (task-893cf2751bac7428). A READ that must scan exactly
+  # the rows a WRITE through these same opts will land among cannot resolve the
+  # tenant by a second, independent rule: `Barkpark.Tasks.Dedup`'s candidate scan
+  # read `opts[:workspace_id]` RAW, so on a path that threads no tenant (the
+  # GitHub webhook pipeline carries no scope plug) it handed `nil` to
+  # `Content.Scope.scope_to_workspace/3` — whose nil arm fails CLOSED — and
+  # scanned zero rows while the write beside it landed in the seeded Default
+  # resolved HERE. The gate reported success having never run. Binding the read
+  # to this function is what keeps the two halves of a find-or-create looking at
+  # one tenant. It RESOLVES; it never widens: every arm below yields a single
+  # workspace id (or nil, when no Default is seeded) or a typed refusal — never
+  # a cross-tenant set. Dedup calls it ONLY for the key-absent case, so the
+  # `:shared_only` arm below is not on that caller's path.
+  @doc false
+  @spec resolve_write_scope(keyword()) ::
+          {:ok, {binary() | nil, binary() | nil}} | {:error, term()}
+  def resolve_write_scope(opts) do
     opt_ws = Keyword.get(opts, :workspace_id)
     opt_proj = Keyword.get(opts, :project_id)
 
