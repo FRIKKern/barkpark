@@ -1219,10 +1219,12 @@ export function bannedSourceCitationErrors(src, file) {
   return errs;
 }
 
-// The files E11 scans: every top-level *.js|*.mjs|*.css plus __preview__/* of
-// the same extensions. Read from the directory (never a hardcoded list) so a
-// NEW harness file is covered the moment it lands — a fixed list is the
-// enumerate-don't-ban shape bp-honest-gates D5 forbids.
+// The files E11 scans: every TEXT file anywhere under the scan root. Both
+// halves of that sentence are predicates — the shape half (is it text?) and the
+// reach half (is it under the root?) — because a list of extensions and a list
+// of directory arms are the same enumerate-don't-ban shape bp-honest-gates D5
+// forbids, and BOTH of them rotted here, in that order. A new harness file, and
+// now a whole new harness SUBDIRECTORY, is covered the moment it lands.
 //
 // WHY .css IS IN THE SET, AND WHY THE REGEX IS NOT THE LEVER (charter D292).
 // This scan read `/\.m?js$/` only — 15 files, and app.css was not one of them —
@@ -1296,32 +1298,76 @@ function isTextFile(abs) {
   }
 }
 
+// THE REACH IS A RULE TOO, NOT A LIST OF ARMS (the second half of the same
+// defect). The predicate above fixed WHAT SHAPE of file is admitted; this walk
+// fixes WHERE the gate is allowed to look. It used to be exactly two
+// readdir calls — the scan root and `__preview__/` — which is an ENUMERATION
+// wearing a derivation's clothes: it covers the directories that existed the
+// day it was written, and every subdirectory that lands afterwards is
+// structurally unreachable at any regex width and at any text predicate. That
+// is not a hypothetical. While the text-shape widening was in flight, this tree
+// already held nested fixture subtrees under `__preview__/fixtures/` (each with
+// its own recorded baseline and proof script), a top-level `__fixtures__/`, and
+// `fonts/` — none of which either arm descends into. A two-arm list had already
+// failed before the change that introduced it finished merging.
+//
+// The replacement asks the only question REACH needs answered — IS THIS FILE
+// UNDER THE SCAN ROOT? — and answers it by descending, so a new subdirectory is
+// covered the day it lands rather than the day someone remembers to add an arm.
+//
+// EVERY EXCLUSION IS A PREDICATE WITH GROUNDS. There is no name list here, and
+// deliberately none for `node_modules/` or build output: neither exists under
+// this root, and a named exclusion for a thing that is not there can never fire
+// — E19's own shape (a waiver that absolves nothing), one level up at the
+// directory. The three that DO fire are properties of the entry itself:
+//
+//   1. NOT A REGULAR FILE (after directories are descended). A socket, FIFO or
+//      device node carries no reviewable comment and opening one can BLOCK the
+//      gate forever. Judged from the dirent, never from the name.
+//   2. A SYMBOLIC LINK, of either kind. A link can point outside the tree
+//      (scanning files this gate does not own) or back into it (an unbounded
+//      walk, and the same file counted under two names, so one repair reads as
+//      two). A link TARGET that genuinely lives under this root is still
+//      scanned — under its own real path, exactly once.
+//   3. BINARY BYTES — the NUL sniff above. Unchanged, and it is what keeps the
+//      newly reachable `fonts/*.woff2` out by their CONTENT rather than by
+//      their extension.
+//
+// Re-derive the whole set, and what the widening cost, with
+// `node __css_check.mjs --citation-inventory` — never from a number quoted here.
 function citationScanFiles(root = dir) {
   const out = [];
   if (!fs.existsSync(root)) return out;
-  const take = (base, rel) => {
-    const abs = path.join(base, rel.split("/").pop());
-    let st;
+  const walk = (absDir, rel) => {
+    let entries;
     try {
-      st = fs.statSync(abs);
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
     } catch {
       return;
     }
-    if (!st.isFile()) return;
-    if (!isTextFile(abs)) return;
-    out.push(rel);
+    for (const ent of entries) {
+      if (ent.isSymbolicLink()) continue; // exclusion 2
+      const abs = path.join(absDir, ent.name);
+      const childRel = rel ? path.join(rel, ent.name) : ent.name;
+      if (ent.isDirectory()) {
+        walk(abs, childRel);
+        continue;
+      }
+      if (!ent.isFile()) continue; // exclusion 1
+      if (!isTextFile(abs)) continue; // exclusion 3
+      out.push(childRel);
+    }
   };
-  for (const f of fs.readdirSync(root)) take(root, f);
-  const pv = path.join(root, "__preview__");
-  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) take(pv, path.join("__preview__", f));
+  walk(root, "");
   return out.sort();
 }
 
 // E17 — THE SCAN SET IS A CLAIM, AND NOTHING CHECKED IT (charter D41 /
-// bp-honest-gates D5). citationScanFiles() derives its list from two readdir
-// calls and one extension filter, and ALL THREE can silently produce nothing: a
-// renamed or moved `__preview__/`, an extension pattern edited to a shape no
-// file matches, a scan rooted somewhere else. E11 then iterates an empty list
+// bp-honest-gates D5). citationScanFiles() derives its list from one recursive
+// walk under one root, filtered by one text predicate, and every part of that
+// can silently produce nothing: a renamed or moved `__preview__/`, a predicate
+// edited to a shape no file matches, a descent quietly flattened back to a
+// readdir of the root, a scan rooted somewhere else. E11 then iterates an empty list
 // and the gate prints its clean census — a green from a scan that read NOTHING
 // is byte-identical to a green from a scan that read everything. That is the
 // vacuous-instrument shape this whole file exists to forbid, sitting inside the
@@ -1358,6 +1404,22 @@ function citationScanSetRefusals(files, root = dir) {
       `E17 ${root}  citation scan set has ZERO __preview__/ members — the preview-harness arm ` +
         `of citationScanFiles() collapsed (a moved or renamed directory reads here exactly like ` +
         `a clean one). Re-derive with: node __css_check.mjs --citation-inventory`,
+    );
+  // THE DESCENT ARM. The reach half of the derivation collapses in a way the
+  // two arms above cannot see: flatten the walk back to a readdir of each arm's
+  // own directory and every member is still present at depth 0 and depth 1, so
+  // both totals stay healthy while every nested fixture subtree — its recorded
+  // baselines, its proof scripts — silently stops being scanned. A set with no
+  // member below the first level is either that collapse or a tree with no
+  // nested content at all; both are worth a named refusal rather than a clean
+  // census, for the same reason the arms above are.
+  if (!files.some((f) => f.split(path.sep).length > 2))
+    out.push(
+      `E17 ${root}  citation scan set has ZERO members below the first level — the recursive ` +
+        `descent in citationScanFiles() collapsed (a walk flattened back to a readdir per arm ` +
+        `reads here exactly like a tree with no subdirectories), so every nested fixture ` +
+        `subtree went unscanned while E11 still reported a count. ` +
+        `Re-derive with: node __css_check.mjs --citation-inventory`,
     );
   const self = path.basename(fileURLToPath(import.meta.url));
   if (root === dir && !files.includes(self))
@@ -1494,8 +1556,9 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
     for (const e of refusals) console.error("FAIL  " + e);
     console.log(
       `__css_check --citation-inventory ${root}: ${files.length} file(s) scanned ` +
-        `(${files.filter((f) => !f.startsWith(PV)).length} top-level, ` +
-        `${files.filter((f) => f.startsWith(PV)).length} __preview__/), ` +
+        `(${files.filter((f) => !f.includes(path.sep)).length} at the root, ` +
+        `${files.filter((f) => f.startsWith(PV)).length} under __preview__/, ` +
+        `${files.filter((f) => f.split(path.sep).length > 2).length} below the first level), ` +
         `${shippedTotal} shipped-E11 hit(s), ${ruledTotal} ruled-alternation hit(s), ` +
         `${refusals.length} E17 refusal(s)`,
     );

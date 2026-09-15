@@ -127,17 +127,34 @@ export function scanSites(rel, src) {
     const L = lines[i];
 
     // 1. readdirSync(<expr>) — the construct that hides the wave-16 edge.
+    //
+    // A READDIR THAT DESCENDS IS A TREE SITE, NOT A DIR SITE. `dir` means
+    // DIRECT CHILDREN ONLY (see `matches`), so modelling a recursive walk as
+    // `dir` understates the instrument's reach by every level below the first —
+    // the gate then fails to compose when a file in a nested subtree changes,
+    // and the miss is silent because a narrower map still produces a green run.
+    // The signal is the walk's own two halves, read locally and never from the
+    // name: the call asks for `withFileTypes` (it needs to classify entries)
+    // AND an `.isDirectory()` test appears within the following lines (it acts
+    // on the classification). One without the other is not a descent: a bare
+    // withFileTypes readdir may only be filtering regular files, and an
+    // isDirectory() elsewhere in the file may belong to a different call.
     for (const m of L.matchAll(/readdirSync\(\s*([^),]+)/g)) {
       const e = m[1].trim();
-      if (/^(dir|root|HERE|__dirname|BASE|DIR)$/.test(e)) add("dir", dirOf, at(i));
+      const descends =
+        /withFileTypes/.test(L.slice(m.index)) && /\.isDirectory\(\)/.test(lines.slice(i, i + 12).join("\n"));
+      const kind = descends ? "tree" : "dir";
+      if (/^(dir|root|HERE|__dirname|BASE|DIR)$/.test(e)) add(kind, dirOf, at(i));
       else if (/^["'`]/.test(e)) {
         const lit = e.slice(1, -1);
-        add("dir", lit.startsWith("/") ? lit : path.posix.join(dirOf, lit), at(i));
+        add(kind, lit.startsWith("/") ? lit : path.posix.join(dirOf, lit), at(i));
       } else {
         // path.join(dir, "sub") / join(root, "sub")
         const j = e.match(/join\(\s*(?:dir|root|HERE|__dirname|BASE|DIR)\s*,\s*["'`]([^"'`]+)/);
-        if (j) add("dir", path.posix.join(dirOf, j[1]), at(i));
-        else add("dir", dirOf, at(i)); // conservative: an unresolved readdir over its own tree
+        if (j) add(kind, path.posix.join(dirOf, j[1]), at(i));
+        // conservative: an unresolved readdir over its OWN tree. A descending
+        // one is that tree; a flat one is its top level.
+        else add(kind, dirOf, at(i));
       }
     }
     // 1b. `const pv = path.join(dir, "sub")` feeding a readdir two lines down.
