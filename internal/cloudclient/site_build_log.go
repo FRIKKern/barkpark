@@ -1,8 +1,10 @@
 package cloudclient
 
-// site_build_log.go is the client half of the operator read path for the black
-// box recorder: GET /v1/sites/:id/deployments/:dep_id/build-log, added by
-// dr-bl-recorder-http-read-path (cloud PR #16847, merged 2026-09-08).
+// site_build_log.go is the client half of the TEAM read path for the black box
+// recorder: GET /v1/sites/:id/deployments/:dep_id/build-log, added by
+// dr-bl-recorder-http-read-path (cloud PR #16847, merged 2026-09-08) and
+// re-pointed at the team door by dr-w19-site-build-log-is-operator-only (cloud
+// PR #17693, merged 2026-09-11) — see SiteBuildLog below for the live audience.
 //
 // WHY THIS ROUTE DOES NOT GO THROUGH cloudError FOR EVERY NON-2xx. The whole
 // point of `BarkparkCloud.Sites.BuildLog` is that its answers are separated BY
@@ -22,8 +24,11 @@ package cloudclient
 // them into a bare *CloudRefusal would throw away exactly the distinctions the
 // server went out of its way to make. So the documented set decodes into a
 // record that carries its own HTTPStatus, and only the UNdocumented statuses —
-// notably the 401/403 this operator-gated route answers to a non-operator — take
-// the normal refusal path, where the auth ladder can still read them.
+// notably the 401 an unauthenticated caller gets and the 403 a PAT without the
+// "read" ability gets (`Auth.require_ability/2`) — take the normal refusal path,
+// where the auth ladder can still read them. A FOREIGN team is deliberately NOT
+// in that set: it is a documented 404, indistinguishable from a deployment that
+// does not exist.
 //
 // THE BYTES ARE NOT HERE. The control plane cannot serve the recorded log bytes
 // (the box refuses them: the build env file carries BARKPARK_TOKEN= in
@@ -116,9 +121,24 @@ func siteBuildLogDocumented(status int) bool {
 }
 
 // SiteBuildLog reads the recorder's durable record for ONE deployment, BY
-// DEPLOYMENT ID (Bearer, operator-gated). The site scoping is part of the URL by
-// design: a deployment that is not this site's is the same 404 as one that does
-// not exist, matching GET /v1/sites/:id/deployments/:dep_id exactly.
+// DEPLOYMENT ID.
+//
+// AUDIENCE: any member of the OWNING TEAM. The router wraps the route in
+// `with_team_site(conn, {:ability, "read"}, ...)` — the same door its sibling
+// GET /v1/sites/:id/deployments/:dep_id uses — which accepts a browser SESSION
+// or a Bearer PAT carrying the "read" ability, and this client sends the latter.
+// It is NOT gated on the platform-operator allowlist. It shipped behind
+// `Auth.require_platform_operator`, whose `:platform_admin_emails` allowlist is
+// empty and unsettable on prod, so the route answered ZERO accounts until cloud
+// PR #17693 re-pointed it at the team door. That platform gate survives only on
+// the SIBLING bytes route (.../build-log/bytes, whose client half is
+// `site_build_log_bytes.go`), which serves the un-scrubbed bytes THIS route has
+// never carried.
+//
+// The wrapper resolves the site with `Registry.get_team_site/2`, so a site — or
+// a deployment — belonging to ANOTHER team is a 404, not a 403: the same answer
+// as one that does not exist. The site scoping is likewise part of the URL by
+// design, matching GET /v1/sites/:id/deployments/:dep_id exactly.
 //
 // A documented answer comes back as a record with HTTPStatus set and a nil
 // error, INCLUDING the 404/409/410/502 ones. err is non-nil only for a transport
