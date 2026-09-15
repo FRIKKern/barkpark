@@ -174,14 +174,14 @@ type Barkpark struct {
 	//     box at a version (empty → unpinned).
 	//   - Channel — the release channel the box rides ("prod" / "staging").
 	//     Empty until the CP emits it.
-	UpdateRunningRelease    string `json:"update_running_release"`
-	UpdateLatestRelease     string `json:"update_latest_release"`
+	UpdateRunningRelease    string  `json:"update_running_release"`
+	UpdateLatestRelease     string  `json:"update_latest_release"`
 	UpdateCheckedAt         *string `json:"update_checked_at"`
-	UpdateUnavailableReason string `json:"update_unavailable_reason"`
-	AutoupdateEnabled       *bool  `json:"autoupdate_enabled"`
-	AutoupdatePaused        bool   `json:"autoupdate_paused"`
-	PinnedRelease           string `json:"pinned_release"`
-	Channel                 string `json:"channel"`
+	UpdateUnavailableReason string  `json:"update_unavailable_reason"`
+	AutoupdateEnabled       *bool   `json:"autoupdate_enabled"`
+	AutoupdatePaused        bool    `json:"autoupdate_paused"`
+	PinnedRelease           string  `json:"pinned_release"`
+	Channel                 string  `json:"channel"`
 
 	// COMMIT DISTANCE (dr-w24-s2) — the control plane's own measurement of the
 	// commit the box actually serves, which is a DIFFERENT question from

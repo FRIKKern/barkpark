@@ -1439,7 +1439,7 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		"url": true, "status": true, "bucket": true, "rank": true, "detail": true,
 		"health_status": true, "agent_status": true, "update_state": true,
 		"suspended": true, "update_running_release": true, "update_latest_release": true,
-		"commit_ancestry": true,
+		"commit_ancestry":            true,
 		"commit_distance_checked_at": true, "autoupdate_paused": true,
 		"pinned_release": true, "channel": true,
 		// dr-w5-followup: the 5xx tri-state node — ALWAYS present, and its
