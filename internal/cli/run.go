@@ -674,6 +674,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		out.errf("bp: %s", note)
 	}
 
+	// WHICH END the `task events` page came from. A bare `--limit` on the
+	// id-ASC keyset feed returns the OLDEST N events of the whole backlog, so a
+	// search for something recent answers zero — and a zero here is
+	// indistinguishable from a genuine absence. Fires only when --since was left
+	// at its default AND the server says has_more, i.e. only when the window
+	// really did sit at the start of history with newer events behind it.
+	// stderr only, so `-o json` stays byte-identical (tasks_events_window.go).
+	if note := taskEventsWindowAdvisory(cmd, req.url, status, respBody); note != "" {
+		out.errf("bp: %s", note)
+	}
+
 	// The claim lives at a DIFFERENT path per read verb and the wrong one never
 	// errors: `.doc.claim` is correct for `task get` and absent from every flat
 	// `ls`/`ready`/`prime` row, so a get-shaped reader answers UNCLAIMED on 30

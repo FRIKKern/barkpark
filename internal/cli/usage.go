@@ -272,6 +272,17 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("%s", line)
 	}
 
+	// WHICH END `bp task events --limit N` READS. The server's summary is
+	// accurate ("omit --since to replay from the start") and still does not
+	// reach the reader who types `--limit 200` wanting to know what JUST
+	// happened: they get the two hundred OLDEST events in the ledger, zero
+	// recent hits, and no error. The generic truncation notice cannot cover it
+	// — that one is gated on cmd.Paginated and this feed is keyset, not offset
+	// (tasks_events_window.go).
+	for _, line := range taskEventsHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
 	// `--match` is honoured entirely client-side (see tasks_match.go), so the
 	// manifest cannot declare it and the flags block above cannot show it. A
 	// flag nobody can discover is a flag nobody uses — and this one exists
