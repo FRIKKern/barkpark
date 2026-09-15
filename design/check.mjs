@@ -358,16 +358,27 @@ if (chromeFromSource) {
 // NEGATIVE CONTROLS, in-process: each way of seeing nothing must THROW rather
 // than hand back an empty ladder. Without these the refusal itself can rot and
 // arm 0 quietly becomes theatre.
-for (const [label, arg] of [
-  ["a missing family", {}],
-  ["a non-object family", { type: { chrome: 7 } }],
-  ["a zero-rung family", { type: { chrome: { _note: "prose only" } } }],
-  ["an ambiguous (tied-size) ladder", { type: { chrome: { a: { size: 12 }, b: { size: 12 } } } }],
-]) {
+//
+// THE FAMILIES ARE NOT WRITTEN HERE ANY MORE. They used to be a four-element
+// literal in this file while web/__tests__/type-ladder-emitted.test.ts carried
+// its own THREE-element one (it had no non-object arm) and design/validate.mjs'
+// chromeLadderAscending had none at all — three implementations of ONE refusal
+// contract with three different, drifting ideas of what must be refused. The
+// list now lives once, in design/ladder-refusal-fixture.json, and all three are
+// driven against it (task-833f347eaa78a2a5). The conformance table, and the two
+// measured grounds on which the three are deliberately NOT one function, are in
+// design/ladder-refusal-conformance.test.mjs.
+const ladderFixture = JSON.parse(readFileSync(join(repoRoot, "design/ladder-refusal-fixture.json"), "utf8"));
+if (ladderFixture.sentinel !== LADDER_REFUSE)
+  webTypeFail(`  Part C2 FAIL: design/ladder-refusal-fixture.json declares sentinel "${ladderFixture.sentinel}" but emit.mjs exports LADDER_REFUSE="${LADDER_REFUSE}"`);
+if (!Array.isArray(ladderFixture.cases) || ladderFixture.cases.length < 4)
+  webTypeFail(`  Part C2 FAIL: design/ladder-refusal-fixture.json carries ${(ladderFixture.cases || []).length} malformed case(s), not the four families — this negative half would prove almost nothing`);
+for (const c of ladderFixture.cases || []) {
+  const arg = c.kind === "omit" ? { type: {} } : { type: { chrome: c.family } };
   let refused = false;
   try { typeLadderFrom(arg, "chrome"); } catch (e) { refused = String(e.message).includes(LADDER_REFUSE); }
   if (!refused)
-    webTypeFail(`  Part C2 FAIL: typeLadderFrom did not refuse ${label} with "${LADDER_REFUSE}" — the ladder derivation can go blind and still report a pass`);
+    webTypeFail(`  Part C2 FAIL: IMPLEMENTATION "emit" (typeLadderFrom) did not refuse ladder-refusal-fixture.json case "${c.id}" with "${LADDER_REFUSE}" — the ladder derivation can go blind and still report a pass. ${c.why}`);
 }
 // arm 1 — every emitted step carries tokens.json's three numbers, verbatim.
 const emittedStep = (family, step) => {
