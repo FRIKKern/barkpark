@@ -614,6 +614,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"blockquote", "Blockquote"},
          {"divider", "Divider"},
          {"section", "Section"},
+         {"expandable", "Expandable"},
          {"steps", "Steps"},
          {"tabs", "Tabs"}
        ]},
@@ -631,13 +632,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
          {"table", "Table"},
          {"terminal", "Terminal"},
          {"stage", "Stage"},
+         {"note", "Note"},
          {"diagram", "Diagram"},
          {"figure", "Figure"},
          {"equation", "Equation"},
          {"route", "Route"},
          {"toc", "Table of contents"},
          {"criteria-progress", "Criteria progress"},
-         {"gauge-list", "Gauge list"}
+         {"gauge-list", "Gauge list"},
+         {"bar-chart", "Bar chart"}
        ]},
       {"Technical",
        [
@@ -667,6 +670,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
        [
          {"field-image", "Image"},
          {"field-reference", "Reference"},
+         {"paper-links", "Paper links"},
          {"video", "Video"}
        ]},
       {"Structured",
@@ -2375,6 +2379,77 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </p>
           <% end %>
         </div>
+      <% "notes" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-notes-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-notes-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.notes_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <details id={"notes-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Edit notes</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form id={"notes-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-notes-editor">
+                    <input type="hidden" name="block_id" value={@id} />
+                    <input type="hidden" name="notes-count" value={length(state.items)} />
+                    <%= for {item, index} <- Enum.with_index(state.items) do %>
+                      <%= for {field, label, value} <- [{"label", "Label", item.label}, {"lead", "Lead (optional)", item.lead}, {"body", "Body", item.body}] do %>
+                        <label class="bp-paper-edit-fieldlabel" for={"notes-#{index}-#{field}-#{@id}"}><%= "Note #{index + 1} #{label}" %></label>
+                        <textarea id={"notes-#{index}-#{field}-#{@id}"} name={"notes-#{index}-" <> field}
+                          rows={if field == "body", do: 3, else: 1}
+                          class="bp-paper-edit-text" phx-hook="BarkparkPaperAutoSize"><%= value %></textarea>
+                      <% end %>
+                    <% end %>
+                  </form>
+                </div>
+              </details>
+            <% {:error, _} -> %>
+              <details id={"notes-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Read-only notes</summary>
+                <div class="bp-paper-contextual-panel">
+                  <p class="bp-paper-edit-readonly">These notes have content that cannot be edited safely here. Their original content is preserved.</p>
+                </div>
+              </details>
+          <% end %>
+        </div>
+      <% "note" -> %>
+        <div class="bp-paper-contextual-editor" data-test-id="paper-note-contextual-editor">
+          <div class="bp-paper-contextual-preview" data-test-id="paper-note-preview">
+            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+          </div>
+          <%= case Blocks.note_form_state(@block) do %>
+            <% {:ok, state} -> %>
+              <details id={"note-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Edit note</summary>
+                <div class="bp-paper-contextual-panel">
+                  <form id={"note-form-" <> @id} class="bp-paper-edit-form"
+                    phx-submit="paper-edit-block" phx-change="paper-block-autosave"
+                    phx-debounce="500" data-test-id="paper-note-editor">
+                    <input type="hidden" name="block_id" value={@id} />
+                    <%= for {field, label, value} <- [{"label", "Label", state.label}, {"lead", "Lead (optional)", state.lead}, {"body", "Body", state.body}] do %>
+                      <label class="bp-paper-edit-fieldlabel" for={"note-#{field}-#{@id}"}><%= label %></label>
+                      <textarea id={"note-#{field}-#{@id}"} name={"note-" <> field}
+                        rows={if field == "body", do: 3, else: 1}
+                        class="bp-paper-edit-text" phx-hook="BarkparkPaperAutoSize"><%= value %></textarea>
+                    <% end %>
+                  </form>
+                </div>
+              </details>
+            <% {:error, _} -> %>
+              <details id={"note-controls-" <> @id} class="bp-paper-contextual-controls"
+                phx-mounted={JS.ignore_attributes("open")}>
+                <summary class="bp-paper-contextual-toggle">Read-only note</summary>
+                <div class="bp-paper-contextual-panel">
+                  <p class="bp-paper-edit-readonly">This note has content that cannot be edited safely here. Its original content is preserved.</p>
+                </div>
+              </details>
+          <% end %>
+        </div>
       <% "stage" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-stage-contextual-editor">
           <%= case Blocks.stage_form_state(@block) do %>
@@ -3428,7 +3503,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <label class="bp-paper-edit-fieldlabel">
                   Layout
                   <input type="text" name="layout" class="bp-paper-edit-text"
-                         value={Map.get(@block, "layout", "")} />
+                         value={Blocks.contextual_optional_value(@block, "layout")} />
                 </label>
 
                 <fieldset
@@ -4180,17 +4255,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <input type="hidden" name="block_id" value={@id} />
           <input type="hidden" name="bar-count" value={length(Map.get(@block, "bars", []))} />
           <label class="bp-paper-edit-fieldlabel">
-            Title
-            <input type="text" name="title" class="bp-paper-edit-text"
-                   value={Map.get(@block, "title", "")} />
-          </label>
-          <label class="bp-paper-edit-fieldlabel">
             Maximum
             <input type="number" name="max" class="bp-paper-edit-text" step="any"
-                   value={Map.get(@block, "max", "")} />
+                   value={Blocks.contextual_optional_value(@block, "max")} />
           </label>
           <label class="bp-paper-edit-check">
-            <input type="checkbox" name="values" value="true" checked={Map.get(@block, "values") == true} />
+            <input type="hidden" name="values" value="false" />
+            <input type="checkbox" name="values" value="true" checked={Blocks.strict_boolean_field?(@block, "values")} />
             Show values
           </label>
           <div :for={{bar, index} <- Enum.with_index(Map.get(@block, "bars", []))}

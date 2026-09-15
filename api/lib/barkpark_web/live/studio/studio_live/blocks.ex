@@ -381,6 +381,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def stage_form_state(_block), do: {:error, :malformed_stage}
 
   @doc false
+  def note_form_state(%{"type" => "note", "id" => id} = block) when is_binary(id) do
+    if String.trim(id) != "",
+      do: note_item_form_state(block),
+      else: {:error, :malformed_note}
+  end
+
+  def note_form_state(_block), do: {:error, :malformed_note}
+
+  @doc false
+  def notes_form_state(%{"type" => "notes", "id" => id, "items" => items})
+      when is_binary(id) and is_list(items) and items != [] do
+    if String.trim(id) != "" do
+      Enum.reduce_while(items, {:ok, []}, fn item, {:ok, states} ->
+        if is_map(item) and not is_struct(item) do
+          case note_item_form_state(item) do
+            {:ok, state} -> {:cont, {:ok, [state | states]}}
+            _ -> {:halt, {:error, :malformed_notes}}
+          end
+        else
+          {:halt, {:error, :malformed_notes}}
+        end
+      end)
+      |> case do
+        {:ok, states} -> {:ok, %{items: Enum.reverse(states)}}
+        error -> error
+      end
+    else
+      {:error, :malformed_notes}
+    end
+  end
+
+  def notes_form_state(_block), do: {:error, :malformed_notes}
+
+  @doc false
   # Build the patch map for a block from the submitted form params. Only the
   # editable field(s) for that block type are included; `id`/`type` are locked
   # by patch.ex regardless. Mirrors the EXACT block shapes in
@@ -522,6 +556,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  def build_block_patch(%{"type" => "notes"} = block, params) do
+    case notes_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
+  def build_block_patch(%{"type" => "note"} = block, params) do
+    case note_patch(block, params) do
+      {:ok, patch} -> patch
+      {:error, _reason} -> %{}
+    end
+  end
+
   def build_block_patch(%{"type" => "stage"} = block, params) do
     case stage_patch(block, params) do
       {:ok, patch} -> patch
@@ -590,7 +638,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     %{}
     |> put_paper_links_text(params, "title")
     |> put_paper_links_text(params, "description")
-    |> put_optional_patch(params, "layout")
+    |> put_contextual_optional(block, params, "layout")
     |> put_paper_link_refs(block, params)
   end
 
@@ -603,10 +651,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   def build_block_patch(%{"type" => "bar-chart"} = block, params) do
+    # Unchecked checkboxes are omitted from whole forms, but an unrelated
+    # partial update must not be interpreted as a visibility toggle.
+    params =
+      if Map.has_key?(params, "bar-count"),
+        do: Map.put_new(params, "values", "false"),
+        else: params
+
     %{}
-    |> put_optional_number(params, "max")
-    |> put_optional_patch(params, "title")
-    |> Map.put("values", parse_bool(params["values"]))
+    |> put_contextual_optional(block, params, "max")
+    |> put_strict_boolean_form_field(block, params, "values")
     |> put_bar_chart_bars(block, params)
   end
 
@@ -688,6 +742,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def validate_block_patch(%{"type" => "terminal"} = block, params),
     do: terminal_patch(block, params)
+
+  def validate_block_patch(%{"type" => "notes"} = block, params),
+    do: notes_patch(block, params)
+
+  def validate_block_patch(%{"type" => "note"} = block, params),
+    do: note_patch(block, params)
 
   def validate_block_patch(%{"type" => "stage"} = block, params),
     do: stage_patch(block, params)
@@ -875,8 +935,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
         original
         |> ensure_map()
-        |> put_param(params, prefix <> "label", "", "label")
-        |> put_number_param(params, prefix <> "value", 0, "value")
+        |> put_form_param_preserving_shape(params, prefix <> "label", "label")
+        |> put_bar_chart_value(params, prefix <> "value")
       end)
       |> apply_bar_action(params["bar-action"])
 
@@ -884,6 +944,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   end
 
   defp put_bar_chart_bars(patch, _block, _params), do: patch
+
+  defp put_bar_chart_value(row, params, param) do
+    with {:ok, submitted} <- Map.fetch(params, param),
+         {:ok, original_number} <- parse_submitted_number(Map.get(row, "value")),
+         {:ok, submitted_number} <- parse_submitted_number(submitted),
+         true <- is_number(original_number) and original_number == submitted_number do
+      row
+    else
+      _ -> put_number_form_field(row, row, params, param, "value")
+    end
+  end
 
   defp put_video_captions(patch, block, %{"caption-count" => count} = params) do
     captions = video_captions(block)
@@ -1258,6 +1329,165 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
       {:ok, patch}
     end
+  end
+
+  defp note_item_form_state(block) do
+    with {:ok, slots} <- card_slots(block),
+         {:ok, label} <- note_field_state(block, slots, "label", "label"),
+         {:ok, lead} <- note_field_state(block, slots, "lead", "lead"),
+         {:ok, primary} <- note_field_state(block, slots, "body", "text"),
+         {:ok, body} <- note_body_state(block, primary) do
+      {:ok,
+       %{
+         label: label.text,
+         lead: lead.text,
+         body: body.text,
+         carriers: %{"label" => label, "lead" => lead, "body" => body}
+       }}
+    else
+      _ -> {:error, :malformed_note}
+    end
+  end
+
+  # A note is plain text to the reader, but its authored carriers are not plain
+  # storage. Only one terminal is writable; retain the complete enclosing maps.
+  defp note_field_state(block, slots, field, flat) do
+    case Map.get(slots, field) do
+      value when is_nil(value) or (value == [] and field == "lead") ->
+        with {:ok, text} <- stage_scalar_text(Map.get(block, flat)) do
+          {:ok, %{text: text, carrier: {:flat, flat}}}
+        end
+
+      [%{"type" => "paragraph"} = paragraph] ->
+        with true <- note_no_rich_shadow?(paragraph, ~w(children text value)),
+             {:ok, text} <- note_inline_text(Map.get(paragraph, "content")) do
+          {:ok, %{text: text, carrier: {:slot, field, flat, paragraph}}}
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp note_body_state(%{"content" => [_ | _] = content} = block, primary) do
+    if primary.text == "" do
+      with {:ok, text} <- note_inline_text(content) do
+        {:ok, %{text: text, carrier: {:content, content}}}
+      end
+    else
+      # Clearing a primary must not resurrect a dormant reader fallback. Guard
+      # dual readable carriers, even equal twins, rather than rewrite both.
+      fallback = Barkpark.PortableDoc.Slots.note_body_text(Map.drop(block, ["text", "slots"]))
+      if fallback == "", do: {:ok, primary}, else: :error
+    end
+  end
+
+  defp note_body_state(_block, primary), do: {:ok, primary}
+
+  defp note_inline_text(value) when value in [nil, []], do: {:ok, ""}
+
+  defp note_inline_text([%{"type" => type} = leaf]) when type in ["text", "code"] do
+    with true <- note_no_rich_shadow?(leaf, ~w(children content text)) do
+      stage_scalar_text(Map.get(leaf, "value"))
+    end
+  end
+
+  defp note_inline_text([%{"children" => [_] = children} = wrapper]) do
+    with true <- note_no_rich_shadow?(wrapper, ~w(content text value)) do
+      note_inline_text(children)
+    end
+  end
+
+  defp note_inline_text(_), do: :error
+
+  defp note_no_rich_shadow?(map, fields),
+    do: Enum.all?(fields, &(Map.get(map, &1) in [nil, [], ""]))
+
+  defp note_patch(block, params) do
+    fields = ~w(note-label note-lead note-body)
+
+    valid? =
+      is_map(params) and Enum.any?(fields, &Map.has_key?(params, &1)) and
+        Enum.all?(fields, &(not Map.has_key?(params, &1) or is_binary(params[&1]))) and
+        not Enum.any?(Map.keys(params), fn key ->
+          is_binary(key) and String.starts_with?(key, "note-") and key not in fields
+        end)
+
+    with true <- valid?,
+         {:ok, state} <- note_form_state(block) do
+      {:ok, note_item_patch(block, params, state, "note-")}
+    else
+      _ -> {:error, :invalid_note_form}
+    end
+  end
+
+  defp notes_patch(block, params) when is_map(params) do
+    with {:ok, state} <- notes_form_state(block),
+         :ok <- validate_notes_params(params, length(state.items)) do
+      items =
+        Enum.zip(block["items"], state.items)
+        |> Enum.with_index()
+        |> Enum.map(fn {{item, item_state}, index} ->
+          Map.merge(item, note_item_patch(item, params, item_state, "notes-#{index}-"))
+        end)
+
+      {:ok, if(items === block["items"], do: %{}, else: %{"items" => items})}
+    end
+  end
+
+  defp notes_patch(_block, _params), do: {:error, :invalid_notes_form}
+
+  defp validate_notes_params(params, count) do
+    fields =
+      for index <- 0..(count - 1), field <- ~w(label lead body), do: "notes-#{index}-#{field}"
+
+    allowed = MapSet.new(["notes-count" | fields])
+
+    valid? =
+      exact_submitted_count?(params["notes-count"], count) and
+        Enum.any?(fields, &Map.has_key?(params, &1)) and
+        Enum.all?(fields, &(not Map.has_key?(params, &1) or is_binary(params[&1]))) and
+        not Enum.any?(Map.keys(params), fn key ->
+          is_binary(key) and String.starts_with?(key, "notes-") and
+            not MapSet.member?(allowed, key)
+        end)
+
+    if valid?, do: :ok, else: {:error, :invalid_notes_form}
+  end
+
+  defp note_item_patch(block, params, state, prefix) do
+    Enum.reduce(~w(label lead body), %{}, fn field, patch ->
+      carrier = state.carriers[field]
+
+      case Map.fetch(params, prefix <> field) do
+        {:ok, text} when text != carrier.text ->
+          note_field_patch(block, patch, carrier, text)
+
+        _ ->
+          patch
+      end
+    end)
+  end
+
+  defp note_field_patch(_block, patch, %{carrier: {:flat, flat}}, text),
+    do: Map.put(patch, flat, if(text == "" and flat != "text", do: nil, else: text))
+
+  defp note_field_patch(_block, patch, %{carrier: {:content, content}}, text),
+    do: Map.put(patch, "content", stage_put_inline(content, text))
+
+  defp note_field_patch(
+         block,
+         patch,
+         %{carrier: {:slot, field, flat, paragraph}, text: old},
+         text
+       ) do
+    updated = Map.put(paragraph, "content", stage_put_inline(paragraph["content"], text))
+    slots = Map.get(patch, "slots", block["slots"])
+    patch = Map.put(patch, "slots", Map.put(slots, field, [updated]))
+
+    if is_binary(block[flat]) and block[flat] == old,
+      do: Map.put(patch, flat, text),
+      else: patch
   end
 
   defp stage_scalar_text(nil), do: {:ok, ""}
@@ -3365,14 +3595,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     if Map.has_key?(params, param), do: Map.put(map, key, params[param] || default), else: map
   end
 
-  defp put_number_param(map, params, param, default, key) do
-    if Map.has_key?(params, param) do
-      Map.put(map, key, parse_number(params[param], default))
-    else
-      map
-    end
-  end
-
   defp put_if_fetched(map, params, key, default) do
     case Map.fetch(params, key) do
       {:ok, value} -> Map.put(map, key, value || default)
@@ -3384,33 +3606,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     if Map.has_key?(params, key), do: Map.put(map, key, value), else: map
   end
 
-  defp put_optional_number(map, params, key) do
-    if Map.has_key?(params, key) do
-      case params[key] do
-        value when value in [nil, ""] -> Map.put(map, key, nil)
-        value -> Map.put(map, key, parse_number(value, Map.get(map, key)))
-      end
+  # Compare the submitted control value with its source projection, not the raw
+  # JSON shape. Untouched blank/equivalent controls must not normalize metadata.
+  @doc false
+  def contextual_optional_value(%{"type" => "bar-chart"} = block, "max") do
+    case parse_submitted_number(Map.get(block, "max")) do
+      {:ok, value} when is_number(value) -> value
+      _ -> ""
+    end
+  end
+
+  def contextual_optional_value(%{"type" => "paper-links"} = block, "layout") do
+    case Map.get(block, "layout") do
+      value when is_binary(value) -> value
+      _ -> ""
+    end
+  end
+
+  defp put_contextual_optional(patch, block, params, key) do
+    with {:ok, submitted} <- Map.fetch(params, key),
+         {:ok, value} <- contextual_optional_input(key, submitted),
+         {:ok, original} <- contextual_optional_input(key, contextual_optional_value(block, key)),
+         false <- value == original do
+      Map.put(patch, key, value)
     else
-      map
+      _ -> patch
     end
   end
 
-  defp parse_number(value, _default) when is_integer(value) or is_float(value), do: value
+  defp contextual_optional_input("max", value) when is_binary(value),
+    do: parse_submitted_number(String.trim(value))
 
-  defp parse_number(value, default) when is_binary(value) do
-    case Integer.parse(value) do
-      {number, ""} ->
-        number
+  defp contextual_optional_input("max", value), do: parse_submitted_number(value)
 
-      _ ->
-        case Float.parse(value) do
-          {number, ""} -> number
-          _ -> default
-        end
-    end
-  end
+  defp contextual_optional_input("layout", value) when is_binary(value) or is_nil(value),
+    do: {:ok, optional_string(value)}
 
-  defp parse_number(_value, default), do: default
+  defp contextual_optional_input("layout", _value), do: :error
 
   defp parse_submitted_number(value) when value in [nil, ""], do: {:ok, nil}
   defp parse_submitted_number(value) when is_integer(value) or is_float(value), do: {:ok, value}
@@ -3477,23 +3709,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
       :error ->
         map
-    end
-  end
-
-  defp put_optional_patch(map, params, key) do
-    if Map.has_key?(params, key) do
-      case params[key] do
-        value when is_binary(value) ->
-          case String.trim(value) do
-            "" -> Map.put(map, key, nil)
-            trimmed -> Map.put(map, key, trimmed)
-          end
-
-        _ ->
-          Map.put(map, key, nil)
-      end
-    else
-      map
     end
   end
 
@@ -3583,6 +3798,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def new_block_id do
     "b-" <> (:crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false))
   end
+
+  @doc false
+  # Request-identified constructors seed the complete tree before any overrides.
+  def new_block_id(request_id) when is_binary(request_id) do
+    suffix =
+      request_id
+      |> then(&:crypto.hash(:sha256, &1))
+      |> binary_part(0, 9)
+      |> Base.url_encode64(padding: false)
+
+    "b-" <> suffix
+  end
+
+  def new_block_id(_request_id), do: new_block_id()
 
   # Resolve visible block bodies; step rows are containers, not block targets.
   @doc false
@@ -4033,6 +4262,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       "rows" => [%{"label" => "", "value" => 0, "note" => ""}]
     }
 
+  def default_block("paper-links", id),
+    do: %{
+      "id" => id,
+      "type" => "paper-links",
+      "title" => "Related papers",
+      "refs" => []
+    }
+
+  def default_block("expandable", id),
+    do: %{
+      "id" => id,
+      "type" => "expandable",
+      "summary" => "New details",
+      "open" => false,
+      "children" => [default_block("paragraph", id <> "-0")]
+    }
+
+  # Label sample data explicitly: these editable bars are not measured results.
+  # Omit max so the reader scales to the authored values as they change.
+  def default_block("bar-chart", id),
+    do: %{
+      "id" => id,
+      "type" => "bar-chart",
+      "values" => true,
+      "bars" => [
+        %{"label" => "Sample A", "value" => 10},
+        %{"label" => "Sample B", "value" => 5}
+      ]
+    }
+
   def default_block("steps", id) do
     row_id = id <> "-step-0"
 
@@ -4157,6 +4416,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   def default_block("columns", id),
     do: %{"id" => id, "type" => "columns", "columns" => [[], []]}
+
+  def default_block("note", id),
+    do: %{"id" => id, "type" => "note", "label" => "note", "text" => ""}
 
   def default_block("stage", id), do: %{"id" => id, "type" => "stage", "title" => "New stage"}
 

@@ -497,7 +497,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             {:error, form_validation_failed(socket, request_id)}
 
           {:error, :precondition_failed} ->
-            socket = socket |> sync_paper_edit_doc() |> push_canvas_echo(request_id)
+            socket =
+              socket
+              |> sync_paper_edit_doc()
+              |> push_canvas_echo(request_id)
+              |> push_task_previews()
+              |> push_block_renders()
 
             {:error,
              socket
@@ -1188,8 +1193,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> Enum.filter(&figure_block?/1)
         |> Enum.map(&figure_render/1)
 
+      # Singular notes may remain opaque when their rich carrier is not safely
+      # editable. Paint the canonical reader row without changing that admission.
+      note_renders =
+        render_blocks
+        |> Enum.filter(&(is_map(&1) and &1["type"] == "note"))
+        |> Enum.map(&note_render/1)
+
       renders =
-        (fleet_renders ++ technical_renders ++ figure_renders)
+        (fleet_renders ++ technical_renders ++ figure_renders ++ note_renders)
         |> Enum.reject(&(&1["block_id"] in [nil, ""]))
 
       push_event(socket, "bp:block-html", %{renders: renders})
@@ -1243,6 +1255,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       end
 
     %{"block_id" => Map.get(block, "id"), "html" => html}
+  end
+
+  @doc false
+  def note_render(block) do
+    %{
+      "block_id" => Map.get(block, "id"),
+      "source_block" => block,
+      "html" => Render.Components.note_item_html(block)
+    }
   end
 
   # Render one fleet block's reader HTML. A query-carrying task or data-viz block
@@ -1744,6 +1765,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   defp document_op_once(socket, doc, type, dataset, op) do
+    op = stable_request_op(op, op["request_id"])
     source = Map.get(op, @server_form_source)
     opts = Shared.hook_opts(socket) ++ [if_rev: op["if_rev"]]
 
@@ -2020,26 +2042,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> Map.put("request_id", meta["request_id"])
   end
 
-  # Server-authored structural ops mint a block id before this shared seam.
-  # Derive that id from the retry-stable request id so the exact facade sees
-  # the same payload after a lost acknowledgement.
+  # Constructors seed request-stable trees before overrides. Retain the parent
+  # ID guard here for server-minted ops; never remap client-authored identities.
   defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
     op
     |> Map.delete(@server_minted_block)
-    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+    |> Map.put("block", request_stable_block(block, request_id))
   end
 
   defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
 
-  defp request_block_id(request_id) do
-    suffix =
-      request_id
-      |> then(&:crypto.hash(:sha256, &1))
-      |> binary_part(0, 9)
-      |> Base.url_encode64(padding: false)
-
-    "b-" <> suffix
-  end
+  @doc false
+  def request_stable_block(block, request_id),
+    do: Map.put(block, "id", Blocks.new_block_id(request_id))
 
   # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).
   defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
