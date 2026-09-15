@@ -26511,7 +26511,17 @@
       '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
         (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
         '<div class="set-row-meta">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
-      '<div class="set-row-side"><span class="set-chip">' + esc(ROLE_LABELS[m.role] || m.role) + "</span>" +
+      // THE CHIP READS `targetRole`, NOT `m.role`
+      // (cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority).
+      // On every row but your own the two ARE the same string, so this changes
+      // nothing there. On the SELF row they can differ — a stale roster read, a
+      // role changed in another tab, a team switch mid-flight — and the chip
+      // used to name the ROSTER's rank while the two controls beside it had
+      // already been decided from `ctx.role`, the resolved team_authority the
+      // server actually compares against. One row cannot honestly assert two
+      // ranks: the chip now names the value its own controls were decided from,
+      // so the row is internally coherent whatever the roster says.
+      '<div class="set-row-side"><span class="set-chip">' + esc(ROLE_LABELS[targetRole] || targetRole) + "</span>" +
         actions + "</div></div>";
   }
 

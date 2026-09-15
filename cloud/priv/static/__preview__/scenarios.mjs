@@ -3294,6 +3294,19 @@ if (/[^a-z0-9]/.test(cruelMemberLocal)) {
 const teamMembersCruel = teamMembers.concat([
   { user_id: "usr_sol", email: cruelMemberEmail, role: "member", joined_at: tMinus(3 * 86400) },
 ]);
+// cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority — THE
+// DIVERGENCE THE CORPUS COULD NOT REACH. Every other roster fixture agrees with
+// its own me() envelope, so the acting user's row role and their resolved
+// `team_authority.role` were always the same string and NOTHING could tell you
+// which of the two a given line of the row was painted from. Here they DISAGREE:
+// the roster row for the acting user says "member" while the envelope's
+// team_authority says "owner" — the shape a stale roster read, a role changed in
+// another tab, or a team switch mid-flight actually produces on the wire.
+// DERIVED from `teamMembers` by map, never retyped: the disagreement is the ONE
+// field that moves, and the emails/ids/joined_at that every other assertion
+// stands on cannot drift apart from their originals.
+const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
+  mem.user_id === "usr_ada" ? Object.assign({}, mem, { role: "member" }) : mem);
 
 export const SCENARIOS = {
   loggedout: {
@@ -3786,6 +3799,28 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       members: teamMembersPeerOwner,
+      invitations: teamInvites,
+    },
+  },
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority: the
+  // acting OWNER whose OWN roster row says "member". memberRowHtml already
+  // decides BOTH controls on the self row from ctx.role (the resolved
+  // team_authority) and not from the row — that is correct, because the server
+  // compares against the actor's real authority — but nothing in the corpus
+  // could show it, and the chip beside those controls was reading the ROW. This
+  // is the fixture in which the two values differ, so the row can be judged on
+  // whether it is internally coherent instead of on a coincidence.
+  "members-self-role-drift": {
+    label: "Members (owner) — the SELF row's roster role DISAGREES with team_authority: chip and controls must name the same rank",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersSelfRoleDrift,
       invitations: teamInvites,
     },
   },

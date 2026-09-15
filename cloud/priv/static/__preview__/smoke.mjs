@@ -5115,6 +5115,74 @@ const EXPECTATIONS = {
         "them — got " + JSON.stringify(removeOffers));
     },
   },
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority.
+  // THE SELF ROW, JUDGED ON COHERENCE INSTEAD OF ON A COINCIDENCE.
+  // memberRowHtml (`grep -n "function memberRowHtml" cloud/priv/static/app.js`)
+  // decides both self-row controls from `ctx.role` — the resolved
+  // team_authority — because that is the value the server compares against. In
+  // every other corpus cell the actor's roster row carries the SAME string, so
+  // a chip painted from the ROW and a chip painted from the AUTHORITY rendered
+  // byte-identically and no instrument could tell which one the code read.
+  // This scenario is the fixture where they differ, so the question becomes
+  // answerable: the chip must name the rank the controls beside it were decided
+  // from, or the panel is telling a person two different things about one row.
+  "members-self-role-drift": {
+    what: "Members — the SELF row's chip names the rank its two controls were decided from (team_authority), not the stale roster role",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const panel = reg.get("members-body");
+      const body = panel.innerHTML || "";
+      const LABELS = { owner: "Owner", admin: "Admin", member: "Member" };
+      // THE DISAGREEMENT IS THE PRECONDITION, so it is asserted before anything
+      // is claimed about how it renders. A corpus edit that quietly re-aligned
+      // this roster with its envelope would leave every line below trivially
+      // true against a row that measures nothing — the exact vacuous green this
+      // fixture exists to end.
+      const scen = SCENARIOS["members-self-role-drift"];
+      const authority = scen.data.me.team_authority.role;
+      const selfRow = scen.data.members.find((m) => m.user_id === scen.data.me.user.id);
+      assert.ok(selfRow, "the fixture must carry a roster row for the acting user");
+      assert.notEqual(selfRow.role, authority,
+        "this scenario only measures anything while the SELF roster row DISAGREES with team_authority — " +
+        "roster says " + JSON.stringify(selfRow.role) + ", envelope says " + JSON.stringify(authority));
+      assert.ok(LABELS[selfRow.role] && LABELS[authority] && LABELS[selfRow.role] !== LABELS[authority],
+        "the two roles must carry DIFFERENT chip labels, or a chip read from either side would look the same");
+      // Slice the self row out of the rendered panel by its own markup. The
+      // chip is a <span>, which the DOM shim does not parse into a node, so it
+      // is read from the row's bytes — and an absent row, or a row with no
+      // chip, must REFUSE. An assertion over markup that never rendered is a
+      // green with no subject.
+      const rows = body.split('<div class="set-row">').slice(1);
+      const mine = rows.filter((r) => r.includes("(you)"));
+      assert.equal(mine.length, 1,
+        "exactly ONE row must be self-tagged (you) — the row this check is about; got " + mine.length +
+        " over " + rows.length + " rendered rows");
+      const row = mine[0];
+      assert.ok(row.includes(selfRow.email),
+        "the self-tagged row must be the acting user's; got: " + row.slice(0, 300));
+      const chip = /<span class="set-chip">([^<]*)<\/span>/.exec(row);
+      assert.ok(chip, "the self row rendered NO role chip — there is nothing for it to be coherent WITH; got: " + row.slice(0, 400));
+      // The controls state, in the markup, the value they were decided from:
+      // `data-role` is `targetRole`, which on the self row is ctx.role.
+      const changeCtl = /data-member-role="[^"]*" data-role="([^"]*)"/.exec(row);
+      assert.ok(changeCtl,
+        "the self row must carry the Change role control this coherence is about — an owner who is not the " +
+        "last owner may re-role themselves; got: " + row.slice(0, 400));
+      assert.ok(/data-member-remove="/.test(row),
+        "the self row must carry Remove too — this roster has no second owner problem to withhold it; got: " + row.slice(0, 400));
+      assert.equal(changeCtl[1], authority,
+        "the self row's controls must be decided from team_authority (" + authority + "), never from the roster row; got " +
+        JSON.stringify(changeCtl[1]));
+      // THE ROW ITSELF: one value, two places. The chip must name what the
+      // controls named.
+      assert.equal(chip[1], LABELS[changeCtl[1]],
+        "the self row's chip says " + JSON.stringify(chip[1]) + " while its own controls were decided from " +
+        JSON.stringify(changeCtl[1]) + " — the panel names one rank and offers another rank's controls on the SAME row");
+      assert.notEqual(chip[1], LABELS[selfRow.role],
+        "the self row's chip is still painted from the stale ROSTER role " + JSON.stringify(selfRow.role) +
+        " — the value nothing on this row was decided from");
+    },
+  },
   // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ─────────────────────
   // The crown surface, states-complete: rolling / halted / bounced / unreadable.
   "operator-console": {
