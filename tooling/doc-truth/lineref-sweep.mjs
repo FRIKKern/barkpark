@@ -936,6 +936,131 @@ function selftest() {
         );
       }
     }
+
+    // ── (o)(p)(q) DOC-LOCAL SHORTHAND ────────────────────────────────────────
+    // Long-form comment prose introduces a file by its full path once and then
+    // refers to it by bare basename. The grammar keeps only `<base>:<N>` for the
+    // shorthand, so the resolver used to match it against whatever TRACKED files
+    // share that basename and judge a line number written for a different file.
+    // Measured on main at 3e358f87f: 7 of 17 novel findings and 1 BASELINED
+    // entry were this one shape.
+    //
+    // THE THREE ARMS ARE A TRIPLE, AND ONLY THE TRIPLE PROVES ANYTHING.
+    //   (o) the shorthand is BOUND to the path the doc gave — silent,
+    //   (o-control) the SAME citation with the qualifying line REMOVED still
+    //       REDS, so the silence in (o) comes from the binding and not from the
+    //       checker having gone deaf to this citation shape,
+    //   (p) two different paths for one basename REFUSE rather than pick,
+    //   (q) a doc-local binding to a TRACKED file that genuinely cannot hold the
+    //       line still REDS — the binding is a resolver, never an amnesty.
+    //
+    // (o) alone would pass on a checker that simply stopped reporting bare
+    // stems, which is the failure this whole file exists to catch.
+    if (!amb) {
+      fails.push("(o) SETUP: shares (h)'s corpus pair and it was unavailable");
+    } else {
+      // A line no tracked candidate can hold, so the OLD resolver reported it
+      // stale against a namesake with the AMBIGUOUS-stem evidence string.
+      const beyond = Math.max(amb.longLines, amb.shortLines) + 1000;
+      // Deliberately synthetic and guaranteed untracked — `deps/` would work on
+      // a machine that has run `mix deps.get` and go vacuous on one that has
+      // not. The predicate under test is "the cited path is not a tracked file",
+      // which is a RULE; naming `deps/` would be a snapshot of one instance.
+      const vendored = `__lineref_selftest_vendor__/lib/${amb.base}`;
+
+      // (o) QUALIFIED THEN SHORTHANDED → silent.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${vendored}:${beyond}\` formats the error, so \`${amb.base}:${beyond}\`\n` +
+          "  # is the same file said twice.\n" +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const bound = linerefFindings([probeRel]);
+      if (bound.length !== 0) {
+        fails.push(
+          `(o) DOC-LOCAL: a bare \`${amb.base}:${beyond}\` that this same file had already ` +
+            `qualified as \`${vendored}\` produced ${bound.length} finding(s) — the shorthand is ` +
+            "being re-bound to a tracked namesake the comment never named: " +
+            (bound[0].evidence || ""),
+        );
+      }
+
+      // (o-control) THE SAME CITATION, UNQUALIFIED → must still RED. This is the
+      // arm that can differ from its subject: one line of context is the only
+      // difference between the two probes, and it must be the only difference in
+      // the verdict.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${amb.base}:${beyond}\` is the same file said twice.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const unbound = linerefFindings([probeRel]);
+      if (unbound.length === 0) {
+        fails.push(
+          `(o-control) UNQUALIFIED: a bare \`${amb.base}:${beyond}\` with NO path anywhere in the ` +
+            "file produced NO finding — so arm (o)'s silence proves nothing: the gate has stopped " +
+            "reporting this citation shape outright rather than resolving it.",
+        );
+      }
+
+      // (p) TWO PATHS, ONE BASENAME → REFUSE, never pick.
+      //
+      // Each explicit path gets its OWN comment line: the grammar reads at most
+      // one file token per span, so both on one line means the second is never
+      // seen as a citation and the doc looks singly-qualified — which is arm (q),
+      // not this one. It cost a red to find out; the split is load-bearing.
+      // The cited line must also be 2+ digits (the grammar's `\d{2,5}` cue), so
+      // a namesake shorter than ten lines cannot carry this arm — say so rather
+      // than let it pass on a citation that was never parsed.
+      if (amb.shortLines < 10) {
+        fails.push(
+          `(p) SETUP: ${amb.short} is ${amb.shortLines} lines, too short to cite at a 2-digit ` +
+            "line — the arm would pass on a span the grammar never classified",
+        );
+      } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${amb.long}:${amb.line}\` is one file.\n` +
+          `  # \`${amb.short}:10\` is a different file.\n` +
+          `  # \`${amb.base}:${beyond}\` does not say which.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      // Only the SHORTHAND's verdict is this arm's business. The two explicit
+      // citations are scaffolding and carry their own honest verdicts.
+      const refused = linerefFindings([probeRel]).filter((f) => f.raw.startsWith(amb.base + ":"));
+      if (refused.length !== 0) {
+        fails.push(
+          `(p) REFUSE: this file cites BOTH ${amb.long} and ${amb.short}, so the bare stem ` +
+            `\`${amb.base}\` names no one file — the resolver must refuse, not pick one and judge ` +
+            "a line against it: " + (refused[0].evidence || ""),
+        );
+      }
+      }
+
+      // (q) THE BINDING IS A RESOLVER, NOT AN AMNESTY. Qualify the stem to a
+      //     TRACKED file that genuinely cannot hold the cited line: still red.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${amb.long}:${beyond}\` is out of range, and so is \`${amb.base}:${beyond}\`.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const stillBites = linerefFindings([probeRel]);
+      if (stillBites.length === 0) {
+        fails.push(
+          `(q) NOT AN AMNESTY: \`${amb.base}:${beyond}\` bound by this file's own ` +
+            `\`${amb.long}\` (${amb.longLines} lines) cannot hold line ${beyond}, and produced NO ` +
+            "finding — doc-local binding has become a blanket pass for every shorthand citation.",
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -962,6 +1087,10 @@ function selftest() {
   process.stdout.write("  ok: (l) silent on PROSE — a number glued to a word, and a date inside the target's filename\n");
   process.stdout.write("  ok: (m) bites on a citation PAST EOF carrying no harvestable anchor at all\n");
   process.stdout.write("  ok: (n) silent on a citation whose only anchor is a HYPHENATED fragment of its own path\n");
+  process.stdout.write("  ok: (o) a bare stem this file already QUALIFIED binds to the path it gave\n");
+  process.stdout.write("  ok: (o-control) the SAME citation, unqualified, still REDS — (o) is a binding, not a blind spot\n");
+  process.stdout.write("  ok: (p) two paths for one basename REFUSE — `cannot resolve`, never a pick\n");
+  process.stdout.write("  ok: (q) a doc-local binding to a file that cannot hold the line still REDS\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
