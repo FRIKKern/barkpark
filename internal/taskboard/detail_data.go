@@ -72,6 +72,27 @@ import (
 // honest budget is snapshot-shaped. Rationale in full at snapshotFetchTimeout
 // (fetch.go).
 func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
+	// A bare, per-call corpus cache: no base, so the corpus GET is the same
+	// exhaustive walk it has always been. Every one-shot CLI verb (`bp task
+	// frontier` / `lint` / `next`, `bp cmux dispatch`) reaches the fetch through
+	// here and is therefore byte-identical to before. The board takes the
+	// incremental path via newSnapshotFetcher, which keeps its cache across the
+	// re-lists of one long-lived process.
+	return fetchSnapshotWith(c, &corpusCache{})
+}
+
+// newSnapshotFetcher returns a fetch seam that CARRIES a corpus cache, so
+// successive re-lists from one board can walk only the changed prefix
+// (corpus.go). One cache per fetcher — never a package global — so two boards,
+// or two tests, can never seed each other's corpus.
+func newSnapshotFetcher() func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+	cc := &corpusCache{}
+	return func(c *apiclient.Client) (Snapshot, DetailIndex, error) {
+		return fetchSnapshotWith(c, cc)
+	}
+}
+
+func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIndex, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotFetchTimeout)
 	defer cancel()
 	var (
@@ -93,7 +114,11 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		// window. listExhaustive records whether the walk actually reached the
 		// end — the fact mergeForward needs to tell "this row closed" from
 		// "this row rotated out of the window".
-		tasks, details, listExhaustive, listErr = fetchTaskPages(ctx, c, listFetchPath)
+		// The corpus GET walks the CHANGED PREFIX when it safely can and the
+		// whole cursor when it cannot (corpus.go); either way listExhaustive
+		// keeps its meaning — true only when the returned corpus is the whole
+		// world — so mergeForward's absence heuristic is unaffected.
+		tasks, details, listExhaustive, listErr = fetchTaskCorpus(ctx, c, cc, time.Now())
 	}()
 	go func() {
 		defer wg.Done()

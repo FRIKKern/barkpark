@@ -390,3 +390,82 @@ func TestASecondMutationIsSeenAfterTheFirst(t *testing.T) {
 		}
 	}
 }
+
+// TestIncrementalRelistStopsDownloadingTheWholeCorpus is the BUDGET half —
+// c0's mechanism in a hermetic fixture, so the client-side saving is pinned by
+// the suite and not only by a pty run against a live server.
+//
+// It is the exact counterpart of the liveness guards above: they red when the
+// re-list stops carrying changes, this one reds when the re-list goes back to
+// re-downloading everything. Neither alone is evidence; the pair is.
+func TestIncrementalRelistStopsDownloadingTheWholeCorpus(t *testing.T) {
+	l := newFakeLedger(t, 2500, 4096)
+	var armed []time.Duration
+	m := ledgerModel(l, &armed)
+
+	m = driveSnapshot(t, m, m.refetchCmd(false))
+	coldBytes, coldCalls := l.tally("tasks")
+	if coldBytes == 0 {
+		t.Fatal("the cold walk downloaded nothing — the fixture is not being read, so every number below is meaningless")
+	}
+
+	// One row moves. That is the whole delta.
+	l.mutate("t-2400", "MUTATED", time.Now().UTC())
+	m = driveSnapshot(t, m, m.refetchCmd(false))
+	warmBytes, warmCalls := l.tally("tasks")
+	delta := warmBytes - coldBytes
+	if got, ok := titleOf(m, "t-2400"); !ok || got != "MUTATED" {
+		t.Fatalf("the cheap re-list dropped the change: t-2400 = %q (present=%v)", got, ok)
+	}
+	// A full re-walk costs the cold price again. The incremental one costs one
+	// small page. The threshold is deliberately loose (a tenth) so this test
+	// pins the MECHANISM, not a byte count that drifts with the fixture.
+	if delta*10 > coldBytes {
+		t.Fatalf("re-list after a ONE-ROW change cost %d bytes against a %d-byte cold walk (%d calls cold, %d warm): the board is still re-downloading the whole corpus",
+			delta, coldBytes, coldCalls, warmCalls)
+	}
+	t.Logf("cold walk %d bytes over %d calls; re-list after one change %d bytes (%.2f%% of the walk)",
+		coldBytes, coldCalls, delta, 100*float64(delta)/float64(coldBytes))
+}
+
+// TestAFullResyncStillHappens pins the one thing the prefix walk cannot see: a
+// row that vanishes without a write. fullResyncEvery is the bound, and a base
+// older than it must NOT be answered incrementally.
+func TestAFullResyncStillHappens(t *testing.T) {
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	base := corpusBase{
+		tasks:      []Task{{DocID: "t-1", UpdatedAt: now.Add(-time.Hour)}},
+		watermark:  now.Add(-time.Hour),
+		exhaustive: true,
+		lastFull:   now.Add(-fullResyncEvery + time.Second),
+	}
+	if !incrementalUsable(base, now) {
+		t.Fatal("a base inside fullResyncEvery was refused: the cheapening never engages")
+	}
+	base.lastFull = now.Add(-fullResyncEvery)
+	if incrementalUsable(base, now) {
+		t.Fatalf("a base %v old was still answered incrementally: nothing would ever retire a row that vanished without a write", fullResyncEvery)
+	}
+	for _, c := range []struct {
+		name string
+		mut  func(*corpusBase)
+	}{
+		{"a non-exhaustive base", func(b *corpusBase) { b.exhaustive = false }},
+		{"an empty base", func(b *corpusBase) { b.tasks = nil }},
+		{"a base with no watermark", func(b *corpusBase) { b.watermark = time.Time{} }},
+		{"a base that never had a full walk", func(b *corpusBase) { b.lastFull = time.Time{} }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := corpusBase{
+				tasks:      []Task{{DocID: "t-1", UpdatedAt: now.Add(-time.Hour)}},
+				watermark:  now.Add(-time.Hour),
+				exhaustive: true,
+				lastFull:   now.Add(-time.Minute),
+			}
+			c.mut(&b)
+			if incrementalUsable(b, now) {
+				t.Fatalf("%s was accepted as an incremental base", c.name)
+			}
+		})
+	}
+}

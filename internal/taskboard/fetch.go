@@ -364,6 +364,7 @@ func getJSONAttempt(ctx context.Context, c *apiclient.Client, path string) ([]by
 	if int64(len(body)) > maxBoardFetchBytes {
 		return nil, false, &oversizeBodyError{Path: path, Limit: maxBoardFetchBytes}
 	}
+	instrRecord(path, len(body))
 	if resp.StatusCode != http.StatusOK {
 		retry := resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599
 		return nil, retry, &httpStatusError{Path: path, StatusCode: resp.StatusCode, Hint: bodyHint(body)}
