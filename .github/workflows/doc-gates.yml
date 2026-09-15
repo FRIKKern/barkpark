@@ -114,6 +114,15 @@ on:
       # no workflow at all — a regression test nobody runs is a comment with a
       # process cost, so it is wired here beside its emit-fence sibling.
       - "design/mirror-fence.test.mjs"
+      # task-833f347eaa78a2a5: the ladder-refusal CONFORMANCE TABLE and the one
+      # fixture of malformed families it drives all three implementations of the
+      # type-ladder derivation against. Both need a glob of their own: the
+      # fixture is the gate's INPUT, so an edit that guts it (a case deleted, the
+      # sentinel changed) must re-run the gate that reads it, and the test itself
+      # is not matched by any other glob here — doc-gates has no broad **/*.mjs
+      # trigger, which is how design/mirror-fence.test.mjs shipped unrun.
+      - "design/ladder-refusal-conformance.test.mjs"
+      - "design/ladder-refusal-fixture.json"
       # tlv: the mutation proof that validate.mjs' lifecycle gate DERIVES its
       # required-state set from design/status-manifest.json. The manifest is the
       # gate's new input, so an edit to it must re-run the gate that reads it —
@@ -447,6 +456,15 @@ on:
       # no workflow at all — a regression test nobody runs is a comment with a
       # process cost, so it is wired here beside its emit-fence sibling.
       - "design/mirror-fence.test.mjs"
+      # task-833f347eaa78a2a5: the ladder-refusal CONFORMANCE TABLE and the one
+      # fixture of malformed families it drives all three implementations of the
+      # type-ladder derivation against. Both need a glob of their own: the
+      # fixture is the gate's INPUT, so an edit that guts it (a case deleted, the
+      # sentinel changed) must re-run the gate that reads it, and the test itself
+      # is not matched by any other glob here — doc-gates has no broad **/*.mjs
+      # trigger, which is how design/mirror-fence.test.mjs shipped unrun.
+      - "design/ladder-refusal-conformance.test.mjs"
+      - "design/ladder-refusal-fixture.json"
       # tlv: the mutation proof that validate.mjs' lifecycle gate DERIVES its
       # required-state set from design/status-manifest.json. The manifest is the
       # gate's new input, so an edit to it must re-run the gate that reads it —
@@ -1023,6 +1041,20 @@ jobs:
           # non-zero exit names the state. Reverting the derivation to a literal
           # reds 4 of its 5 tests (proven able to fail).
           node design/validate-life-fence.test.mjs
+
+          # task-833f347eaa78a2a5: THE LADDER-REFUSAL CONFORMANCE TABLE. Three
+          # implementations of "derive tokens.type.<family> by size and refuse
+          # rather than go blind" — design/emit.mjs typeLadderFrom (#18275),
+          # design/validate.mjs chromeLadderAscending (#18322) and
+          # web/__tests__/type-ladder-emitted.test.ts ladderFrom (#18142) — and
+          # every gate before this one compared only the LISTS they produce,
+          # which are identical on a well-formed tokens.json WHATEVER their
+          # refusal semantics are. A relaxed tie-refusal in one copy was
+          # therefore invisible. This drives all of them against ONE fixture of
+          # malformed families and names the implementation that diverged; the
+          # web arm runs in the web suite (this job is Node 20, which cannot
+          # execute TypeScript) and the enrolment arm here reds if it is unhooked.
+          node design/ladder-refusal-conformance.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens

@@ -34,6 +34,10 @@ defmodule Barkpark.Content.SchemaDefinition do
     # registered without an explicit `visibility`.
     # See `Barkpark.Structure.build_settings_group/3`.
     field :singleton, :boolean, default: false
+    # Gyldendal parity E3.6: "document" (owns documents, sits on the desk) or
+    # "object" (a named composite referenced by type name from other schemas,
+    # inlined at read time; owns no documents, never on the desk).
+    field :kind, :string, default: "document"
     field :fields, {:array, :map}, default: []
     field :dataset, :string, default: "production"
     field :cors_origins, {:array, :string}, default: []
@@ -87,6 +91,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :visibility,
       :owner_scoped,
       :singleton,
+      :kind,
       :fields,
       :dataset,
       :cors_origins,
@@ -105,6 +110,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
+    |> validate_inclusion(:kind, ~w(document object))
     |> validate_desk_group_filters()
     |> validate_desk_block()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
