@@ -1,13 +1,75 @@
 package pdrender
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// TestSanitizeText checks control bytes (C0 + DEL) are dropped from display text
+func TestSanitizeC1TextAndCode(t *testing.T) {
+	const printable = "A\u00a0exämple 世界 ☕Z"
+	for r := rune(0x80); r <= 0x9f; r++ {
+		t.Run(fmt.Sprintf("U+%04X", r), func(t *testing.T) {
+			for name, sanitize := range map[string]func(string) string{
+				"text": sanitizeText, "display": sanitizeDisplayText,
+				"code line": sanitizeCodeText, "code source": sanitizeCodeSource,
+			} {
+				if got := sanitize("A" + string(r) + printable[1:]); got != printable {
+					t.Errorf("%s: got %q, want %q", name, got, printable)
+				}
+				if got := sanitize(string(r)); got != "" {
+					t.Errorf("%s: control-only input survived: %q", name, got)
+				}
+			}
+			input := "\tA" + string(r) + "\n\tB\r\x7f"
+			if got := sanitizeCodeText(input); got != "\tA\tB" {
+				t.Errorf("code line must preserve tabs only: %q", got)
+			}
+			if got := sanitizeCodeSource(input); got != "\tA\n\tB" {
+				t.Errorf("code source must preserve tabs and newlines: %q", got)
+			}
+		})
+	}
+}
+
+func TestRenderNoColorStripsC1Controls(t *testing.T) {
+	reg := testRegistry()
+	lipgloss.SetColorProfile(3)
+	t.Cleanup(func() { lipgloss.SetColorProfile(3) })
+	ctx := RenderCtx{Width: 100, Theme: DarkTheme(), Profile: NoColor}
+	for r := rune(0x80); r <= 0x9f; r++ {
+		t.Run(fmt.Sprintf("U+%04X", r), func(t *testing.T) {
+			const clean = "before世界after"
+			payload := "before" + string(r) + "世界after"
+			blocks := []Block{
+				{Type: "heading", Attrs: map[string]any{"level": 1, "text": payload}},
+				{Type: "paragraph", Attrs: map[string]any{"content": []any{
+					map[string]any{"type": "text", "value": payload},
+				}}},
+				{Type: "code", Attrs: map[string]any{"language": "text", "code": payload}},
+			}
+			for _, block := range blocks {
+				out := strings.Join(reg.Render(block, ctx), "\n")
+				want := clean
+				if block.Type == "heading" {
+					want = strings.ToUpper(clean) // Level-one headings use uppercase chrome.
+				}
+				if !strings.Contains(out, want) {
+					t.Errorf("%s: cleaned visible text missing: %q", block.Type, out)
+				}
+				for _, got := range out {
+					if got == 0x1b || got == 0x07 || (got >= 0x80 && got <= 0x9f) {
+						t.Errorf("%s: terminal control U+%04X leaked: %q", block.Type, got, out)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestSanitizeText checks control runes (C0, DEL, and C1) are dropped from display text
 // while all valid printable/UTF-8 runes pass through unchanged.
 func TestSanitizeText(t *testing.T) {
 	cases := []struct {
@@ -21,6 +83,7 @@ func TestSanitizeText(t *testing.T) {
 		{"newline stripped", "a\nb", "ab"},
 		{"del stripped", "a\x7fb", "ab"},
 		{"unicode kept", "exämple ☕", "exämple ☕"},
+		{"C1 upper boundary excluded", "a\u00a0世界", "a\u00a0世界"},
 		{"empty", "", ""},
 	}
 	for _, c := range cases {
