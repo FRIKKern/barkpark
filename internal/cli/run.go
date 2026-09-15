@@ -381,6 +381,22 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	out.resolveOutputForCommand(g, cmd.DefaultOutput)
 
+	// THE NON-EVALUATING PROSE DOOR, for every MANIFEST command that declares a
+	// `--description` or `--title` flag (prose_text_file.go). `--description-file
+	// <path>` / `--title-file <path>` are rewritten into the ordinary inline
+	// spelling here, before splitArgs — which would otherwise refuse them as
+	// unknown command-local flags, exactly like `--criterion-text-file` and
+	// `task ls --match`. Scoped by proseFileScopeForCommand to the fields the
+	// command actually declares, so a command with no `--title` does not grow a
+	// `--title-file`. The same pass screens an implausible INLINE payload.
+	if scope := proseFileScopeForCommand(cmd); scope != nil {
+		resolved, perr := resolveProseTextFiles(tail, scope, out.errf)
+		if perr != nil {
+			return useError(out, proseTextSourceCode, perr.Error(), exitValidation)
+		}
+		tail = resolved
+	}
+
 	// webhook test-send verdict-aware exit (task-60887badc1d2900f decision
 	// (a)): the ONE additive, opt-in flag this command understands that the
 	// manifest never declares, so it must be stripped out of tail before
