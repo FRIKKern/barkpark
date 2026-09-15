@@ -2221,7 +2221,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     test "a holder that lets go inside the backoff window is out-waited: the second attempt " <>
            "takes the lock and the import completes" do
       put_import_lock_config!(
-        bundle_import_ddl_lock_timeout: "300ms",
+        # THE ENGINE'S OWN DEFAULT (@ddl_lock_timeout_default), and deliberately
+        # so. This test is the ONLY one of the three that expects an attempt to
+        # SUCCEED, so it is the only one whose wall must clear AMBIENT lock
+        # contention on the 150 AccessExclusiveLock acquisitions attempt 2 makes
+        # (107 DROP CONSTRAINT + 43 DISABLE TRIGGER USER, each of which gets its
+        # OWN lock_timeout). Attempt 1's refusal is not at risk either way: the
+        # planted holder is released ON that refusal, in program order, so
+        # attempt 1 refuses whatever the wall is.
+        #
+        # It shipped at 300ms and that sat INSIDE the ambient distribution.
+        # Measured at d4177ca6b on this box at load ~27, over 400 replayed
+        # drop_member_fks passes, the WORST single lock acquisition per pass was
+        # p50 3.9ms / p90 55ms / p99 192ms / p99.9 439ms — 1 pass in 400 already
+        # exceeded 300ms with nothing planted. 2s clears the observed p100 by
+        # 4.6x. This is the same reason @ddl_lock_timeout_default was raised off
+        # its first cut of 750ms (see WorkspaceBundle): an ordinary background
+        # reader in the test app (Pulse.Metrics) holds AccessShareLock on a
+        # member table for longer than a sub-second bound.
+        bundle_import_ddl_lock_timeout: "2s",
         bundle_import_ddl_lock_attempts: 3,
         # NOT load-bearing, and deliberately short. The release is sequenced on
         # the refusal event that fires BEFORE this sleep (see below), so the
