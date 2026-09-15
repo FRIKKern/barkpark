@@ -28917,6 +28917,17 @@
       // friendly is exported so the harness can PROVE it drops .remediation (the
       // connect sheet must never route the server copy through it).
       remediationCopy: remediationCopy, friendly: friendly, formatMonthlyPrice: formatMonthlyPrice,
+      // cch-w50-s2-followup — THE ERRORS MAP ITSELF, as a FROZEN COPY. The
+      // support-channel ban in __app.test.mjs ("cch-w50-s2 THE BAN CAN LOSE")
+      // used to drive a HAND-COPIED list of slug names, because only friendly()
+      // and faultCopy() were reachable from the harness. That made the ban lag
+      // the map: a slug registered here was banned only once someone also
+      // edited the test. Exported so the ban can sweep Object.values() and
+      // follow the map BY CONSTRUCTION. A frozen shallow copy, not the live
+      // object, so a harness can neither mutate the console's curated copy nor
+      // observe a mutation the console never makes (nothing writes to ERRORS —
+      // `grep -n "ERRORS\[" app.js` shows a single READ, in friendly()).
+      errors: Object.freeze(Object.assign({}, ERRORS)),
       catalogViewState: catalogViewState, serverTypeLabel: serverTypeLabel,
       defaultCatalogSelection: defaultCatalogSelection, launchBody: launchBody,
       launchProviderTabsHtml: launchProviderTabsHtml, catalogRegionsHtml: catalogRegionsHtml,
