@@ -3357,11 +3357,19 @@ jobs:
       - name: the dispatcher can fire on every root the census reads
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/compose-smoke-dispatch.test.sh
-      # GREEN-ARM CAUSE ATTRIBUTION (task-98b3df6eab045a78, PR #16509). The
-      # harness ships a fake `docker` on PATH, so it needs no daemon and no
-      # image build. It refuses to pass vacuously: 27 unconditional cases with
-      # an internal count floor of 22, and its mutation proof asserts the
-      # anchor matched exactly three times before it can read as a catch.
+      # GREEN-ARM CAUSE ATTRIBUTION (task-98b3df6eab045a78, PR #16509;
+      # extended by task-a6ef8e3b2c78054f + task-0b75a09ab8057598). The harness
+      # ships a fake `docker` on PATH, so it needs no daemon and no image build.
+      # It refuses to pass vacuously: 56 unconditional cases with an internal
+      # count floor of 50, and its mutation proofs assert the anchors matched
+      # exactly seven (container-alive) and two (the census + LiveView probes)
+      # times before they can read as a catch.
+      #
+      # THESE NUMBERS ARE A REGISTRY, NOT DECORATION. They were 27/22/three and
+      # went stale when the build-identity probe landed, which left the harness
+      # RED ON MAIN — four failures nobody was looking at, because this job is
+      # paths-filtered and not a required context. If you add or remove a probe,
+      # move these numbers in the SAME commit.
       - name: Syntax-check the green-arm cause harness
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash -n scripts/compose-smoke.test.sh

@@ -79,8 +79,55 @@ if [ "${1:-}" = "compose" ]; then
     build|up|pull|down) exit 0 ;;
     ps)   echo "fakecid00000001"; exit 0 ;;
     exec)
-      url=""
-      for a in "$@"; do case "$a" in http://*) url="$a" ;; esac; done
+      url=""; body=0; hdrs=0; rpc=0
+      for a in "$@"; do
+        case "$a" in
+          http://*) url="$a" ;;
+          rpc)      rpc=1 ;;
+          -S)       hdrs=1 ;;
+        esac
+      done
+      # `wget -O -` reads the BODY; `-O /dev/null` only asserts the status.
+      case "$*" in *"-O -"*) body=1 ;; esac
+
+      # ── the plugin census (assert_plugin_census) ──────────────────────────
+      if [ "$rpc" = 1 ]; then
+        case "$sc" in
+          census_rpc_down)
+            echo "Could not contact remote node barkpark@localhost" >&2; exit 1 ;;
+          census_no_json)
+            echo "some banner line that is not a census"; exit 0 ;;
+          census_failed)
+            echo '{"ok":false,"plugin_count":9,"schema_count":5,"failed":["bulldocs","frt","media","onixedit","scaffy","sheets"],"plugins":[{"name":"bulldocs","module":"Elixir.Barkpark.Plugins.Bulldocs","status":"failed","schema_count":0,"schemas":[],"error":"%File.Error{}"}]}'
+            exit 0 ;;
+          census_empty)
+            echo '{"ok":true,"plugin_count":0,"schema_count":0,"failed":[],"plugins":[]}'
+            exit 0 ;;
+          *)
+            echo '{"ok":true,"plugin_count":9,"schema_count":14,"failed":[],"plugins":[{"name":"bulldocs","module":"Elixir.Barkpark.Plugins.Bulldocs","status":"ok","schema_count":1,"schemas":["paper"],"error":null},{"name":"sheets","module":"Elixir.Barkpark.Plugins.Sheets","status":"ok","schema_count":1,"schemas":["sheet"],"error":null}]}'
+            exit 0 ;;
+        esac
+      fi
+
+      # ── the LiveView dead render (assert_liveview_mount) ──────────────────
+      case "$url" in
+        */studio/*)
+          touch "$st/probed"
+          case "$sc" in
+            live500)
+              echo "  HTTP/1.1 500 Internal Server Error" >&2
+              echo "wget: server returned error: HTTP/1.1 500 Internal Server Error" >&2
+              exit 8 ;;
+            live_noconn)
+              echo "wget: can't connect to remote host: Connection refused" >&2; exit 4 ;;
+            live_logcrash)
+              # The status line looks fine; the crash is only in the log.
+              echo "  HTTP/1.1 302 Found" >&2; exit 8 ;;
+            *)
+              echo "  HTTP/1.1 302 Found" >&2; exit 8 ;;
+          esac ;;
+      esac
+
       case "$sc:$url" in
         death:*)
           echo "wget: can't connect to remote host: Connection refused" >&2; exit 1 ;;
@@ -91,8 +138,16 @@ if [ "${1:-}" = "compose" ]; then
           touch "$st/dead"; exit 0 ;;
         http500:*/status.json)
           echo "wget: server returned error: HTTP/1.1 500 Internal Server Error" >&2; exit 1 ;;
-        *) exit 0 ;;
-      esac ;;
+      esac
+
+      # ── build identity (assert_build_identity) reads two BODIES ───────────
+      if [ "$body" = 1 ]; then
+        case "$url" in
+          */status.json)      echo '{"version":"0.42.7.0"}'; exit 0 ;;
+          */v1/capabilities*) echo '{"build":{"release":"0.42.7"}}'; exit 0 ;;
+        esac
+      fi
+      exit 0 ;;
     *) echo "fake docker: unhandled compose subcommand '$sub'" >&2; exit 97 ;;
   esac
 fi
@@ -116,7 +171,16 @@ case "${1:-}" in
       *) echo "fake docker: unhandled inspect format '$fmt'" >&2; exit 97 ;;
     esac
     exit 0 ;;
-  logs) echo "[fake] api | 12:00:00.000 [info] boot log tail"; exit 0 ;;
+  logs)
+    echo "[fake] api | 12:00:00.000 [info] boot log tail"
+    # THE DELTA the mount probe reads: lines that appear only AFTER the probe
+    # has run. `live_logcrash` is the shape where the status line is innocent
+    # and only the log names the crash.
+    if [ -f "$st/probed" ] && [ "$sc" = live_logcrash ]; then
+      echo "[fake] api | 12:00:01.000 [error] GenServer terminating"
+      echo "[fake] api | 12:00:01.000 [error] ** (UndefinedFunctionError) function Mix.env/0 is undefined (module Mix is not available)"
+    fi
+    exit 0 ;;
   rm)   exit 0 ;;
   *) echo "fake docker: unhandled argv: $*" >&2; exit 97 ;;
 esac
@@ -129,16 +193,33 @@ cp "$SMOKE" "$TMP/real/scripts/compose-smoke.sh"
 # `$cid` below is a LITERAL: it is the text in compose-smoke.sh, not a variable here.
 # shellcheck disable=SC2016
 ANCHORS="$(grep -c 'assert_container_alive "\$cid"' "$SMOKE" || true)"
-check "fix is present at all three call sites" 3 "$ANCHORS"
+check "fix is present at every call site" 7 "$ANCHORS"
 # shellcheck disable=SC2016
 sed 's/^\( *\)assert_container_alive "\$cid".*/\1: # MUTATED: fix removed/' "$SMOKE" \
   > "$TMP/mutant/scripts/compose-smoke.sh"
 chmod +x "$TMP/mutant/scripts/compose-smoke.sh" "$TMP/real/scripts/compose-smoke.sh"
 MUT_DIFF="$(diff "$SMOKE" "$TMP/mutant/scripts/compose-smoke.sh" | grep -c '^>' || true)"
-check "mutation applied (non-empty diff, one line per site)" 3 "$MUT_DIFF"
+check "mutation applied (non-empty diff, one line per site)" 7 "$MUT_DIFF"
 # shellcheck disable=SC2016
 check "mutant carries no live call site" 0 \
   "$(grep -c '^ *assert_container_alive "\$cid"' "$TMP/mutant/scripts/compose-smoke.sh" || true)"
+
+# ── THE PRE-FIX MUTANT — the green arm as it stood before this slice ────────
+# The mutation removes the two calls this slice adds, leaving exactly the arm
+# that shipped: liveness + build identity, no registration outcome, no mount.
+# It is the control for "a probe never seen red is not known to probe anything":
+# against a release where six plugins are dead OR every admin mount 500s, THIS
+# arm must still exit 0 — and the real one must not.
+mkdir -p "$TMP/prefix/scripts"
+# shellcheck disable=SC2016
+NEWCALLS="$(grep -cE '^ *assert_(liveview_mount|plugin_census) "\$cid"' "$SMOKE" || true)"
+check "both new probes are called from the green arm" 2 "$NEWCALLS"
+sed -E 's/^( *)assert_(liveview_mount|plugin_census) "\$cid".*/\1: # PRE-FIX: probe removed/' "$SMOKE" \
+  > "$TMP/prefix/scripts/compose-smoke.sh"
+chmod +x "$TMP/prefix/scripts/compose-smoke.sh"
+# shellcheck disable=SC2016
+check "pre-fix mutant carries no live new-probe call" 0 \
+  "$(grep -cE '^ *assert_(liveview_mount|plugin_census) "\$cid"' "$TMP/prefix/scripts/compose-smoke.sh" || true)"
 
 # ── the runner ──────────────────────────────────────────────────────────────
 run() { # run <variant real|mutant> <scenario> -> writes $TMP/out, echoes rc
@@ -178,7 +259,10 @@ check "real: says where it re-inspected"                1 "$(has "$TMP/out" 'aft
 echo ""
 echo "== 2. THE SIBLING PROBE — /login, derived from the script's own exec set =="
 EXECS="$(grep -c 'compose exec -T api wget' "$SMOKE" || true)"
-check "the green arm has exactly two in-container probes" 2 "$EXECS"
+# DERIVED, NOT REMEMBERED. /status.json + /login + the two build-identity body
+# reads + the LiveView dead render. If a probe is added or deleted, this reds
+# and whoever moved it must say which.
+check "the green arm has exactly five in-container wget probes" 5 "$EXECS"
 rc="$(run mutant death_login)"
 check "mutant: a death before /login blames the /login wget" 1 "$(has "$TMP/out" "$LOGIN_MSG")"
 check "mutant: never names the container state"          0 "$(has "$TMP/out" "$STATE_MSG")"
@@ -208,12 +292,67 @@ check "real: no container-state message on a clean run"  0 "$(has "$TMP/out" "$S
 check "fake docker met no unhandled argv"                0 "$(has "$TMP/out" 'unhandled')"
 
 echo ""
+echo "== 5. PLUGIN CENSUS — registration OUTCOME reds where liveness passed =="
+# task-a6ef8e3b2c78054f. The census fixture is the FILED defect verbatim: six of
+# nine plugins failed to register, every HTTP route still serves.
+CENSUS_MSG='plugins failed to register their document types'
+rc="$(run prefix census_failed)"
+check "PRE-FIX: six dead plugins PASS the old green arm"   0 "$rc"
+check "PRE-FIX: never names the registration failure"      0 "$(has "$TMP/out" "$CENSUS_MSG")"
+rc="$(run real census_failed)"
+sed -n '1,60p' "$TMP/out"
+check "real: six dead plugins RED the green arm"           1 "$rc"
+check "real: names the registration failure"               1 "$(has "$TMP/out" "$CENSUS_MSG")"
+check "real: names the culprit plugins"                    1 "$(has "$TMP/out" "bulldocs,frt,media,onixedit,scaffy,sheets")"
+check "real: the HTTP probes were all green first"         1 "$(has "$TMP/out" '/login serves in-container')"
+rc="$(run real census_empty)"
+check "real: a census of ZERO plugins is not a pass"       1 "$rc"
+check "real: names the vacuity floor"                      1 "$(has "$TMP/out" 'a green with no subject')"
+rc="$(run real census_no_json)"
+check "real: a census with no JSON envelope is not a pass" 1 "$rc"
+check "real: refuses to read a missing census as healthy"  1 "$(has "$TMP/out" 'Refusing to read a missing census')"
+rc="$(run real census_rpc_down)"
+check "real: an unreachable census node fails"             1 "$rc"
+
+echo ""
+echo "== 6. LIVEVIEW MOUNT — a dead mount reds where the controllers passed =="
+# task-0b75a09ab8057598. live500 is the gh-8461 shape: healthy container,
+# controller routes green, every admin/ops mount 500s.
+CRASH_MSG='the LiveView MOUNT CRASHED'
+CONN_MSG='a connection failure, not a mount verdict'
+rc="$(run prefix live500)"
+check "PRE-FIX: a dead admin mount PASSES the old green arm" 0 "$rc"
+check "PRE-FIX: never names the mount"                       0 "$(has "$TMP/out" "$CRASH_MSG")"
+rc="$(run real live500)"
+sed -n '1,60p' "$TMP/out"
+check "real: a dead admin mount REDS the green arm"          1 "$rc"
+check "real: names the mount crash"                          1 "$(has "$TMP/out" "$CRASH_MSG")"
+check "real: does NOT call it a connection failure"          0 "$(has "$TMP/out" "$CONN_MSG")"
+rc="$(run real live_noconn)"
+check "real: no status line also fails"                      1 "$rc"
+check "real: names it a CONNECTION failure, not a crash"     1 "$(has "$TMP/out" "$CONN_MSG")"
+check "real: does NOT relabel it a mount crash"              0 "$(has "$TMP/out" "$CRASH_MSG")"
+rc="$(run real live_logcrash)"
+check "real: an innocent 302 with a crash in the log fails"  1 "$rc"
+check "real: names the log anchor"                           1 "$(has "$TMP/out" 'UndefinedFunctionError')"
+check "real: the 302 itself was accepted first"              1 "$(has "$TMP/out" 'answered HTTP 302')"
+
+echo ""
+echo "== 7. GREEN EVIDENCE — a pass NAMES what registered (a6ef c2) =="
+rc="$(run real ok)"
+check "real: a clean run still exits 0"                      0 "$rc"
+check "real: the run log carries the schema COUNTS"          1 "$(has "$TMP/out" '9 plugins registered 14 schemas')"
+check "real: the run log names the schema TYPE NAMES"        1 "$(has "$TMP/out" 'paper')"
+check "real: the mount probe passed with its status code"    1 "$(has "$TMP/out" 'answered HTTP 302')"
+check "real: no unhandled argv in the fullest scenario"      0 "$(has "$TMP/out" 'unhandled')"
+
+echo ""
 echo "---"
 echo "compose-smoke green-arm cause attribution: $pass passed, $fail failed, $cases cases"
 # COUNT FLOOR. A harness whose cases stopped running is a harness that passes
 # for the wrong reason. Every case above is unconditional, so the count is a
 # constant: if it drops, something silently stopped executing.
-FLOOR=22
+FLOOR=50
 if [ "$cases" -lt "$FLOOR" ]; then
   echo "FAIL: only $cases cases ran, floor is $FLOOR — the harness went partly vacuous." >&2
   exit 2

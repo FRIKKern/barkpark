@@ -237,6 +237,193 @@ arm_green() {
   pass "/login serves in-container — session key derivation works"
 
   assert_build_identity "$cid"
+  assert_liveview_mount "$cid"
+  assert_plugin_census "$cid"
+}
+
+# ── LiveView mount (task-0b75a09ab8057598) ───────────────────────────────────
+#
+# WHY LIVENESS IS NOT ENOUGH. Every probe above this line is a plain controller:
+# /status.json, /login, /v1/capabilities. NONE of them mounts a LiveView, and
+# gh-8461 was a release-only crash in `BarkparkWeb.LiveAuth.authorize/4` —
+# `dev_browser_token_fallback/0` called `Mix.env()`, which `mix release` does not
+# ship. Every :admin / :ops / :scoped_admin mount raised UndefinedFunctionError
+# in the image while the two probed controller routes stayed perfectly green.
+# The release booted, reported healthy, served both probes, and the entire
+# Studio admin surface was dead behind them.
+#
+# WHY AN UNAUTHENTICATED DEAD RENDER IS THE RIGHT PROBE, not a weaker one.
+# `authorize/4` builds its candidate list as
+# `Enum.filter([dev_browser_token_fallback(), session["api_token"]], &is_binary/1)`
+# — the fallback is called UNCONDITIONALLY, before anything looks at the
+# session. So an anonymous disconnected-render GET of an :admin route runs the
+# whole on_mount chain and would have hit the gh-8461 raise. It needs no cookie
+# jar, no CSRF scrape and no websocket client: one wget, and it lands exactly
+# where the bug lived. A healthy build halts that chain with a 302 to the denial
+# target; a broken one 500s.
+#
+# WHAT THIS DOES NOT CLAIM. It never reaches the LiveView module's own mount/3
+# (the on_mount chain halts first), so a crash INSIDE a specific LiveView is out
+# of its reach. It covers the on_mount/live_session layer — the shared code path
+# every admin and ops LiveView goes through, and the one gh-8461 broke.
+#
+# THE DISCRIMINATION c0 REQUIRES. wget's exit code alone cannot tell a mount
+# crash from a container that stopped answering — both are non-zero. So this
+# reads the STATUS LINE out of `wget -S`: no HTTP status line at all is a
+# CONNECTION failure (and re-inspects the container before blaming anything),
+# a 5xx is a MOUNT CRASH, and anything else passes with the code printed.
+# `--max-redirect=0` keeps the 302 visible instead of following it to a 200.
+LIVE_PROBE_PATH="${COMPOSE_SMOKE_LIVE_PATH:-/studio/org-admin}"
+
+assert_liveview_mount() { # assert_liveview_mount <cid>
+  local cid="$1" out status before logdelta anchor
+  out="$(mktemp -t compose-smoke-live.XXXXXX)"
+  logdelta="$(mktemp -t compose-smoke-livelog.XXXXXX)"
+
+  # Mark where the container log is NOW, so the anchor grep below reads only
+  # what THIS probe produced. Grepping the whole boot log would blame the mount
+  # for anything that happened during migrations or seeding.
+  before="$(docker logs "$cid" 2>&1 | wc -l | tr -d " ")"
+
+  note "green arm: in-container LiveView dead render ${LIVE_PROBE_PATH} (on_mount chain)"
+  set +e
+  compose exec -T api wget -S -O /dev/null --max-redirect=0 \
+    "http://localhost:4000${LIVE_PROBE_PATH}" >"$out" 2>&1
+  set -e
+
+  # wget -S writes the response headers to stderr, which is folded into $out.
+  status="$(sed -n "s|^ *HTTP/[0-9.]* \([0-9][0-9][0-9]\).*|\1|p" "$out" | head -1)"
+
+  if [ -z "$status" ]; then
+    echo "── wget output ──"
+    cat "$out"
+    echo "─────────────────"
+    assert_container_alive "$cid" "the failed ${LIVE_PROBE_PATH} dead-render probe"
+    die "green arm: ${LIVE_PROBE_PATH} returned NO HTTP status line — a connection failure, not a mount verdict. The container is still cleanly running, so the listener answered nothing at all."
+  fi
+
+  case "$status" in
+    5*)
+      echo "── wget output ──"
+      cat "$out"
+      echo "─────────────────"
+      echo "── container logs since the probe ──"
+      docker logs "$cid" 2>&1 | tail -n +$((before + 1))
+      echo "────────────────────────────────────"
+      die "green arm: ${LIVE_PROBE_PATH} answered HTTP ${status} — the LiveView MOUNT CRASHED in the release image. This is the gh-8461 shape: the container is healthy, the controller routes serve, and every admin/ops mount is dead."
+      ;;
+  esac
+  pass "${LIVE_PROBE_PATH} dead render answered HTTP ${status} — the on_mount chain ran without raising"
+
+  # THE CHEAP NET, in the refusal arm's shape: a log ANCHOR grepped out of a
+  # FILE (never `printf | grep -q`, which returns 141 under pipefail when grep
+  # -q exits early). A mount that crashes logs loudly even when the status line
+  # is rewritten by an error handler, so this catches the shape the status code
+  # can miss. Scoped to the lines this probe produced.
+  docker logs "$cid" 2>&1 | tail -n +$((before + 1)) >"$logdelta"
+  for anchor in "UndefinedFunctionError" "(exit) an exception was raised"; do
+    if grep -F -q "$anchor" "$logdelta"; then
+      echo "── container logs since the probe ──"
+      cat "$logdelta"
+      echo "────────────────────────────────────"
+      die "green arm: the ${LIVE_PROBE_PATH} dead render logged '$anchor' — a mount-time crash, whatever status code came back"
+    fi
+  done
+  pass "no mount-crash anchor in the container log for ${LIVE_PROBE_PATH}"
+  rm -f "$out" "$logdelta"
+}
+
+# ── plugin census (task-a6ef8e3b2c78054f) ────────────────────────────────────
+#
+# WHY A LIVENESS PROBE CAN NEVER BE SUFFICIENT HERE. `Plugins.Bootstrap` is
+# deliberately degradation-tolerant: `do_install_for_plugin/3` wraps the
+# plugin's `register_schemas/1` in a try/rescue, LOGS the raise, and returns
+# `{:error, {:raised, ...}}`; `register_all_schemas/0` folds those into a return
+# value and never raises. Boot continues. The container reaches
+# healthcheck-healthy and every HTTP route above answers 200 with whatever
+# schemas DID register. That is how this gate's green arm reported PASS for
+# weeks while six of nine plugins were dead in every released build (PR #13708 /
+# task-f44c1839cb28b0af). No number of HTTP probes fixes that, because the
+# failure is swallowed before it can reach a response.
+#
+# SO THIS PROBE READS REGISTRATION OUTCOME. `Barkpark.Plugins.Census` (shipped
+# by #16197 for exactly this purpose) reads `Plugins.Registry.all/0` against
+# what `Plugins.RunStatus` recorded when `register_all_schemas/0` walked the
+# registry at boot, and returns `ok: false` plus a `failed` list if any plugin
+# raised, returned a non-list, had its module fail to load, or was never
+# reached.
+#
+# `rpc`, NOT `eval`, AND NOT `cli/0`. RunStatus is an in-memory GenServer in the
+# RUNNING node (run_status.ex: "Tiny in-memory GenServer"), so `bin/barkpark
+# eval` — a fresh node with no application state — would census an empty
+# RunStatus and report every plugin `"not_registered"`: a false red, or worse, a
+# green read of nothing. And `Census.cli/0`, which the module doc offers as the
+# release entry point, ends in `System.halt/1` — over `rpc` that halts the
+# RUNNING API NODE, killing the container mid-gate. This calls `report_json/0`
+# and makes the assertion in the shell instead.
+#
+# THE EVIDENCE REQUIREMENT (criterion 3 of the row). A green run must let a
+# reader tell "the stack booted" from "the stack booted correctly", so the
+# counts and the per-plugin schema type names are PRINTED on success, not only
+# on failure.
+#
+# VACUITY FLOOR. A census that saw zero plugins is a green with no subject. This
+# image compiles the whole plugin registry in, so zero means the census read
+# nothing — that is a failure here. A deliberately plugin-free build sets
+# COMPOSE_SMOKE_MIN_PLUGINS=0 and says so out loud.
+assert_plugin_census() { # assert_plugin_census <cid>
+  local cid="$1" raw json ok failed counts min
+  min="${COMPOSE_SMOKE_MIN_PLUGINS:-1}"
+  raw="$(mktemp -t compose-smoke-census.XXXXXX)"
+
+  note "green arm: in-container plugin census (registration OUTCOME, never liveness)"
+  if ! compose exec -T api bin/barkpark rpc \
+        "IO.puts(Barkpark.Plugins.Census.report_json())" >"$raw" 2>&1; then
+    echo "── rpc output ──"
+    cat "$raw"
+    echo "────────────────"
+    assert_container_alive "$cid" "the failed plugin-census rpc"
+    die "green arm: could not read the plugin census in-container (bin/barkpark rpc Barkpark.Plugins.Census.report_json/0)"
+  fi
+
+  # The envelope is one line of JSON; `rpc` may print banner lines around it.
+  json="$(grep -m1 "^{" "$raw" || true)"
+  if [ -z "$json" ]; then
+    echo "── rpc output ──"
+    cat "$raw"
+    echo "────────────────"
+    die "green arm: the plugin census rpc printed no JSON envelope. Refusing to read a missing census as a healthy one."
+  fi
+
+  ok="$(printf "%s" "$json" | python3 -c "import json,sys; print(json.load(sys.stdin).get(\"ok\"))")"
+  failed="$(printf "%s" "$json" | python3 -c "import json,sys; print(\",\".join(json.load(sys.stdin).get(\"failed\") or []))")"
+  counts="$(printf "%s" "$json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get(\"plugin_count\",-1), d.get(\"schema_count\",-1))")"
+
+  local plugin_count schema_count
+  plugin_count="${counts%% *}"
+  schema_count="${counts##* }"
+
+  if [ "$plugin_count" -lt "$min" ]; then
+    die "green arm: the plugin census saw ${plugin_count} plugins, floor is ${min} — a census of nothing is a green with no subject. If this image is deliberately plugin-free, set COMPOSE_SMOKE_MIN_PLUGINS=0."
+  fi
+
+  if [ "$ok" != "True" ]; then
+    echo "── plugin census ──"
+    printf "%s" "$json" | python3 -m json.tool
+    echo "───────────────────"
+    die "green arm: plugins failed to register their document types in the release image: ${failed:-<none named>}. Boot continued anyway — Plugins.Bootstrap rescues and logs — which is exactly why the HTTP probes above are all green."
+  fi
+
+  # NAME WHAT REGISTERED. This is the line that lets a reader tell a correct
+  # boot from a merely live one.
+  printf "%s" "$json" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+for p in d.get('plugins', []):
+    print('      %-14s %-18s %2d  %s' % (p.get('name'), p.get('status'), p.get('schema_count', 0), ', '.join(p.get('schemas') or [])))
+"
+  pass "plugin census ok: ${plugin_count} plugins registered ${schema_count} schemas, 0 failed"
+  rm -f "$raw"
 }
 
 # ── build identity (task-2ab4f5f0a07e887a) ───────────────────────────────────
