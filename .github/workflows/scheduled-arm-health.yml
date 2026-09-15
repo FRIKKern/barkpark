@@ -1,0 +1,80 @@
+name: scheduled-arm-health
+
+# THE READER'S OWN OWNER (task-c1148783a9ee36e7).
+#
+# scripts/scheduled-arm-health.sh reads every cron'd workflow in the tree against
+# its real scheduled-run history. Until this file existed, CI only `bash -n`'d it
+# and ran its hermetic .test.sh — both gated on its own paths changing — so
+# NOTHING anywhere ever ran it against this repository. A reader with no caller is
+# a reader nobody reads: the same shape as the cron'd job that gates nothing,
+# which is the defect the script was written to find. It reproduced its own
+# disease one level up, and this file is the fix.
+#
+# WHY ITS OWN FILE AND NOT A JOB IN shell-harnesses.yml. That was tried first and
+# is wrong twice over. (1) scripts/shell-harnesses-dispatch.test.sh requires every
+# job there to carry EXACTLY `if: needs.changes.outputs.<job id> == 'true'` — no
+# other condition — so a job that must run on `schedule` and on NO other event
+# cannot be expressed under that contract without either widening the partition
+# (disabling the guard) or letting the sweep fire on every PR. (2) Adding a cron
+# to shell-harnesses.yml would put all 52 of its paths-partitioned harness jobs on
+# a nightly, because the dispatcher dispatches TRUE for every set on any non-PR
+# event. A schedule-only reader belongs in a schedule-only file.
+#
+# NO push OR pull_request ARM, DELIBERATELY. The sweep costs ~90 `gh api` calls
+# over ~30 cron'd workflows and its subject is GitHub's run history, which no
+# diff changes. It would be pure noise on a PR, and a PR green would say nothing
+# about it. The script's own hermetic harness is what guards the code; this is
+# what guards the repository. workflow_dispatch is here so a human can take the
+# reading on demand rather than waiting for 07:20Z.
+#
+# 07:20 UTC is chosen to sit AFTER the smoke crons it measures (search-starter
+# 12:50, studio-journey 13:20 the previous day), so it always reads a settled
+# history rather than a run still in flight.
+#
+# IT FAILS ON A RED, AND THE RED IS EXPECTED TO BE NON-EMPTY TODAY.
+# studio-journey-smoke's scheduled arm is 47-of-47 failed and has never once
+# succeeded; that row is the open finding, not noise. A job that printed it while
+# exiting 0 would be exactly the report-mode shape this lane objects to. Exit 2
+# (CANNOT MEASURE) fails too: a sweep that could not read a row must never be
+# mistaken for a sweep that found nothing.
+#
+# `github.token` carries actions:read on this repository, which is every scope
+# the reader needs. It creates nothing and writes nothing.
+
+on:
+  schedule:
+    - cron: "20 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: scheduled-arm-health
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: every cron'd workflow in this tree, read against its real run history
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        id: setup
+      - name: read every declared cron against its real scheduled runs
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          bash scripts/scheduled-arm-health.sh 2>&1 | tee "$RUNNER_TEMP/arm-health.txt"
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## scheduled-arm-health'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/arm-health.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

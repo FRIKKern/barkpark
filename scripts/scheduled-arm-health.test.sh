@@ -36,15 +36,24 @@ NOW="2026-09-15T00:00:00Z"
 # runs_json <total_count> <success-count> <failure-count> <newest-success-iso|"">
 # Builds a payload of the shape `actions/workflows/<file>/runs` returns.
 runs_json() {
-  local tc="$1" ok="$2" bad="$3" last="$4" i=0 rows=""
+  local tc="$1" ok="$2" bad="$3" last="$4" i=0 rows="" ev="${5:-schedule}" rid="${6:-900000}"
   for ((i = 0; i < ok; i++)); do
-    rows="$rows{\"conclusion\":\"success\",\"run_started_at\":\"${last:-2026-09-01T00:00:00Z}\"},"
+    rows="$rows{\"id\":$((rid + i)),\"event\":\"$ev\",\"conclusion\":\"success\",\"run_started_at\":\"${last:-2026-09-01T00:00:00Z}\"},"
   done
   for ((i = 0; i < bad; i++)); do
     rows="$rows{\"conclusion\":\"failure\",\"run_started_at\":\"2026-09-01T00:00:00Z\"},"
   done
   rows="${rows%,}"
   printf '{"total_count":%s,"workflow_runs":[%s]}' "$tc" "$rows"
+}
+
+# jobs_json <name:conclusion> ... — the shape `actions/runs/<id>/jobs` returns.
+jobs_json() {
+  local rows="" a
+  for a in "$@"; do
+    rows="$rows{\"name\":\"${a%%:*}\",\"conclusion\":\"${a##*:}\"},"
+  done
+  printf '{"total_count":%s,"jobs":[%s]}' "$#" "${rows%,}"
 }
 
 # run_case <label> <fixture> <expected-rc> <expected-substring|""> <extra-args...>
@@ -115,7 +124,12 @@ run_case names-laundering never-succeeded 1 "LAUNDERED"
 # check is stuck on one answer and case 1 proved nothing.
 lay_tree healthy subject.yml cron
 runs_json 50 50 0 "2026-09-14T00:00:00Z"  > "$TMP/healthy/runs/subject.yml.schedule.json"
-runs_json 100 94 1 "2026-09-14T00:00:00Z" > "$TMP/healthy/runs/subject.yml.all.json"
+runs_json 100 94 1 "2026-09-14T00:00:00Z" push 800 > "$TMP/healthy/runs/subject.yml.all.json"
+# The job read is the LAST gate before the word `ok`, so every green case has to
+# carry a job graph now: a scheduled winner that executes something the push arm
+# does not. Ids follow runs_json's numbering (base+n-1 for the newest).
+jobs_json "live-demo:success" > "$TMP/healthy/runs/jobs.900049.json"
+jobs_json "self-test:success" > "$TMP/healthy/runs/jobs.893.json"
 run_case healthy healthy 0 "ok              subject.yml"
 
 # ── 3. EVENT SCOPING IS LOAD-BEARING ─────────────────────────────────────────
@@ -139,7 +153,9 @@ run_case stale stale 1 "STALE"
 
 lay_tree fresh subject.yml cron
 runs_json 30 5 25 "2026-09-10T00:00:00Z"  > "$TMP/fresh/runs/subject.yml.schedule.json"
-runs_json 60 30 30 "2026-09-14T00:00:00Z" > "$TMP/fresh/runs/subject.yml.all.json"
+runs_json 60 30 30 "2026-09-14T00:00:00Z" push 800 > "$TMP/fresh/runs/subject.yml.all.json"
+jobs_json "live-demo:success" > "$TMP/fresh/runs/jobs.900004.json"
+jobs_json "self-test:success" > "$TMP/fresh/runs/jobs.829.json"
 run_case fresh fresh 0 "ok "
 
 # ── 5. A SMALL POPULATION IS NOT A VERDICT ───────────────────────────────────
@@ -191,6 +207,75 @@ lay_tree bad-arg subject.yml cron
 runs_json 50 50 0 "2026-09-14T00:00:00Z"  > "$TMP/bad-arg/runs/subject.yml.schedule.json"
 runs_json 100 94 1 "2026-09-14T00:00:00Z" > "$TMP/bad-arg/runs/subject.yml.all.json"
 run_case unknown-argument-refused bad-arg 2 "REFUSING" --not-a-real-flag
+
+# ── 10. A RUN-LEVEL SUCCESS IS NOT COVERAGE ──────────────────────────────────
+# THE PAIR THAT MATTERS MOST IN THIS FILE, because the reader's FIRST version
+# passed every case above while failing this one. Both fixtures are run-level
+# IDENTICAL: one scheduled success, one push success, nothing to tell them apart
+# until a job is read. The ONLY thing that differs is the job graph of the
+# scheduled run — modelled on the two real runs named in the subject's header
+# (studio-journey-smoke 34910849865 and search-starter-smoke 34845674798).
+#
+#   launder: the cron SKIPS the substantive job and executes only what push runs
+#   discriminates: the cron EXECUTES a job push does not
+#
+# Without the green half this is a guard that reds on everything.
+lay_tree vacuous-cron subject.yml cron
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/vacuous-cron/runs/subject.yml.schedule.json"
+runs_json 6 6 0 "2026-09-14T00:00:00Z" push 800     > "$TMP/vacuous-cron/runs/subject.yml.all.json"
+jobs_json "self-test:success" "deployed:skipped" > "$TMP/vacuous-cron/runs/jobs.705.json"
+jobs_json "self-test:success" "deployed:skipped" > "$TMP/vacuous-cron/runs/jobs.805.json"
+run_case vacuous-cron-is-red vacuous-cron 1 "VACUOUS CRON"
+run_case vacuous-cron-names-the-skip vacuous-cron 1 "SKIPPED on the cron: deployed"
+
+lay_tree cron-buys-coverage subject.yml cron
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/cron-buys-coverage/runs/subject.yml.schedule.json"
+runs_json 6 6 0 "2026-09-14T00:00:00Z" push 800     > "$TMP/cron-buys-coverage/runs/subject.yml.all.json"
+jobs_json "live-demo:success" "self-test:skipped" > "$TMP/cron-buys-coverage/runs/jobs.705.json"
+jobs_json "self-test:success" "live-demo:skipped" > "$TMP/cron-buys-coverage/runs/jobs.805.json"
+run_case cron-buys-coverage-is-ok cron-buys-coverage 0 "ok              subject.yml"
+
+# ── 11. A RERUN IS NOT A LAUNDER ─────────────────────────────────────────────
+# Same job set on both arms and NOTHING skipped: a nightly repeat of a full run.
+# Noted, never red — the pair-mate of case 10's red, differing only in whether a
+# job was skipped. Subset alone reds 10 of the real tree's 29 cron'd workflows.
+lay_tree rerun-cron subject.yml cron
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/rerun-cron/runs/subject.yml.schedule.json"
+runs_json 6 6 0 "2026-09-14T00:00:00Z" push 800     > "$TMP/rerun-cron/runs/subject.yml.all.json"
+jobs_json "full-suite:success" > "$TMP/rerun-cron/runs/jobs.705.json"
+jobs_json "full-suite:success" > "$TMP/rerun-cron/runs/jobs.805.json"
+run_case rerun-cron-is-noted-not-red rerun-cron 0 "ok (rerun)"
+
+# ── 12. EVERY JOB SKIPPED STILL CONCLUDES SUCCESS ────────────────────────────
+# The loudest shape: the run asserted literally nothing and GitHub called it
+# success. Paired with case 10's green half, which differs only in that one job
+# actually ran.
+lay_tree asserted-nothing subject.yml cron
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/asserted-nothing/runs/subject.yml.schedule.json"
+runs_json 6 6 0 "2026-09-14T00:00:00Z" push 800     > "$TMP/asserted-nothing/runs/subject.yml.all.json"
+jobs_json "a:skipped" "b:skipped" > "$TMP/asserted-nothing/runs/jobs.705.json"
+jobs_json "a:success" "b:success" > "$TMP/asserted-nothing/runs/jobs.805.json"
+run_case asserted-nothing-is-red asserted-nothing 1 "ASSERTED NOTHING"
+
+# ── 13. AN UNREADABLE JOBS PAYLOAD IS NEVER GREEN ────────────────────────────
+# The jobs fixture for the scheduled winner is simply absent — the offline
+# stand-in for a `gh api .../jobs` failure. It must exit 2, not fall back onto
+# the ok path it was about to print. Paired with case 11, which differs only in
+# that the fixture exists.
+lay_tree jobs-unreadable subject.yml cron
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/jobs-unreadable/runs/subject.yml.schedule.json"
+runs_json 6 6 0 "2026-09-14T00:00:00Z" push 800     > "$TMP/jobs-unreadable/runs/subject.yml.all.json"
+run_case jobs-unreadable-is-not-green jobs-unreadable 2 "CANNOT MEASURE"
+
+# ── 14. A CRON THAT IS THE ONLY ARM CANNOT BE REDUNDANT ──────────────────────
+# No non-schedule success exists at all, so there is nothing for the cron to be a
+# subset OF. Stated exemption, printed, not silent.
+lay_tree only-arm subject.yml cron
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/only-arm/runs/subject.yml.schedule.json"
+runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/only-arm/runs/subject.yml.all.json"
+jobs_json "nightly:success" > "$TMP/only-arm/runs/jobs.705.json"
+run_case cron-is-only-arm-is-ok only-arm 0 "cannot be redundant"
+
 
 echo
 echo "scheduled-arm-health.test.sh — $CASES cases · $PASS passed · $FAIL failed"
