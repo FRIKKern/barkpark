@@ -1295,6 +1295,18 @@ jobs:
           # path is IN — over-running a harness is cheap; a false skip is the
           # defect. This workflow file is in every set implicitly (see below)
           # and is deliberately not a row.
+          #
+          # AXIS D'S CORPUS IS TWO GLOBS, AND THEY ARE ROWS (task-74f54db3b1f353d2).
+          # scripts/pds-record-parity.sh --axis d resolves the PDS-D literals carried
+          # in `scripts/pds-*.sh` + `tooling/pds/**` against the charter, and the
+          # pds-harnesses job runs that arm. Both globs were added to the paths lists
+          # when axis d landed; NEITHER got a roster row, so the half that dispatches
+          # the workflow and the half that selects the job disagreed: an edit to
+          # scripts/pds-secret-scan.sh started a run in which every one of the 48 jobs
+          # was skipped. Neither glob is an exclusion — a PREDICATE, not the
+          # enumerated pds rows above, is what makes the corpus and the roster the
+          # same set. The enumerated rows stay: they are cheap, and several name
+          # inputs (the charter, docs/setup/personal-local.md) the globs do not cover.
           roster='
           node-test-floor scripts/node-test-floor.mjs
           node-test-floor scripts/node-test-floor.test.sh
@@ -1358,6 +1370,8 @@ jobs:
           pds-harnesses scripts/pds-record-parity.test.sh
           pds-harnesses .claude/workflows/bp-pds-charter.md
           pds-harnesses tooling/pds/d-number-reservations.tsv
+          pds-harnesses scripts/pds-*.sh
+          pds-harnesses tooling/pds/**
           pds-harnesses scripts/pds-scratch-target.sh
           pds-harnesses scripts/pds-scratch-target_test.sh
           pds-harnesses scripts/pds-read-preflight-audit.sh
