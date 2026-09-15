@@ -102,7 +102,7 @@ export const REQUIRED_EDGES = [
     file: "cloud/priv/static/__preview__/breakpoint-sweep.mjs",
     instrument: "cloud/priv/static/__css_check.mjs",
     row: "cchi-w37-bl-slice-gate-omits-the-surface-s-shipped-gates",
-    why: "__css_check scans every .js/.mjs/.css directly inside cloud/priv/static and cloud/priv/static/__preview__ for E11 (banned `app.js:<line>` citations) by READING THE DIRECTORY — an import graph cannot find this edge.",
+    why: "breakpoint-sweep.mjs is subject to __css_check's E11 (banned source-line citations) by its LOCATION UNDER THE SCAN ROOT, not by anything importing it: __css_check builds its own file set from the filesystem, so nothing in the import graph ever names this pair. That is the property the edge rests on, and it holds however the traversal walks and however the file predicate decides — do NOT restate today's extensions or directory arms here; two earlier versions of this sentence did, and both rotted within the wave. Never quote the set; RUN it: node cloud/priv/static/__css_check.mjs --citation-inventory prints the live scan set, one line per file.",
   },
 ];
 
