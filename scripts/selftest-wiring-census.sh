@@ -4,6 +4,10 @@
 # either EXECUTED by CI or carries a machine-readable exemption naming why.
 # A harness added tomorrow with neither is a RED here, not a silent omission.
 #
+# THE CORPUS IS `*.test.sh`, `*.test.mjs`, `*_test.sh` and `*-selftest.sh`.
+# A self-test named anything else is not examined at all — see the comment on
+# the `find` below, which carries the measured case that added the fourth.
+#
 # WHY IT EXISTS (task-8780f3b465edea5b, 2026-09-06). shell-harnesses.yml names
 # its tenants ONE BY ONE, so adding scripts/foo.test.sh does not add it to CI.
 # A census run by hand on 2026-09-06 put the orphan count at "14 of 66"; that
@@ -150,7 +154,16 @@ census() {
     ' "$wf_nc" \
     | grep -oE "scripts/[A-Za-z0-9_./-]*\*[A-Za-z0-9_./*-]*\.test\.(sh|mjs)" | LC_ALL=C sort -u)"
 
-  files="$(find "$root/scripts" -type f \( -name '*.test.sh' -o -name '*.test.mjs' -o -name '*_test.sh' \) 2>/dev/null | LC_ALL=C sort)"
+  # THE CORPUS IS NAME-KEYED, so a naming shape missing from this list is not
+  # an orphan the census failed to resolve — it is a file the census never
+  # LOOKED at, and the difference is invisible in the output. Measured
+  # 2026-09-15 (task-d64ecb4727209800): scripts/ledger/claim-health-selftest.sh
+  # was referenced by no workflow, no Makefile and no other script, and this
+  # census printed "OK - 102 run, 4 exempt, 0 orphaned" without naming it once.
+  # `*-selftest.sh` is now in the corpus for that reason. A shape added later
+  # has the same fault, which is why the number in the OK line is a count of
+  # what was examined and not a claim about scripts/.
+  files="$(find "$root/scripts" -type f \( -name '*.test.sh' -o -name '*.test.mjs' -o -name '*_test.sh' -o -name '*-selftest.sh' \) 2>/dev/null | LC_ALL=C sort)"
   [ -n "$files" ] || { echo "selftest-wiring-census: REFUSING — found ZERO self-tests under $root/scripts. Reporting a clean census over an empty corpus is the failure this gate exists to prevent." >&2; rm -f "$wf_nc" "$wf_exec" "$invocations" "$doors"; return 2; }
 
   local f base rel route
