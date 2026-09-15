@@ -107,22 +107,28 @@ mc_main_census(){
 # main head has not been shown to be healthy OR broken there — and an absence is
 # never evidence of health. Fail closed: refuse and say why.
 #
-# THE HONEST LIMIT OF THIS WHOLE ARM: PATH FILTERS, not missing `push:` arms.
-# Measured 2026-09-15: `tooling/{aesthetics,ergonomics,risk} node --test suite +
-# tooling/pds gate` rendered 0 rows across the last 20 main heads. The tempting
-# reading is "it has no push arm" — and it is WRONG. research-coverage-suite.yml
-# DOES have `push: branches: [main]`; both of its arms carry the same `paths:`
-# filter, so on main it fires only when a merged commit happens to touch those
-# paths, which none of the last 20 did. A PR that touches them gets a row and
-# main usually does not.
-# So UNPROVEN here is a true statement about the WINDOW, not about the workflow,
-# and it does not become answerable by sampling deeper — only by waiting for a
-# main commit that trips the same filter. The arm refuses, correctly, but this
-# fix helps only contexts that actually recur on main. The named r19 specimens
-# (`Doc budgets + anchors`, `Required-check spec drift (advisory)`) do recur,
-# which is why they are the ones it fixes. Establishing inheritance for a
-# path-filtered context needs a different comparison (other recent PR heads that
-# tripped the same filter), deliberately NOT attempted here.
+# THE HONEST LIMIT OF THIS WHOLE ARM: A COMMIT WINDOW CANNOT SEE A RARE WORKFLOW.
+# Measured 2026-09-15 on this tool's own PR. `tooling/{aesthetics,ergonomics,risk}
+# node --test suite + tooling/pds gate` rendered 0 rows across the last 20 main
+# heads, so it classified UNPROVEN and REFUSED. Two tempting explanations, both
+# WRONG:
+#   "it has no push arm"  -> research-coverage-suite.yml DOES have
+#                            `push: branches: [main]`.
+#   "it never runs on main" -> it does. `gh api
+#                            actions/workflows/research-coverage-suite.yml/runs`
+#                            shows THREE `push`/`main` runs on 2026-09-13, all
+#                            `failure`, alongside a failure on every PR branch
+#                            for days. The red is as inherited as a red can be.
+# What actually happened: both arms carry the same `paths:` filter, so main trips
+# it only occasionally — and the last time it did was further back than 20
+# commits on a repo this busy. The window, not the workflow, is the blind spot.
+#
+# Deepening the window is the wrong remedy: the right question is not "did this
+# context fail on the last N main COMMITS" but "when this workflow last ran on
+# main, did it fail". That is a workflow-history read, not a commit-window read,
+# and it needs a check-run-name -> workflow mapping this script does not have.
+# Deliberately NOT built here. Until it exists, UNPROVEN refuses and the message
+# hands the operator the exact command that answers it.
 #
 # AN EMPTY CENSUS IS NOT A CLEAN MAIN. An exhausted shared rate limit renders as
 # an EMPTY RESULT SET with stderr suppressed, which would otherwise classify
@@ -253,7 +259,7 @@ mc_rollup(){
         # census establishes is only that this PR did not cause it.
         arm ok "full rollup" "INHERITED — every concluded red is also red on origin/main over the last $MAIN_N head(s), so none of it is attributable to this PR. THIS IS NOT A CLEAN BILL: $INH$( [ -n "$PENDN" ] && printf ' | still pending (NOT failures): %s' "$PENDN" )"
       else
-        arm no "full rollup" "OWN — red(s) NOT explained by origin/main over the last $MAIN_N head(s): $OWNS$( [ -n "$INH" ] && printf ' | inherited, not attributable: %s' "$INH" )$( [ -n "$PENDN" ] && printf ' | still pending (NOT failures): %s' "$PENDN" )"
+        arm no "full rollup" "OWN — red(s) NOT explained by origin/main over the last $MAIN_N head(s)$( grep -q '^UNPROVEN' "$CLS" && printf ' (UNPROVEN re-sampled over %s)' "$MAIN_DEEP" ): $OWNS$( [ -n "$INH" ] && printf ' | inherited, not attributable: %s' "$INH" )$( [ -n "$PENDN" ] && printf ' | still pending (NOT failures): %s' "$PENDN" )$( grep -q '^UNPROVEN' "$CLS" && printf ' || AN UNPROVEN CONTEXT IS NOT A PROVEN OWN RED: it rendered no row on any sampled main commit, which for a path-filtered workflow can simply mean main has not tripped its filter recently. Before treating it as yours, read the workflow history: gh api "repos/%s/actions/workflows/<file>.yml/runs?per_page=20" --paginate | jq -s -r "[.[].workflow_runs[]]|.[]|[.conclusion,.event,.head_branch]|@tsv" ' "$REPO" )"
       fi
     fi
     rm -f "$CN" "$NF" "$CLS"
