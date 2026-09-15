@@ -658,6 +658,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		out.errf("bp: %s", note)
 	}
 
+	// The claim lives at a DIFFERENT path per read verb and the wrong one never
+	// errors: `.doc.claim` is correct for `task get` and absent from every flat
+	// `ls`/`ready`/`prime` row, so a get-shaped reader answers UNCLAIMED on 30
+	// of 30 live claims and a reconciliation sweep steals them. One stderr line,
+	// only on a page that actually carries a live claim, never on stdout — so
+	// `-o json` stays byte-identical (tasks_claim_path.go).
+	emitTaskClaimPathAdvisory(out, cmd, status, out.machineOut(), respBody)
+
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
 		hinter = func() string { return taskGetNotFoundHint(out, m, ctx, typed) }
