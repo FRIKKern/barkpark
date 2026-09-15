@@ -46,7 +46,7 @@ defmodule Barkpark.Tasks.HeldPredicateTest do
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
-  defp claimed_task!(scope, worker) do
+  defp claimed_task!(scope, worker, extra_opts \\ []) do
     doc_id = uniq("held")
 
     {:ok, doc} =
@@ -67,7 +67,7 @@ defmodule Barkpark.Tasks.HeldPredicateTest do
         scope
       )
 
-    {:ok, claimed} = Tasks.claim_by_id(doc.doc_id, worker, scope)
+    {:ok, claimed} = Tasks.claim_by_id(doc.doc_id, worker, scope ++ extra_opts)
     claimed
   end
 
@@ -176,6 +176,229 @@ defmodule Barkpark.Tasks.HeldPredicateTest do
       refute Internal.held?(nil)
       # A non-map claim must not blow up a read-side predicate.
       refute Internal.held?(%{"claim" => "nonsense"})
+    end
+  end
+
+  # ────────────────────────────────────────────────────────────────────────
+  # THE KEY SET OF A RELEASED CLAIM
+  #
+  # The tests above assert the FIELDS somebody remembered. That is exactly the
+  # failure this block exists to close: an earlier enumeration of the released
+  # claim object listed four keys (epoch, released_at, released_by, worker) and
+  # the real object carries ten. Two of them — `session` and `session_origin` —
+  # were in NOBODY's list. So: print the keyset, do not code against the fields
+  # you remember.
+  #
+  # The roster below is DERIVED from the writers, each of which is the single
+  # place its keys are minted:
+  #
+  #   Tasks.Claim.do_claim_resolved/7  worker ts_iso epoch work_digest
+  #                                    work_field_digests  (a map LITERAL —
+  #                                    unconditional, every claim has all five)
+  #                                    + resources / execution_policy /
+  #                                      criteria_unstated_override / session +
+  #                                      session_origin, each behind an `if`
+  #   Tasks.Pulse.pulse/3              rewrites epoch + ts_iso, and MINTS `now`
+  #                                    — `now` is a PULSE key, written nowhere
+  #                                    else (`grep -n \'"now"\' lib/barkpark/tasks/`
+  #                                    hits pulse.ex and nothing else). A claim
+  #                                    that was never pulsed releases WITHOUT
+  #                                    it, which is why `now` sits in the
+  #                                    conditional tier and gets its own arm
+  #                                    below: measured, not remembered. An
+  #                                    earlier hand enumeration of "the released
+  #                                    claim" listed `now` as always-present
+  #                                    because it happened to read a pulsed row.
+  #   Tasks.TtlSweeper.apply_reap/1    expired_at previous_worker
+  #   Tasks.Release.apply_release_update/2  +released_by +released_at,
+  #                                    -resources -expired_at
+  #
+  # STRICT OR SUBSET? — BOTH, SPLIT BY DIRECTION, ON PURPOSE.
+  #
+  # A single `==` against one literal set is not available here and never was:
+  # the same verb legitimately produces a DIFFERENT set depending on the claim
+  # that preceded it (8 keys sessionless, 10 with a session, and a
+  # resource-bearing claim differs again). An exact-match test would therefore
+  # pin THIS FIXTURE, not the verb, and would red on a benign additive change —
+  # a cost, not a gain. But a pure subset check cannot see a DROPPED key, and
+  # the drop direction is the one that breaks the CAS fence. So:
+  #
+  #   DROP direction  -> strict, in `required_claim_keys/0`. Any of these
+  #                      missing is a red that NAMES the missing keys. Tiers:
+  #                        load-bearing  worker epoch      — the CAS fence
+  #                                                          (Close/Release
+  #                                                          fence on epoch,
+  #                                                          held?/1 on worker)
+  #                        audit trail   released_by released_at — the dossier
+  #                                                          this row exists to
+  #                                                          carry
+  #                        carried       now ts_iso work_digest
+  #                                      work_field_digests — required because
+  #                                      the claim writes them unconditionally
+  #                                      and release's contract is "preserve the
+  #                                      claim OBJECT"; a silent drop here IS a
+  #                                      break of that contract.
+  #   FORBIDDEN       -> strict absence. `resources` and `expired_at` are
+  #                      deleted deliberately (they describe a fence/lapse the
+  #                      release superseded). Their return is a regression.
+  #   GROWTH direction-> its own test, `@known_claim_keys`. A new key reds ONE
+  #                      test whose name says it is a roster update, so a benign
+  #                      addition is a cheap, obvious edit and is never silent.
+  #
+  # Every set below is DERIVED from a row put through the real `Release.release/3`
+  # verb. Nothing here hand-builds a claim map: that would test the fixture.
+  # ────────────────────────────────────────────────────────────────────────
+
+  @load_bearing_claim_keys ~w(worker epoch)
+  @audit_claim_keys ~w(released_by released_at)
+  @carried_claim_keys ~w(ts_iso work_digest work_field_digests)
+  @forbidden_claim_keys ~w(resources expired_at)
+
+  # Minted behind a condition by claim/pulse/reap — legal to be absent, and
+  # legal to be present. Listed so the growth ratchet does not red on them.
+  @conditional_claim_keys ~w(now session session_origin execution_policy
+                             criteria_unstated_override previous_worker)
+
+  @required_claim_keys @load_bearing_claim_keys ++ @audit_claim_keys ++ @carried_claim_keys
+  @known_claim_keys @required_claim_keys ++ @conditional_claim_keys
+
+  # Claim -> release through the REAL verbs, and hand back the stored claim.
+  defp released_claim!(scope, worker, opts \\ []) do
+    {pulse_text, claim_opts} = Keyword.pop(opts, :pulse_text)
+    doc = claimed_task!(scope, worker, claim_opts)
+
+    if pulse_text do
+      # `pulse` BUMPS the epoch, so the observed epoch must be re-read after it
+      # (it is, below) or the release fences off.
+      assert {:ok, _} = Tasks.pulse_by_id(doc.id, worker, text: pulse_text)
+    end
+
+    epoch = get_in(stored(doc).content, ["claim", "epoch"])
+    assert {:ok, _} = Release.release(doc.id, worker, observed_epoch: epoch)
+
+    content = stored(doc).content
+
+    assert get_in(content, ["claim", "worker"]) == nil,
+           "precondition failed: #{doc.doc_id} did not release"
+
+    claim = Map.get(content, "claim")
+
+    assert is_map(claim),
+           "precondition failed: #{doc.doc_id} has no claim object to enumerate"
+
+    {doc, claim}
+  end
+
+  defp keyset_report(doc, claim) do
+    "\n  doc_id:   #{doc.doc_id}" <>
+      "\n  OBSERVED: #{inspect(Enum.sort(Map.keys(claim)))}" <>
+      "\n  REQUIRED: #{inspect(Enum.sort(@required_claim_keys))}" <>
+      "\n  KNOWN:    #{inspect(Enum.sort(@known_claim_keys))}" <>
+      "\n  claim:    #{inspect(claim)}"
+  end
+
+  describe "the released claim's key set is pinned, not remembered" do
+    test "DROP ARM: every required key survives the release", %{scope: scope} do
+      {doc, claim} = released_claim!(scope, "w-keys")
+      observed = MapSet.new(Map.keys(claim))
+
+      missing = MapSet.difference(MapSet.new(@required_claim_keys), observed)
+
+      assert MapSet.size(missing) == 0,
+             "the released claim DROPPED required key(s): " <>
+               "#{inspect(Enum.sort(MapSet.to_list(missing)))}\n" <>
+               "  load-bearing (CAS fence, breaks claim/close/held?): " <>
+               "#{inspect(Enum.sort(MapSet.to_list(MapSet.intersection(missing, MapSet.new(@load_bearing_claim_keys)))))}\n" <>
+               "  audit trail (the release dossier): " <>
+               "#{inspect(Enum.sort(MapSet.to_list(MapSet.intersection(missing, MapSet.new(@audit_claim_keys)))))}\n" <>
+               "  carried from the claim (release must PRESERVE the object): " <>
+               "#{inspect(Enum.sort(MapSet.to_list(MapSet.intersection(missing, MapSet.new(@carried_claim_keys)))))}" <>
+               keyset_report(doc, claim)
+    end
+
+    test "GROWTH ARM: the released claim grew no key this roster does not know",
+         %{scope: scope} do
+      {doc, claim} = released_claim!(scope, "w-keys-grow")
+      unknown = MapSet.difference(MapSet.new(Map.keys(claim)), MapSet.new(@known_claim_keys))
+
+      assert MapSet.size(unknown) == 0,
+             "the released claim gained key(s) no tier claims: " <>
+               "#{inspect(Enum.sort(MapSet.to_list(unknown)))}\n" <>
+               "  This is a ROSTER UPDATE, not necessarily a defect. Classify each\n" <>
+               "  new key and add it to @conditional_claim_keys (minted behind an\n" <>
+               "  `if`) or to one of the required tiers (written unconditionally),\n" <>
+               "  then say in a comment which writer mints it." <> keyset_report(doc, claim)
+    end
+
+    test "FORBIDDEN ARM: release strips the keys whose meaning it falsifies",
+         %{scope: scope} do
+      resource = uniq("lib/held_predicate")
+      {doc, claim} = released_claim!(scope, "w-keys-res", resources: [resource])
+
+      present =
+        MapSet.intersection(MapSet.new(Map.keys(claim)), MapSet.new(@forbidden_claim_keys))
+
+      assert MapSet.size(present) == 0,
+             "the released claim kept superseded key(s) " <>
+               "#{inspect(Enum.sort(MapSet.to_list(present)))} — `resources` is a dead " <>
+               "fence and `expired_at` is a lapse the walk-away superseded." <>
+               keyset_report(doc, claim)
+
+      # …and the CONTROL: the claim really did carry `resources`, so the
+      # absence above measures a DELETION, not a fixture that never had one.
+      held = claimed_task!(scope, "w-keys-res-control", resources: [uniq("lib/control")])
+
+      assert is_list(get_in(stored(held).content, ["claim", "resources"])),
+             "control failed: the claim path did not write `resources`, so the " <>
+               "assertion above proves nothing about release deleting it"
+    end
+
+    test "CONDITIONAL ARM: `now` appears only on a claim that was actually pulsed",
+         %{scope: scope} do
+      {_doc, unpulsed} = released_claim!(scope, "w-keys-nopulse")
+      {doc, pulsed} = released_claim!(scope, "w-keys-pulse", pulse_text: "heartbeat")
+
+      refute Map.has_key?(unpulsed, "now"),
+             "`now` turned up on a claim nothing pulsed — it belongs to " <>
+               "Tasks.Pulse; if a second writer now mints it, move it out of " <>
+               "@conditional_claim_keys." <> keyset_report(doc, unpulsed)
+
+      # The arm an enumeration taken from an UNPULSED row cannot see.
+      assert Map.has_key?(pulsed, "now"),
+             "a pulsed lease released WITHOUT its `now` line — the pulse\'s only " <>
+               "durable trace on the claim is gone." <> keyset_report(doc, pulsed)
+
+      extra = MapSet.difference(MapSet.new(Map.keys(pulsed)), MapSet.new(Map.keys(unpulsed)))
+
+      assert MapSet.equal?(extra, MapSet.new(["now"])),
+             "pulsing changed the released key set by " <>
+               "#{inspect(Enum.sort(MapSet.to_list(extra)))}, expected exactly " <>
+               "[\"now\"]." <> keyset_report(doc, pulsed)
+    end
+
+    test "the two conditional session keys are BOTH-or-NEITHER, and the sessionless " <>
+           "claim is the reason nobody listed them",
+         %{scope: scope} do
+      {_doc, sessionless} = released_claim!(scope, "w-keys-nosess")
+      {doc, with_session} = released_claim!(scope, "w-keys-sess", session: "sess-fixture")
+
+      refute Map.has_key?(sessionless, "session")
+      refute Map.has_key?(sessionless, "session_origin")
+
+      # The arm that an enumeration built from a sessionless fixture CANNOT see.
+      assert Map.has_key?(with_session, "session") and
+               Map.has_key?(with_session, "session_origin"),
+             "a session-bearing claim released without its session keys — the pair " <>
+               "is written together by SessionId.put_session_origin/2." <>
+               keyset_report(doc, with_session)
+
+      extra =
+        MapSet.difference(MapSet.new(Map.keys(with_session)), MapSet.new(Map.keys(sessionless)))
+
+      assert MapSet.equal?(extra, MapSet.new(~w(session session_origin))),
+             "the session arm differs from the sessionless arm by " <>
+               "#{inspect(Enum.sort(MapSet.to_list(extra)))}, expected exactly " <>
+               "[\"session\", \"session_origin\"]." <> keyset_report(doc, with_session)
     end
   end
 end
