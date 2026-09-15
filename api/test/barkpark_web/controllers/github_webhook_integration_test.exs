@@ -791,8 +791,14 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
       assert task_rows(number) == []
 
       # THE STORE — `recorded: true` promises a maintainer something to find.
-      assert [%{kind: "dedup_refused", doc_id: nil}] = refusal_rows(number),
-             "the receipt said recorded: true but no dead-letter row exists for ##{number}"
+      # Bound first, then asserted on a boolean: `assert pattern = expr, msg`
+      # silently DISCARDS the message (the match form of assert/1 takes no
+      # second argument), so the sentence below could never have printed.
+      rows = refusal_rows(number)
+
+      assert match?([%{kind: "dedup_refused", doc_id: nil}], rows),
+             "the receipt said recorded: true but no dead-letter row exists " <>
+               "for ##{number} — got #{inspect(rows)}"
     end
 
     test "a dedup refusal whose dead-letter write FAILS says recorded: false — no row is promised",
