@@ -78,7 +78,10 @@ function empty(kind: string): string {
 
 /* ── stat / stats ──────────────────────────────────────────────────────────── */
 
-function sparkSvg(values: number[]): string {
+// Class-parameterised so the table `spark` column composes THIS svg instead of
+// minting a second ladder — the twin of DataViz.spark_svg/2 (the class is the
+// only difference: `bp-stat__spark` in a stat, `bp-table__spark` in a table).
+export function sparkSvg(values: number[], cls = 'bp-stat__spark'): string {
   if (values.length === 0) return ''
   const n = values.length
   const minV = Math.min(...values)
@@ -93,7 +96,7 @@ function sparkSvg(values: number[]): string {
       return `${fmt(x)},${fmt(y)}`
     })
     .join(' ')
-  return `<svg class="bp-stat__spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg>`
+  return `<svg class="${cls}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg>`
 }
 
 const VERDICTS = ['loss', 'peace']
