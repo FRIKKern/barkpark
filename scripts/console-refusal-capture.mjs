@@ -211,6 +211,17 @@ export const CONFORMING = [
 // reason it is out of scope. An exclusion is a decision, so it is written down.
 export const EXCLUDED = [
   {
+    file: "cloud/priv/static/__preview__/shoot-guards.mjs",
+    why:
+      "A HAND-RUN REGRESSION HARNESS for shoot.sh's four guards (#18434). NO `run:` line in any " +
+      "workflow invokes it — its own header documents `node cloud/priv/static/__preview__/shoot-guards.mjs` " +
+      "as a manual command — so nothing ever captures its stderr and normalising it would be a shape with " +
+      "no reader. Its two exit-2 paths are a CLI usage error (`!! no check named '<x>'`) and an unhandled " +
+      "crash, neither of which is a gate instrument refusing to measure. This exclusion is not prose: the " +
+      "`no EXCLUDED file is invoked by a workflow` arm in the test derives that reachability from " +
+      ".github/workflows/*.yml on every run, so the day a `run:` line does reach this file, the exclusion reds.",
+  },
+  {
     file: "cloud/priv/static/__preview__/serve.mjs",
     why:
       "A SPAWNED SIDECAR, never a gate step. No `run:` line reaches it; the browser " +
