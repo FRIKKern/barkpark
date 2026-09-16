@@ -75,6 +75,8 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   """
   use ExUnit.Case, async: true
 
+  alias BarkparkCloud.Web.RouterAuthWrappers
+
   @router_source Path.expand("../../../lib/barkpark_cloud/web/router.ex", __DIR__)
 
   # A GET declaration in either form: `get "/path" do` and `get("/path", do: …)`.
@@ -84,40 +86,26 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # moduledoc.
   @block_end_re ~r/^  end\s*$/
 
-  # Every wrapper that establishes a HUMAN/session-token identity, directly or
-  # one call deep. `with_team_role` → `Auth.require_team_role`; `with_team_site`
-  # → `Auth.require_user` (or `require_user_or_pat` + `require_ability`);
-  # `require_user_sse` → `verify_user_session_token` / `consume_sse_ticket`;
-  # `proxy_instance_webhook` → `Auth.require_user`.
-  @session_wrappers [
-    "Auth.require_user",
-    "Auth.require_user_or_pat",
-    "Auth.require_team_admin",
-    "Auth.require_team_role",
-    "Auth.require_current_team_admin",
-    "Auth.require_current_team_owner",
-    "Auth.require_platform_operator",
-    "Auth.require_ability",
-    "with_team_role",
-    "with_team_site",
-    "require_user_sse",
-    "proxy_instance_webhook"
-  ]
-
-  # Machine identities: an agent token or the internal worker shared secret.
-  # Checked FIRST, so a route carrying both classifies as machine.
+  # THE WRAPPER SETS ARE NO LONGER WRITTEN HERE. They come from
+  # `BarkparkCloud.Web.RouterAuthWrappers`, whose companion test
+  # (`router_auth_wrapper_registry_test.exs`) DERIVES the wrapper set from
+  # router.ex on every run and reds in both directions when the registry and the
+  # router disagree.
   #
-  # `Auth.require_user_or_pat_or_worker` is listed here DELIBERATELY even though
-  # it also admits a human: it is a route a MACHINE can reach, and the whole
-  # point of checking this list first is that "carries both" resolves to machine.
-  # Leaving it out would have been the quiet option — the substring
-  # `Auth.require_user` matches it, so the census would have stayed 68/49/7/12
-  # and a route that became worker-reachable would have moved no number at all.
-  @machine_wrappers [
-    "Auth.require_agent",
-    "Auth.require_worker",
-    "Auth.require_user_or_pat_or_worker"
-  ]
+  # WHY THE MOVE. These two lists used to be a hand-written enumeration, the same
+  # shape as charter decision D34's eight names — and D34 is the worked example
+  # of why that fails: it was correct when written, the router grew wrappers, and
+  # every number rebuilt from its text came out wrong with nothing going red. The
+  # lists here were RIGHT for the GET surface and still went stale for the rest
+  # of the router: `go_live/1` and `resurrect/1` are session wrappers on POST
+  # routes that neither list ever named. They move no number in this file (no GET
+  # body mentions either, which is why the four integers below are unchanged by
+  # the move), and the registry test is what makes the next one loud.
+  #
+  # Machine is checked FIRST, so a route carrying both classifies as machine —
+  # see the 2026-09-02 baseline entry.
+  @session_wrappers RouterAuthWrappers.session_wrappers()
+  @machine_wrappers RouterAuthWrappers.machine_wrappers()
 
   # THE BASELINE. Four integers, re-derived from source above, changed only
   # DELIBERATELY and with a reason written next to them.
