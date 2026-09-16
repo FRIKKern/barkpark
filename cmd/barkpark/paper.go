@@ -232,13 +232,27 @@ func (m model) buildPaperContent(width int) string {
 	// resolver sets this only when its lookup actually MISSED *and* the read
 	// behind that miss failed — a reference that resolved never cries wolf.
 	var readFailed bool
+	// ONE cache for all three resolvers, and — when the model carries one —
+	// one that outlives this pass. Before it, the three resolvers each read
+	// straight through to DataStore.QueryResult (an unconditional HTTP GET, no
+	// cache layer in the path) and paperRefResolver did so once per schema PER
+	// REFERENCE NODE. Measured cost of one render of a 4-reference paper across
+	// 5 schemas: 10 requests with the lucky schema ordering, 26 with the worst
+	// (paper_render_requests_test.go). Through the cache: 5 on the first render,
+	// and ZERO on every later one until something invalidates it.
+	cache := m.paperDocs
+	if cache == nil {
+		// No model-held cache (a bare model{} in a test, say): a per-pass cache
+		// still collapses the per-node scan; it just cannot span renders.
+		cache = newPaperDocCache(m.ds)
+	}
 	ctx := pdrender.RenderCtx{
 		Width:         paperWidth,
 		Theme:         m.paperTheme,
 		Profile:       m.paperProfile,
-		RefResolver:   m.paperRefResolver(&readFailed),
-		TaskResolver:  m.taskChipResolver(&readFailed),
-		ValueResolver: m.paperValueResolver(&readFailed),
+		RefResolver:   m.paperRefResolver(cache, &readFailed),
+		TaskResolver:  m.taskChipResolver(cache, &readFailed),
+		ValueResolver: m.paperValueResolver(cache, &readFailed),
 	}
 	rendered := m.paperRegistry.RenderDoc(m.selectedPaperBlocks, ctx)
 
@@ -286,10 +300,11 @@ func centerPaperLines(s string, leftPad int) string {
 	return strings.Join(parts, "\n")
 }
 
-// taskChipResolver returns a per-render memoised TaskResolver (lvw-t7): the
-// FIRST task-chip lookup in a render pass loads the task list once through the
-// datastore (the same single-query cost paperRefResolver pays per type) and
-// keys chips by task id in BOTH the `drafts.` and published spellings. The TUI
+// taskChipResolver returns a TaskResolver reading through the shared
+// paperDocCache (lvw-t7 memoised this per render; the cache now memoises it for
+// the cache's whole lifetime, which spans renders when the model holds one).
+// The FIRST task-chip lookup loads the task list once and keys chips by task id
+// in BOTH the `drafts.` and published spellings. The TUI
 // stays conservative: it resolves ID-PINNED wikilinks only (no title keys —
 // without the paper corpus in hand a title key could shadow a paper link;
 // a typed-by-title task link degrades to the plain link, which is the allowed
@@ -301,27 +316,12 @@ func centerPaperLines(s string, leftPad int) string {
 // task" over "we were not allowed to look". The degrade still happens — it is
 // the right inline behaviour — but a miss BEHIND a failed read reports through
 // readFailed so buildPaperContent can say the render is incomplete.
-func (m model) taskChipResolver(readFailed *bool) func(id string) *pdrender.TaskChip {
-	var chips map[string]*pdrender.TaskChip
-	var loadFailed bool
+func (m model) taskChipResolver(cache *paperDocCache, readFailed *bool) func(id string) *pdrender.TaskChip {
 	return func(id string) *pdrender.TaskChip {
 		if m.ds == nil || id == "" {
 			return nil
 		}
-		if chips == nil {
-			chips = map[string]*pdrender.TaskChip{}
-			docs, outcome := m.ds.QueryResult("task", "")
-			loadFailed = outcome.Failed()
-			for _, d := range docs {
-				if d.ID == "" {
-					continue
-				}
-				chip := taskChipFromDoc(d)
-				pub := strings.TrimPrefix(d.ID, "drafts.")
-				chips[pub] = chip
-				chips["drafts."+pub] = chip
-			}
-		}
+		chips, loadFailed := cache.taskChips()
 		chip := chips[id]
 		if chip == nil && loadFailed && readFailed != nil {
 			*readFailed = true
@@ -370,22 +370,33 @@ func taskChipFromDoc(d Doc) *pdrender.TaskChip {
 }
 
 // paperValueResolver is the inline live-value seam (lvw-t1, wire §3/§5) for the
-// TUI paper pane: resolve a valueref's (target, field) from whatever the
-// datastore already has loaded — CACHE-ONLY and non-blocking (wire §10: the
-// TUI value is stale until the datastore refreshes; never a blocking fetch
-// inside a render pass, exactly like paperRefResolver). The FIRST lookup in a
-// render pass builds one id→doc map across the loaded types (memoised — never
-// a scan per node); the published spelling is preferred over its `drafts.`
-// twin (D3). "" = miss → pdrender shows the node's pinned fallback.
+// TUI paper pane: resolve a valueref's (target, field) through the shared
+// paperDocCache.
+//
+// THIS COMMENT USED TO SAY THE RESOLVER WAS "CACHE-ONLY and non-blocking …
+// never a blocking fetch inside a render pass". That was FALSE, and load-
+// bearing false: DataStore is a bare alias for apiclient.Client, QueryResult is
+// an unconditional HTTP GET with no cache layer anywhere in the path, and the
+// loop below swept EVERY schema over the wire from inside a synchronous render.
+// Adjacent work reasoned from the reassuring sentence and therefore never
+// looked — which is the whole reason a comment is evidence about what someone
+// INTENDED and never about what the code DOES.
+//
+// What the code does NOW, stated so the next reader need not check: the first
+// lookup against a cold cache DOES fetch — one page per type, blocking, inside
+// the render — and every lookup after it, in this pass and in later passes
+// against the same cache, is a map hit that touches no network. Bounded, not
+// abolished; see paperDocCache for the lifetime and the invalidation.
+//
+// The published spelling is preferred over its `drafts.` twin (D3). "" = miss →
+// pdrender shows the node's pinned fallback.
 //
 // QueryResult, not Query: a type the store refuses contributes zero docs to the
 // map, exactly as an empty type does, and the valueref then shows its pinned
 // fallback as though the live value were merely absent. The fallback still
 // shows — that is the wire §3 contract — but a miss behind a failed read
 // reports through readFailed so the pane can flag the incomplete render.
-func (m model) paperValueResolver(readFailed *bool) func(target, field string) string {
-	var docs map[string]Doc
-	var loadFailed bool
+func (m model) paperValueResolver(cache *paperDocCache, readFailed *bool) func(target, field string) string {
 	return func(target, field string) string {
 		target = strings.TrimSpace(target)
 		field = strings.TrimSpace(field)
@@ -394,22 +405,7 @@ func (m model) paperValueResolver(readFailed *bool) func(target, field string) s
 		if m.ds == nil || target == "" || field == "" || strings.Contains(field, ".") {
 			return ""
 		}
-		if docs == nil {
-			docs = map[string]Doc{}
-			for i := range schemas {
-				page, outcome := m.ds.QueryResult(schemas[i].Name, "")
-				if outcome.Failed() {
-					loadFailed = true
-				}
-				for _, d := range page {
-					if d.ID != "" {
-						if _, taken := docs[d.ID]; !taken {
-							docs[d.ID] = d
-						}
-					}
-				}
-			}
-		}
+		docs, loadFailed := cache.docIndex()
 		pub := strings.TrimPrefix(target, "drafts.")
 		d, ok := docs[pub]
 		if !ok {
@@ -460,8 +456,15 @@ func paperValueScalar(d Doc, field string) string {
 
 // paperRefResolver builds the RefResolver seam: given a referenced doc id it
 // returns that doc's title from the loaded types, falling back to the raw id
-// when the referenced doc isn't found (no blocking fetch — the renderer stays
-// synchronous). The raw id is a valid display and stays the degrade.
+// when the referenced doc isn't found. The raw id is a valid display and stays
+// the degrade.
+//
+// This resolver was the expensive one: it re-scanned EVERY schema over the wire
+// for EVERY reference node, with no memo, so a paper with N references across M
+// types cost up to M*N queries inside one synchronous render (measured at 26
+// for N=4, M=5). It now reads the shared id→doc index, which is built once per
+// cache lifetime — the whole sweep costs M queries, and later renders cost
+// none. The FIRST build still blocks; see paperDocCache.
 //
 // QueryResult, not Query: a refused type reads as an empty type, so a
 // reference the reader is simply not allowed to resolve renders exactly like a
@@ -469,22 +472,14 @@ func paperValueScalar(d Doc, field string) string {
 // whether any type's read FAILED and reports through readFailed only when the
 // id was not found anyway — a reference resolved from a readable type never
 // raises the notice, even when some other type in the scan was refused.
-func (m model) paperRefResolver(readFailed *bool) func(id, refType string) string {
+func (m model) paperRefResolver(cache *paperDocCache, readFailed *bool) func(id, refType string) string {
 	return func(id, _ string) string {
 		if m.ds == nil || id == "" {
 			return id
 		}
-		var loadFailed bool
-		for i := range schemas {
-			page, outcome := m.ds.QueryResult(schemas[i].Name, "")
-			if outcome.Failed() {
-				loadFailed = true
-			}
-			for _, d := range page {
-				if d.ID == id && d.Title != "" {
-					return d.Title
-				}
-			}
+		docs, loadFailed := cache.docIndex()
+		if d, ok := docs[id]; ok && d.Title != "" {
+			return d.Title
 		}
 		if loadFailed && readFailed != nil {
 			*readFailed = true

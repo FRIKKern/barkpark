@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/pdrender"
@@ -188,5 +189,208 @@ func measureOnePaperRender(t *testing.T, order []Schema) {
 	}
 	if strings.Contains(out, "Couldn't load") {
 		t.Errorf("a fully-served render reported a read failure:\n%s", out)
+	}
+}
+
+// THE SECOND RED ARM, and the one that carries the actual "stops blocking on
+// the network" claim: the cache is held on the MODEL, so the second and every
+// later render of the same paper — every keystroke, resize and scroll — issues
+// ZERO requests. Take the model field away and this count goes back to 5 per
+// frame.
+func TestPaperRerenderIssuesNoRequests(t *testing.T) {
+	c := newCountingPaperServer(t)
+	m := paperRequestModel(t, c, paperRequestSchemasFirst)
+	m.paperDocs = newPaperDocCache(m.ds)
+
+	first := m.buildPaperContent(72)
+	cold := c.count()
+	if cold == 0 {
+		t.Fatalf("fixture: the cold render issued no requests at all")
+	}
+
+	c.reset()
+	// Three more frames, one of them at a different width, exactly as a resize
+	// or a scroll would drive it.
+	for _, w := range []int{72, 72, 96} {
+		out := m.buildPaperContent(w)
+		if !strings.Contains(out, "Ada Lovelace") {
+			t.Fatalf("a cached render stopped resolving:\n%s", out)
+		}
+	}
+	warm := c.count()
+	t.Logf("MEASURED: cold render %d requests, three further frames %d requests", cold, warm)
+	if warm != 0 {
+		t.Errorf("three cached renders issued %d query requests — the cache does not survive the render pass", warm)
+	}
+	if !strings.Contains(first, "Ada Lovelace") {
+		t.Fatalf("fixture: the cold render did not resolve")
+	}
+}
+
+// THE QUIET ARM. A cache that never invalidates is a worse bug than the one it
+// fixes, so the same funnel every mutation and every SSE echo runs through —
+// refreshDocViews — must drop it: after it, the next render re-reads and shows
+// the NEW title, not the cached one.
+func TestPaperCacheDropsOnRefresh(t *testing.T) {
+	var mu sync.Mutex
+	title := "Ada Lovelace"
+	var queries int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		queries++
+		cur := title
+		mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, "/person") {
+			_, _ = fmt.Fprintf(w, `{"result":{"documents":[{"_id":"person-1","_type":"person","title":%q}]}}`, cur)
+			return
+		}
+		_, _ = w.Write([]byte(`{"result":{"count":0,"documents":[]}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := schemas
+	t.Cleanup(func() { schemas = prev })
+	schemas = []Schema{{Name: "person", Title: "People"}}
+
+	theme := barkparkPaperTheme()
+	decoded, err := pdrender.Decode([]byte(`{"version":1,"blocks":[{"type":"field-reference","label":"Author","value":"person-1","refType":"person"}]}`))
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	ds := apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	m := model{
+		ds:                  ds,
+		paperTheme:          theme,
+		paperProfile:        pdrender.NoColor,
+		paperRegistry:       pdrender.DefaultRegistry(theme),
+		selectedPaperBlocks: decoded,
+		paperDocs:           newPaperDocCache(ds),
+	}
+	if out := m.buildPaperContent(72); !strings.Contains(out, "Ada Lovelace") {
+		t.Fatalf("fixture: the first render did not resolve:\n%s", out)
+	}
+
+	mu.Lock()
+	title = "Ada Byron"
+	mu.Unlock()
+
+	// Without an invalidation the pane would happily keep showing the old title.
+	if out := m.buildPaperContent(72); !strings.Contains(out, "Ada Lovelace") {
+		t.Fatalf("fixture: the cache did not hold between renders:\n%s", out)
+	}
+	m.paperDocs.invalidate()
+	out := m.buildPaperContent(72)
+	if !strings.Contains(out, "Ada Byron") {
+		t.Errorf("the render after an invalidation still showed the CACHED title:\n%s", out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if queries < 2 {
+		t.Errorf("an invalidated cache did not re-read (only %d queries reached the store)", queries)
+	}
+}
+
+// THE WALL-TIME HALF of the measurement. Requests are the honest unit, but the
+// reader feels milliseconds, so the same render is timed against a store with a
+// per-request latency floor. Nothing is asserted about the absolute duration (a
+// shared machine under load makes that a flake); the arm asserts the SHAPE the
+// cache buys — a warm frame costs no round trips at all — and records the
+// numbers.
+func TestPaperRenderWallTimeIsRecorded(t *testing.T) {
+	const perRequest = 4 * time.Millisecond
+	var mu sync.Mutex
+	var queries int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(perRequest)
+		mu.Lock()
+		queries++
+		mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, "/person") {
+			_, _ = w.Write([]byte(`{"result":{"documents":[{"_id":"person-1","_type":"person","title":"Ada Lovelace"},{"_id":"person-2","_type":"person","title":"Grace Hopper"},{"_id":"person-3","_type":"person","title":"Alan Turing"},{"_id":"person-4","_type":"person","title":"Barbara Liskov"}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"result":{"count":0,"documents":[]}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := schemas
+	t.Cleanup(func() { schemas = prev })
+	schemas = paperRequestSchemasLast
+
+	theme := barkparkPaperTheme()
+	decoded, err := pdrender.Decode([]byte(paperRequestFixture()))
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	ds := apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	m := model{
+		ds:                  ds,
+		paperTheme:          theme,
+		paperProfile:        pdrender.NoColor,
+		paperRegistry:       pdrender.DefaultRegistry(theme),
+		selectedPaperBlocks: decoded,
+		paperDocs:           newPaperDocCache(ds),
+	}
+
+	start := time.Now()
+	m.buildPaperContent(72)
+	cold := time.Since(start)
+	mu.Lock()
+	coldQueries := queries
+	mu.Unlock()
+
+	start = time.Now()
+	out := m.buildPaperContent(72)
+	warm := time.Since(start)
+	mu.Lock()
+	warmQueries := queries - coldQueries
+	mu.Unlock()
+
+	t.Logf("MEASURED at a %v per-request floor: cold render %v (%d requests), "+
+		"warm render %v (%d requests). On the pre-cache code the same paper cost "+
+		"26 requests, i.e. ~%v of round trips on EVERY frame.",
+		perRequest, cold.Round(time.Millisecond), coldQueries,
+		warm.Round(time.Millisecond), warmQueries, 26*perRequest)
+
+	if warmQueries != 0 {
+		t.Errorf("the warm render made %d round trips", warmQueries)
+	}
+	if !strings.Contains(out, "Ada Lovelace") {
+		t.Errorf("the timed render did not resolve:\n%s", out)
+	}
+}
+
+// The wiring half of the invalidation contract: TestPaperCacheDropsOnRefresh
+// shows an invalidated cache re-reads; this shows that refreshDocViews — the
+// single funnel the DataStoreRefreshMsg handler and every TUI mutation run
+// through — is what performs the invalidation. Delete that one line and this
+// reds while every render test stays green, which is exactly the failure a
+// cache invites.
+func TestRefreshDocViewsDropsThePaperCache(t *testing.T) {
+	c := newCountingPaperServer(t)
+	prev := schemas
+	t.Cleanup(func() { schemas = prev })
+	schemas = paperRequestSchemasFirst
+
+	ds := apiclient.New(apiclient.Config{BaseURL: c.srv.URL, Token: "t", Dataset: "production"})
+	prevRoot := rootStructure
+	t.Cleanup(func() { rootStructure = prevRoot })
+	buildDesk(ds)
+	m := initialModel(ds)
+	if m.paperDocs == nil {
+		t.Fatal("initialModel did not give the TUI a paper cache — every frame re-fetches")
+	}
+	if _, failed := m.paperDocs.docIndex(); failed {
+		t.Fatalf("fixture: the warming sweep failed")
+	}
+	if len(m.paperDocs.pages) == 0 {
+		t.Fatal("fixture: the cache holds nothing to drop")
+	}
+
+	m.refreshDocViews()
+
+	if len(m.paperDocs.pages) != 0 || m.paperDocs.indexBuilt {
+		t.Errorf("refreshDocViews left %d cached pages (indexBuilt=%v) — a store change "+
+			"would keep rendering the stale copy", len(m.paperDocs.pages), m.paperDocs.indexBuilt)
 	}
 }
