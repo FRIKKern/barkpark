@@ -880,6 +880,25 @@ if [ "\$mode" = "repoll-loses-page-2" ]; then
   fi
   cat "$TMP/gql-page1-unknown.json"; exit 0
 fi
+# `repoll-goes-blind`: BOTH polls complete, and the LATER one sees LESS. Poll 1
+# answers page 1 UNKNOWN and page 2 CONFLICTING-with-a-stale-green (1 of 2
+# classified, so the re-poll fires); poll 2 answers BOTH pages UNKNOWN. That is
+# the live shape measured on main run 35121820618 (2026-09-16T16:25:41Z), where
+# poll 1 logged 28 UNKNOWN of 50 and poll 2 logged 50 of 50.
+if [ "\$mode" = "repoll-goes-blind" ]; then
+  if grep -q 'after=' <<<"\$*"; then
+    if [ -f "$TMP/page2-served-once" ]; then cat "$TMP/gql-page2-unknown.json"; exit 0; fi
+    touch "$TMP/page2-served-once"
+    cat "$TMP/gql-page2.json"; exit 0
+  fi
+  cat "$TMP/gql-page1-unknown.json"; exit 0
+fi
+# `always-unknown`: EVERY page of EVERY poll answers UNKNOWN. No pass ever
+# classified a row, so BLIND is the only honest verdict and must survive.
+if [ "\$mode" = "always-unknown" ]; then
+  if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2-unknown.json"; else cat "$TMP/gql-page1-unknown.json"; fi
+  exit 0
+fi
 if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2.json"; else cat "$TMP/gql-page1.json"; fi
 STUBEOF
   chmod +x "$STUB/gh"
@@ -922,6 +941,9 @@ gql_rollup "$TMP/gql-rollup.json"
 jq '.data.repository.pullRequests.nodes[0].mergeable = "UNKNOWN"
     | .data.repository.pullRequests.nodes[0].mergeStateStatus = "UNKNOWN"' \
   "$TMP/gql-page1.json" > "$TMP/gql-page1-unknown.json"
+jq '.data.repository.pullRequests.nodes[0].mergeable = "UNKNOWN"
+    | .data.repository.pullRequests.nodes[0].mergeStateStatus = "UNKNOWN"' \
+  "$TMP/gql-page2.json" > "$TMP/gql-page2-unknown.json"
 
 STUB_PATH="$STUB:/usr/bin:/bin:/usr/sbin:/sbin"
 run_stubbed() { # <mode> [extra args…]
@@ -1055,6 +1077,62 @@ else
   [ "$mrc" = "6" ] \
     && ok "(p-6m) with the fallback removed the same population exits 6 UNREACHABLE again — the fix is live, not decorative" \
     || bad "(p-6m) MUTATION SURVIVED: expected 6 without the fallback, got $mrc: $mout"
+fi
+
+# (p-7) A LATER POLL THAT SEES LESS DOES NOT ERASE AN EARLIER ONE THAT SAW MORE.
+#
+# THE DEFECT THIS OWNS, measured on main run 35121820618 (2026-09-16T16:25:41Z)
+# — the first failing run that ALREADY carried #18600's keep-the-last-complete-
+# pass fix. It logged `poll 1/3: 28 row(s) answered mergeable=UNKNOWN` (so 22 of
+# 50 rows WERE classified), then `poll 2/3: 50 row(s) answered UNKNOWN`, kept
+# poll 2 because it was later, and concluded `BLIND — classified 0 of 50 open
+# pull request(s)`. It had classified 22. GitHub invalidates mergeability behind
+# every merge, so under a merge burst re-polling routinely makes the run see
+# LESS, and keeping the most RECENT complete pass threw the sight away.
+#
+# Here poll 1 reads page 1 UNKNOWN + page 2 CONFLICTING-with-a-stale-green, and
+# poll 2 reads both pages UNKNOWN. The run must report poll 1's verdict — the
+# scream, exit 1 — not a BLIND that names no pull request at all.
+out="$(run_stubbed repoll-goes-blind --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "1" ] \
+  && ok "(p-7) a blinder re-poll does not erase the pass that saw the stale green — still exit 1" \
+  || bad "(p-7) expected exit 1 from the pass that classified rows, got $rc: $out"
+grep -q "#9102" <<<"$out" \
+  && ok "(p-7) …and the CONFLICTING row poll 1 classified is named" \
+  || bad "(p-7) the stale green poll 1 had read was erased by the blinder re-poll: $out"
+grep -q "BLIND" <<<"$out" \
+  && bad "(p-7) a run holding a pass that classified a row still called itself BLIND: $out" \
+  || ok "(p-7) …and never calls itself BLIND while holding a pass that classified a row"
+grep -q "is not a fresher verdict, it is a blinder one" <<<"$out" \
+  && ok "(p-7) …and SAYS which poll it reported from and why, so the staleness is on the record" \
+  || bad "(p-7) the selection is silent about preferring an earlier poll: $out"
+
+# (p-7d) DISARM — THE RED THIS MUST NOT REMOVE. If NO pass ever classified a
+# row, BLIND is the truth and the selection above must not launder it. Every
+# page of every poll answers UNKNOWN.
+out="$(run_stubbed always-unknown --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "5" ] \
+  && ok "(p-7d) a run where NO poll classified anything STILL exits 5 BLIND — the selection bought no green" \
+  || bad "(p-7d) expected 5 when every poll is all-UNKNOWN, got $rc — BLIND was laundered: $out"
+grep -q "BLIND" <<<"$out" \
+  && ok "(p-7d) …and still says BLIND" || bad "(p-7d) no BLIND sentence: $out"
+
+# (p-7m) THE SAME ARM, MUTATION-PROVEN. Put the keep-the-LAST-pass rule back on
+# a copy and (p-7)'s population must go back to BLIND — otherwise (p-7) passes
+# for some other reason and proves nothing about the selection.
+sed 's/if \[ "$last_full_unknown" -lt 0 \] || \[ "$unknown" -lt "$last_full_unknown" \]; then/if true; then/' \
+  "$WATCH" > "$TMP/mut-bestpass.sh"
+if diff -q "$WATCH" "$TMP/mut-bestpass.sh" >/dev/null 2>&1; then
+  bad "(p-7m) MUTATION did not apply — the selection moved, so (p-7) proves nothing"
+else
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once" "$TMP/page2-served-once"
+  mk_stub repoll-goes-blind
+  mout="$(env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$TMP/mut-bestpass.sh" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 --attempts 2 --page-attempts 2 2>&1)"; mrc=$?
+  [ "$mrc" = "5" ] \
+    && ok "(p-7m) with keep-the-LAST-pass restored the same population exits 5 BLIND again — the fix is live, not decorative" \
+    || bad "(p-7m) MUTATION SURVIVED: expected 5 with last-pass-wins, got $mrc: $mout"
 fi
 
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
