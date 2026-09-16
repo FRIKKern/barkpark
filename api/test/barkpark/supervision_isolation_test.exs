@@ -256,4 +256,95 @@ defmodule Barkpark.SupervisionIsolationTest do
                {plugins.intensity, plugins.period}
     end
   end
+
+  # Every intermediate supervisor in the SHIPPED boot list, derived rather than
+  # listed: `Barkpark.Application.child_specs/4` is pure, so the population is
+  # read from the thing that boots. A hand-written list of three modules is a
+  # SNAPSHOT — it goes stale the day a fifth tier is added, and it goes stale
+  # silently, which is exactly how `Barkpark.Plugins.Sheets.Supervisor` kept the
+  # OTP default while three named siblings were asserted green.
+  defp intermediate_supervisors do
+    []
+    |> Barkpark.Application.child_specs([repo: Barkpark.Repo], [], [])
+    |> Enum.map(&Supervisor.child_spec(&1, []))
+    |> Enum.filter(fn %{start: {mod, _, _}} = spec ->
+      Map.get(spec, :type) == :supervisor and barkpark_module?(mod) and
+        supervisor_behaviour?(mod)
+    end)
+    |> Enum.map(fn %{start: {mod, _, _}} -> mod end)
+    |> Enum.uniq()
+  end
+
+  defp barkpark_module?(mod) do
+    mod |> Atom.to_string() |> String.starts_with?("Elixir.Barkpark.")
+  end
+
+  # `Barkpark.Repo`'s child spec is ALSO `type: :supervisor`, and it has no
+  # restart budget of its own to read — an Ecto repo takes `init/2`. Keying on
+  # `init/1` selects the `use Supervisor` modules and nothing else.
+  defp supervisor_behaviour?(mod) do
+    Code.ensure_loaded?(mod) and function_exported?(mod, :init, 1)
+  end
+
+  # `init/1` takes `:ok` on three of the tiers and the plugin child list on the
+  # fourth; try both rather than keying the arg off the module name.
+  defp tier_flags(mod) do
+    try do
+      supervisor_flags(mod, :ok)
+    rescue
+      FunctionClauseError -> supervisor_flags(mod, [])
+    end
+  end
+
+  describe "EVERY intermediate tier in the real boot list widens its budget" do
+    test "the derived population is the four wrapping tiers (control)" do
+      mods = intermediate_supervisors()
+
+      # Printed as an assertion, not assumed: an empty or shrunken population
+      # would make the budget test below vacuously green.
+      assert Barkpark.Plugins.Supervisor in mods
+      assert Barkpark.Plugins.Indx.Supervisor in mods
+      assert Barkpark.Plugins.Sheets.Supervisor in mods
+      assert Barkpark.StudioChat.Supervisor in mods
+      assert length(mods) >= 4, "derived population: #{inspect(mods)}"
+    end
+
+    test "the top supervisor's budget really is 3/5s (basis control)" do
+      # The comparison below is only meaningful if the top tier runs the OTP
+      # default; `Barkpark.Application` states it explicitly, so read it there.
+      src = File.read!("lib/barkpark/application.ex")
+
+      assert src =~ "max_restarts: 3"
+      assert src =~ "max_seconds: 5"
+
+      {:ok, {default_flags, _}} = Supervisor.init([], strategy: :one_for_one)
+      assert %{intensity: 3, period: 5} = Map.take(default_flags, [:intensity, :period])
+    end
+
+    test "no intermediate tier carries the top tier's own restart budget" do
+      {:ok, {top, _}} = Supervisor.init([], strategy: :one_for_one)
+
+      offenders =
+        for mod <- intermediate_supervisors(),
+            flags = tier_flags(mod),
+            {flags.intensity, flags.period} == {top.intensity, top.period},
+            do: mod
+
+      assert offenders == [],
+             "these intermediate supervisors run the SAME #{top.intensity}/#{top.period}s budget " <>
+               "as Barkpark.Supervisor, so a crash-loop they exist to contain exhausts both " <>
+               "walls in one window and escalates to Repo/Oban/Endpoint: #{inspect(offenders)}"
+    end
+
+    test "every intermediate tier is strictly more restart-tolerant than the top" do
+      {:ok, {top, _}} = Supervisor.init([], strategy: :one_for_one)
+
+      for mod <- intermediate_supervisors() do
+        flags = tier_flags(mod)
+
+        assert flags.intensity > top.intensity,
+               "#{inspect(mod)} allows #{flags.intensity} restarts, top allows #{top.intensity}"
+      end
+    end
+  end
 end
