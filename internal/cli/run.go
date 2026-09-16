@@ -29,9 +29,13 @@ import (
 )
 
 // cliVersion is the binary's CLI version, surfaced by `barkpark version` and
-// used for the manifest's min_cli gate when present. Injected at release time
-// via -ldflags -X (see Makefile LDFLAGS); "dev" for plain `go build` builds,
-// which makes untagged binaries self-evident in bug reports.
+// compared against the manifest's advertised min_cli floor by minCLICheck
+// (min_cli_gate.go) — an ADVISORY report on `bp capabilities`, never a refusal.
+// This comment previously claimed a "min_cli gate"; there was none, at any call
+// site, which is exactly how an inert guard reads as a working one.
+// Injected at release time via -ldflags -X (see Makefile LDFLAGS); "dev" for
+// plain `go build` builds, which makes untagged binaries self-evident in bug
+// reports — and which minCLICheck treats as UNKNOWN, never as satisfied.
 var cliVersion = "dev"
 
 // cliCommit and cliDate are release-build provenance, injected alongside
