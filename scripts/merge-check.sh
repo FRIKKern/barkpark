@@ -42,9 +42,55 @@ esac
 # functions, not hand-written lookalikes of them. Moving a definition below the
 # selftest silently converts those arms back into fixture theatre.
 # ============================================================================
-FAIL=0; ARMS=0
+FAIL=0; ARMS=0; WAITS=0
 arm(){ ARMS=$((ARMS+1)); if [ "$1" = ok ]; then printf 'PASS %-22s %s\n' "$2" "$3"; else printf 'FAIL %-22s %s\n' "$2" "$3"; FAIL=$((FAIL+1)); fi; }
 cannot(){ printf 'CANNOT READ %-14s %s\n' "$1" "$2"; FAIL=$((FAIL+1)); ARMS=$((ARMS+1)); }
+# --- waitfor <arm> <why> ----------------------------------------------------
+# THE THIRD BUCKET. A still-running check and a failed check are DIFFERENT
+# OBJECTS and must get DIFFERENT VERDICTS. Before this there were two buckets —
+# PASS and "everything else" — so a head whose only non-success rows were still
+# QUEUED came out of `cannot`, which increments FAIL, and the final line read
+# `DO NOT MERGE` with NOTHING having concluded failure.
+# MEASURED on #18483 (2026-09-16): `CANNOT READ ... ZERO CONCLUDED FAILURES —
+# still moving: Required-check spec drift (advisory)` — the arm's own words say
+# zero failures, and the verdict it produced said DO NOT MERGE.
+# A WAIT counts as an ARM (it is a real reading of a real head) and it keeps the
+# run NON-ZERO — fail-closed is preserved, nothing here turns a wait into a
+# merge permit — but it never lands in the FAIL bucket, because a wait is not a
+# diagnosis and must not be read, counted or debugged as one.
+waitfor(){ printf 'WAIT %-22s %s\n' "$1" "$2"; WAITS=$((WAITS+1)); ARMS=$((ARMS+1)); }
+
+# --- mc_failed_names / mc_pending_names / mc_pooled_names_OLD <file> --------
+# ONE HEAD, TWO QUESTIONS. `status` answers "has it concluded?"; `conclusion`
+# answers "what did it conclude?". An in_progress or queued run carries
+# conclusion:null, which is not "success" — so a filter that asks ONLY about
+# conclusion pools PENDING in with FAILURES. That is exactly what shipped:
+#   gates  read 20 "failures" on a fresh head. ALL 20 WERE PENDING.
+#   deploy read two "new failures" (`Required-check spec gate`, `Required-check
+#          spec drift (advisory)`) that were both in_progress, conclusion null,
+#          and followed an elegant, entirely false attribution trail.
+#   api    was handed a QUEUED `PR task gate self-test` as a non-success and
+#          never noticed the tool had misclassified it.
+# The filters live here, ABOVE the selftest, so its arms run THESE and not a
+# retyped lookalike. mc_pooled_names_OLD is the pre-fix reader, kept for ONE
+# purpose: to be the selftest's control. Nothing in the live path calls it.
+mc_failed_names(){
+  jq -s -r '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[]
+              | select(.status=="completed")
+              | select(.conclusion!="success" and .conclusion!="neutral" and .conclusion!="skipped")
+              | .name ] | .[]' "$1" 2>/dev/null
+}
+mc_pending_names(){
+  jq -s -r '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[]
+              | select(.status!="completed") | .name ] | .[]' "$1" 2>/dev/null
+}
+mc_pooled_names_OLD(){
+  jq -s -r '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[]
+              | select(.conclusion!="success" and .conclusion!="neutral" and .conclusion!="skipped")
+              | .name ] | .[]' "$1" 2>/dev/null
+}
+# Display join. NEVER re-parsed: check names contain commas (A14).
+mc_join(){ awk 'NR>1{printf ", "}{printf "%s",$0} END{if(NR)printf "\n"}'; }
 
 # How many recent origin/main heads the inherited-census samples.
 # WHY NOT 1: `Required-check spec drift (advisory)` flaps at roughly 1-in-6 and
@@ -178,6 +224,90 @@ mc_classify(){
   [ "$anyown" -eq 0 ]
 }
 
+# ============================================================================
+# THE WORKFLOW'S OWN MAIN HISTORY — the answer to UNPROVEN.
+# ============================================================================
+# A COMMIT WINDOW CANNOT SEE A RARE WORKFLOW. `tooling/{aesthetics, ergonomics,
+# risk} node --test suite + tooling/pds gate` rendered 0 rows across the last 20
+# main heads -> UNPROVEN -> REFUSED, while
+# `actions/workflows/research-coverage-suite.yml/runs` showed THREE push/main
+# runs, ALL failure. The workflow has a `push: branches: [main]` arm and it DOES
+# run on main; both arms just carry the same `paths:` filter, so main trips it
+# rarely and the last time was further back than the window.
+# Bit again on #18483 and #18498 (2026-09-16), where `Required-check spec drift
+# (advisory)` was a standing main red fixed later by #18500 — an INHERITED red
+# the classifier could not see because it sampled COMMITS, not workflow history.
+# DEEPENING THE WINDOW IS THE WRONG REMEDY: it only moves the boundary. The
+# right question is "when this workflow LAST RAN on main, did it fail".
+
+# --- mc_run_id_from_details_url <url> ---------------------------------------
+# A check run does not carry its workflow FILE. It carries a details_url shaped
+# https://github.com/<owner>/<repo>/actions/runs/<run_id>/job/<job_id>, and
+# `actions/runs/<run_id>` carries `.path`. PURE PARSE, so the selftest exercises
+# the real extraction offline. Prints nothing when the URL is not that shape —
+# an unparsed URL must stay UNPROVEN, never become a guess.
+mc_run_id_from_details_url(){
+  printf '%s' "${1:-}" | sed -n 's#^https\{0,1\}://[^/]*/[^/]*/[^/]*/actions/runs/\([0-9][0-9]*\)\(/.*\)\{0,1\}$#\1#p'
+}
+
+# --- mc_name_to_workflow <check name> <head sha> ----------------------------
+# The mapping the script did not have: check-run NAME -> workflow file basename.
+mc_name_to_workflow(){
+  local name="$1" sha="$2" url rid path
+  url=$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" --paginate 2>/dev/null \
+        | jq -s -r --arg n "$name" '[.[].check_runs[]] | map(select(.name==$n))
+                                    | sort_by(.started_at) | last | (.details_url // "")' 2>/dev/null)
+  rid=$(mc_run_id_from_details_url "$url")
+  [ -n "$rid" ] || return 1
+  path=$(gh api "repos/$REPO/actions/runs/$rid" --jq '.path' 2>/dev/null)
+  [ -n "$path" ] && [ "$path" != null ] || return 1
+  printf '%s' "${path##*/}"
+}
+
+# --- mc_wf_main_census <outfile> <workflow file> ----------------------------
+# The workflow's OWN branch=main run history, newest first, as FAIL/OK lines.
+# THE PAGINATION FORM IS LOAD-BEARING HERE TOO: `--paginate -q '<aggregate>'`
+# runs the filter once PER PAGE and emits one value per page, never a total.
+# `--paginate` with NO -q, piped to `jq -s` over the page objects, is the safe
+# form — the same rule arm A12 pins on the commit census.
+#
+# THIS IS A RUN-LEVEL READ, AND THE ROLLUP HAZARD IS MODELLED RATHER THAN IGNORED
+# (adjudicated in .github/run-level-readers.allow as KNOWS-THE-CLASS). A job-level
+# `continue-on-error` launders a red job into a green RUN, so this census can only
+# UNDER-count main failures. Under-counting lowers k in k/N, which pushes the class
+# toward OWN, which REFUSES. A laundered run can cost a true permit; it can NEVER
+# manufacture a false INHERITED, because a run reads `failure` only when a job that
+# was not continue-on-error actually failed. The PR's OWN verdict is still read
+# exclusively from check-runs; this read is only ever asked about names the commit
+# window could not see at all.
+mc_wf_main_census(){
+  local out="$1" wf="$2"
+  : > "$out"
+  [ -n "$wf" ] || return 0
+  gh api "repos/$REPO/actions/workflows/$wf/runs?branch=main&per_page=20" --paginate 2>/dev/null \
+    | jq -s -r '[.[].workflow_runs[]] | map(select(.status=="completed"))
+                | sort_by(.created_at) | reverse | .[0:20] | .[]
+                | (if (.conclusion=="failure" or .conclusion=="timed_out" or .conclusion=="startup_failure")
+                   then "FAIL" else "OK" end) + "\t" + (.head_sha // "-")' >> "$out" 2>/dev/null
+}
+
+# --- mc_wf_classify <name> <wf census file> ---------------------------------
+# PURE. Prints <CLASS><TAB><name><TAB><failed>/<completed main runs>.
+# 0 = inherited-class (permit), 1 = own-class or unproven (refuse).
+# AN ABSENCE IS STILL NOT EVIDENCE OF HEALTH: a workflow with NO completed main
+# run stays UNPROVEN and still refuses. The new read can only turn UNPROVEN into
+# a VERDICT when there is main history to read; it never invents one.
+mc_wf_classify(){
+  local name="$1" cens="$2" n k
+  n=$(grep -c . "$cens" 2>/dev/null); n=${n:-0}
+  k=$(grep -c '^FAIL' "$cens" 2>/dev/null); k=${k:-0}
+  if [ "$n" -eq 0 ]; then printf 'UNPROVEN\t%s\t0/0\n' "$name"; return 1; fi
+  if [ "$k" -eq 0 ]; then printf 'OWN\t%s\t0/%s\n' "$name" "$n"; return 1; fi
+  if [ "$k" -eq "$n" ]; then printf 'INHERITED-MAIN-WF-STABLE\t%s\t%s/%s\n' "$name" "$k" "$n"
+  else printf 'INHERITED-MAIN-WF-FLAPPING\t%s\t%s/%s\n' "$name" "$k" "$n"; fi
+  return 0
+}
+
 # --- mc_rollup <sha> --------------------------------------------------------
 # FULL ROLLUP, PAGINATED, with the total_count check that a single page cannot
 # give you — then the inherited/own classification of whatever it found red.
@@ -187,7 +317,7 @@ mc_classify(){
 # two halves drift apart without any arm noticing.
 mc_rollup(){
   local REAL="$1"
-  local TC T P GOT FAILED PENDN OKN MISS PEND _c CN NF CLS RC OWNS INH
+  local TC T P GOT FAILED PENDN OKN MISS PEND _c CN NF CLS RC OWNS INH CN2 NF2 CLS2 WFO UNF _un _wf _wc
   TC=$(gh api "repos/$REPO/commits/$REAL/check-runs?per_page=1" --jq '.total_count' 2>/dev/null)
   if [ -z "$TC" ]; then cannot "rollup" "total_count unreadable"; return; fi
   T=$(mktemp); P=1
@@ -207,8 +337,8 @@ mc_rollup(){
   # two, on a head whose two spec jobs were in_progress with null conclusions.
   # BOTH would have diagnosed a defect that did not exist. Split them: a wall of
   # pending names is a WAIT, a concluded non-success is a VERDICT.
-  FAILED=$(jq -s '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[] | select(.status=="completed") | select(.conclusion!="success" and .conclusion!="neutral" and .conclusion!="skipped") | .name ] | join(", ")' -r "$T")
-  PENDN=$(jq -s '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[] | select(.status!="completed") | .name ] | join(", ")' -r "$T")
+  FAILED=$(mc_failed_names "$T" | mc_join)
+  PENDN=$(mc_pending_names "$T" | mc_join)
   OKN=$(jq -s '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[] | select(.conclusion=="success") ] | length' -r "$T")
   # ASSERT PRESENCE BEFORE STATUS. A required check that rendered NO ROW contributes
   # zero non-success rows and is byte-identical to "all clean". Console's monitor
@@ -222,10 +352,10 @@ mc_rollup(){
   # A FRESH HEAD HAS ZERO SUCCESSES AND IS NOT A BROKEN READER.
   PEND=$(jq -s '[ .[] | select(.status != "completed") ] | length' -r "$T")
   if [ "$OKN" -eq 0 ] && [ "${PEND:-0}" -gt 0 ]; then
-    cannot "rollup" "no newest-per-name success yet and $PEND of $TC run(s) are still queued/in_progress — CI IS FRESH, not broken; re-read when it settles"
+    waitfor "rollup" "no newest-per-name success yet and $PEND of $TC run(s) are still queued/in_progress — CI IS FRESH, not broken; re-read when it settles. This is a WAIT, not a failure."
   elif [ "$OKN" -eq 0 ]; then cannot "rollup" "zero successes among $TC runs and NOTHING is pending — the reader is broken, not the PR"
   elif [ -z "$FAILED" ] && [ -n "$PENDN" ]; then
-    cannot "full rollup" "$TC runs, newest-per-name, $OKN green, ZERO CONCLUDED FAILURES — still moving: $PENDN. This is a WAIT, not a diagnosis. Re-read; do NOT debug these."
+    waitfor "full rollup" "$TC runs, newest-per-name, $OKN green, ZERO CONCLUDED FAILURES — still moving: $PENDN. This is a WAIT, not a diagnosis. Re-read; do NOT debug these, and do not read the run's non-zero exit as a red."
   elif [ -z "$FAILED" ]; then arm ok "full rollup" "$TC runs, newest-per-name, 0 non-success ($OKN green)"
   else
     # ---- INHERITED vs OWN -------------------------------------------------
@@ -250,7 +380,7 @@ mc_rollup(){
     # all three classified UNPROVEN and the arm REFUSED — manufacturing exactly the
     # false refusal this change exists to remove, inside the fix for it.
     # $FAILED stays a comma-joined string for DISPLAY only; it is never re-parsed.
-    jq -s -r '[ . | group_by(.name) | map(sort_by(.started_at)|last) | .[] | select(.status=="completed") | select(.conclusion!="success" and .conclusion!="neutral" and .conclusion!="skipped") | .name ] | .[]' "$T" > "$NF"
+    mc_failed_names "$T" > "$NF"
     mc_main_census "$CN" "$MAIN_N"
     mc_classify "$NF" "$CN" > "$CLS"; RC=$?
     # SECOND PASS: re-sample ONLY the unproven names, deeper. A refusal caused by
@@ -267,6 +397,25 @@ mc_rollup(){
       fi
       rm -f "$CN2" "$NF2" "$CLS2"
     fi
+    # THIRD PASS — ASK THE WORKFLOW'S MAIN HISTORY, not a commit window. Only
+    # the names STILL UNPROVEN after the deep re-sample reach here, so the cost
+    # lands on the rare case. MERGE_CHECK_DISARM_WFHISTORY=1 disarms it: the
+    # mutation switch that proves THIS read is what moved the verdict.
+    if [ "$RC" != 3 ] && [ "${MERGE_CHECK_DISARM_WFHISTORY:-0}" != "1" ] && grep -q '^UNPROVEN' "$CLS"; then
+      WFO=$(mktemp); UNF=$(mktemp)
+      awk -F'\t' '$1=="UNPROVEN"{print $2}' "$CLS" > "$UNF"
+      grep -v '^UNPROVEN' "$CLS" > "$WFO" 2>/dev/null
+      while IFS= read -r _un; do
+        [ -n "$_un" ] || continue
+        _wf=$(mc_name_to_workflow "$_un" "$REAL" 2>/dev/null) || _wf=""
+        if [ -z "$_wf" ]; then printf 'UNPROVEN\t%s\t0/0\n' "$_un" >> "$WFO"; continue; fi
+        _wc=$(mktemp); mc_wf_main_census "$_wc" "$_wf"
+        mc_wf_classify "$_un" "$_wc" >> "$WFO"
+        rm -f "$_wc"
+      done < "$UNF"
+      mv "$WFO" "$CLS"; rm -f "$UNF"
+      if awk -F'\t' '$1=="OWN"||$1=="UNPROVEN"||$1=="OWN-DISARMED"{f=1} END{exit !f}' "$CLS"; then RC=1; else RC=0; fi
+    fi
     if [ "$RC" = 3 ]; then
       cannot "full rollup" "CONCLUDED non-success ($FAILED) but the origin/main census came back $(cut -f3 "$CLS" | head -1) — an empty or short census is a BROKEN READER (or an exhausted shared rate limit), NOT a clean main. No inherited/own verdict is available; do not read this as either."
     else
@@ -277,7 +426,7 @@ mc_rollup(){
         # census establishes is only that this PR did not cause it.
         arm ok "full rollup" "INHERITED — every concluded red is also red on origin/main over the last $MAIN_N head(s), so none of it is attributable to this PR. THIS IS NOT A CLEAN BILL: $INH$( [ -n "$PENDN" ] && printf ' | still pending (NOT failures): %s' "$PENDN" )"
       else
-        arm no "full rollup" "OWN — red(s) NOT explained by origin/main over the last $MAIN_N head(s)$( grep -q '^UNPROVEN' "$CLS" && printf ' (UNPROVEN re-sampled over %s)' "$MAIN_DEEP" ): $OWNS$( [ -n "$INH" ] && printf ' | inherited, not attributable: %s' "$INH" )$( [ -n "$PENDN" ] && printf ' | still pending (NOT failures): %s' "$PENDN" )$( grep -q '^UNPROVEN' "$CLS" && printf ' || AN UNPROVEN CONTEXT IS NOT A PROVEN OWN RED: it rendered no row on any sampled main commit, which for a path-filtered workflow can simply mean main has not tripped its filter recently. Before treating it as yours, read the workflow history: gh api "repos/%s/actions/workflows/<file>.yml/runs?per_page=20" --paginate | jq -s -r "[.[].workflow_runs[]]|.[]|[.conclusion,.event,.head_branch]|@tsv" ' "$REPO" )"
+        arm no "full rollup" "OWN — red(s) NOT explained by origin/main over the last $MAIN_N head(s)$( grep -q '^UNPROVEN' "$CLS" && printf ' (UNPROVEN re-sampled over %s)' "$MAIN_DEEP" ): $OWNS$( [ -n "$INH" ] && printf ' | inherited, not attributable: %s' "$INH" )$( [ -n "$PENDN" ] && printf ' | still pending (NOT failures): %s' "$PENDN" )$( grep -q '^UNPROVEN' "$CLS" && printf ' || AN UNPROVEN CONTEXT IS NOT A PROVEN OWN RED. The commit window AND the workflow-history read have both now been tried and neither produced a main verdict: either the check-run name could not be mapped to a workflow file, or that workflow has NO completed run on main. An absence is still not evidence of health, so it refuses — but it is not a finding about this PR. Settle it by hand: gh api "repos/%s/actions/workflows/<file>.yml/runs?per_page=20" --paginate | jq -s -r "[.[].workflow_runs[]]|.[]|[.conclusion,.event,.head_branch]|@tsv" ' "$REPO" )"
       fi
     fi
     rm -f "$CN" "$NF" "$CLS"
@@ -524,9 +673,96 @@ if [ "${1:-}" = "--selftest" ]; then
   else _no "CONTROL comma-split shreds" "the old form yielded $_frag — A14 cannot discriminate"; fi
   rm -f "$_cens2" "$_nm2"
 
+  # ---- A15: PENDING IS NOT A FAILURE -------------------------------------
+  # Runs the REAL mc_failed_names / mc_pending_names over a synthetic head that
+  # carries one concluded failure and two pending rows — the exact shape deploy
+  # read as "two NEW failures" when both were in_progress with conclusion null.
+  _crf=$(mktemp)
+  printf '%s\n' \
+    '{"name":"Elixir gate","status":"completed","conclusion":"failure","started_at":"2026-09-16T01:00:00Z"}' \
+    '{"name":"Required-check spec gate","status":"in_progress","conclusion":null,"started_at":"2026-09-16T01:00:00Z"}' \
+    '{"name":"Required-check spec drift (advisory)","status":"queued","conclusion":null,"started_at":"2026-09-16T01:00:00Z"}' \
+    '{"name":"Cloud gate","status":"completed","conclusion":"success","started_at":"2026-09-16T01:00:00Z"}' > "$_crf"
+  _fl=$(mc_failed_names "$_crf" | tr '\n' '|'); _pl=$(mc_pending_names "$_crf" | tr '\n' '|')
+  _a15=1
+  [ "$_fl" = "Elixir gate|" ] || _a15=0
+  case "$_pl" in *"Required-check spec gate"*) : ;; *) _a15=0 ;; esac
+  case "$_pl" in *"drift (advisory)"*) : ;; *) _a15=0 ;; esac
+  if [ "$_a15" = 1 ]; then _ok "pending is not a failure" "failures=[$_fl] pending=[$_pl]"
+  else _no "pending is not a failure" "failures=[$_fl] pending=[$_pl] — a pending row is being read as a failure"; fi
+  # A15b — CONTROL: the PRE-FIX pooled reader really does pool, or A15 pins nothing.
+  _pool=$(mc_pooled_names_OLD "$_crf" | grep -c .)
+  if [ "${_pool:-0}" -ge 3 ]; then _ok "CONTROL pooled reader pools" "the pre-fix filter names $_pool non-success rows (1 failed + 2 PENDING)"
+  else _no "CONTROL pooled reader pools" "the pre-fix filter named $_pool — A15 cannot discriminate"; fi
+  rm -f "$_crf"
+
+  # A15c — A WAIT MUST NOT LAND IN THE FAIL BUCKET. This is the defect measured
+  # on #18483: the arm's own text said ZERO CONCLUDED FAILURES and the verdict
+  # it produced said DO NOT MERGE, because the wait came out of `cannot`.
+  _F0=$FAIL; _A0=$ARMS; _W0=$WAITS
+  waitfor "selftest-probe" "synthetic wait" >/dev/null
+  if [ "$FAIL" -eq "$_F0" ] && [ "$WAITS" -eq $((_W0+1)) ] && [ "$ARMS" -eq $((_A0+1)) ]; then
+    _ok "a WAIT does not refuse" "FAIL unchanged at $FAIL, WAITS $_W0->$WAITS, counted as an arm"
+  else _no "a WAIT does not refuse" "FAIL $_F0->$FAIL WAITS $_W0->$WAITS ARMS $_A0->$ARMS — a wait still refuses"; fi
+  FAIL=$_F0; ARMS=$_A0; WAITS=$_W0
+  # A15d — CONTROL: a GENUINELY unreadable input must STILL increment FAIL. The
+  # split must not have turned fail-closed into fail-open.
+  _F0=$FAIL; _A0=$ARMS
+  cannot "selftest-probe" "synthetic unreadable input" >/dev/null
+  if [ "$FAIL" -eq $((_F0+1)) ]; then _ok "CONTROL cannot-read still refuses" "FAIL $_F0->$FAIL — fail-closed intact"
+  else _no "CONTROL cannot-read still refuses" "FAIL $_F0->$FAIL — an unreadable input stopped refusing"; fi
+  FAIL=$_F0; ARMS=$_A0
+
+  # ---- A16: THE WORKFLOW'S MAIN HISTORY ANSWERS UNPROVEN -------------------
+  # Calls the REAL mc_wf_classify. `research-coverage-suite.yml` had THREE
+  # push/main runs, all failure, while its context read UNPROVEN 0/0 off a
+  # 20-commit window. The window was the blind spot, not the workflow.
+  _wfc=$(mktemp)
+  _cn='tooling/{aesthetics, ergonomics, risk} node --test suite + tooling/pds gate'
+  printf 'FAIL\taaa\nFAIL\tbbb\nFAIL\tccc\n' > "$_wfc"
+  _out=$(mc_wf_classify "$_cn" "$_wfc"); _rc=$?
+  case "$_rc:$_out" in
+    0:INHERITED-MAIN-WF-STABLE*3/3*) _ok "unproven flips on wf history" "$_out" ;;
+    *) _no "unproven flips on wf history" "rc=$_rc out=$_out — a wholly-failing main workflow history did not permit" ;;
+  esac
+  # A16b — CONTROL: a workflow GREEN on main stays OWN and still REFUSES.
+  printf 'OK\taaa\nOK\tbbb\n' > "$_wfc"
+  _out=$(mc_wf_classify "$_cn" "$_wfc"); _rc=$?
+  case "$_rc:$_out" in
+    1:OWN*0/2*) _ok "CONTROL green-on-main is OWN" "$_out" ;;
+    *) _no "CONTROL green-on-main is OWN" "rc=$_rc out=$_out — a context green on main was excused" ;;
+  esac
+  # A16c — NO main history at all stays UNPROVEN and still refuses. An absence
+  # is never evidence of health; the new read must not invent one.
+  : > "$_wfc"
+  _out=$(mc_wf_classify "$_cn" "$_wfc"); _rc=$?
+  case "$_rc:$_out" in
+    1:UNPROVEN*0/0*) _ok "no wf history stays unproven" "$_out" ;;
+    *) _no "no wf history stays unproven" "rc=$_rc out=$_out — an empty history produced a verdict" ;;
+  esac
+  # A16d — A FLAPPING main workflow is inherited-class but renders distinguishably.
+  printf 'FAIL\taaa\nOK\tbbb\nOK\tccc\n' > "$_wfc"
+  _out=$(mc_wf_classify "$_cn" "$_wfc"); _rc=$?
+  case "$_rc:$_out" in
+    0:INHERITED-MAIN-WF-FLAPPING*1/3*) _ok "wf flapping is its own object" "$_out" ;;
+    *) _no "wf flapping is its own object" "rc=$_rc out=$_out" ;;
+  esac
+  rm -f "$_wfc"
+  # A16e — THE NAME->WORKFLOW MAPPING. The missing piece: a check run carries a
+  # details_url, and actions/runs/<id> carries .path. Pure parse, plus a control
+  # that a URL of the wrong shape yields NOTHING rather than a guess.
+  _rid=$(mc_run_id_from_details_url "https://github.com/FRIKKern/barkpark/actions/runs/34955892970/job/97531")
+  if [ "$_rid" = "34955892970" ]; then _ok "details_url yields a run id" "34955892970"
+  else _no "details_url yields a run id" "got [$_rid] — the name->workflow mapping cannot start"; fi
+  _bad=$(mc_run_id_from_details_url "https://example.com/not/an/actions/url")
+  if [ -z "$_bad" ]; then _ok "CONTROL wrong-shape URL yields nothing" "no run id invented"
+  else _no "CONTROL wrong-shape URL yields nothing" "parsed [$_bad] out of a non-actions URL"; fi
+
   # DERIVED tally with its own floor. A hardcoded count is a lie waiting.
   _total=$((_p+_f))
-  if [ "$_total" -lt 26 ]; then
+  # THE FLOOR RISES WITH THE SUITE. 26 before the pending/failure split and the
+  # workflow-history read added 10 arms (A15..A15d, A16..A16e).
+  if [ "$_total" -lt 36 ]; then
     echo "MERGE-CHECK SELFTEST: CANNOT READ — only $_total arm(s) reported; this tally measures nothing"; exit 3
   fi
   if [ "$_f" -eq 0 ]; then echo "MERGE-CHECK SELFTEST: $_p/$_total arms pass"; exit 0
@@ -543,7 +779,9 @@ if [ "${1:-}" = "--classify" ]; then
   [ -n "$CLSHA" ] || { echo "usage: merge-check.sh --classify <sha> [owner/repo]"; exit 2; }
   echo "REPLAY sha=$CLSHA repo=$REPO main_sample=$MAIN_N disarm=${MERGE_CHECK_DISARM_INHERITED:-0}"
   mc_rollup "$CLSHA"
-  if [ "$FAIL" -eq 0 ]; then echo "REPLAY VERDICT: PERMIT ($ARMS arm(s), 0 refusals)"; exit 0
+  if [ "$FAIL" -eq 0 ] && [ "$WAITS" -gt 0 ]; then
+    echo "REPLAY VERDICT: WAIT ($WAITS of $ARMS arm(s) still moving, 0 concluded failures)"; exit 4
+  elif [ "$FAIL" -eq 0 ]; then echo "REPLAY VERDICT: PERMIT ($ARMS arm(s), 0 refusals)"; exit 0
   else echo "REPLAY VERDICT: REFUSE ($FAIL of $ARMS arm(s) not met)"; exit 1; fi
 fi
 
@@ -702,5 +940,13 @@ fi
 if [ "$ARMS" -lt 6 ]; then
   echo "MERGE-CHECK: CANNOT READ — only $ARMS arm(s) reported; this verdict measures nothing"; exit 3
 fi
-if [ "$FAIL" -eq 0 ]; then echo "MERGE-CHECK: ALL $ARMS CONDITIONS MET — remove the hold label deliberately, then merge"; exit 0
-else echo "MERGE-CHECK: $FAIL of $ARMS condition(s) NOT MET — DO NOT MERGE"; exit 1; fi
+# THREE OUTCOMES, NOT TWO. A WAIT is not a refusal and must not print like one:
+# nothing has concluded failure, so there is no diagnosis to act on and nothing
+# to debug. It still exits NON-ZERO (4) — fail-closed: a wait is never a permit.
+if [ "$FAIL" -gt 0 ]; then
+  echo "MERGE-CHECK: $FAIL of $ARMS condition(s) NOT MET — DO NOT MERGE$( [ "$WAITS" -gt 0 ] && printf ' (%s further arm(s) merely STILL MOVING — those are not among the %s)' "$WAITS" "$FAIL" )"; exit 1
+elif [ "$WAITS" -gt 0 ]; then
+  echo "MERGE-CHECK: NOT YET — $WAITS of $ARMS condition(s) STILL MOVING and ZERO concluded failures. This is a WAIT, not a refusal: re-read when CI settles; do NOT debug the pending names."; exit 4
+else
+  echo "MERGE-CHECK: ALL $ARMS CONDITIONS MET — remove the hold label deliberately, then merge"; exit 0
+fi

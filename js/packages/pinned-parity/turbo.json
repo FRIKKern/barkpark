@@ -1,0 +1,18 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "tests/**",
+        "scripts/**",
+        "package.json",
+        "vitest.config.ts",
+        "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**",
+        "$TURBO_ROOT$/packages/react/tests/support/**",
+        "$TURBO_ROOT$/packages/react/src/**",
+        "$TURBO_ROOT$/packages/react/package.json"
+      ]
+    }
+  }
+}

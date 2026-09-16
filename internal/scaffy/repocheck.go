@@ -28,6 +28,8 @@ package scaffy
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
+	"strings"
 )
 
 // Repo-aware rule IDs. These live OUTSIDE the frozen text-level catalog
@@ -45,6 +47,7 @@ var RepoRules = []RuleInfo{
 	{RuleRepoMissingFile, SeverityError, "IN-op target file missing from the tree"},
 	{RuleRepoAnchorMissing, SeverityError, "structural anchor not found in the target file"},
 	{RuleRepoAnchorAmbig, SeverityError, "anchor occurs more than once where exactly-once is required"},
+	{RuleRepoCuratedInvalid, SeverityError, "curated example tuple no longer satisfies the command's declared VARIABLES"},
 }
 
 // RepoCheckOptions configures one repo-aware validation pass.
@@ -56,10 +59,19 @@ type RepoCheckOptions struct {
 // RepoCheckResult carries the drift findings plus the honesty counters:
 // AnchorsOK anchors resolved cleanly and SkippedToken anchors (or paths)
 // skipped because they carry {{.tokens}} and no --var set was supplied.
+//
+// AnchorsExpanded / MembersChecked mirror SkippedToken for the curated
+// half: AnchorsExpanded counts the token-bearing ops that were RECOVERED
+// by curated-tuple expansion instead of skipped, and MembersChecked the
+// (op x tuple) anchor probes that expansion actually ran. Together the
+// three say exactly how much of a no-var pass was measured — a rise in
+// SkippedToken with AnchorsExpanded flat means new uncheckable surface.
 type RepoCheckResult struct {
-	Findings     []Finding
-	AnchorsOK    int
-	SkippedToken int
+	Findings        []Finding
+	AnchorsOK       int
+	SkippedToken    int
+	AnchorsExpanded int
+	MembersChecked  int
 }
 
 // RepoCheck runs the repo-aware anchor checks for ONE already-text-valid
@@ -88,14 +100,74 @@ func RepoCheck(path string, src []byte, opts RepoCheckOptions) (*RepoCheckResult
 
 	tr := newTree(opts.RepoRoot)
 	res := &RepoCheckResult{}
+
+	// With no --var set, a token-bearing op is expanded ONLY if this
+	// command is on the curated allowlist (repocheck_curated.go). An
+	// unlisted command keeps the skip-and-count contract verbatim.
+	var curated []*substituter
+	if sub == nil {
+		curated = curatedSubstituters(cmd, path, res)
+	}
+
 	for _, op := range cmd.Ops {
 		in, ok := op.(*InOp)
 		if !ok {
 			continue // CREATE/DELETE own their file's existence — no pre-existing anchor
 		}
-		checkInOp(cmd, sub, tr, in, res)
+		if sub != nil || !opNeedsVars(in) {
+			checkInOp(cmd, sub, tr, in, res)
+			continue
+		}
+		if len(curated) == 0 {
+			res.SkippedToken++
+			continue
+		}
+		res.AnchorsExpanded++
+		for _, cs := range curated {
+			res.MembersChecked++
+			checkInOp(cmd, cs, tr, in, res)
+		}
 	}
 	return res, nil
+}
+
+// commandStem is the allowlist key: the command file's basename without
+// its .scaffy extension (scaffy/commands/<stem>.scaffy).
+func commandStem(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), ".scaffy")
+}
+
+// curatedSubstituters builds one substituter per curated tuple for this
+// command, or nil when the command is unlisted. A tuple the command can
+// no longer accept is reported as R-004 and DROPPED — the remaining
+// tuples still run, so one stale tuple never blinds the whole command.
+func curatedSubstituters(cmd *Command, path string, res *RepoCheckResult) []*substituter {
+	tuples := curatedVarSets[commandStem(path)]
+	if len(tuples) == 0 {
+		return nil
+	}
+	out := make([]*substituter, 0, len(tuples))
+	for i, vars := range tuples {
+		s, err := newSubstituter(cmd, vars)
+		if err != nil {
+			res.Findings = append(res.Findings, Finding{
+				File: cmd.SourceFile, Line: 1, Rule: RuleRepoCuratedInvalid,
+				Msg: fmt.Sprintf("curated example tuple %d for %q no longer satisfies the declared VARIABLES: %v",
+					i, commandStem(path), err),
+				Hint: "re-curate the tuple in internal/scaffy/repocheck_curated.go, or drop it if the command was re-pointed",
+			})
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// opNeedsVars reports whether an IN op is substitution-dependent — a
+// {{.token}} in its PATH or anywhere in its fenced anchor. These are the
+// ops that are skipped without a var set and expanded with one.
+func opNeedsVars(o *InOp) bool {
+	return tokenRe.MatchString(o.Path.Value) || fencedHasToken(o.Target)
 }
 
 // checkInOp verifies one IN op's file + structural anchor against the

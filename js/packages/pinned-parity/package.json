@@ -1,0 +1,30 @@
+{
+  "name": "@barkpark/pinned-parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pinned-consumer parity proof: renders the CURRENT Elixir pd-golden fixtures through a PINNED @barkpark/react ARTIFACT (npm pack of the workspace by default, or a vendored .tgz path, or a published npm spec via BARKPARK_PINNED_REACT) resolved through the artifact's own exports map — the drift class every workspace:^ parity package is blind to. Counts derive from readdir + REGISTERED_TYPES, never literals. Two negative controls corrupt the pinned artifact and must red. Test-only — never published, ships no bytes.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "prepare:pinned": "node scripts/prepare-pinned.mjs",
+    "test": "pnpm run prepare:pinned && vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint tests scripts vitest.config.ts"
+  },
+  "dependencies": {
+    "@barkpark/core": "workspace:^",
+    "@barkpark/react": "workspace:^"
+  },
+  "devDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/node": "^20",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}
