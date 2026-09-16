@@ -664,8 +664,12 @@ const failedBeforeF = failed;
 // must follow). ts-w5a raised evergreen 56 → 82: promoting the neutral ladder +
 // CLI chrome ramp into skin-responsive formulas (D14ii/v) means evergreen's
 // shadcn-zinc bytes no longer match the formula, so its 26 zinc rungs are
-// CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). A theme with no
-// entry here is not ratcheted (a fixture); every design/themes/*.json ships one.
+// CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). MEMBERSHIP is
+// NOT this map's to decide: every design/themes/*.json MUST have an entry, and a
+// theme without one is a hard FAIL below, so a sixth committed theme cannot land
+// un-ratcheted in silence. The map supplies the NUMBER; the directory listing
+// supplies the ROSTER. (Fixture themes are handed to derive() directly by tests
+// and never reach this loop, which reads design/themes/ off disk.)
 const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
@@ -782,6 +786,17 @@ for (const f of themeFiles) {
   const schemaFaults = themeFaults[f] || 0;
   const name = theme.name || f.replace(/\.json$/, "");
   const frozen = OVERRIDE_COUNT_FROZEN[name];
+  // COVERAGE, not membership. `frozen === undefined` used to mean "not ratcheted"
+  // silently, so a SIXTH committed theme was un-ratcheted the day it landed and no
+  // output said so (proven 2026-09-16: design/themes/w8probe.json derived 3 pins,
+  // Part F printed its ok line and its PASS verdict; adding `w8probe: 0` to the map
+  // immediately red the same run). Every design/themes/*.json must carry an entry;
+  // the map supplies the NUMBER, the directory supplies the MEMBERSHIP.
+  if (frozen === undefined)
+    fail(
+      `  Part F FAIL: ${name} (design/themes/${f}) has no OVERRIDE_COUNT_FROZEN entry — its override count is NOT ratcheted. ` +
+      "Add an entry for it to OVERRIDE_COUNT_FROZEN in design/check.mjs IN THIS SAME DIFF (its live pin count is on this theme's ok line below).",
+    );
 
   let full, bare;
   try { full = derive(theme); }
@@ -908,19 +923,66 @@ console.log("\ndesign/check.mjs — Part G: [data-bp-theme] identity blocks + to
 const failedBeforeG = failed;
 
 // Every attribute surface must carry an evergreen theme block (identity reached
-// it). The media surfaces (status/sheets) + reader carry one too, but their idiom
-// varies; this asserts the five DOM-attribute surfaces at minimum.
-const ATTR_SURFACES = [
-  ["cloud SPA", "static/app.css"],
-  ["Studio", "layouts/root.html.heex"],
-  ["web demo", "web/app/globals.css"],
-  ["login", "controllers/session_html.ex"],
-  ["paper-surface", "paper-surface.css"],
-];
-for (const [name, suffix] of ATTR_SURFACES) {
-  const text = ARTIFACTS.find((a) => a.path.endsWith(suffix)).build();
+// it). ENROLMENT IS DERIVED, NEVER LISTED. This was a five-entry literal list of
+// path suffixes while TEN artifacts emitted [data-bp-theme] blocks, so five live
+// surfaces (/papers reader, /sheets reader, status page, and both search-starter
+// template globals) were outside the gate — a reader surface rebuilt with its
+// theme blocks dropped, and the tree re-emitted so Part A was in sync, left Part G
+// printing its PASS line over a surface with zero theme identity (proven 2026-09-16).
+//
+// The roster is now read off the EMITTER: a CSS/HTML surface acquires theme
+// identity by calling themeBlocks() in its builder, so the set of builders that
+// call it IS the set of themed surfaces. Scan emit.mjs for those call sites,
+// resolve each to its enclosing function name, and match against `a.build.name`.
+// A surface that starts calling themeBlocks enrols itself; one that STOPS calling
+// it drops out of the derived roster and is caught by the floor below.
+const emitSource = readFileSync(join(here, "emit.mjs"), "utf8");
+const THEMED_BUILDERS = new Set();
+{
+  let fn = null;
+  for (const line of emitSource.split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/);
+    if (m) fn = m[1];
+    if (fn && fn !== "themeBlocks" && /\bthemeBlocks\s*\(/.test(line)) THEMED_BUILDERS.add(fn);
+  }
+}
+const ATTR_SURFACES = ARTIFACTS.filter(
+  (a) => (a.kind === "css" || a.kind === "html") && THEMED_BUILDERS.has(a.build.name),
+);
+// Shrink-only floor. The derived roster answers "who is enrolled TODAY"; it cannot
+// answer "did a surface silently stop being themed", because a builder that drops
+// themeBlocks() drops out of its own roster. This number is the recorded count and
+// may only be RAISED, in the same diff that adds the surface.
+const ATTR_SURFACE_FLOOR = 10;
+if (ATTR_SURFACES.length < ATTR_SURFACE_FLOOR)
+  fail(
+    `  Part G FAIL: only ${ATTR_SURFACES.length} artifact builder(s) call themeBlocks(), floor is ${ATTR_SURFACE_FLOOR} — ` +
+    `a surface STOPPED emitting [data-bp-theme] blocks and silently left the theme-identity gate. ` +
+    `Enrolled: ${ATTR_SURFACES.map((a) => a.name).join(", ") || "∅"}`,
+  );
+for (const a of ATTR_SURFACES) {
+  const text = a.build();
   if (!/\[data-bp-theme="evergreen"\]/.test(text))
-    fail(`  Part G FAIL: ${name} has no [data-bp-theme="evergreen"] block — theme identity did not reach this surface`);
+    fail(`  Part G FAIL: ${a.name} (${a.path}) has no [data-bp-theme="evergreen"] block — theme identity did not reach this surface`);
+}
+// The emitter-derived roster and the OUTPUT-derived roster must agree: an artifact
+// whose emitted bytes carry a [data-bp-theme] block but whose builder is not in
+// THEMED_BUILDERS means the scan above missed a call site (a hand-rolled theme
+// block, or themeBlocks reached through an alias) — i.e. the derivation itself
+// silently under-enrolled, which is the exact failure the literal list had.
+{
+  const byOutput = ARTIFACTS.filter(
+    (a) => (a.kind === "css" || a.kind === "html") && /\[data-bp-theme=/.test(a.build()),
+  );
+  const enrolled = new Set(ATTR_SURFACES.map((a) => a.name));
+  const orphans = byOutput.filter((a) => !enrolled.has(a.name));
+  if (orphans.length)
+    fail(
+      `  Part G FAIL: ${orphans.length} artifact(s) EMIT a [data-bp-theme] block but are not in the themeBlocks()-derived roster ` +
+      `(the enrolment scan under-counts): ${orphans.map((a) => `${a.name} (${a.path})`).join(", ")}`,
+    );
+  else
+    console.log(`  ok   theme-identity roster DERIVED from emit.mjs themeBlocks() call sites: ${ATTR_SURFACES.length} surface(s) (floor ${ATTR_SURFACE_FLOOR}), output-derived roster agrees (${byOutput.length})`);
 }
 
 // D25: no positional-passthrough var/class may appear inside a [data-bp-theme]
