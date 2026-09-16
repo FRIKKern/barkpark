@@ -13,10 +13,13 @@
 #   PLAN   build_id is passed in by the caller; if the process on the ACTIVE
 #          Caddy-upstream slot already serves this build_id, exit 0 no-op (the
 #          on-box mirror of the sites(site_id,build_id) unique index).
-#   BUILD  npm ci && npm run build in the site source dir under
-#          `systemd-run --scope -p MemoryMax -p CPUQuota` + a SCRUBBED env (only
-#          the injected BARKPARK_* build vars — D7). Next's `output:'standalone'`
-#          emits .next/standalone (a traced node_modules + server.js), NOT a
+#   BUILD  npm ci && npm run build in the site source dir + a SCRUBBED env (only
+#          the injected BARKPARK_* build vars — D7).  The cap is carried by the
+#          OUTER transient unit DeployRunner mints (`bp-site-build-*.service`,
+#          MemoryMax=1500M CPUQuota=150%), not by an inner `systemd-run --scope`:
+#          that one was retired (stw6-deployrunner-reattach), and the transient
+#          unit is the only place charter D118 permits a bound (D611).
+#          Next's `output:'standalone'` emits .next/standalone (a traced node_modules + server.js), NOT a
 #          static dist/.
 #   STAGE  (D64) three-piece copy into an IMMUTABLE releases/<build_id>/: the
 #          standalone dir IS the release root (server.js at its top), then

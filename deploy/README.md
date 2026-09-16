@@ -96,11 +96,19 @@ behind. `--sample` folds the live counters into a monotonic max in
 only counter that sees both BEAMs during a cutover); `--report` prints it. It sets
 NO resource directive: charter D118 forbids `MemorySwapMax` on the serving slot,
 and the script's header carries the placement arithmetic for the day that is
-revisited. Offline gate:
-`bash deploy/slot-memory-peaks.sh --self-test` — 21 checks against a fake
-`systemctl`, with the restart-survives assertion and `show_prop`'s extraction
-each shown non-vacuous by mutating the engine, and this very count read back
-and asserted by the run itself.
+revisited. `--placement-check [FILE|-]` ENFORCES that placement instead of
+asserting it — it reads `systemctl show`'s own block shape (a live box, or a
+capture) and exits **40** on a finite `MemoryMax`/`MemoryHigh`/`MemorySwapMax`
+on a slot unit or the slot slice, **0** for the same bound on a
+`bp-site-build-*.service` (the sanctioned home, D611), leaves every other unit
+unjudged (`barkpark-site@.service` ships `MemoryMax=512M` by design), and exits
+**41**/**42** rather than green on an empty capture or a host with no
+`systemctl`. A static arm reds the same 40 if a `Memory*=` directive is ever
+added to the shipped `deploy/systemd/barkpark-slot@.service`. Offline gate:
+`bash deploy/slot-memory-peaks.sh --self-test` — 35 checks against a fake
+`systemctl`, with the restart-survives assertion, `show_prop`'s extraction and
+the forbidden-placement red each shown non-vacuous by mutating the engine, and
+this very count read back and asserted by the run itself.
 
 **Spawned static sites (`deploy/site-deploy.sh`).** A content-bound static site
 (Astro adapter × static symlink-swap target, Site-Spawner W1) builds and serves
@@ -112,8 +120,10 @@ serialize (queue depth 1 *per site*; the fleet-wide build gate below is what kee
 N sites from compiling at once), typed exit codes, Caddy backup+`validate`+reload-or-
 revert, fail-closed on any error. Deploy is one state machine over an immutable
 `sites/<slug>/releases/<build_id>/` layout: **PLAN** (caller passes `BUILD_ID`;
-already-live ⇒ exit 0 no-op) → **BUILD** (`npm ci && npm run build` under
-`systemd-run --scope -p MemoryMax=1500M -p CPUQuota=150%` with a SCRUBBED env —
+already-live ⇒ exit 0 no-op) → **BUILD** (`npm ci && npm run build` with a SCRUBBED env;
+the cap rides the OUTER transient unit DeployRunner mints — `bp-site-build-*.service`
+at `MemoryMax=1500M`/`CPUQuota=150%` — NOT an inner `systemd-run --scope`, which was
+retired by `stw6-deployrunner-reattach` and leaves `BARKPARK_SITE_NO_CAP` a no-op —
 only the injected `BARKPARK_*` build vars reach Vite, because its `process.env`
 precedence would let an ambient `BARKPARK_TOKEN` silently shadow the per-site
 token) → **STAGE** (copy ONLY `dist/` — ~16K — into `releases/<build_id>/`;

@@ -14046,3 +14046,102 @@ reader does not assume a gate exists.*
   `SELECT count(*), sum(coalesced_attempts), count(*) FILTER (WHERE coalesced_attempts > 0) FROM deployments
   WHERE inserted_at >= '2026-08-07 10:02:23Z';` beside
   `SELECT count(*) FROM deployments WHERE status='deferred' AND inserted_at::date = '<day>';`
+
+### D611 — 2026-09-16 — THE CONSTRUCTIVE HALF OF D118: THE LEVER'S HOME IS THE PER-BUILD TRANSIENT UNIT, THE BOUND THAT BELONGS THERE IS `MemorySwapMax=0`, AND THE PLACEMENT RULE NOW HAS A GUARD THAT CAN RED.
+
+Closes the constructive side of `dr-bl-w8-memory-lever-belongs-on-the-build-slice`. D118 states the
+PROHIBITION (never the serving slot) and names the permitted home in one clause; it never says what is
+already there, what the bound should be, or how anyone would notice a violation. This supplies all three.
+
+**(a) THE ROW'S FOUNDING PREMISE IS WRONG, AND IT IS WRONG IN THE DIRECTION THAT WOULD HAVE CAUSED A
+DUPLICATE RULING.** The row reads *"The charter carries no memory, swap, OOM or cgroup decision, so this needs
+a new one."* It carries at least three: **D39** (the OOM census, `MemoryHigh` parked, two levers refuted by
+measurement), **D118** (the prohibition itself), and **D143** (`/v1/graph` measured from outside the BEAM:
++684/+568/+646 MB in 2–4 s off a 403–446 MB idle floor). A fourth, **D119**, is the one the row DOES quote —
+build windows anti-correlated at relative risk 0.42. A builder taking the row at its word would have re-derived
+D39's census and re-argued D118. **Read the charter before writing "the charter has no ruling."**
+
+**(b) THE BOUND IS ALREADY ON THE BUILD UNIT — MEASURED IN THE TREE, NOT ON A BOX.** Read on `origin/main`
+2026-09-16 from this repo (no host was touched; every line number below is from that read):
+
+| what | where | value |
+|---|---|---|
+| per-build transient unit name | `api/lib/barkpark/sites/deploy_runner.ex:1910` | `bp-site-build-<slug>-<tag>-<ms>.service` |
+| its RSS bound | `deploy_runner.ex:211`, applied at `:1933` | `MemoryMax=1500M` |
+| its CPU bound | `deploy_runner.ex:212`, applied at `:1934` | `CPUQuota=150%` |
+| its SWAP bound | — | **absent. No unit file and no code path in the tree SETS `MemorySwapMax`; `git grep MemorySwapMax` returns prose (this charter, `deploy/README.md`, the script header), one 2026-08-06 ledger transcript of an `ssh` probe, and — after this commit — `deploy/slot-memory-peaks.sh`, which only READS the property and mints it in its own `--self-test` fixtures. Zero live directives anywhere.** |
+| the serving slot unit file | `deploy/systemd/barkpark-slot@.service` | **zero `Memory*=` directives** |
+| build concurrency forced by those caps | `deploy/lib/site-deploy-common.sh:342` | `BUILD_GATE_SLOTS=1` |
+| a legitimately bounded NON-slot unit | `deploy/systemd/barkpark-site@.service:53` | `MemoryMax=512M` |
+
+So D118's placement is already honoured for the RSS half and the box is already compliant. **The open half is
+swap.** Under cgroup v2 `memory.swap.max` defaults to `max`, so a build held to 1,500 MB of RSS may still push
+an unbounded number of pages into the box's swapfile — and the pages it displaces are the serving BEAM's. That
+is the exact mechanism D118 is about, and `MemoryMax` alone does not close it.
+
+**(c) THE VALUE IS `MemorySwapMax=0`, AND ITS JUSTIFICATION IS BLAST RADIUS, NOT RECLAIM. Whoever ships it may
+not sell it as recovering memory.** The input is NOT mine and is labelled as such: the 2026-08-06 guerrilla
+budget (`tooling/grip/ledger/guerrilla-steady-state-memory-budget-2026-08-06.md:70-73`) ranks it lever #2 and
+measured **build processes holding ~9 MB of swap in total** while the box held 2,160 MB — so refusing the build
+scope swap outright **recovers 0 MB** and costs the build approximately nothing, while removing the build from
+the set of processes that can be the one that tips the API into the global OOM killer. That is the whole case,
+and the "0 MB" is half of it: a reader who quotes this as a memory-reclaim lever has inverted it. **This
+charter prescribes no OTHER number.** A non-zero swap ceiling would have to be derived from the build unit's
+own `MemorySwapPeak`, and see (d).
+
+**(d) THE VERIFICATION OF ANY BUILD-UNIT BOUND RIDES THE JOURNAL, NEVER `systemctl show` — `--collect` DESTROYS
+THE EVIDENCE AT EXIT.** `deploy_runner.ex:1935` passes `--collect`, which is correct (it is what keeps a re-run
+of the same slug from tripping "unit already exists") and which garbage-collects the transient unit the moment
+it exits. A finished build's `MemoryPeak` / `MemorySwapPeak` / `Result` are therefore **unreadable after the
+fact**: `systemctl show bp-site-build-….service -p Result` races the reaper and normally loses. The journal
+does survive — the 2026-08-06 `bp-oom-probe-B` probe
+(`tooling/grip/ledger/journald-vs-d31-ruling-2026-08-06.md:17`, again not my reading) established that an
+OOM-killed unit flushes its output, 200/200 pre-kill lines plus the partial. **So: prove a build-unit bound
+from `journalctl -u bp-site-build-*`, and treat a post-hoc `systemctl show` of a finished build unit as an
+instrument that reads empty for a structural reason, not as a clean box.** `deploy/slot-memory-peaks.sh`'s
+monotonic fold cannot help here either: it folds units that are LONG-LIVED, and a transient unit that is reaped
+at exit has no next sample to fold into.
+
+**(e) THE PLACEMENT RULE STOPS BEING PROSE.** `bash deploy/slot-memory-peaks.sh --placement-check [FILE|-]`
+reads `systemctl show`'s own block shape (live on a box, or a capture offline/in CI) and exits **40** the
+moment a finite `MemoryMax` / `MemoryHigh` / `MemorySwapMax` appears on `barkpark-slot@*.service` or on the
+slot slice; a bound on a `bp-site-build-*.service` exits 0 and is reported as the sanctioned home; a bound on
+any other unit is printed and **not judged** (`barkpark-site@.service` ships `MemoryMax=512M` by design, and a
+guard that reddened a box for that would be uninstalled inside a day). An empty capture exits **41** and a
+host with no `systemctl` and no capture exits **42** — a broken instrument never renders as a clean box. A
+STATIC arm reads the shipped `deploy/systemd/barkpark-slot@.service` and reds the same 40 if a `Memory*=`
+directive is ever added to it, so the violation is caught at the commit and not only on the host.
+The `--self-test` proof is 35 checks; the placement arms carry **both** required mutations: the forbidden-slot
+red is shown non-vacuous by misclassifying the serving slot (the red disappears), and the QUIET arm runs the
+**identical** `MemorySwapMax=1468006400` against a build unit and asserts exit 0 — same number, different
+cgroup, opposite verdict, which is the entire ruling expressed as a test.
+
+**(f) CRITERION 2 OF THE ROW IS ALREADY DISCHARGED BY THIS CHARTER, BY A DIFFERENT WAVE.** The row demands the
+driver of the graph failure rate be established before any bound is prescribed. **D116** established it, and its own
+citation is quoted here rather than re-derived: `resolve_target_existence` in `api/lib/barkpark/content/edges.ex`
+runs per reference-value per document, un-batched and un-memoized,
+measured at **+1,484 / +1,318 / +2,332 `xact_commit`** against an +86…+140 baseline, n=30 giving p95 23.4 s and
+4/30 HTTP 500 clustered at the `DBConnection` 15,000 ms ceiling. **D143** then split the two stories apart and
+forbade conflating them: #10016 "reclaims the pool-timeout story and NOT the OOM story, and it must not be sold
+as both." **D119** refuted build windows at RR 0.42. None of those are my measurements and none of them are
+re-derived here. **The driver is round trips, not memory — which is precisely why the memory lever is a blast-
+radius lever and not a cure, and why (c) forbids selling it as one.**
+
+**(g) THREE PIECES OF PROSE DESCRIBED A CAP MECHANISM THAT NO LONGER EXISTS, AND THEY ARE THE FIRST THING A
+READER HUNTING THE LEVER WOULD FIND.** `deploy/README.md`, `deploy/site-deploy.sh`'s header and
+`deploy/site-deploy-node.sh`'s header all said the BUILD runs "under `systemd-run --scope -p MemoryMax=1500M -p
+CPUQuota=150%`". The inner scope was retired by slice `stw6-deployrunner-reattach`; the engines' own in-body
+comments already say so — cited by CONTENT, not by line, because this very commit edits that file's header and
+would shift any number written here: `grep -n 'No inner resource cap' deploy/site-deploy.sh` lands on the block
+reading *"the inner `systemd-run --scope` cap is gone, so it is a no-op today"*. `BARKPARK_SITE_NO_CAP` is
+therefore a documented no-op (still set by 27 self-test invocations in `site-deploy-node.sh`, which is why it
+was retained rather than deleted). The headers were pointing anyone asking
+"where does the memory bound live?" at a mechanism inside the engine instead of at the transient unit one layer
+up — the exact question this row exists to answer. Corrected in the same commit. **The assertion is where
+people stop looking: the three surfaces that named the cap were the three that were wrong about it.**
+
+**WHAT THIS DOES NOT CLOSE.** The setting itself. `MemorySwapMax=0` must be added at `deploy_runner.ex:1933-1934`
+beside the two properties already there, and that file is outside the deploy fence — filed, not built here.
+Nothing above was measured on guerrilla or any other host: this entry contains **no new host reading**, and every
+number in it is either read from this repo at `origin/main` (the table in (b), the 35-check count) or quoted
+with its source and its date from an earlier wave's ledger (the ~9 MB, the 0 MB, the 2,160 MB, the 200/200).
