@@ -81,9 +81,12 @@ defmodule BarkparkWeb.QueryController do
   # — propagates exactly as it did before.
   #
   # BLAST RADIUS, STATED. This covers `GET /v1/data/query/:dataset/:type` and
-  # NOTHING ELSE in this controller. `backlinks/2`, `related/2`, `counts/2` and
-  # the document-show door are DELIBERATELY NOT WRAPPED and still raise as they
-  # did; the `:query_index` fault seam below is the only site, and a sibling
+  # NOTHING ELSE in this controller. `backlinks/2`, `related/2` and `counts/2`
+  # are DELIBERATELY NOT WRAPPED and still raise as they did. (The
+  # document-show door was in that list too until
+  # pds-bl-census-load-read-path found it was the census's own FALLBACK door —
+  # see the `:doc_show` region at `show_doc/5`.) The `:query_index` fault seam
+  # below is this region's only site, and a sibling
   # seam in `TasksController` pins the untouched graph doors the same way
   # #15489's `:upsert_prev_doc_lookup` seam pinned `upsert_document/4`.
   defp query_index(conn, dataset, type, params) do
@@ -558,7 +561,62 @@ defmodule BarkparkWeb.QueryController do
   defp refuse_read_perspective(conn, value),
     do: ReadPerspective.refuse(conn, value, @document_perspectives)
 
+  # ─── THE SAME CLASSIFICATION AT THE DOC-GET DOOR (pds-bl-census-read-path-500-under-load) ───
+  #
+  # WHY THIS DOOR, AND WHY IT WAS THE ONE LEFT. The read-side rescue above
+  # covers `GET /v1/data/query/:dataset/:type` and says so: "`backlinks/2`,
+  # `related/2`, `counts/2` and the document-show door are DELIBERATELY NOT
+  # WRAPPED". That was a defensible line to draw until you read what the census
+  # actually does when the paginated door misbehaves. The filing this arm comes
+  # from records the remedy verbatim: "WORKAROUND USED THIS WAVE, not a fix:
+  # per-row verification switched to GET /v1/data/doc/production/task/<id>".
+  #
+  # So the fallback the board gate reaches for when the sweep door is unhappy —
+  # under exactly the concurrent write load that made the sweep door unhappy —
+  # was the one door still answering 500 `internal_error` for a pool checkout
+  # it was merely refused. `BarkparkCloud.Sites.Deploy.transient_refusal?/1`
+  # keys retry grace on the CODE and `internal_error` is not on its transient
+  # list, so the degraded-pool minute escalated as a hard failure on the very
+  # path chosen to survive it.
+  #
+  # THE FAULT SHAPE IS MEASURED, NOT ASSUMED. A starved real pool (a second
+  # `Barkpark.Repo` instance, `pool: DBConnection.ConnectionPool`, `pool_size:
+  # 1`, `queue_target: 10`, one held connection) refused the census read with
+  # `** (DBConnection.ConnectionError) connection not available and request was
+  # dropped from queue after 54ms` — raised, not exited, so a `rescue` on that
+  # one struct is the right instrument and `catch :exit` would be cargo.
+  #
+  # SAME REGION ARGUMENT, SAME NON-FAIL-OPEN. Every Repo call inside
+  # `show_doc!/5` can be refused a checkout — `get_document_for_perspective`,
+  # `fetch_schema`, `Expand.expand/4`, `maybe_resolve_tasks/3`,
+  # `Content.schema_hash_for_dataset/2` — and the remedy at all of them is
+  # resend. `rescue e in DBConnection.ConnectionError` matches that ONE struct;
+  # the arm returns an `{:error, …}` tuple and can never return `{:ok, _}`, a
+  # 404, or a 200 carrying a half-rendered document. The 404 matters here the
+  # way an empty list mattered next door: this door hides existence with
+  # not-found, so a rescue that degraded into 404 would tell a census the row
+  # was DELETED. Any other exception propagates exactly as before.
+  #
+  # BLAST RADIUS, STATED. `GET /v1/data/doc/:dataset/:type/:doc_id` (and its
+  # `/w/:ws/p/:project` mirror) and NOTHING else. `backlinks/2`, `related/2`
+  # and `counts/2` remain unwrapped and still raise; the `:doc_show` seam is
+  # the only new site.
   defp show_doc(conn, dataset, type, doc_id, params) do
+    show_doc!(conn, dataset, type, doc_id, params)
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.QueryController.show/2: the database connection was lost mid-read " <>
+          "(dataset=#{inspect(dataset)} type=#{inspect(type)} doc_id=#{inspect(doc_id)}) — " <>
+          "answering 503 storage_unavailable/connection_unavailable. " <>
+          "exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  end
+
+  defp show_doc!(conn, dataset, type, doc_id, params) do
+    inject_read_fault!(:doc_show)
     t0 = System.monotonic_time(:microsecond)
     expand_spec = parse_expand(params["expand"])
 

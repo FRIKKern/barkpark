@@ -167,6 +167,102 @@ defmodule BarkparkWeb.ReadConnectionFaultTest do
     end
   end
 
+  # ── THE DOC-GET DOOR — the census's OWN fallback (pds-bl-census-read-path-500-under-load) ──
+  #
+  # WHY THIS DOOR EARNS ITS OWN ARMS. The paginated sweep door above was fixed
+  # first and its comment recorded the line it drew: "the document-show door
+  # [is] DELIBERATELY NOT WRAPPED". The census filing names the consequence in
+  # its own words — "WORKAROUND USED THIS WAVE, not a fix: per-row verification
+  # switched to GET /v1/data/doc/production/task/<id>" — so the door the board
+  # gate FALLS BACK TO when the sweep door is failing, under the same degraded
+  # pool that made it fail, was the door still answering a TERMINAL 500 for a
+  # TRANSIENT refusal.
+  #
+  # The fail-open trap here is not the empty list next door; it is the 404.
+  # This door hides existence with not-found, so a rescue that degraded into
+  # 404 would tell a per-row census the row had been DELETED — a permanent
+  # verdict manufactured out of a pool checkout.
+  describe "GET /v1/data/doc/:dataset/:type/:doc_id — the per-row census door" do
+    test "a DBConnection.ConnectionError answers 503 storage_unavailable/connection_unavailable",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("dbconn-docget")
+      _post = mk_published_post!(doc_id, scope)
+      arm!(:doc_show)
+
+      {resp, log} =
+        with_log(fn -> conn |> authed() |> get("/v1/data/doc/#{@dataset}/post/#{doc_id}") end)
+
+      assert log =~ "the database connection was lost mid-read"
+
+      assert resp.status == 503
+
+      body = Jason.decode!(resp.resp_body)
+      error = body["error"]
+
+      assert error["code"] == "storage_unavailable"
+      assert error["reason"] == "connection_unavailable"
+
+      # THE ASSERTION THAT REDDENS ON THE UNFIXED TREE: without the rescue the
+      # raise propagates to ErrorJSON as 500 internal_error / "unknown error
+      # (DBConnection.ConnectionError)".
+      refute error["code"] == "internal_error"
+      refute to_string(error["message"]) =~ "unknown error"
+
+      assert error["message"] =~ @fault_message
+    end
+
+    test "NO FAIL-OPEN: a lost connection is never a 404 and never a 200 document",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("dbconn-docget-failopen")
+      _post = mk_published_post!(doc_id, scope)
+      arm!(:doc_show)
+
+      {resp, _log} =
+        with_log(fn -> conn |> authed() |> get("/v1/data/doc/#{@dataset}/post/#{doc_id}") end)
+
+      refute resp.status == 200,
+             "a lost connection answered 200 — a half-rendered document is not an answer"
+
+      refute resp.status == 404,
+             "a lost connection answered 404 — a per-row census reads that as DELETED, " <>
+               "turning a transient pool fault into a permanent verdict about the row"
+
+      body = Jason.decode!(resp.resp_body)
+
+      assert is_nil(body["result"]),
+             "the refusal body carried a `result` key — the doc-get success shape — " <>
+               "so a caller may read the refusal as a document"
+
+      refute body["ok"] == true
+      assert body["error"]["code"] == "storage_unavailable"
+    end
+
+    test "a NON-connection exception at the identical seam is UNCHANGED",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("dbconn-docget-other")
+      _post = mk_published_post!(doc_id, scope)
+      arm!(:doc_show, RuntimeError, "not a connection fault")
+
+      assert_raise RuntimeError, "not a connection fault", fn ->
+        conn |> authed() |> get("/v1/data/doc/#{@dataset}/post/#{doc_id}")
+      end
+    end
+
+    test "CONTROL: with the seam DISARMED the same request is a clean 200",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("dbconn-docget-control")
+      _post = mk_published_post!(doc_id, scope)
+      Application.delete_env(:barkpark, :reader_fault)
+
+      resp = conn |> authed() |> get("/v1/data/doc/#{@dataset}/post/#{doc_id}")
+
+      # Without this arm the three arms above could all pass on a door that is
+      # broken for every request, fault or no fault.
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body)["result"]["_id"] == doc_id
+    end
+  end
+
   # ── THE GRAPH DOOR — the one the deploy evidence names by message ─────────
 
   describe "GET /v1/graph/:id — the graph read door" do
