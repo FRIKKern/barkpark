@@ -185,4 +185,116 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
       assert id == only.id
     end
   end
+
+  # ── THE ESCAPE HATCH THE REFUSAL ADVERTISES ────────────────────────────────
+  # (bp-task-verbs-500-on-cross-dataset-duplicate-slugs)
+  #
+  # The refusal above is only half an answer. `AmbiguousTwinError`'s message and
+  # hint both say "name one with ?dataset=", and the READ door honours it — but
+  # the claim door read no `:dataset` at all, so the remedy it named did not
+  # exist on the verb that needed it most. Measured live against guerrilla
+  # 2026-09-16, one id and one query string, two answers:
+  #
+  #   GET  /v1/tasks/akbr-feedback-2026-08-epic?dataset=production        -> 200
+  #   POST /v1/tasks/akbr-feedback-2026-08-epic/claim?dataset=production  -> 409
+  #                                       (ambiguous_dataset, GNW9zm1YCdlVXHsAADNB)
+  #
+  # A row that cannot be claimed cannot be stamped, closed or released — all
+  # three are claim-fenced — so the eleven live twins stayed unreachable through
+  # the whole write surface even for a caller who did exactly what the error
+  # told them to do.
+  #
+  # RED-WITHOUT / GREEN-WITH, MEASURED, not asserted. Revert the `dataset:
+  # dataset` threading in `Claim.claim_by_id/3` + the controller's
+  # `put_opt(:dataset, ...)` and re-run this file: 8 tests, 3 failures — the two
+  # positive arms raise an unexpected `AmbiguousTwinError`, and the empty-dataset
+  # arm resolves the OTHER twin instead of `:not_found`.
+  #
+  # THE FOURTH ARM IS THE QUIET CONTROL and it must NOT red: naming a dataset on
+  # an ordinary single-row task is byte-identical either way, so a change that
+  # broke the ordinary path would be caught here and a change that merely fails
+  # to thread the option would not. A describe block where every arm reds proves
+  # only that the block ran.
+  describe "a targeted claim that NAMES the dataset" do
+    test "claims the named dataset's copy, not the other twin's", %{scope: scope} do
+      doc_id = uniq("cross-named")
+      [primary_twin, _secondary] = mk_in_both!(scope, doc_id)
+
+      assert {:ok, %Document{id: id, dataset: dataset}} =
+               Tasks.claim_by_id(doc_id, "worker-named", Keyword.put(scope, :dataset, @primary))
+
+      assert dataset == @primary
+      assert id == primary_twin.id
+    end
+
+    test "the OTHER dataset is reachable by the same door, and stays unwritten",
+         %{scope: scope} do
+      doc_id = uniq("cross-named-other")
+      [primary_twin, secondary_twin] = mk_in_both!(scope, doc_id)
+
+      assert {:ok, %Document{id: id, dataset: dataset}} =
+               Tasks.claim_by_id(
+                 doc_id,
+                 "worker-named-other",
+                 Keyword.put(scope, :dataset, @secondary)
+               )
+
+      assert dataset == @secondary
+      assert id == secondary_twin.id
+
+      # The twin the caller did NOT name is untouched. `?dataset=` narrows; it
+      # never picks a second row as a side effect.
+      untouched = Repo.get!(Document, primary_twin.id)
+      assert untouched.content["lifecycle_status"] == "open"
+      refute untouched.content["claim"]
+    end
+
+    test "a dataset that holds no copy is not_found — never the other twin",
+         %{scope: scope} do
+      doc_id = uniq("cross-named-empty")
+      twins = mk_in_both!(scope, doc_id)
+
+      # THE FAIL-QUIET ARM. `TwinResolver.choose/3` filters to the named dataset
+      # BEFORE the rule runs, so naming a dataset that holds nothing must be an
+      # empty candidate set. A `:dataset` threaded as a mere hint — consulted
+      # only to break a tie — would silently hand back a twin the caller did not
+      # ask for, which is the wrong-row read the whole rule exists to end.
+      assert {:error, :not_found} =
+               Tasks.claim_by_id(doc_id, "worker-named-empty", Keyword.put(scope, :dataset, "no-such-dataset"))
+
+      for twin <- twins do
+        after_call = Repo.get!(Document, twin.id)
+        assert after_call.content["lifecycle_status"] == "open"
+        refute after_call.content["claim"]
+      end
+    end
+
+    test "naming a dataset changes NOTHING for an ordinary single-dataset row",
+         %{scope: scope} do
+      doc_id = uniq("named-single")
+
+      {:ok, only} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => doc_id,
+            "title" => doc_id,
+            "content" => %{
+              "kind" => "task",
+              "acceptance_criteria" => [
+                %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "f"}
+              ],
+              "lifecycle_status" => "open"
+            }
+          },
+          @primary,
+          scope
+        )
+
+      assert {:ok, %Document{id: id}} =
+               Tasks.claim_by_id(doc_id, "worker-named-single", Keyword.put(scope, :dataset, @primary))
+
+      assert id == only.id
+    end
+  end
 end

@@ -134,4 +134,97 @@ defmodule BarkparkWeb.TasksTwinOneRuleTest do
     resp = authed(conn) |> get(~p"/v1/tasks/#{doc_id}") |> json_response(200)
     assert resp["doc"]["rev"] == only.rev
   end
+
+  # ── THE WRITE DOOR HONOURS ITS OWN HINT ────────────────────────────────────
+  # (bp-task-verbs-500-on-cross-dataset-duplicate-slugs)
+  #
+  # The 409 above tells the caller to "name the dataset you mean (?dataset=<name>
+  # on the task route)". The READ route obeyed that from the day the rule landed;
+  # the CLAIM route did not read the param at all, so the remedy the refusal
+  # advertised did not exist on the one verb the eleven live twins needed — and
+  # because pulse, stamp, stage, close and release are all claim-fenced, a row
+  # that cannot be claimed cannot be moved through any of them either.
+  #
+  # Measured live against guerrilla 2026-09-16, same id, same query string:
+  #
+  #   GET  /v1/tasks/akbr-feedback-2026-08-epic?dataset=production       -> 200
+  #   POST /v1/tasks/akbr-feedback-2026-08-epic/claim?dataset=production -> 409
+  #                                      (ambiguous_dataset, GNW9zm1YCdlVXHsAADNB)
+  describe "POST /v1/tasks/:doc_id/claim for a doc_id in two datasets" do
+    setup %{scope: scope} do
+      doc_id = uniq("http-claim-twin")
+      primary = mk_published!(doc_id, @primary, scope)
+      secondary = mk_published!(doc_id, @secondary, scope, %{"dataset_twin_intended" => true})
+      %{doc_id: doc_id, primary: primary, secondary: secondary}
+    end
+
+    test "with NO dataset it refuses 409 ambiguous_dataset, naming both",
+         %{conn: conn, doc_id: doc_id} do
+      {409, _headers, body} =
+        assert_error_sent(409, fn ->
+          post(authed(conn), ~p"/v1/tasks/#{doc_id}/claim", %{"worker_id" => "w-http-claim"})
+        end)
+
+      assert %{"error" => error} = Jason.decode!(body)
+      assert error["code"] == "ambiguous_dataset"
+      assert error["details"]["datasets"] == Enum.sort([@primary, @secondary])
+    end
+
+    test "with ?dataset= it CLAIMS that dataset's row and leaves the twin alone",
+         %{conn: conn, doc_id: doc_id, primary: primary, secondary: secondary} do
+      # RED without the fix: 409 — the door refused the very query string its own
+      # hint told the caller to send.
+      resp =
+        authed(conn)
+        |> post(~p"/v1/tasks/#{doc_id}/claim?dataset=#{@primary}", %{
+          "worker_id" => "w-http-claim-named"
+        })
+        |> json_response(200)
+
+      assert resp["doc"]["dataset"] == @primary
+      assert resp["doc"]["id"] == primary.id
+
+      # The unnamed twin is untouched — `?dataset=` narrows, it never writes a
+      # second row as a side effect.
+      untouched = Repo.get!(Document, secondary.id)
+      assert untouched.content["lifecycle_status"] == "open"
+      refute untouched.content["claim"]
+    end
+
+    test "?dataset= naming a dataset with no such row is 404, never the other twin",
+         %{conn: conn, doc_id: doc_id, primary: primary, secondary: secondary} do
+      resp =
+        authed(conn)
+        |> post(~p"/v1/tasks/#{doc_id}/claim?dataset=no-such-dataset", %{
+          "worker_id" => "w-http-claim-empty"
+        })
+        |> json_response(404)
+
+      assert resp["reason"] == "not_found"
+
+      for twin <- [primary, secondary] do
+        after_call = Repo.get!(Document, twin.id)
+        assert after_call.content["lifecycle_status"] == "open"
+        refute after_call.content["claim"]
+      end
+    end
+
+    # THE QUIET CONTROL. An ordinary single-row task claimed WITH a dataset named
+    # must behave exactly as it always did; this arm must stay green across the
+    # revert, or the fix is changing the ordinary path rather than the twin one.
+    test "?dataset= changes nothing for an ordinary single-row task",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("http-claim-single")
+      only = mk_published!(doc_id, @primary, scope)
+
+      resp =
+        authed(conn)
+        |> post(~p"/v1/tasks/#{doc_id}/claim?dataset=#{@primary}", %{
+          "worker_id" => "w-http-claim-single"
+        })
+        |> json_response(200)
+
+      assert resp["doc"]["id"] == only.id
+    end
+  end
 end
