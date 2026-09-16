@@ -1000,6 +1000,16 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
 .bp-paper-editor-body .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
 .bp-paper-editor-body .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+/* The two SEMANTIC VERDICT tones ride the SAME mirror but a DIFFERENT token
+ * family: `--bp-verdict-{loss,peace}` + its `-soft` wash, not `--bp-tone-*`
+ * (design/tokens.json color.verdict — pe-bl-verdict-accent-tokens). Byte-copied
+ * from paper-surface.css `.bp-paper-surface .bp-callout--loss` / `--peace`; the
+ * tokens are already in the generated token region above, so a standalone host
+ * resolves them without a `.bp-paper-surface` ancestor. Without these two rules
+ * an authored verdict callout fell through to the bare `.bp-callout` default and
+ * the embedder painted no rail at all where /papers paints terracotta/green. */
+.bp-paper-editor-body .bp-callout--loss  { background: var(--bp-verdict-loss-soft);  color: var(--bp-verdict-loss);  border-left-color: var(--bp-verdict-loss); }
+.bp-paper-editor-body .bp-callout--peace { background: var(--bp-verdict-peace-soft); color: var(--bp-verdict-peace); border-left-color: var(--bp-verdict-peace); }
 .bp-paper-editor-body .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-editor-body .bp-callout__body { margin-top: 8px; }
 
