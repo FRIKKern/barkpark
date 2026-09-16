@@ -56,7 +56,7 @@ func runSitesLogsFixture(t *testing.T, status int, body string, output string) (
 
 	stdout, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = output
-		return runSites(out, []string{"logs", "blog", "dep-9"})
+		return runSites(out, globals{}, []string{"logs", "blog", "dep-9"})
 	})
 	return s, stdout, stderr, code
 }
@@ -287,7 +287,7 @@ func TestSitesLogsNeverClaimsTheRecordedBytesAreAvailable(t *testing.T) {
 	withTempConfigHome(t)
 	helpOut, _, helpCode := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"logs", "--help"})
+		return runSites(out, globals{}, []string{"logs", "--help"})
 	})
 	if helpCode != exitOK {
 		t.Fatalf("help exit = %d, want 0", helpCode)
@@ -362,7 +362,7 @@ func TestSitesLogsSlugFormNamesTheDeploymentKeyedForm(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"logs", "blog"})
+		return runSites(out, globals{}, []string{"logs", "blog"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -386,7 +386,7 @@ func TestSitesLogsRejectsAThirdPositional(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"logs", "blog", "dep-9", "extra"})
+		return runSites(out, globals{}, []string{"logs", "blog", "dep-9", "extra"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want exitUsage=%d\n%s", code, exitUsage, stderr)

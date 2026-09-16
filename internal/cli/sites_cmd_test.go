@@ -112,7 +112,7 @@ func TestSitesListRendersTable(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -155,7 +155,7 @@ func TestSitesListReadsTheEmbedAndMakesExactlyOneRequest(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -198,7 +198,7 @@ func TestSitesListCohortSplitsSettledFromInFlight(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -319,7 +319,7 @@ func TestSitesListJSONCarriesTheEmbedKeysetAndTheCohort(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "json"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -402,7 +402,7 @@ func TestSitesListYAMLParity(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "yaml"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -430,7 +430,7 @@ func TestSitesListEmptyRendersHint(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -458,7 +458,7 @@ func TestSitesCreateResolvesBarkparkSlug(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"create",
+		return runSites(out, globals{}, []string{"create",
 			"--barkpark", "blog", "--name", "Blog",
 			"--framework", "nextjs",
 			"--domain", "blog.example.com",
@@ -498,7 +498,7 @@ func TestSitesCreateRequiresFlags(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"create", "--name", "Blog"})
+		return runSites(out, globals{}, []string{"create", "--name", "Blog"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
@@ -685,7 +685,7 @@ func TestSitesEnvSetReplacesBlob(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"env", "set", "blog", "FOO=bar", "BAZ=qux"})
+		return runSites(out, globals{}, []string{"env", "set", "blog", "FOO=bar", "BAZ=qux"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -720,7 +720,7 @@ func TestSitesEnvSetRejectsBadPair(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"env", "set", "blog", "BAD-PAIR"})
+		return runSites(out, globals{}, []string{"env", "set", "blog", "BAD-PAIR"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d", code, exitUsage)
@@ -746,7 +746,7 @@ func TestSitesDomainAdd(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"domain", "add", "blog", "www.example.com"})
+		return runSites(out, globals{}, []string{"domain", "add", "blog", "www.example.com"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -779,7 +779,7 @@ func TestSitesDeploymentsTable(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"deployments", "blog"})
+		return runSites(out, globals{}, []string{"deployments", "blog"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -842,7 +842,7 @@ func runDeploymentsFixture(t *testing.T, body string, extraArgs ...string) (*scr
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, append([]string{"deployments", "blog"}, extraArgs...))
+		return runSites(out, globals{}, append([]string{"deployments", "blog"}, extraArgs...))
 	})
 	return s, stdout, code
 }
@@ -996,7 +996,7 @@ func TestSitesDeploymentsRejectsBadLimit(t *testing.T) {
 	withTempConfigHome(t)
 	_, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"deployments", "blog", "--limit", "0"})
+		return runSites(out, globals{}, []string{"deployments", "blog", "--limit", "0"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want exitUsage", code)
@@ -1022,7 +1022,7 @@ func TestSitesDeploymentsJSONKeepsAbsenceAbsent(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "json"
-		return runSites(out, []string{"deployments", "blog"})
+		return runSites(out, globals{}, []string{"deployments", "blog"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -1081,7 +1081,7 @@ func TestSitesLogsPrintsBuildLogURL(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"logs", "blog"})
+		return runSites(out, globals{}, []string{"logs", "blog"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -1109,7 +1109,7 @@ func TestSitesShowRendersDetail(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"show", "blog"})
+		return runSites(out, globals{}, []string{"show", "blog"})
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -1128,14 +1128,16 @@ func TestSitesRequiresLogin(t *testing.T) {
 		name string
 		run  func(out *writer) int
 	}{
-		{"sites", func(out *writer) int { return runSites(out, nil) }},
+		{"sites", func(out *writer) int { return runSites(out, globals{}, nil) }},
 		{"sites create", func(out *writer) int {
-			return runSites(out, []string{"create", "--barkpark", "blog", "--name", "Blog"})
+			return runSites(out, globals{}, []string{"create", "--barkpark", "blog", "--name", "Blog"})
 		}},
-		{"sites deployments", func(out *writer) int { return runSites(out, []string{"deployments", "blog"}) }},
-		{"sites env set", func(out *writer) int { return runSites(out, []string{"env", "set", "blog", "K=V"}) }},
-		{"sites domain add", func(out *writer) int { return runSites(out, []string{"domain", "add", "blog", "x.example.com"}) }},
-		{"sites logs", func(out *writer) int { return runSites(out, []string{"logs", "blog"}) }},
+		{"sites deployments", func(out *writer) int { return runSites(out, globals{}, []string{"deployments", "blog"}) }},
+		{"sites env set", func(out *writer) int { return runSites(out, globals{}, []string{"env", "set", "blog", "K=V"}) }},
+		{"sites domain add", func(out *writer) int {
+			return runSites(out, globals{}, []string{"domain", "add", "blog", "x.example.com"})
+		}},
+		{"sites logs", func(out *writer) int { return runSites(out, globals{}, []string{"logs", "blog"}) }},
 		{"deploy", func(out *writer) int { return runDeploy(out, []string{"blog", "--artifact-url", "file:///tmp/x"}) }},
 	}
 	for _, tc := range cases {
@@ -1226,7 +1228,7 @@ func TestSitesGithubConnectPostsRepoAndBranch(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"github", "connect", "blog",
+		return runSites(out, globals{}, []string{"github", "connect", "blog",
 			"--repo", "FRIKKern/barkpark", "--branch", "main",
 		})
 	})
@@ -1284,7 +1286,7 @@ func TestSitesGithubConnectForwardsUserSecret(t *testing.T) {
 
 	_, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"github", "connect", "blog",
+		return runSites(out, globals{}, []string{"github", "connect", "blog",
 			"--repo", "FRIKKern/barkpark", "--secret", "user-supplied-pre-shared",
 		})
 	})
@@ -1308,7 +1310,7 @@ func TestSitesGithubConnectRequiresRepo(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"github", "connect", "blog"})
+		return runSites(out, globals{}, []string{"github", "connect", "blog"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
@@ -1332,7 +1334,7 @@ func TestSitesGithubConnectRequiresSite(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"github", "connect", "--repo", "x/y"})
+		return runSites(out, globals{}, []string{"github", "connect", "--repo", "x/y"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
@@ -1353,7 +1355,7 @@ func TestSitesGithubConnectRejectsUnknownVerb(t *testing.T) {
 
 	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, []string{"github", "disconnect", "blog"})
+		return runSites(out, globals{}, []string{"github", "disconnect", "blog"})
 	})
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
@@ -1495,7 +1497,7 @@ func sitesTableFor(t *testing.T, fixture string) string {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -1564,7 +1566,7 @@ func TestSitesListJSONCarriesTheCausePair(t *testing.T) {
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "json"
-		return runSites(out, nil)
+		return runSites(out, globals{}, nil)
 	})
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
@@ -1652,7 +1654,7 @@ func runDeploymentsFixtureJSON(t *testing.T, body string, extraArgs ...string) (
 
 	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "json"
-		return runSites(out, append([]string{"deployments", "blog"}, extraArgs...))
+		return runSites(out, globals{}, append([]string{"deployments", "blog"}, extraArgs...))
 	})
 	return stdout, code
 }

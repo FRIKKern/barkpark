@@ -372,7 +372,7 @@ func Execute(args []string) int {
 			printSitesHelp(out)
 			return exitOK
 		}
-		return runSites(out, rest[1:])
+		return runSites(out, g, rest[1:])
 	case "deploy":
 		// `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a
 		// hosted site through the control plane (P6). Requires `bp login`.
