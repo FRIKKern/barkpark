@@ -26,27 +26,55 @@ defmodule BarkparkWeb.PoolOverloadTest do
         ])
         |> Keyword.merge(
           pool_size: 1,
-          queue_target: 1,
-          queue_interval: 1,
+          # NOT 1ms/1ms: that is aggressive enough to drop the HOLDER's own
+          # checkout against an idle pool, and the starvation never begins.
+          # 50/100 lets a free pool serve instantly while guaranteeing a drop
+          # for anyone queued behind the multi-second hold below.
+          queue_target: 50,
+          queue_interval: 100,
           backoff_type: :stop
         )
 
       {:ok, pid} = Postgrex.start_link(opts)
 
-      # A pool of ONE, held for 300ms, with four callers queued behind it and a
-      # GENEROUS per-call timeout. The generosity is the point: a short client
-      # timeout races the pool and the CLIENT gives up first (reason: :error),
-      # which is the other error entirely. Here the POOL is what gives up, so
-      # the struct under test is the one `DBConnection.ConnectionPool.drop/2`
-      # actually builds in production.
-      #
+      # HOLD the single connection INSIDE a transaction and wait for the holder
+      # to CONFIRM it is checked out. A `Process.sleep` before the queued
+      # callers is a race, not a hold: measured in CI, all four callers were
+      # served by the same connection_id because the holder had not checked out
+      # yet. The receive is what makes the starvation a FACT rather than a hope.
+      test = self()
+
+      # spawn, NOT Task.async: the holder is DELIBERATELY starved and its own
+      # transaction dies with a queue-drop on the way out. A linked task would
+      # take the test process down with it — an exit from the fixture, reported
+      # as a failure of the thing under test.
+      hog =
+        spawn(fn ->
+          Postgrex.transaction(
+            pid,
+            fn conn ->
+              Postgrex.query!(conn, "SELECT 1", [])
+              send(test, :held)
+
+              receive do
+                :release -> :ok
+              after
+                10_000 -> :timeout
+              end
+            end,
+            timeout: 20_000
+          )
+        end)
+
+      assert_receive :held, 10_000
+
       # Deliberately small: every agent shares this Postgres, and an 8-way burst
       # behind a 3s holder was measured reddening a sibling suite in the same run.
-      hog =
-        Task.async(fn -> Postgrex.query(pid, "SELECT pg_sleep(0.3)", [], timeout: 10_000) end)
-
-      Process.sleep(50)
-
+      #
+      # The per-call timeout is GENEROUS on purpose: a short client timeout races
+      # the pool and the CLIENT gives up first (reason: :error), which is the
+      # other error entirely. Here the POOL is what gives up, so the struct under
+      # test is the one `DBConnection.ConnectionPool.drop/2` builds in production.
       results =
         1..4
         |> Enum.map(fn _ ->
@@ -66,7 +94,7 @@ defmodule BarkparkWeb.PoolOverloadTest do
           _ -> nil
         end)
 
-      Task.shutdown(hog, :brutal_kill)
+      Process.exit(hog, :kill)
       GenServer.stop(pid, :normal, 5_000)
 
       assert match?(%DBConnection.ConnectionError{reason: :queue_timeout}, error),
