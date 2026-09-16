@@ -5,6 +5,23 @@
 //   • mock.js  — the browser dynamically import()s it and routes window.fetch.
 //   • smoke.mjs — node statically imports it and boots app.js against it.
 //
+// ── OWNERSHIP — THIS TREE HAS EXACTLY ONE OWNING EPIC ────────────────────
+// @owner epic:cloud-console-hardening
+//
+// cloud/priv/static/__preview__/* belongs to the cloud-console-hardening epic.
+// The cession is recorded on the other side by the deploy-reliability charter's
+// D402 — "the fence that IS real: cloud/priv/static/app.js + __app.test.mjs +
+// __preview__/* (ceded to console)" — and the stamp above is the console tree
+// citing that ruling back, so a builder standing in this file learns who owns
+// it without reading a charter. It was undecided until then: this tree is
+// neither the app.js surface nor __fixtures__/, and no text named it.
+//
+// MACHINE-CHECKED, and the check is a PREDICATE, not a list:
+//   mix test test/web/preview_tree_ownership_test.exs   (from cloud/)
+// It sweeps every .mjs in this tree for `@owner epic:` stamps and refuses a
+// tree that carries none, or one that names a SECOND epic. Adding the stamp to
+// another file here is fine; naming a different owner is the failure.
+//
 // ── TWO-WAY CENSUS RULE — READ THIS BEFORE YOU ADD A SCENARIO ────────────────
 // Four committed instruments keep a TWO-WAY census over this file: every
 // scenario here must be accounted for over there, AND every account over there
