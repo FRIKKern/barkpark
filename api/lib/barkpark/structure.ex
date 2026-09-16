@@ -1162,7 +1162,8 @@ defmodule Barkpark.Structure do
   # `over` rows (bounded); an `over` type with no rows yields an empty group.
   #
   #   {"kind":"groupBy","title":"Etter kategori","type":"publication",
-  #    "by":"content.category","over":"category","orderings":[…]}
+  #    "by":"content.category","over":"category","orderings":[…],
+  #    "overFilter":{"_id":{"referencedBy":"publication"}}}
   @group_by_fanout 200
 
   defp declared_item_to_node(%{"kind" => "groupBy"} = item, idx, ctx) do
@@ -1171,11 +1172,18 @@ defmodule Barkpark.Structure do
     by = item["by"]
 
     if is_binary(type) and is_binary(over) and is_binary(by) do
+      # Gyldendal parity E9 — `overFilter`: Sanity's own "Etter kategori" does
+      # not group over EVERY category, it groups over the ones a publication
+      # points at (`count(*[_type == "publication" && references(^._id)]) > 0`).
+      # Without this the desk grows an empty child list per unused category.
+      over_filter = parse_filter(item["overFilter"])
+
       children =
         over
         |> Content.list_documents(
           ctx.dataset,
-          [perspective: :published, limit: @group_by_fanout] ++ ctx.scope
+          [perspective: :published, limit: @group_by_fanout, filter_map: over_filter] ++
+            ctx.scope
         )
         |> Enum.map(fn doc ->
           key = Barkpark.Content.DraftId.published_id(doc.doc_id)

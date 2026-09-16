@@ -1037,7 +1037,8 @@ defmodule BarkparkWeb.QueryController do
   #
   # DELIBERATELY NOT a delegation to `Content.Query.validate_filter_map/1`. The
   # builder is FIELD-AWARE and accepts `@doc_id_only_ops` (`starts_with`,
-  # `not_starts_with`) on `doc_id`/`_id`, which `query.ex` records as
+  # `not_starts_with`, and since E9 `referencedBy` / `notReferencedBy`) on
+  # `doc_id`/`_id`, which `query.ex` records as
   # "builder-only spellings … no public wire form — QueryController's door
   # rejects them". The door is SUPPOSED to be narrower than the builder here;
   # delegating would put those spellings on the public wire. Pinned by
