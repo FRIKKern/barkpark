@@ -746,6 +746,32 @@ defmodule Barkpark.Plugins.Tasks do
                 "audit needs. `bp task get <parent>` renders the same rail but " <>
                 "its child summaries are a lighter card; use this verb when you " <>
                 "are querying by time rather than reading one task."
+          },
+          # task-a60d5a14346c43bb — THE DELTA READ, DECLARED. The route honours
+          # `?updated_since=<iso8601>` (and `filter[updated_since]`), but a
+          # narrowing the manifest does not name is a narrowing no `bp` and no
+          # generated SDK can spell: `applyQuery` forwards ONE query key per
+          # DECLARED string flag, so this entry IS the wiring. The flag is named
+          # `updated_since` rather than `updated-since` for exactly that reason —
+          # the flag name and the query key are the same string.
+          #
+          # WHY IT EXISTS. The board's first walk has no corpus to diff against,
+          # so the "only send me what changed" half cannot be done client-side
+          # at any price (measured, cli lane r19: the per-re-list half fell
+          # 97 MB -> 0.61 MB by diffing in the client; the LAUNCH walk stayed at
+          # ~97 MB because there was nothing to diff). Pass the previous
+          # response's `delta.as_of`, not your own clock: a client clock running
+          # fast skips rows silently and permanently.
+          %{
+            name: "updated_since",
+            type: "string",
+            summary:
+              "DELTA READ — return only tasks whose updated_at is at or after " <>
+                "this ISO-8601 instant (zone REQUIRED, e.g. 2026-09-16T07:45:00Z). " <>
+                "Echo the response's `delta.as_of` on the next poll: the window " <>
+                "is server-minted and inclusive, so it overlaps rather than gaps. " <>
+                "Carries no tombstone — a row that LEAVES the corpus has no later " <>
+                "updated_at; page `bp task events` (or re-walk) for disappearance."
           }
         ],
         writes: false,
