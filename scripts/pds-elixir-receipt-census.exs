@@ -14080,7 +14080,8 @@ defmodule PDS.Census do
   defp unwrap_checks! do
     indent = "             "
     targets = for i <- 1..8, do: {"FixtureController.helper_number_#{i}/3", nil, nil}
-    rendered = Enum.join(wrap_lines(hop_refusal([], targets), indent, ""), "\n")
+    sentence = hop_refusal([], targets)
+    rendered = Enum.join(wrap_lines(sentence, indent, ""), "\n")
     needle = "FixtureController.helper_number_8/3 [emits nothing — a SECOND hop]"
 
     # THE ARM THAT REDS IF THE REPAIR IS REVERTED — and, first, the check that it is not
@@ -14103,6 +14104,18 @@ defmodule PDS.Census do
     unless unwrapped(intact) == intact do
       raise "unwrap arm FAILED: unwrapped/1 joined two SHORT lines no wrap could have " <>
               "broken — it is fusing unrelated emissions, not undoing this file's wrapper"
+    end
+
+    # THE ARM THE FIRST SHAPE OF THIS GUARD FAILED, AND THE REASON IT IS HERE. Asking
+    # only "would the next word have fit?" admits every bare `p/1` line longer than the
+    # column — and this census prints many: 2073 joins over a 2591-line run, a plain
+    # line-joiner wearing a guard's comment. `sentence` is the SAME production string the
+    # arms above wrap, taken UNWRAPPED, so the specimen is one this file really emits.
+    unbroken = sentence <> "\n  PASS  A-SHORT-ARM"
+
+    unless String.length(sentence) > @wrap_column and unwrapped(unbroken) == unbroken do
+      raise "unwrap arm FAILED: unwrapped/1 undid a break after a line LONGER than the " <>
+              "column — no wrap emitted that line, so no wrap made that break"
     end
   end
 
@@ -14396,7 +14409,15 @@ defmodule PDS.Census do
   defp wrap_break?(prev, next) do
     word = next |> String.trim_leading() |> String.split(" ") |> hd()
 
+    # BOTH HALVES OF THE WRAPPER'S OWN INVARIANT, and the first is what keeps this from
+    # being a line-joiner in a guard's clothing. wrap/3 emits `indent <> line` WITHIN the
+    # column, so a line LONGER than it was never produced by wrapping and the break after
+    # it is a `p/1` boundary — and this census prints many such lines (the conversion
+    # rows run past 150 characters). Testing only the second half admitted every one of
+    # them: 2073 joins over a 2591-line run, which is the plain line-joiner this refuses
+    # to be. With the first half, only lines the wrapper could have emitted are joined.
     word != "" and String.trim(prev) != "" and
+      String.length(prev) <= @wrap_column and
       String.length(prev) + 1 + String.length(word) > @wrap_column
   end
 
