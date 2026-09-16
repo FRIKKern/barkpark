@@ -1,1 +1,0 @@
-node tooling/doc-truth/lineref-sweep.mjs prints "0 novel" — every one of the 9 novel stale linerefs re-pointed at the source, none added to the frozen baseline (count holds at 143).
