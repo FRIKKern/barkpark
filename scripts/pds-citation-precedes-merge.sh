@@ -66,12 +66,27 @@
 # and "my reader read nothing" produce byte-identical output. So before any
 # verdict, two controls run over the same lens and are PRINTED beside the result:
 #
-#   POSITIVE  the highest number the charter defines MUST resolve.
+#   PROBE     the lens is pointed at a charter THIS SCRIPT WRITES, defining
+#             exactly two numbers in the charter's two definition forms and
+#             MENTIONING a third in prose. It must return exactly the two, in
+#             order. This is a control on the READER, not on the membership
+#             test, and it is the only one of the three that survives a lens
+#             which resolves everything.
+#   POSITIVE  the highest number the real charter defines MUST resolve.
 #   NEGATIVE  the number one above it MUST NOT resolve.
 #
-# Both are DERIVED from the charter under test, never listed: a hardcoded
-# control rots into a second thing to maintain. If either misbehaves the verdict
-# is UNCHECKED (exit 2) and no pass or fail is printed at all.
+# All three are DERIVED from the charter under test, never listed: a hardcoded
+# control rots into a second thing to maintain. If any misbehaves the verdict is
+# UNCHECKED (exit 2) and no pass or fail is printed at all.
+#
+# WHY THE PROBE EXISTS AT ALL — it was not designed in, it was EARNED. The first
+# version of this arm shipped with the positive and negative legs only, and the
+# paired test's mutation 7 (a lens that returns every number from 1 upward)
+# walked straight through both: the highest real number resolved, the one above
+# the highest resolved number did not, and a phantom citation printed a clean
+# PASS. Two legs that fail together prove one thing. The probe asks a different
+# question of a different corpus, which is the only kind of leg that adds
+# anything.
 #
 # A PR introducing ZERO citations PASSES, and says so in those words. That is a
 # real pass, not a vacuous one, precisely because the controls above fired over
@@ -156,7 +171,25 @@ DEFN="$(grep -c . < "$WORK/defs.base" | tr -d ' ')"
 resolves_base() { grep -qxF "$1" "$WORK/defs.base"; }
 
 # ── CONTROLS. Derived from the charter under test; printed; never a list. ─────
-CTL_POS="$(tail -n 1 "$WORK/defs.base")"
+#
+# LEG 1 — THE PROBE. A charter this script writes, in the two definition forms,
+# plus a prose MENTION that is not a definition. The lens must return exactly
+# the two defined numbers. A lens that reads nothing fails it; so does a lens
+# that resolves everything; so does a lens that counts any PDS-D it sees.
+CTL_MAX="$(tail -n 1 "$WORK/defs.base")"
+case "$CTL_MAX" in ''|*[!0-9]*) die2 "the lens returned '${CTL_MAX}' as its highest number — that is not a decision id" ;; esac
+P1=$((CTL_MAX + 1000)); P2=$((CTL_MAX + 1005)); P3=$((CTL_MAX + 1010))
+{
+  printf '# Probe charter written by %s\n\n' "$(basename "$0")"
+  printf '### PDS-D%s — HEADING FORM.\nbody\n\n' "$P1"
+  printf -- '- **PDS-D%s — BOLD-LEAD FORM.** body\n\n' "$P2"
+  printf 'Prose that merely MENTIONS PDS-D%s is a reference, not a definition.\n' "$P3"
+} > "$WORK/probe.md"
+PROBE_GOT="$(bash "$LENS" --print-defs --charter "$WORK/probe.md" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
+PROBE_WANT="${P1} ${P2}"
+[ "$PROBE_GOT" = "$PROBE_WANT" ] || die2 "probe control failed: pointed at a charter defining exactly ${PROBE_WANT}, the lens ${LENS} returned '${PROBE_GOT}'. The reader is not reading; a clean result from a broken reader is indistinguishable from a clean corpus"
+
+CTL_POS="$CTL_MAX"
 CTL_NEG=$((CTL_POS + 1))
 resolves_base "$CTL_POS" || die2 "positive control failed: D${CTL_POS} is the highest number the lens read and it does not resolve through the same lens — the reader is broken, and a clean result from a broken reader is indistinguishable from a clean corpus"
 if resolves_base "$CTL_NEG"; then
@@ -174,7 +207,8 @@ echo "PDS CITATION PRECEDES MERGE"
 echo "  base       : ${BASE} (${BASE_SHA})"
 echo "  head       : ${HEAD_REF} (${HEAD_SHA})"
 echo "  charter    : ${BASE}:${CHARTER_PATH} — ${DEFN} decisions defined (lens: ${LENS})"
-echo "  controls   : D${CTL_POS} resolves=YES (positive), D${CTL_NEG} resolves=NO (negative) — both fired"
+echo "  controls   : probe charter defining D${P1}/D${P2} (+ a prose mention of D${P3}) read back as exactly '${PROBE_GOT}'"
+echo "               D${CTL_POS} resolves=YES (positive), D${CTL_NEG} resolves=NO (negative) — all three fired"
 echo "  synthetic  : ${SYNTH:-(none)} — prose ABOUT a fixture is not a claim on an authority"
 
 # ── the corpus: the lines this PR's diff INTRODUCES, charter excluded ─────────
@@ -232,7 +266,8 @@ fi
 if [ "${CITES:-0}" -eq 0 ]; then
   echo
   echo "PASS — this diff introduces no PDS-D citation. The controls above fired over"
-  echo "       ${DEFN} genuinely-read decisions, so this is an empty corpus, not an unread one."
+  echo "       ${DEFN} genuinely-read decisions — including a probe charter this run wrote —"
+  echo "       so this is an empty corpus, not an unread one."
   echo "       EXISTENCE IS NOT COVERAGE: this arm never reads what a decision SAYS."
   exit 0
 fi
