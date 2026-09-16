@@ -123,6 +123,14 @@
 #                                                             # resolve a fixture's
 #                                                             # summary rows too (NOT
 #                                                             # hermetic: it reads rows)
+#   scripts/epic-zero-criteria-census.sh --via-bp             # the LEGACY rail:
+#                                                             # read through bp
+#                                                             # (needs bp + its
+#                                                             # credential; not
+#                                                             # available on a
+#                                                             # GitHub runner)
+#   scripts/epic-zero-criteria-census.sh --token-free         # the default,
+#                                                             # stated explicitly
 #   scripts/epic-zero-criteria-census.sh --self-test          # proves it can lose
 #
 # HERMETIC MODE reads one file — the JSON body of `bp task get <epic> -o json`
@@ -137,6 +145,13 @@ SELF_TEST=0
 RESOLVE="auto"   # auto: on for a live read, off for a fixture (hermetic by default)
 DESCEND="auto"   # auto: on for a live read, off for a fixture (hermetic by default)
 MAX_DEPTH="${CENSUS_MAX_DEPTH:-6}"
+# token-free (curl, no credential, the default) | bp (the legacy rail, kept so
+# the two can be run side by side and their rosters diffed).
+READER="${CENSUS_READER:-token-free}"
+# Print the population's doc_ids, one per line, instead of classifying it. This
+# exists so "the ported reader answers the SAME question" is a DIFF, not a
+# claim: run it on both rails in the same minute and compare the two sets.
+PRINT_ROSTER=0
 
 usage() { sed -n '2,129p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -147,6 +162,9 @@ while [ $# -gt 0 ]; do
     --resolve)    RESOLVE=1; shift ;;
     --no-resolve) RESOLVE=0; shift ;;
     --descend)    DESCEND=1; shift ;;
+    --token-free) READER="token-free"; shift ;;
+    --print-roster) PRINT_ROSTER=1; shift ;;
+    --via-bp)     READER="bp"; shift ;;
     --no-descend) DESCEND=0; shift ;;
     -h|--help)    usage; exit 0 ;;
     --*)          echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
@@ -353,6 +371,17 @@ sys.exit(0)
 
 classify() {
   python3 -c "$CLASSIFY_PY" "$1"
+}
+
+# The population, as ids, sorted — the thing two rails must agree on.
+roster_ids() {
+  python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+for c in doc.get("children") or []:
+    if isinstance(c, dict) and c.get("doc_id"):
+        print(c["doc_id"])
+' | LC_ALL=C sort
 }
 
 # ---------------------------------------------------------------------------
@@ -879,8 +908,48 @@ if [ -n "$FIXTURE" ]; then
   exit "${PIPESTATUS[1]}"
 fi
 
+# ── THE LIVE READ. TOKEN-FREE BY DEFAULT. ──────────────────────────────────
+# This used to be `bp task get` and nothing else, which is why this census
+# could never be a required context: `bp` is not on a GitHub runner, so
+# PATH-stripped it printed "UNKNOWN: bp is not on PATH" and exited 2 — red on
+# every PR, forever, for a reason that had nothing to do with the PR. The
+# repo's precedent for that shape is the header of
+# .github/workflows/required-checks-drift.yml: a gate whose greenness depends
+# on a credential (there, a rotating human OAuth token; here, `bp`'s own
+# config) STAYS ADVISORY, and on a fork PR it reds for someone who has done
+# nothing wrong.
+#
+# scripts/ledger-epic-roster.sh reads the SAME roster over the public,
+# unauthenticated query route with curl + bounded exponential retry, in the
+# payload shape this classifier already consumes — and it walks the whole tree
+# itself, so neither descent nor per-row shape resolution is needed on this
+# rail (its rows carry the real `content`, so ABSENT and [] stay different).
+# Its denominator is PUBLISHED rows only; run it with --explain-denominator for
+# the pinned delta against `bp`.
+if [ "$READER" = "token-free" ]; then
+  roster_script="$(dirname "$0")/ledger-epic-roster.sh"
+  if [ ! -r "$roster_script" ]; then
+    echo "UNKNOWN: $roster_script is missing, so the token-free ledger read cannot run." >&2
+    exit 2
+  fi
+  ledger="$(bash "$roster_script" "$EPIC")"
+  rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$ledger" ]; then
+    # The reader already printed its own self-describing verdict on stderr
+    # (outage / refusal / malformed / paging). Do NOT overwrite it with a
+    # generic one, and do NOT downgrade it to a pass: exit 2 is the census's
+    # own UNKNOWN and every one of the reader's non-zero exits means the
+    # census could not be taken.
+    echo "UNKNOWN: the token-free ledger read failed (exit $rc); no census was taken." >&2
+    exit 2
+  fi
+  if [ "$PRINT_ROSTER" = "1" ]; then printf '%s' "$ledger" | roster_ids; exit 0; fi
+  printf '%s' "$ledger" | classify "$EPIC"
+  exit "${PIPESTATUS[1]}"
+fi
+
 if ! command -v bp >/dev/null 2>&1; then
-  echo "UNKNOWN: bp is not on PATH, so the ledger cannot be read." >&2
+  echo "UNKNOWN: bp is not on PATH, so the ledger cannot be read (\`--via-bp\`). The token-free rail is the default; drop --via-bp." >&2
   exit 2
 fi
 
@@ -907,5 +976,7 @@ fi
 if [ "$RESOLVE" != "0" ]; then
   ledger="$(printf '%s' "$ledger" | resolve_shapes)"
 fi
+
+if [ "$PRINT_ROSTER" = "1" ]; then printf '%s' "$ledger" | roster_ids; exit 0; fi
 
 printf '%s' "$ledger" | classify "$EPIC"

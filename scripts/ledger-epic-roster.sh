@@ -394,7 +394,17 @@ STUB
   # 3. ABSENT stays ABSENT: the key must not be manufactured by the reader.
   out="$(run "$tmp/dirty-absent.json")"; rc=$?
   check "dirty(absent) corpus reads" 0 "$rc"
-  refute "the absent-criteria row did NOT gain a key" "$out" '"acceptance_criteria"'
+  # Asserted on the ROW, not on the whole blob: a sibling in the same roster
+  # legitimately carries the key, so a bare grep would pass vacuously either way.
+  verdict="$(printf '%s' "$out" | python3 -c '
+import json, sys
+rows = {c["doc_id"]: c for c in json.load(sys.stdin)["children"]}
+absent = "acceptance_criteria" not in rows["gkid-a"]["content"]
+present = "acceptance_criteria" in rows["kid-a"]["content"]
+print("ABSENT-KEPT" if absent else "KEY-MANUFACTURED",
+      "SIBLING-KEPT" if present else "SIBLING-LOST")')"
+  expect "the absent-criteria row did NOT gain a key" "$verdict" "ABSENT-KEPT"
+  expect "and its healthy sibling did not LOSE one" "$verdict" "SIBLING-KEPT"
 
   # 4. OUTAGE: 503 is retried, then lands on an explicitly-worded RED. Never 0,
   #    never an empty roster reported as a clean one.
