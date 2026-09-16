@@ -46,6 +46,19 @@ type siteCP struct {
 	lastAuth   string
 	deployHits int
 	pollHits   int
+	// wireLog records every request the fake served, in order, as "METHOD path".
+	// A LATENCY row is a round-trip row: the only machine-independent thing a
+	// test can pin about how long `bp cloud site rollback` takes is HOW MANY
+	// times it goes to the control plane and why. A wall-clock assertion passes
+	// forever on a fast box and reds under CI load for reasons that have nothing
+	// to do with the code; the request sequence reds exactly when someone adds a
+	// round trip. (task-b017df2fda0fe600)
+	wireLog []string
+	// GET /v1/sites — the list-ALL read `resolveOpenSiteID` issues to turn a
+	// slug into the uuid the CP route requires. sitesListHits counts it.
+	sitesListResp fakeResp
+	sitesListHits int
+	rollHits      int
 	// per-route responses (status, body)
 	createResp fakeResp
 	deployResp fakeResp
@@ -123,7 +136,19 @@ func (cp *siteCP) serve() *httptest.Server {
 		cp.lastAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
+		cp.wireLog = append(cp.wireLog, r.Method+" "+path)
 		switch {
+		// GET /v1/sites is the list-ALL read that `resolveOpenSiteID` issues when
+		// the ref is not already a uuid. It is a real round trip on every
+		// slug-addressed verb, and before this case the default arm t.Fatal'd —
+		// which is exactly why no test had ever exercised the slug path.
+		case r.Method == "GET" && path == "/v1/sites":
+			cp.sitesListHits++
+			if cp.sitesListResp.body == "" && cp.sitesListResp.status == 0 {
+				cp.write(w, fakeResp{200, `{"sites":[{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static"}]}`})
+				break
+			}
+			cp.write(w, cp.sitesListResp)
 		case r.Method == "POST" && path == "/v1/sites":
 			cp.createBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.createResp)
@@ -169,6 +194,7 @@ func (cp *siteCP) serve() *httptest.Server {
 			}
 			cp.write(w, cp.listResp)
 		case r.Method == "POST" && path == "/v1/sites/"+testSiteID+"/rollback":
+			cp.rollHits++
 			cp.write(w, cp.rollResp)
 		case r.Method == "DELETE" && path == "/v1/sites/"+testSiteID:
 			cp.write(w, cp.deleteResp)
@@ -1664,6 +1690,94 @@ func TestRunCloudSiteRollback(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "atomic symlink") {
 		t.Fatalf("rollback copy must name the atomic symlink flip:\n%s", stdout)
+	}
+}
+
+// --- rollback round-trip cost (task-b017df2fda0fe600) -------------------------
+//
+// THE ROW IS A LATENCY ROW, AND THESE TWO TESTS PIN THE ONE PART OF THE LATENCY
+// A UNIT TEST CAN HONESTLY OWN: the number of control-plane round trips.
+//
+// Measured 2026-09-16 (Apple M4, loadavg 54, N=10 each, against the live
+// api.barkpark.cloud): bp process startup 57-73 ms; GET /v1/sites 343-460 ms by
+// raw curl, 390-496 ms through bp. So the slug path pays ~0.4 s BEFORE the
+// rollback request is issued — 38-46% of the charter's 1000 ms budget — and the
+// original filing's claim that "~0.39 s is unavoidable client + network
+// overhead" is wrong about the word unavoidable: most of it is one discretionary
+// list-ALL read, not a floor.
+//
+// It is discretionary only in principle today: `Registry.get_team_site/2` runs
+// the ref through `uuid_or_nil/1`, so POST /v1/sites/:id/rollback accepts a uuid
+// and NOTHING else. Until the control plane resolves a slug itself, the CLI has
+// to make this read — so the test pins the count at its true present value of
+// two rather than pretending it can be one.
+//
+// Why a count and not a clock: a `< 1s` assertion passes on every developer
+// machine regardless of the code and reds under CI load regardless of the code.
+// A round-trip count reds when, and only when, someone puts another request on
+// this path — the thing that actually spends the time.
+func TestRunCloudSiteRollbackBySlugCostsExactlyOneExtraRoundTrip(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	// Addressed by SLUG — the way the live 1840/3021/3820 ms measurements on
+	// guerrilla addressed it, and the way an operator does.
+	_, stderr, code := runSite(t, "table", "rollback", "blog")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	want := []string{
+		"GET /v1/sites",
+		"POST /v1/sites/" + testSiteID + "/rollback",
+	}
+	if len(cp.wireLog) != len(want) {
+		t.Fatalf("slug rollback must cost exactly %d round trips, got %d:\n%v",
+			len(want), len(cp.wireLog), cp.wireLog)
+	}
+	for i, w := range want {
+		if cp.wireLog[i] != w {
+			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
+		}
+	}
+	// Named separately so a regression says WHICH leg grew.
+	if cp.sitesListHits != 1 {
+		t.Fatalf("slug resolve must read GET /v1/sites exactly once, got %d", cp.sitesListHits)
+	}
+	if cp.rollHits != 1 {
+		t.Fatalf("rollback must POST exactly once, got %d", cp.rollHits)
+	}
+	// The flip is synchronous and the envelope already carries the post-swap
+	// deployment id, so there is NO verification read and NO poll loop after it.
+	// A third request here would be a re-read of state the response already held.
+	if cp.pollHits != 0 || cp.listHits != 0 {
+		t.Fatalf("rollback must not poll or re-read deployments after the flip (poll=%d list=%d)",
+			cp.pollHits, cp.listHits)
+	}
+}
+
+// TestRunCloudSiteRollbackByIDIsASingleRoundTrip is the QUIET arm: given a uuid,
+// `resolveOpenSiteID` short-circuits and the list read must not happen at all.
+// It is the control for the test above — it proves the extra round trip is
+// attributable to slug resolution specifically and not to the rollback verb, and
+// it is the assertion that would catch the opposite regression (an unconditional
+// list read, making every rollback pay ~0.4 s even when addressed by id).
+func TestRunCloudSiteRollbackByIDIsASingleRoundTrip(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	_, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if cp.sitesListHits != 0 {
+		t.Fatalf("a uuid ref must not read GET /v1/sites at all, got %d hits (log %v)",
+			cp.sitesListHits, cp.wireLog)
+	}
+	want := []string{"POST /v1/sites/" + testSiteID + "/rollback"}
+	if len(cp.wireLog) != 1 || cp.wireLog[0] != want[0] {
+		t.Fatalf("id rollback must be exactly one round trip %v, got %v", want, cp.wireLog)
 	}
 }
 
