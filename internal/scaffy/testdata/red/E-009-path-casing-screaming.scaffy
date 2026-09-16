@@ -1,0 +1,11 @@
+# SCREAMING_SNAKE is the fifth canonical spelling (A1) but is NOT
+# path-legal: E-009 admits only kebab and snake in path positions.
+# The sibling E-009-path-casing.scaffy pins the Pascal facet; this one
+# pins SCREAMING, which prose alone asserted until now.
+# expect: E-009 8
+DIRECTION "add"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+CREATE FILE IF ABSENT "internal/widgets/{{.WIDGET_NAME}}.go"
+::: widget module :::
+package widgets
+::: widget module :::
