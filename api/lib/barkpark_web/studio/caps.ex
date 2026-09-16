@@ -140,6 +140,11 @@ defmodule BarkparkWeb.Studio.Caps do
   # The remedy IF that posture ever changes is NOT a tier bump but a
   # capability check in the handler itself (`Caps.derive(socket).read`), which
   # is the only place in this path that can tell an anonymous socket apart.
+  # `select-view` (Gyldendal parity E10) is the same shape as `search`,
+  # `ref-search` and `backlinks-refresh` above it: a UI event whose only effect
+  # is a SCOPED read through `Content.list_documents/3`, filtered to the open
+  # document's own id. It reads no capability the socket does not already hold
+  # to see the document it is standing on, and it writes nothing.
   @safe_events ~w(
     select select-group select-desk select-pane expand-pane
     switch-workspace switch-project switch-dataset toggle-create
@@ -148,6 +153,7 @@ defmodule BarkparkWeb.Studio.Caps do
     toggle-content-preview toggle-diff toggle-category editor-set-mode
     width-bucket
     search ref-search validate-upload reload-remote-doc
+    select-view
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal
