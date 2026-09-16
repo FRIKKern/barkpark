@@ -64,7 +64,8 @@ describe('table `cols` contract (shared fixture)', () => {
   })
 
   it('right-aligns the HEADER of a right-aligned column too, so the label sits over it', () => {
-    const type = contract.right_aligned[0]
+    const type = contract.right_aligned[0] ?? ''
+    expect(type, 'the fixture names at least one right-aligned type').toBeTruthy()
     const html = article({
       type: 'table',
       head: ['Label', 'Count'],
