@@ -275,6 +275,14 @@ on:
       - "js/packages/create-barkpark-app/templates/website-starter/barkpark.template.json"
       # A change to the ratchet itself must run the suite it guards.
       - "scripts/go-path-escape-check.sh"
+      # .github/ — doc-gates.yml's own `pull_request: paths:` block is the
+      # AUTHORITY internal/scaffy/anchor_glob_invariant_test.go reads: it
+      # asserts every non-token scaffy `IN` target matches at least one of
+      # those globs, because the scaffy anchor-drift gate only runs on a PR
+      # the filter admits. DELETING a glob is therefore a Go-suite subject
+      # with no .go diff at all, and without this entry the very PR that
+      # narrows the filter dispatches nothing.
+      - ".github/workflows/doc-gates.yml"
   pull_request:
     # NO `paths:` KEY, EVER — see THE SKIP SHIM above. The path decision for a
     # pull_request is made by the `changes` job below, which derives it from the
