@@ -7507,17 +7507,95 @@
     return { role: "warn", label: "Unclassified", detail: "No console state for '" + kind + "'" };
   }
 
-  // The single .status-pill component — one dot + label + optional detail,
-  // coloured by the semantic role. This is the only status affordance in a
-  // fleet row and the instance-detail header (charter decision 6).
-  function statusPill(bp, extraClass) {
-    var s = statusOf(bp);
-    return '<span class="status-pill status-pill--' + esc(s.role) +
-      (extraClass ? " " + extraClass : "") + '">' +
+  // ── THE STATE GRAMMAR (GR11 / parent decision 24) ──────────────────────────
+  // ONE vocabulary and ONE emitter for every status affordance in the console.
+  //
+  // WHAT THIS REPLACED. Two pill families rendered the same idea in two
+  // dialects: `.status-pill` (dot + label + detail, coloured by a semantic
+  // ROLE) for instance health, and a second `.dep-*` family (no dot, its own
+  // box metrics, one bespoke rule per server status string) for deployments.
+  // The deploy side hand-built its class attribute at five call sites, so the
+  // set of states it could paint was whatever the server happened to send and
+  // the checker could only ask whether each such string had SOME rule. Two
+  // dialects also meant two ways to be wrong about the same row: `cancelled`
+  // and `deferred` each shipped ruleless at some point and impersonated
+  // `queued`, because the fall-through look of the dep base WAS the queued look.
+  //
+  // THE GRAMMAR. A state is a `statusMeta`: `{ role, variant, label }`.
+  //   role    — the semantic colour, from the closed five the unified family
+  //             already owns: ok | info | warn | danger | neutral.
+  //   variant — the optional CHIP SHAPE, from the closed two: "hollow" (an open
+  //             chip: this state wants attention but no longer holds a build
+  //             slot) and "stopped" (a dashed, dimmed chip: a deliberate,
+  //             terminal halt — the dash carries the meaning without colour, so
+  //             the state survives greyscale and colour-blind viewing). Absent
+  //             variant = the filled chip.
+  //   label   — the visible word. NEVER invented for an unknown state: an
+  //             unrecognised server status renders its own word, capitalised.
+  // Both voices are the ones the retired `.dep-deferred` / `.dep-cancelled`
+  // rules carried; nothing in the state ladder lost a look in the absorption.
+  //
+  // DEPLOY_STATUS_META is TOTAL over the ledger's statuses by construction and
+  // an unknown key falls to `neutral` with no variant — the honest "I have no
+  // console judgement about this word" look, which is exactly what the old dep
+  // base painted. __css_check.mjs E13 reads THIS table out of app.js and
+  // asserts (a) it covers every status in DEPLOY_STATUSES, (b) every role and
+  // variant it names has a `.status-pill--<name>` rule in app.css, and (c) the
+  // retired `.dep-pill` / `.dep-<status>` family has not come back — so a
+  // reverted sweep reds the gate instead of quietly re-forking the grammar.
+  var DEPLOY_STATUS_META = {
+    live:      { role: "ok" },
+    failed:    { role: "danger" },
+    building:  { role: "warn" },
+    pushing:   { role: "warn" },
+    queued:    { role: "neutral" },
+    deferred:  { role: "warn", variant: "hollow" },
+    cancelled: { role: "neutral", variant: "stopped" }
+  };
+
+  // A deploy-ledger status string → its statusMeta. `label` defaults to the
+  // status word capitalised (`cap`), which is what every deploy row shows; a
+  // caller with its own copy (the site chip says "Deploying", not "Building")
+  // passes an override.
+  function statusMeta(st, labelOverride) {
+    var key = typeof st === "string" ? st : "";
+    var m = Object.prototype.hasOwnProperty.call(DEPLOY_STATUS_META, key)
+      ? DEPLOY_STATUS_META[key] : { role: "neutral" };
+    return {
+      role: m.role,
+      variant: m.variant || "",
+      label: labelOverride != null ? String(labelOverride) : cap(key)
+    };
+  }
+
+  // THE ONE EMITTER. Every status affordance in this file goes through it —
+  // there are no hand-written pill class attributes left. `meta` is a statusMeta
+  // (or `statusOf`'s shape, which is the same `{role,label,detail}` plus a
+  // detail segment); `extraClass` rides after the role; `attrs` is a pre-escaped
+  // attribute string for the callers that need a title / aria-label.
+  function statusMetaPill(meta, extraClass, attrs) {
+    return '<span class="status-pill status-pill--' + esc(meta.role) +
+      (meta.variant ? " status-pill--" + esc(meta.variant) : "") +
+      (extraClass ? " " + extraClass : "") + '"' + (attrs || "") + ">" +
       '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(s.label) + "</span>" +
-      (s.detail ? '<span class="status-pill-detail">' + esc(s.detail) + "</span>" : "") +
+      '<span class="status-pill-label">' + esc(meta.label) + "</span>" +
+      (meta.detail ? '<span class="status-pill-detail">' + esc(meta.detail) + "</span>" : "") +
     "</span>";
+  }
+
+  // The instance-health pill — one dot + label + optional detail, coloured by
+  // the semantic role. This is the only status affordance in a fleet row and
+  // the instance-detail header (charter decision 6). It is now one consumer of
+  // statusMetaPill among several rather than its own component.
+  function statusPill(bp, extraClass) {
+    return statusMetaPill(statusOf(bp), extraClass);
+  }
+
+  // A deploy-ledger row's status chip — the deploy-side consumer of the same
+  // grammar. `st` is the server's own status string, rendered verbatim through
+  // statusMeta (which never invents a word for one it does not know).
+  function deployStatusPill(st, labelOverride, attrs) {
+    return statusMetaPill(statusMeta(st, labelOverride), "", attrs);
   }
 
   // ---- v4 fleet-row anatomy (screens/01) — pure, node-pinned via __bpTestHook.
@@ -15799,19 +15877,22 @@
   // the deployment the production pointer names. Live → the ok pill; an
   // in-flight build → Deploying; a failed CURRENT pointer never happens (the
   // pointer only moves to live rows), so absence of a live current row simply
-  // renders no chip (never an invented status). Consumes .dep-pill (GR11).
+  // renders no chip (never an invented status). Consumes the one state grammar
+  // via deployStatusPill — the label is this surface's own copy ("Deploying"
+  // reads better than the ledger's "Building" on a site head), the LOOK is the
+  // shared family's (GR11 / decision 24).
   function siteStatusChip(site, deployments) {
     var arr = deployments || [];
     for (var i = 0; i < arr.length; i++) {
       if (deployIsActive(arr[i].status || "queued")) {
-        return '<span class="dep-pill dep-building">Deploying</span>';
+        return deployStatusPill("building", "Deploying");
       }
     }
     if (site && site.current_deployment_id) {
       var cur = arr.filter(function (d) {
         return String(d.id) === String(site.current_deployment_id) && (d.status || "") === "live";
       })[0];
-      if (cur) return '<span class="dep-pill dep-live">Live</span>';
+      if (cur) return deployStatusPill("live");
       // A pointer we cannot resolve (the deployments read degraded, or the page
       // is mid-load) says NOTHING — the site HAS served a build, so "Not
       // deployed" here would be the same lie in the other direction.
@@ -15822,11 +15903,11 @@
     // said nothing about. Visible copy is the LIST's word for word ("Not
     // deployed"); the accessible name says which environment ("…to production"),
     // so a screen reader is not left guessing whether a branch preview counts.
-    // BARE `.dep-pill`, no new class: D157 measured that .dep-queued declares
-    // only what the base already sets — the base IS the neutral look, and this
-    // slice ships zero CSS lines.
-    return '<span class="dep-pill" title="Not deployed to production"' +
-      ' aria-label="Not deployed to production">Not deployed</span>';
+    // The NEUTRAL role, which under the unified grammar is what the retired
+    // bare `.dep-pill` base painted (D157 measured `.dep-queued` as declaring
+    // only what that base already set). No new CSS, no borrowed status colour.
+    return deployStatusPill("", "Not deployed",
+      ' title="Not deployed to production" aria-label="Not deployed to production"');
   }
 
   // cch-w48-s2 (charter D539): `authority` is instanceAdminAuthority()'s
@@ -16439,7 +16520,7 @@
         '<div class="deploy-meta">' + pmeta.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
-      '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
+      deployStatusPill(st) + "</div>";
     return '<div class="deploy-row preview-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
 
@@ -17840,15 +17921,15 @@
   // string the server sends renders as itself, and __app.test.mjs pins exactly
   // that, plus the ABSENCE of any taxonomy vocabulary in this file.
   //
-  // The pill is the shared `.dep-pill` base and no new modifier: colouring the
-  // class would be a second, client-side judgement about severity on top of the
-  // one the row's own status pill already states (GR11/D24 freeze the .dep-*
-  // family, and this is a consumer of it, never a restyle).
+  // The pill is the grammar's NEUTRAL role and no variant: colouring the class
+  // would be a second, client-side judgement about severity on top of the one
+  // the row's own status pill already states. This is a CONSUMER of the shared
+  // family (GR11 / decision 24), never a restyle.
   function deployFailureClassPillHtml(d) {
     var fc = d && d.failure_class;
     if (typeof fc !== "string" || fc === "") return "";
-    return '<span class="dep-pill" title="The deploy ledger\'s class for this row">' +
-      esc(fc) + "</span>";
+    return statusMetaPill({ role: "neutral", label: fc }, "",
+      ' title="The deploy ledger\'s class for this row"');
   }
 
   function deployRow(d, currentId, flash) {
@@ -17906,7 +17987,7 @@
       // machine name that prose was classified into, and conflating them would
       // hide the one an operator can grep a census for.
       '<div class="dep-side">' + actionBtn + deployFailureClassPillHtml(d) +
-        '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div></div>";
+        deployStatusPill(st) + "</div></div>";
     return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
 
