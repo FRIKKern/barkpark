@@ -1,15 +1,21 @@
 defmodule BarkparkCloud.Web.InstanceApiProxyAdminVerbsTest do
   @moduledoc """
-  task-a0f4f8757ba28e76, ruled ARM B: of the nine instance-webhook proxy routes,
-  exactly TWO are credential verbs and gate at team admin — `rotate` (mints a
-  new signing secret) and `deliveries` (returns payload bodies). The other
-  seven stay member-tier beside site CRUD.
+  task-a0f4f8757ba28e76, ruled ARM B: `rotate` (mints a new signing secret) and
+  `deliveries` (returns payload bodies) gate at team admin.
+
+  task-8ccc571ab4d4e713, ruled ARM B EXTENDED: so does every remaining `:mutate`
+  verb — `create`, `update`, `delete`, `replay`, `test_send`. The reason is on
+  the record at the routes: the instance's OWN flat `/v1/webhooks/*` scope sits
+  behind `:flat_admin_api`, and the proxy relays carrying the platform's stored,
+  decrypted instance ADMIN token, so the caller's tier is the only thing between
+  a plain member and an admin-token-bearing write to the customer's box. Of the
+  nine proxy routes exactly TWO stay member-tier: the reads `list` and `show`.
 
   One driven test per gated route, from a plain MEMBER (403 naming the missing
   authority, ZERO upstream calls) and from an ADMIN (relayed exactly as before).
-  Plus the two invariants the change must not disturb: cross-team is still 404
-  for an admin (object authz, cch-idor-s2), and a member still reaches the list
-  verb (the seven are untouched).
+  Plus the invariants the change must not disturb: cross-team is still 404 for an
+  admin (object authz, cch-idor-s2), and a member still reaches `list` and `show`
+  — the quiet arm, which stays green precisely when the gate is NOT overreaching.
 
   async: false — shares the fake HTTP client's process-wide programme.
   """
@@ -123,6 +129,49 @@ defmodule BarkparkCloud.Web.InstanceApiProxyAdminVerbsTest do
     end
   end
 
+  describe "the five remaining :mutate verbs (task-8ccc571ab4d4e713)" do
+    # {label, method, path suffix, body-programmed success}
+    @mutate_verbs [
+      {"create", :post, "", ~s({"id":"wh_new"}), "/v1/webhooks/production"},
+      {"update", :put, "/wh_9", ~s({"id":"wh_9"}), "/v1/webhooks/production/wh_9"},
+      {"delete", :delete, "/wh_9", ~s({"deleted":true}), "/v1/webhooks/production/wh_9"},
+      {"replay", :post, "/wh_9/deliveries/evt_1/replay", ~s({"replayed":true}),
+       "/v1/webhooks/production/wh_9/deliveries/evt_1/replay"},
+      {"test-send", :post, "/wh_9/test-send", ~s({"sent":true}),
+       "/v1/webhooks/production/wh_9/test-send"}
+    ]
+
+    for {label, method, suffix, _ok_body, _upstream} <- @mutate_verbs do
+      test "#{label}: a plain MEMBER is refused, and NOTHING reaches the instance",
+           %{bp: bp, member: member} do
+        Fake.program([])
+
+        conn =
+          call(unquote(method), "/v1/barkparks/#{bp.id}/api/webhooks#{unquote(suffix)}", member)
+
+        assert conn.status == 403
+        assert %{"error" => "forbidden", "required" => "admin", "scope" => "team"} = body(conn)
+        # Asserted after the status so a lost gate fails with the RELAYED
+        # request — bearer and all — in the message, not just a 200.
+        assert Fake.requests() == []
+      end
+    end
+
+    for {label, method, suffix, ok_body, upstream} <- @mutate_verbs do
+      test "#{label}: a team ADMIN still reaches the instance, at the catalog path",
+           %{bp: bp, admin: admin} do
+        Fake.program([{:ok, %{status: 200, body: unquote(ok_body)}}])
+
+        conn =
+          call(unquote(method), "/v1/barkparks/#{bp.id}/api/webhooks#{unquote(suffix)}", admin)
+
+        assert conn.status == 200
+        assert [req] = Fake.requests()
+        assert req.url == @instance_url <> unquote(upstream)
+      end
+    end
+  end
+
   describe "what the ruling does NOT change" do
     test "cross-team is still 404 for an ADMIN of another team (object authz stays first-class)",
          %{bp: bp} do
@@ -134,10 +183,21 @@ defmodule BarkparkCloud.Web.InstanceApiProxyAdminVerbsTest do
       assert Fake.requests() == []
     end
 
-    test "a plain MEMBER still reaches the list verb — the seven CRUD verbs stay member-tier",
+    test "a plain MEMBER still reaches the list verb — the reads stay member-tier",
          %{bp: bp, member: member} do
       Fake.program([{:ok, %{status: 200, body: ~s({"webhooks":[]})}}])
       conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks", member)
+
+      assert conn.status == 200
+      assert [_req] = Fake.requests()
+    end
+
+    # The QUIET arm of task-8ccc571ab4d4e713: a gate that spread to the reads
+    # would red here while every 403 assertion above stayed green.
+    test "a plain MEMBER still reaches the show verb — the reads stay member-tier",
+         %{bp: bp, member: member} do
+      Fake.program([{:ok, %{status: 200, body: ~s({"id":"wh_9"})}}])
+      conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9", member)
 
       assert conn.status == 200
       assert [_req] = Fake.requests()
