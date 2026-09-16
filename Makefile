@@ -440,3 +440,5 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help
+# ARM (temporary, task-519d5ea68ddca27f): a Makefile-ONLY diff. If pdrender-wasm
+# renders a check row on this PR head, the paths: fix works. Not for merge.
