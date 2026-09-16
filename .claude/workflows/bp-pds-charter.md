@@ -11246,7 +11246,7 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
      count of collisions **within `{path, module.name/arity}`**, measured over the corpus. The genuine
      corpus-wide figure — ignoring path and mfa — is **1,101 collision groups over 3,035 defs, out of
      23,679 defs**, RE-DERIVED IN PROCESS on 2026-09-16 at 25ed0f263 with
-     `elixir tooling/grip/ledger/_probe_d498_head_hash_corpus.exs` run from the repo root — a READ-ONLY
+     `elixir tooling/pds/d498_head_hash_corpus_probe.exs` run from the repo root — a READ-ONLY
      probe that mirrors the census's own `defs/4` walker, `head_sig/1`, `label/1`, `tree_population/0`
      and the shipped `total-meta-drop/phash2-term/v1` normaliser, all of which are `defp` in the census
      and so cannot be called. Obviously nowhere near unique, since `def all()` is byte-identical in 7

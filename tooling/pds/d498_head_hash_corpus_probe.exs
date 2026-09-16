@@ -1,4 +1,4 @@
-# _probe_d498_head_hash_corpus.exs — PDS-D498's head_hash figures, RE-DERIVED IN PROCESS.
+# d498_head_hash_corpus_probe.exs — PDS-D498's head_hash figures, RE-DERIVED IN PROCESS.
 #
 # WHY IT EXISTS. The census (scripts/pds-elixir-receipt-census.exs) carries the
 # corpus-wide head_hash collision figure as a COMMENT and computes it nowhere at run
@@ -25,7 +25,7 @@
 # the tree's own `git grep -cE '^[[:space:]]*(def|defp|defmacro|defmacrop|defdelegate)[[:space:]]'`
 # over api/lib has a broken population, and its collision figures mean nothing.
 #
-#   Usage: elixir tooling/grip/ledger/_probe_d498_head_hash_corpus.exs   (from the repo root)
+#   Usage: elixir tooling/pds/d498_head_hash_corpus_probe.exs   (from the repo root)
 defmodule Probe do
   def parse_opts,
     do: [
