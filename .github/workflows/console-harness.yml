@@ -2716,6 +2716,18 @@ jobs:
 
           echo "dispatcher outputs: console='${O_CONSOLE}'"
           echo
+          echo "::notice title=PROBE filler 1::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 2::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 3::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 4::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 5::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 6::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 7::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 8::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 9::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 10::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 11::cch-w44 probe: a competing notice in the same step."
+          echo "::notice title=PROBE filler 12::cch-w44 probe: a competing notice in the same step."
 
           bad=0
 
