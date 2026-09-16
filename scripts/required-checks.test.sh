@@ -5147,11 +5147,126 @@ rc20_roster_rows() {
 }
 RC20_DG_CLAIM="$(rc20_roster_claim "$MERGE_GATES_DOC")"
 RC20_DG_ROWS="$(rc20_roster_rows "$MERGE_GATES_DOC")"
+
+# THE NUMBERS ARE THE VERDICT; THE NAMES ARE THE REMEDY (2026-09-17).
+# `28 declared, 26 tabled` is a true statement that tells the reader nothing
+# about WHICH two steps to write down. It reddened main for three merges on
+# 2026-09-16 and every reader had to re-derive the delta by hand out of
+# doc-gates.yml. These two extractors and the reconciler below make the FAIL
+# line name the steps, in the workflow's own words.
+#
+# Names are extracted, never typed. The page ABBREVIATES ("Preview parity +
+# no-oEmbed" for "Preview parity + D10 no-oEmbed gate"; "PortableDoc render
+# parity" for "PortableDoc render-parity completeness"), so equality would
+# report all 26 correct rows as unmatched. The relation is: a row matches a
+# declared step when the row's alphanumerics-only key is a SUBSEQUENCE of the
+# step's. That is loose enough to survive the page's shortenings and tight
+# enough that a step no row mentions has nothing to match against.
+rc20_dg_yml_steps() { # <doc-gates.yml> -> declared step names, workflow order
+  sed -nE 's/^[[:space:]]*- name:[[:space:]]*(.*)[[:space:]]\((blocking|fails this job)\)[[:space:]]*$/\1/p' "$1"
+}
+rc20_dg_doc_steps() { # <merge-gates.md> -> the roster table's Step column, table order
+  awk -F'|' '/^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Step[[:space:]]*\|/ { t = 1; next }
+             t && $0 !~ /^\|/ { t = 0 }
+             t && /^\|[[:space:]]*[0-9]+[[:space:]]*\|/ {
+               s = $3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); if (s != "") print s
+             }' "$1"
+}
+# <doc-steps-file> <yml-steps-file> -> one indented line per unreconciled name,
+# in BOTH directions: a declared step no row covers (the append case), and a row
+# naming no declared step (the delete/rename case).
+rc20_dg_unreconciled() {
+  awk '
+    function key(s) { s = tolower(s); gsub(/[^a-z0-9]/, "", s); return s }
+    function subseq(a, b,   i, j) {
+      i = 1; j = 1
+      while (i <= length(a) && j <= length(b)) {
+        if (substr(a, i, 1) == substr(b, j, 1)) i++
+        j++
+      }
+      return i > length(a)
+    }
+    NR == FNR { dn++; dtext[dn] = $0; dkey[dn] = key($0); next }
+    {
+      yn++; ytext[yn] = $0; k = key($0)
+      for (i = 1; i <= dn; i++) if (dkey[i] != "" && !dhit[i] && subseq(dkey[i], k)) { dhit[i] = 1; yhit[yn] = 1; break }
+    }
+    END {
+      for (i = 1; i <= yn; i++) if (!yhit[i]) print "       DECLARED, NOT TABLED: " ytext[i]
+      for (i = 1; i <= dn; i++) if (!dhit[i]) print "       TABLED, NOT DECLARED: " dtext[i]
+    }
+  ' "$1" "$2"
+}
+
 if [ "$RC20_DG_REAL" -gt 0 ] && [ "$RC20_DG_CLAIM" = "$RC20_DG_REAL" ] && [ "$RC20_DG_ROWS" = "$RC20_DG_REAL" ]; then
   ok "the doc-gates roster counts what the workflow declares: $RC20_DG_REAL \`(blocking)\` steps, $RC20_DG_CLAIM claimed in prose, $RC20_DG_ROWS rows in the table"
 else
   bad "the doc-gates roster miscounts: doc-gates.yml declares $RC20_DG_REAL \`(blocking)\` steps, the page claims $RC20_DG_CLAIM and tables $RC20_DG_ROWS"
+  rc20_dg_unreconciled \
+    <(rc20_dg_doc_steps "$MERGE_GATES_DOC") \
+    <(rc20_dg_yml_steps "$RC20_DG_YML") >&2
 fi
+
+# CLAUSE 11a — THE ARM. The reconciler is exercised on a PLANTED append: a copy
+# of doc-gates.yml grows one step the page cannot know about, and the report has
+# to name it in the workflow's own words. Fixtures, not the live pair, so this
+# clause says the same thing whether or not main's page is currently in sync.
+RC20_DG_ARM_DIR="$(mktemp -d)"
+RC20_DG_ARM_YML="$RC20_DG_ARM_DIR/doc-gates.yml"
+cp "$RC20_DG_YML" "$RC20_DG_ARM_YML"
+printf '      - name: Planted roster arm step (fails this job)\n' >> "$RC20_DG_ARM_YML"
+RC20_DG_ARM_OUT="$(rc20_dg_unreconciled \
+  <(rc20_dg_doc_steps "$MERGE_GATES_DOC") \
+  <(rc20_dg_yml_steps "$RC20_DG_ARM_YML") 2>/dev/null || true)"
+if grep -q 'DECLARED, NOT TABLED: Planted roster arm step' <<<"$RC20_DG_ARM_OUT"; then
+  ok "the roster reconciler NAMES a declared step no table row covers (mutation-proven able to fail: a planted append is reported in the workflow's own words)"
+else
+  bad "the roster reconciler did not name the planted append — the FAIL line is numbers only, which is the state this clause exists to prevent"
+  printf '%s\n' "$RC20_DG_ARM_OUT" | sed 's/^/       /' >&2
+fi
+# …and the DELETE direction: a row the workflow no longer declares.
+RC20_DG_ARM_DOC="$RC20_DG_ARM_DIR/merge-gates.md"
+rc20_dg_doc_steps "$MERGE_GATES_DOC" > "$RC20_DG_ARM_DIR/doc-steps.txt"
+printf 'Planted roster ghost row\n' >> "$RC20_DG_ARM_DIR/doc-steps.txt"
+RC20_DG_GHOST_OUT="$(rc20_dg_unreconciled \
+  "$RC20_DG_ARM_DIR/doc-steps.txt" \
+  <(rc20_dg_yml_steps "$RC20_DG_YML") 2>/dev/null || true)"
+if grep -q 'TABLED, NOT DECLARED: Planted roster ghost row' <<<"$RC20_DG_GHOST_OUT"; then
+  ok "…and it names a TABLED row the workflow no longer declares — the reconciler is two-sided, so a deleted or renamed step is reported rather than absorbed by the count"
+else
+  bad "the roster reconciler did not name the planted ghost row — the delete direction is not covered"
+  printf '%s\n' "$RC20_DG_GHOST_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 11b — THE CONTROL. The same reconciler, on a pair that IS in sync, must
+# say nothing at all. Built by DERIVING the page's roster from the workflow (the
+# abbreviating page is replaced by its own declared names), so this clause is a
+# statement about the reconciler and not about today's merge-gates.md. Without
+# it "names the planted step" would be satisfied by a reconciler that names
+# every step on every run.
+RC20_DG_CTRL_DOC="$RC20_DG_ARM_DIR/in-sync-steps.txt"
+rc20_dg_yml_steps "$RC20_DG_YML" > "$RC20_DG_CTRL_DOC"
+RC20_DG_CTRL_OUT="$(rc20_dg_unreconciled "$RC20_DG_CTRL_DOC" <(rc20_dg_yml_steps "$RC20_DG_YML") 2>/dev/null || true)"
+if [ -z "$RC20_DG_CTRL_OUT" ] && [ -s "$RC20_DG_CTRL_DOC" ]; then
+  ok "…and on an in-sync pair it reports NOTHING (control: $(wc -l < "$RC20_DG_CTRL_DOC" | tr -d ' ') declared steps, zero unreconciled — the reconciler is a diff, not a lister)"
+else
+  bad "the roster reconciler reported something on an in-sync pair — it is a lister, not a diff"
+  printf '%s\n' "$RC20_DG_CTRL_OUT" | sed 's/^/       /' >&2
+fi
+# …and the ABBREVIATION control: the LIVE page's 26 rows, against the 26 steps
+# they actually describe, reconcile silently. This is the clause that proves the
+# subsequence relation survives the page's own shortenings — an equality-keyed
+# reconciler reports 8 of these 26 as unmatched.
+RC20_DG_ABBR_OUT="$(rc20_dg_unreconciled \
+  <(rc20_dg_doc_steps "$MERGE_GATES_DOC") \
+  <(rc20_dg_yml_steps "$RC20_DG_YML" | awk -v n="$RC20_DG_ROWS" 'NR <= n') 2>/dev/null || true)"
+if ! grep -q 'TABLED, NOT DECLARED' <<<"$RC20_DG_ABBR_OUT"; then
+  ok "…and every one of the page's $RC20_DG_ROWS abbreviated rows reconciles against the step it describes — the subsequence key survives shortenings like \"Preview parity + no-oEmbed\" for \"Preview parity + D10 no-oEmbed gate\""
+else
+  bad "an abbreviated roster row failed to reconcile against the step it describes — the key is too tight and would report correct rows"
+  printf '%s\n' "$RC20_DG_ABBR_OUT" | sed 's/^/       /' >&2
+fi
+rm -rf "$RC20_DG_ARM_DIR"
 
 # CLAUSE 12 — and that arithmetic is able to fail: the canary's 17 is reported
 # against the same derived 19.
