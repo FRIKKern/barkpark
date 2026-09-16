@@ -236,6 +236,10 @@ SCREAMING_SNAKE is the constant-name spelling JS, Rust and Python share
 (first external consumer: gyldendal.no's create-widget const stems), rides **last** in the
 collapse-precedence order so no pre-existing one-word resolution moves, and is **not** a
 path-legal spelling (E-009 still admits only kebab and snake in path positions).
+That last clause is pinned, not merely asserted: `internal/scaffy/testdata/red/E-009-path-casing-screaming.scaffy`
+reds with `path-position token {{.WIDGET_NAME}} is not a lowercase spelling`, and
+`TestScreamingSnakeIsNotPathLegal` carries two controls — snake in the same path
+position is clean, and the same SCREAMING spelling outside a path position is clean.
 
 Elixir and Go **file paths derive via snake** (`lib/barkpark/workers/{{.worker_name}}.ex`).
 Without a snake spelling, no Elixir or Go command could derive its own paths.
