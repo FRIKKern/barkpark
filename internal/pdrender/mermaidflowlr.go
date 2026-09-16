@@ -2,7 +2,6 @@ package pdrender
 
 import (
 	"strings"
-
 )
 
 // ── flowchart LR — the responsive flex-direction transpose ───────────────────
