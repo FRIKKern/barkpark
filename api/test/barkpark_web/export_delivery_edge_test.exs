@@ -55,10 +55,13 @@ defmodule BarkparkWeb.ExportDeliveryEdgeTest do
     @impl true
     def init(opts), do: opts
 
+    # State rides the plug's init opts, NEVER :persistent_term or an app-env
+    # key: both are VM-GLOBAL, so two async tests in this file would clobber
+    # each other's path and a leak would outlive the whole file.
+    # `scripts/test-env-leak-*` reds on exactly that, and did on the first cut
+    # of this test.
     @impl true
-    def call(conn, _opts) do
-      %{path: path, owner: owner} = :persistent_term.get({__MODULE__, :state})
-
+    def call(conn, %{path: path, owner: owner}) do
       # The notification rides an `after`, NOT the success path: on the
       # disconnect test `deliver_bundle/3` re-raises Bandit.TransportError and a
       # trailing `send/2` would never run — the test would then time out on a
@@ -126,11 +129,9 @@ defmodule BarkparkWeb.ExportDeliveryEdgeTest do
     File.write!(path, payload)
     digest = :crypto.hash(:sha256, payload)
 
-    :persistent_term.put({Harness, :state}, %{path: path, owner: self()})
-
     {:ok, pid} =
       Bandit.start_link(
-        plug: Harness,
+        plug: {Harness, %{path: path, owner: self()}},
         scheme: :http,
         port: 0,
         ip: {127, 0, 0, 1},
