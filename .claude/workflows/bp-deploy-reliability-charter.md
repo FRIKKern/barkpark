@@ -6103,7 +6103,10 @@ the per-site partition guard and the still-unrepaired prebuilt dead end are the 
   start returning a number.** Correcting the wave-17 debrief: the counter does NOT "reconcile to the Oban gap"
   in general — post-migration the gap is **negative (562 jobs vs 566 rows)** because rows also arrive from
   non-AutoDeployWorker triggers; the estimator is robust only at DAILY granularity on busy days, and
-  `oban_jobs` prunes at 7 days (floor 2026-07-31), so the cross-check has a hard expiry.
+  `oban_jobs` prunes at 7 days (floor 2026-07-31), so the cross-check has a hard expiry. **SETTLED BY D608
+  (2026-09-16): "DORMANT" IS THE WRONG WORD — the near-zero is a REGIME FACT with a named mechanism, and the
+  `0`-against-`1,371`-deferrals comparison this entry's neighbours draw is invalid.** Read D608 before quoting
+  any number from this entry.
 
 - **D314 — THE 50-SITE TRUNCATION IS LATENT BY ~4×, NOT LIVE, AND IS DEMOTED TO A ONE-LINE MARKER.** Distinct
   `site_id` is 7 (24h) / 9 (7d) / **12 all-time over 31,254 rows**; `sites` holds 13; creation is ~1/week after
@@ -6470,7 +6473,10 @@ land the file is resolved by UNION, never by choosing a side.
   (iii) **Of the candidate terms, `failure_rate` is vacuous by rename** (2026-07-30: failed 2446 / deferred
   0 / 88.43%; 2026-08-07: failed 18 / deferred 1371 / 0.94%, with failed+deferred roughly conserved) and
   **`coalesced_attempts` ships, meters, and reads a confident permanent ZERO** (1 non-zero row of 658 since
-  the counter began, total 6, against 1,371 deferrals the same day). **`live_rate` is the only quantity that
+  the counter began, total 6, against 1,371 deferrals the same day). **AMENDED IN PLACE BY D608 (2026-09-16): the
+  "against 1,371 deferrals" clause is STRUCK — those deferrals are the OTHER BRANCH of the same decision, not
+  a denominator, and the zero is correct for the regime that produced it. The ruling below (`live_rate` is the
+  honest headline) is UNAFFECTED: it never rested on this clause.** **`live_rate` is the only quantity that
   survives the rename** — 27.4% today (3.65 attempts per live) against 91.7–95.6% on 2026-07-14..21 (1.05–
   1.40) — so it IS the epic's harm and the honest headline. **It is a BAD FENCE**: any floor calibrated on
   healthy July makes today permanently red, which is precisely the objection levelled at raw absorption —
@@ -13991,3 +13997,52 @@ only mechanism is review, and review is what caught this one. **Naming that is t
 tier that could reach titles would have to run against prod on every PR, which D469 already refused for a
 reason that has not changed; the honest state is *known gap, deliberately unguarded, documented here so the next
 reader does not assume a gate exists.*
+
+- **D608 — THE `coalesced_attempts` ZERO IS A REGIME FACT, NOT A DEAD COUNTER, AND THE `0`-vs-`1,371`
+  COMPARISON IS INVALID.** A counter reading zero has two indistinguishable causes — the phenomenon does not
+  happen, or the increment never fires — and D313 chose "accurate and dormant" by reading the code. This entry
+  settles it by RUNNING both causes through the same column.
+
+  **(a) THE TWO NUMBERS ARE THE EXCLUSIVE BRANCHES OF ONE DECISION.** In `AutoDeployWorker.drive/2` a second
+  publish either finds the site's previous row STILL ACTIVE — `deployments_active_site_env_index` refuses the
+  INSERT, `Sites.Deploy.enqueue/6` recovers `{:duplicate, building}`, `defer_behind_running_build/2` mints NO
+  row and bumps `coalesced_attempts` — or finds it SETTLED, in which case the INSERT succeeds, a REAL ROW
+  carries the attempt, and the counter is never reached. `deferred` is TERMINAL (`Deployment.@transitions`
+  maps it to `[]`), so on a busy box every round settles its own row before the next attempt runs and only the
+  MINT branch is reachable. **The 1,371 `deferred` rows of 2026-08-07 are 1,371 proofs that the mint branch was
+  taken, not 1,371 uncounted coalesces.** The coalesce branch's window is the span a row spends active: minutes
+  on a healthy build, ONE HTTP ROUND TRIP on a busy box (claim → `building` → 409 → `deferred`), against a 60s
+  debounce. That, and not a broken increment, is the whole explanation for 6 attempts on 1 row.
+
+  **(b) PROVED BY A TEST THAT CAN TELL THE TWO CAUSES APART, NOT BY READING THE CODE.**
+  `cloud/test/barkpark_cloud/sites/auto_deploy_worker_test.exs` — *"THE ZERO IS THE REGIME, NOT A DEAD
+  COUNTER: the same counter reads 3 in flight and 0 behind a busy box"* — runs ARM A (a row claimed to
+  `building`, three publishes coalesce, counter reads **3**) and ARM B (`Deploy.SyncStarter` + a 409
+  `already_running` box, five rounds, five `deferred` rows, `SUM(coalesced_attempts)` = **0**), asserting in
+  ARM B's every round that `Deploy.active_production_deployment/1` is `nil` so the coalesce branch is
+  UNREACHABLE rather than merely unvisited. **A dead counter reads 0 in BOTH arms.** MUTATION-PROVED IN BOTH
+  DIRECTIONS, run output recorded on the PR: deleting the `record_coalesced_attempt(in_flight)` call reds ARM
+  A only (`left: 0, right: 3`, line 501) and leaves ARM B green; adding `"deferred"` to
+  `active_production_deployment/1`'s status list reds ARM B only (*"round 2: a settled deferral must leave the
+  active set"*) and leaves ARM A green.
+
+  **(c) RULING: THE TERM IS RENDERABLE ABOVE ITS FLOOR, AND ITS `basis` NOW CARRIES THE EXCLUSIVITY.** The
+  wave-19 refusal to render it (`dr-w19-s7`) was the right call while the cause was unknown; the cause is now
+  known and it is not a defect, so the gauge keeps the `@coalesced_counter_since` coverage floor it already has
+  and needs no second suppression. What changes is the SENTENCE that travels with the number: `@coalesced_basis`
+  now states that coalescing and minting a row are exclusive branches and that `deferred` rows can never be a
+  denominator for it — because the reading that made this suspect was made by a reader who had the number and
+  not that fact. **A low reading means "few publishes landed during a healthy in-flight build in this window",
+  never "the counter is broken"; if it must ever be re-doubted, the discriminator in (b) is the instrument.**
+
+  **(d) NOT SIZED WITH `oban_jobs` MINUS `deployments`, AND THE COPY OF THAT ESTIMATOR IN THE CODE IS
+  WITHDRAWN.** `auto_deploy_worker.ex`'s own comment carried *"1,204 attempts that minted no row … 4.35:1"*
+  from that subtraction; the two populations are not nested (rows also arrive from non-`AutoDeployWorker`
+  triggers), so post-migration it goes NEGATIVE — **651 jobs against 658 rows, i.e. -7** — and `oban_jobs`
+  prunes at 7 days. The paragraph is deleted from the file rather than merely overruled here, per D607. **NOT
+  RE-MEASURED THIS ROUND:** every prod figure quoted above (658 rows, total 6, 1,371 deferrals, 651 jobs) is
+  INHERITED from D313 and the wave-19 filing and is a month old — this entry settles the MECHANISM, which is a
+  property of the code, and deliberately does not restate the counts as fresh. Re-derive with
+  `SELECT count(*), sum(coalesced_attempts), count(*) FILTER (WHERE coalesced_attempts > 0) FROM deployments
+  WHERE inserted_at >= '2026-08-07 10:02:23Z';` beside
+  `SELECT count(*) FROM deployments WHERE status='deferred' AND inserted_at::date = '<day>';`
