@@ -238,7 +238,10 @@ else
   # Detector B: recorded, but no file claims it.
   while read -r v; do
     [ -n "$v" ] || continue
-    if ! printf '%s\n' "$dir_versions" | grep -qx "$v"; then
+    # NOT `printf … | grep -qx`: `grep -q` exits on the first match, the
+    # printf takes SIGPIPE, and `set -o pipefail` (line 63) reports 141 for a
+    # TRUE match. A here-string has no producer process to kill.
+    if ! grep -qx "$v" <<<"$dir_versions"; then
       violations=$((violations + 1))
       printf 'VIOLATION (B orphaned version): schema_migrations holds %s but NO file in %s claims it.\n' "$v" "$DIR"
       printf '    expected a file named %s/%s_<name>.exs; the directory holds none.\n' "$DIR" "$v"
@@ -268,8 +271,8 @@ EOF
         esac
         base=${f##*/}
         v=${base%%_*}
-        printf '%s' "$v" | grep -qE '^[0-9]{8,}$' || continue
-        if printf '%s\n' "$recorded" | grep -qx "$v"; then
+        grep -qE '^[0-9]{8,}$' <<<"$v" || continue   # here-string: no SIGPIPE'd producer
+        if grep -qx "$v" <<<"$recorded"; then
           violations=$((violations + 1))
           printf 'VIOLATION (C recorded before added): %s is ALREADY in schema_migrations, but %s is added by this branch relative to %s.\n' "$v" "$f" "$BASE_REF"
           printf '    The row predates the file. `mix ecto.migrate` will print `Migrations already up` and apply NOTHING from it; the suite then runs against a schema this migration never touched.\n'
