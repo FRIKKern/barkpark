@@ -37,6 +37,27 @@ import (
 // (bp-secgo-completion-emitter-quoting).
 var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// safeParamName constrains a manifest-supplied FLAG name and positional ARG
+// name to a shell-safe identifier. It is safeName's sibling, deliberately one
+// character class wider: an opening ASCII letter or digit, then any run of
+// ASCII letters, digits, underscores, or hyphens. Uppercase is allowed here and
+// not in safeName because it is MEASURED to be load-bearing — the live
+// capabilities manifest ships camelCase parameter names (`objectId`,
+// `queryEventId`; the repo fixtures add `assetId`, `periodStart`), so reusing
+// the lowercase-only safeName for flags/args would reject the REAL manifest at
+// Parse and brick every bp against prod. Uppercase carries no shell meaning; the
+// metacharacters that do — quotes, `$`, backtick, `;`, `(`, whitespace, `%`,
+// a leading `-` — are outside both classes.
+//
+// Same trust boundary, same reason as safeName: a flag name is emitted as
+// `--<name>` into the bash/zsh/fish completion scripts the user is told to eval
+// (completionFlagMap in internal/cli/builtins.go) and into help output. The
+// emitters quote today (bp-secgo-completion-emitter-quoting); this is the
+// upstream half — a boundary reject, so a hostile name never reaches a
+// consumer that might forget to quote. The predicate is an ALLOWED SHAPE, not a
+// blocklist: a metacharacter nobody thought to enumerate still fails it.
+var safeParamName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
 // Manifest is the root capabilities document. Field names mirror
 // manifest.schema.json exactly; optional/additive fields use omitempty.
 type Manifest struct {
@@ -275,6 +296,19 @@ func Parse(body []byte) (*Manifest, error) {
 		}
 		if !safeName.MatchString(c.Verb) {
 			return nil, fmt.Errorf("parse manifest: unsafe command verb %q (must match %s)", c.Verb, safeName)
+		}
+		// Flag and arg names ride the same path to the eval'd completion
+		// scripts and to help output, so they are rejected at the same
+		// boundary — see safeParamName.
+		for _, a := range c.Args {
+			if !safeParamName.MatchString(a.Name) {
+				return nil, fmt.Errorf("parse manifest: unsafe arg name %q on command %q (must match %s)", a.Name, c.ID, safeParamName)
+			}
+		}
+		for _, f := range c.Flags {
+			if !safeParamName.MatchString(f.Name) {
+				return nil, fmt.Errorf("parse manifest: unsafe flag name %q on command %q (must match %s)", f.Name, c.ID, safeParamName)
+			}
 		}
 	}
 	return &m, nil
