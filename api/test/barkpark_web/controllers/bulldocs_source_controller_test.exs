@@ -2,7 +2,7 @@ defmodule BarkparkWeb.BulldocsSourceControllerTest do
   use BarkparkWeb.ConnCase, async: true
 
   # NOTE: `show/2`'s `requested_dataset/1` guard (a non-binary `?dataset=` must
-  # fall back to the default instead of raising Ecto.Query.CastError → 500) is
+  # fall back to the default instead of raising Ecto.Query.CastError → 400) is
   # regression-tested in bulldocs_email_controller_test.exs, where the same
   # three cases cover BOTH reader controllers against one staging-only fixture.
   # Reverting only bulldocs_source_controller.ex reds those tests with the stack
