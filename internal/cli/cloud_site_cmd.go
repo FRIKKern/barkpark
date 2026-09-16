@@ -1385,12 +1385,17 @@ func siteAbandonmentText(d cloudclient.SiteDeployment) string {
 // blind to every row older than it rather than degraded by a fraction. Seven
 // live abandoned rows carry NULL columns today and the sentence is all they have.
 //
-// On `main` today the prose arm is the ONLY reachable one — nothing writes the
-// columns on an abandoned row until PR #11209 merges (see
-// `siteAbandonmentBound`). The column-first order is kept anyway because it is
-// the ruled one and because it needs no edit the day #11209 lands, whose
-// `deferral_depth: prior + 1` is by construction the number this regex reads
-// out of the same call's sentence.
+// THE COLUMN ARM IS THE LIVE ONE AND THE PROSE ARM IS THE FLOOR BENEATH IT.
+// The control plane's abandonment branch stamps its own chain columns today —
+// `fail(ctx, abandonment_reason(reason, prior + 1, cause), %{deferral_depth:
+// prior + 1, deferral_bound: max_consecutive_deferrals(cause), deferral_cause:
+// cause, …})` — so the column and the sentence come from ONE expression each
+// and the two arms below cannot disagree: the column's `prior + 1` IS the
+// number this regex reads out of the same call's sentence. The prose arm still
+// stands for any row whose columns are NULL, so column-first costs nothing and
+// loses nothing. Both arms are pinned by tests rather than by a PR citation —
+// TestSiteAbandonmentChainReachesTheJSONEnvelope covers the column arm,
+// TestSiteAbandonmentDepthFallsBackToTheProducersSentence the prose one.
 //
 // A PRESENT-BUT-UNUSABLE COLUMN IS "NO DEPTH", NEVER A PROSE RE-READ: the
 // control plane has answered, and falling through would let a stale sentence
@@ -1422,17 +1427,21 @@ func siteAbandonmentDepth(d cloudclient.SiteDeployment) (int, bool) {
 // NOT. That asymmetry is the coverage signal, honestly rendered: a zero here
 // would read as "abandoned against a budget of nothing".
 //
-// ON `main` TODAY THAT IS EVERY ABANDONED ROW, verified in the producer rather
-// than taken on trust: the abandonment arm is `fail(ctx,
-// abandonment_reason(reason, prior + 1, cause))` and `fail/2` writes only
-// `status` / `failure_reason` / `detail` — the column triple is written on the
-// DEFERRED arm alone. PR #11209 (`dr-w28-s6-abandonment-stamps-its-own-columns`,
-// open, unmerged) is what starts writing them, with `deferral_depth: prior + 1`
-// — the SAME number `abandonment_reason/3` interpolates, pinned there by
-// `assert abandoned.failure_reason =~ "refused #{abandoned.deferral_depth}
-// rebuilds in a row"`. So the two arms below cannot disagree, and this key is
-// simply unreachable until #11209 lands: MERGE THAT FIRST, or ship this knowing
-// `abandonment_bound` is dead until it does.
+// THAT IS NO LONGER EVERY ABANDONED ROW, verified in the producer rather than
+// taken on trust: the abandonment arm hands `fail/3` the chain triple beside
+// the sentence it already writes — `deferral_depth: prior + 1`,
+// `deferral_bound: max_consecutive_deferrals(cause)`, `deferral_cause: cause` —
+// so an abandoned row carries the bound AS DATA and this function returns it.
+// The asymmetry above is what survives for a row whose column is still NULL,
+// and it is why the arm stays rather than being replaced by a hardcoded 12/6.
+//
+// THIS COMMENT CITES TESTS, NOT A PR NUMBER, on purpose: a citation to unlanded
+// work rots the day it lands, and this block previously told its reader to go
+// merge a PR that had already merged. The behaviour is pinned in both
+// directions — TestSiteAbandonmentChainReachesTheJSONEnvelope asserts
+// `abandonment_bound` renders off the column, and
+// TestSiteAbandonmentDepthFallsBackToTheProducersSentence asserts it is
+// ABSENT — never a zero — when the column is NULL.
 func siteAbandonmentBound(d cloudclient.SiteDeployment) (int, bool) {
 	if d.DeferralBound == nil || *d.DeferralBound < 1 {
 		return 0, false
