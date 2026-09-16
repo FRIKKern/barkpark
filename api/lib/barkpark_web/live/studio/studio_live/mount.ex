@@ -177,6 +177,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       access_workspace_grants: [],
       access_error: nil,
       validation_errors: %{},
+      # ── Desk search (Gyldendal parity E8) ────────────────────────────
+      # The text in the desk's search box and the hits it resolved. Empty
+      # box ⇒ empty hits ⇒ the desk renders its own items, unchanged.
+      desk_search: "",
+      desk_search_hits: [],
       # Warning-level findings (schema `"level": "warning"` rules, Gyldendal
       # parity E1.6): rendered inline and counted in the publish bar, never a
       # gate on save or publish.

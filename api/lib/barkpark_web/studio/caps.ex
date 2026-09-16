@@ -145,6 +145,13 @@ defmodule BarkparkWeb.Studio.Caps do
   # is a SCOPED read through `Content.list_documents/3`, filtered to the open
   # document's own id. It reads no capability the socket does not already hold
   # to see the document it is standing on, and it writes nothing.
+  #
+  # `desk-search` / `desk-search-clear` (Gyldendal parity E8) sit beside
+  # `search` and `ref-search` below for the same reason: the only effect is a
+  # SCOPED read, through `Query.search_documents_across_types/4`, which carries
+  # the tenant, owner, grant and schema-visibility guards of the typeless batch
+  # read and refuses a caller with no workspace outright. Clearing writes
+  # nothing at all.
   @safe_events ~w(
     select select-group select-desk select-pane expand-pane
     switch-workspace switch-project switch-dataset toggle-create
@@ -154,6 +161,7 @@ defmodule BarkparkWeb.Studio.Caps do
     width-bucket
     search ref-search validate-upload reload-remote-doc
     select-view
+    desk-search desk-search-clear
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal

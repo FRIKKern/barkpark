@@ -86,7 +86,7 @@ msgstr "Lukk referanse: %{title}"
 msgid "Delete"
 msgstr "Slett"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1435
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1436
 #, elixir-autogen, elixir-format
 msgid "Desk filters"
 msgstr "Desk-filtre"
@@ -141,8 +141,8 @@ msgstr "Flytt ned"
 msgid "Move up"
 msgstr "Flytt opp"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1412
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1413
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1414
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
 msgstr "Ny %{type}"
@@ -188,15 +188,15 @@ msgstr "Publiser"
 msgid "Remove row"
 msgstr "Fjern rad"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1402
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1403
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1759
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1404
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1823
 #, elixir-autogen, elixir-format
 msgid "Review scoped access grants"
 msgstr "Se over tilgangsgrantene"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1392
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1393
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1394
 #, elixir-autogen, elixir-format
 msgid "Share access to %{type}"
 msgstr "Del tilgang til %{type}"
@@ -467,3 +467,25 @@ msgstr "Felt"
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr "Ingen dokumenter ennå"
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1492
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1493
+#, elixir-autogen, elixir-format
+msgid "Clear search"
+msgstr "Tøm søket"
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1510
+#, elixir-autogen, elixir-format
+msgid "No documents match “%{query}”"
+msgstr "Ingen dokumenter treffer «%{query}»"
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1480
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1481
+#, elixir-autogen, elixir-format
+msgid "Search documents…"
+msgstr "Søk i dokumenter…"
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1505
+#, elixir-autogen, elixir-format
+msgid "Type at least 2 characters"
+msgstr "Skriv minst 2 tegn"

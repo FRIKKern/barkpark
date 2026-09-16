@@ -1360,6 +1360,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             @sidebar_user_opened
           ) %>
         <% collapsed = display == :strip %>
+        <% desk_searching = String.trim(@desk_search || "") != "" %>
         <% doc_count = Enum.count(pane.items, &(&1.type == :doc)) %>
         <.pane_column
           :if={display != :hidden}
@@ -1460,7 +1461,70 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             </div>
           <% end %>
 
-          <div class="pane-body">
+          <%!-- DESK SEARCH (Gyldendal parity E8). Sanity puts a global search in
+                the navbar; Barkpark puts it at the top of the ROOT pane, which is
+                the one pane every desk has and the only one whose contents are
+                not already a single type. Typing swaps THIS pane's body for the
+                hits and leaves every other pane untouched, so a drilled path
+                stays on screen behind the results. A hit is an ordinary link to
+                `/…/studio/<type>/<id>`, so it is deep-linkable, middle-clickable,
+                and opens a type the desk does not list at its root through the
+                E3.5 dead-head alias. --%>
+          <div :if={idx == 0} class="bp-desk-search" data-test-id="desk-search">
+            <span class="bp-desk-search-icon" aria-hidden="true"><.icon name="search" size={14} /></span>
+            <input
+              type="search"
+              name="desk-search"
+              class="form-input bp-desk-search-input"
+              autocomplete="off"
+              placeholder={gettext("Search documents…")}
+              aria-label={gettext("Search documents…")}
+              value={@desk_search}
+              phx-keyup="desk-search"
+              phx-debounce="250"
+              data-test-id="desk-search-input"
+            />
+            <button
+              :if={@desk_search != ""}
+              type="button"
+              class="pane-add-btn"
+              phx-click="desk-search-clear"
+              title={gettext("Clear search")}
+              aria-label={gettext("Clear search")}
+              data-test-id="desk-search-clear"
+            ><.icon name="x" size={14} /></button>
+          </div>
+
+          <div
+            :if={idx == 0 and desk_searching}
+            class="pane-body"
+            data-test-id="desk-search-results"
+          >
+            <%= if String.length(String.trim(@desk_search)) < 2 do %>
+              <div class="bp-pane-notice" role="status" data-test-id="desk-search-too-short">
+                <%= gettext("Type at least 2 characters") %>
+              </div>
+            <% else %>
+              <%= if @desk_search_hits == [] do %>
+                <div class="bp-pane-notice" role="status" data-test-id="desk-search-empty">
+                  <%= gettext("No documents match “%{query}”", query: String.trim(@desk_search)) %>
+                </div>
+              <% else %>
+                <a
+                  :for={hit <- @desk_search_hits}
+                  class="pane-doc-item bp-desk-search-hit"
+                  data-test-id="desk-search-hit"
+                  data-hit-type={hit.type}
+                  href={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset)}
+                >
+                  <span class="pane-doc-title"><%= hit.title %></span>
+                  <span class="pane-doc-sub"><%= hit.type %></span>
+                </a>
+              <% end %>
+            <% end %>
+          </div>
+
+          <div :if={not (idx == 0 and desk_searching)} class="pane-body">
             <%= if pane.items == [] and pane[:type_name] != nil and pane[:filter_error] == nil do %>
               <.pane_empty message="No documents yet">
                 <%!-- `drawable_name/2`, not `||` (icons-tab-icon-tenant-guard):

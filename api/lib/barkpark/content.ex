@@ -711,6 +711,15 @@ defmodule Barkpark.Content do
   def search_documents_by_title(query, type, dataset, opts \\ [], limit_n \\ 20),
     do: Query.search_documents_by_title(query, type, dataset, opts, limit_n)
 
+  @doc """
+  Typeless title search across every type the caller may see — the Studio
+  desk's search box (Gyldendal parity E8). Delegates to
+  `Query.search_documents_across_types/4`, which carries the same tenant,
+  owner, grant and schema-visibility guards as the typeless batch read.
+  """
+  def search_documents_across_types(query, dataset, opts \\ [], limit_n \\ 20),
+    do: Query.search_documents_across_types(query, dataset, opts, limit_n)
+
   @doc "DISTINCT tag values of a type matching a substring (the inverse of docs_with_tag). See `Content.Query`."
   def search_tags_for_type(query, type, dataset, opts \\ [], limit_n \\ 20),
     do: Query.search_tags_for_type(query, type, dataset, opts, limit_n)

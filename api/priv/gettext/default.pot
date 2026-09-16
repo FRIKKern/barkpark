@@ -86,7 +86,7 @@ msgstr ""
 msgid "Delete"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1435
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1436
 #, elixir-autogen, elixir-format
 msgid "Desk filters"
 msgstr ""
@@ -141,8 +141,8 @@ msgstr ""
 msgid "Move up"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1412
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1413
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1414
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
 msgstr ""
@@ -188,15 +188,15 @@ msgstr ""
 msgid "Remove row"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1402
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1403
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1759
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1404
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1823
 #, elixir-autogen, elixir-format
 msgid "Review scoped access grants"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1392
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1393
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1394
 #, elixir-autogen, elixir-format
 msgid "Share access to %{type}"
 msgstr ""
@@ -466,4 +466,26 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/editor.ex:690
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1492
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1493
+#, elixir-autogen, elixir-format
+msgid "Clear search"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1510
+#, elixir-autogen, elixir-format
+msgid "No documents match “%{query}”"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1480
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1481
+#, elixir-autogen, elixir-format
+msgid "Search documents…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1505
+#, elixir-autogen, elixir-format
+msgid "Type at least 2 characters"
 msgstr ""
