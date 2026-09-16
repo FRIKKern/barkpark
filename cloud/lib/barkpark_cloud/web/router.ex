@@ -5084,7 +5084,12 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
-  defp digest_send_json({:ok, %{sent: sent, recipients: recipients}}, scope_word, team_id, instances) do
+  defp digest_send_json(
+         {:ok, %{sent: sent, recipients: recipients}},
+         scope_word,
+         team_id,
+         instances
+       ) do
     %{
       scope: scope_word,
       team_id: team_id,

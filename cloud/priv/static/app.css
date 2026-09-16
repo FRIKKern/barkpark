@@ -4490,6 +4490,20 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .wh-del-hint { font-size: 12px; }
 .wh-del-empty { font-size: 13px; padding: 6px 0; }
 .wh-del-heading { font-size: 13px; font-weight: 600; color: var(--text); }
+/* gr-backlog-operator-digest-send — the Operator console's Send-one-now block,
+   above the fleet-digest log. It sits apart from the log rather than inside the
+   card chrome, because the log is a RECORD and this is an ACT: one bordered
+   region reading as a single object would invite the button to be read as a
+   filter over the rows beneath it. */
+.op-digest-send {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.op-digest-send > .set-purpose { margin: 0; max-width: 62ch; }
+
 .wh-del-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);

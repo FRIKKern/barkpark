@@ -335,7 +335,13 @@ defmodule BarkparkCloud.Web.RouterOperatorDigestSendTest do
 
   test "a scope whose teams have no members is a COUNTED ZERO, not a fake success" do
     {operator, _team} = operator_fixture()
-    memberless = Accounts.create_team(%{name: "Memberless", slug: "memberless-#{System.unique_integer([:positive])}"})
+
+    memberless =
+      Accounts.create_team(%{
+        name: "Memberless",
+        slug: "memberless-#{System.unique_integer([:positive])}"
+      })
+
     {:ok, memberless} = memberless
     barkpark_fixture(memberless)
 
