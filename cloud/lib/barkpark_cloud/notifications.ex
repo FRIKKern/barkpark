@@ -889,7 +889,7 @@ defmodule BarkparkCloud.Notifications do
   Each team's reading is `SitePublishWaitingAlert.read/2`, which is a thin call
   onto `DeployLedger.delivery/3` — the ONE definition of "which of this team's
   sites is still waiting". No query is written here. `delivery/3` already
-  excludes rows a human cancelled and rows whose live mark the ledger cannot
+  excludes rows the fleet cancelled and rows whose live mark the ledger cannot
   time, and a second hand-written "newest attempt post-dates newest live row"
   query would have emailed teams about both.
 
