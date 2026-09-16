@@ -233,6 +233,8 @@
 #   bash scripts/pds-record-parity.sh --fixture-dir <dir>   # hermetic, selftest
 #   bash scripts/pds-record-parity.sh --allocate-d <n> --for <label>  # MINT D numbers
 #   bash scripts/pds-record-parity.sh --check-alloc          # every mint was reserved
+#   bash scripts/pds-record-parity.sh --print-defs [--charter <path>]  # the lens, alone
+#   bash scripts/pds-record-parity.sh --print-synthetic <a|d>          # the roster, alone
 
 set -uo pipefail
 
@@ -279,6 +281,12 @@ HEADING_LENS=0           # lens artifact demonstrator; never the gate
 ALLOCATE_D=""            # --allocate-d <n>: mint n PDS-D numbers through the arbiter
 ALLOC_FOR=""             # --for <label>: who is minting (e.g. "w50 DECIDE")
 CHECK_ALLOC=0            # --check-alloc: every number minted since the seed was reserved
+# READ-ONLY ACCESSORS. This file owns the definition lens and the synthetic
+# roster; sibling arms must READ them, never re-derive them. The lens has
+# drifted once already (PDS-D679: a heading-blind lens manufactured six phantom
+# citations), and a second copy is a second thing to drift.
+PRINT_DEFS=0             # --print-defs: the charter's defined numbers, one per line
+PRINT_SYNTHETIC=""       # --print-synthetic <a|d>: that axis's skip roster
 # THE RESERVATION LEDGER. The arbiter's whole substance: a durable record that
 # a number has been SPOKEN FOR, written BEFORE the charter is. See allocate_d.
 ALLOC_LEDGER="${PDS_D_ALLOC_LEDGER:-tooling/pds/d-number-reservations.tsv}"
@@ -309,6 +317,8 @@ while [ $# -gt 0 ]; do
     --for)           ALLOC_FOR="${2:-}"; shift 2 ;;
     --alloc-ledger)  ALLOC_LEDGER="${2:-}"; shift 2 ;;
     --check-alloc)   CHECK_ALLOC=1; shift ;;
+    --print-defs)    PRINT_DEFS=1; shift ;;
+    --print-synthetic) PRINT_SYNTHETIC="${2:-}"; shift 2 ;;
     -h|--help)       usage ;;
     *) echo "pds-record-parity: unknown argument '$1'" >&2; usage ;;
   esac
@@ -529,6 +539,10 @@ check_alloc() {
   return 0
 }
 
+if [ "$PRINT_DEFS" -eq 1 ]; then
+  charter_defined_numbers || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; exit 2; }
+  exit 0
+fi
 if [ -n "$ALLOCATE_D" ]; then
   case "$ALLOCATE_D" in ''|*[!0-9]*|0) echo "pds-record-parity: --allocate-d must be a positive integer, got '${ALLOCATE_D}'" >&2; usage ;; esac
   allocate_d "$ALLOCATE_D"; exit $?
@@ -873,6 +887,12 @@ pds_synthetic_numbers() {
   done
   printf '%s' "$out"
 }
+
+if [ -n "$PRINT_SYNTHETIC" ]; then
+  case "$PRINT_SYNTHETIC" in a|d) : ;; *) echo "pds-record-parity: --print-synthetic must be a or d, got '${PRINT_SYNTHETIC}'" >&2; usage ;; esac
+  pds_synthetic_numbers "$PRINT_SYNTHETIC"; echo
+  exit 0
+fi
 
 
 # ══ AXIS A — a commit may not cite an authority that does not exist ═══════════
