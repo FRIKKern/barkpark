@@ -157,6 +157,8 @@ func runScaffyValidate(out *writer, args []string) int {
 	var findings []scaffy.Finding
 	skippedToken := 0
 	anchorsOK := 0
+	anchorsExpanded := 0
+	membersChecked := 0
 	for _, f := range files {
 		src, rerr := os.ReadFile(f)
 		if rerr != nil {
@@ -178,6 +180,8 @@ func runScaffyValidate(out *writer, args []string) int {
 			findings = append(findings, res.Findings...)
 			skippedToken += res.SkippedToken
 			anchorsOK += res.AnchorsOK
+			anchorsExpanded += res.AnchorsExpanded
+			membersChecked += res.MembersChecked
 		}
 	}
 
@@ -191,6 +195,8 @@ func runScaffyValidate(out *writer, args []string) int {
 			env["repo"] = repo
 			env["anchors_ok"] = anchorsOK
 			env["anchors_skipped_token"] = skippedToken
+			env["anchors_expanded"] = anchorsExpanded
+			env["members_checked"] = membersChecked
 		}
 		out.emitStructured(env)
 	} else {
@@ -210,6 +216,10 @@ func runScaffyValidate(out *writer, args []string) int {
 		// anchors skipped for want of --var (never a silent green).
 		if repo != "" {
 			line := fmt.Sprintf("repo: %d anchor(s) verified against %s", anchorsOK, repo)
+			if anchorsExpanded > 0 {
+				line += fmt.Sprintf(", %d token-bearing anchor(s) recovered by curated example tuples (%d member probe(s))",
+					anchorsExpanded, membersChecked)
+			}
 			if skippedToken > 0 {
 				line += fmt.Sprintf(", %d token-bearing anchor(s) skipped (supply --var to check them)", skippedToken)
 			}
@@ -930,10 +940,14 @@ flags:
   --var K=V      resolve one declared VARIABLE so its {{.token}}-bearing
                  anchors can be checked (repeatable; requires the full
                  declared set, like run). Only valid with --repo; without
-                 it, token-bearing anchors are skipped and counted.
+                 it, token-bearing anchors are skipped and counted --
+                 except for the commands carrying curated example tuples
+                 (internal/scaffy/repocheck_curated.go), whose anchors are
+                 expanded and checked, and counted in anchors_expanded.
 
 -o json|-o yaml emits {ok, files, findings:[{file,line,rule,message,hint}]}
-(plus repo, anchors_ok, anchors_skipped_token under --repo).
+(plus repo, anchors_ok, anchors_skipped_token, anchors_expanded and
+members_checked under --repo).
 
 examples:
   bp scaffy validate scaffy/commands/
