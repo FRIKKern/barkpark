@@ -1630,7 +1630,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # emitters overlap, and only the walker could say by how much. The go-tag pins
   # do not move at all — this change writes no Go, and `DeployCensus.Scope` has
   # been declared since the slice that emitted it.
-  @emitted_pinned 175
+  # dr-w16-bl-live-per-attempt-reaches-the-site-owner: `site_row/2` gains
+  # `live_rate`, the per-site live-per-attempt node the site owner's own
+  # team-scoped census read now carries. ONE new serializer key, so
+  # `@emitted_pinned` moves 175 -> 176 and `@go_tag_pinned` does NOT move at all
+  # — `live_rate` was already a NAME in `internal/cloudclient` (DeployCensus
+  # declares the fleet-level one), which is precisely why the per-site field had
+  # to be declared on `DeployCensusSite` itself: the file-global union is blind
+  # to it and `json.Unmarshal` would have dropped the per-site key on the floor.
+  # MEASURED by the PIN CO-EDIT arm on this tree ("@emitted_pinned 176 emitted
+  # key(s) collected, the PIN is EXACTLY 175"), never summed with an earlier
+  # delta. `@ast_blind_paths` moves 172 -> 179: the AST census sees the
+  # `live_rate` KEY on `site_row/2` but not the seven keys inside the
+  # `rate_basis/3` node it calls, exactly as it already cannot see
+  # `sites[].failure_rate.*`.
+  @emitted_pinned 176
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2081,6 +2095,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "label" => 6,
     "last_seen_at" => 2,
     "live" => 2,
+    # dr-w16-bl-live-per-attempt-reaches-the-site-owner: NEWLY DUPLICATED, 1 -> 2.
+    # `DeployCensusSite.LiveRate` joins `DeployCensus`'s fleet-level declaration.
+    # It rides free on the NAME union (`@go_tag_pinned` does NOT move), which is
+    # the whole reason the per-site field had to be declared on its own struct —
+    # cloud's OFF-STRUCT arm reds on exactly this laundering, and did.
+    "live_rate" => 2,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.LogBytes` joins the single existing declaration — the recorded size, nil when never measured.
     "log_bytes" => 2,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.LogPath` joins the single existing declaration.
@@ -4614,6 +4634,14 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
     "sites[].failure_rate.refused",
     "sites[].failure_rate.sample",
     "sites[].live",
+    "sites[].live_rate",
+    "sites[].live_rate.basis",
+    "sites[].live_rate.min_sample",
+    "sites[].live_rate.numerator",
+    "sites[].live_rate.pct",
+    "sites[].live_rate.reason",
+    "sites[].live_rate.refused",
+    "sites[].live_rate.sample",
     "sites[].site_id",
     "sites[].terminal_failure_rate",
     "sites[].terminal_failure_rate.basis",
@@ -4713,7 +4741,15 @@ defmodule BarkparkCloud.EvaluatedCensusKeySetTest do
   # `covering_bound` path added inside it. UP by one, same shape as `box_door/1`
   # and `vocabulary/0` above — a helper writing to the wire — and the EVALUATED
   # census names it.
-  @ast_blind_paths 172
+  # 172 -> 179 (dr-w16-bl-live-per-attempt-reaches-the-site-owner): `site_row/2`
+  # gains `live_rate`, and `rate_basis/3` is a private helper — so the AST census
+  # sees the top-level `sites[].live_rate` key the call site writes and is blind
+  # to all SEVEN of the rate node's inner paths (`basis`, `min_sample`,
+  # `numerator`, `pct`, `reason`, `refused`, `sample`). UP by seven, and the
+  # reason is the one already standing beside `sites[].failure_rate.*` and
+  # `sites[].terminal_failure_rate.*`, whose inner paths this census has never
+  # been able to see either. The EVALUATED census above names all eight.
+  @ast_blind_paths 179
 
   @ledger Path.expand("../../lib/barkpark_cloud/deploy_ledger.ex", __DIR__)
 
