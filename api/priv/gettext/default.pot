@@ -11,7 +11,7 @@
 msgid ""
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:711
+#: lib/barkpark_web/components/studio_components/editor.ex:714
 #, elixir-autogen, elixir-format
 msgid "%{count} warning — publishing is still allowed"
 msgid_plural "%{count} warnings — publishing is still allowed"
@@ -48,7 +48,7 @@ msgstr ""
 msgid "API token"
 msgstr ""
 
-#: lib/barkpark_web/components/fields/array_field.ex:146
+#: lib/barkpark_web/components/fields/array_field.ex:152
 #, elixir-autogen, elixir-format
 msgid "Add"
 msgstr ""
@@ -131,12 +131,12 @@ msgstr ""
 msgid "History"
 msgstr ""
 
-#: lib/barkpark_web/components/fields/array_field.ex:115
+#: lib/barkpark_web/components/fields/array_field.ex:118
 #, elixir-autogen, elixir-format
 msgid "Move down"
 msgstr ""
 
-#: lib/barkpark_web/components/fields/array_field.ex:103
+#: lib/barkpark_web/components/fields/array_field.ex:106
 #, elixir-autogen, elixir-format
 msgid "Move up"
 msgstr ""
@@ -183,7 +183,7 @@ msgstr ""
 msgid "Publish"
 msgstr ""
 
-#: lib/barkpark_web/components/fields/array_field.ex:128
+#: lib/barkpark_web/components/fields/array_field.ex:131
 #, elixir-autogen, elixir-format
 msgid "Remove row"
 msgstr ""
@@ -412,7 +412,7 @@ msgstr ""
 msgid "Describe the image for people who cannot see it"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:1127
+#: lib/barkpark_web/components/studio_components/editor.ex:1130
 #, elixir-autogen, elixir-format
 msgid "Title"
 msgstr ""
@@ -420,4 +420,39 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:61
 #, elixir-autogen, elixir-format
 msgid "Upload"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:97
+#, elixir-autogen, elixir-format
+msgid "Does not match required format"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:51
+#, elixir-autogen, elixir-format
+msgid "Fix validation errors before publishing"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:108
+#, elixir-autogen, elixir-format
+msgid "Must be at least %{min}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:102
+#, elixir-autogen, elixir-format
+msgid "Must be at least %{min} characters"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:111
+#, elixir-autogen, elixir-format
+msgid "Must be at most %{max}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:105
+#, elixir-autogen, elixir-format
+msgid "Must be at most %{max} characters"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:96
+#, elixir-autogen, elixir-format
+msgid "Required"
 msgstr ""

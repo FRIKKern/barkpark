@@ -83,4 +83,55 @@ defmodule BarkparkWeb.StudioLocale do
       "documents" => gettext("documents")
     })
   end
+
+  @doc """
+  A validation finding in the CURRENT process locale (Gyldendal parity E7
+  follow-up, friction #87). `Barkpark.Content.Validation` is kernel code with
+  no Gettext, so its messages are stable English keys; the Studio translates
+  them at the assign, once, before any render site sees them. A schema's own
+  `"message"` (already the editor's language) and anything unrecognised pass
+  through verbatim. The flat envelope's `"/path: msg"` form keeps its pointer.
+  """
+  @spec validation_message(String.t()) :: String.t()
+  def validation_message("Required"), do: gettext("Required")
+
+  def validation_message("Does not match required format"),
+    do: gettext("Does not match required format")
+
+  def validation_message(msg) when is_binary(msg) do
+    cond do
+      m = Regex.run(~r/^Must be at least (\d+) characters$/, msg) ->
+        gettext("Must be at least %{min} characters", min: Enum.at(m, 1))
+
+      m = Regex.run(~r/^Must be at most (\d+) characters$/, msg) ->
+        gettext("Must be at most %{max} characters", max: Enum.at(m, 1))
+
+      m = Regex.run(~r/^Must be at least (-?[\d.]+)$/, msg) ->
+        gettext("Must be at least %{min}", min: Enum.at(m, 1))
+
+      m = Regex.run(~r/^Must be at most (-?[\d.]+)$/, msg) ->
+        gettext("Must be at most %{max}", max: Enum.at(m, 1))
+
+      m = Regex.run(~r/^(\/[^:]*): (.+)$/s, msg) ->
+        Enum.at(m, 1) <> ": " <> validation_message(Enum.at(m, 2))
+
+      true ->
+        msg
+    end
+  end
+
+  def validation_message(other), do: other
+
+  @doc """
+  `validation_message/1` over a whole findings tree as `Validation.check_tree/3`
+  returns it: field → list, or field → `%{__self__: list, "sub" => …, 1 => …}`.
+  Shape-preserving; an empty map stays an empty map.
+  """
+  @spec localize_findings(map() | list()) :: map() | list()
+  def localize_findings(list) when is_list(list), do: Enum.map(list, &validation_message/1)
+
+  def localize_findings(map) when is_map(map),
+    do: Map.new(map, fn {k, v} -> {k, localize_findings(v)} end)
+
+  def localize_findings(other), do: other
 end
