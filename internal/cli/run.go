@@ -442,6 +442,21 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		restoreOntoClaimed, tail = extractClaimedRestoreRevisionFlag(tail)
 	}
 
+	// `--write-claimed-draft`: the SIXTH additive, opt-in flag the manifest
+	// never declares, stripped here for the same reason as the ones above. It
+	// is the FIRST one that is not scoped to a single cmd.ID, because the gate
+	// it opts into is not scoped to one either: guardClaimedDraftMutation reads
+	// the RESOLVED REQUEST BODY, so every verb that lands draft bytes through
+	// POST /v1/data/mutate reaches it — including `doc mutate`, which declares
+	// no positional arguments at all. The strip is keyed on the same shape the
+	// gate is (a write command), and stands down for any command whose manifest
+	// already declares a flag of this name, so it can never shadow a real one.
+	// See claimed_draft_mutation_guard.go.
+	var writeClaimedDraft bool
+	if claimedDraftMutationFlagApplies(cmd) {
+		writeClaimedDraft, tail = extractClaimedDraftMutationFlag(tail)
+	}
+
 	// `bp task ls --match <substring>`: the THIRD additive, opt-in flag the
 	// manifest never declares, stripped here for the same reason as the two
 	// above — GET /v1/tasks accepts no substring filter (its filter container is
@@ -622,6 +637,26 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// immediately before the send, so the refusal arrives BEFORE the write
 	// rather than one failed publish later.
 	if code, refused := guardClaimedRestoreRevision(out, g, ctx, m, cmd, tail, restoreOntoClaimed); refused {
+		return code
+	}
+
+	// Claim-wall pre-flight, THE CHOKE POINT (claimed_draft_mutation_guard.go).
+	// The two gates above are keyed on POSITIONAL ARGUMENTS, and four more doors
+	// reach the same trap — `doc create`, `doc create-or-replace`,
+	// `doc create-if-not-exists` and `doc mutate`, all reproduced live on
+	// guerrilla 2026-09-16. `doc mutate` declares no positionals at all: its
+	// whole payload is a `--file` batch that can carry every other door's op in
+	// one request, so no argument-keyed guard can ever see it.
+	//
+	// So this one is keyed on the RESOLVED REQUEST instead — `req`, the single
+	// object every dispatch passes through — and refuses when the mutation batch
+	// would land bytes on the `drafts.` twin of a CLAIMED task row. It asks the
+	// same claim question through the same probePublishedClaim, adds no second
+	// definition of "claimed", and covers a seventh verb on this route the day
+	// it ships. Runs LAST so each argument-keyed gate keeps its verb-specific
+	// wording, and is the backstop underneath both if a call site is ever
+	// dropped. Still before the send: the refusal arrives BEFORE the write.
+	if code, refused := guardClaimedDraftMutation(out, g, ctx, m, cmd, req, writeClaimedDraft || editClaimedDraft || restoreOntoClaimed); refused {
 		return code
 	}
 
