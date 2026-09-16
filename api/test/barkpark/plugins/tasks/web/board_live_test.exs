@@ -786,12 +786,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     # and raised `Ecto.MultipleResultsError` — the LiveView process dying mid-
     # drag, not a refusal.
     #
-    # RED WITHOUT THE FIX, measured: drop the `d.dataset == ^@dataset` clause
-    # from `BoardLive.fetch_task_exact/2` and this test exits with
-    # `Ecto.MultipleResultsError, expected at most one result but got 2`.
-    # It is the one arm in this describe block that depends on that clause;
-    # the other seven stay green either way, which is what makes them the
-    # control that the filter did not narrow the ordinary path.
+    # THE DRAG NEEDS BOTH HALVES, and the read half alone is not enough — which
+    # is why the claim carries `dataset: @dataset` too. Measured by reverting
+    # `board_live.ex` and re-running this file (117 tests, 1 failure, this one):
+    #
+    #   * without the read filter — `Ecto.MultipleResultsError, expected at most
+    #     one result but got 2` out of `fetch_task_exact/2`;
+    #   * with the read filter but without `dataset:` in the restage scope —
+    #     `Barkpark.Tasks.AmbiguousTwinError` out of `Tasks.claim_by_id/3`,
+    #     because `{:claim}` is the one restage arm that re-resolves by doc_id
+    #     (the others carry the uuid).
+    #
+    # Either way the LiveView process EXITS mid-drag. This is the only arm in
+    # the file that depends on either half; the other 116 stay green across both
+    # reverts, which is what makes them the control that nothing narrowed the
+    # ordinary path.
     test "a cross-dataset TWIN of a board card does not crash the drag — the board's own dataset wins",
          %{conn: conn, ws: ws} do
       scoped_task("dr-twin", "Claim me by drag", ws.id,
