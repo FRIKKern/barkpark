@@ -27,6 +27,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/buildlog"
 )
 
 // DefaultInterval is the claim-poll cadence when Builder.Interval is zero.
@@ -44,7 +46,9 @@ const (
 // in the control plane's claim ledger (use the hostname + a stable suffix).
 // CacheDir is where image tarballs land after `docker save` — the box agent
 // (P3) pulls from this directory or its mirror. LogDir holds per-deployment
-// build logs; the path becomes the deployment's `build_log_url` as `file://`.
+// build logs. That path is NOT stamped as the deployment's `build_log_url` —
+// it names a file on this host and nothing uploads it, so it is narrated to the
+// console as a location and the reachable read is buildlog.ReachableDoor.
 type Builder struct {
 	ControlURL string
 	Token      string
@@ -147,9 +151,22 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 
 	imageTag, buildLogPath, buildErr := b.build(ctx, d, con)
 
+	// build_log_url is a key a READER opens, and buildLogPath is a path on THIS
+	// builder host's own filesystem that nothing uploads. Stamping
+	// "file://"+path made a pointer exactly one machine on earth can follow —
+	// never the operator's — which the control plane discards outright (its
+	// build_log_url allowlist admits http/https only) and which `bp sites logs`
+	// used to print as a bare `log: <url>` link. So stamp ONLY what a reader
+	// could actually retrieve; the on-box location goes to the console, where
+	// it reads as a location, and the reachable door is named beside it.
 	logURL := ""
-	if buildLogPath != "" {
-		logURL = "file://" + buildLogPath
+	if buildlog.ReaderFetchable(buildLogPath) {
+		logURL = buildLogPath
+	} else if buildLogPath != "" {
+		con.logf("build log: written to %s on builder host %s — a path on the BUILDER's "+
+			"filesystem, not a URL you can open; the recorded log is served by %s "+
+			"(`bp sites logs <site> %s`)",
+			buildLogPath, b.WorkerID, buildlog.ReachableDoor, d.ID)
 	}
 
 	if buildErr != nil {

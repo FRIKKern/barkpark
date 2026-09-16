@@ -335,7 +335,8 @@ func TestRunOnce_HappyPath_NixpacksThenTransitionPushing(t *testing.T) {
 		t.Errorf("second call args missing '-o <out>.tar': %v", second.args)
 	}
 
-	// One transition POST was made: status=pushing, image_tag set, build_log_url set.
+	// One transition POST was made: status=pushing, image_tag set, and
+	// build_log_url EMPTY — see the build_log_url assertion below.
 	if len(cp.transitions) != 1 {
 		t.Fatalf("expected 1 transition, got %d", len(cp.transitions))
 	}
@@ -346,8 +347,22 @@ func TestRunOnce_HappyPath_NixpacksThenTransitionPushing(t *testing.T) {
 	if !strings.HasPrefix(tr["image_tag"].(string), "site-s-876543") {
 		t.Errorf("transition image_tag = %v, want site-s-876543...", tr["image_tag"])
 	}
-	if !strings.HasPrefix(tr["build_log_url"].(string), "file:///tmp/p2-logs/") {
-		t.Errorf("transition build_log_url = %v, want file:///tmp/p2-logs/...", tr["build_log_url"])
+	// THE POINTER ARM (task-2f6445d961a84992). This used to assert
+	// `file:///tmp/p2-logs/...` — a path on the BUILDER's own filesystem that
+	// nothing uploads, so the reader of `build_log_url` was handed a URL only
+	// this process could follow. The builder now stamps the column ONLY with
+	// something reader-fetchable; a builder-local path is narrated to the
+	// console as a LOCATION instead, beside the door that does serve it.
+	// Restore the `"file://" + buildLogPath` stamp and both halves red.
+	if got := tr["build_log_url"].(string); got != "" {
+		t.Errorf("transition build_log_url = %q, want \"\" — a builder-local path is not fetchable by the reader", got)
+	}
+	logJoined := cp.consoleJoined()
+	if !strings.Contains(logJoined, "build log: written to /tmp/p2-logs/") {
+		t.Errorf("console must narrate WHERE the build log was written:\n%s", logJoined)
+	}
+	if !strings.Contains(logJoined, "/v1/sites/:id/deployments/:dep_id/build-log") {
+		t.Errorf("console must name the read that DOES serve the log:\n%s", logJoined)
 	}
 	if got := tr["worker_id"].(string); got != "w-1" {
 		t.Errorf("transition worker_id = %q, want w-1", got)
@@ -1452,6 +1467,16 @@ func TestConsoleLatchIsRecordedAsTruncation(t *testing.T) {
 	defer mu.Unlock()
 	if len(got) != 2 {
 		t.Fatalf("terminal path posted %d line(s), want 2 (marker + terminal): %q", len(got), got)
+	}
+	// The marker must ALSO be honest about where the rest of the build went:
+	// naming "the durable build log" alone pointed at a file on the builder
+	// host that the console's reader cannot open (task-2f6445d961a84992). It
+	// has to name the read that serves it.
+	if !strings.Contains(got[0], "/v1/sites/:id/deployments/:dep_id/build-log") {
+		t.Errorf("truncation marker must name the reachable read, got:\n%s", got[0])
+	}
+	if !strings.Contains(got[0], "bp sites logs <site> <deployment-id>") {
+		t.Errorf("truncation marker must name the CLI verb, got:\n%s", got[0])
 	}
 	if !strings.Contains(got[0], "console TRUNCATED") || !strings.Contains(got[0], "NOT the whole build") {
 		t.Fatalf("first line %q must be the truncation marker — a reader must be able to tell truncated from complete", got[0])

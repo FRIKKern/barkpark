@@ -37,6 +37,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/buildlog"
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
@@ -1488,20 +1489,33 @@ func runSitesLogs(out *writer, args []string) int {
 		out.outf("no deployments for %q yet — 'cd ~/your-project && bp deploy %s'", site.Name, site.Slug)
 		return exitOK
 	}
+	// `build_log_url_fetchable` is the SAME fact the table below prints, handed
+	// to the machine reader so a script does not have to re-derive the scheme
+	// rule (and get it wrong the way this command used to).
 	if out.emitStructured(map[string]any{
-		"ok":            true,
-		"deployment_id": dep.ID,
-		"status":        dep.Status,
-		"build_log_url": dep.BuildLogURL,
+		"ok":                      true,
+		"deployment_id":           dep.ID,
+		"status":                  dep.Status,
+		"build_log_url":           dep.BuildLogURL,
+		"build_log_url_fetchable": buildlog.ReaderFetchable(dep.BuildLogURL),
 	}) {
 		return exitOK
 	}
 	out.outf("deployment %s (%s)", dep.ID, dep.Status)
-	if dep.BuildLogURL == "" {
+	switch {
+	case dep.BuildLogURL == "":
 		out.outf("  no build log URL — that column is stamped only by the off-band builder door,")
 		out.outf("  never by a box build, so for a box-keyed deployment it never arrives")
-	} else {
+	case buildlog.ReaderFetchable(dep.BuildLogURL):
 		out.outf("  log: %s", dep.BuildLogURL)
+	default:
+		// The column carries SOMETHING, but not something YOU can retrieve.
+		// Printing it as `log: <url>` told the operator to open a path that
+		// exists on the machine that WROTE it and nowhere else. Say what it is.
+		out.outf("  build log written to %s", buildlog.WhereItActuallyLives(dep.BuildLogURL))
+		out.outf("  ON THE MACHINE THAT BUILT IT — %q is not a URL you can open: this CLI", dep.BuildLogURL)
+		out.outf("  retrieves http and https and nothing else, so that pointer names a location,")
+		out.outf("  not a link. The read that DOES serve it is %s:", buildlog.ReachableDoor)
 	}
 	// The pointer view is LATEST-keyed, which is the wrong key for "why did THIS
 	// deployment fail?". Name the deployment-keyed verb rather than leaving the
