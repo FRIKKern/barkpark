@@ -145,13 +145,28 @@ STUB
   # ARM THAT REDS WHEN THE FIX IS REVERTED: a cancelled row NEWER than a failure
   # must still report RED ON MAIN (exit 1). Under the old selector this returned
   # exit 2 with "CANNOT READ", so reverting the selector fails this arm.
-  MRP_CANC_ARM=1 _arm "red behind a cancel is seen" many failure "" "" 1 "red 54 · green 0 · unread 0"
+  # THE NEEDLES ON THESE ARMS ARE COUNT-FREE ON PURPOSE. An earlier draft pinned the
+  # literal "red 54 · green 0 · unread 0" and went stale INSIDE ITS OWN COMMIT: this PR
+  # adds .github/workflows/main-collapse-gates.yml, a branch-driven push workflow, so
+  # the denominator moved 54 -> 55 and both cancel arms failed against the very tree
+  # that introduced them. What the arm actually asserts is "unread 0" -- every workflow
+  # reached a verdict THROUGH the cancel -- which the pre-fix selector could not
+  # produce (it bucketed all of them unread and exited non-zero).
+  # NO `forbidden` ARGUMENT ON THESE ARMS: the predicate's own prose prints the
+  # literals "RED ON MAIN" and "CANNOT READ" on every invocation, so a forbidden-string
+  # check on either fires unconditionally and the arm would fail over its own
+  # documentation rather than over behaviour. The exit code carries that half.
+  MRP_CANC_ARM=1 _arm "red behind a cancel is seen" many failure "" "" 1 "green 0 · unread 0"
   # ...and it must SAY that it stepped over one, or the skip is silent.
   MRP_CANC_ARM=1 _arm "the skipped cancel is named" many failure "" "" 1 "DESTROYED VERDICT"
   # THE QUIET ARM: a cancelled row in front of a genuine SUCCESS is still green,
   # and must not manufacture a red. (Without this, "call everything behind a
   # cancel red" would pass the arm above and be worse than the bug.)
-  MRP_CANC_ARM=1 _arm "green behind a cancel stays green" many success "" "" 0 "red 0 · green 54 · unread 0"
+  MRP_CANC_ARM=1 _arm "green behind a cancel stays green" many success "" "" 0 "red 0 · green"
+  # ...and it must still have READ every verdict. Split from the arm above because
+  # unread rows are not reds: an assertion that only says "red 0" passes over a run
+  # in which nothing was measured at all.
+  MRP_CANC_ARM=1 _arm "green behind a cancel reads every verdict" many success "" "" 0 "· unread 0"
   # THE ABSENCE MUST SURVIVE: a feed of nothing but cancels has no verdict at
   # all and must still refuse — this is the case where CANNOT READ is TRUE.
   MRP_CANC_ARM=only _arm "cancels only still refuses" many failure "" "" 2 "verdicts were DESTROYED, not missing"
@@ -163,7 +178,7 @@ STUB
   esac
   rm -rf "$d"
   local total=$((pass+fails))
-  if [ "$total" -lt 14 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
+  if [ "$total" -lt 15 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
   [ "$fails" = 0 ] && { echo "SELFTEST: $pass/$total arms pass"; return 0; }
   echo "SELFTEST: $fails of $total arm(s) FAILED"; return 1
 }
