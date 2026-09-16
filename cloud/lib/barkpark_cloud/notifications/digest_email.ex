@@ -103,6 +103,14 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       arriving as a green one is the exact defect this epic exists to remove.
       Expect a small team to fall below `min_sample` and render the
       counts-intact refusal: that is the honest answer, not a regression.
+    * **AND AN UNMEASURED WINDOW SAYS WHEN IT MEASURES AGAIN.** A door refused
+      for a BOUNDARY STRADDLE carries a date: the boundary instant plus that
+      door's own span, which is the first send at which the whole window sits on
+      one side of the vocabulary change. It is the difference between a reader
+      concluding "the pipeline is broken" and reading "this waits until
+      2026-08-12". The door is never clipped and the boundary is never widened
+      to manufacture a number
+      (dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out).
     * **NO LIFETIME RATE.** The all-time numerator's honest freeze point is
       2026-08-08T14:55:28.776961 at 18,640, which is not the instant anybody
       would read it as, so the digest reports only windows it pins itself.
@@ -575,8 +583,55 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     settled =
       basis_clause(Map.get(w, :terminal_rate), w.failed, Map.get(w, :settled, 0), "settled")
 
-    attempted <> "; " <> settled
+    attempted <> "; " <> settled <> boundary_horizon_clause(w)
   end
+
+  # THE READER'S NEXT QUESTION, ANSWERED ONCE PER DOOR
+  # (dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out).
+  #
+  # When a door's window straddles the deferred-status vocabulary boundary, BOTH
+  # bases above refuse and both print the census's own reason — which is correct
+  # and is deliberately not softened: a blend of two taxonomies is not a
+  # measurement, and the counts beside it are real. But the operator prose stops
+  # exactly where a non-operator starts, at "is this pipeline broken?". The
+  # honest answer has a DATE in it, and this clause is that date.
+  #
+  # IT IS NOT A SECOND REFUSAL AND IT IS NOT A NUMBER. The alternative considered
+  # and REJECTED was clipping the window (`from = max(now - 7d, boundary)`) so a
+  # rate survives: that keeps the label "last 7d" over a window that is not seven
+  # days long, which is the unpinned-window hazard `deploy_health/1` pins both
+  # bounds to avoid (D3) and the same "a window must stay a window" ruling
+  # `DeployLedger.DrainDistribution.retake/2` makes one module over. Widening the
+  # boundary to rescue the number is forbidden outright. So the door keeps
+  # refusing and starts SAYING WHEN it stops.
+  #
+  # THE HORIZON IS DERIVED, NEVER TYPED: boundary instant + this window's own
+  # span, so a door of any length answers for itself and the 24h and 7d doors
+  # cannot disagree. The boundary comes from `DeployLedger.refusal_boundary/0`
+  # rather than from parsing the reason prose — a renderer that scraped the
+  # sentence would go quiet the day the sentence is reworded.
+  #
+  # IT IS KEYED ON THE PREDICATE, NOT ON THE REFUSAL. `straddles_refusal_boundary?/2`
+  # is the same test `census/3` refuses on, so a rate refused for a SMALL SAMPLE
+  # never collects a horizon it has no claim to, and a straddling window still
+  # gets one on the day its sample also happens to be short.
+  defp boundary_horizon_clause(%{from: %DateTime{} = from, to: %DateTime{} = to} = w) do
+    if DeployLedger.straddles_refusal_boundary?(from, to) do
+      boundary = DeployLedger.refusal_boundary()
+      span = DateTime.diff(to, from, :second)
+      measures_again = DateTime.add(boundary.instant, span, :second)
+
+      ". Nothing here is broken and the boundary is not being moved to rescue " <>
+        "the percentage: this door measures again from " <>
+        "#{format_ts(measures_again)}, the first moment a whole #{w.label} " <>
+        "window sits after the #{boundary.subject} boundary. Until then the " <>
+        "attempted and deferred counts above are real and only the ratio is withheld"
+    else
+      ""
+    end
+  end
+
+  defp boundary_horizon_clause(_w), do: ""
 
   # ONE basis, rendered with its OWN denominator beside it — three endings and
   # not one of them is a bare percentage.
