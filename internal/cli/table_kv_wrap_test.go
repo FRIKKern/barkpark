@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
+	"github.com/FRIKKern/barkpark/internal/pdrender"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -208,5 +210,52 @@ func TestSiteStatusDeferredNewestSentenceSurvivesTheWrap(t *testing.T) {
 	// The copy is unchanged: the honest blind-spot clause is still the sentence.
 	if !strings.Contains(status, "whether a rebuild has been re-queued is not visible from here") {
 		t.Errorf("the fix is the renderer, not the copy — the blind-spot clause must survive: %q", status)
+	}
+}
+
+// TestRenderKVDoesNotPaintWrappedSegments is a CONTROL PAIR, and the control is
+// the point: the status painter keys on the WHOLE cell (statusRole/semrole.Color
+// match a bare "failed", never a sentence containing it), so painting each
+// wrapped segment would colour whichever line the wrap happened to isolate a
+// token onto — one arbitrarily green line in the middle of a paragraph.
+//
+// The pair: the SAME token, same writer, same width. Alone it must still paint
+// (or this test would pass against a renderer that had simply lost colour), and
+// as the tail of a wrapped sentence it must not.
+func TestRenderKVDoesNotPaintWrappedSegments(t *testing.T) {
+	var sout, serr bytes.Buffer
+	w := coloredWriter(&sout, &serr, pdrender.ANSI16, true)
+	w.kvWrapWidth = kvWrapWidthTestCols
+
+	// CONTROL: the token on its own still paints. Without this arm, a renderer
+	// with colour switched off entirely would satisfy the assertion below.
+	renderKV(w, map[string]any{"status": "failed"})
+	if !strings.Contains(sout.String(), "\033[") {
+		t.Fatalf("CONTROL: a bare status token must still be painted; got %q", sout.String())
+	}
+
+	sout.Reset()
+	// The value column is len("status")+2 = 8, so the value gets 72 cells. A
+	// 72-cell first token exactly fills line one and pushes the token ALONE onto
+	// line two — which is the whole hazard: a per-segment painter would key on
+	// that isolated "failed" and colour it. A sentence that merely CONTAINS the
+	// token proves nothing here, because the wrap would never isolate it and the
+	// painter would decline for the ordinary reason.
+	const valueCol = len("status") + 2
+	long := strings.Repeat("x", kvWrapWidthTestCols-valueCol) + " failed"
+	renderKV(w, map[string]any{"status": long})
+	got := sout.String()
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	// PRECONDITION, not a control: assert the SETUP the assertion depends on.
+	// If the wrap does not isolate the bare token, the painter has nothing to
+	// key on and the check below is green with no subject.
+	if len(lines) < 2 {
+		t.Fatalf("PRECONDITION: the value must actually WRAP or this measures nothing:\n%s", got)
+	}
+	if last := strings.TrimSpace(lines[len(lines)-1]); last != "failed" {
+		t.Fatalf("PRECONDITION: the wrap must ISOLATE the bare status token on its own line for the painter to have a subject; last line is %q", last)
+	}
+	if strings.Contains(got, "\033[") {
+		t.Errorf("a wrapped value is prose — no segment may be painted as a status token, even one the wrap isolated:\n%q", got)
 	}
 }

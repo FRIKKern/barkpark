@@ -239,14 +239,25 @@ func renderKV(out *writer, obj map[string]any) {
 	hang := strings.Repeat(" ", valueCol)
 	for _, k := range keys {
 		v := cellString(obj[k])
-		// The value is the last thing on the line (no padding), so bare == painted
-		// input; paintCell is a no-op unless color is on AND v is a status token.
-		for i, seg := range wrapKVValue(v, avail) {
+		segs := wrapKVValue(v, avail)
+		if len(segs) == 1 {
+			// The value is the last thing on the line (no padding), so bare ==
+			// painted input; paintCell is a no-op unless color is on AND v is a
+			// status token.
+			out.outf("%s  %s", runewidth.FillRight(k, width), out.paintCell(v, v))
+			continue
+		}
+		// A value that needed WRAPPING is prose, never a status token — the
+		// painter keys on the WHOLE cell (statusRole/semrole.Color match a bare
+		// "failed", not a sentence containing it), so painting per-segment could
+		// only ever fire on a fragment the wrap happened to isolate, colouring one
+		// line of a paragraph for no reason. Wrapped values go out unpainted.
+		for i, seg := range segs {
 			if i == 0 {
-				out.outf("%s  %s", runewidth.FillRight(k, width), out.paintCell(seg, seg))
+				out.outf("%s  %s", runewidth.FillRight(k, width), seg)
 				continue
 			}
-			out.outf("%s%s", hang, out.paintCell(seg, seg))
+			out.outf("%s%s", hang, seg)
 		}
 	}
 }
