@@ -69,7 +69,7 @@ defmodule BarkparkWeb.PoolOverloadTest do
       Task.shutdown(hog, :brutal_kill)
       GenServer.stop(pid, :normal, 5_000)
 
-      assert %DBConnection.ConnectionError{reason: :queue_timeout} = error,
+      assert match?(%DBConnection.ConnectionError{reason: :queue_timeout}, error),
              "expected the pool to DROP a queued caller, got: #{inspect(results)}"
 
       assert error.message =~ "connection not available and request was dropped from queue"
