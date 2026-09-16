@@ -811,13 +811,17 @@ retired; it was fixed in #4473).
 
 ### What step 1 covers under `docs/ops/` — and what this page's own header means
 
-`scripts/check-doc-budgets.sh` gates a fixed 31-row byte table (pinned by
-`CAPS_ROWS_EXPECTED`), the 7 `docs/cards/*.md`, and the pinned
-`docs/setup/CODEX.md` onramp span — nothing else. Under `docs/ops/` that table
-now names **three** files of the twenty-one: `docs/ops/PROD_OPS.md`, this page,
-and `docs/ops/branch-protection-and-overrides.md`. Every other `docs/ops/*.md`
-carries a G1 `budget:` figure that **no gate reads** — on those files the header
-is a declaration, not a cap.
+`scripts/check-doc-budgets.sh` gates a hand-written byte table (pinned by
+`CAPS_ROWS_EXPECTED` — re-derive the row count from the script, it moves), the 7
+`docs/cards/*.md`, the pinned `docs/setup/CODEX.md` onramp span, **and every
+other spine doc by HEADER DISCOVERY**: a declared `budget: Ntok` is enforced as
+`N * 4` bytes. Under `docs/ops/` the hand-written table names three files —
+`docs/ops/PROD_OPS.md`, this page, and
+`docs/ops/branch-protection-and-overrides.md`; the rest are capped by their own
+headers, which is why `docs/ops/security-gates.md` needed no new table row. The
+older reading — that a `docs/ops/` header outside the table is a declaration no
+gate reads — is DEAD: discovery closed that hole, and the `budget:` figure in a
+header is now the cap.
 
 History: [merge-gates-history.md](merge-gates-history.md#the-budget-header-that-enforced-nothing). The registration / break-glass / recorded-override runbook
 moved out to `docs/ops/branch-protection-and-overrides.md` under its own
