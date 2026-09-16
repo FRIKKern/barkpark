@@ -132,8 +132,8 @@
    },
    {
     "path": "cloud/priv/static/app.css",
-    "count": 311,
-    "note": "Cloud SPA. Not a paper surface, but on the colour ledger and therefore on the derived set — the same discipline, one census. 317 -> 311 (cch-w49-s1-followup, 2026-09-13): retiring seven orphaned tier/plan price + quota rules took six hand-typed type literals with them. LOWERED, not raised, and MEASURED — `node design/check.mjs` Part O printed \"SHRANK 317 -> 311 (-6)\" and named 311; a ratchet reds in BOTH directions, and leaving it high would let a future regression hide under the slack."
+    "count": 310,
+    "note": "Cloud SPA. Not a paper surface, but on the colour ledger and therefore on the derived set — the same discipline, one census. 317 -> 311 (cch-w49-s1-followup, 2026-09-13): retiring seven orphaned tier/plan price + quota rules took six hand-typed type literals with them. LOWERED, not raised, and MEASURED — `node design/check.mjs` Part O printed \"SHRANK 317 -> 311 (-6)\" and named 311; a ratchet reds in BOTH directions, and leaving it high would let a future regression hide under the slack. 311 -> 310 (studio, 2026-09-16): #18558 absorbed the .dep-pill family into the shared .status-pill family, and the retired block took a hand-typed type literal with it. LOWERED, not raised, and MEASURED — `node design/check.mjs` Part O printed \"SHRANK 311 -> 310 (-1)\" and named 310. This is ARREARS: the gate asks for the lowering IN THE SAME DIFF as the tokenization, #18558 did not carry it, and the ratchet has been red on main ever since."
    },
    {
     "path": "api/assets/paper-editor/src/styles.css",
