@@ -208,6 +208,11 @@ EOF
   # SCHEMAS_CODE=200 to simulate a box from before the removal.
   cat > "$dir/curl" <<'EOF'
 #!/usr/bin/env bash
+# Every invocation is recorded when $CURLLOG is set (one line per call, the
+# whole argv). The prebuilt-artifact decision case below reads it to prove a
+# NEGATIVE — that a slot deploy issues no artifact fetch — which is only worth
+# something if the same log proves the recorder was live during that run.
+[ -n "${CURLLOG:-}" ] && echo "curl $*" >> "$CURLLOG"
 for a in "$@"; do
   case "$a" in *:4020*) printf '%s' "${CONNECTORS_HEALTH_CODE:-000}"; exit 0 ;; esac
 done
@@ -341,7 +346,8 @@ EOF
   # The fake git's HEAD/FETCH_HEAD store — per case, so cases never bleed.
   GITSTATE="$TMP/gitstate"; mkdir -p "$GITSTATE"
   export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log" GITSTATE
-  : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+  export CURLLOG="$TMP/curl.log"
+  : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"; : > "$CURLLOG"
 }
 
 run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NODE_*/NPM_*/UNIT_ACTIVE/PUBLIC_HEALTH_CODE from env)
@@ -1607,6 +1613,65 @@ printf 'CONNECTORS_CREDENTIAL_KEY_PREVIOUS=   \n' >> "$APP/.env"
 rc="$(run_deploy 200 prevblanksha)"
 check "blank previous key: treated as UNSET, no line emitted" \
   "! grep -q '^CONNECTORS_CREDENTIAL_KEY_PREVIOUS' '$TMP/connectors.env'"
+rm -rf "$TMP"
+
+echo "== Case: the slot deployer COMPILES ON-BOX and fetches no prebuilt artifact (task-f94dc334001ec8d0) =="
+# THE RULING these arms hold (the full grounds are in instance-deploy.sh, above
+# the clean-build block): a blue/green slot box does NOT consume the
+# release-artifact.yml prebuilt api build. It compiles into the idle slot root.
+# Two halves, both measured rather than grepped:
+#   (A) a happy deploy issues curl calls (the CONTROL) and NONE of them is an
+#       artifact fetch. Teach instance-deploy.sh to fetch one and the absence
+#       asserts red; leave it alone and they stay quiet.
+#   (B) the upstream refusal is real: scripts/fetch-prebuilt.sh — the ONLY
+#       consumer of that artifact — exits 3 on a .slots checkout BEFORE it does
+#       anything else, and the same script with the same args and no .slots dir
+#       does NOT exit 3. That pair is what makes the 3 attributable to .slots.
+setup_case
+rc="$(run_deploy 200 noprebuiltsha)"
+check "no-prebuilt: the happy deploy still exits 0"       "[ '$rc' = '0' ]"
+# CONTROL for the two absence asserts below: a run that issued no curl at all
+# would satisfy them vacuously. It must have probed.
+check "no-prebuilt CONTROL: this run's curl calls WERE recorded" \
+  "[ -s '$CURLLOG' ]"
+check "no-prebuilt: no GitHub release artifact was fetched" \
+  "! grep -q 'releases/download' '$CURLLOG'"
+check "no-prebuilt: no api-build tarball or runtime stamp was fetched" \
+  "! grep -Eq 'api-build[.]tar[.]zst|stamp[.]json' '$CURLLOG'"
+# The positive half: the idle slot's build root was produced by an on-box mix
+# compile, so the absence above is "compiles instead", not "did nothing".
+check "no-prebuilt: the idle slot was compiled on-box (mix compile ran)" \
+  "grep -q 'compile' '$MIXLOG'"
+FP="$HERE/../scripts/fetch-prebuilt.sh"
+# Not a skip: this case's whole subject is that the artifact consumer refuses
+# slot boxes. With the consumer gone there is nothing to assert and the ruling
+# needs re-deciding, so say so loudly rather than pass.
+check "no-prebuilt: the artifact consumer scripts/fetch-prebuilt.sh exists (the guard has a subject)" \
+  "[ -f '$FP' ]"
+if [ -f "$FP" ]; then
+  mkdir -p "$TMP/fp/scripts" "$TMP/fp/stub"
+  cp "$FP" "$TMP/fp/scripts/fetch-prebuilt.sh"
+  # Hermetic: present-but-failing curl (no network from a unit test), present
+  # zstd (the script only tests for its presence). Both halves of the pair run
+  # under this identical PATH, so the only difference between them is .slots.
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/fp/stub/curl"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/fp/stub/zstd"
+  chmod +x "$TMP/fp/stub"/*
+  mkdir -p "$TMP/fp/.slots"
+  env PATH="$TMP/fp/stub:/usr/bin:/bin" bash "$TMP/fp/scripts/fetch-prebuilt.sh" deadbeef \
+    > "$TMP/fp/with.log" 2>&1
+  fp_with=$?
+  rmdir "$TMP/fp/.slots"
+  env PATH="$TMP/fp/stub:/usr/bin:/bin" bash "$TMP/fp/scripts/fetch-prebuilt.sh" deadbeef \
+    > "$TMP/fp/without.log" 2>&1
+  fp_without=$?
+  check "no-prebuilt: a .slots checkout is REFUSED by fetch-prebuilt.sh (exit 3)" \
+    "[ '$fp_with' = '3' ]"
+  check "no-prebuilt: the refusal names the slot deployer" \
+    "grep -q 'instance-deploy.sh' '$TMP/fp/with.log'"
+  check "no-prebuilt CONTROL: same script, same args, NO .slots -> not exit 3" \
+    "[ '$fp_without' != '3' ]"
+fi
 rm -rf "$TMP"
 
 echo

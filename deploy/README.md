@@ -40,10 +40,10 @@ seamless, this covers crashes/restarts outside deploys. Baked into the renderers
 armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
 auto-reverting; port-flip-safe). Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 452 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 461 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
-and their install guards. Each of the three check counts on this page is READ
+and their install guards, and the on-box-compile ruling below. Each of the three check counts on this page is READ
 BACK and asserted by the engine it describes, which fails naming both numbers
 when they disagree — so a count here cannot drift silently again.
 
@@ -289,6 +289,20 @@ proven against the harness's exit-0 `flock` stub would prove the stub.
 `bash deploy/instance-deploy_test.sh` covers the blue/green script, including the
 Caddyfile-lock regression (fail-before: the flip is lost; fixed: both writers
 survive) — it needs a real `caddy` and `flock(1)`, so that case skips on macOS.
+
+**Slot boxes compile on-box; they do not consume the prebuilt artifact.**
+`release-artifact.yml` mints a precompiled `api/_build/prod` per api-touching
+merge, but its only consumer is `scripts/fetch-prebuilt.sh` on SINGLE-CHECKOUT
+boxes — it exits 3 on a `.slots` checkout. Teaching `instance-deploy.sh` to
+fetch it instead was considered and **declined** (task-f94dc334001ec8d0): the
+artifact is not ordered before the deploy (published only after the slot deploy
+had started in 14 of 22 same-sha run pairs, 2026-09-13..15), it bundles the
+SHARED `api/deps` that the active slot serves its `priv` symlinks through, and
+the box picks its own sha via `reset --hard FETCH_HEAD` (staging can deploy a PR
+ref, which is never minted at all). The full grounds and the revisit conditions
+are in the comment above the clean-build block in `deploy/instance-deploy.sh`;
+`deploy/instance-deploy_test.sh` holds the ruling with arms that red if a fetch
+is added here.
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
