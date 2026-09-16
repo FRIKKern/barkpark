@@ -181,28 +181,45 @@ defmodule BarkparkCloud.Notifications.EventVocabularyCensusTest do
   # that not-found true by re-measuring the source every run.
   @fan_out_verdicts %{
     # Audited by the two censuses above: these are the two human-facing renderers.
-    "render.ex" => {:reads_vocabulary, "the chat renderer — audited by the render census + the severity guard above"},
-    "event_email.ex" => {:reads_vocabulary, "the email renderer — audited by the subject census above"},
+    "render.ex" =>
+      {:reads_vocabulary,
+       "the chat renderer — audited by the render census + the severity guard above"},
+    "event_email.ex" =>
+      {:reads_vocabulary, "the email renderer — audited by the subject census above"},
     # Owns the vocabulary; `events/0` is what the censuses iterate.
     "email_settings.ex" => {:reads_vocabulary, "owns @events — the vocabulary itself"},
     # Policy modules scoped to ONE event each. Not renderers: no copy, no severity.
-    "abandonment_policy.ex" => {:reads_vocabulary, "splits deployment_abandoned off deployment_failed; no rendered copy"},
-    "deployment_failed_policy.ex" => {:reads_vocabulary, "narrows deployment_failed volume; no rendered copy"},
+    "abandonment_policy.ex" =>
+      {:reads_vocabulary, "splits deployment_abandoned off deployment_failed; no rendered copy"},
+    "deployment_failed_policy.ex" =>
+      {:reads_vocabulary, "narrows deployment_failed volume; no rendered copy"},
     # ── The four modules cch-w42-s5 named. All four come back NOT-FOUND. ──
-    "digest_email.ex" => {:no_vocabulary, "fleet roll-up: its catch-alls key on freshness/window shape, never on an event name"},
-    "transactional.ex" => {:no_vocabulary, "one named function per transactional email; its only catch-all is transport_caveat/1 on a TRANSPORT string"},
-    "delivery_reason.ex" => {:no_vocabulary, "classifies TRANSPORT failures; classify/1's catch-all is already pinned by delivery_reason_test.exs and label/1 is total over classes/0"},
-    "withhold.ex" => {:no_vocabulary, "keys on withhold REASONS (@reasons), not events; label/1 has no catch-all at all, so an unlabelled reason crashes rather than ships generic"},
+    "digest_email.ex" =>
+      {:no_vocabulary,
+       "fleet roll-up: its catch-alls key on freshness/window shape, never on an event name"},
+    "transactional.ex" =>
+      {:no_vocabulary,
+       "one named function per transactional email; its only catch-all is transport_caveat/1 on a TRANSPORT string"},
+    "delivery_reason.ex" =>
+      {:no_vocabulary,
+       "classifies TRANSPORT failures; classify/1's catch-all is already pinned by delivery_reason_test.exs and label/1 is total over classes/0"},
+    "withhold.ex" =>
+      {:no_vocabulary,
+       "keys on withhold REASONS (@reasons), not events; label/1 has no catch-all at all, so an unlabelled reason crashes rather than ships generic"},
     # ── Everything else under notifications/. ──
-    "box_unreachable_episode_alert.ex" => {:no_vocabulary, "episode state machine; dispatches through Notifications, never names an event"},
+    "box_unreachable_episode_alert.ex" =>
+      {:no_vocabulary,
+       "episode state machine; dispatches through Notifications, never names an event"},
     "channel_config.ex" => {:no_vocabulary, "channel kinds + sealed creds"},
     "delivery.ex" => {:no_vocabulary, "the delivery receipt row"},
     "deploy_rate_alert.ex" => {:no_vocabulary, "rate thresholds"},
     "deploy_rate_alert_state.ex" => {:no_vocabulary, "rate-alert state row"},
     "digest_run.ex" => {:no_vocabulary, "digest run bookkeeping"},
     "safe_url.ex" => {:no_vocabulary, "SSRF fence on channel URLs"},
-    "site_publish_waiting_alert.ex" => {:no_vocabulary, "publish-wait alert; dispatches through Notifications"},
-    "channels/discord.ex" => {:no_vocabulary, "envelope shaper — takes {title, body, severity}, never the event name"},
+    "site_publish_waiting_alert.ex" =>
+      {:no_vocabulary, "publish-wait alert; dispatches through Notifications"},
+    "channels/discord.ex" =>
+      {:no_vocabulary, "envelope shaper — takes {title, body, severity}, never the event name"},
     "channels/pushover.ex" => {:no_vocabulary, "envelope shaper"},
     "channels/slack.ex" => {:no_vocabulary, "envelope shaper"},
     "channels/telegram.ex" => {:no_vocabulary, "envelope shaper"},
@@ -329,7 +346,8 @@ defmodule BarkparkCloud.Notifications.EventVocabularyCensusTest do
     on_disk = sibling_modules()
     declared = @fan_out_verdicts |> Map.keys() |> Enum.sort()
 
-    assert on_disk != [], "no modules found under #{@notifications_source} — the census is scanning nothing."
+    assert on_disk != [],
+           "no modules found under #{@notifications_source} — the census is scanning nothing."
 
     unjudged = on_disk -- declared
     vanished = declared -- on_disk
