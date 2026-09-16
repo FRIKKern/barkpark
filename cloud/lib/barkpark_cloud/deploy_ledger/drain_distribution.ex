@@ -243,6 +243,76 @@ defmodule BarkparkCloud.DeployLedger.DrainDistribution do
     end
   end
 
+  @doc """
+  THE RE-TAKE ITSELF, at one of the marks the row names — the call an operator
+  runs on the box.
+
+  `summarize/1` and `report/1` answer for whatever window you hand them. The row
+  does not ask for *a* window: it asks for the distribution **at 24h and again at
+  72h past the regime boundary**, and those are two DIFFERENT windows, not one
+  window read at two times. So this function resolves the label to its instant
+  and pins `:to` THERE — a `"24h"` re-take run on day nine still answers for the
+  first 24 hours, which is the only way the two marks can ever be compared to
+  each other or re-read later and come back the same.
+
+  It REFUSES a mark the clock has not reached yet. A window that has not
+  happened has no figures, and printing a partial one under the label `72h` is
+  how a 12-hour reading became a 24-hour claim in the first place.
+
+  Returns rendered lines. The `RECORD` lines at the end carry exactly the five
+  quantities the row asks to be recorded — `n`, `p50`, `p95`, `max` and the
+  uncensored `no_live_1h` — once per UNIT, because those two numbers were 53%
+  apart on the same fleet and a figure without its unit records nothing.
+
+  Options are `summarize/1`'s, plus `:now` (the clock the mark is tested
+  against, default `DateTime.utc_now/0`). `:to` is ignored: the mark IS the `to`.
+  """
+  @spec retake(binary(), keyword()) :: [binary()]
+  def retake(label, opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    case retake_at(label) do
+      {:error, message} ->
+        ["RE-TAKE REFUSED — #{message}"]
+
+      {:ok, at} ->
+        if DateTime.compare(now, at) == :lt do
+          [
+            "RE-TAKE #{label} — post-regime deferral wait",
+            "  mark          #{DateTime.to_iso8601(at)} (#{label} past D179 @ #{DateTime.to_iso8601(@regime_boundary)})",
+            "  now           #{DateTime.to_iso8601(now)}",
+            "RE-TAKE REFUSED — the #{label} mark is #{age(DateTime.diff(at, now, :second))} away. No figures."
+          ]
+        else
+          summary = opts |> Keyword.drop([:now]) |> Keyword.put(:to, at) |> summarize()
+
+          [
+            "RE-TAKE #{label} — mark #{DateTime.to_iso8601(at)}, read at #{DateTime.to_iso8601(now)}"
+          ] ++
+            report(summary) ++ record_lines(label, summary)
+        end
+    end
+  end
+
+  @doc """
+  The instant a re-take mark falls on, or a refusal naming the marks that exist.
+
+  `regime_boundary/0` plus the mark's offset — so the two re-takes are derived
+  from the one pinned boundary and cannot drift from it.
+  """
+  @spec retake_at(binary()) :: {:ok, DateTime.t()} | {:error, binary()}
+  def retake_at(label) do
+    case List.keyfind(@retake_marks, label, 0) do
+      {^label, seconds} ->
+        {:ok, DateTime.add(@regime_boundary, seconds, :second)}
+
+      nil ->
+        {:error,
+         "unknown mark #{inspect(label)}; this row asks for " <>
+           Enum.map_join(@retake_marks, " and ", &inspect(elem(&1, 0)))}
+    end
+  end
+
   @doc "The D179 rollback instant every window here is pinned against."
   @spec regime_boundary() :: DateTime.t()
   def regime_boundary, do: @regime_boundary
@@ -417,6 +487,20 @@ defmodule BarkparkCloud.DeployLedger.DrainDistribution do
       Enum.map(slices, fn s ->
         "    #{pad(s.cause)} n=#{s.n} p50=#{secs(s.p50)} p95=#{secs(s.p95)} max=#{secs(s.max)} waited_1h=#{s.no_live_1h}"
       end)
+  end
+
+  # The five quantities the row asks to be RECORDED, one line per unit, prefixed
+  # so a reader can grep the record out of the report it sits under. The `ALL`
+  # slice is the one the criterion means; the cause split is above it in the
+  # report and is not re-stated here.
+  defp record_lines(label, s) do
+    Enum.map([{"rows", s.rows}, {"chains", s.chains}], fn {unit, slices} ->
+      a = Enum.find(slices, &(&1.cause == "ALL"))
+
+      "  RECORD #{label} #{String.pad_trailing(unit, 7)} n=#{a.n} p50=#{secs(a.p50)} " <>
+        "p95=#{secs(a.p95)} max=#{secs(a.max)} no_live_1h=#{a.no_live_1h} " <>
+        "(uncensored population #{s.population.uncensored}, censored #{s.population.censored_recent})"
+    end)
   end
 
   defp pad(cause), do: String.pad_trailing(cause, 26)
