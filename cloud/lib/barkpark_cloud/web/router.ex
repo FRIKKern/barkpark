@@ -105,6 +105,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
+      POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
@@ -4805,8 +4806,11 @@ defmodule BarkparkCloud.Web.Router do
   # definition of operator-ness — isu-backlog-operator-principal inherits both).
   # Zero new business logic: every handler is a thin read/toggle over an existing
   # Registry/Notifications function, mirroring the /v1/admin/autoupdate* trio
-  # above. NO digest-send route here (GR40 cut it — gr-backlog-operator-digest-
-  # send is the successor). The require_worker routes stay untouched (GR9/GR39).
+  # above. The digest-send route GR40 cut now EXISTS, below
+  # (gr-backlog-operator-digest-send, the successor row GR40 named) — and it is
+  # the one handler in this seam that is not a read or a toggle, so it carries a
+  # rate limit and a required scope the others do not need. The require_worker
+  # routes stay untouched (GR9/GR39).
   get "/v1/operator/autoupdate" do
     conn = Auth.require_platform_operator(conn, [])
 
@@ -4924,6 +4928,176 @@ defmodule BarkparkCloud.Web.Router do
 
       json(conn, 200, tally)
     end
+  end
+
+  # POST /v1/operator/digest/send → 200 <send accounting> — THE SEND-NOW BUTTON'S
+  # ROUTE (gr-backlog-operator-digest-send, the successor GR40 named when it cut
+  # the designed button because no route called `deliver_fleet_digest/1`).
+  #
+  # THIS IS THE ONLY HANDLER IN THIS SEAM THAT PUTS MAIL IN A STRANGER'S INBOX.
+  # Every other /v1/operator/* route reads a table or flips a boolean this plane
+  # owns; this one fans out one email per member of every covered team, over the
+  # platform's own return address, to people who did not ask for it in that
+  # minute. Three gates follow from that, in this order:
+  #
+  #   1. `Auth.require_platform_operator` — 401 with no session, 403 for a
+  #      non-operator session, and 403 `allowlist: "unconfigured"` when
+  #      PLATFORM_ADMIN_EMAILS is unset (which it is, in production). It FAILS
+  #      CLOSED: an unconfigured allowlist admits nobody rather than everybody.
+  #      An operator-only send route reachable by anyone is a spam cannon.
+  #   2. `digest_send:<user_id>` — 2/60s (DeviceAuth.RateLimiter). The smallest
+  #      bucket in that table, per USER, for the reason its moduledoc gives.
+  #   3. THE SCOPE IS REQUIRED AND THERE IS NO DEFAULT. A bodyless or malformed
+  #      POST is 422 `scope_required`; it never falls back to "everybody". The
+  #      whole fleet is reachable, but only by ASKING for it in words
+  #      (`{"scope":"fleet"}`), so no fat finger, retried fetch or half-built
+  #      client can mail the platform by accident. `{"team_id":"…"}` sends one
+  #      team's own digest and nobody else's.
+  #
+  # NOT A NEW PRODUCER (charter D14). This adds no schedule, no toggle and no
+  # recurring job — it is one operator-initiated shot down the rail
+  # `DailyDigestWorker` already rides, which is why it calls
+  # `Notifications.deliver_fleet_digest/2` rather than growing a second sender.
+  # Same recipient resolution, same per-team payload tenancy, same transport
+  # seam, and therefore the same `notification_deliveries` receipt carrying
+  # `content_sha256` / `content_subject` / `content_counts` (dr-w34, dr-w29) — a
+  # manual send that recorded less than the cron send would be a send nobody
+  # could prove.
+  #
+  # WHAT THE 200 CLAIMS, AND WHAT IT DOES NOT. `accepted` is
+  # `deliver_fleet_digest/2`'s own `sent` count, which is the number of Swoosh
+  # deliveries that returned `{:ok, _}` — the relay answered at the submission
+  # hop, AFTER the provider spoke. It is not a delivery claim, and
+  # `status_meaning` is the sentence that says so, read from
+  # `Delivery.status_meaning/1` rather than restated here. NO RECIPIENT ADDRESS
+  # IS RETURNED: this is a cross-team response and `DigestRun`'s ruling — counts,
+  # never addresses — applies to the wire for the same disclosure reason it
+  # applies to the row.
+  post "/v1/operator/digest/send" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      operator = conn.assigns.current_user
+
+      case DeviceAuthRateLimiter.check("digest_send:" <> operator.id) do
+        {:error, :rate_limited} ->
+          json(conn, 429, %{
+            error: "rate_limited",
+            remedy:
+              "a fleet digest send was already accepted for you in this minute — " <>
+                "wait for the window to pass rather than re-sending, every hit mails real people"
+          })
+
+        :ok ->
+          case digest_send_scope(conn.body_params) do
+            {:error, body} -> json(conn, 422, body)
+            {:ok, scope} -> operator_digest_send(conn, operator, scope)
+          end
+      end
+    end
+  end
+
+  # THE SCOPE PARSER, and it REFUSES by default. There is no clause that returns
+  # a fleet scope from an absent key: `{"scope":"fleet"}` is the only way to
+  # reach the whole fleet and `{"team_id":"<id>"}` the only way to reach one
+  # team. Everything else — an empty body, `{}`, `{"scope":"all"}`, a non-binary
+  # team_id, or BOTH keys at once — lands on the catch-all 422. Both keys
+  # together is refused rather than silently resolved because the caller has said
+  # two different things and guessing which they meant is the fan-out this
+  # refusal exists to prevent.
+  defp digest_send_scope(%{"scope" => "fleet"} = params) do
+    if Map.has_key?(params, "team_id") do
+      {:error, digest_scope_refusal("scope and team_id are both present, and they disagree")}
+    else
+      {:ok, :fleet}
+    end
+  end
+
+  defp digest_send_scope(%{"team_id" => team_id}) when is_binary(team_id) and team_id != "" do
+    {:ok, {:team, team_id}}
+  end
+
+  defp digest_send_scope(_params), do: {:error, digest_scope_refusal(nil)}
+
+  defp digest_scope_refusal(detail) do
+    base = %{
+      error: "scope_required",
+      accepts: ["scope", "team_id"],
+      remedy:
+        "name the audience explicitly: {\"scope\":\"fleet\"} mails every covered team, " <>
+          "{\"team_id\":\"<id>\"} mails one. There is no default — a send with no scope " <>
+          "would have to guess, and the only guess that could be wrong is everybody."
+    }
+
+    if detail, do: Map.put(base, :detail, detail), else: base
+  end
+
+  # The send itself. One call over `Notifications.deliver_fleet_digest/2`; the
+  # scope narrows the ROWS handed in, never the audience rule, so the per-team
+  # partitioning that decides who may see which instance is still made in exactly
+  # one place.
+  defp operator_digest_send(conn, operator, scope) do
+    case digest_send_rows(scope) do
+      :no_such_team ->
+        json(conn, 404, %{error: "not_found", scope: "team"})
+
+      {:ok, scope_word, team_id, rows} ->
+        result =
+          Notifications.deliver_fleet_digest(rows,
+            trigger: "operator",
+            actor_user_id: operator.id
+          )
+
+        json(conn, 200, digest_send_json(result, scope_word, team_id, length(rows)))
+    end
+  end
+
+  defp digest_send_rows(:fleet), do: {:ok, "fleet", nil, Registry.all_barkparks()}
+
+  defp digest_send_rows({:team, team_id}) do
+    if is_nil(Accounts.get_team(team_id)) do
+      :no_such_team
+    else
+      rows = Enum.filter(Registry.all_barkparks(), &(&1.team_id == team_id))
+      {:ok, "team", team_id, rows}
+    end
+  end
+
+  # `{:ok, :no_admins}` is NOT an error and is not rendered as one: it is the
+  # counted zero — the fleet was read and no covered team had a member to mail.
+  # It answers 200 with `recipients: 0` and its own reason, because a 500 would
+  # say the send broke and a bare 200 with no numbers would say it worked.
+  defp digest_send_json({:ok, :no_admins}, scope_word, team_id, instances) do
+    %{
+      scope: scope_word,
+      team_id: team_id,
+      instances: instances,
+      recipients: 0,
+      accepted: 0,
+      failed: 0,
+      reason: "no_team_recipients",
+      status_meaning:
+        "Nothing was mailed: no team in this scope has a member to send to, so there was " <>
+          "nobody to accept anything on behalf of."
+    }
+  end
+
+  defp digest_send_json({:ok, %{sent: sent, recipients: recipients}}, scope_word, team_id, instances) do
+    %{
+      scope: scope_word,
+      team_id: team_id,
+      instances: instances,
+      recipients: length(recipients),
+      accepted: sent,
+      failed: length(recipients) - sent,
+      reason: if(sent < length(recipients), do: "partial_send"),
+      # The word the receipt uses, from the receipt's own vocabulary. `accepted`
+      # is the mail relay answering at the submission hop; it is not delivery and
+      # this sentence is what stops the console from claiming otherwise.
+      status_meaning: BarkparkCloud.Notifications.Delivery.status_meaning("sent")
+    }
   end
 
   # POST /v1/operator/teams/:id/billing/resume -> 200 {resumed: true, ...} — THE

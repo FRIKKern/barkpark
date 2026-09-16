@@ -40,6 +40,18 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
       `oauth_exchange` below: a whole office signs up from one NAT'd IP on the
       last hop.
 
+    * `"digest_send:"<user_id>` — 2 / 60s, on `POST /v1/operator/digest/send`
+      (gr-backlog-operator-digest-send). The SMALLEST bucket here, and the reason
+      is that this is the only prefix whose every hit puts mail in real people's
+      inboxes: one hit fans out one email per member of every covered team, so
+      the cost of a runaway loop is not CPU, it is a spam incident with the
+      platform's own return address on it. Per authenticated USER and not per IP
+      — the route is `require_platform_operator`, so a session always exists, and
+      two operators sharing an office NAT must not brake each other. Two, not
+      one, so an operator who genuinely needs a re-send after a failed run is not
+      told to wait a minute; the daily cron send does not pass through this
+      limiter at all.
+
   The key is `{key_string, window}` where `window = div(now_ms, @window_ms)`, so
   strictly-elapsed windows are lazily swept on the next `check/1` for that key.
   That sweep is PER-KEY: its match head pins the key being checked, so it bounds
@@ -61,11 +73,11 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
   first gate, so nothing braked the minting. That is an availability defect, not
   an over-admission one — every counter was correct.
 
-  `poll:` is the ONLY attacker-chosen key space of the eight prefixes.
+  `poll:` is the ONLY attacker-chosen key space of the nine prefixes.
   `start:`/`register:`/`oauth_exchange:`/`app_token:`/`app_token_revoke:` key on
   `peer_ip`, which RemoteIp resolves from the RIGHTMOST trusted-proxy hop and is
-  therefore not caller-controlled; `approve:`/`push_register:` key on an
-  authenticated user id. Those leak one permanent row per one-shot source IP or
+  therefore not caller-controlled; `approve:`/`push_register:`/`digest_send:` key
+  on an authenticated user id. Those leak one permanent row per one-shot source IP or
   user — the same shape, bounded by a far smaller space.
 
   So `maybe_prune/1` adds a GLOBAL sweep: at most once per window, one caller
@@ -121,7 +133,11 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
     # office behind one corporate NAT shares that IP on the LAST hop of their
     # sign-in. 10/min would starve them. 30 is still a hard bound on guessing a
     # 256-bit code — the code's own 120s TTL and burn-on-use do the real work.
-    "oauth_exchange" => 30
+    "oauth_exchange" => 30,
+    # gr-backlog-operator-digest-send — the outward-facing bucket. See the
+    # moduledoc: every admitted hit SENDS REAL MAIL, so this is deliberately the
+    # tightest number in the table rather than the @default_limit of 10.
+    "digest_send" => 2
   }
 
   @doc false
