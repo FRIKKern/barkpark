@@ -8,7 +8,6 @@ import (
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
-
 // TestMinCLICheckVerdicts is the FIRES-WHEN-IT-SHOULD half paired with the
 // STAYS-QUIET half in one table: every row that must produce a message, and
 // every row that must produce none. A gate that only has positive rows cannot
