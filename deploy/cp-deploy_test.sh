@@ -1141,6 +1141,57 @@ grep -qE 'has active endpoints|is not connected to the network' <<<"$long_out" |
 check "the pipe-less form answers TRUE (exit 0) on the same >64KB transcript" \
   "[ $_fixed_rc -eq 0 ]"
 
+# ===========================================================================
+# THE CUTOVER LEDGER (dr-w26-bl-cp-deploy-eats-a-scheduled-sampler-tick)
+# ===========================================================================
+# `deploy/cp-cutover-gaps.sh --self-test` is 46 offline checks over the ledger
+# cp-deploy.sh writes and the analyzer that reads it. It is CHAINED here rather
+# than registered as its own step because `.github/workflows/deploy-harnesses.yml`
+# names each harness explicitly and this harness is already in that list — a
+# self-test that no workflow invokes is a gate nobody runs.
+#
+# Captured as `out=$(...); rc=$?`, never piped into tail/grep: a gate piped to
+# another process reports THAT process's exit code, and empty output with rc=0
+# is indistinguishable from a harness that never ran. Both the rc AND the
+# child's own non-vacuity line are asserted.
+GAPS="$HERE/cp-cutover-gaps.sh"
+check "cp-cutover-gaps.sh exists beside cp-deploy.sh" "[ -r '$GAPS' ]"
+if [ -r "$GAPS" ]; then
+  gaps_out="$(bash "$GAPS" --self-test 2>&1)"; gaps_rc=$?
+  check "cp-cutover-gaps.sh --self-test exits 0" "[ $gaps_rc -eq 0 ]"
+  # The child's own floor line, asserted here too: a child that printed ALL PASS
+  # having run zero checks must not launder a green up into this harness.
+  # shellcheck disable=SC2034  # read inside check()'s eval string
+  gaps_count="$(printf '%s\n' "$gaps_out" | sed -n 's/^ALL PASS (\([0-9]*\) checks)$/\1/p')"
+  check "and it reports a check count (not a bare ALL PASS)" "[ -n \"\$gaps_count\" ]"
+  check "and that count is at least 38 (the child's own non-vacuity floor)" \
+    "[ -n \"\$gaps_count\" ] && [ \"\$gaps_count\" -ge 38 ]"
+  if [ "$gaps_rc" -ne 0 ]; then printf '%s\n' "$gaps_out" | sed 's/^/    [gaps] /'; fi
+fi
+# Static arms on THIS script's side of the seam — EVERY stamp, never head -1.
+# Deleting any one of the five leaves the ledger unable to bound its window and
+# the analyzer then over- or under-attributes with no signal that it is doing so.
+for _ev in deploy_start flip old_slot_stopped deploy_end deploy_aborted; do
+  check "cp-deploy.sh stamps the cutover event '$_ev'" \
+    "grep -qE '^[[:space:]]*cutover_stamp $_ev' '$SCRIPT'"
+done
+check "the ledger path is overridable for tests but defaults under the app dir" \
+  "grep -q 'BARKPARK_CP_CUTOVER_LEDGER:-\$APP/.slots/cp-cutovers.log' '$SCRIPT'"
+check "the ledger is line-bounded (a deploy-rate leak on a box whose disk filling is a recorded outage)" \
+  "grep -q 'BARKPARK_CP_CUTOVER_LEDGER_MAX_LINES:-' '$SCRIPT'"
+# deploy_start must come BEFORE anything that can replace a container, or the
+# window it opens does not contain the loss it exists to explain. The slot
+# decision line is the last point at which nothing has been built or booted.
+_start_ln="$(grep -n '^cutover_stamp deploy_start' "$SCRIPT" | head -1 | cut -d: -f1)"
+_build_ln="$(grep -n 'compose build\|compose up' "$SCRIPT" | head -1 | cut -d: -f1)"
+check "the window OPENS before the first container-replacing step" \
+  "[ -n \"\$_start_ln\" ] && [ -n \"\$_build_ln\" ] && [ \"\$_start_ln\" -lt \"\$_build_ln\" ]"
+# ...and it must CLOSE on both exits. An abort still replaced containers.
+check "cutover_stamp deploy_aborted is inside abort_deploy(), not merely in the file" \
+  "awk '/^abort_deploy\(\) \{/,/^\}/' '$SCRIPT' | grep -q 'cutover_stamp deploy_aborted'"
+check "a stamp failure can never fail the deploy (the function always returns 0)" \
+  "awk '/^cutover_stamp\(\) \{/,/^\}/' '$SCRIPT' | grep -q '^  return 0$'"
+
 echo
 # NON-VACUITY FLOOR. Asserted BEFORE the verdict: `fails -eq 0` is satisfied
 # just as well by a run that executed nothing at all. The floor is a lower

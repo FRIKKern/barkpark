@@ -87,6 +87,20 @@ Unhealthy = fail closed: slot re-disabled, Caddy untouched, checkout reset
 back, exit 24. Schema stays forward — rolling back code does NOT undo a
 migration; write a compensating one.
 
+**Slot memory peaks (`deploy/slot-memory-peaks.sh`).** systemd's `MemoryPeak`/
+`MemorySwapPeak` reset per unit invocation and read 0 on a stopped unit — both
+guaranteed here, since every deploy stops one slot and starts the other. A census
+built on a live `systemctl show` therefore reports whatever the last restart left
+behind. `--sample` folds the live counters into a monotonic max in
+`/opt/barkpark/.slots/memory-peaks.tsv` (both slots plus the parent slice, the
+only counter that sees both BEAMs during a cutover); `--report` prints it. It sets
+NO resource directive: charter D118 forbids `MemorySwapMax` on the serving slot,
+and the script's header carries the placement arithmetic for the day that is
+revisited. Offline gate:
+`bash deploy/slot-memory-peaks.sh --self-test` — 15 checks against a fake
+`systemctl`, with the restart-survives assertion shown non-vacuous by mutating
+the fold, and this very count read back and asserted by the run itself.
+
 **Spawned static sites (`deploy/site-deploy.sh`).** A content-bound static site
 (Astro adapter × static symlink-swap target, Site-Spawner W1) builds and serves
 NEXT TO Phoenix on a content box, at `https://<instance>/sites/<slug>/`. It is a
@@ -282,6 +296,74 @@ The control plane's `cloud/docker-compose.yml` also ships a self-hosted mail
 relay (`postfix` service) — see `cloud/postfix/README.md` for its DNS/TLS/
 Hetzner-port-25 setup; nothing extra is needed in this deploy pipeline.
 Its TLS cert renews on its own schedule — see below.
+
+## A control-plane deploy eats a scheduled cron tick — the decision
+
+`Oban.Plugins.Cron` (OSS) enqueues only on a tick a **running node observes**; it
+never backfills a tick nobody was up for. So a control-plane container
+replacement crossing a cron boundary eats that tick and leaves **no row
+anywhere** — not `available`, not `discarded`, not `retryable`. Measured on
+2026-08-08: a clean blue/green cutover (blue `Exited(137)` 23:48:20, green up
+23:51:03) against a 15-minute `usage_samples` series that reads
+`23:22 / 23:37 / [NOTHING] / 00:07 / 00:22`, while `UsageSamplerWorker` showed
+664 completed / 1 discarded. The loss is invisible from the job table.
+
+**THE DECISION: accept the loss, end the guesswork.** Closing the *cause* needs
+either a guaranteed-cron engine or a second scheduled job whose whole purpose is
+to notice a missing first one — a new scheduled alert producer, which is a
+charter D14 question, not a builder's (`daily_digest_worker.ex` records the same
+residual). What was *not* acceptable is that the only way to tell a missing
+**measurement** from a stopped **worker** was reading container uptime by hand on
+the box — an instrument that needs ssh, evaporates on the next recreate, and
+whose stale read is indistinguishable from "someone already fixed it".
+
+**The measured rate beside the decision** (`deploy.yml` `control-plane` job,
+2026-09-09T07:00Z → 2026-09-16T07:00Z, 565 runs enumerated, job windows read from
+the Actions API):
+
+| | |
+|---|---|
+| successful control-plane legs | **378** (one every **26.7 min** mean) |
+| failed legs that still replaced a container | 33 |
+| legs skipped by the path filter | 139 |
+| 15-min slots touched by a cutover-shaped (last-90 s) window | **199 of 672 = 29.6 %** |
+| loose upper bound (whole job window crosses a slot boundary) | 253 of 672 = 37.7 % |
+
+So on a 15-minute cadence roughly **one slot in three** has a control-plane
+cutover somewhere inside it. That is the ceiling on what the mechanism can cost,
+not a measurement of what it *did* cost: the second half of the correlation needs
+the `usage_samples` series itself, which is a production DB read. Run it with the
+tool below rather than re-deriving it — and quote the result either way.
+
+**The tool.** `cp-deploy.sh` now appends its own cutover window to a bounded,
+append-only ledger, `/opt/barkpark/.slots/cp-cutovers.log`
+(`BARKPARK_CP_CUTOVER_LEDGER`; 4000 lines ≈ 6 weeks at the rate above), at five
+instants — `deploy_start`, `flip`, `old_slot_stopped`, `deploy_end`,
+`deploy_aborted` — each line `CPCUTOVER deploy_id=… event=… ts=… old_sha=…
+new_sha=… active_port=… target_slot=… run_id=…`. Every write is non-fatal: a full
+disk must never red a good deploy, and a ledger with holes degrades toward
+`unexplained`, which is the loud direction.
+
+`deploy/cp-cutover-gaps.sh` reads that ledger plus a tick series and classifies
+every missing instant:
+
+```bash
+docker exec <cp-container> psql "$DATABASE_URL" -At \
+  -c "select measured_at at time zone 'utc' from usage_samples order by 1" \
+  | bash deploy/cp-cutover-gaps.sh --ticks -      # --every-min 15 --grace-min 5
+# GAP ts=2026-08-08T23:52:00Z class=deploy_attributable deploy_id=… new_sha=…
+# SUMMARY ticks=4 expected=5 missing=1 deploy_attributable=1 unexplained=0 loss_pct=20.000
+```
+
+Typed exits: **0** nothing missing or everything attributable, **3** at least one
+`unexplained` hole (the one a human must read — that is the stopped-worker
+signal), **11** bad input. Offline gate, no box and no DB:
+`bash deploy/cp-cutover-gaps.sh --self-test` — 46 checks, including the 2026-08-08
+incident's own series as a real-shape fixture, three controls that must NOT fire
+(an empty ledger flips the same hole to `unexplained`; a deploy four hours away
+does not absorb it; a complete series prints nothing), and a seam case that runs
+the real `cutover_stamp()` extracted out of `cp-deploy.sh` into the real
+analyzer, so the two halves cannot drift apart silently.
 
 ## Required GitHub secrets (one-time, human-only)
 

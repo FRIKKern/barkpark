@@ -34,18 +34,49 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_ROOT = path.join(WEB_ROOT, "app", "api");
 
+/**
+ * Directories this scan must never descend into. Pruned AT THE EDGE, before any
+ * per-entry syscall — not filtered out after the walk. Both reasons matter:
+ *
+ *  1. CORRECTNESS UNDER PARALLELISM. `node --test` runs the suite's files in
+ *     parallel processes, and four siblings each `writeFileSync` a temp ES
+ *     module INSIDE `web/components/` and `unlinkSync` it from an `after()`
+ *     hook. Enumerate them, and re-derive rather than trusting this list — the
+ *     pathspec excludes THIS file, which would otherwise match its own comment:
+ *       git grep -l 'writeFileSync(tmpPath' -- '__tests__/*.test.ts' ':!*privileged-proxy*'
+ *     — today bench, listings-map-bounds, listings-map-href, sheet-grid-render.
+ *     All named `components/.<name>.test-<pid>.mjs` — a dotfile with a `.mjs`
+ *     extension, i.e. squarely inside the referrer scan's own filter. The old
+ *     shape did `readdirSync` -> `statSync` -> (post-walk filter) ->
+ *     `readFileSync`, so a sibling's unlink landing in either gap threw
+ *     ENOENT out of the test body. That is the flake: shared filesystem state,
+ *     not a port and not a timer. A filter applied after the walk is too late
+ *     by construction — the syscall it was meant to prevent has already run.
+ *
+ *  2. COST. `node_modules/` + `.next/` are 16,163 of the 16,388 files under
+ *     `web/` (98.6%) and cannot hold a committed referrer. The old walk statted
+ *     every one of them, then discarded them.
+ *
+ * `withFileTypes` also removes the separate `statSync` per entry, closing the
+ * first of the two ENOENT windows outright. Symlinks are skipped rather than
+ * followed: `web/` has none outside the pruned directories (verified), and
+ * following them reintroduces both a cycle risk and a dangling-target throw.
+ */
+const WALK_SKIP = new Set([".git", ".next", ".turbo", ".vercel", "node_modules"]);
+
 function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else out.push(full);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || WALK_SKIP.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (entry.isFile()) out.push(full);
   }
   return out;
 }
@@ -163,15 +194,34 @@ test("the unauthenticated admin/reindex route is gone and unreferenced", () => {
   );
 
   // A reintroduction would most likely arrive WITH a caller. Catch that too.
-  const referrers = walk(WEB_ROOT)
-    .filter(
-      (f) =>
-        /\.(ts|tsx|mjs|json)$/.test(f) &&
-        !f.includes(`${path.sep}node_modules${path.sep}`) &&
-        !f.includes(`${path.sep}.next${path.sep}`) &&
-        f !== fileURLToPath(import.meta.url),
-    )
-    .filter((f) => readFileSync(f, "utf8").includes("admin/reindex"))
+  const scanned = walk(WEB_ROOT).filter(
+    (f) => /\.(ts|tsx|mjs|json)$/.test(f) && f !== fileURLToPath(import.meta.url),
+  );
+
+  // Pruning a walk can silently empty it, and an empty referrer scan reports the
+  // same clean `[]` as a scan that looked everywhere. Pin a floor so it cannot.
+  assert.ok(
+    scanned.length >= 100,
+    `the referrer scan collapsed: only ${scanned.length} source files under web/. ` +
+      "A pruned walk that finds nothing passes this test vacuously.",
+  );
+
+  // The prune above removes the four siblings' temp modules by name. This closes
+  // the CLASS: any file that disappears between this walk's readdir and this
+  // read is, by definition, not a committed referrer — so it is skipped, not
+  // thrown on. Narrowed to ENOENT: every other read error still fails the test.
+  // This is not a retry. Nothing is re-read; the vanished path is simply not a
+  // file the tree contains. The floor asserted above is what stops a mass
+  // disappearance from turning this into a vacuous pass.
+  const referrers = scanned
+    .filter((f) => {
+      try {
+        return readFileSync(f, "utf8").includes("admin/reindex");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw err;
+      }
+    })
     .map((f) => path.relative(WEB_ROOT, f));
 
   assert.deepEqual(
