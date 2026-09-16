@@ -27758,10 +27758,31 @@
     env: "Environment variables",
   };
 
-  // Pure: the STATIC nav registry — the frozen IA (D17) plus the three Fleet lenses
-  // and every registered Settings view. `run` closes over paletteNavRun; the label
+  // Pure: the nav registry for a VIEWER — the frozen IA (D17) plus the three Fleet
+  // lenses and every registered Settings view, plus the Operator row when (and only
+  // when) `me` says platform operator. `run` closes over paletteNavRun; the label
   // + group + kind are inspectable without invoking it.
-  function paletteNavItems() {
+  //
+  // GR49 — THE IDENTITY ARGUMENT IS REQUIRED, and calling with NO argument throws.
+  // This registry used to be argument-free, which is why the Operator route was
+  // absent from Cmd+K for everyone: a registry that cannot see who is asking cannot
+  // role-gate anything. A caller that has no /v1/me yet must say so explicitly by
+  // passing the undefined it holds (`paletteNavItems(meCache)`) — that is
+  // fail-closed and offers no Operator row. Reverting the signature to zero
+  // parameters reds `paletteNavItems refuses to be called argument-free` in
+  // __app.test.mjs, so the defect cannot silently return.
+  //
+  // ONE GATE, NOT TWO: the visibility decision delegates to operatorVisible — the
+  // SAME predicate the sidebar entry (applyOperatorGate) and the route bounce
+  // (operatorRouteAllowed) already use, so the three surfaces can never disagree
+  // about who is an operator. The palette is a CONVENIENCE, never a fence: every
+  // /v1/operator/* read behind #operator is gated server-side by
+  // `Auth.require_platform_operator` (401 no session, 403 non-operator), so hiding
+  // the row withholds discovery, not authority.
+  function paletteNavItems(me) {
+    if (arguments.length === 0) {
+      throw new TypeError("paletteNavItems(me) requires the /v1/me envelope — pass meCache (undefined is fail-closed)");
+    }
     var nav = [
       { id: "nav-overview", label: "Overview", group: "Go to", target: "#overview" },
       { id: "nav-fleet", label: "Fleet", group: "Go to", target: "#fleet" },
@@ -27771,6 +27792,10 @@
       { id: "nav-sites", label: "Sites", group: "Go to", target: "#sites" },
       { id: "nav-activity", label: "Activity", group: "Go to", target: "#activity" },
     ];
+    // Fail-closed: an unloaded/absent/non-true me → no row at all.
+    if (operatorVisible(me)) {
+      nav.push({ id: "nav-operator", label: "Operator", group: "Go to", target: "#operator" });
+    }
     SETTINGS_VIEWS.forEach(function (v) {
       nav.push({ id: "nav-settings-" + v, label: "Settings · " + (PAL_SETTINGS_LABEL[v] || v),
         group: "Settings", target: "#settings/" + v });
@@ -27832,12 +27857,15 @@
     });
   }
 
-  // Pure: the full registry for a data snapshot. Order = static nav, actions,
+  // Pure: the full registry for a data snapshot. Order = viewer nav, actions,
   // instances, sites — so the palette paints a complete slate the instant it opens
   // (static + cached instances) and sites slot in when their fetch lands.
+  // `data.me` overrides the module's /v1/me cache when supplied (the node pins
+  // drive both operator arms through here); otherwise the live meCache decides,
+  // and an unloaded meCache is undefined → fail-closed, no Operator row.
   function paletteRegistry(data) {
     data = data || {};
-    return paletteNavItems()
+    return paletteNavItems(data.me !== undefined ? data.me : meCache)
       .concat(paletteActionItems())
       .concat(paletteInstanceItems(data.instances))
       .concat(paletteSiteItems(data.sites));
