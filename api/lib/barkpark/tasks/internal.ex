@@ -47,7 +47,7 @@ defmodule Barkpark.Tasks.Internal do
   # those, hiding genuinely available work from reconciliation sweeps.
   #
   # THE RETAINED EPOCH IS LOAD-BEARING, NOT RESIDUE. `Tasks.Claim` computes the
-  # next lease as `current_epoch(doc) + 1` (claim.ex:481), reading it straight
+  # next lease as `current_epoch(doc) + 1` (claim.ex, `current_epoch/1` call sites), reading it straight
   # off the released row, so the epoch is what keeps the fence MONOTONIC across
   # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex:741-742)
   # refuses `:fenced_off` whenever a claim map carries an epoch that does not
