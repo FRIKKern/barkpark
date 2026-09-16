@@ -20,8 +20,19 @@
 // next-navigation shim's push is a pushState (in-island URL state), and a
 // static site's /d/<type>/<slug> pages are separate prerendered documents. The
 // live finder query string is carried onto the href the same way the result
-// rows do it. Renders in the always-dark Obsidian aesthetic the original
-// landing pins (theme-invariant by design).
+// rows do it.
+//
+// PANEL-THEME CONTRACT — the SAME one the Next edition states in
+// components/graph-view.tsx, and stated here because this pane used to break it:
+// the graph panel is THEME-AWARE. It resolves the site's real mode from
+// `document.documentElement.dataset.theme` (the attribute Base.astro's boot
+// script seeds before first paint, alongside the deploy-pinned `data-bp-theme`
+// identity) and forwards every `bp:themechange` to the controller's `setTheme`,
+// and the renderer owns ALL painting of the graph surface for both modes. This
+// pane previously pinned `theme: 'dark'` and registered no listener at all, so
+// the Astro edition's graph stayed an always-dark island on a light page while
+// the byte-identical renderer flipped correctly in the Next edition — the same
+// "born correct, charter D11" defect graph-view.tsx already retired.
 //
 // THE CAPTION says what this pane is actually serving. It had none at all: no
 // document count, no note that the server had capped the corpus, and no way to
@@ -57,6 +68,9 @@ interface GraphController {
   update: (nodes: GraphNode[], edges: GraphEdge[], opts?: { rootId?: string | null }) => void
   setMatches: (matches: GraphMatch[] | null) => void
   setHovered: (docId: string | null) => void
+  /** Optional: an older snapshot of bp-graph.js predates it, so every call is
+   * guarded and such a snapshot simply keeps its init-time theme. */
+  setTheme?: (mode: 'light' | 'dark') => void
   destroy: () => void
 }
 
@@ -89,6 +103,14 @@ function domBuildIdentity(): BuildIdentity {
     buildId: (d.bpBuildId ?? '').trim() || null,
     contentRev: (d.bpContentRev ?? '').trim() || null,
   }
+}
+
+/** The CURRENT site mode, from the root element's `data-theme` — the single
+ * source of truth Base.astro seeds before first paint, re-applies on
+ * `astro:after-swap`, and any theme control mutates. Born correct: never
+ * hard-coded to 'dark', which is what made this pane fight a light-mode page. */
+function currentMode(): 'dark' | 'light' {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
 }
 
 function loadRendererScript(base: string): Promise<void> {
@@ -176,6 +198,12 @@ export default function GraphPane() {
     // Independent of the corpus read, and therefore still true when it fails.
     setBuild(domBuildIdentity())
 
+    // Live re-skin on a runtime mode flip. Registered BEFORE the async boot so a
+    // flip that lands mid-fetch is not lost: the controller reads currentMode()
+    // at construction, and this forwards every flip after that.
+    const onThemeChange = () => ctlRef.current?.setTheme?.(currentMode())
+    window.addEventListener('bp:themechange', onThemeChange)
+
     const boot = async () => {
       await loadRendererScript(base)
       const res = await fetch(base + 'graph.json')
@@ -190,8 +218,8 @@ export default function GraphPane() {
         hostRef.current,
         { nodes: baked.nodes ?? [], edges: baked.edges ?? [] },
         {
-          // The Obsidian graph canvas is theme-INVARIANT dark, like the original.
-          theme: 'dark',
+          // The renderer paints canvas bed AND overlay chrome for THIS mode.
+          theme: currentMode(),
           rootId: baked.rootId ?? null,
           // The finder owns search; suppress the renderer's in-canvas box.
           externalSearch: true,
@@ -218,6 +246,7 @@ export default function GraphPane() {
     })
     return () => {
       cancelled = true
+      window.removeEventListener('bp:themechange', onThemeChange)
       ctlRef.current?.destroy()
       ctlRef.current = null
     }
@@ -226,7 +255,11 @@ export default function GraphPane() {
   const line = corpus ? corpusProvenanceLine(corpus) : null
 
   return (
-    <div className="relative h-full w-full" style={{ background: '#0b0d10' }}>
+    /* The renderer paints the whole canvas bed for the current data-theme and
+       re-skins live on bp:themechange, so this host bg only shows PRE-INIT and
+       must track the site theme — the old always-dark #0b0d10 is retired here
+       exactly as `bg-graph-canvas` was retired from the Next edition's host. */
+    <div className="relative h-full w-full bg-background">
       <div className="pointer-events-none absolute bottom-5 left-5 z-20 max-w-sm select-none">
         <p className="text-xs font-medium leading-relaxed text-zinc-400">
           The corpus, as a graph. Search on the left to light up matches; click a

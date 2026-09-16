@@ -73,7 +73,7 @@ Env keys follow the **starter convention** (`BARKPARK_API_URL`,
 surfaces.
 
 An optional **`theme`** field (search-template W2) pins a shipped palette for
-the deploy: `evergreen | ember | fjord | charple` — surfaced at runtime as the
+the deploy: `charple | ember | evergreen | fjord | iris` — surfaced at runtime as the
 `data-bp-theme` default (a visitor's own picker choice still wins).
 
 ## Retrofitted manifests
