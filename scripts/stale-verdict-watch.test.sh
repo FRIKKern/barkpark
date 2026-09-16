@@ -865,6 +865,21 @@ fi
 # rollup request with a population page and the script correctly refuses it
 # ("did not come back as a pull request payload").
 if grep -q 'pullRequest(number:' <<<"\$*"; then cat "$TMP/gql-rollup.json"; exit 0; fi
+# `repoll-loses-page-2`: page 1 answers an UNKNOWN row (so the script re-polls),
+# page 2 answers ONCE and 502s on every later request. That is the live shape
+# measured on main 2026-09-16: poll 1 reads the whole population, the re-poll
+# cannot finish it.
+if [ "\$mode" = "repoll-loses-page-2" ]; then
+  if grep -q 'after=' <<<"\$*"; then
+    if [ -f "$TMP/page2-served-once" ]; then
+      echo "HTTP 502: Bad gateway (https://api.github.com/graphql)" >&2
+      exit 1
+    fi
+    touch "$TMP/page2-served-once"
+    cat "$TMP/gql-page2.json"; exit 0
+  fi
+  cat "$TMP/gql-page1-unknown.json"; exit 0
+fi
 if grep -q 'after=' <<<"\$*"; then cat "$TMP/gql-page2.json"; else cat "$TMP/gql-page1.json"; fi
 STUBEOF
   chmod +x "$STUB/gh"
@@ -902,11 +917,16 @@ gql_page() { # <path> <number> <hasNext> <cursor>
 gql_page "$TMP/gql-page1.json" 9101 true  "CURSOR_ONE"
 gql_page "$TMP/gql-page2.json" 9102 false null
 gql_rollup "$TMP/gql-rollup.json"
+# Page 1 with its row's mergeability still uncomputed — the trigger for the
+# re-poll loop, and GitHub's answer for every row for a while after main moves.
+jq '.data.repository.pullRequests.nodes[0].mergeable = "UNKNOWN"
+    | .data.repository.pullRequests.nodes[0].mergeStateStatus = "UNKNOWN"' \
+  "$TMP/gql-page1.json" > "$TMP/gql-page1-unknown.json"
 
 STUB_PATH="$STUB:/usr/bin:/bin:/usr/sbin:/sbin"
 run_stubbed() { # <mode> [extra args…]
   local mode="$1"; shift
-  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once"
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once" "$TMP/page2-served-once"
   mk_stub "$mode"
   env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
     bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
@@ -990,6 +1010,52 @@ out="$(run_stubbed pages)"; rc=$?
 [ "$rc" = "0" ] \
   && ok "(p-5) disarm: a MERGEABLE, fresh row read through the SAME paged transport exits 0" \
   || bad "(p-5) the paged read reds no matter what it reads (exit $rc): $out"
+
+# (p-6) A COMPLETED POLL IS NOT THROWN AWAY BY A FAILED RE-POLL.
+#
+# THE DEFECT THIS OWNS, measured on main 2026-09-16: 46 of 54 completed runs
+# that day exited 6 UNREACHABLE saying "this run classified nothing and does not
+# know how many pull requests exist" AFTER logging `poll 1/3: 55 row(s) answered
+# mergeable=UNKNOWN` — i.e. after reading all 55 rows. fetch_prs kept only the
+# LAST pass, so a transport failure on a re-poll erased a population the run had
+# already read, and with it any rc-1 scream that population carried.
+#
+# Here page 1 answers UNKNOWN (forcing the re-poll) and page 2 answers ONCE and
+# then 502s. Poll 1 reads both pages; poll 2 cannot. The run must still report
+# the stale green page 2 carried.
+out="$(run_stubbed repoll-loses-page-2 --attempts 2 --page-attempts 2)"; rc=$?
+[ "$rc" = "1" ] \
+  && ok "(p-6) a completed poll survives a failed re-poll — the run still reaches its rc-1 verdict" \
+  || bad "(p-6) expected exit 1 from the population poll 1 read, got $rc: $out"
+grep -q "#9102" <<<"$out" \
+  && ok "(p-6) …and the CONFLICTING row with the stale green is still named" \
+  || bad "(p-6) the stale green poll 1 had already read was swallowed by the failed re-poll: $out"
+grep -qE "^  2 open . 1 CONFLICTING" <<<"$out" \
+  && ok "(p-6) …over the REAL population size (2 open), so nothing was truncated into the denominator" \
+  || bad "(p-6) the reported open count is not the 2 rows poll 1 read: $out"
+grep -q "UNREACHABLE" <<<"$out" \
+  && bad "(p-6) a run that read its whole population still called itself UNREACHABLE: $out" \
+  || ok "(p-6) …and never claims it does not know how many pull requests exist"
+grep -q "read the WHOLE population" <<<"$out" \
+  && ok "(p-6) …and SAYS which poll the reported read came from, so the staleness of the rows is on the record" \
+  || bad "(p-6) the fallback is silent about being a fallback: $out"
+
+# (p-6m) THE SAME ARM, MUTATION-PROVEN. Neuter the fallback on a copy and this
+# population must go back to UNREACHABLE — otherwise (p-6) is passing for some
+# other reason and proves nothing about the fallback.
+sed 's/if \[ -n "$last_full" \]; then/if false; then/' "$WATCH" > "$TMP/mut-lastfull.sh"
+if diff -q "$WATCH" "$TMP/mut-lastfull.sh" >/dev/null 2>&1; then
+  bad "(p-6m) MUTATION did not apply — the fallback moved, so (p-6) proves nothing"
+else
+  : > "$STUB_LOG"; rm -f "$TMP/page2-failed-once" "$TMP/page2-served-once"
+  mk_stub repoll-loses-page-2
+  mout="$(env PATH="$STUB_PATH" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$TMP/mut-lastfull.sh" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 --attempts 2 --page-attempts 2 2>&1)"; mrc=$?
+  [ "$mrc" = "6" ] \
+    && ok "(p-6m) with the fallback removed the same population exits 6 UNREACHABLE again — the fix is live, not decorative" \
+    || bad "(p-6m) MUTATION SURVIVED: expected 6 without the fallback, got $mrc: $mout"
+fi
 
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
