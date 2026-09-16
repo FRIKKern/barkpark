@@ -94,12 +94,26 @@
 //       check 19 focus rules painted a 1.19–1.52:1 band while E5 was green. A
 //       rule carrying an opaque border-color is compliant (that border IS the
 //       indicator); full predicate on focusIndicatorErrors below.
-//   E13 an unpainted deployment status: a status in DEPLOY_STATUSES with no
-//       `.dep-<status>` rule in app.css. The `dep-pill dep-` E3 allowlist waives
-//       the whole dynamic head, so the emitted VALUE SPACE was unchecked and
-//       `cancelled` shipped ruleless — falling through to the .dep-pill base,
-//       which is byte-identical to .dep-queued, so an aborted deploy painted as
-//       one still waiting. Full boundary on DEPLOY_STATUSES below.
+//   E13 a BROKEN STATE GRAMMAR. Since the decision-24 sweep there is ONE pill
+//       vocabulary: `DEPLOY_STATUS_META` in app.js maps every ledger status to
+//       a `.status-pill` role (+ optional shape variant), and the second
+//       `.dep-*` family is retired. Five arms, because the old one-arm shape
+//       ("does .dep-<status> have a rule?") could only ever police ONE of the
+//       ways this grammar breaks:
+//         (a) the table could not be located or parsed in app.js — a rename must
+//             come with an update here, never a silently skipped check;
+//         (b) a status in DEPLOY_STATUSES the table does not cover (it would
+//             fall to neutral and impersonate `queued`, the exact defect that
+//             shipped twice under the old family);
+//         (c) a role or variant the table names with no `.status-pill--<name>`
+//             rule in app.css — the unpainted arm, one family over;
+//         (d) a role outside the closed five, which would be a sixth hue
+//             invented at a call site rather than declared in the family;
+//         (e) the RETIRED family coming back — any `.dep-pill` / `.dep-<status>`
+//             rule in app.css or `dep-pill` literal in app.js. This is the arm
+//             that reds if the sweep is reverted: re-forking the grammar is the
+//             regression, not any single missing rule.
+//       Full boundary on DEPLOY_STATUSES / STATUS_PILL_ROLES below.
 //   E15 an unpainted DELIVERY TONE, and a stale consent for one. Same family as
 //       E13 one surface over: `wh-del-status wh-del-status--` is an E3 allowlist
 //       entry too, so the tone half was unmeasured. The value space is DERIVED
@@ -414,7 +428,11 @@ const ALLOW_PREFIXES = [
   "choice-ico sm ",    // provider row mini-tile: + m.cls (same brand-* set)
   "token-row",         // token row (GR33 lean line item, no longer a .fleet-row): + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
-  "dep-pill dep-",     // deployment status pill: + esc(st) — the value space is NOT this comment's; it is DEPLOY_STATUSES below, and E13 checks it
+  // gr-backlog-d24: `"dep-pill dep-"` stood here and is REMOVED with the family.
+  // Deploy status chips now compose `status-pill status-pill--` like every other
+  // status affordance, so they are covered by that entry below — and E19 would
+  // red on this one anyway the moment the last emitting site went, which is the
+  // durable half of the removal.
   "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")
   "deploy-console",    // + (open ? "" : " is-collapsed")
   "tier",              // + " tier-current" / " tier-free" conditionals
@@ -479,13 +497,22 @@ const ALLOW_PREFIXES = [
   "bp-lc-",                        // coherenceFixtureToHtml(): + captured role word (info | warn | ok | danger) — closed alternation in code
 ];
 
-// ── E13: the .dep-* VALUE SPACE, derived instead of described ───────────────
-// The `dep-pill dep-` entry above is an E3 allowlist: it waives the whole
-// dynamic head, so before this list existed NOTHING checked which suffixes the
-// head can actually take. The comment on that entry claimed five statuses and
-// the server has six — `cancelled` shipped with no rule at all and fell through
-// to the .dep-pill base, which is byte-identical to .dep-queued, so a terminal
-// abort painted as "still waiting". A comment cannot fail; this list can.
+// ── E13: the DEPLOY STATE GRAMMAR, derived instead of described ────────────
+// This list began as the value space of a `dep-pill dep-` E3 allowlist entry:
+// that entry waived the whole dynamic head, so before the list existed NOTHING
+// checked which suffixes the head could take, and the comment on it claimed
+// five statuses while the server had six — `cancelled` shipped with no rule at
+// all and fell through to the .dep-pill base, which was byte-identical to
+// .dep-queued, so a terminal abort painted as "still waiting". A comment cannot
+// fail; this list can.
+//
+// gr-backlog-d24 kept the list and moved what it is CHECKED AGAINST. There is
+// no `.dep-*` family any more: app.js's DEPLOY_STATUS_META maps each status
+// below to a role (+ optional shape variant) in the one `.status-pill` family,
+// and E13 now reads that table out of app.js and holds it total over this list.
+// The list therefore states the server's value space and NOTHING about the
+// mapping — which is the property that made the old check weak, because the
+// mapping was spread across five hand-written class attributes.
 //
 // THE SOURCE OF TRUTH is Ecto: BarkparkCloud.Registry.Deployment's @statuses
 // (grep: `grep -n '@statuses' cloud/lib/barkpark_cloud/registry/deployment.ex`
@@ -513,6 +540,42 @@ const ALLOW_PREFIXES = [
 // `.dep-deferred`), so it co-merges with the rule in the same commit — a
 // deliberate guard+fix co-merge, not a guard weakened to fit.
 const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
+
+// The CLOSED role set of the unified pill family. A sixth name here would be a
+// hue invented at a call site instead of declared in the family, which is how
+// two families happened the first time — so E13 arm (d) refuses it by NAME, not
+// merely by "has a rule" (a typo'd role with a stray matching rule would pass
+// the unpainted arm and still be wrong).
+const STATUS_PILL_ROLES = ["ok", "info", "warn", "danger", "neutral"];
+
+// app.js's DEPLOY_STATUS_META, read out of the source. DERIVED, never
+// enumerated: an enumerated copy is the mapping somebody REMEMBERED, and the
+// whole point of decision 24 is that there is exactly one place the mapping
+// lives. Returns null when the table cannot be located or brace-matched — an
+// empty scan is not a clean scan, so arm (a) makes that a hard error.
+function deployStatusMetaTable(js) {
+  const start = js.indexOf("var DEPLOY_STATUS_META = {");
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  if (i === -1) return null;
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open + 1, i);
+  const table = new Map();
+  for (const m of body.matchAll(
+    /([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g,
+  )) {
+    const role = /\brole\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
+    const variant = /\bvariant\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
+    table.set(m[1], { role: role ? role[1] : null, variant: variant ? variant[1] : null });
+  }
+  return table.size === 0 ? null : table;
+}
 
 // The `wh-del-status--` VALUE SPACE, mirroring DEPLOY_STATUSES above and checked
 // by E15. `"wh-del-status wh-del-status--"` is an ALLOW_PREFIXES entry, which
@@ -768,7 +831,7 @@ const CONTRAST_PAIRS = [
   { fg: "--muted-text", bg: "--surface", min: 4.5, why: "secondary copy on cards" },
   { fg: "--dim", bg: "--bg", min: 4.5, why: "tertiary copy (.dim)" },
   { fg: "--dim", bg: "--muted-surface", min: 4.5, why: "tertiary copy on muted" },
-  { fg: "--dim", bg: "--surface", min: 4.5, why: ".dep-cancelled pill text — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
+  { fg: "--dim", bg: "--surface", min: 4.5, why: ".status-pill--stopped pill text (a cancelled deploy) — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
   { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
   { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
@@ -777,12 +840,12 @@ const CONTRAST_PAIRS = [
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
   { fg: "--ok-strong", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip (green=accent: strong text voice on the soft tint, GR6)" },
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
-  { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
-  { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },
+  { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".wh-del-status--danger / .tlv-badge--verify-fail / .dom-rung--failed text on a soft danger tint" },
+  { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".deploy-fail--blocked text on a soft warn tint" },
   // cch-w64-s6: `.dep-deferred` keeps the warn hue but gives up the filled chip
   // (it no longer holds a build slot), so its ground is the CARD itself — the
   // one pair the tinted variant would not have owed.
-  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".dep-deferred pill text on an open chip" },
+  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".status-pill--warn.status-pill--hollow pill text (a deferred deploy) on an open chip" },
   { fg: "--text", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".notice-ok copy" },
   { fg: "--text", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".notice-warn copy" },
   { fg: "--text", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".notice-error copy" },
@@ -2668,18 +2731,99 @@ for (const b of badTokens) {
   );
 }
 
-// E13 — every server-side deployment status is painted. Derived from
-// DEPLOY_STATUSES (the Ecto @statuses enum), never from the E3 allowlist's
-// prose. `css` is comment-stripped, so a selector that survives only inside a
-// comment does NOT count.
-for (const st of DEPLOY_STATUSES) {
-  if (cssClasses.has(`dep-${st}`)) continue;
-  errors.push(
-    `E13 app.css  deployment status "${st}" has no .dep-${st} rule — the ` +
-      `dep-pill dep- head emits it, so it falls through to the .dep-pill base ` +
-      `and paints as an untouched/queued deployment. Add a rule next to the ` +
-      `other .dep-* rules in the DEPLOYMENTS section.`,
-  );
+// E13 — the deploy STATE GRAMMAR is one vocabulary, total, painted, and the
+// retired second family has not come back. Derived from DEPLOY_STATUSES (the
+// Ecto @statuses enum) and from app.js's DEPLOY_STATUS_META, never from the E3
+// allowlist's prose. `css` is comment-stripped, so a selector that survives
+// only inside a comment does NOT count — which is what lets the retired
+// family's tombstone comment in app.css name `.dep-queued` without reviving it.
+{
+  const meta = deployStatusMetaTable(jsRaw);
+
+  // (a) VACUOUS-GREEN GUARD. Every other arm reads this table; a table this
+  //     reader cannot find would make all four of them silently pass.
+  if (meta === null) {
+    errors.push(
+      "E13 app.js  DEPLOY_STATUS_META could not be located or parsed — every other " +
+        "arm of E13 reads it, so a rename or a rewrite must come with an update to " +
+        "deployStatusMetaTable() here, never a silently skipped check.",
+    );
+  } else {
+    const roles = new Set(STATUS_PILL_ROLES);
+
+    // (b) TOTALITY. A status the table does not cover falls to `neutral` with no
+    //     variant at runtime — which is the `queued` look, the impersonation that
+    //     shipped twice under the old family.
+    for (const st of DEPLOY_STATUSES) {
+      if (meta.has(st)) continue;
+      errors.push(
+        `E13 app.js  deployment status "${st}" has no DEPLOY_STATUS_META entry — ` +
+          `statusMeta() falls it through to the neutral role with no variant, which ` +
+          `is the QUEUED look, so a ${st} deploy would impersonate one still waiting ` +
+          `its turn. Add the entry beside the others.`,
+      );
+    }
+
+    for (const [st, m] of meta) {
+      // (d) CLOSED ROLE SET.
+      if (m.role === null) {
+        errors.push(
+          `E13 app.js  DEPLOY_STATUS_META["${st}"] declares no role — the emitter ` +
+            `would compose \`status-pill status-pill--\` with nothing after it.`,
+        );
+      } else if (!roles.has(m.role)) {
+        errors.push(
+          `E13 app.js  DEPLOY_STATUS_META["${st}"] names role "${m.role}", which is ` +
+            `not one of the closed five (${STATUS_PILL_ROLES.join(" | ")}) — a sixth ` +
+            `hue invented at a call site instead of declared in the family is how two ` +
+            `pill families happened the first time. Use a declared role, or widen ` +
+            `STATUS_PILL_ROLES here in the same commit as its .status-pill-- rule.`,
+        );
+      }
+      // (c) PAINTED. Role and variant both have to exist in app.css.
+      for (const [kind, name] of [["role", m.role], ["variant", m.variant]]) {
+        if (!name) continue;
+        if (cssClasses.has(`status-pill--${name}`)) continue;
+        errors.push(
+          `E13 app.css  DEPLOY_STATUS_META["${st}"] names ${kind} "${name}" but there ` +
+            `is no .status-pill--${name} rule — the class rides into the DOM and ` +
+            `paints as the bare base pill. Add the rule beside the other ` +
+            `.status-pill--* rules in the STATUS PILL section.`,
+        );
+      }
+    }
+  }
+
+  // (e) THE RETIRED FAMILY HAS NOT COME BACK. This is the arm that reds if the
+  //     decision-24 sweep is reverted or re-forked: the defect is not any one
+  //     missing rule, it is a SECOND vocabulary for the same idea existing at
+  //     all — which is what made the two earlier impersonations invisible.
+  const revived = [...cssClasses].filter(
+    (c) => c === "dep-pill" || DEPLOY_STATUSES.some((st) => c === `dep-${st}`),
+  ).sort();
+  if (revived.length) {
+    errors.push(
+      `E13 app.css  the RETIRED .dep-* pill family is back: ${revived
+        .map((c) => "." + c)
+        .join(", ")}. Deploy status chips are .status-pill + a DEPLOY_STATUS_META ` +
+        `role since decision 24; a second family painting the same idea is the ` +
+        `regression this arm exists to catch, not a styling choice.`,
+    );
+  }
+  // app.js is scanned for the class inside a QUOTED string only, so the
+  // tombstone comments that explain the retirement (and name the dead classes)
+  // are not themselves a revival; styleguide.html is scanned for the attribute.
+  for (const [file, re, src] of [
+    ["app.js", /["'][^"'\n]*\bdep-pill\b/, jsRaw],
+    ["styleguide.html", /class="[^"\n]*\bdep-pill\b/, styleguideRaw],
+  ]) {
+    if (src == null || !re.test(src)) continue;
+    errors.push(
+      `E13 ${file}  emits a \`dep-pill\` class literal — the family is retired. ` +
+        `Render the chip through deployStatusPill()/statusMetaPill() so there stays ` +
+        `exactly one state grammar.`,
+    );
+  }
 }
 
 // E15 — every delivery-log TONE is painted, or is a NAMED base-pill consent.

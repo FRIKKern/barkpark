@@ -7553,6 +7553,16 @@
     cancelled: { role: "neutral", variant: "stopped" }
   };
 
+  // The variant's CLASS FRAGMENT, spelled out whole. A `" status-pill--" +
+  // variant` concat would hand __css_check a half-name (`status-pill--`) as the
+  // emitted class token and read as an unpainted family; spelling each fragment
+  // in full keeps the emitted names greppable, and E13 arm (c) holds the two
+  // keys here against their `.status-pill--*` rules in app.css.
+  var STATUS_PILL_VARIANT_CLASS = {
+    hollow: " status-pill--hollow",
+    stopped: " status-pill--stopped"
+  };
+
   // A deploy-ledger status string → its statusMeta. `label` defaults to the
   // status word capitalised (`cap`), which is what every deploy row shows; a
   // caller with its own copy (the site chip says "Deploying", not "Building")
@@ -7575,7 +7585,7 @@
   // attribute string for the callers that need a title / aria-label.
   function statusMetaPill(meta, extraClass, attrs) {
     return '<span class="status-pill status-pill--' + esc(meta.role) +
-      (meta.variant ? " status-pill--" + esc(meta.variant) : "") +
+      (meta.variant ? STATUS_PILL_VARIANT_CLASS[meta.variant] || "" : "") +
       (extraClass ? " " + extraClass : "") + '"' + (attrs || "") + ">" +
       '<span class="status-pill-dot" aria-hidden="true"></span>' +
       '<span class="status-pill-label">' + esc(meta.label) + "</span>" +

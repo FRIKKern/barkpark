@@ -3805,6 +3805,13 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    wrong for a stop nobody needs to act on. `--dim` on `--surface` is gated in
    CONTRAST_PAIRS. */
 .status-pill--hollow { background: transparent; }
+/* The hollow chip gave up its tinted ground, so the HUE has to move into the
+   label or the state loses its voice entirely — this is the one place the
+   family's `--text` label is overridden, and only for the role that composes
+   with --hollow today. `--warn-strong` on `--surface` is gated in
+   CONTRAST_PAIRS (the transparent ground is why this rule owes a pair the
+   filled variant does not). */
+.status-pill--warn.status-pill--hollow { color: var(--warn-strong); }
 .status-pill--stopped {
   background: transparent;
   border-style: dashed;
