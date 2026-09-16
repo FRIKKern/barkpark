@@ -2096,19 +2096,37 @@ defmodule Barkpark.Content.Query do
       q ->
         workspace_id = Keyword.get(opts, :workspace_id)
         project_id = Keyword.get(opts, :project_id)
-
-        Document
-        |> where([d], ilike(d.title, ^like_contains(q)))
-        |> where([d], not like(d.doc_id, "drafts.%"))
-        |> scope_to_dataset(dataset, opts)
-        |> scope_to_workspace_or_global(workspace_id, project_id)
-        |> scope_to_owner(Keyword.get(opts, :caller_context))
-        |> maybe_scope_to_grants(opts)
-        |> restrict_to_visible_types(dataset, opts)
-        |> order_by([d], asc: d.title, asc: d.type, asc: d.doc_id)
-        |> limit(^limit_n)
-        |> Repo.all()
+        search_scoped(q, dataset, workspace_id, project_id, opts, limit_n)
     end
+  end
+
+  # NIL WORKSPACE IS A REFUSAL, decided HERE and not in the scope helper. The
+  # desk's own listing reads through the fail-OPEN `scope_to_workspace_or_global/3`
+  # — a nil workspace leaves the query untouched, i.e. every tenant — and this
+  # search MUST answer with exactly what the desk above it can list, so it uses
+  # the same helper rather than a narrower one. What it must not inherit is that
+  # helper's nil arm, so the nil case never reaches it.
+  defp search_scoped(_q, _dataset, nil, _project_id, _opts, _limit_n), do: []
+
+  defp search_scoped(q, dataset, workspace_id, project_id, opts, limit_n) do
+    Document
+    |> where([d], ilike(d.title, ^like_contains(q)))
+    |> where([d], not like(d.doc_id, "drafts.%"))
+    |> scope_to_dataset(dataset, opts)
+    # The desk's own list read (PaneBuilder -> list_documents -> base_query)
+    # uses this same helper, and a search narrower than the list it sits above
+    # would hide rows the editor can see one click away. The fail-OPEN nil arm
+    # is unreachable from here: `search_scoped/6`'s first clause refuses it, so
+    # this call is only ever made with a real workspace_id or the `:shared_only`
+    # sentinel, which NARROWS to workspace_id IS NULL.
+    # global-read: mirrors the desk list's own scope; nil is refused above.
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> scope_to_owner(Keyword.get(opts, :caller_context))
+    |> maybe_scope_to_grants(opts)
+    |> restrict_to_visible_types(dataset, opts)
+    |> order_by([d], asc: d.title, asc: d.type, asc: d.doc_id)
+    |> limit(^limit_n)
+    |> Repo.all()
   end
 
   @doc """

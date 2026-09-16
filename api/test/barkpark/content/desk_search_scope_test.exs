@@ -109,6 +109,17 @@ defmodule Barkpark.Content.DeskSearchScopeTest do
     refute "Nordic Secret A" in titles
   end
 
+  test "an unscoped caller gets nothing, never every tenant" do
+    # The desk list read is fail-OPEN on a nil workspace (it leaves the query
+    # untouched), and this search reuses that helper so it can never be
+    # narrower than the list above it. The nil case is refused BEFORE the
+    # helper, which is the whole of why reusing it is safe.
+    assert Content.search_documents_across_types("Nordic", @dataset, caller_context: member_ctx()) ==
+             []
+
+    assert Content.search_documents_across_types("Nordic", @dataset, []) == []
+  end
+
   test "a blank query is no query at all", %{scope_a: a} do
     a = Keyword.put(a, :caller_context, member_ctx())
     assert Content.search_documents_across_types("", @dataset, a) == []
