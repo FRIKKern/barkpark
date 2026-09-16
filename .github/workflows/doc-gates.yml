@@ -39,6 +39,9 @@ on:
       - "**/*.js"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
+      - "scripts/doc-drift-check.sh"
+      - "scripts/doc-drift-check.test.sh"
+      - "scripts/doc-drift-extract.py"
       # charter-corpus marker hygiene (docs/decisions/0008): its SUBJECT is the
       # charter tree, which no other glob here reaches, plus its own script.
       - "scripts/charter-corpus-hygiene-check.sh"
@@ -391,6 +394,9 @@ on:
       - "**/*.js"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
+      - "scripts/doc-drift-check.sh"
+      - "scripts/doc-drift-check.test.sh"
+      - "scripts/doc-drift-extract.py"
       # charter-corpus marker hygiene (docs/decisions/0008): its SUBJECT is the
       # charter tree, which no other glob here reaches, plus its own script.
       - "scripts/charter-corpus-hygiene-check.sh"
@@ -1607,6 +1613,41 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node scripts/merge-gate-backfill.mjs --selftest
 
+      # Doc drift an ORDINARY change causes (task-b97741617bf6c860). Two arms,
+      # and the order matters: the SELF-TEST runs first, so a green sweep is
+      # evidence about the tree rather than about a gate that lost the ability
+      # to see anything. Its twelve regression arms cover six fixture classes
+      # (broken link, exposed placeholder, failing allowlisted example, valid
+      # extensionless route, intentional unmarked example, excluded history),
+      # both scope arms, and a vacuity control that demands an EMPTY corpus
+      # REFUSE rather than pass clean.
+      #
+      # The sweep itself is DIFF-SCOPED against the merge base, the same shape
+      # as scripts/format-diff-scope.sh: inherited drift is printed and stays
+      # neutral, only drift in a doc THIS diff touches (or a doc whose
+      # allowlisted example declares a file this diff touches as a dependency)
+      # is owned. On push:main there is no PR diff, so the standing debt is
+      # printed and the step is green — main is where the debt is VISIBLE, the
+      # PR that touches the file is where it is ENFORCED.
+      - name: Doc drift self-test (tripwire)
+        id: s40
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/doc-drift-check.test.sh
+
+      - name: Doc drift — links, routes, placeholders, runnable examples (fails this job)
+        id: s41
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        env:
+          # Empty on push:main (no PR base) -> report-only, exit 0.
+          DOC_DRIFT_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/doc-drift-check.sh
+
       # Charter-corpus marker hygiene (docs/decisions/0008). Two arms with
       # different baselines: arm A bans the redacted gyldendal.no address
       # repo-wide (its baseline is ZERO, so it needs no allowlist), arm B bans
@@ -1631,7 +1672,7 @@ jobs:
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\", \"s40\": \"Doc drift self-test (tripwire)\", \"s41\": \"Doc drift \u2014 links, routes, placeholders, runnable examples (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}
