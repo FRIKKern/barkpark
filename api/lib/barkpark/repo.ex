@@ -232,7 +232,12 @@ defmodule Barkpark.Repo do
   The one shared guard for every `Repo.get`/`where` keyed on a `:binary_id`
   primary key fed a raw path param: `Ecto.UUID.cast` on a non-UUID string
   returns `:error`, so binding it to a `:binary_id` column would raise
-  `Ecto.Query.CastError` → 500.
+  `Ecto.Query.CastError`. phoenix_ecto carries a `Plug.Exception` impl for it
+  (`{Ecto.Query.CastError, 400}` in `phoenix_ecto/lib/phoenix_ecto/plug.ex`), so
+  an unguarded fetch answers an opaque **400** `internal_error` — NOT the 500
+  this docstring used to claim, and never the clean 404 the caller wanted. 500
+  is Plug's `Any` fallback, which covers the nil / non-binary `FunctionClauseError`
+  class instead.
 
   THE STRUCT NAME IS LOAD-BEARING (corrected arpss-w8). This docstring used to
   say `Ecto.CastError`. That is a DIFFERENT struct, and it is not the one this

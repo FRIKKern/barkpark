@@ -60,7 +60,9 @@ defmodule Barkpark.Webhooks do
   """
   def get_webhook(id, opts \\ []) do
     # Guard the :binary_id cast: a non-UUID id (e.g. GET /v1/webhooks/:ds/garbage)
-    # would raise Ecto.CastError → 500. A malformed id matches no row → not_found.
+    # would raise Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that
+    # struct to 400; it is NOT Ecto.CastError, which never fires on a binary_id
+    # bind). A malformed id matches no row → not_found.
     case Repo.uuid_or_nil(id) do
       nil ->
         {:error, :not_found}

@@ -472,7 +472,7 @@ defmodule Barkpark.Tasks.Compactor do
       when is_binary(doc_id) and is_binary(snapshot_revision_id) do
     # Guard the :binary_id casts — a raw non-UUID id (e.g. from a future
     # restore endpoint's path/body params) would otherwise raise
-    # Ecto.Query.CastError -> 500 inside Repo.get/2. A malformed id can't
+    # Ecto.Query.CastError -> 400 inside Repo.get/2. A malformed id can't
     # identify any row, so fold it into the existing not_found branches
     # (mirrors Barkpark.Sharing.Links.revoke/1).
     with {:ok, uuid} <- cast_uuid(doc_id, :not_found),
