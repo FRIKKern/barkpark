@@ -1980,14 +1980,29 @@ jobs:
         # step proves the default rail no longer asks for bp at all, without
         # touching the network: the legacy rail must still red for exactly that
         # reason, and the token-free rail must get past it.
+        # `set +e` is deliberate and is the point of the step. GitHub runs this
+        # body under `bash -e`, and EVERY assertion here is about a command that
+        # EXITS NON-ZERO ON PURPOSE (the legacy rail must exit 2). Under -e the
+        # step would abort at the first one and red without ever comparing
+        # anything — a gate failing for a reason unrelated to its subject, which
+        # is the exact fault pr-task-gate.sh's own header records.
         run: |
+          set +e
           set -u
-          command -v bp >/dev/null 2>&1 && { echo "bp is unexpectedly ON this runner — this control cannot measure what it claims" >&2; exit 1; }
+          if command -v bp >/dev/null 2>&1; then
+            echo "bp is unexpectedly ON this runner — this control cannot measure what it claims" >&2
+            exit 1
+          fi
           echo "control: bp is absent from this runner, as expected"
 
-          bash scripts/epic-zero-criteria-census.sh --via-bp task-fb4fb869490b4213 >/dev/null 2>via-bp.err; rc=$?
-          [ "$rc" = "2" ] || { echo "expected the LEGACY rail to exit 2 without bp, got $rc" >&2; exit 1; }
-          grep -q "bp is not on PATH" via-bp.err || { echo "the legacy rail red for some OTHER reason:" >&2; cat via-bp.err >&2; exit 1; }
+          bash scripts/epic-zero-criteria-census.sh --via-bp task-fb4fb869490b4213 >/dev/null 2>via-bp.err
+          rc=$?
+          if [ "$rc" != "2" ]; then
+            echo "expected the LEGACY rail to exit 2 without bp, got $rc" >&2; cat via-bp.err >&2; exit 1
+          fi
+          if ! grep -q "bp is not on PATH" via-bp.err; then
+            echo "the legacy rail red for some OTHER reason:" >&2; cat via-bp.err >&2; exit 1
+          fi
           echo "legacy rail: exit 2, 'bp is not on PATH' — the original defect, still reproducible"
 
           # The token-free rail must get PAST the bp check. It is deliberately
@@ -1995,12 +2010,14 @@ jobs:
           # being up (see the promotion note in scripts/ledger-epic-roster.sh).
           # Reaching the ledger at all — or failing with the reader's OWN
           # outage wording — both prove bp is out of the path.
-          bash scripts/epic-zero-criteria-census.sh task-fb4fb869490b4213 >/dev/null 2>token-free.err; rc=$?
+          bash scripts/epic-zero-criteria-census.sh task-fb4fb869490b4213 >/dev/null 2>token-free.err
+          rc=$?
           if grep -q "bp is not on PATH" token-free.err; then
             echo "the token-free rail STILL asks for bp — the port did not land" >&2; cat token-free.err >&2; exit 1
           fi
           echo "token-free rail: exit ${rc}, and it never asked for bp"
-          cat token-free.err || true
+          cat token-free.err
+          exit 0
 
   webhook-fanout-guard:
     needs: [changes]
