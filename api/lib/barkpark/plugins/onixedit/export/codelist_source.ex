@@ -26,17 +26,40 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CodelistSource do
   not user input.
   """
 
-  @priv_root Path.expand("../../../../../priv", __DIR__)
-  @xsd_relpath "onix/onix-3.0/ONIX_BookProduct_CodeLists.xsd"
-  @thema_relpath "codelists/thema-1.6/thema-v1.6-en.json"
+  # Resolved at RUNTIME via `:code.lib_dir/1`, the same shape
+  # `Export.Validator.default_xsd_path/0` uses — in an OTP release `priv`
+  # lives at `lib/barkpark-<vsn>/priv` and the build tree is gone, so a
+  # `__DIR__`-baked absolute path would raise File.Error there.
+  # `Barkpark.Plugins.ReleasePrivPathTest` enforces this.
+  @xsd_subpath "priv/onix/onix-3.0/ONIX_BookProduct_CodeLists.xsd"
+  @thema_subpath "priv/codelists/thema-1.6/thema-v1.6-en.json"
 
   @doc "Absolute path to the vendored EDItEUR ONIX codelist XSD."
   @spec xsd_path() :: Path.t()
-  def xsd_path, do: Path.join(@priv_root, @xsd_relpath)
+  def xsd_path, do: priv_path(@xsd_subpath)
 
   @doc "Absolute path to the vendored EDItEUR Thema 1.6 JSON snapshot."
   @spec thema_path() :: Path.t()
-  def thema_path, do: Path.join(@priv_root, @thema_relpath)
+  def thema_path, do: priv_path(@thema_subpath)
+
+  # `:code.lib_dir/1` answers for a release and for a compiled source tree
+  # alike. It can still miss during a COLD first compile of this very app,
+  # before its own ebin lands on the code path — these files are read from the
+  # module body of `Export.Codelists`, so that window is real. The source-tree
+  # fallback covers it; nothing here freezes a build path into a `.beam`.
+  defp priv_path(subpath) do
+    from_code_path =
+      case :code.lib_dir(:barkpark) do
+        {:error, _} -> nil
+        dir -> Path.join(to_string(dir), subpath)
+      end
+
+    if is_binary(from_code_path) and File.exists?(from_code_path) do
+      from_code_path
+    else
+      Path.expand(Path.join("../../../../..", subpath), __DIR__)
+    end
+  end
 
   @doc """
   Read the named ONIX lists out of the XSD in one pass.
