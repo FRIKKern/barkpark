@@ -159,7 +159,7 @@ defmodule BarkparkWeb.TasksController do
       # which is a bigger change than this row is allowed to make. What changes
       # is that the span is now STATED (`page.dataset*` below) instead of being
       # an unstated global.
-      dataset = ready_dataset_param(params)
+      dataset = dataset_param(params)
 
       opts =
         []
@@ -175,7 +175,7 @@ defmodule BarkparkWeb.TasksController do
       body =
         docs
         |> task_list_response(conn, params, limit: limit, offset: offset)
-        |> put_ready_dataset_scope(docs, dataset, Tasks.dataset_ambiguous(opts))
+        |> put_dataset_scope(docs, dataset, Tasks.dataset_ambiguous(opts))
 
       json(conn, body)
     else
@@ -210,12 +210,18 @@ defmodule BarkparkWeb.TasksController do
   # exactly-full last page; that errs toward "look again", the safe direction.
   # ADDITIVE ONLY — `ok`, `docs` and `help` keep their names and shapes, so the
   # SDK, the Studio and the taskboard read byte-identical fields.
-  # `?dataset=` on the ready route. Fails SOFT on a non-binary spelling
-  # (`?dataset[]=production`), like `request_dataset/1` — a malformed selector
-  # must not 500 a queue read — but carries NO default: see `ready/2`.
-  defp ready_dataset_param(params) do
+  # `?dataset=` on the two LIST routes (ready and index). Fails SOFT on a
+  # non-binary spelling (`?dataset[]=production`), like `request_dataset/1` — a
+  # malformed selector must not 500 a listing — but carries NO default: see
+  # `ready/2`. An empty string is "named nothing", not a dataset called "".
+  #
+  # ONE reader for both routes (task-8483029782444df4). The index grew its own
+  # dataset selector after ready had one, and two spellings of "read the same
+  # query param" is exactly how ready and index came to disagree about whether
+  # `?dataset=` meant anything at all.
+  defp dataset_param(params) do
     case params["dataset"] do
-      dataset when is_binary(dataset) -> dataset
+      dataset when is_binary(dataset) and dataset != "" -> dataset
       _ -> nil
     end
   end
@@ -241,9 +247,12 @@ defmodule BarkparkWeb.TasksController do
   # standing exception, not an opening. A dataset fact a caller ACTS on belongs
   # in the structured block it can read without string-matching anyway.
   #
-  # READY ONLY, deliberately: `task_list_response/4`'s other caller is the index,
-  # which is not twin-collapsed and whose envelope stays byte-identical.
-  defp put_ready_dataset_scope(body, docs, dataset, ambiguous) do
+  # BOTH LIST ROUTES (task-8483029782444df4). It was ready-only while the index
+  # did not read `?dataset=` at all — an envelope may not describe a scope its
+  # route does not honour. Now that the index narrows on the same param, it says
+  # the same four things in the same four keys, so a caller reads one contract
+  # off `page` no matter which listing answered.
+  defp put_dataset_scope(body, docs, dataset, ambiguous) do
     spans = docs |> Enum.map(& &1.dataset) |> Enum.uniq() |> Enum.sort()
 
     page =
@@ -663,42 +672,24 @@ defmodule BarkparkWeb.TasksController do
     parent =
       params["parent"] || params["parent_id"] || filters["parent"] || filters["parent_id"]
 
-    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
-    # published twin exists in the same scope is suppressed, so a twinned task
-    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
-    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
-    # population) has no distinct twin and survives — see
-    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
-    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
-    # BASE, so removing shadow rows shifts which rows land on which page and
-    # moves `bp task ls --all` totals.
-    base =
-      from(d in Document,
-        where: d.type == "task",
-        limit: ^limit,
-        offset: ^offset
-      )
-      |> Tasks.Query.collapse_twins()
-      # DATASET axis of the SAME rule (task-49eef068420df918,
-      # `Barkpark.Tasks.TwinResolver` rule 3 at a listing). `collapse_twins/1`
-      # above requires `twin.dataset = d.dataset` BY DESIGN, so a doc_id living
-      # in two datasets of one workspace+project contributed TWO rows to this
-      # page — ids `GET /v1/tasks/:doc_id` itself refuses with a 409
-      # `ambiguous_dataset`. Same pagination consequence `collapse_twins/1`
-      # documents — `limit`/`offset` live in this BASE, so suppressed rows shift
-      # which rows land on which page.
-      #
-      # UNCONDITIONAL here, unlike `child_tasks/2`, and that is not an
-      # oversight: this route does not read `?dataset=` as a scope selector at
-      # all (task-8483029782444df4, open — `dataset` is not in its filter
-      # whitelist). Gating on a param the route then IGNORES would be strictly
-      # worse than not gating: naming a dataset would lift the refusal without
-      # narrowing the page, handing the caller back BOTH rows. The gate goes in
-      # beside the filter when that row lands.
-      |> Tasks.Query.collapse_cross_dataset_twins()
+    # `?dataset=` ON THE INDEX (task-8483029782444df4). `/v1/tasks/ready` and
+    # `/v1/tasks/:doc_id` both honour this param; this route IGNORED it — and
+    # not by 400ing, which would at least be honest: `dataset` rides the
+    # `@phoenix_injected` allowlist in `reject_unknown_flat_params/2`, so
+    # `GET /v1/tasks?dataset=nosuchds` answered 200 with a FULL, GLOBAL page.
+    # A listing that serves the whole corpus under a selector naming one dataset
+    # is the "false confirmation an operator can act on" this route's own
+    # fail-closed filter doors exist to prevent. Read through `dataset_param/1`
+    # — the SAME reader `ready/2` uses, no default, soft on a malformed spelling.
+    dataset = dataset_param(params)
 
-    query =
-      base
+    # The filter chain is a CLOSURE because two queries need it: the paged read
+    # below, and the ambiguity probe. Building the probe off a different set of
+    # predicates is how a page and its own explanation come to describe
+    # different populations (`child_dataset_ambiguous/2` shares its base for the
+    # same reason).
+    narrow = fn query ->
+      query
       |> Params.maybe_filter_workspace(workspace_id)
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_type(params["type"])
@@ -729,7 +720,42 @@ defmodule BarkparkWeb.TasksController do
       # and the cursor still mean what they meant — so a poller that narrows to
       # its own window pays for the rows that actually moved.
       |> Params.maybe_filter_updated_since(updated_since)
-      |> Params.apply_index_order(parent)
+    end
+
+    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
+    # published twin exists in the same scope is suppressed, so a twinned task
+    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
+    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
+    # population) has no distinct twin and survives — see
+    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
+    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
+    # BASE, so removing shadow rows shifts which rows land on which page and
+    # moves `bp task ls --all` totals.
+    base =
+      from(d in Document,
+        where: d.type == "task",
+        limit: ^limit,
+        offset: ^offset
+      )
+      |> Tasks.Query.collapse_twins()
+      # DATASET axis of the SAME rule (task-49eef068420df918,
+      # `Barkpark.Tasks.TwinResolver` rule 3 at a listing). `collapse_twins/1`
+      # above requires `twin.dataset = d.dataset` BY DESIGN, so a doc_id living
+      # in two datasets of one workspace+project contributed TWO rows to this
+      # page — ids `GET /v1/tasks/:doc_id` itself refuses with a 409
+      # `ambiguous_dataset`. Same pagination consequence `collapse_twins/1`
+      # documents — `limit`/`offset` live in this BASE, so suppressed rows shift
+      # which rows land on which page.
+      #
+      # GATED on `?dataset=`, exactly as `child_tasks/2` gates it: naming a
+      # dataset IS the disambiguation rule 3 asks for, so a dataset-scoped page
+      # is NARROWED to that dataset rather than having its twins withheld. The
+      # narrowing is the same `maybe_filter_dataset/2` a dataset-named ready page
+      # applies — not merely "un-collapse", which would hand a caller who asked
+      # for ONE dataset back BOTH copies.
+      |> maybe_scope_index_dataset(dataset)
+
+    query = base |> narrow.() |> Params.apply_index_order(parent)
 
     # bl-api-tasks-stable-cursor: the keyset seek. Parsed AFTER `parent` is
     # bound because the cursor's axis is the ORDERING's axis, and the ordering
@@ -746,18 +772,54 @@ defmodule BarkparkWeb.TasksController do
         docs = query |> Params.apply_index_cursor(cursor) |> Repo.all()
 
         body =
-          task_list_response(docs, conn, params,
+          docs
+          |> task_list_response(conn, params,
             limit: limit,
             offset: offset,
             cursor_axis: Params.cursor_axis(parent),
             cursor_requested?: Params.cursor_requested?(params)
           )
+          |> put_dataset_scope(docs, dataset, index_dataset_ambiguous(dataset, narrow))
 
         json(conn, maybe_put_delta(body, updated_since, as_of))
 
       {:error, reason} ->
         bad_request(conn, reason)
     end
+  end
+
+  # `?dataset=` on the index, as a SCOPE SELECTOR (task-8483029782444df4).
+  #
+  #   * NAMED  — narrow to that dataset. Cross-dataset twins are not "ambiguous"
+  #     any more: the caller answered the question rule 3 refuses to answer for
+  #     them. A dataset holding no rows yields an EMPTY page, which is the whole
+  #     point: `?dataset=nosuchds` used to return a full global page.
+  #   * ABSENT — the page spans every dataset in the caller's workspace/project
+  #     scope and the cross-dataset twins are WITHHELD and named in
+  #     `page.dataset_ambiguous`, exactly as before this row.
+  defp maybe_scope_index_dataset(query, nil), do: Tasks.Query.collapse_cross_dataset_twins(query)
+
+  defp maybe_scope_index_dataset(query, dataset),
+    do: Tasks.Query.maybe_filter_dataset(query, dataset)
+
+  # The doc_ids the index WITHHELD as cross-dataset ambiguous, each with the
+  # dataset set it spans — `page.dataset_ambiguous`, the same shape
+  # `/v1/tasks/ready` and the child rail render.
+  #
+  # `[]` whenever the caller named a dataset (nothing is ambiguous then), so a
+  # dataset-scoped read pays for no probe at all. Otherwise it runs over the
+  # SAME narrowing closure the page used, minus `limit`/`offset`: a withheld id
+  # that fell outside the page window is still a withheld id, and an explanation
+  # bounded by the page it explains would go silent exactly when the page is
+  # short. Cheaper than the page in the way `Tasks.Queue.dataset_ambiguous/1` is
+  # cheaper than `ready_query/1` — one indexed correlated probe, no child-count
+  # fan-out, no render.
+  defp index_dataset_ambiguous(dataset, _narrow) when is_binary(dataset), do: []
+
+  defp index_dataset_ambiguous(nil, narrow) do
+    from(d in Document, where: d.type == "task")
+    |> narrow.()
+    |> Tasks.Query.cross_dataset_ambiguous_ids()
   end
 
   # The delta envelope. ADDITIVE and OMITTED WHEN THE CALLER DID NOT ASK, so
