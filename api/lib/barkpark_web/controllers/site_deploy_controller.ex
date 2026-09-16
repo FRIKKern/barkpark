@@ -1,4 +1,16 @@
 defmodule BarkparkWeb.SiteDeployController do
+  # THE CODE LISTS BELOW ARE READ FROM THE MODULE THAT EMITS THEM, not typed
+  # out here. A hand-kept copy is what let this moduledoc document 19 of the
+  # extractor's 22 codes — and the three it silently omitted were exactly the
+  # three whose status class was wrong. The doc cannot drift from the code set
+  # any more, because it no longer holds a second copy of it, and the count is
+  # `length/1` over the same list rather than a number somebody counted.
+  @artifact_400_codes Barkpark.Sites.PrebuiltArtifact.caller_fault_codes()
+  @artifact_500_codes Barkpark.Sites.PrebuiltArtifact.internal_failure_codes()
+
+  @artifact_400_list Enum.map_join(@artifact_400_codes, " / ", &"`#{&1}`")
+  @artifact_500_list Enum.map_join(@artifact_500_codes, " / ", &"`#{&1}`")
+
   @moduledoc """
   Admin-only trigger + status for a content-bound STATIC site deploy
   (`/v1/admin/site-deploy`, backed by `Barkpark.Sites.DeployRunner`).
@@ -23,12 +35,8 @@ defmodule BarkparkWeb.SiteDeployController do
       `invalid_deploy_mode` / `invalid_env` / `invalid_artifact` /
       `invalid_artifact_digest` / `artifact_too_large` — nothing reaches argv or
       the child's env until `Barkpark.Sites.DeployRequest` has validated it.
-    * **400** `E_DIGEST_MISMATCH` / `E_NOT_GZIP` / `E_NOT_BASE64` /
-      `E_MALFORMED` / `E_PATH_TRAVERSAL` / `E_ABSOLUTE_PATH` / `E_SYMLINK` /
-      `E_HARDLINK` / `E_SPECIAL_FILE` / `E_UNKNOWN_TYPE` / `E_MODE_BITS` /
-      `E_BAD_NAME` / `E_UNSAFE_PARENT` / `E_ENTRY_TOO_LARGE` /
-      `E_TOTAL_TOO_LARGE` / `E_COMPRESSION_RATIO` / `E_TOO_MANY_ENTRIES` /
-      `E_NO_INDEX` / `E_JUNK_ENTRY` — the 19 typed refusals a PREBUILT artifact can draw from the
+    * **400** #{@artifact_400_list} — the #{length(@artifact_400_codes)} typed
+      refusals a PREBUILT artifact can draw from the
       box (`Barkpark.Sites.PrebuiltArtifact`). These are 400s, not 500s: the
       bytes are the caller's, and the box never falls back to building the site
       itself when it refuses them. `E_MALFORMED` covers framing as well as
@@ -63,6 +71,17 @@ defmodule BarkparkWeb.SiteDeployController do
     * **500** `runner_start_failed` — the feature IS enabled but the command
       could not spawn (missing script, bad cd). Distinct from 503: telling an
       admin to set an env var they already set would be actively wrong.
+    * **500** #{@artifact_500_list} — the #{length(@artifact_500_codes)}
+      extractor codes that are NOT a verdict about the caller's bytes. The
+      artifact validated; THIS BOX could not put it on disk (ENOSPC, EACCES, a
+      failed rename). They rendered as 400s until ssw11 — telling a caller
+      "your tarball is bad" while the disk was full, which is exactly the
+      answer that makes a correct client stop retrying and start repacking
+      bytes that were never the problem. WHO RETRIES: nobody automatically
+      (a TYPED 5xx is terminal for the control plane, as the 400 was) — the
+      OPERATOR who clears the disk re-fires the deploy, and the caller's bytes
+      are untouched. `Barkpark.Sites.PrebuiltArtifact.internal_failure?/1` is
+      the only classifier; a code it does not know stays a 400.
     * **500** `site_provision_failed` — the site's SOURCE could not be
       materialized, so the build never started. Carries a scrubbed `reason`
       (the failed action + path). Distinct from `runner_start_failed`, which it
@@ -170,6 +189,17 @@ defmodule BarkparkWeb.SiteDeployController do
         # has a symlink in it" from "the box is broken", and must never read a
         # refusal as a licence to let the box build the site instead.
         bad_request(conn, code, message)
+
+      {:error, {:artifact_staging_failed, code, message}} ->
+        # THE BOX BROKE, and a 400 said otherwise. `stage/4` answers ENOSPC,
+        # EACCES and a failed rename through the same `{:error, code, message}`
+        # shape as a symlink refusal, so all three rode the `bad_request` arm
+        # above — a 400 is a statement about the CALLER'S bytes, and a client
+        # that believes it correctly stops retrying and repacks an artifact
+        # that was already valid. The code still travels verbatim (the control
+        # plane renders "<code> — <message>" and the ledger keys its class on
+        # the STATUS), so only the class moves.
+        artifact_staging_failed(conn, code, message)
 
       {:error, {:provision_failed, reason}} ->
         # The site's SOURCE could not be materialized, so the build never
@@ -422,6 +452,20 @@ defmodule BarkparkWeb.SiteDeployController do
   defp bad_request(conn, code, message) do
     conn
     |> ErrorResponse.emit_fields(:bad_request, %{code: code, message: message})
+  end
+
+  # The extractor's INTERNAL failures. Same envelope, same typed code — only
+  # the class differs, and the class is the whole point: 4xx blames the caller,
+  # 5xx blames the box. `fault: "box"` rides beside it so a consumer that has
+  # only the body (a relayed envelope, a ledger row) can tell the two apart
+  # without re-deriving the status.
+  defp artifact_staging_failed(conn, code, message) do
+    conn
+    |> ErrorResponse.emit_fields(:internal_server_error, %{
+      code: code,
+      message: message,
+      fault: "box"
+    })
   end
 
   # The polled build_id is not the run this slug is currently serving — it was
