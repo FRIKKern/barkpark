@@ -15,7 +15,7 @@
 # .github/ is the gates lane's fence, not the deploy/PDS lane's. This exemption
 # is a HANDOFF, not a verdict: until that line lands, a revert of the charter
 # anchors is caught by running this file BY HAND, and by nothing else. Wiring
-# row: see the PR body. Baseline at authoring: 10 passed, 0 failed.
+# row: see the PR body. Baseline at authoring: 14 passed, 0 failed.
 
 # shellcheck disable=SC2016  # backticks inside single quotes are literal citation syntax, not expansions
 set -uo pipefail
@@ -38,6 +38,15 @@ run() { out="$(bash "$CHECK" "$1" 2>&1)"; rc=$?; }
 pad_bare() { # <count>
   local i=0
   while [ "$i" -lt "$1" ]; do printf 'legacy cite pds-pull-proof.sh:%s\n' "$((100 + i))"; i=$((i + 1)); done
+}
+
+# The same, for arm C's FILE-LESS `:NNN` form. Deliberately a DIFFERENT padder:
+# arm B's pattern requires the filename and arm C's requires its absence, so one
+# fixture can never satisfy both and a gain in one form cannot mask a loss in
+# the other.
+pad_fileless() { # <count>
+  local i=0
+  while [ "$i" -lt "$1" ]; do printf 'file-less cite (`:%s`)\n' "$((100 + i))"; i=$((i + 1)); done
 }
 
 # ── ARM 1 (QUIET): the real charter on the real tree must pass ───────────────
@@ -114,6 +123,51 @@ run "$TMP/shipped.md"
 if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 4'; then
   ok "ARM 10 CONTROL — the shipped D92/D93 text carries exactly 4 resolving anchors"
 else bad "ARM 10 CONTROL — the shipped D92/D93 text carries exactly 4 resolving anchors" "rc=$rc $out"; fi
+
+
+# ── ARM 11 (RED): a NEW file-less `:NNN` citation breaks arm C's ratchet ─────
+# 642 = the shipped ceiling (641) + 1. The fixture carries NO filename-bearing
+# cite, so arm B sees 0 and cannot be what reds here.
+{ pad_fileless 642; } > "$TMP/fileless_over.md"
+run "$TMP/fileless_over.md"
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'file-less `:NNN` citation was added'; then
+  ok "ARM 11 RED — a new file-less \`:NNN\` cite reds (arm C)"
+else bad "ARM 11 RED — a new file-less \`:NNN\` cite reds (arm C)" "rc=$rc $out"; fi
+
+# ── ARM 12 (QUIET): FEWER file-less citations is progress, never a red ───────
+{ pad_fileless 3; pad_bare 15; } > "$TMP/fileless_under.md"
+run "$TMP/fileless_under.md"
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'file-less citations are down to 3'; then
+  ok "ARM 12 QUIET — improvement prints PROGRESS for arm C and exits 0"
+else bad "ARM 12 QUIET — improvement prints PROGRESS for arm C and exits 0" "rc=$rc $out"; fi
+
+# ── ARM 13 (RED, THE REVERT ARM): the pre-fix D101/D116 text, verbatim ──────
+# The exact citations this PR removed. Every one of them is file-less, so arm B
+# never counted them and arm C's ceiling is not crossed by six — which is the
+# whole point: the signal that distinguishes reverted from shipped is arm A,
+# and the reverted text parses ZERO anchors.
+{ cat <<'PRE'
+- **PDS-D101** `canonical_order` (`:2177-2191`) enforces ladder order only WITHIN one process, and
+  reuses a parked bundle for 0 attempts when the sha held (`:1249-1261`).
+- **PDS-D116** `canonical_order()` (`:2240`) plus step 4's PULL_BUNDLE-this-run guard (`:1665`) —
+  not `step_6`, whose only cross-step precondition is `PULL_BUNDLE` (`:2003`); `run_steps` (`:2256`).
+PRE
+  pad_bare 15; } > "$TMP/reverted_d101.md"
+run "$TMP/reverted_d101.md"
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 0'; then
+  ok "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable anchors"
+else bad "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable anchors" "rc=$rc $out"; fi
+
+# ── ARM 14 (QUIET/CONTROL): the shipped D101+D116 text carries SEVEN ─────────
+# pad_bare 14, not 15: the D101..D116 slice itself carries ONE surviving
+# `pds-pull-proof.sh:NNN` cite (in PDS-D113), so 14 + 1 sits exactly ON arm B's
+# ceiling. Padding to 15 would red arm B and mask what this arm measures.
+{ sed -n '/PDS-D101 — Anything touching rungs/,/arm C ratchets the file-less/p' \
+    "$REPO_ROOT/.claude/workflows/bp-pds-charter.md"; pad_bare 14; } > "$TMP/shipped_d101.md"
+run "$TMP/shipped_d101.md"
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 7'; then
+  ok "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors"
+else bad "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors" "rc=$rc $out"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
