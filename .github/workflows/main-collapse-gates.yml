@@ -1,0 +1,71 @@
+name: main-collapse gates
+# WHAT THIS RUNS, and why it is its own file.
+#
+# Two gates that came out of task-9ee58a247b158826, both about the SAME blind
+# spot: the five workflows that declare `main-collapse: harness-ok` share one
+# concurrency group on main, so a merge evicts the PENDING intermediate and that
+# sha never gets a verdict.
+#
+#   scripts/main-collapse-criterion-check.sh
+#       a ledger criterion may not name "the next main <collapsible workflow>
+#       run" — that run may not exist. Only its --selftest runs here: the live
+#       arm reads the Barkpark ledger and CI holds no token. The live arm is a
+#       local/lead instrument.
+#   scripts/main-runs-window-check.sh
+#       an un-paginated repo-wide `actions/runs?branch=main` query reads ~81
+#       SECONDS of main history; its empty result is CANNOT READ, never absence.
+#       Both arms run here — it needs nothing but the tree.
+#
+# PER-SHA ON MAIN, DELIBERATELY. This file is ABOUT the collapse; a gate that
+# collapsed its own main runs would be the joke telling itself. The group varies
+# by github.sha on main so two merges are never rivals, and PR refs keep a
+# per-ref group so a newer push supersedes — the exact shape
+# scripts/main-run-concurrency-check.sh demands of an unmarked workflow.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "scripts/main-collapse-criterion-check.sh"
+      - "scripts/main-runs-window-check.sh"
+      - "scripts/**"
+      - "tooling/**"
+      - "docs/**"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/main-collapse-criterion-check.sh"
+      - "scripts/main-runs-window-check.sh"
+      - "scripts/**"
+      - "tooling/**"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-collapse-gates-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  gates:
+    name: main-collapse criterion + runs-window gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # SYNTAX FIRST. A truncated harness that cannot parse would otherwise read
+      # as a green from whichever arm happened to exit 0.
+      - name: syntax
+        run: |
+          bash -n scripts/main-collapse-criterion-check.sh
+          bash -n scripts/main-runs-window-check.sh
+      # DISTRUST VACUOUS GREEN: the selftests run BEFORE the live assertions, so
+      # a gate that can no longer red is caught before its silence is believed.
+      - name: main-collapse criterion check — selftest (10 arms, planted tree, no bp/network)
+        run: bash scripts/main-collapse-criterion-check.sh --selftest
+      - name: main-runs-window check — selftest (8 arms, mktemp fixtures, no network)
+        run: bash scripts/main-runs-window-check.sh --selftest
+      - name: main-runs-window check — the live tree
+        run: bash scripts/main-runs-window-check.sh
