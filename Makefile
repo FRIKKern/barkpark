@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots cloud-format-check wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots cloud-format-check wasm wasm-siblings-check
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -222,17 +222,45 @@ cli-install-safe: cli-build ## LOCAL: back up the installed bp, THEN install (pr
 # so we pin rather than diff. The loader (bp-wasm-exec.js) is committed + host-stable
 # text — NOT rebuilt here. Regenerated at dev (make dev prereq) and at deploy
 # (scripts/deploy-rebuild.sh); the CI gate builds + smokes it.
+# BOTH SIBLINGS, ALWAYS. Plug.Static runs with `gzip: true`, which makes the
+# IDENTITY url `/assets/bp-pdrender.wasm` a real, advertised route: a client that
+# sends `Accept-Encoding: gzip` gets the `.gz` bytes under that url, and a client
+# that sends `Accept-Encoding: identity` gets... 404, because for years this
+# target emitted the `.gz` and nothing else. Same url, two answers, decided by a
+# request header — a static plug 404ing a file it advertises (het-bl-wasm-identity-404;
+# live-proven on guerrilla, tooling/grip/ledger/het-w1-s3-residuals-2026-08-08.md e2).
+# So the build now writes the uncompressed blob to its own path FIRST and gzips
+# FROM that exact file, which also makes the two siblings byte-identical by
+# construction rather than by coincidence. Neither is committed (see .gitignore).
 WASM_GO_VERSION ?= 1.25.8
 
+WASM_IDENTITY := api/priv/static/assets/bp-pdrender.wasm
+WASM_GZ       := api/priv/static/assets/bp-pdrender.wasm.gz
+
 wasm: ## Build the pdrender→TUI wasm the paper reader lazy-loads (GOOS=js, pinned toolchain)
-	@echo ">> Building pdrender wasm (go$(WASM_GO_VERSION), js/wasm) -> api/priv/static/assets/bp-pdrender.wasm.gz..."
+	@echo ">> Building pdrender wasm (go$(WASM_GO_VERSION), js/wasm) -> $(WASM_IDENTITY) + $(WASM_GZ)..."
 	@command -v gzip >/dev/null 2>&1 || { echo "!! gzip not found on PATH"; exit 1; }
 	@test -f api/priv/static/assets/bp-wasm-exec.js || { echo "!! api/priv/static/assets/bp-wasm-exec.js (committed loader) missing"; exit 1; }
-	@tmp="$$(mktemp -d)"; \
-	GOTOOLCHAIN=go$(WASM_GO_VERSION) GOOS=js GOARCH=wasm go build -trimpath -ldflags=-buildid= -o "$$tmp/pdrender.wasm" ./cmd/pdrender-wasm && \
-	gzip -9 -c "$$tmp/pdrender.wasm" > api/priv/static/assets/bp-pdrender.wasm.gz && \
-	rm -rf "$$tmp" && \
-	echo ">> Done: api/priv/static/assets/bp-pdrender.wasm.gz ($$(ls -lh api/priv/static/assets/bp-pdrender.wasm.gz | awk '{print $$5}'))"
+	@# Write the identity blob to its FINAL path first, then gzip FROM it. Building
+	@# to a temp dir and compressing that would leave the two siblings related only
+	@# by a convention nobody checks; this way the `.gz` is literally the served
+	@# `.wasm` compressed, and wasm-siblings-check below proves it every build.
+	GOTOOLCHAIN=go$(WASM_GO_VERSION) GOOS=js GOARCH=wasm go build -trimpath -ldflags=-buildid= -o $(WASM_IDENTITY) ./cmd/pdrender-wasm
+	gzip -9 -c $(WASM_IDENTITY) > $(WASM_GZ)
+	@$(MAKE) --no-print-directory wasm-siblings-check
+	@echo ">> Done: $(WASM_IDENTITY) ($$(ls -lh $(WASM_IDENTITY) | awk '{print $$5}')) + $(WASM_GZ) ($$(ls -lh $(WASM_GZ) | awk '{print $$5}'))"
+
+wasm-siblings-check: ## Assert BOTH pdrender wasm siblings exist and the .gz is exactly the .wasm compressed
+	@# The arm for het-bl-wasm-identity-404. It is a SEPARATE target, not inlined in
+	@# the recipe above, so that deleting the identity emission from `wasm` — the
+	@# original defect — reds this check instead of silently taking the old path.
+	@# Three ways to fail, all of them real: no identity sibling (the 404 returns),
+	@# no gz sibling (the reader's own fetch 404s), or the two disagree (Plug.Static
+	@# would then serve DIFFERENT bytes to gzip and identity clients under one url).
+	@test -s $(WASM_IDENTITY) || { echo "!! MISSING $(WASM_IDENTITY) — /assets/bp-pdrender.wasm 404s for Accept-Encoding: identity (het-bl-wasm-identity-404)"; exit 1; }
+	@test -s $(WASM_GZ) || { echo "!! MISSING $(WASM_GZ) — the paper reader fetches this path directly"; exit 1; }
+	@gzip -dc $(WASM_GZ) | cmp -s - $(WASM_IDENTITY) || { echo "!! $(WASM_GZ) is NOT $(WASM_IDENTITY) compressed — one url, two different payloads by Accept-Encoding"; exit 1; }
+	@echo ">> wasm siblings OK: $(WASM_IDENTITY) == gunzip($(WASM_GZ))"
 
 cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux/windows × arm64/amd64 into dist/
 	@echo ">> Cross-compiling bp $(VERSION) for 6 targets into dist/..."
