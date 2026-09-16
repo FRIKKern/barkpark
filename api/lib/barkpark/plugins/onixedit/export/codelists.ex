@@ -23,6 +23,18 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   Studio got a valid document that could not export. The maps below are
   generated, not curated.
 
+  ## ERRATA — two list numbers this module used to get wrong
+
+  The pre-2026-09 docstring filed `publishing_date_role/1` under List 23 and
+  `supplier_role/1` under List 25. Both are wrong: List 23 is Extent type and
+  List 25 is Illustration and other content type. `<PublishingDateRole>` is
+  **List 163** and `<SupplierRole>` is **List 93** (the same List 93 the ONIX
+  field map's ERRATA notes is Supplier role, NOT Thema). The starter maps hid
+  it — they were hand-typed from the right list under the wrong number, so
+  nothing ever resolved against the wrong enumeration. Generating from the
+  number makes the number load-bearing, so it is stated here and pinned by
+  `CodelistRegistryTest`.
+
   ## Why compile time and not a `Content.Codelists` query
 
   The DB registry and these snapshots carry the SAME code sets — the bundled
@@ -50,13 +62,13 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   @type code :: String.t()
 
   onix_lists =
-    CodelistSource.onix_lists([17, 150, 175, 23, 25, 45, 69, 58, 65, 91, 96, 153, 154, 158, 159])
+    CodelistSource.onix_lists([17, 150, 175, 163, 93, 45, 69, 58, 65, 91, 96, 153, 154, 158, 159])
 
   @contributor_role Map.fetch!(onix_lists, 17)
   @product_form Map.fetch!(onix_lists, 150)
   @product_form_detail Map.fetch!(onix_lists, 175)
-  @publishing_date_role Map.fetch!(onix_lists, 23)
-  @supplier_role Map.fetch!(onix_lists, 25)
+  @publishing_date_role Map.fetch!(onix_lists, 163)
+  @supplier_role Map.fetch!(onix_lists, 93)
   @publishing_role Map.fetch!(onix_lists, 45)
   @agent_role Map.fetch!(onix_lists, 69)
   @price_type Map.fetch!(onix_lists, 58)
@@ -130,7 +142,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   def product_form_detail_label(code), do: Map.get(@product_form_detail, code)
 
   @doc """
-  Resolve a PublishingDateRole code (List 23). Returns `{:ok, code}` on hit;
+  Resolve a PublishingDateRole code (List 163). Returns `{:ok, code}` on hit;
   raises `ArgumentError` with an `unknown_publishing_date_role_code` message on miss.
   """
   @spec publishing_date_role(code()) :: {:ok, code()}
@@ -142,7 +154,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   def publishing_date_role_label(code), do: Map.get(@publishing_date_role, code)
 
   @doc """
-  Resolve a SupplierRole code (List 25). Returns `{:ok, code}` on hit;
+  Resolve a SupplierRole code (List 93). Returns `{:ok, code}` on hit;
   raises `ArgumentError` with an `unknown_supplier_role_code` message on miss.
   """
   @spec supplier_role(code()) :: {:ok, code()}

@@ -121,6 +121,29 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CodelistRegistryTest do
     end
   end
 
+  describe "ERRATA — the two list numbers the old docstring got wrong" do
+    # The pre-2026-09 module filed PublishingDateRole under List 23 (actually
+    # Extent type) and SupplierRole under List 25 (actually Illustration and
+    # other content type). Generating from the number makes the number
+    # load-bearing: List 23 has no "01" at all, so a regression to it reds
+    # here AND takes every full-book export down with it.
+    test "PublishingDateRole is List 163, not List 23" do
+      lists = CodelistSource.onix_lists([163, 23])
+
+      assert Codelists.publishing_date_role("01") == {:ok, "01"}
+      assert Codelists.size(:publishing_date_role) == map_size(Map.fetch!(lists, 163))
+      refute Map.has_key?(Map.fetch!(lists, 23), "01")
+    end
+
+    test "SupplierRole is List 93, not List 25" do
+      lists = CodelistSource.onix_lists([93, 25])
+
+      assert Codelists.supplier_role("09") == {:ok, "09"}
+      assert Codelists.size(:supplier_role) == map_size(Map.fetch!(lists, 93))
+      assert Codelists.size(:supplier_role) != map_size(Map.fetch!(lists, 25))
+    end
+  end
+
   describe "a genuinely absent code still REFUSES — it is never dropped" do
     test "the resolver raises with the codelist named" do
       assert_raise ArgumentError, ~r/unknown_thema_code: "BOGUS"/, fn ->
