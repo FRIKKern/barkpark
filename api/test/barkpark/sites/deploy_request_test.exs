@@ -217,10 +217,15 @@ defmodule Barkpark.Sites.DeployRequestTest do
 
     test "an unknown source_kind is a 400, NEVER a silent drop to content-bound" do
       for bogus <- ["external", "git", "Content-Bound", "content_bound", "../x", "  "] do
-        assert {:error, "invalid_source_kind", msg} =
-                 DeployRequest.new(%{"slug" => "s", "build_id" => "b", "source_kind" => bogus}),
-               "#{inspect(bogus)} was ACCEPTED — an un-upgraded box would clobber the source"
+        result = DeployRequest.new(%{"slug" => "s", "build_id" => "b", "source_kind" => bogus})
 
+        # Bound first so the message is REACHABLE (assert/2 drops a message
+        # given to the `assert pattern = expr` macro form).
+        assert match?({:error, "invalid_source_kind", _}, result),
+               "#{inspect(bogus)} was ACCEPTED (#{inspect(result)}) — an un-upgraded " <>
+                 "box would silently default it to content-bound and clobber the source"
+
+        {:error, _code, msg} = result
         assert msg =~ "external-git"
       end
     end
