@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.Plugins.FieldComponents do
   attr :field, :map, required: true
   attr :value, :map, default: %{}
   attr :errors, :map, default: %{}
+  attr :warnings, :map, default: %{}
   attr :on_change, :string, default: nil
   attr :plugin_name, :string, default: "core"
   attr :path, :string, default: ""
@@ -36,6 +37,7 @@ defmodule BarkparkWeb.Studio.Plugins.FieldComponents do
   attr :field, :map, required: true
   attr :value, :list, default: []
   attr :errors, :map, default: %{}
+  attr :warnings, :map, default: %{}
   attr :on_change, :string, default: nil
   attr :on_reorder, :string, default: "array_op"
   attr :plugin_name, :string, default: "core"

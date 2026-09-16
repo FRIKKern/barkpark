@@ -6449,6 +6449,48 @@ const FIXTURE_SHAPE_PINS = [
     expected: 1,
     why: 'EXPECTATIONS["fleet-support-online"].check reads .find((b) => b.fleet_role === "support") and renders the presence slot for it; a second support row makes the Online chip and the 1/1-slots capacity a statement about an arbitrary member',
   },
+  // cch-w68-bl-smoke-rollback-fixture-shape-pin — THE CONDITIONALLY-RENDERED
+  // HALF OF THE ROLLBACK WIRING SWEEP.
+  //
+  // cch-w67-followup made EXPECTATIONS["rollback"].check dispatch all SEVEN
+  // loadSite controls, and five of them are painted unconditionally. Two are
+  // not:
+  //   • `#site-github` — siteDetailHtml offers the interactive button only to
+  //     an ADMIN actor (the non-admin arms paint a non-interactive mono chip,
+  //     or omit the door entirely when the site is unconnected). Grep the
+  //     `githubLabel` / `githubReady` block in app.js for the three arms.
+  //   • `#site-rollback` — the `deploys-head` button is gated on
+  //     `canSiteRollback`, which is `site.current_deployment_id` AND a
+  //     deployments list of length >= 2: a LIVE release plus at least one prior
+  //     row to fall back to.
+  // So a fixture edit that demotes this scenario's actor, or drops the prior
+  // live deploy, reds the wiring sweep with `reg.get("site-github")` /
+  // `reg.get("site-rollback")` undefined — prose that accuses the SPA of having
+  // dropped a control when what actually moved was scenarios.mjs. These three
+  // pins move that refusal before any scenario boots and name the fixture.
+  //
+  // THEY ARE THREE AND NOT ONE because the two conditions are independent and
+  // the rollback condition is itself a conjunction: the actor axis, the live
+  // pointer, and the fallback row can each be lost without touching the other
+  // two.
+  {
+    scenario: "rollback",
+    path: "me.team_authority.admin",
+    expected: true,
+    why: 'EXPECTATIONS["rollback"].check sweeps all seven loadSite controls INCLUDING #site-github, and siteDetailHtml paints that button only for an admin actor — a demotion here (me(..., "member", …), as `site-member` deliberately carries) deletes the control and the sweep reports a DEAD CONTROL for what is really a fixture role change',
+  },
+  {
+    scenario: "rollback",
+    path: "sites.0.current_deployment_id",
+    expected: "5b2c1e00-0000-4000-8000-0000000000d1",
+    why: 'the first half of canSiteRollback: #site-rollback is offered only when acme-web still points at a LIVE release. Null this pointer (the `webSite` base row, un-Object.assign-ed) and the Deployments head loses its button — and the sweep, the ">Roll back to this<" rows and the Current chip all go with it, none of them naming the pointer',
+  },
+  {
+    scenario: "rollback",
+    path: "deployments.#eq(status,live)",
+    expected: 2,
+    why: 'the second half of canSiteRollback, keyed on the fact that MATTERS rather than on the raw length: rollbackDeployments is [depCurrent(live), depFailed, depPrior(live)], and depPrior IS the rollbackable prior-live row. Dropping it leaves length 2 — still >= 2 by arithmetic — while deleting the target the whole scenario exists to offer, so a length pin alone would stay green through the exact edit this row was filed for',
+  },
 ];
 
 // The path grammar, deliberately tiny — a dotted property walk plus four
