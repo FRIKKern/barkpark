@@ -732,11 +732,20 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   # their own filed backlog task, `cch-w32-bl-receipt-loss-branches-have-no-trace`,
   # which needs a trace of its own class — this row does not silently duplicate it.
   @receipt_loss %{
-    # cch-w52-s3 widened this to /6 (the carrier the send actually used rides in
-    # as the sixth argument). The BRANCH is unchanged — same `{:error, changeset}`
-    # arm, same class, same owner — so this row is re-keyed rather than re-judged.
-    {:record_delivery, 6, :nil_shape} =>
-      "record_delivery/6's `{:error, changeset}` arm: the email send returned, " <>
+    # RE-KEYED TWICE, RE-JUDGED NEVER. cch-w52-s3 widened this to /6 (the carrier
+    # the send actually used rides in as the sixth argument); dr-w34 widened it
+    # to /7 (the rendered `%Swoosh.Email{}` the receipt fingerprints, defaulted to
+    # `nil`). The BRANCH is unchanged through both — same `{:error, changeset}`
+    # arm, same class, same owner.
+    #
+    # The key is the CLAUSE HEAD's arity, which is 7 even though the default
+    # argument also makes `record_delivery/6` callable: the census reads the
+    # source, not the export list. So the /6 row is DELETED rather than kept
+    # beside this one — a named branch the census can no longer derive is a row
+    # that would red this test in the other direction, and this map is an
+    # adjudication of branches, not a changelog of signatures.
+    {:record_delivery, 7, :nil_shape} =>
+      "record_delivery/7's `{:error, changeset}` arm: the email send returned, " <>
         "the row did not write. Logger-only; owned by cch-w32-bl-receipt-loss-*.",
     {:log_chat_delivery, 6, :nil_shape} =>
       "log_chat_delivery/6's `{:error, changeset}` arm: the chat POST returned, " <>
