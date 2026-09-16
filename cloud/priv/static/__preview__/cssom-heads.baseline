@@ -650,7 +650,16 @@
 # "FAIL app.css — baseline mismatch with 0 misses": MISSES 0 is what makes this an
 # unrecorded ADD rather than a parity defect. styleguide.html PASSED unchanged at 84.
 # Bumped in the SAME COMMIT as the CSS hunk (D158).
-1337
+# dr-w34 2026-09-16 (console/r20-console-w34-digestproof): 1337 -> 1338, +1 authored
+# rule head. ONE head arrives and none leaves: `.wh-del-proof`, the delivery row's
+# content-fingerprint segment (`notification_deliveries.content_sha256` — the column
+# that lets a send prove what it carried). A plain class selector in the top-level
+# cascade; the only other app.css edit in this diff is a comment.
+# MEASURED, not inferred: 1338 is `authoredHeads(app.css).length` run on this branch
+# with a browser (Chrome 150, node v22), MISSES 0 and MULTISET DEFICITS 0 — which is
+# what makes this an unrecorded ADD rather than a parity defect. The styleguide
+# sheet's 84 is unchanged; this diff does not touch it.
+1338
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
