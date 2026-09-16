@@ -1670,17 +1670,42 @@ func authHeaders(cmd manifest.Command, ctx manifest.Context) map[string]string {
 }
 
 // ingestSecret resolves the shared ingest secret for an `auth_tier: ingest`
-// command. It reads BARKPARK_INGEST_TOKEN first, then the legacy
-// PAPERFLOW_INGEST_TOKEN env var the server still honours. As a last
-// resort it falls back to the resolved bearer token — best-effort only, for the
-// single-secret dev setup where both happen to be the same value. The server's
-// RequireIngestToken plug compares this against :ingest_token.
+// command. For an operator-local invocation it reads BARKPARK_INGEST_TOKEN
+// first, then the legacy PAPERFLOW_INGEST_TOKEN env var the server still
+// honours, and finally falls back to the resolved bearer token — best-effort,
+// for the single-secret dev setup where both happen to be the same value. The
+// server's RequireIngestToken plug compares whatever comes back against
+// :ingest_token.
+//
+// THE ENV LOOKUP IS GATED ON ctx.AmbientCredentialsOK, AND THAT GATE IS THE
+// SECURITY BOUNDARY. `ingest` is the only tier whose credential does not come
+// from ctx.Token, so it is the only tier that reaches around a per-request token
+// seam: `bp mcp serve --http` scrubs the process bearer and installs the
+// caller's own (newMCPHTTPHandler, mcp_serve.go), but an ingest-tier bridge tool
+// used to skip straight past that to os.Getenv and sign a remote, credential-
+// less caller's request with the SERVING PROCESS'S ingest secret. Measured
+// before the gate: a POST carrying no Authorization header at all reached the
+// downstream ingest route as `Bearer <the process's BARKPARK_INGEST_TOKEN>` and
+// the write was performed. That is a confused deputy — the env var authorises
+// whoever can reach the socket rather than whoever proved anything.
+//
+// The remedy is REQUEST-SCOPED, not advisory: with AmbientCredentialsOK false
+// the environment is never consulted and the only credential available is the
+// one the request itself carried (ctx.Token, i.e. its Authorization bearer). A
+// caller that legitimately holds the ingest secret presents it and is served
+// unchanged; a caller that holds nothing gets no header and the server's
+// RequireIngestToken plug refuses it. Deployment guidance ("do not set that var
+// in the unit file") was rejected as the boundary for the obvious reason: it is
+// not enforced by anything, and the next unit file, shell, or supervisor that
+// exports it silently re-opens the hole.
 func ingestSecret(ctx manifest.Context) string {
-	if s := os.Getenv("BARKPARK_INGEST_TOKEN"); s != "" {
-		return s
-	}
-	if s := os.Getenv("PAPERFLOW_INGEST_TOKEN"); s != "" {
-		return s
+	if ctx.AmbientCredentialsOK {
+		if s := os.Getenv("BARKPARK_INGEST_TOKEN"); s != "" {
+			return s
+		}
+		if s := os.Getenv("PAPERFLOW_INGEST_TOKEN"); s != "" {
+			return s
+		}
 	}
 	return ctx.Token
 }

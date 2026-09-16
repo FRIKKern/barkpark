@@ -981,7 +981,13 @@ func TestIngestAuthHeader(t *testing.T) {
 		t.Fatalf("fixture changed: bulldocs publish tier = %q, want ingest", pub.AuthTier)
 	}
 
-	ctx := manifest.Context{Token: "api-bearer-tok"}
+	// AmbientCredentialsOK models the OPERATOR-LOCAL invocation this test is
+	// about — `bp bulldocs publish …` from a shell, where the process environment
+	// IS the requester's credential store, which is what ResolveWithSources
+	// produces. The env-first precedence asserted below is scoped to exactly that
+	// case now; the remote `--http` transport clears the flag and never
+	// substitutes a process secret for a caller's own (mcp_http_ingest_test.go).
+	ctx := manifest.Context{Token: "api-bearer-tok", AmbientCredentialsOK: true}
 
 	t.Run("BARKPARK_INGEST_TOKEN wins", func(t *testing.T) {
 		t.Setenv("BARKPARK_INGEST_TOKEN", "bp-ingest")
