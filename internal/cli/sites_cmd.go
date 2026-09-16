@@ -46,42 +46,27 @@ import (
 var uuidLike = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // runSites is the `bp sites <verb>` dispatcher. A bare `bp sites` is the list
-// view (the most common path). Any other verb routes to its sub-command.
+// view (the most common path). Every other verb resolves through THE SITE
+// COMMAND MATRIX (site_verb_matrix.go) — the one table `bp cloud site` routes
+// through too, so the two spellings cannot drift into two behaviours. There is
+// deliberately no switch here: a `case` arm added back would be a verb only one
+// noun answers, which is the defect the matrix retired.
 func runSites(out *writer, args []string) int {
 	if len(args) == 0 {
 		return runSitesList(out, nil)
 	}
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
-			printSitesHelp(out)
-			return exitOK
+	// `preflight` and `matrix` own their OWN -h pages, so route them before the
+	// family-level help below would swallow it (the same carve-out runCloudSite
+	// makes — one behaviour, two nouns).
+	if verb := args[0]; verb != "preflight" && verb != "matrix" {
+		for _, a := range args {
+			if a == "-h" || a == "--help" {
+				printSitesHelp(out)
+				return exitOK
+			}
 		}
 	}
-
-	verb := args[0]
-	rest := args[1:]
-	switch verb {
-	case "ls", "list":
-		return runSitesList(out, rest)
-	case "show", "get":
-		return runSitesShow(out, rest)
-	case "create", "new":
-		return runSitesCreate(out, rest)
-	case "deployments", "deploys":
-		return runSitesDeployments(out, rest)
-	case "env":
-		return runSitesEnv(out, rest)
-	case "domain", "domains":
-		return runSitesDomain(out, rest)
-	case "github":
-		return runSitesGithub(out, rest)
-	case "logs", "log":
-		return runSitesLogs(out, rest)
-	default:
-		// A bare positional that isn't a known verb is treated as the list view
-		// being passed extra junk — surface a usage error rather than guessing.
-		return useError(out, "usage", fmt.Sprintf("unknown sites command %q (run `bp sites -h` for usage)", verb), exitUsage)
-	}
+	return dispatchSiteVerb(out, globals{}, siteSpellingFleet, args[0], args[1:])
 }
 
 // runSitesList renders `bp sites` — the fleet of hosted sites under the user's

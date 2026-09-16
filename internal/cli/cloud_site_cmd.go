@@ -65,11 +65,12 @@ const siteDeployPollMax = 300
 // of `deploy` (both enqueue a build); `sites` is accepted as a plural alias at
 // the dispatcher above.
 func runCloudSite(out *writer, g globals, args []string) int {
-	// `preflight` owns its OWN -h/--help (a dedicated page that disambiguates it
-	// from the box-side --rollback-preflight), so route it before the family-level
-	// help catch below would swallow `preflight -h` into the family usage.
-	isPreflight := len(args) > 0 && args[0] == "preflight"
-	if !isPreflight {
+	// `preflight` and `matrix` own their OWN -h/--help (a dedicated page that
+	// disambiguates preflight from the box-side --rollback-preflight), so route
+	// them before the family-level help catch below would swallow `preflight -h`
+	// into the family usage.
+	own := len(args) > 0 && (args[0] == "preflight" || args[0] == "matrix")
+	if !own {
 		for _, a := range args {
 			if a == "-h" || a == "--help" {
 				printCloudSiteHelp(out)
@@ -84,48 +85,18 @@ func runCloudSite(out *writer, g globals, args []string) int {
 	if len(args) == 0 {
 		return useError(out, "usage", "missing site command (run `bp cloud site -h` for usage)", exitUsage)
 	}
-	verb := args[0]
-	rest := args[1:]
-	switch verb {
-	// THE TWO-NOUN RULING (dr-w14-bl-owner-cannot-list-own-sites): `bp sites`
-	// and `bp cloud site` are BOTH real and deliberately split — `bp sites` is
-	// the team-wide site surface (list/show/create/deployments/env/domains),
-	// `bp cloud site` is the spawner's lifecycle verbs on ONE site
-	// (create/deploy/rollback/delete/status/open/preflight/settings). The
-	// overlap is resolved by ALIASING, not by exclusivity: enumeration lives in
-	// runSitesList and `bp cloud site ls` routes THERE, so an owner standing at
-	// either noun can enumerate their own sites — the wave-14 verifier found
-	// their 13 sites only by curling /v1/sites because THIS noun refused `ls`
-	// while the other noun answered it.
-	case "ls", "list":
-		return runSitesList(out, rest)
-	case "create":
-		return runCloudSiteCreate(out, g, rest)
-	case "deploy", "build":
-		return runCloudSiteDeploy(out, g, rest)
-	case "rollback":
-		return runCloudSiteRollback(out, g, rest)
-	case "delete", "rm":
-		return runCloudSiteDelete(out, g, rest)
-	case "status":
-		return runCloudSiteStatus(out, g, rest)
-	// `doctor` is the READ-ONLY diagnosis (ssw8-site-doctor): `status` answers
-	// "what is this site's newest/live build", `doctor` answers "which of the
-	// substrates a site occupies actually exist, and what repairs the ones that
-	// do not". They are deliberately separate verbs — folding the per-substrate
-	// report into `status` would put a ten-probe synchronous read behind the
-	// verb people run in a loop.
-	case "doctor":
-		return runCloudSiteDoctor(out, g, rest)
-	case "open":
-		return runCloudSiteOpen(out, g, rest)
-	case "preflight":
-		return runCloudSitePreflight(out, g, rest)
-	case "settings":
-		return runCloudSiteSettings(out, g, rest)
-	default:
-		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage; to list your team's sites: `bp sites` or `bp cloud site ls`)", verb), exitUsage)
-	}
+	// THE TWO-NOUN RULING, generalised (site-spawner-backlog-cli-unify). `bp
+	// sites` and `bp cloud site` are two SPELLINGS of one tree, not two trees:
+	// every verb is declared ONCE in siteVerbMatrix (site_verb_matrix.go) and
+	// both dispatchers route through it, so a shared verb reaches the same func
+	// value — same request, same bytes, same exit code — at either noun. The
+	// wave-14 verifier found their 13 sites only by curling /v1/sites because
+	// THIS noun refused `ls` while the other answered it; thirteen more verbs
+	// had the same shape until the matrix landed. `create` stays
+	// spelling-bound because the kind difference is real, and `deploy` at the
+	// fleet noun REFUSES by naming both doors — see the matrix's KindNote
+	// column, or run `bp cloud site matrix`.
+	return dispatchSiteVerb(out, g, siteSpellingSpawner, args[0], args[1:])
 }
 
 // siteCloudConfig loads the config and gates on a Cloud session — the shared
