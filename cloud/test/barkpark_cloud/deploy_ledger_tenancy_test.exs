@@ -123,6 +123,19 @@ defmodule BarkparkCloud.DeployLedgerTenancyTest do
 
   defp live(n), do: for(_ <- 1..n, do: %{status: "live"})
 
+  # A DEFERRAL IS NOT A FAILURE AND NOT A SUCCESS — it is inside `volume` and
+  # outside both numerators, which is the whole reason `live_rate` exists beside
+  # `failure_rate` on the per-site row. `BOX_AT_CAPACITY_DEFERRED` is the class
+  # `classify/1` reads off this reason on a `deferred` row.
+  defp deferred(n) do
+    for _ <- 1..n,
+        do: %{
+          status: "deferred",
+          stage: "start",
+          failure_reason: "the instance refused the deploy (HTTP 409): already_running"
+        }
+  end
+
   ## ── Credentials ───────────────────────────────────────────────────────────
 
   defp session_token(user) do
@@ -423,6 +436,169 @@ defmodule BarkparkCloud.DeployLedgerTenancyTest do
 
       assert conn.status == 422
       assert body(conn)["error"] == "invalid_window"
+    end
+  end
+
+  ## ── 6b. Per-site live-per-attempt reaches the OWNER ───────────────────────
+  #
+  # dr-w16-bl-live-per-attempt-reaches-the-site-owner. The decision on WHICH
+  # owner surface carries this number was RULED by team-lead on 2026-09-02 and
+  # recorded on the row itself (`disposition_reason`: "the console owns it,
+  # ceded by cch") — `cloud/priv/static/app.js` is cloud-console-hardening's
+  # fence, so the surface is THIS route's payload, the team-scoped census a real
+  # site owner can reach with a session OR a read PAT.
+  #
+  # WHY THE NUMBER HAD TO EXIST AT ALL: per-site `failure_rate` goes blind
+  # across the deferral relabel. On 2026-08-07 site `search-capstone` read
+  # att=321 / failed=5 — 1.56%, the healthiest it had ever looked — while 233 of
+  # those 321 attempts (72.6%) deployed NOTHING and only 25.86% went live. The
+  # `deferred` fixture below is that shape in miniature.
+
+  describe "the site owner's own census carries live-per-attempt, per site" do
+    test "sites[].live_rate is the SAME rate-node shape as sites[].failure_rate" do
+      {user, team} = owned_team()
+      site = site_fixture(team)
+
+      # 6 live, 3 failed, 1 deferred — 10 attempted. `failure_rate` and
+      # `live_rate` are denominated on the SAME attempted door, so both carry
+      # sample 10 and the deferral sits inside it.
+      deployments!(site, live(6))
+      deployments!(site, failed(3))
+      deployments!(site, deferred(1))
+
+      conn = call("/v1/deploy-ledger/census?#{@window}", session_token(user))
+      assert conn.status == 200
+      [row] = body(conn)["sites"]
+
+      assert row["site_id"] == site.id
+      assert row["volume"] == 10
+      assert row["live"] == 6
+      # THE DEFERRAL VOLUME, beside the rate and on the owner's own read.
+      assert row["deferred"] == 1
+
+      # SAME SHAPE, asserted as a KEY SET and not key by key: a live rate that
+      # dropped `min_sample` or `basis` would still pass a spot check on `pct`.
+      assert Map.keys(row["live_rate"]) |> Enum.sort() ==
+               Map.keys(row["failure_rate"]) |> Enum.sort()
+
+      assert row["live_rate"]["numerator"] == 6
+      assert row["live_rate"]["sample"] == 10
+      assert row["live_rate"]["min_sample"] == DeployLedger.min_sample()
+      assert row["live_rate"]["basis"] == row["failure_rate"]["basis"]
+    end
+
+    test "a site at n=1 REFUSES — the node says `refused`, never 100%" do
+      {user, team} = owned_team()
+      site = site_fixture(team)
+      deployments!(site, live(1))
+
+      conn = call("/v1/deploy-ledger/census?#{@window}", session_token(user))
+      assert conn.status == 200
+      [row] = body(conn)["sites"]
+
+      # THE WHOLE POINT. One live deploy out of one attempt is 100% by
+      # arithmetic and unknowable in fact, and a success percentage off n=1 is
+      # exactly as dishonest as a failure percentage off n=1.
+      assert row["live_rate"]["refused"] == true
+      assert row["live_rate"]["pct"] == nil
+      refute row["live_rate"]["pct"] == 100.0
+      assert row["live_rate"]["sample"] == 1
+      assert row["live_rate"]["numerator"] == 1
+
+      assert row["live_rate"]["reason"] ==
+               "sample 1 below min_sample #{DeployLedger.min_sample()}"
+    end
+
+    test "ABOVE the floor the SAME node prints a number — the refusal is the sample, not the key" do
+      {user, team} = owned_team()
+      site = site_fixture(team)
+
+      # The refusal arm above is only meaningful if this arm can pass: a node
+      # that refused unconditionally would green the n=1 test while measuring
+      # nothing at all.
+      n = DeployLedger.min_sample()
+      deployments!(site, live(n))
+      deployments!(site, failed(n))
+
+      conn = call("/v1/deploy-ledger/census?#{@window}", session_token(user))
+      [row] = body(conn)["sites"]
+
+      assert row["live_rate"]["refused"] == false
+      assert row["live_rate"]["pct"] == 50.0
+      assert row["live_rate"]["sample"] == 2 * n
+      assert row["live_rate"]["reason"] == nil
+    end
+
+    test "THE DEFERRAL RELABEL: live_rate holds while failure_rate collapses" do
+      {user, team} = owned_team()
+      site = site_fixture(team)
+
+      # 220 attempts, 60 live. Of the other 160, 150 settled `deferred` and 10
+      # `failed` — the 2026-08-07 shape. `failure_rate` reads 4.55% (healthy!),
+      # `live_rate` reads 27.27% and is the only number that did not move when
+      # the refusals changed their name.
+      deployments!(site, live(60))
+      deployments!(site, failed(10))
+      deployments!(site, deferred(150))
+
+      conn = call("/v1/deploy-ledger/census?#{@window}", session_token(user))
+      [row] = body(conn)["sites"]
+
+      assert row["volume"] == 220
+      assert row["deferred"] == 150
+      assert row["failure_rate"]["pct"] == 4.55
+      assert row["live_rate"]["pct"] == 27.27
+
+      assert row["live_rate"]["pct"] < row["failure_rate"]["pct"] * 10,
+             "the fixture stopped exhibiting the relabel gap this arm exists for"
+    end
+
+    # THE LOW-PRIVILEGE ARM. A number that reaches its owner is only a feature
+    # if it does not also reach everybody else: the failure mode this codebase
+    # keeps filing rows about is a fence that fails OPEN, and "the owner can now
+    # see it" is half a proof. Both credentials are exercised from the FOREIGN
+    # side, because the PAT path and the session path are separate gates.
+    test "a NON-MEMBER cannot read another team's live_rate — session or PAT" do
+      {_owner, team_a} = owned_team()
+      site_a = site_fixture(team_a)
+      deployments!(site_a, live(9))
+
+      {outsider, team_b} = owned_team()
+      _site_b = site_fixture(team_b)
+
+      for {label, token} <-
+            [{"session", session_token(outsider)}, {"read PAT", read_pat(outsider, team_b)}] do
+        # Naming team A's site id explicitly — the strongest form of the ask.
+        conn =
+          call("/v1/deploy-ledger/census?#{@window}&site_ids=#{site_a.id}", token)
+
+        assert conn.status == 200, "#{label}: expected 200, got #{conn.status}"
+        b = body(conn)
+
+        refute site_a.id in rendered_site_ids(b),
+               "#{label}: team #{team_a.slug}'s site #{site_a.id} leaked into team " <>
+                 "#{team_b.slug}'s census body: #{inspect(rendered_site_ids(b))}"
+
+        assert b["sites"] == [], "#{label}: a foreign site row rendered at all"
+
+        # AND THE FLEET TOTAL TOO: a `live_rate` computed before the scope is
+        # applied would leak the owner's number without naming their site.
+        assert b["live_rate"]["numerator"] == 0,
+               "#{label}: team #{team_a.slug}'s 9 live rows reached the fleet " <>
+                 "numerator of team #{team_b.slug}'s census"
+
+        assert b["volume"] == 0
+      end
+    end
+
+    test "an unauthenticated caller reads no live_rate at all" do
+      {_owner, team_a} = owned_team()
+      site_a = site_fixture(team_a)
+      deployments!(site_a, live(9))
+
+      conn = conn(:get, "/v1/deploy-ledger/census?#{@window}") |> Router.call(@opts)
+      assert conn.status == 401
+      refute conn.resp_body =~ "live_rate"
     end
   end
 

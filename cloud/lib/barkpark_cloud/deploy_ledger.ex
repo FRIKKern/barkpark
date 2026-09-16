@@ -1550,6 +1550,15 @@ defmodule BarkparkCloud.DeployLedger do
   `failure_rate`, with the same `@min_sample` refusal: a success percentage off
   n=10 is exactly as dishonest as a failure percentage off n=10.
 
+  EVERY `sites[]` row carries its OWN `live_rate`, same node and same refusal
+  floor (dr-w16-bl-live-per-attempt-reaches-the-site-owner). A fleet-level live
+  rate with no per-site twin sends the reader who wants to know WHICH site went
+  blind across the deferral relabel back to the diluted number — the same
+  argument that already put `terminal_failure_rate` on the site row. It reaches
+  the SITE OWNER through `GET /v1/deploy-ledger/census`, which is scoped to the
+  caller's own sites; a non-member's census never carries another team's row and
+  never folds their `live` rows into its own numerator.
+
   `failure_rate` and `volume` are UNCHANGED by all of this (D43): the new keys
   are read off the same `attempted`/`settled` split that already existed, and no
   row moves cohorts.
@@ -2571,6 +2580,40 @@ defmodule BarkparkCloud.DeployLedger do
       # site that was. A fleet-level pair with no per-site pair sends that reader
       # back to the diluted number.
       terminal_failure_rate: rate_basis(failed, failed + live, @basis_terminal),
+      # PER-SITE LIVE-PER-ATTEMPT — the number that reaches the SITE OWNER
+      # (dr-w16-bl-live-per-attempt-reaches-the-site-owner).
+      #
+      # THE DECISION, RECORDED AND NOT ASSUMED. Which owner-facing surface
+      # carries live-per-attempt and the deferral volume was RULED by team-lead
+      # on 2026-09-02 and written onto the row
+      # (`dr-w16-bl-live-per-attempt-reaches-the-site-owner`, field
+      # `disposition_reason`): "the console owns it, ceded by cch." The ruling
+      # matters because `cloud/priv/static/app.js` is cloud-console-hardening's
+      # fence (D211c filed the SPA's deferral vocabulary separately), so the
+      # SPA was never this slice's to edit. The surface is therefore the census
+      # PAYLOAD on `GET /v1/deploy-ledger/census` — the team-scoped read a real
+      # site owner can actually reach (`require_user_or_pat` +
+      # `require_ability("read")`, dr-w16-s6), as against
+      # `/v1/operator/deploy-ledger/census`, whose `require_platform_operator`
+      # gate has a population of ZERO in production. `sites[].deferred` is
+      # already on that payload; `sites[].live_rate` was the half missing.
+      #
+      # WHY PER-SITE AND WHY THIS NUMBER. Per-site `failure_rate` goes BLIND
+      # across the deferral relabel: on 2026-08-07 site `search-capstone` read
+      # att=321, failed=5 — 1.56%, the healthiest it has ever looked — while 233
+      # of those 321 attempts (72.6%) deployed NOTHING and only 25.86% went
+      # live; the same site read 58.5% failed on 08-06. `live / volume` is the
+      # one per-site quantity that cannot be moved by renaming a refusal
+      # (D229), because both its numerator and its denominator are
+      # label-independent.
+      #
+      # THE SAME NODE, NOT A NEW SHAPE: `rate_basis/3` over the same
+      # `@basis_attempted` denominator the fleet total uses, so a site at n=1
+      # answers `refused: true, pct: nil, reason: "sample 1 below min_sample
+      # 200"` — never `100%`. A bespoke percentage here would be a success
+      # number with no refusal floor, which is the one thing this epic exists to
+      # stop shipping.
+      live_rate: rate_basis(live, volume, @basis_attempted),
       top_class: top_class(failed_rows)
     }
   end

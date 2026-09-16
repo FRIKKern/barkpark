@@ -2999,7 +2999,19 @@ type DeployCensusSite struct {
 	// json.Unmarshal would drop the per-site key on the floor while every
 	// name-based guard stayed green.
 	TerminalFailureRate *DeployRate `json:"terminal_failure_rate"`
-	TopClass            *string     `json:"top_class"`
+	// LiveRate is per-site LIVE-PER-ATTEMPT (`live / volume`), the number
+	// dr-w16-bl-live-per-attempt-reaches-the-site-owner put on the owner's own
+	// read. It is declared HERE and not left to ride the file-global tag union
+	// on DeployCensus's identically-named field for the same reason
+	// TerminalFailureRate is (charter D260): json.Unmarshal would drop the
+	// per-site key on the floor while every name-based guard stayed green, and
+	// cloud's OFF-STRUCT census reds by name when it does.
+	//
+	// A POINTER, like its neighbours: a control plane predating this slice
+	// sends no per-site live rate, and an absence must not decode into a site
+	// whose live rate is 0% of 0 rows.
+	LiveRate *DeployRate `json:"live_rate"`
+	TopClass *string     `json:"top_class"`
 }
 
 // DeployCensusWindow is the PINNED window the census was taken over, echoed back
