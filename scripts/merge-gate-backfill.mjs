@@ -622,7 +622,7 @@ async function runTwice(argv) {
   const after = buildReport(applied, { mode: "SIMULATED-APPLY", pageSize, effectivePageSize: b.rep.enumeration.effective_page_size, pages: b.rep.enumeration.pages, notes: [], statuses: b.rep.population.statuses, perStatus: b.rep.population.per_status });
   console.log(`SIMULATED-APPLY: newly_flaggable after applying sweep 1's ${target.size} rows = ${after.newly_flaggable.length}`);
   console.log(`SIMULATED-APPLY: unwritable still NOT counted as applied = ${after.unwritable.length}`);
-  console.log(`WORDING CENSUS (open rows only): ${JSON.stringify(b.rep.wording_census)}`);
+  console.log(`WORDING CENSUS (${b.rep.population.statuses.join(",")}): ${JSON.stringify(b.rep.wording_census)}`);
   process.exit(onlyA.length + onlyB.length === 0 ? 0 : 1);
 }
 
