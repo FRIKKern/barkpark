@@ -32,6 +32,63 @@ defmodule BarkparkCloud.Web.RouterBuildLogUrlReachabilityTest do
   client, and a denylist would hand the next builder the same lie. The
   non-http arm below carries one of each.
 
+  ## THE SURFACE CENSUS (every cloud/ site that renders or links this key)
+
+  Measured with `grep -rn "build_log_url" cloud/` on this branch's base:
+
+    * `web/router.ex` `deployment_json/1` — THE ONE READER SURFACE. Reached by
+      `GET /v1/sites/:id/deployments`, `GET /v1/sites/:id/deployments/:dep_id`
+      (through `site_deployment_json/3`), `GET /v1/sites/:id/previews`, the
+      rollback/promote/artifact responses, and the builder transition echo. This
+      is the surface the fix changes; the three arms above are its guard.
+    * `web/router.ex` builder-intake `maybe_put(:build_log_url, params[…])` (two
+      call sites) — the WRITE side. Unchanged: the column keeps the worker's raw
+      report.
+    * `registry/deployment.ex` — the schema field, the transition changeset
+      allowlist, and the moduledoc (corrected in this commit).
+    * `registry.ex` — `transition_deployment/2`'s docstring plus two HONESTY LAW
+      comments that name this key as one the site list must NOT carry.
+    * `priv/static/app.js` — ZERO occurrences of `build_log_url`. The Console SPA
+      never renders or links it; there is no anchor to make honest.
+    * `priv/static/__preview__/scenarios.mjs` — the deployment fixture already
+      carries `build_log_url: null`.
+    * `priv/repo/migrations/20260627150100_create_deployments.exs` — the column.
+
+  No cloud/ surface renders the value as a link or a click-through. The claim of
+  retrievability was carried entirely by the KEY NAME on the payload, which is
+  what this commit withdraws for unopenable schemes.
+
+  ## CRITERION 0 — the population, and what is BLOCKED
+
+  The query (runs against the `deployments` table as-is):
+
+      SELECT count(*)                                              AS deployments_total,
+             count(build_log_url)                                  AS with_build_log_url,
+             count(*) FILTER (WHERE build_log_url LIKE 'file://%') AS scheme_file,
+             count(*) FILTER (WHERE build_log_url LIKE 'http://%'
+                                 OR build_log_url LIKE 'https://%') AS scheme_http_s,
+             count(*) FILTER (WHERE build_log_url IS NOT NULL
+                                AND build_log_url NOT LIKE 'file://%'
+                                AND build_log_url NOT LIKE 'http://%'
+                                AND build_log_url NOT LIKE 'https://%') AS scheme_other
+      FROM deployments;
+
+  Counts REACHABLE from this worktree, 2026-09-16:
+
+      barkpark_cloud_dev   → 0 | 0 | 0 | 0 | 0
+      barkpark_cloud_test  → 0 | 0 | 0 | 0 | 0
+
+  Both local databases hold ZERO deployment rows, so those counts measure the
+  query, not the world. That the arms DISCRIMINATE was proven separately by
+  running the identical predicates over a synthetic `VALUES` population of five
+  rows (two `file://`, one `https://`, one `s3://`, one NULL): the query returned
+  `5 | 4 | 2 | 1 | 1`, i.e. every arm fired. The local zero is a real zero.
+
+  THE PRODUCTION FIGURE IS BLOCKED ON THE OWNER. This worker has no production
+  database access and did not attempt any (prod DB reads are owner-only). No
+  production number is asserted anywhere in this commit. Running the query above
+  on `cloud-db-1` is the outstanding sub-item.
+
   ## OUT OF FENCE — deferred, with an owner
 
   Two in-code justifications cite "the durable log" to explain why a dropped
