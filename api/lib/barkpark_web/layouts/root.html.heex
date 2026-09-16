@@ -1853,6 +1853,30 @@
        so the shared hover lift needs a matching rule to reach link rows. */
     a.pane-item.nav-plugin-entry:hover { color: var(--fg); }
 
+    /* Desk search (Gyldendal parity E8). The box sits at the top of the ROOT
+       pane and looks like a pane row, not a form: no card, one hairline under
+       it, the magnifier and the clear button flanking a borderless input. */
+    .bp-desk-search {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-bottom: 1px solid var(--border-muted);
+      flex-shrink: 0;
+    }
+    .bp-desk-search-icon { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; }
+    .bp-desk-search-input {
+      flex: 1 1 auto; min-width: 0;
+      background: transparent; border: 0; box-shadow: none;
+      padding: 2px 0; font-size: var(--text-sm); color: var(--fg);
+    }
+    .bp-desk-search-input:focus { outline: none; box-shadow: none; }
+    .bp-desk-search-input::placeholder { color: var(--fg-muted); }
+    /* A hit is an <a>, so it needs the row's block layout and its own link
+       reset; the rest of the row look comes from .pane-doc-item above. */
+    .bp-desk-search-hit {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 12px; text-decoration: none;
+    }
+    .bp-desk-search-hit .pane-doc-sub { flex-shrink: 0; }
+
     .pane-doc-item {
       cursor: pointer;
       border-left: 3px solid transparent; transition: all var(--dur-1);

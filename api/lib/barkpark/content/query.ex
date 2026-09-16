@@ -2068,6 +2068,50 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  TYPELESS title search across every type the caller may see — the desk's own
+  search box (Gyldendal parity E8). `search_documents_by_title/5` answers for
+  ONE type, which the reference picker knows in advance; the desk does not.
+
+  Guard stack is `get_documents_by_ids/3`'s, the codebase's other TYPELESS
+  read, clause for clause: dataset + tenant (`scope_to_dataset`,
+  `scope_to_workspace_or_global`), the row/ownership ACL applied
+  UNCONDITIONALLY (a non-owner_scoped row carries a NULL `owner_id` and always
+  satisfies it, so this is byte-identical for those types and closes the leak
+  for owner_scoped ones), grants, and the schema-visibility clamp
+  (`restrict_to_visible_types/3` — allowlist, fails CLOSED to nothing).
+
+  `maybe_scope_to_owner/4` is deliberately NOT used: it keys on a single type.
+
+  Drafts are excluded — the desk lists published rows and their draft twin is
+  surfaced by the row's own pill, not as a second hit.
+  """
+  @spec search_documents_across_types(String.t(), String.t(), keyword(), pos_integer()) ::
+          [Document.t()]
+  def search_documents_across_types(query, dataset, opts \\ [], limit_n \\ 20)
+      when is_binary(query) do
+    case String.trim(query) do
+      "" ->
+        []
+
+      q ->
+        workspace_id = Keyword.get(opts, :workspace_id)
+        project_id = Keyword.get(opts, :project_id)
+
+        Document
+        |> where([d], ilike(d.title, ^like_contains(q)))
+        |> where([d], not like(d.doc_id, "drafts.%"))
+        |> scope_to_dataset(dataset, opts)
+        |> scope_to_workspace_or_global(workspace_id, project_id)
+        |> scope_to_owner(Keyword.get(opts, :caller_context))
+        |> maybe_scope_to_grants(opts)
+        |> restrict_to_visible_types(dataset, opts)
+        |> order_by([d], asc: d.title, asc: d.type, asc: d.doc_id)
+        |> limit(^limit_n)
+        |> Repo.all()
+    end
+  end
+
+  @doc """
   DISTINCT tag VALUES of `type` whose name matches `query` (case-insensitive
   substring) — the inverse of `docs_with_tag/4`. Where `docs_with_tag` fans a
   tag OUT to the papers carrying it, this gathers the tag NAMES themselves

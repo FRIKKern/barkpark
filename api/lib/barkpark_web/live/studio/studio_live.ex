@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Airdrop,
     Bulk,
     Delete,
+    DeskSearch,
     Discard,
     Doc,
     FieldBlocks,
@@ -361,6 +362,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("create-workspace", params, socket), do: Scope.create_workspace(params, socket)
   def handle_event("create-project", params, socket), do: Scope.create_project(params, socket)
   def handle_event("expand-pane", params, socket), do: Scope.expand_pane(params, socket)
+
+  def handle_event("desk-search", params, socket), do: DeskSearch.search(params, socket)
+  def handle_event("desk-search-clear", _params, socket), do: DeskSearch.clear(socket)
 
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
   def handle_event("save", params, socket), do: Fields.save(params, socket)
