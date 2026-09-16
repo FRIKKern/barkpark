@@ -164,8 +164,30 @@ function parseDecls(sel, body, type) {
           `\`.bp-paper-surface\` selector.)`
       );
     }
+    // An unmapped `var(--font*)` must NOT fall through. `?? value` silently
+    // copied the host-app var verbatim into the standalone bundle, where no
+    // `--font*` exists to resolve it and the declaration dies with no fallback —
+    // the exact failure FONT_LITERALS was added to prevent, made invisible by the
+    // fact that FONT_LITERALS is a THREE-KEY LIST and the fallback was silent.
+    // Proven 2026-09-16: `--paper-font-display: var(--font-display);` added to a
+    // paper-surface token scope landed byte-identically in
+    // api/assets/paper-editor/src/styles.css, and design/check.mjs,
+    // design/mirror-fence.test.mjs (7/7) and `paper-editor-mirror.mjs --check`
+    // (rc=0) were all green over it.
     const m = value.match(/^var\((--font[\w-]*)\)$/);
-    if (m) value = FONT_LITERALS[m[1]] ?? value;
+    if (m) {
+      const literal = FONT_LITERALS[m[1]];
+      if (literal === undefined)
+        throw new MirrorError(
+          `paper-surface.css token scope \`${sel.trim()}\` sets \`${name}\` to \`${value}\`, ` +
+            `a HOST-APP font var with no entry in FONT_LITERALS.\n  The standalone editor bundle ` +
+            `has no \`${m[1]}\` to resolve, so this declaration would ship dead. Add ` +
+            `\`"${m[1]}"\` to FONT_LITERALS in design/paper-editor-mirror.mjs with the literal ` +
+            `stack it should resolve to (known: ${Object.keys(FONT_LITERALS).join(", ")}), or give ` +
+            `the declaration an inline fallback (\`var(${m[1]}, <stack>)\`) so it is not a bare var.`,
+        );
+      value = literal;
+    }
     out.push([name, value]);
   }
   return out;
