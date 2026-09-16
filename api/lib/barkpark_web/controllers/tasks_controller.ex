@@ -1012,6 +1012,17 @@ defmodule BarkparkWeb.TasksController do
             params["criteria_unstated_override"] ||
               get_in(params, ["set", "criteria_unstated_override"])
           )
+          # `?dataset=` — the disambiguator the ambiguous_dataset refusal
+          # ADVERTISES (bp-task-verbs-500-on-cross-dataset-duplicate-slugs).
+          # `find_task_by_doc_id/2` has honoured it on every read door since the
+          # rule landed; this write door dropped it, so the claim refused and
+          # then refused its own escape hatch. Measured live on guerrilla
+          # 2026-09-16: GET `?dataset=production` -> 200 while POST
+          # `/claim?dataset=production` -> 409 (request_id GNW9zm1YCdlVXHsAADNB),
+          # which is what kept the eleven cross-dataset rows unclaimable — and
+          # therefore unstampable and uncloseable, every one of those verbs
+          # being claim-fenced.
+          |> Params.put_opt(:dataset, params["dataset"])
 
         # Snapshot the rail BEFORE the claim so rail_changed compares
         # observed_rail_rev against the rail the worker actually saw (not the
