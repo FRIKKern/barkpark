@@ -1909,8 +1909,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `paths/1` file set — the 7 non-test sources of internal/cloudclient — on
   # this tree AND on origin/main's copy of each file:
   #
-  #   origin/main : 372 names, 709 sites
-  #   this tree   : 373 names, 710 sites
+  #   origin/main : 372 names, 712 sites
+  #   this tree   : 373 names, 713 sites
   #   delta       : +1 name `refusal_phase`, no other name's multiplicity moved
   #
   # CONTROL: the origin/main arm of that same scan returns 372, byte-equal to
@@ -1920,8 +1920,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `@go_tag_sites` below does NOT move. `refusal_phase` is declared at exactly
   # ONE site, so it belongs to `@go_tag_pinned`'s once-declared class; a row for
   # it here would be a count of 1 and the partition test refuses those by name.
-  # The partition still reconstructs: 239 once-declared names + 471 sites of the
-  # 134 registered names = 710 = the measured site total.
+  # The partition still reconstructs: 237 once-declared names + 476 sites of the
+  # 136 registered names = 713 = the measured site total.
+  #
+  # RE-MEASURED ON THE REBASED TREE, not carried forward. The first measurement
+  # of this pin was taken against a base 36 commits older, where the same scan
+  # read 709 sites and the register held 134 names / 471 sites. Five cli PRs
+  # landed under it — at least one of them (#18511) moved `@go_tag_sites`
+  # itself — so every number in this block was re-read after `git rebase
+  # origin/main` rather than re-applied. The NAME count happens to be unchanged
+  # at 372 -> 373, and that coincidence is exactly why it had to be measured
+  # again instead of assumed: the SITE total moved by three underneath it while
+  # the name floor sat still.
   #
   # `@emitted_pinned` does NOT move either — this slice writes no Elixir
   # serializer. It declares a READER for a key `deployment_json/1` already
