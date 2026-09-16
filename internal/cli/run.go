@@ -2932,7 +2932,7 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 // stops after one line should get the fact. Centralised so every error path
 // (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
-	if renderErrorEnvelopeDetailed(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details) {
+	if renderErrorEnvelopeRemedy(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details, ae.datasetRemedy) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
@@ -2941,6 +2941,9 @@ func renderError(out *writer, ae apiError) {
 	}
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
+	}
+	if ae.datasetRemedy != "" {
+		out.errf("  bp: %s", ae.datasetRemedy)
 	}
 	humanErrorCode(out, ae.code)
 	if ae.requestID != "" {
@@ -2989,6 +2992,14 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 	// one-size-fits-all document answer. serverHint still outranks it — the
 	// server knows more than we do — and notFoundHint returns "" rather than
 	// inventing a verb the manifest cannot confirm.
+	// The twin-resolver refusal, restated in argv. Unlike the not_found branch
+	// this does NOT wait for an empty serverHint: the server's hint is present,
+	// correct, and the very thing being translated — it names `?dataset=`, which
+	// a bp caller has nowhere to type. So this is an ADDITIONAL line below the
+	// hint, never a replacement for it.
+	if ae.code == ambiguousDatasetCode {
+		ae.datasetRemedy = ambiguousDatasetRemedy(cmd, manifestRoster(m), ae.details)
+	}
 	if ae.code == "not_found" && ae.serverHint == "" {
 		ae.localHint = ""
 		if hinter != nil {
