@@ -12697,6 +12697,22 @@ defmodule BarkparkCloud.Web.Router do
       content_sha256: d.content_sha256,
       content_proof_meaning:
         BarkparkCloud.Notifications.Delivery.content_proof_meaning(d.content_sha256),
+      # dr-w29: WHAT IT SAID, in the two narrowest forms that say it. The
+      # rendered subject VERBATIM (or null — never truncated), and the numeric
+      # block read back OUT of that subject, integer values under a closed key
+      # set. The BODY is not here and is not stored: it names sites,
+      # environments and per-team deploy volume, and THIS payload is the one
+      # `/v1/operator/deliveries` serves cross-team. The full ruling is
+      # `Delivery.content_retention_ruling/0`; `content_block_meaning/2` travels
+      # beside the values for the `status_meaning` reason — a null must read as
+      # a claim about what was kept, not as a missing field.
+      content_subject: d.content_subject,
+      content_counts: d.content_counts,
+      content_block_meaning:
+        BarkparkCloud.Notifications.Delivery.content_block_meaning(
+          d.content_subject,
+          d.content_counts
+        ),
       inserted_at: d.inserted_at
     }
   end
