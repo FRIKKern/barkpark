@@ -110,6 +110,53 @@ FALSE NEGATIVES OF P3 (an unfalsifiable rerun P3 will NOT name)
   * NON-GREP RERUNS.  `git cat-file -e` / `git rev-list --count` shapes are not
     read at all.
 
+FOURTH PREDICATE — ORPHANED (the rerun outlived the reason it was written for)
+
+    T(R) = the PROBE SUBJECT of R.disposition_rerun: the grep pattern and the
+           path basename of `git grep -n <pat> origin/main -- <path>`, the sha
+           of `git rev-list --count origin/main..<sha>`, the path of
+           `git cat-file -e origin/main:<path>`.
+
+    ORPHANED(R) <=> T(R) != {} AND no t in T(R) occurs as a case-insensitive
+                    substring of R.disposition_reason.
+
+  This is P1 RUN BACKWARDS, and the direction is the whole point.  P1 asks
+  whether the rerun mentions the reason; it needs the reason to carry
+  backticks, so it abstains on 415 of 515 rows.  P4 asks whether the REASON
+  mentions what the rerun actually probes — and a rerun has a parseable
+  subject whether or not anyone backticked anything, so P4 reaches into the
+  ABSTAIN set by construction.
+
+  ORTHOGONAL TO P3, NOT A REFINEMENT OF IT.  P3 asks whether the rerun CAN go
+  red at all (a bare identifier tail cannot).  P4 asks whether the row it sits
+  on is the row it was written for.  A rerun can be perfectly falsifiable and
+  still be testing somebody else's claim; that is the whole of P4's subject.
+
+  WHY THE FIELD DESYNCS.  `disposition_reason` is REPLACED in place
+  (`bp task stage --note --supersede`); `disposition_rerun` is written by a
+  separate optional flag on the same call and is simply LEFT ALONE when the
+  call omits it.  So superseding a reason silently keeps the previous reason's
+  rerun, and the row goes on presenting a green, recent, symbol-specific probe
+  for a claim it no longer makes.  Every orphan this predicate names on the
+  live corpus has updated_at > inserted_at; none was born wrong.
+
+  NOT A DUPLICATE OF P2.  P2 (SHARED) says a rerun stands on k rows; it cannot
+  say which k-1 are wrong, and PDS-D391b ruled — correctly — that sharing
+  itself is honest.  P4 says WHICH rows the shared command was not written for,
+  by asking the rows rather than the group.  Measured: it CLEARS 192 rows P2
+  flags and NAMES 16 unique-rerun rows P2 cannot see.
+
+  FALSE POSITIVES OF P4
+    * A reason may turn on the symbol via a synonym, a caller, or a test name
+      the rerun greps instead — textual, the same hop P1 cannot follow.
+    * A rerun deliberately aimed at the INFRASTRUCTURE of the check rather than
+      the claim (rare; none seen on the live corpus).
+  FALSE NEGATIVES OF P4
+    * An INCIDENTAL mention of the probe token in a long multi-clause reason
+      passes on a coincidence, exactly as it does in P1.
+    * A rerun whose spelling this parser does not recognise yields T(R) == {}
+      and abstains.  The UNPARSED count is printed for that reason.
+
 CONTROLS
   Run with --selftest: two synthetic rows, one that MUST be named and one that
   MUST NOT, plus an assertion that the live corpus produces a non-empty anchor
@@ -257,6 +304,52 @@ def falsifiability(rerun):
     return "reference-tail", pats
 
 
+GREP_RERUN = re.compile(r"git\s+grep\s+(?:-\w+\s+)*(?P<pat>'[^']*'|\"[^\"]*\"|\S+)(?:\s+\S+)?(?:\s+--\s+(?P<path>\S+))?")
+REVLIST_RERUN = re.compile(r"git\s+rev-list\s+--count\s+\S*?\.\.(?P<sha>[0-9a-f]{7,40})")
+CATFILE_RERUN = re.compile(r"git\s+cat-file\s+-e\s+\S+?:(?P<path>\S+)")
+
+
+def probe_subject(rerun):
+    """T(R): what the rerun actually probes — grep pattern, sha, or path leaf."""
+    out = set()
+    if not rerun:
+        return out
+    m = REVLIST_RERUN.search(rerun)
+    if m:
+        out.add(m.group("sha"))
+    m = CATFILE_RERUN.search(rerun)
+    if m:
+        out.add(m.group("path").rsplit("/", 1)[-1])
+    m = GREP_RERUN.search(rerun)
+    if m:
+        pat = (m.group("pat") or "").strip("'\"")
+        if len(pat) >= MIN_ANCHOR_LEN:
+            out.add(pat)
+            # A multi-token pattern (`def drain_distribution`) is also probed by the
+            # identifier inside it — the same tokenisation `anchors()` applies to a
+            # backticked span, for the same reason: a reason that names the symbol
+            # but not the grep's exact spelling IS talking about what the rerun runs.
+            for w in WORD.findall(pat):
+                w = w.strip(".,:;()[]{}\"'")
+                if len(w) >= MIN_ANCHOR_LEN and (CODEISH.search(w) or len(w) >= 6):
+                    out.add(w)
+        path = m.group("path")
+        if path:
+            leaf = path.rsplit("/", 1)[-1]
+            if len(leaf) >= MIN_ANCHOR_LEN:
+                out.add(leaf)
+    return {t for t in out if len(t) >= MIN_ANCHOR_LEN}
+
+
+def orphaned(reason, rerun):
+    """-> ('orphaned'|'bound'|'unparsed', subject_set)"""
+    t = probe_subject(rerun)
+    if not t:
+        return "unparsed", t
+    low = (reason or "").lower()
+    return ("bound" if any(x.lower() in low for x in t) else "orphaned"), t
+
+
 def shared_groups(rows):
     """-> {rerun_string: [row, ...]} for every rerun used by more than one row."""
     by = {}
@@ -339,6 +432,34 @@ def selftest():
     v, _ = falsifiability("git grep -n -e 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex")
     print(f"control I (-e takes the pattern as its ARGUMENT, must still be named): {v}")
     ok &= v == "unfalsifiable-def"
+    # --- P4 controls (PDS-D751). J and K share a rerun BYTE-FOR-BYTE and must
+    # disagree: that pair is the mutation proof that P4's verdict is about the
+    # REASON and not about the command, which is exactly what separates it from
+    # P2 (SHARED). L pins the other two legal spellings and makes an unknown one
+    # abstain LOUDLY rather than read as bound; M pins the multi-token pattern
+    # binding on the identifier inside it.
+    v, t = orphaned(
+        "The premise expired; cancelled not done — see close_reason.",
+        "git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs",
+    )
+    print(f"control J (must be orphaned): {v}  subject={sorted(t)}")
+    ok &= v == "orphaned"
+    v, t = orphaned(
+        "Adopted for ROSTER HEADROOM: the roster was 450 of ROSTER_PAGE_LIMIT 500.",
+        "git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs",
+    )
+    print(f"control K (same rerun as J, must be bound): {v}")
+    ok &= v == "bound"
+    v, t = orphaned("nothing to do with it", "git rev-list --count origin/main..6dff811575c7 | grep -qx 0")
+    v2, t2 = orphaned("nothing", "bash scripts/whatever.sh --check")
+    print(f"control L (rev-list: {v} {sorted(t)} | unknown spelling: {v2})")
+    ok &= v == "orphaned" and "6dff811575c7" in t and v2 == "unparsed"
+    v, t = orphaned(
+        'the release exposes drain_distribution("24h") on the box',
+        "git grep -n 'def drain_distribution' origin/main -- cloud/lib/barkpark_cloud/release.ex",
+    )
+    print(f"control M (must be bound via token): {v}  subject={sorted(t)}")
+    ok &= v == "bound"
     print("SELFTEST", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -382,8 +503,22 @@ def main(argv):
     print(f"P3 reference-tail     {fals['reference-tail']}  (equally prefix-matching, DELIBERATELY not named — P3's declared blind spot, sized)")
     print(f"P3 anchored           {fals['anchored']}  (control: a non-zero here proves the tail test is not naming everything)")
     print(f"P3 no-git-grep        {fals['no-git-grep']}  (not read by this arm at all)")
+    # P4 — the binding axis (PDS-D751), same denominator again.
+    orph, bound, unparsed = [], 0, 0
+    for r in rows:
+        v, t = orphaned(r["reason"], r["rerun"])
+        if v == "orphaned":
+            orph.append(r)
+        elif v == "bound":
+            bound += 1
+        else:
+            unparsed += 1
+    print(f"P4 BOUND              {bound}  (the reason mentions what the rerun probes)")
+    print(f"P4 ORPHANED           {len(orph)}  (the rerun outlived the reason it was written for)")
+    print(f"P4 UNPARSED           {unparsed}  (control/blind spot: rerun spelling this parser does not recognise)")
     union = {r["id"] for r in named} | {r["id"] for v in groups.values() for r in v}
     print(f"UNION         {len(union)} rows named by P1 (anchor) or P2 (shared)")
+    print(f"UNION+P4      {len(union | {r['id'] for r in orph})} rows adding P4 (orphaned)")
     print()
     print("== P2 SHARED RERUN GROUPS (largest first) ==")
     for cmd, v in sorted(groups.items(), key=lambda kv: -len(kv[1])):
@@ -395,6 +530,13 @@ def main(argv):
         print(f"    title   : {r['title']}")
         print(f"    rerun   : {r['rerun'][:200]}")
         print(f"    pattern : {r['patterns']}  <- add the language's terminator")
+    print()
+    print("== P4 ORPHANED (rerun outlived its reason) ==")
+    for r in orph:
+        print(f"--- ORPHANED {r['id']}  [{r['lifecycle']}] claim={r['claim']}")
+        print(f"    title : {r['title']}")
+        print(f"    rerun : {r['rerun'][:160]}")
+        print(f"    reason: {(r['reason'] or '')[:160]}")
     print()
     print("== P1 NAMED ==")
     for r in named:
