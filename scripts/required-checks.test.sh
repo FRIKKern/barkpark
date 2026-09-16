@@ -4187,15 +4187,27 @@ rc_nonblocking_claims() {
 
 # One driver, pointed at a workflow dir / spec / doc, so every mutation below
 # re-runs the SAME code path rather than a look-alike.
-rc_gate_report() { # <workflow-dir> <spec-json> <doc>
-  local up all tgt
-  up="$(rc_transitive_upstreams "$1" "$2")"
+#
+# VARIADIC IN THE DOC, AND THE DERIVATION IS HOISTED OUT OF THE LOOP. The corpus
+# is now every doc the doc contract governs (~143 files), not one; re-deriving
+# the upstream graph per file cost ~2.5s each and the measurement run took over
+# ten minutes before the hoist and 18s after. The reports are ORDERED per doc and
+# each CLAIM carries its file as a TRAILING field, so the existing
+# `^CLAIM<TAB><name><TAB>` greps in the mutations below keep matching unchanged.
+rc_gate_report() { # <workflow-dir> <spec-json> <doc>...
+  local up all tgt wfdir spec d
+  wfdir="$1"; spec="$2"; shift 2
+  up="$(rc_transitive_upstreams "$wfdir" "$spec")"
   grep '^UNRESOLVED' <<<"$up" || true
   all="$TMP/rc19-all.txt"; tgt="$TMP/rc19-tgt.txt"
-  rc_all_job_names "$(rc_job_index "$1")" | sort -u > "$all"
+  rc_all_job_names "$(rc_job_index "$wfdir")" | sort -u > "$all"
   grep '^JOB' <<<"$up" | cut -f2 | sort -u > "$tgt"
   [ -s "$tgt" ] || printf 'UNRESOLVED\tno required aggregator resolved to a single upstream job — the derivation produced an empty target set\n'
-  rc_nonblocking_claims "$3" "$all" "$tgt"
+  for d in "$@"; do
+    [ -f "$d" ] || { printf 'UNRESOLVED\tcorpus member %s does not exist\n' "$d"; continue; }
+    rc_nonblocking_claims "$d" "$all" "$tgt" \
+      | awk -F'\t' -v f="$d" 'BEGIN { OFS = "\t" } { print $0, f }'
+  done
 }
 
 # Job ids carrying a JOB-LEVEL `continue-on-error: true`. Step-level ones are
@@ -4258,6 +4270,90 @@ rc_needs_lineno() { # <workflow-file> <job-key>
   ' "$1"
 }
 
+# ── THE CORPUS, AS A PREDICATE (task-4f686b3c70162907) ───────────────────────
+#
+# WHAT IT WAS. One file: docs/ops/merge-gates.md, the `canonical-for` owner. A
+# false "does not block" sentence about a blocking upstream was caught there and
+# NOWHERE ELSE — a card, docs/setup/*, the router, any of them could carry the
+# same inversion unwatched, and an agent is just as likely to read it there.
+#
+# WHY NOT A LIST OF FILENAMES. The enumeration would be a snapshot: it goes
+# stale the instant someone adds a doc, and a guard that silently stops covering
+# new material is the SAME defect class this section exists to catch. So the
+# corpus is derived.
+#
+# THE PREDICATE, AND WHY THIS ONE. It is the doc contract's own jurisdiction,
+# read from the contract's own enforcer: exactly the file set that
+# docs-anchors-check.sh §4 (G1) requires a `doc-tier` header on — every
+# non-fixture `*.md` under docs/, plus every CLAUDE.md / AGENTS.md within two
+# levels of the root — minus `doc-tier: cold`. Two properties fall out for free
+# that a hand-rolled find would not have: a new doc enters this guard the moment
+# it enters G1, and because G1 already REDS on a header-less member, the
+# UNTIERED refusal below is satisfiable rather than decorative.
+#
+# COLD IS EXCLUDED BY THE CONTRACT, NOT BY A FAVOUR. CLAUDE.md's doc contract
+# defines cold as retired — "never load" — and requires a dated HISTORICAL
+# RECORD banner on its commands. A retired page recording what used to be true
+# is not teaching anybody anything, and reddening on it would push a fix into a
+# file nobody may load. Same reasoning §18 applies to `no rulesets`, and the
+# exemption is keyed on the tier header, never on a path.
+#
+# WHAT IS DELIBERATELY OUT, MEASURED RATHER THAN ASSUMED. `.claude/workflows/`
+# epic charters. Running the unchanged phrase set over all 244 tracked docs +
+# charters scored 184 CLAIM lines: 182 in bp-cloud-console-hardening-charter.md,
+# 2 in bp-deploy-reliability-charter.md, and ZERO across all of docs/ and every
+# CLAUDE.md. All 184 reduce to 14 distinct sentences, every one of them prose
+# ABOUT this very defect class ("#11377 is precedent AGAINST making REFUSED
+# non-blocking", "A comment that tells a builder their red is advisory when it
+# will in fact block their merge is this wave's thesis"), multiplied out by the
+# subject-carry across a charter's very long analytic blocks. A charter is a
+# dated working record of an argument, not a page that teaches a reader how the
+# gates behave; including it would buy 0 true positives for 184 false ones and
+# the section would be silenced inside a day. That is a measurement, not a
+# preference, and the numbers are here so a future reader can re-take them.
+#
+# THE RESULT OF THE WIDENING, STATED UP FRONT: 0 hits across the whole widened
+# corpus. A clean widening is exactly the shape of a green with no subject, so
+# the corpus is never trusted to be non-empty (the floor clause), and mutation 7
+# below plants an overclaim in a NEWLY covered doc and proves it reds while the
+# old single-file corpus walks past it.
+
+# The G1 header line: the first line, or the first non-empty line after a leading
+# YAML frontmatter block. Deliberately a re-implementation of
+# docs-anchors-check.sh's `header_line` rather than a source of it — the same
+# reason rc_job_index does not share the generator's parser.
+rc_doc_header_line() { # <file>
+  local f="$1" first
+  first="$(head -n 1 "$f")"
+  case "$first" in '<!-- doc-tier:'*) printf '%s\n' "$first"; return 0 ;; esac
+  [ "$first" = "---" ] || return 0
+  awk 'NR == 1 { next } /^---$/ { fm = 1; next } fm && NF { print; exit }' "$f"
+}
+
+# `<tier><TAB><repo-relative path>` for every doc under the contract, where tier
+# is agent / human / cold / UNTIERED.
+rc_doc_corpus() { # <repo-root>
+  local root="$1" f h tier
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    h="$(rc_doc_header_line "$root/$f")"
+    case "$h" in
+      *'doc-tier: agent'*) tier=agent ;;
+      *'doc-tier: human'*) tier=human ;;
+      *'doc-tier: cold'*)  tier=cold ;;
+      *)                   tier=UNTIERED ;;
+    esac
+    printf '%s\t%s\n' "$tier" "$f"
+  done <<EOF
+$( cd "$root" && {
+     find docs -name '*.md' -not -path 'docs/cli/fixtures/*'
+     find . -maxdepth 2 \( -name 'CLAUDE.md' -o -name 'AGENTS.md' \) \
+       -not -path './_attic/*' -not -path './node_modules/*' \
+       -not -path './web/CLAUDE.md'
+   } | sed 's|^\./||' | sort -u )
+EOF
+}
+
 RC19_TARGETS="$(rc_transitive_upstreams "$REPO_ROOT/.github/workflows" "$SPEC" | grep '^JOB' | cut -f2 | sort -u | tr '\n' ' ')"
 if [ -n "$RC19_TARGETS" ]; then
   ok "derived the required aggregators' transitive upstreams from source, nothing typed: $RC19_TARGETS"
@@ -4265,11 +4361,41 @@ else
   bad "no transitive upstreams derived — the guard would pass by having nothing to check"
 fi
 
-RC19_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
-if [ -z "$RC19_OUT" ]; then
-  ok "merge-gates.md calls no transitive upstream of a required aggregator non-blocking"
+RC19_CORPUS="$(rc_doc_corpus "$REPO_ROOT")"
+RC19_SCAN="$(awk -F'\t' '$1 == "agent" || $1 == "human" { print $2 }' <<<"$RC19_CORPUS")"
+RC19_UNTIERED="$(awk -F'\t' '$1 == "UNTIERED" { print $2 }' <<<"$RC19_CORPUS")"
+RC19_SCAN_N="$(grep -c . <<<"$RC19_SCAN" || true)"
+RC19_COLD_N="$(awk -F'\t' '$1 == "cold"' <<<"$RC19_CORPUS" | grep -c . || true)"
+
+# THE FLOOR. A predicate that silently resolves to nothing — a renamed docs/
+# tree, a `find` that stopped matching — would make every clause below pass by
+# having no subject, which is the exact failure this suite exists to delete. The
+# floor is a PROPERTY, not a pinned count: the corpus must still contain the one
+# file §19 covered before the widening, and it must contain more than that file.
+# The size itself is REPORTED, on §20 clause 6's precedent, so a reader watches
+# it move without a ratchet reddening when the tree legitimately grows or shrinks.
+if grep -qx 'docs/ops/merge-gates.md' <<<"$RC19_SCAN" && [ "$RC19_SCAN_N" -gt 1 ]; then
+  ok "the doc corpus is DERIVED from the doc contract's own jurisdiction, nothing typed: $RC19_SCAN_N agent/human doc(s) scanned, $RC19_COLD_N cold doc(s) exempt by tier header, and docs/ops/merge-gates.md — §19's entire corpus before this — is still one of them"
 else
-  bad "merge-gates.md tells a reader that a check which reds a REQUIRED aggregator cannot stop a merge:"
+  bad "the derived doc corpus lost its floor ($RC19_SCAN_N file(s), merge-gates.md present: $(grep -qx 'docs/ops/merge-gates.md' <<<"$RC19_SCAN" && echo yes || echo NO)) — every clause below would pass by having nothing to read"
+fi
+
+# THE REFUSAL. A doc under the contract with no tier header is neither scanned
+# nor honestly exempt: it is a hole. docs-anchors-check.sh G1 reds on exactly
+# this, so the set is empty today and this clause says so rather than assuming
+# it — the same fail-closed shape as UNRESOLVED above, one jurisdiction over.
+if [ -z "$RC19_UNTIERED" ]; then
+  ok "…and every member of that corpus declares a tier, so nothing sits in it un-scanned and un-exempt"
+else
+  bad "doc(s) under the contract carry no doc-tier header — they are in neither the scan nor the cold exemption:"
+  printf '%s\n' "$RC19_UNTIERED" | sed 's/^/       /' >&2
+fi
+
+RC19_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" $RC19_SCAN)"
+if [ -z "$RC19_OUT" ]; then
+  ok "no agent- or human-tier doc calls a transitive upstream of a required aggregator non-blocking ($RC19_SCAN_N doc(s) read, was 1)"
+else
+  bad "a doc tells a reader that a check which reds a REQUIRED aggregator cannot stop a merge (file is the last field):"
   printf '%s\n' "$RC19_OUT" | sed 's/^/       /' >&2
 fi
 
@@ -4414,6 +4540,68 @@ if ! grep -qx 'mix-prod-compile' \
   ok "…and dropping a context from the SPEC drops its upstreams — the required list is read, not hardcoded"
 else
   bad "\`mix-prod-compile\` survived removing \`Elixir gate\` from the spec — the target set is typed into this file"
+fi
+
+# MUTATION 7 — THE VACUITY CONTROL FOR THE WIDENING (task-4f686b3c70162907).
+# The widened scan came back CLEAN on its first run, over ~143 docs. A clean
+# sweep is indistinguishable from a sweep that reads nothing, and this section's
+# whole corpus grew by two orders of magnitude in one commit — so "0 hits" is
+# not evidence until a planted overclaim in a NEWLY covered doc is shown to red.
+#
+# THE SPECIMEN DOC IS DERIVED, never named: the first agent-tier corpus member
+# that is NOT merge-gates.md. If a future edit narrows the corpus back to the
+# one file, `RC19_NEW` comes back empty and the first clause reds, so the
+# narrowing cannot pass quietly as "still clean".
+#
+# THREE CLAUSES, because one proves nothing on its own:
+#   (a) the doc is genuinely IN the widened scan set — coverage, asserted;
+#   (b) a planted overclaim in a copy of it is REPORTED BY NAME — losability;
+#   (c) the OLD corpus (merge-gates.md alone) does NOT report it — the widening
+#       is what caught it, measured against the rival it replaced rather than
+#       argued. Without (c), (b) would pass just as well before this commit.
+RC19_NEW="$(awk -F'\t' '$1 == "agent" && $2 != "docs/ops/merge-gates.md" { print $2; exit }' <<<"$RC19_CORPUS")"
+if [ -n "$RC19_NEW" ]; then
+  ok "the widening covers a doc §19 could not see before: \`$RC19_NEW\` is agent-tier and in the scan set"
+else
+  bad "no agent-tier doc other than merge-gates.md is in the corpus — the widening has been narrowed back and the clauses below would be vacuous"
+fi
+
+RC19_NEW_CANARY="$TMP/rc19-new-doc-canary.md"
+cp "$REPO_ROOT/${RC19_NEW:-docs/ops/merge-gates.md}" "$RC19_NEW_CANARY"
+# The name is the derived target set's first member, so this sentence stays a
+# lie about a genuinely blocking upstream whatever the graph does next.
+RC19_NEW_TGT="$(rc_transitive_upstreams "$REPO_ROOT/.github/workflows" "$SPEC" | grep '^JOB' | cut -f2 | sort -u | grep -x 'mix-prod-compile' || true)"
+[ -n "$RC19_NEW_TGT" ] || RC19_NEW_TGT="${RC19_TARGETS%% *}"
+printf '\nFor the record, a red `%s` does not block merge on this repo.\n' "$RC19_NEW_TGT" >> "$RC19_NEW_CANARY"
+RC19_NEW_OUT="$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_NEW_CANARY")"
+if grep -q "^CLAIM	$RC19_NEW_TGT	" <<<"$RC19_NEW_OUT"; then
+  ok "…and an overclaim planted in that newly covered doc is REPORTED by name (\`$RC19_NEW_TGT\`) — the widened corpus is readable, not decorative"
+else
+  bad "a planted overclaim in a newly covered doc was NOT reported — the widened scan is a sweep that can only pass:"
+  printf '%s\n' "${RC19_NEW_OUT:-<empty>}" | sed 's/^/       /' >&2
+fi
+
+# (c) THE RIVAL: §19 AS IT SHIPPED YESTERDAY. Same planted sentence, same
+# scanner, corpus of one — and it must MISS, or the widening bought nothing.
+if [ -z "$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")" ]; then
+  ok "…and the single-file corpus this replaced reports nothing on that same tree — the widening is what catches it, measured against the rival"
+else
+  bad "the single-file rival also reported something — re-derive what the widening actually bought"
+fi
+
+# MUTATION 8 — THE OTHER DIRECTION, which is what keeps this section alive. The
+# four required contexts really ARE blocking, and docs say so constantly. A
+# guard that reddened on a doc CORRECTLY stating a requirement would be disabled
+# within a day, and the 184-hit charter measurement above is what that failure
+# looks like at scale. A true sentence about a true blocking upstream must stay
+# quiet.
+RC19_TRUE="$TMP/rc19-true-statement.md"
+printf 'A red `%s` reds `Elixir gate`, which is a required context, so it blocks the merge.\nThis is required to pass before anyone can merge.\n' "$RC19_NEW_TGT" > "$RC19_TRUE"
+if [ -z "$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_TRUE")" ]; then
+  ok "…and a doc CORRECTLY calling \`$RC19_NEW_TGT\` blocking stays quiet — the widened guard is not a filter on the word \"required\""
+else
+  bad "the guard reddened on a doc that states the requirement CORRECTLY — it has become a word filter and will be silenced:"
+  printf '%s\n' "$(rc_gate_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC19_TRUE")" | sed 's/^/       /' >&2
 fi
 
 
