@@ -466,13 +466,30 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # HOW MANY PUBLISHES THIS BUILD IS ANSWERING FOR — the count of attempts that
   # minted no row of their own, hung on the in-flight row they coalesced onto.
   #
-  # WHY IT MATTERS EVEN THOUGH IT IS QUIET TODAY, measured from Oban rather than
-  # guessed: in the twelve hours 2026-08-06 08:00-20:00Z there were 2,256
-  # `AutoDeployWorker` jobs against 1,052 deployment rows — 1,204 ATTEMPTS THAT
-  # MINTED NO ROW against 277 counted deferrals (4.35:1). Since 22:00Z the same
-  # ratio is 0.086:1 and zero per minute. That is DORMANT, not fixed: the gap is
-  # a function of publish load against build duration, so it returns precisely
-  # when the number is worth having.
+  # WHY IT READS NEAR-ZERO, AND WHY THAT IS THE CORRECT ANSWER
+  # (dr-w19-bl-coalesced-counter-reads-a-confident-zero). This counter and a
+  # MINTED ROW are the two EXCLUSIVE branches of one decision in `drive/2`: a
+  # second publish either finds the site's previous row still ACTIVE — the
+  # `(site_id, environment)` index refuses the INSERT, no row exists to count,
+  # so the attempt is counted HERE — or finds it SETTLED, in which case the
+  # INSERT succeeds and a real row carries the attempt instead. `deferred` is
+  # TERMINAL, so on a busy box each round settles its own row before the next
+  # attempt runs and only the MINT branch is reachable: the 1,371 deferral rows
+  # of 2026-08-07 are 1,371 proofs that the mint branch was taken, NOT 1,371
+  # uncounted coalesces. The coalesce branch's window is the span a row spends
+  # active — minutes on a healthy build, one HTTP round trip on a busy box
+  # (claim → `building` → 409 → `deferred`) — against a 60s debounce.
+  #
+  # THE PRIOR SIZING HERE IS WITHDRAWN. This comment used to carry "1,204
+  # attempts that minted no row … 4.35:1", derived by subtracting deployment
+  # rows from `AutoDeployWorker` Oban jobs. The two populations are not nested
+  # (rows also arrive from non-AutoDeployWorker triggers), so post-migration the
+  # subtraction goes NEGATIVE — 651 jobs against 658 rows, i.e. -7 — and
+  # `oban_jobs` prunes at 7 days. It sized nothing then and cannot be used now.
+  #
+  # ALIVE, NOT DORMANT-BY-ASSUMPTION: `auto_deploy_worker_test.exs`'s "THE ZERO
+  # IS THE REGIME, NOT A DEAD COUNTER" reads 3 in flight and 0 behind a busy box
+  # through this same column — a dead counter reads 0 in both.
   #
   # "Attempts that minted no row", never "uncounted deferrals": the
   # `{:duplicate, %{status: "queued"}}` re-drive arm above has the same shape and
