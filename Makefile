@@ -232,6 +232,9 @@ cli-install-safe: cli-build ## LOCAL: back up the installed bp, THEN install (pr
 # So the build now writes the uncompressed blob to its own path FIRST and gzips
 # FROM that exact file, which also makes the two siblings byte-identical by
 # construction rather than by coincidence. Neither is committed (see .gitignore).
+# GUARDED BY: .github/workflows/pdrender-wasm.yml — its `paths:` filter lists
+# `Makefile`, so editing the targets below fires `make wasm` + the node smoke in
+# CI. Before task-519d5ea68ddca27f it did not, and this recipe was unguarded.
 WASM_GO_VERSION ?= 1.25.8
 
 WASM_IDENTITY := api/priv/static/assets/bp-pdrender.wasm
