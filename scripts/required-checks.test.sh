@@ -2662,7 +2662,11 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # paths-filtered — so the pair cannot render it and the generator reports it LOST.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly this
         # name as MISSING ACK_EX.
-        --expect-unrendered "main-collapse criterion + runs-window gates")
+        --expect-unrendered "main-collapse criterion + runs-window gates"
+        # Same PR, second name: shell-harnesses.yml job `workflow-owner` landed after the
+        # first push here and the census clause named it on the next settled head it sampled.
+        # DERIVED the same way — scripts/required-checks-ack-derive.sh, one name at a time.
+        --expect-unrendered "workflow-owner-check.sh named-owner guard")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
