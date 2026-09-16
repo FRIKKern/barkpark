@@ -544,6 +544,21 @@ jobs:
       # lane would otherwise blind the re-deriver silently and nothing would
       # say so until the next re-earn produced a vacuous clean run.
       #
+      # EVERY FUNCTIONAL SLOT, NOT ONLY `-ne` (task-4a591a26279e7d24). A pin is
+      # hardcoded in FIVE places per step — the step NAME's `N-test`, two `-ne N`
+      # comparisons, the red sentence's `pin is N`, its `bump every N`
+      # instruction to the next author, and the green line's `exact pin N`. The
+      # predicate used to compare only the `-ne` literals, so a HALF-DONE bump
+      # (measured on this file at 1463: name, `bump every` and the green line
+      # left at the old 1459) passed every gate green while the workflow went on
+      # TELLING the next author to bump a number that was no longer the pin. The
+      # selftest now reads back the same slot set the rewriter writes, over the
+      # step NAME line through the run body, and reds naming the step.
+      # COMMENT LINES ARE EXCLUDED, deliberately: the PIN-history log below each
+      # step is the record of what the count USED to be, and gating bare
+      # `N tests` prose here would red ~20 lines that are correctly historical.
+      # That half of the filing is a WONTFIX — the history log IS the record.
+      #
       # NOT the full `--check`: that would re-run every suite the console-unit
       # job below already runs, a second time. Those steps ARE the measurement
       # and they are the authority; this one only keeps the tool that re-earns
