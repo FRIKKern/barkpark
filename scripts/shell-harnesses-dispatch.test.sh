@@ -318,15 +318,18 @@ if [ "$rc" -eq 0 ] && [ "$(true_set "$TMP/e5.out")" = "doctor-matrix" ]; then
   ok "E5 scripts/doctor.sh: doctor-matrix only"
 else bad "E5 scripts/doctor.sh: rc=$rc true={$(true_set "$TMP/e5.out")}"; fi
 
-# E6 a new workflow file → the FIVE corpus readers via the *.yml glob (selftest-wiring-census
+# E6 a new workflow file → the SIX corpus readers via the *.yml glob (selftest-wiring-census
 #    joined in task-8780f3b465edea5b: it resolves execution FROM the workflow corpus, so a new
 #    workflow can change which self-tests count as run; undispatched-target joined in
 #    task-3fd49a953afffd2f: it derives its candidate set from every workflow's on.*.paths key,
-#    so a new workflow can add a candidate)
+#    so a new workflow can add a candidate; workflow-owner joined in
+#    task-dee226be3107a98b c4: its population is the set of workflows carrying a `push:` arm and
+#    no `pull_request:` arm, derived from the trigger blocks, so a NEW workflow file is exactly
+#    the event that can strand one off the PR path with no named owner)
 make_case newwf .github/workflows/brand-new.yml "a"
 rc=$(run_dispatcher pull_request "$BASE_A" "$TMP/e6.out")
-if [ "$rc" -eq 0 ] && [ "$(true_set "$TMP/e6.out")" = "deploy-concurrency selftest-wiring-census undispatched-target workflow-portability workflow-trigger-coverage" ]; then
-  ok "E6 new workflow file: exactly the five .github/workflows/*.yml readers"
+if [ "$rc" -eq 0 ] && [ "$(true_set "$TMP/e6.out")" = "deploy-concurrency selftest-wiring-census undispatched-target workflow-owner workflow-portability workflow-trigger-coverage" ]; then
+  ok "E6 new workflow file: exactly the six .github/workflows/*.yml readers"
 else bad "E6 new workflow file: rc=$rc true={$(true_set "$TMP/e6.out")}"; fi
 
 # E7 this workflow file itself → all true

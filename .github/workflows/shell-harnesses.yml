@@ -677,6 +677,19 @@ on:
       # no `bp`, no token, no network — measured 16 arms, 0 failed, under 2 s.
       - "scripts/ledger/claim-health.sh"
       - "scripts/ledger/claim-health-selftest.sh"
+      # WORKFLOW OWNER (task-dee226be3107a98b c4). A workflow with a `push:` arm
+      # and no `pull_request:` arm has NO OWNER BY CONSTRUCTION — it cannot red a
+      # PR, so nobody is told. workflow-owner-check.sh derives that population
+      # from the workflow files themselves and requires a named lane owner for
+      # every member. The registry is an input; so are the workflow files, whose
+      # trigger blocks ARE the population predicate (already a row above for
+      # selftest-wiring-census, repeated here because a move that strands a
+      # workflow is a `.github/workflows/*.yml` edit and must fire THIS job).
+      # ci-pr-checkrun-floor.sh is the c2 measurement and reads
+      # .github/required-checks.json (also already a row above).
+      - "scripts/workflow-owner-check.sh"
+      - "scripts/ci-pr-checkrun-floor.sh"
+      - ".github/workflow-owners.json"
   push:
     branches: [main]
     paths:
@@ -1184,6 +1197,19 @@ on:
       # no `bp`, no token, no network — measured 16 arms, 0 failed, under 2 s.
       - "scripts/ledger/claim-health.sh"
       - "scripts/ledger/claim-health-selftest.sh"
+      # WORKFLOW OWNER (task-dee226be3107a98b c4). A workflow with a `push:` arm
+      # and no `pull_request:` arm has NO OWNER BY CONSTRUCTION — it cannot red a
+      # PR, so nobody is told. workflow-owner-check.sh derives that population
+      # from the workflow files themselves and requires a named lane owner for
+      # every member. The registry is an input; so are the workflow files, whose
+      # trigger blocks ARE the population predicate (already a row above for
+      # selftest-wiring-census, repeated here because a move that strands a
+      # workflow is a `.github/workflows/*.yml` edit and must fire THIS job).
+      # ci-pr-checkrun-floor.sh is the c2 measurement and reads
+      # .github/required-checks.json (also already a row above).
+      - "scripts/workflow-owner-check.sh"
+      - "scripts/ci-pr-checkrun-floor.sh"
+      - ".github/workflow-owners.json"
 
 permissions:
   contents: read
@@ -1298,6 +1324,7 @@ jobs:
       dispatch-selftest: ${{ steps.sets.outputs.dispatch-selftest }}
       deploy-receipt-honesty: ${{ steps.sets.outputs.deploy-receipt-honesty }}
       which-gates: ${{ steps.sets.outputs.which-gates }}
+      workflow-owner: ${{ steps.sets.outputs.workflow-owner }}
       bp-curl: ${{ steps.sets.outputs.bp-curl }}
       migration-version-collision: ${{ steps.sets.outputs.migration-version-collision }}
       orchestrate-launch-recipe: ${{ steps.sets.outputs.orchestrate-launch-recipe }}
@@ -1559,6 +1586,11 @@ jobs:
           registry-impact-check scripts/registry-impact-check.sh
           registry-impact-check scripts/registry-impact-check.test.sh
           exit-laundering-sweep scripts/exit-laundering-sweep.sh
+          workflow-owner scripts/workflow-owner-check.sh
+          workflow-owner scripts/ci-pr-checkrun-floor.sh
+          workflow-owner .github/workflow-owners.json
+          workflow-owner .github/workflows/*.yml
+          workflow-owner .github/required-checks.json
           which-gates scripts/which-gates.sh
           which-gates scripts/which-gates.test.sh
           which-gates scripts/cloud-path-escape-check.sh
@@ -3552,6 +3584,49 @@ jobs:
         # scratch copy and requires the case it owns to STOP refusing, so a
         # guard that is not the detector reds here.
         run: bash scripts/mix-test-strict.test.sh
+
+  workflow-owner:
+    needs: [changes]
+    if: needs.changes.outputs.workflow-owner == 'true'
+    # A WORKFLOW OFF THE PR PATH MUST HAVE A NAMED OWNER (task-dee226be3107a98b
+    # c4). posix-vacuous-green-census.yml stood red on main's tip for ELEVEN
+    # HOURS across EIGHT runs and cost nobody a second: advisory, so no merge
+    # blocked; push-only, so no PR surfaced it; and a lane close-out reads its
+    # own PRs, never main's health. scripts/main-red-owner.sh answers "somebody
+    # must be told"; this answers "WHO", and reds the moment a workflow is moved
+    # off the PR path without a row in .github/workflow-owners.json.
+    #
+    # THE POPULATION IS A PREDICATE, recomputed from the trigger blocks each run,
+    # so the guard cannot go stale in the commit that strands the next workflow.
+    #
+    # HARNESS FIRST, SUBJECT SECOND. The selftest drives six refusals off real
+    # fixture trees plus two quiet arms and a discrimination control; its first
+    # draft bound the tree root at file scope, so all six refusal arms measured
+    # the REAL repo, passed against a clean tree, and proved nothing. That is why
+    # --selftest runs BEFORE the live check: a subject that passes because its
+    # harness cannot fire is the exact failure this job exists to catch.
+    name: workflow-owner-check.sh named-owner guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: syntax
+        run: |
+          bash -n scripts/workflow-owner-check.sh
+          bash -n scripts/ci-pr-checkrun-floor.sh
+
+      - name: "workflow-owner-check.sh --selftest (6 refusal arms + 2 quiet + control)"
+        run: bash scripts/workflow-owner-check.sh --selftest
+
+      - name: "ci-pr-checkrun-floor.sh --selftest (hermetic: required-context map + the completeness control both ways)"
+        run: bash scripts/ci-pr-checkrun-floor.sh --selftest
+
+      - name: "LIVE: every workflow off the PR path has a named owner"
+        run: bash scripts/workflow-owner-check.sh
+
+      - name: "watcher cadence (reported, not enforced — the watcher is not this file's to fix)"
+        run: bash scripts/workflow-owner-check.sh --cadence
 
   which-gates:
     needs: [changes]
