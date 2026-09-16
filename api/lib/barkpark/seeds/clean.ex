@@ -229,8 +229,39 @@ defmodule Barkpark.Seeds.Clean do
   whole non-default-port proof.
   """
   def connect_url do
-    url = BarkparkWeb.Endpoint.config(:url) || []
-    http = BarkparkWeb.Endpoint.config(:http) || []
+    url = endpoint_config(:url) || []
+    http = endpoint_config(:http) || []
     "#{url[:scheme] || "http"}://#{url[:host] || "localhost"}:#{http[:port] || 4000}"
+  end
+
+  # `BarkparkWeb.Endpoint.config/2` reads the endpoint's ETS table, and that
+  # table is created when the endpoint STARTS. `Barkpark.Release.seed/0` boots
+  # in `:seed` mode, which drops `BarkparkWeb.Endpoint` from the child list on
+  # purpose (`Barkpark.Application.child_specs/5`) — so the ETS read raised
+  #
+  #     ** (ArgumentError) the table identifier does not refer to an existing
+  #        ETS table ... :ets.lookup(BarkparkWeb.Endpoint, :url)
+  #
+  # from `print_token_banner/1`, the LAST step of a first-ever boot's seed.
+  # With `set -e` in `api/entrypoint.sh` that killed the container before
+  # `bin/barkpark start`, and it took the shown-once admin token with it.
+  # Invisible to `mix test`: the test node always has the endpoint up.
+  #
+  # The fallback is not a second source of truth. `BarkparkWeb.Endpoint`
+  # defines no `init/2`, so Phoenix seeds that ETS table verbatim from
+  # `Application.get_env(:barkpark, BarkparkWeb.Endpoint)` — the same merged
+  # keyword `config/runtime.exs` writes. The live table is still preferred
+  # whenever it exists, so a running node's answer is byte-identical to before.
+  #
+  # `:ets.whereis/1` rather than `Process.whereis/1`: the ETS table is exactly
+  # what `config/2` needs, so probing it asks the question that decides.
+  defp endpoint_config(key) do
+    if :ets.whereis(BarkparkWeb.Endpoint) == :undefined do
+      :barkpark
+      |> Application.get_env(BarkparkWeb.Endpoint, [])
+      |> Keyword.get(key)
+    else
+      BarkparkWeb.Endpoint.config(key)
+    end
   end
 end
