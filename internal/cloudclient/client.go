@@ -2359,6 +2359,38 @@ type SiteDeployment struct {
 	//     server-side), for when FailureReason is the humanizer's generic arm.
 	FailureClass     string `json:"failure_class,omitempty"`
 	FailureReasonRaw string `json:"failure_reason_raw,omitempty"`
+	// deploy-reliability W15 S3 follow-up (dr-w15-s3-followup-decode-refusal-phase):
+	// WHICH PHASE the box refused in. `deployment_json/1` has emitted this key
+	// since the W15 S3 producer slice and this struct declared no tag for it, so
+	// `json.Unmarshal` dropped it in silence — the third instance of the exact
+	// shape the FailureClass/FailureReasonRaw and FailureCode/FailureMessage
+	// blocks either side of it record: a decoder that never names a key cannot
+	// report it, and nothing reds.
+	//
+	//   * "start" — the TRIGGER was refused; no build ever began.
+	//   * "poll"  — a beat of a build ALREADY RUNNING was refused; a build died
+	//               mid-flight.
+	//
+	// Same failure class, very different blast radius, and the taxonomy
+	// deliberately does NOT split on it — this key is the only way the phase
+	// reaches a reader at all.
+	//
+	// A POINTER, for the reason FailureCode/FailureMessage below are pointers.
+	// The producer sends null on every row that is NOT a box refusal and never
+	// coerces it to "start", because "this was not a refusal" and "this was
+	// refused at trigger time" are different sentences. A plain string would
+	// decode that null to "" and the render would have to guess which it meant;
+	// worse, a `string` plus the usual `!= ""` emit guard reads identically to a
+	// row the producer never wrote. Keep it *string.
+	//
+	// HONEST LIMIT, carried from the producer verbatim so no reader downstream
+	// infers more than it says: this is a TRIPWIRE, not a live discriminator.
+	// cloud-db-1 holds ZERO poll-phase rows all-time against 14,848 start-phase
+	// ones, so in production today this field reads "start" or nil and nothing
+	// else. It is decoded so the FIRST poll refusal is legible the day it lands.
+	// Do NOT split any taxonomy on it and do NOT let a render imply it
+	// discriminates anything in the corpus we have.
+	RefusalPhase *string `json:"refusal_phase"`
 	// THE REFUSAL, UNFUSED (task-f156b5e43bfbfe91, producer PR #16511).
 	// FailureReason above is ONE prose line with the box's typed code and its
 	// human sentence fused into it, so every reader took it apart again by
