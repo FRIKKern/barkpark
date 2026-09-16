@@ -858,7 +858,10 @@ both the `push` and `pull_request` arms) — reviewed and landed in **PR #18707*
    and none pretends to; it is a review rule, not a check.
 3. **RE-RUN the supported startup paths a doc names.** If your change touches a
    file an allowlisted example depends on, declare it —
-   `<!-- doc-exec: allowlisted deps=path/one,path/two -->` — and the drift check
+   put an HTML comment reading `doc-exec: allowlisted deps=path/one,path/two`
+   on the line above the fence (spelled out rather than reproduced here: the
+   checker matches that literal LINE-WISE, so a marker quoted in prose with no
+   fence under it is itself a red) — and the drift check
    re-runs that example on YOUR PR instead of leaving it to rot until someone
    else's. Unmarked fences are never run, so an example you want PROTECTED has
    to say so.
@@ -870,7 +873,7 @@ are partly mechanised; rule 2 is not mechanised at all.
 |---|---|---|
 | 1 · canonical ownership | `docs-anchors-check.sh` reds on a duplicate `canonical-for` topic and on a missing G1 header; `check-doc-budgets.sh` reds when an owner overflows its byte cap | whether a given FACT landed in the right owner — no gate reads meaning |
 | 2 · independent reader | nothing | everything — this rule is carried by review alone |
-| 3 · rerun startup paths | `doc-drift-check.sh` re-runs a `<!-- doc-exec: allowlisted -->` fence and reds on a non-zero exit, diff-scoped: yours when your diff touches the doc or a declared `deps=` file | every unmarked fence; cold-tier docs, `_attic/`, `fixtures/` trees and `tooling/grip/ledger/` are out of the corpus |
+| 3 · rerun startup paths | `doc-drift-check.sh` re-runs a fence carrying the `doc-exec: allowlisted` marker comment and reds on a non-zero exit, diff-scoped: yours when your diff touches the doc or a declared `deps=` file | every unmarked fence; cold-tier docs, `_attic/`, `fixtures/` trees and `tooling/grip/ledger/` are out of the corpus |
 | (carried along) links + placeholders | `doc-drift-check.sh` reds on a relative link target that resolves nowhere, and on `FIXME` / `TBD` / `TODO:` / `<PLACEHOLDER>` / `REPLACE_ME` standing as prose | `http(s)`, absolute, anchor-only and templated targets; a bare extensionless route a `.md`, a directory or an `index.md` serves; the same placeholder words inside a fence or code span, which are quotation, not assertion |
 
 **The strength of that coverage, said negatively.** Every one of those checks
