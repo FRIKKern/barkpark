@@ -9569,10 +9569,16 @@ defmodule PDS.Census do
     p("      census's own budget sees; #{closes.full} / #{nr} @#{closes.depth} is what the relation closes at. BOTH")
     p("      are printed, because a lens that prints one of them is choosing an answer.")
     p("      FLOOR, REASON 1 — THE DEPTH BUDGET. #{at_max.routed} / #{nr} @#{@evidence_depth} rises to #{closes.routed} / #{nr} @#{closes.depth}.")
-    p("      FLOOR, REASON 2 — THE KEY. bfs/7's seen-set and callees/2's uniq_by are BOTH")
-    p("      {module, name, arity}, so exactly ONE clause per callee key is ever entered. A")
-    p("      write living in a SECOND clause of an already-visited key is invisible at")
-    p("      EVERY depth, and no budget buys it back. Neither reason is an estimate.")
+    p("      FLOOR, REASON 2 — THE KEY. bfs_walk/9's seen-set and callees/2's uniq_by are BOTH")
+    p("      {module, name, arity, LINE} since PDS-D480a, so a SECOND clause of an already-")
+    p("      visited def IS entered and this reason is now about the SITE, not the clause: a")
+    p("      write reached only through an edge the resolver cannot build (a runtime-")
+    p("      dispatched module, a process hop) is invisible at EVERY depth, and no budget")
+    p("      buys it back. The clause-collapse half of this sentence was TRUE BEFORE")
+    p("      PDS-D480a and is retired here rather than repeated — the emission-anchored")
+    p("      column below re-derives the same key and prints a NONZERO sibling_clauses")
+    p("      residual, which could not happen if the collapse this line used to assert")
+    p("      still held. Neither reason is an estimate.")
     p("      THE SWEEP IS DENOMINATOR-BLIND: the routed and full NUMERATORS are identical")
     p("      at every depth above (all #{nc} / #{nc} component clauses are write-FALSE at every")
     p("      depth), so only the FRACTION tells the two lenses apart — #{lv_pct(at_max.routed, nr)} vs #{lv_pct(at_max.full, n)} @#{@evidence_depth}.")
@@ -9971,12 +9977,13 @@ defmodule PDS.Census do
     proxy_mods = pop |> Enum.map(&lv_mod/1) |> Enum.uniq() |> Enum.reject(&MapSet.member?(route_mods, &1))
     disagree = lv_sym_diff(theorem.with_clauses, proxy_mods)
     deleg = Enum.count(rows, & &1.delegation?)
+    anchor = lv_emission_anchor(rows, pop, index)
 
     lv_print_reach(rows, freqs, n, sessions, multi, sidx)
     lv_print_denies(reachable, nrch, n, sites)
     lv_print_attach(reachable, nrch, ev, by_mod)
     lv_print_component(theorem, proxy_mods, disagree, n)
-    lv_print_derivation_denominator(deleg, n)
+    lv_print_derivation_column(anchor, n, nrch)
 
     %{
       population: n,
@@ -9992,6 +9999,7 @@ defmodule PDS.Census do
       multi_session: length(multi),
       component_disagreement: length(disagree),
       delegations: deleg,
+      emission: anchor,
       # -- THE TWO CAVEATS, GIVEN DENOMINATORS (wave 49) -------------------------
       hook_sites: length(sites),
       hook_unresolved: Enum.count(sites, &(not &1.resolved?)),
@@ -10241,17 +10249,362 @@ defmodule PDS.Census do
     p("")
   end
 
-  # -- THE DERIVATION DENOMINATOR, UNJUDGED -----------------------------------
+  # -- THE DERIVATION COLUMN, ANCHORED ON EMISSION (PDS-D621, wave 42 lane) ----
+  #
+  # WHY THIS BLOCK EXISTS AND WHY IT IS NOT THE OLD ONE. Until this wave the figure
+  # was printed as a SIZE and judged nowhere, on a stated reason: "an anchor placed on
+  # emission would swap those N delegating clauses for the N defs they delegate to and
+  # hide the swap inside an unchanged denominator". THAT REASON IS SOUND AND IS WHAT
+  # THIS BLOCK OBEYS — it does not reuse the authorization denominator. The REACH and
+  # DENIES columns above are keyed on the handle_event/3 clause population and on the
+  # reachable subset of it, because those answer "can a socket-level hook see this
+  # clause". THIS column answers "where does the value this surface emits come from",
+  # and its population is the set of clauses that EMIT. The two denominators are
+  # printed side by side and NEITHER is ever used for the other's question.
+  #
+  # CLAUSE-FAITHFUL, AND THAT IS THE ONLY WAY THE SWAP IS VISIBLE. A delegating clause
+  # is swapped for EVERY clause of the def it reaches, not for one clause per
+  # {module, name, arity}. The difference between those two counts is printed as its
+  # own named residual (`sibling_clauses`) rather than being absorbed: a swap that
+  # leaves the denominator unmoved is exactly the defect the old block refused to ship.
+  #
+  # ATTRIBUTION CORRECTED BY RUN. The filing that cut this lane attributed the sibling
+  # loss to "callees/2's uniq_by {module, name, arity}". That is FALSE at this sha:
+  # callee_key/1 is {module, name, arity, LINE} (PDS-D480a) and bfs_walk/9's seen-set
+  # repeats the same key, so callees/2 hands back every clause. The sibling residual is
+  # real, and its mechanism is the ONE-TARGET-PER-KEY reading of the swap — not the
+  # resolver. Both counts are derived here so the difference is a measurement.
+  @lv_deriv_order [
+    :store_derived,
+    :store_refetched,
+    :request_echo,
+    :literal_only,
+    :residual_unattributed
+  ]
 
-  defp lv_print_derivation_denominator(deleg, n) do
-    p("    THE DERIVATION DENOMINATOR, PRINTED UNJUDGED (PDS-D621)")
-    p("      #{deleg} / #{n} clause(s) have a body that is EXACTLY ONE remote call and emit")
-    p("      nothing themselves. THE REASON THIS IS NOT A COLUMN: an anchor placed on")
-    p("      emission would swap those #{deleg} for the #{deleg} defs they delegate to and hide the")
-    p("      swap inside an unchanged denominator of #{n}. A numerator and a denominator")
-    p("      that answer different questions make a fraction that answers neither, so")
-    p("      the figure is printed as a SIZE and judged nowhere.")
+  @lv_deriv_why %{
+    store_derived: "an ASSIGNED value mentions a variable bound by an `{:ok, _}` pattern in this clause",
+    store_refetched:
+      "the clause HAS an `{:ok, _}` bind and an ASSIGNED value is a fresh CALL that mentions none of its variables — a collection re-read AFTER the write, never the write's own return",
+    request_echo: "an ASSIGNED value mentions a variable bound in the clause HEAD",
+    literal_only: "no assign in this clause, or every assigned value is a literal",
+    residual_unattributed:
+      "assigned values trace to neither an `{:ok, _}` payload, a fresh read, nor the head — NOT DECIDED"
+  }
+
+  defp lv_emission_anchor(rows, pop, index) do
+    deleg_rows = Enum.filter(rows, & &1.delegation?)
+
+    targets =
+      deleg_rows
+      |> Enum.flat_map(&callees(&1.def, index))
+      |> Enum.uniq_by(&callee_key/1)
+
+    target_keys = targets |> Enum.map(&{&1.module, &1.name, &1.arity}) |> Enum.uniq()
+    self_emitting = Enum.filter(pop, &lv_emits?/1)
+    emitting_targets = Enum.filter(targets, &lv_emits?/1)
+    emission_pop = self_emitting ++ emitting_targets
+
+    classed =
+      Enum.map(emission_pop, fn d ->
+        {class, ev} = lv_deriv_class(d)
+        %{def: d, class: class, evidence: ev}
+      end)
+
+    %{
+      delegating: length(deleg_rows),
+      target_keys: length(target_keys),
+      target_clauses: length(targets),
+      siblings: length(targets) - length(target_keys),
+      targets_emitting: length(emitting_targets),
+      targets_silent: length(targets) - length(emitting_targets),
+      self_emitting: length(self_emitting),
+      # a clause that neither emits nor delegates is a THIRD shape and is printed
+      # rather than assumed away.
+      neither: Enum.count(pop, &(not lv_emits?(&1) and not lv_delegation?(&1))),
+      population: length(emission_pop),
+      freqs: Enum.frequencies_by(classed, & &1.class),
+      rows: classed,
+      refetch_with_derived_flash:
+        Enum.filter(classed, &(&1.class == :store_refetched and lv_flash_derived?(&1.def))),
+      refetch_with_derived_flash_1hop:
+        Enum.filter(classed, fn r ->
+          r.class == :store_refetched and
+            lv_flash_derived?(r.def, fn b -> lv_ok_vars_1hop(b) end)
+        end)
+    }
+  end
+
+  defp lv_print_derivation_column(a, n, nrch) do
+    p("    THE DERIVATION COLUMN — EMISSION-ANCHORED, BOTH DENOMINATORS PRINTED (PDS-D621)")
+    p("      TWO QUESTIONS, TWO DENOMINATORS, AND NEITHER ANSWERS THE OTHER:")
+    p("        AUTHORIZATION  #{pad(n)} clause(s), #{nrch} of them reachable — the REACH, DENIES and")
+    p("                       ATTACH-CERTAINTY columns above are keyed on these and on")
+    p("                       nothing else. The question is: can a socket-level hook see")
+    p("                       this clause at all.")
+    p("        EMISSION       #{pad(a.population)} clause(s) — THIS column and nothing else. The question")
+    p("                       is: where does the value this surface emits come from. A")
+    p("                       delegating clause emits nothing, so it is not a member;")
+    p("                       the clauses it reaches are.")
+    p("      THE ANCHOR, ADDED UP RATHER THAN ASSERTED:")
+    p("        #{pad(a.self_emitting)}  self-emitting clause(s) in the #{n} population (a `{:noreply, _}` or")
+    p("             `{:reply, _, _}` in their own body)")
+    p("      + #{pad(a.targets_emitting)}  EMITTING clause(s) of the defs the delegating clauses reach")
+    p("      = #{pad(a.population)}  EMISSION ANCHOR")
     p("")
+    p("      RESIDUAL LINES — NAMED, NOT ABSORBED")
+    p("        delegation_swap   #{a.delegating} delegating clause(s) <-> #{a.target_keys} unique target key(s)")
+    p("                          The swap is NOT 1:1 and the old block's refusal turned on")
+    p("                          the assumption that it was. Printed as both sides so the")
+    p("                          re-anchor is visible in the DENOMINATOR, not only in a")
+    p("                          numerator: #{a.delegating} out, #{a.target_clauses} clause(s) in.")
+    p("        sibling_clauses   #{a.siblings} clause(s) — the gap between #{a.target_clauses} target CLAUSE(S) and")
+    p("                          #{a.target_keys} target KEY(S). A one-target-per-{module, name, arity}")
+    p("                          reading of the swap loses exactly these. MECHANISM,")
+    p("                          RE-DERIVED: callee_key/1 is {module, name, arity, LINE}")
+    p("                          (PDS-D480a) and bfs_walk/9's seen-set carries the same")
+    p("                          line, so callees/2 does NOT drop them — a filing that")
+    p("                          blames the resolver is refuted by this run.")
+    p("        silent_targets    #{a.targets_silent} / #{a.target_clauses} target clause(s) emit NOTHING themselves and are")
+    p("                          therefore NOT in the anchor — a second hop this column")
+    p("                          does not take, counted so the absence is a fact.")
+    p("        neither_shape     #{a.neither} / #{n} population clause(s) neither emit nor delegate.")
+    p("")
+    p("      THE CLASSES — UNIT: EMISSION-ANCHOR CLAUSES, KEYED ON ASSIGNED VALUES")
+    p("      SAYING THE UNIT IS LOAD-BEARING: every numerator below is counted over the")
+    p("      SAME #{a.population} clause(s) this block just added up. No fraction here puts a")
+    p("      clause-counted numerator over a target-counted or a route-counted denominator.")
+
+    Enum.each(@lv_deriv_order, fn c ->
+      cnt = Map.get(a.freqs, c, 0)
+      p("        #{String.pad_trailing(to_string(c), 22)} #{pad(cnt)} / #{a.population}  #{Map.fetch!(@lv_deriv_why, c)}")
+    end)
+
+    stray = a.freqs |> Map.keys() |> Enum.reject(&(&1 in @lv_deriv_order))
+    p("        sum #{Enum.sum(Map.values(a.freqs))} == emission anchor #{a.population}#{if stray == [], do: "", else: " · STRAY #{inspect(stray)}"}")
+    p("")
+    p("      store_refetched IS ITS OWN CLASS AND IS NOT A POST-READ (the whole point)")
+    wrap(
+      "POST-READ, this census's controller-side shape, is a read the response is built " <>
+        "from. A collection re-read after a write is a DIFFERENT statement: the emitted " <>
+        "assign is the whole list the store holds NOW, and it does not descend from the " <>
+        "write's return, so it is not a receipt for the write that just happened. Folding " <>
+        "it into POST-READ would credit the write with a receipt it never produced. " <>
+        "The worked example is `BarkparkWeb.Studio.StudioLive.Handlers.ItemShare." <>
+        "item_share_revoke/2`: it re-reads the WHOLE link collection through " <>
+        "`Shared.load_item_links/3` and assigns THAT — not the row `Links.revoke/1` " <>
+        "returned.",
+      "        "
+    )
+
+    p("        THE CLASS IS ENUMERABLE, SO IT IS ENUMERATED — a reader spends one judgement")
+    p("        per clause instead of inheriting an aggregate:")
+
+    a.rows
+    |> Enum.filter(&(&1.class == :store_refetched))
+    |> Enum.sort_by(&{&1.def.path, &1.def.line})
+    |> Enum.each(fn r ->
+      mod = Enum.map_join(r.def.module, ".", &to_string/1)
+      p("          #{short_mod(mod)}.#{r.def.name}/#{r.def.arity} — #{r.def.path}:#{r.def.line}")
+    end)
+
+    p("        THE CAVEAT THAT KEEPS THIS CLASS FROM BEING READ AS AN ACCUSATION:")
+    nref = Map.get(a.freqs, :store_refetched, 0)
+    p("        #{length(a.refetch_with_derived_flash)} / #{nref} store_refetched clause(s) DO carry a flash receipt that")
+    p("        descends from the write return ON THE DIRECT LENS — the flash argument NAMES")
+    p("        an `{:ok, _}`-bound variable. The class is keyed on the ASSIGN, which is the")
+    p("        value the re-render displays; a flash is a second channel and is counted here")
+    p("        rather than collapsed into the class either way.")
+    Enum.each(a.refetch_with_derived_flash, fn r ->
+      mod = Enum.map_join(r.def.module, ".", &to_string/1)
+      p("          #{short_mod(mod)}.#{r.def.name}/#{r.def.arity} — #{r.def.path}:#{r.def.line}")
+    end)
+
+    p("        THE CHANNEL RE-DERIVED, NEVER ADMITTED IN PROSE: forgiving ONE transitive")
+    p("        `=` hop moves the count to #{length(a.refetch_with_derived_flash_1hop)} / #{nref}. The clauses the direct lens loses")
+    p("        bind their sentence through an intermediate and then flash THAT:")
+
+    (a.refetch_with_derived_flash_1hop -- a.refetch_with_derived_flash)
+    |> Enum.sort_by(&{&1.def.path, &1.def.line})
+    |> Enum.each(fn r ->
+      mod = Enum.map_join(r.def.module, ".", &to_string/1)
+      p("          #{short_mod(mod)}.#{r.def.name}/#{r.def.arity} — #{r.def.path}:#{r.def.line}")
+    end)
+
+    p("        NEITHER FIGURE RE-KEYS THE CLASS. store_refetched is a statement about the")
+    p("        ASSIGN and both of these are statements about the FLASH; the column would be")
+    p("        mixing two units the moment one of them moved a class count.")
+
+    p("")
+  end
+
+  # -- the emission lens ------------------------------------------------------
+
+  # EVERY LITERAL ARRIVES WRAPPED. parse_file/1 passes `literal_encoder`, so the atom
+  # head of `{:noreply, socket}` is `{:__block__, meta, [:noreply]}` and a naive
+  # `{:noreply, _}` match reads ZERO over the whole corpus — the exact trap PDS-D448
+  # names, and the one this lens fell into on its first run (0 / 357 emitters, a green
+  # with no subject). Unwrap through lit/1 first, ask second.
+  defp lv_emits?(%{body: nil}), do: false
+
+  defp lv_emits?(d) do
+    {_, hit} =
+      Macro.prewalk(d.body, false, fn
+        {a, _} = node, acc -> {node, acc or lv_tag?(a, :noreply)}
+        {:{}, _, [a, _, _]} = node, acc -> {node, acc or lv_tag?(a, :reply)}
+        node, acc -> {node, acc}
+      end)
+
+    hit
+  end
+
+  defp lv_tag?(a, want) do
+    case lit(a) do
+      {:lit, ^want, _} -> true
+      _ -> a == want
+    end
+  end
+
+  # literal_encoder wraps LISTS too, so `assign(socket, a: 1)`'s keyword list arrives as
+  # {:__block__, _, [[...]]}. Unwrapped here rather than guarded on is_list/1.
+  defp lv_unwrap({:__block__, _, [inner]}), do: inner
+  defp lv_unwrap(other), do: other
+
+  defp lv_ok_vars(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {a, rhs} = node, acc ->
+          if lv_tag?(a, :ok), do: {node, lv_vars(rhs) ++ acc}, else: {node, acc}
+
+        {:{}, _, [a | rest]} = node, acc ->
+          if lv_tag?(a, :ok), do: {node, Enum.flat_map(rest, &lv_vars/1) ++ acc}, else: {node, acc}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  defp lv_vars(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {v, _, ctx} = node, acc when is_atom(v) and not is_list(ctx) -> {node, [v | acc]}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  # assign/2 and assign/3, under the piped spelling too (expand_pipes/1 runs first).
+  defp lv_assign_values(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {{:., _, [_, :assign]}, _, args} = node, acc -> {node, lv_assign_args(args) ++ acc}
+        {:assign, _, args} = node, acc when is_list(args) -> {node, lv_assign_args(args) ++ acc}
+        node, acc -> {node, acc}
+      end)
+
+    acc
+  end
+
+  defp lv_assign_args([_socket, kw]) do
+    case lv_unwrap(kw) do
+      list when is_list(list) -> Enum.flat_map(list, fn {_k, v} -> [v] end)
+      other -> [other]
+    end
+  end
+
+  defp lv_assign_args([_socket, _k, v]), do: [v]
+  defp lv_assign_args(_), do: []
+
+  defp lv_flash_args(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {{:., _, [_, :put_flash]}, _, args} = node, acc -> {node, Enum.drop(args, 2) ++ acc}
+        {:put_flash, _, args} = node, acc when is_list(args) -> {node, Enum.drop(args, 2) ++ acc}
+        node, acc -> {node, acc}
+      end)
+
+    acc
+  end
+
+  defp lv_flash_derived?(d), do: lv_flash_derived?(d, &lv_ok_vars/1)
+
+  defp lv_flash_derived?(d, vars_fn) do
+    body = expand_pipes(d.body || [])
+    vs = vars_fn.(body)
+    Enum.any?(lv_flash_args(body), fn v -> Enum.any?(lv_vars(v), &(&1 in vs)) end)
+  end
+
+  # ONE TRANSITIVE HOP, AND IT EXISTS ONLY AS A COUNTERFACTUAL. The direct lens asks
+  # whether the flash argument NAMES an `{:ok, _}`-bound variable. A clause that binds
+  # its sentence through an intermediate — `{error, receipt} = case revoke_scoped(...)
+  # do {:ok, link} -> {nil, revoked_receipt(link)}` and then flashes `receipt` — reads
+  # as NOT derived through it. That is a REAL undercount channel, so it is measured by
+  # RE-DERIVING the column with the channel forgiven rather than being admitted in
+  # prose. The CLASS above is NOT re-keyed on this: it is keyed on the ASSIGN, which is
+  # the value the re-render displays, and widening the flash lens moves no class.
+  defp lv_ok_vars_1hop(body) do
+    base = lv_ok_vars(body)
+
+    {_, binds} =
+      Macro.prewalk(body, [], fn
+        {:=, _, [lhs, rhs]} = node, acc -> {node, [{lv_vars(lhs), lv_vars(rhs)} | acc]}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.reduce(binds, base, fn {lhs, rhs}, acc ->
+      if Enum.any?(rhs, &(&1 in acc)), do: Enum.uniq(lhs ++ acc), else: acc
+    end)
+  end
+
+  defp lv_call?(v) do
+    {_, hit} =
+      Macro.prewalk(v, false, fn
+        {{:., _, _}, _, args} = node, _ when is_list(args) -> {node, true}
+        {f, _, args} = node, acc when is_atom(f) and is_list(args) ->
+          {node, acc or f not in [:%{}, :{}, :<<>>, :__aliases__, :^, :.., :when, :__block__]}
+
+        node, acc -> {node, acc}
+      end)
+
+    hit
+  end
+
+  defp lv_head_vars(%{head: head}) do
+    case head do
+      {:when, _, [call, _guard]} -> lv_head_vars(%{head: call})
+      {_, _, args} when is_list(args) -> Enum.flat_map(args, &lv_vars/1)
+      _ -> []
+    end
+  end
+
+  defp lv_deriv_class(%{body: nil}), do: {:literal_only, "no body to read"}
+
+  defp lv_deriv_class(d) do
+    body = expand_pipes(d.body)
+    oks = lv_ok_vars(body)
+    vals = lv_assign_values(body)
+    heads = lv_head_vars(d) -- [:socket]
+
+    cond do
+      vals == [] ->
+        {:literal_only, "no assign"}
+
+      Enum.any?(vals, fn v -> Enum.any?(lv_vars(v), &(&1 in oks)) end) ->
+        {:store_derived, "ok-bound: #{inspect(Enum.take(oks, 3))}"}
+
+      oks != [] and Enum.any?(vals, &lv_call?/1) ->
+        {:store_refetched, "ok-bound #{inspect(Enum.take(oks, 3))} unused by the assign; assign is a call"}
+
+      Enum.any?(vals, fn v -> Enum.any?(lv_vars(v), &(&1 in heads)) end) ->
+        {:request_echo, "head-bound: #{inspect(Enum.take(heads, 3))}"}
+
+      Enum.all?(vals, &(not lv_call?(&1) and lv_vars(&1) == [])) ->
+        {:literal_only, "every assigned value is a literal"}
+
+      true ->
+        {:residual_unattributed, "not decided"}
+    end
   end
 
   # -- the live_session walk (a SECOND walk over router.ex, on purpose) --------
