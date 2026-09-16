@@ -780,6 +780,7 @@ func resolveContext(g globals) manifest.Context {
 // redirects the server, the saved token is for somewhere else and no shadow is
 // claimed. Whether that shadow is a PROBLEM is decided by the caller, which
 // knows whether the server actually refused the env token.
+// @canonical capability:bp-credential-server-pairing aka:token binding,withheld credential,mismatched server,credential leak,saved credential,server-credential pairing,TestResolvedCredentialIsNotBoundToTheResolvedServer
 func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// Persisted config is the ActiveContext layer. A missing/empty config is a
 	// no-op (empty ActiveContext); a malformed one is non-fatal here — we fall
