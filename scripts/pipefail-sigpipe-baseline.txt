@@ -175,4 +175,72 @@
 # producer failed 10/10. The small-producer sites are latent, not safe.
 #
 # Filed under task-0c3f58ec7fb18137.
-108
+
+# ── RE-MEASURED 2026-09-16 (task-0c3f58ec7fb18137, follow-up to #18560): 108 → 101
+#    AND THE PREVIOUS BLOCK'S "NOT UNDER -e" READING IS WITHDRAWN ─────────────
+# origin/main 25ed0f263 measured 107 against the banked 108 — the ratchet was
+# LOOSE by one (rc 0, "RATCHET LOOSE"), which is slack the next regression can
+# hide in. This change converts 6 sites and banks the result, by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 101 finding(s) — high 101 · medium 0 · low 0 — over 429 file(s)
+#     (all confidences on the same tree: 258 → 246; medium 146 → 140)
+#
+# WHAT THE BLOCK ABOVE GOT WRONG. It left ten .github/workflows sites on the
+# ground that they are "all under `set -uo pipefail` with NO -e, so the 141 is
+# DISCARDED". Six of those ten were LIVE. A GitHub `run:` step with no `shell:`
+# key runs under the runner's DEFAULT shell, `bash -e {0}` — `-e` is supplied by
+# the RUNNER, so a step that writes `set -uo pipefail` is running `-euo pipefail`
+# whatever its own line says. Neither of these workflows carries a `shell:` key
+# or a `defaults: run:` block (verified on this head), so -e is on in both.
+#
+# THE SIX CONVERTED (all `sed`/`grep` into `head -1`, status consumed by an
+# assignment or a bare command, so the 141 aborts the STEP on a TRUE read):
+#   elixir-main-red-attribution.yml:132  grep -o | head -1 | cut  → grep + ${x%%\n*}
+#       Also fixed a SECOND latent abort at the same site: on NO match the old
+#       pipeline returned 1, which -e also aborts on; `|| true` restores the
+#       `${v:-UNREADABLE}` fallback the next line always intended.
+#   reland-check.yml:215                 get() printf | sed | head -1  → sed <<< + ${x%%\n*}
+#   reland-check.yml:299,300,301,302     sed FILE | head -1 ×4         → one first_of() helper
+#
+# THE FOUR LEFT, and why (a fix with no failure mode is churn):
+#   cp-ops.yml:96,97,149,406 — all four sit INSIDE a quoted REMOTE ssh command
+#       string. The scanner reads the OUTER `run:` body's `set -euo pipefail`
+#       and attributes it to text that a different shell on a different host
+#       executes. 96/97/406 run in a remote shell with no `set` at all; 149's
+#       remote shell sets `-uo` and, unlike a GitHub step, gets no -e from
+#       anywhere. The attribution is wrong for these four; the sites are not.
+#
+# ALSO CONVERTED (medium tier — inventory, not enforced, so they do not move the
+# number above; they are the two files the task row names):
+#   scripts/migration-version-collision-check.sh:241,271,272  printf | grep -q → here-string
+#   scripts/prod-build-cache-guard.sh:119                     printf "${arr[@]}" | grep -qxF → here-string
+#   scripts/migration-version-collision-check.test.sh:59,69   the HARNESS had the same shape:
+#       a TRUE `expect_out` on a large CHECK_OUT would have reported `bad`.
+#
+# BOTH-WAYS ARMS, run on this head, real output:
+#   REVERT ARM — the OLD shape of each conversion, fed a 200k-line producer under
+#       `bash -euo pipefail`: rc=141 on all three shapes (grep|head|cut,
+#       sed FILE|head -1, printf|grep -qxF). Reverting any of them REDS.
+#   QUIET ARM — the same OLD and NEW shapes on small/no-match/empty inputs return
+#       IDENTICAL values and identical rc; and a genuine MISS still returns rc=1
+#       on BOTH shapes, so the fix did not turn a check into a yes-machine.
+#   13 pass / 0 fail. An earlier run of the same arms returned rc=126
+#       ("Argument list too long") from passing 3MB through argv — an instrument
+#       fault that reads exactly like the 141 being hunted. The big producers
+#       live in files for that reason.
+#   Selftests on this head: migration-version-collision-check.test.sh 40/0,
+#       prod-build-cache-guard.sh --selftest OK 11 cases,
+#       pipefail-sigpipe-scan.sh --selftest pass 30 / fail 0.
+#
+# WHAT 101 MEANS IN EACH DIRECTION (a ratchet has two failure directions):
+#   A RISE above 101 is a NEW high-confidence site and REDS — that is the whole
+#       point, and it is the direction that has already fired once (the 113→114
+#       drift recorded two blocks up).
+#   A FALL below 101 does NOT red; it prints RATCHET LOOSE and asks for the
+#       number to be banked. That notice is not cosmetic: while the file says 101
+#       and the tree reads 99, two new regressions can land unseen. Bank a fall in
+#       the change that causes it — this file was loose by one for four days.
+#
+# Filed under task-0c3f58ec7fb18137.
+101
