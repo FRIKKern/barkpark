@@ -321,7 +321,14 @@ defmodule Barkpark.Tasks.PulseTest do
       assert verb.verb == "pulse"
       assert verb.http == %{method: "POST", path_template: "/v1/tasks/:doc_id/pulse"}
       assert Enum.map(verb.args, & &1.name) == ["doc_id", "worker_id"]
-      assert Enum.map(verb.flags, & &1.name) == ["now", "criterion"]
+      # `dataset` is appended by the ROUTE-derived rule in
+      # `Barkpark.Plugins.Tasks.declare_dataset_on_doc_id_route/1`
+      # (task-1e3101eaf9a03f84): every task verb whose path_template carries
+      # `:doc_id` resolves through `TasksController.find_task_by_doc_id/2` and
+      # can answer a 409 `ambiguous_dataset`, so it declares the disambiguator
+      # the refusal names. This pin is EXACT on purpose — it is the reason that
+      # rule could not add a flag here unnoticed.
+      assert Enum.map(verb.flags, & &1.name) == ["now", "criterion", "dataset"]
       # NO epoch arg anywhere — pulse survives fences by design (charter D9).
       refute Enum.any?(verb.args ++ verb.flags, &(&1.name == "observed_epoch"))
       assert verb.writes == true

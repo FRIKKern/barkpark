@@ -1708,7 +1708,69 @@ defmodule Barkpark.Plugins.Tasks do
       # alongside their CORE-mounted /v1/graph/* routes (fresh-install
       # invariant).
     ]
+    |> Enum.map(&declare_dataset_on_doc_id_route/1)
   end
+
+  # ── THE `?dataset=` DISAMBIGUATOR, DECLARED FROM THE ROUTE ──────────────
+  # (task-1e3101eaf9a03f84)
+  #
+  # `GET /v1/tasks/:doc_id` refuses a doc_id that lives in two datasets of one
+  # workspace+project with a 409 `ambiguous_dataset` whose message names the
+  # remedy: "Name the dataset you mean (?dataset=<name> on the task route)".
+  # The SERVER honours that remedy — `find_task_by_doc_id/2` reads
+  # `conn.params["dataset"]` and hands it to `Barkpark.Tasks.TwinResolver`. The
+  # CLI can forward it too: `globalQueryForwards` (internal/cli/globals.go) puts
+  # a TYPED `-d/--dataset` on the request for any command that DECLARES a
+  # dataset flag (`commandDeclaresFlag`, internal/cli/run.go). Neither half was
+  # broken. The MANIFEST was: `task.get` declared `flags: []`, so the forward
+  # was gated off and `bp task get <ambiguous-id> -d production` came back
+  # BYTE-IDENTICAL to the refusal that told the caller to type it.
+  #
+  # DERIVED, NOT LISTED. The predicate is the ROUTE: every task command whose
+  # `path_template` carries `:doc_id` resolves through
+  # `TasksController.find_task_by_doc_id/2` and can therefore answer
+  # `ambiguous_dataset` — so every one of them gets the declaration, and the
+  # next `:doc_id` verb someone adds gets it for free. A hand-written list of
+  # verbs is the same shape as the defect it repairs: it goes stale silently.
+  #
+  # NOT declared here, and why:
+  #   * `task.ready` and `task.events` already declare their own dataset flag
+  #     (the CONTROL — `-d` has worked on both for months); the clause below is
+  #     idempotent and leaves an existing declaration exactly as written.
+  #   * `task.ls`, `task.prime`, `task.next` carry no `:doc_id`. Their routes
+  #     cannot answer `ambiguous_dataset` at all: the index COLLAPSES/withholds
+  #     twins (`Tasks.Query.collapse_twins/1`) rather than refusing, and
+  #     `POST /v1/tasks/claim` picks off the queue by rank, never by id. Making
+  #     the index's own `?dataset=` (#18531) typeable from `bp task ls` is a
+  #     real gap, but it is a DIFFERENT rule than this one and is filed
+  #     separately rather than bolted on as an exception here.
+  #
+  # This declaration changes NOTHING when the caller types no `-d`: the forward
+  # is gated on `datasetSet` (TYPED IN ARGV), not on the ambient dataset, so a
+  # bare `bp task get <ambiguous-id>` still sends no `?dataset=` and still gets
+  # the honest 409. The refusal is what this makes followable, not what it
+  # replaces.
+  @doc_id_dataset_flag %{
+    name: "dataset",
+    type: "string",
+    summary:
+      "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 " <>
+        "`ambiguous_dataset` refusal names: one doc_id may live in two datasets of a " <>
+        "single workspace+project, and the task doors REFUSE such an id rather than " <>
+        "picking a dataset you did not name. Omit it and nothing is picked for you — " <>
+        "an unambiguous id reads normally and an ambiguous one is still refused."
+  }
+
+  defp declare_dataset_on_doc_id_route(%{http: %{path_template: path}, flags: flags} = cmd)
+       when is_binary(path) and is_list(flags) do
+    if String.contains?(path, ":doc_id") and not Enum.any?(flags, &(&1.name == "dataset")) do
+      %{cmd | flags: flags ++ [@doc_id_dataset_flag]}
+    else
+      cmd
+    end
+  end
+
+  defp declare_dataset_on_doc_id_route(cmd), do: cmd
 
   @doc """
   Projects a task document's dependency + hierarchy edges into the content
