@@ -800,6 +800,36 @@
     }
 
     /* ── Schema-driven field-group tabs (editor pane) ─────────────────── */
+    /* Document views (Gyldendal parity E10). A second, quieter tab row above
+       the field groups: it switches the whole editor body between the form and
+       a list of related documents, so it reads as a level above the group tabs
+       rather than a sibling of them. */
+    .bp-view-bar {
+      display: flex; gap: 4px; align-items: center;
+      padding: 0 0 10px 0; margin-bottom: 14px;
+      border-bottom: 1px solid var(--border-muted);
+      overflow-x: auto;
+    }
+    .bp-view-tab {
+      appearance: none; background: transparent;
+      border: 1px solid transparent; border-radius: 999px;
+      padding: 4px 12px;
+      color: var(--fg-muted); cursor: pointer;
+      font-size: var(--text-sm); font-family: inherit; white-space: nowrap;
+      transition: color var(--dur-1), background var(--dur-1), border-color var(--dur-1);
+    }
+    .bp-view-tab:hover { color: var(--fg); background: var(--bg-muted); }
+    .bp-view-tab.is-active {
+      color: var(--fg); background: var(--bg-accent);
+      border-color: var(--border); font-weight: 500;
+    }
+    .bp-view-list { display: flex; flex-direction: column; }
+    .bp-view-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 12px; text-decoration: none;
+      border-bottom: 1px solid var(--border-muted);
+    }
+
     .bp-tab-bar {
       display: flex; gap: 2px; padding: 0 0 12px 0;
       border-bottom: 1px solid var(--border-muted);

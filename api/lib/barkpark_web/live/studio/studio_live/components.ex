@@ -1834,6 +1834,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             presences={@presences}
             parent_assigns={assigns}
             nav_group={@nav_group}
+            nav_view={@nav_view}
+            nav_view_docs={@nav_view_docs}
+            scope_prefix={@scope_prefix}
             content_preview_rendered={@content_preview_rendered}
             content_preview_visible={@content_preview_visible}
             diff_visible={@diff_visible}

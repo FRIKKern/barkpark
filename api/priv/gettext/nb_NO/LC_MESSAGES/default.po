@@ -11,7 +11,7 @@ msgstr ""
 "Language: nb_NO\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:714
+#: lib/barkpark_web/components/studio_components/editor.ex:772
 #, elixir-autogen, elixir-format
 msgid "%{count} warning — publishing is still allowed"
 msgid_plural "%{count} warnings — publishing is still allowed"
@@ -38,7 +38,7 @@ msgstr "for %{n} min siden"
 msgid "%{n}mo ago"
 msgstr "for %{n} mnd siden"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:300
 #, elixir-autogen, elixir-format
 msgid "A %{type} with the id"
 msgstr "Et dokument av typen %{type} med id-en"
@@ -53,25 +53,25 @@ msgstr "API-token"
 msgid "Add"
 msgstr "Legg til"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:298
+#: lib/barkpark_web/components/studio_components/editor.ex:301
 #, elixir-autogen, elixir-format
 msgid "Ask whoever shared access with you to widen the grant."
 msgstr "Be den som delte tilgangen med deg om å utvide den."
 
-#: lib/barkpark_web/components/studio_components/editor.ex:100
+#: lib/barkpark_web/components/studio_components/editor.ex:103
 #: lib/barkpark_web/layouts/studio.html.heex:28
 #: lib/barkpark_web/layouts/studio.html.heex:29
 #, elixir-autogen, elixir-format
 msgid "Back to Studio"
 msgstr "Tilbake til Studio"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:325
+#: lib/barkpark_web/components/studio_components/editor.ex:328
 #, elixir-autogen, elixir-format
 msgid "Back to the %{type} list"
 msgstr "Tilbake til %{type}-lista"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:325
-#: lib/barkpark_web/components/studio_components/editor.ex:333
+#: lib/barkpark_web/components/studio_components/editor.ex:328
+#: lib/barkpark_web/components/studio_components/editor.ex:336
 #, elixir-autogen, elixir-format
 msgid "Back to the desk"
 msgstr "Tilbake til desken"
@@ -147,18 +147,18 @@ msgstr "Flytt opp"
 msgid "New %{type}"
 msgstr "Ny %{type}"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:294
-#: lib/barkpark_web/components/studio_components/editor.ex:301
+#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:304
 #, elixir-autogen, elixir-format
 msgid "No %{type} with the id"
 msgstr "Ingen %{type} med id-en"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:271
+#: lib/barkpark_web/components/studio_components/editor.ex:274
 #, elixir-autogen, elixir-format
 msgid "No document is open. Pick one from the list to start editing."
 msgstr "Ingen dokument er åpent. Velg ett i lista for å begynne å redigere."
 
-#: lib/barkpark_web/components/studio_components/editor.ex:304
+#: lib/barkpark_web/components/studio_components/editor.ex:307
 #, elixir-autogen, elixir-format
 msgid "No schema for"
 msgstr "Ingen skjema for"
@@ -168,7 +168,7 @@ msgstr "Ingen skjema for"
 msgid "Open another"
 msgstr "Åpne et annet"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:318
+#: lib/barkpark_web/components/studio_components/editor.ex:321
 #, elixir-autogen, elixir-format
 msgid "Open it in %{workspace}"
 msgstr "Åpne det i %{workspace}"
@@ -221,22 +221,22 @@ msgstr "Logg inn med token"
 msgid "Structure"
 msgstr "Struktur"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:291
+#: lib/barkpark_web/components/studio_components/editor.ex:294
 #, elixir-autogen, elixir-format
 msgid "Studio could not open this document."
 msgstr "Studio kunne ikke åpne dette dokumentet."
 
-#: lib/barkpark_web/components/studio_components/editor.ex:309
+#: lib/barkpark_web/components/studio_components/editor.ex:312
 #, elixir-autogen, elixir-format
 msgid "The link may predate a structure change, or the plugin that owned it may be disabled."
 msgstr "Lenken kan være fra før en strukturendring, eller pluginen som eide den kan være slått av."
 
-#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:300
 #, elixir-autogen, elixir-format
 msgid "The type"
 msgstr "Typen"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:308
+#: lib/barkpark_web/components/studio_components/editor.ex:311
 #, elixir-autogen, elixir-format
 msgid "This desk has no section named"
 msgstr "Denne desken har ingen seksjon som heter"
@@ -266,12 +266,12 @@ msgstr "Oppdatert %{ago}"
 msgid "View blast radius"
 msgstr "Vis påvirkning"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:305
+#: lib/barkpark_web/components/studio_components/editor.ex:308
 #, elixir-autogen, elixir-format
 msgid "Whatever is stored under that type is untouched."
 msgstr "Det som er lagret under den typen er urørt."
 
-#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:300
 #, elixir-autogen, elixir-format
 msgid "but your access grant does not cover it"
 msgstr "men tilgangsgranten din dekker det ikke"
@@ -281,28 +281,28 @@ msgstr "men tilgangsgranten din dekker det ikke"
 msgid "document"
 msgstr "dokument"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:297
-#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:300
+#: lib/barkpark_web/components/studio_components/editor.ex:300
 #, elixir-autogen, elixir-format
 msgid "exists in this dataset"
 msgstr "finnes i dette datasettet"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:301
+#: lib/barkpark_web/components/studio_components/editor.ex:304
 #, elixir-autogen, elixir-format
 msgid "exists in this dataset. It may have been deleted."
 msgstr "finnes i dette datasettet. Det kan være slettet."
 
-#: lib/barkpark_web/components/studio_components/editor.ex:294
+#: lib/barkpark_web/components/studio_components/editor.ex:297
 #, elixir-autogen, elixir-format
 msgid "exists in this workspace — but a document with that id lives in the workspace"
 msgstr "finnes i dette workspacet — men et dokument med den id-en ligger i workspacet"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:304
+#: lib/barkpark_web/components/studio_components/editor.ex:307
 #, elixir-autogen, elixir-format
 msgid "is installed in this dataset, so Studio has no fields to show its documents with"
 msgstr "er installert i dette datasettet, så Studio har ingen felt å vise dokumentene med"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:297
+#: lib/barkpark_web/components/studio_components/editor.ex:300
 #, elixir-autogen, elixir-format
 msgid "it covers %{scope}"
 msgstr "den dekker %{scope}"
@@ -317,12 +317,12 @@ msgstr "akkurat nå"
 msgid "paste token"
 msgstr "lim inn token"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:308
+#: lib/barkpark_web/components/studio_components/editor.ex:311
 #, elixir-autogen, elixir-format
 msgid "so the path could not be walked to a document"
 msgstr "så stien kunne ikke følges til et dokument"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:304
+#: lib/barkpark_web/components/studio_components/editor.ex:307
 #, elixir-autogen, elixir-format
 msgid "you asked for"
 msgstr "du ba om"
@@ -397,6 +397,7 @@ msgstr "Laster opp…"
 msgid "documents"
 msgstr "dokumenter"
 
+#: lib/barkpark_web/components/studio_components/editor.ex:700
 #: lib/barkpark_web/studio_locale.ex:79
 #, elixir-autogen, elixir-format
 msgid "draft"
@@ -412,7 +413,7 @@ msgstr "Alt-tekst"
 msgid "Describe the image for people who cannot see it"
 msgstr "Beskriv bildet for dem som ikke kan se det"
 
-#: lib/barkpark_web/components/studio_components/editor.ex:1130
+#: lib/barkpark_web/components/studio_components/editor.ex:1188
 #, elixir-autogen, elixir-format
 msgid "Title"
 msgstr ""
@@ -422,7 +423,7 @@ msgstr ""
 msgid "Upload"
 msgstr "Last opp"
 
-#: lib/barkpark_web/studio_locale.ex:97
+#: lib/barkpark_web/studio_locale.ex:99
 #, elixir-autogen, elixir-format
 msgid "Does not match required format"
 msgstr "Har ikke riktig format"
@@ -432,22 +433,22 @@ msgstr "Har ikke riktig format"
 msgid "Fix validation errors before publishing"
 msgstr "Rett valideringsfeilene før du publiserer"
 
-#: lib/barkpark_web/studio_locale.ex:108
+#: lib/barkpark_web/studio_locale.ex:110
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min}"
 msgstr "Må være minst %{min}"
 
-#: lib/barkpark_web/studio_locale.ex:102
+#: lib/barkpark_web/studio_locale.ex:104
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min} characters"
 msgstr "Må være minst %{min} tegn"
 
-#: lib/barkpark_web/studio_locale.ex:111
+#: lib/barkpark_web/studio_locale.ex:113
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max}"
 msgstr "Kan være høyst %{max}"
 
-#: lib/barkpark_web/studio_locale.ex:105
+#: lib/barkpark_web/studio_locale.ex:107
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max} characters"
 msgstr "Kan være høyst %{max} tegn"
@@ -456,3 +457,13 @@ msgstr "Kan være høyst %{max} tegn"
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr "Påkrevd"
+
+#: lib/barkpark_web/components/studio_components/editor.ex:673
+#, elixir-autogen, elixir-format
+msgid "Fields"
+msgstr "Felt"
+
+#: lib/barkpark_web/components/studio_components/editor.ex:690
+#, elixir-autogen, elixir-format
+msgid "No documents yet"
+msgstr "Ingen dokumenter ennå"

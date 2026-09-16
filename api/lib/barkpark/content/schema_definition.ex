@@ -113,6 +113,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_desk_group_filters()
     |> validate_desk_block()
+    |> validate_desk_views()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -187,6 +188,78 @@ defmodule Barkpark.Content.SchemaDefinition do
         changeset
     end
   end
+
+  # Gyldendal parity E10 — `desk.views`: Sanity's `defaultDocumentNode` adds a
+  # tab beside «Felt» that lists OTHER documents related to the open one
+  # («Bøker i serien», «Bøker av forfatteren», «Utgivelser i kategorien»). The
+  # declaration lives under `desk` rather than in a column of its own so a
+  # schema gains views with no migration, beside `orderings` and `hidden`.
+  #
+  #   "desk": {"views": [{"id": "boker-i-serien", "title": "Bøker i serien",
+  #                       "type": "publication", "by": "content.series",
+  #                       "icon": "book",
+  #                       "orderings": [{"field": "title", "direction": "asc"}]}]}
+  #
+  # `by` is the FIELD PATH on the listed type that holds the reference back to
+  # the open document, in the same grammar a desk filter uses. Every key but
+  # `icon` and `orderings` is required: a view missing one would render a tab
+  # that lists nothing, which reads to an editor as "there are none".
+  defp validate_desk_views(changeset) do
+    case get_change(changeset, :desk) do
+      %{} = desk ->
+        case Map.get(desk, "views") || Map.get(desk, :views) do
+          nil ->
+            changeset
+
+          list when is_list(list) ->
+            case Enum.find(list, &(not valid_view?(&1))) do
+              nil ->
+                changeset
+
+              bad ->
+                add_error(
+                  changeset,
+                  :desk,
+                  "views entries need non-empty \"id\", \"title\", \"type\" and \"by\" " <>
+                    "(plus optional \"icon\" and valid \"orderings\"), got #{inspect(bad)}"
+                )
+            end
+
+          other ->
+            add_error(changeset, :desk, "views must be a list, got #{inspect(other)}")
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp valid_view?(%{} = v) do
+    # String key first, atom key second, and the atom is a LITERAL — never
+    # `String.to_existing_atom/1` on the loop variable, which raises for a key
+    # no atom exists for and would turn a validation into a 500.
+    required =
+      Enum.all?(
+        [
+          Map.get(v, "id") || Map.get(v, :id),
+          Map.get(v, "title") || Map.get(v, :title),
+          Map.get(v, "type") || Map.get(v, :type),
+          Map.get(v, "by") || Map.get(v, :by)
+        ],
+        fn val -> is_binary(val) and String.trim(val) != "" end
+      )
+
+    orderings =
+      case Map.get(v, "orderings") || Map.get(v, :orderings) do
+        nil -> true
+        list when is_list(list) -> Enum.all?(list, &valid_ordering?/1)
+        _ -> false
+      end
+
+    required and orderings
+  end
+
+  defp valid_view?(_), do: false
 
   defp valid_ordering?(%{} = o) do
     field = Map.get(o, "field") || Map.get(o, :field)
