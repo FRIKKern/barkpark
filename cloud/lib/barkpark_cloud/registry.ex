@@ -9760,9 +9760,11 @@ defmodule BarkparkCloud.Registry do
   horizon". The age gate is what keeps a FRESH row out: the route that minted it
   is driving it right now, and `Deploy.run/1` claims within milliseconds — a
   never-claimed row still `queued` a full `deployment_stale_after_seconds/0`
-  later is one whose driver never started. Human-cancelled rows are excluded by
+  later is one whose driver never started. Cancelled rows are excluded by
   `d.status == "queued"` (a cancel writes `"cancelled"`), so nothing resurrects a
-  build a person stopped.
+  build the fleet already refused — an auto-deploy refusal, a superseded or torn
+  down preview, or a box's terminal. There is no human cancel path
+  (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
 
   Being FOUND here is a re-attempt, not a cure: if the spawn keeps being refused
   the row stays `claim_epoch == 0` and comes back next sweep. Pass (0c) of
@@ -10400,8 +10402,10 @@ defmodule BarkparkCloud.Registry do
     # Container rows are out of scope: they legitimately wait on the off-box
     # builder's claim (`queued_deploy_age_map/1` is that class's read-only
     # alarm), and failing a queue for being a queue would be a new defect.
-    # `d.status == "queued"` also keeps a HUMAN-CANCELLED row (status
-    # "cancelled") out — nothing here resurrects or re-terminates one.
+    # `d.status == "queued"` also keeps an ALREADY-CANCELLED row (status
+    # "cancelled") out — nothing here resurrects or re-terminates one. Such a
+    # row was cancelled by the fleet, never by a person: no human cancel path
+    # exists (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
     spawn_budget_before =
       DateTime.add(now, -(max_claims * deployment_stale_after_seconds()), :second)
 
@@ -10438,7 +10442,7 @@ defmodule BarkparkCloud.Registry do
     #
     # Its own window — `prebuilt_upload_grace_seconds/0`, not the fleet's lease
     # or claim budget — because what it waits on is the CLIENT'S build, not any
-    # worker of ours. `d.status == "queued"` keeps a human-cancelled row and a
+    # worker of ours. `d.status == "queued"` keeps an already-cancelled row and a
     # row whose upload DID arrive (the artifact route starts the driver, which
     # claims it out of `queued`) out by construction; `is_nil(artifact_sha256)`
     # is the second, independent proof that no bytes ever landed.

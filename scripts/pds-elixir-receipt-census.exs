@@ -1724,12 +1724,12 @@ defmodule PDS.Census do
   @roster [
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "Scim.delete_group(org, group)",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.delete/2", def_fp: "48311107",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.delete/2", def_fp: "48311107", callee_fp: "41762080",
       verdict: "PROVEN", basis: :end_to_end,
       note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670, and that verdict outlived its defect by a whole wave). Scim.delete_group/2 (scim.ex:502-516) now returns {:error, :not_found} when Repo.delete_all removed nothing, so {:ok, 0} is UNREACHABLE, and the caller cases on the tag rather than discarding it: {:ok, _n} -> 204, {:error, :not_found} -> a SCIM 404. Driven and read back: scim_groups_controller_test.exs `the group vanishes between the read and the delete → 404, never 204` deletes the row out from under the request through a repo telemetry handler, then asserts the 404 AND `refute Repo.get(Group, gid)`."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "Scim.deprovision_user(org, user, hard: true)",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067", callee_fp: "58639899",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
       note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
     # ------------------------------------------------------------------ THE SIX SCIM
@@ -1748,77 +1748,77 @@ defmodule PDS.Census do
     # search_controller.ex correction/2 row above, which removed two).
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "case Scim.provision_user(org, params) do",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "70214860",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "70214860", callee_fp: "90246701",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
                  "test \"provisions a confirmed user who can then log in (via magic-link)\" do"},
       note: "THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131", callee_fp: "22175733",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
                  "test \"PATCH active:false deprovisions (soft: revokes access, keeps the row)\" do"},
       note: "THE ONE CLAUSE THAT COULD LIE IS THE ONE ALREADY REPAIRED. The deprovision arm's `active` used to be a literal `false` chosen by the clause, so the body was byte-identical whether the deprovision took or matched nothing; 501fb9670 (#8952, PDS-D503) replaced it with `Scim.org_user_active?(org, user)`, read back off the stored rows, and this file's own WORKED EXAMPLE block cites that repair. The other arm renders the resource fetched by `Scim.get_org_user(org, id)`. Body shape is judged by `ScimPatch.classify/1` BEFORE the resource is touched, so a refused PATCH cannot have half-applied."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "def replace(conn, params), do: update(conn, params)",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.replace/2", def_fp: "1429186",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.replace/2", def_fp: "1429186", callee_fp: "128279295",
       verdict: "UNJUDGED", basis: :unjudged_other,
       note: "A PURE DELEGATE, AND THAT IS THE WHOLE ROW. `def replace(conn, params), do: update(conn, params)` renders nothing of its own: PUT /scim/v2/Users/:id reaches the receipt the row above judges. IT IS STILL CARRIED SEPARATELY rather than folded into that row, because @roster disposes BY DEF and the routed member is keyed on the :replace action — folding it would leave the PUT arrival undisposed. WHY UNJUDGED AND NOT PROVEN: the committed PUT cases (`a stale If-Match on PUT -> 412`, `a matching If-Match on PUT proceeds -> 200`) drive the route and assert the STATUS and the precondition, and neither reads a stored row back, so the end_to_end falsifier would refuse this row on its own citation. The delegate is judged as far as it goes and no further, and the gap is this sentence rather than a silence."},
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "case Scim.create_group(org, params) do",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.do_create/3", def_fp: "108471285",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.do_create/3", def_fp: "108471285", callee_fp: "60389870",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
                  "test \"cross-org: a token for org A cannot grant membership to a user in org B\" do"},
       note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE ANCHOR MOVED ONTO `do_create/3` ON PURPOSE, NOT TO SILENCE THE ARM: `create/2` is now a four-line bound check that delegates, and the receipt this row judges lives entirely in `do_create/3`. Anchoring def_fp on the wrapper would leave a DEAD DETECTOR — every future edit to the rendering would move no byte inside `create/2` and this row would print fresh through it. The routed member `post /scim/v2/Groups -> create` stays disposed because roster_functions/2 resolves the LITERAL to its containing def and disposition is REACHABILITY (`create/2` calls `do_create/3`), not def equality. THE 201 ANSWERS OVER THE RECONCILIATION IT PERFORMED, NOT OVER THE REQUEST. `render_group(conn, group, Scim.group_member_ids(org, group), unmatched)` takes the group from `{:ok, group} <- Scim.create_group(org, params)` and the member list from a STORED read, and the `unmatched` set names the member ids the write refused — so a request member that matched nobody comes back as `unmatchedMembers`, never as a granted member. The cited case drives the cross-org shape where that distinction is load-bearing and asserts BOTH the receipt and the untouched stored rows."},
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "with {:ok, patch} <- ScimPatch.classify(params),",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.update/2", def_fp: "15721568",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.update/2", def_fp: "15721568", callee_fp: "122675305",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
                  "test \"membership changes are audited\" do"},
       note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE LITERAL MOVED BECAUSE THE OLD ONE LEFT THE FILE: the `with` grew a second clause (`:ok <- ScimPatch.check_member_total(...)`), so `... classify(params) do` no longer occurs and ROSTER-ANCHORS-EXIST reddened on it — which is ALSO what took `patch /scim/v2/Groups/:id -> update` out of the disposed population and reddened ROUTED-POPULATION-COMPLETE. The anchor is the same `with` head, one line as it is written today. RE-READ AFTER THE WRITES, BY CONSTRUCTION. `apply_patch/5` fetches the group BEFORE the member ops and then re-reads it — `group = Scim.get_org_group(org, id) || group` — with the comment PDS-D551 left there saying why: rendering the pre-fetched struct would answer for the PRE-mutation resource. Members come from `Scim.group_member_ids(org, group)`, a stored read, and ops that matched nobody are reported as `unmatchedMembers` rather than folded into a bare 200."},
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "case Scim.update_group(org, group, params) do",
-      anchor_mfa: "BarkparkWeb.ScimGroupsController.do_replace/4", def_fp: "60781801",
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.do_replace/4", def_fp: "60781801", callee_fp: "128122846",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
                  "test \"membership changes are audited\" do"},
       note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE ANCHOR MOVED ONTO `do_replace/4` FOR THE SAME REASON `create` MOVED ONTO `do_create/3`: `replace/2` is now the bound check and every call this note describes lives in `do_replace/4`, so the wrapper's def_fp would detect nothing. `put /scim/v2/Groups/:id -> replace` stays disposed by reachability. PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
-      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031",
+      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031", callee_fp: "12927600",
       verdict: "PROVEN", basis: :end_to_end,
       note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs `clears the session and redirects to /studio` posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
-      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "99902146",
+      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "99902146", callee_fp: "63598076",
       verdict: "UNJUDGED", basis: :unjudged_other,
       note: "RE-DERIVED on ct-bl-plan-paper-parity, which grew the enclosing approval/2 a third unread outcome and moved def_fp 121603508 -> 99902146; ROSTER-VERDICT-FRESH demoted the row to UNJUDGED and this is the re-derivation it asked for. THE VERDICT IS UNCHANGED and its basis is now THREEFOLD, not two: both arms of update_approval_status fold to :ok, answer_approval's result is discarded with `_ =`, and the newly added PlanPapers.publish_approved_plan/3 sits last in the `with` body where nothing reads its return either. The third one is DELIBERATE and does not worsen the row: the Paper projection is fire-and-forget by design (a publish miss must not fail a flip that already happened and a 204 that already stands), and it is declared as such in the clause comment above the call. What this row has always said still holds — the 204 reports the flip without reading a stored row back."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "persist_user_turn(id, content)",
-      anchor_mfa: "BarkparkWeb.ChatController.create_message/2", def_fp: "83487517",
+      anchor_mfa: "BarkparkWeb.ChatController.create_message/2", def_fp: "83487517", callee_fp: "45890722",
       verdict: "UNJUDGED", basis: :declared_basis,
       note: "a fail-soft persist, declared in the clause comment above it — the send is already on its way, so a persist miss must not turn a live send into an error."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "json(%{request_id: request_id})",
-      anchor_mfa: "BarkparkWeb.ChatController.interrupt/2", def_fp: "23665871",
+      anchor_mfa: "BarkparkWeb.ChatController.interrupt/2", def_fp: "23665871", callee_fp: "69846627",
       verdict: "UNJUDGED", basis: :declared_basis,
       note: "the request_id: nil no-op, declared in the @doc."},
     %{path: "api/lib/barkpark_web/controllers/chat_host_controller.ex",
       literal: "{:ok, :accepted} -> conn |> put_status(:accepted) |> json(",
-      anchor_mfa: "BarkparkWeb.ChatHostController.event/2", def_fp: "62380347",
+      anchor_mfa: "BarkparkWeb.ChatHostController.event/2", def_fp: "62380347", callee_fp: "5495820",
       verdict: "UNJUDGED", basis: :stub_mapping_only,
       note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
     %{path: "api/lib/barkpark_web/controllers/search_controller.ex",
       literal: "recorded: status == :recorded,",
-      anchor_mfa: "BarkparkWeb.SearchController.correction/2", def_fp: "94313079",
+      anchor_mfa: "BarkparkWeb.SearchController.correction/2", def_fp: "94313079", callee_fp: "26145788",
       verdict: "PROVEN", basis: :end_to_end,
       note: "ARRIVES AS A ROSTER ROW BECAUSE THE EVIDENCE ARRIVED FIRST, NOT AS BOOKKEEPING. correction/2 left this lens's literal population at #9600 — it stopped spelling `ok: true` and now renders `ok: status != :error` beside a `status:` discriminator for the five causally different outcomes record_correction/3 answers — so no register row can name it and BOTH of its routed arrivals (`post /v1/data/search/:dataset/correction` and `post /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction`) sat in @routed_excluded as :status_only_receipt. A roster row attaches to the DEF, so ONE row disposes both, which is why the two exclusion tuples and their two @exclusion_anchors entries are REMOVED in the same commit — ROUTED-DISPOSITION-UNSHADOWED would otherwise red on a committed row naming a member this run disposes ROSTERED. WHY PROVEN, AND WHY NOT SOONER: the earlier proposal to write this row was refused precisely because it would have counted the SCOPED MIRROR as proven on a suite that never dispatched to it — correction_receipt_test.exs drives the flat route only and its own moduledoc says so. #16521 removed that objection by running the mirror: scoped_search_intel_receipt_test.exs `the five-way correction receipt is identical on the scoped and flat paths` posts all five inputs through :scoped_api under a member token and asserts five DISTINCT receipts on the SCOPED path, `a scoped correction writes a row carrying the URL's workspace_id` reads the written row back, and the C0 cases pin that the mirror fails closed for an anonymous caller and for a member of another workspace. end_to_end is earned on both legs: each case asserts the receipt AND the `search_intel_events` correction row count behind it. MUTATION-EXERCISED at 2e3ee4f6c — re-laundering correction/2 (destructure `status` away, render `ok: true` again) reds `the five-way correction receipt is identical on the scoped and flat paths` with `five causally different outcomes collapsed on the SCOPED path` and `a scoped correction writes a row carrying the URL's workspace_id` on `body[\"status\"]` nil, alongside 6 flat-route cases: 14 tests, 8 failures. Restored: 14 tests, 0 failures. def_fp DERIVED, never typed — a planted def_fp: \"PROBE\" row made ROSTER-VERDICT-FRESH print `def_fp moved PROBE -> 94313079`, and any further edit to correction/2, `mix format` included, moves it again and demotes this row to UNJUDGED."},
     %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
       literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
-      anchor_mfa: "BarkparkWeb.PulseController.preflight/2", def_fp: "131930615",
+      anchor_mfa: "BarkparkWeb.PulseController.preflight/2", def_fp: "131930615", callee_fp: "113427502",
       verdict: "UNJUDGED", basis: :not_a_receipt,
       note: "a CORS preflight 204 claims nothing about work done. CARRIED ON PURPOSE, so the roster's own completeness is checkable: a roster of only the guilty is indistinguishable from a roster nobody finished."}
   ]
@@ -11349,16 +11349,17 @@ defmodule PDS.Census do
   # FINGERPRINT must be unambiguous, so ties go to the smallest span.
   defp roster_freshness(parsed) do
     by_path = Map.new(parsed, &{&1.path, &1})
-    Enum.map(@roster, fn r -> {r, roster_resolution(Map.get(by_path, r.path), r)} end)
+    index = roster_index(parsed)
+    Enum.map(@roster, fn r -> {r, roster_resolution(Map.get(by_path, r.path), r, index)} end)
   end
 
   # ABSENT IS NOT UNRESOLVED, AND THE SPLIT IS DELIBERATE. A file or literal that has left
   # the corpus is ROSTER-ANCHORS-EXIST's finding, and two arms redding on one fact reads as
   # two regressions. UNRESOLVED is the case only this arm can see: the literal is right
   # there, and it sits inside no def at all.
-  defp roster_resolution(nil, _r), do: %{state: :absent}
+  defp roster_resolution(nil, _r, _index), do: %{state: :absent}
 
-  defp roster_resolution(f, r) do
+  defp roster_resolution(f, r, index) do
     case roster_anchor(%{r.path => f.src}, r) do
       :missing ->
         %{state: :absent}
@@ -11369,7 +11370,7 @@ defmodule PDS.Census do
             %{state: :unresolved, why: "#{short(r.path)}:#{line} lies inside no def this lens can see"}
 
           d ->
-            roster_compare(r, d, line)
+            roster_compare(r, d, line, index)
         end
     end
   end
@@ -11386,19 +11387,84 @@ defmodule PDS.Census do
   # eight rows exactly as it re-keys the register's 91.
   defp roster_def_fp(d), do: fp({d.head, d.body})
 
-  defp roster_compare(r, d, line) do
+  # -- THE CALLEE HOP, CLOSED (pds-w39-roster-fresh-callee-blindspot) ----------
+  #
+  # WHAT THIS FIELD BUYS, AND WHAT IT COST TO FIND OUT. `anchor_mfa` and `def_fp` are both
+  # SAME-FILE, and this arm printed that blind shape rather than hiding it: a repair confined
+  # to a CALLEE of a roster row's def moves no byte inside that def, so the arm printed PASS
+  # through a verdict that had just become false. `callee_fp` is a fingerprint over the
+  # ONE-HOP callee set of the same def — the {mfa, def-fingerprint} of every def in `api/lib`
+  # that def calls, sorted, so the field moves when a callee's BODY moves and when the SET
+  # of callees changes, and does not move when a callee merely relocates.
+  #
+  # IT WAS PRICED BEFORE IT WAS BUILT, ON THE WINDOW THAT SETTLED `def_fp`.
+  # `scripts/pds-roster-callee-churn.exs` re-derives all three granularities over
+  # `git rev-list -95 9730f6931 -- api/lib` — the 95 api/lib commits PDS-D558 used — and
+  # halts unless it reproduces D558's price for `def_fp` exactly (2 fires, one of them
+  # fbc6b80a1, one of them unrelated). It reproduces. Measured over that window:
+  #
+  #     def_fp (shipped)               2 fires   1 unrelated   1 per 95
+  #     def_fp + callee_fp (this)      3 fires   1 unrelated   1 per 95
+  #
+  # The third fire is 501fb9670 (#8952, PDS-D503) on the SCIM Users row — a repair that
+  # edited `Scim.deprovision_user/3`, the very callee that row's PROVEN basis describes, and
+  # moved no byte inside `delete/2`. That is THE BLIND SHAPE, caught: the widening adds one
+  # TRUE POSITIVE and ZERO unrelated fires, against PDS-D524's refused count-arm rate of
+  # ~1 per 11. A fire on a row carrying a JUDGED verdict is a re-derivation this arm exists
+  # to demand; a fire on an UNJUDGED row is noise, and there are no more of those than before.
+  #
+  # IT REUSES roster_def_fp/1 AND NOTHING ELSE for the callees themselves, for the same
+  # reason exclusion_def_fp/1 does: a second normaliser would make two tables that agree
+  # today and diverge silently.
+  #
+  # THE INDEX IS MEMOISED, NOT THREADED. `callees/2` needs the corpus index, and this arm is
+  # reached from two call sites (report_roster/1 and roster_freshness_checks/2) neither of
+  # which carries one. build_index/1 is a pure function of `parsed` and this file already
+  # calls it three times; a fourth, taken once per run and cached in the process dictionary
+  # beside the :pds_cl and :pds_vh memos, buys the hop without a 17th argument on integrity/16.
+  defp roster_index(parsed) do
+    case :erlang.get(:pds_roster_index) do
+      :undefined ->
+        v = build_index(parsed)
+        :erlang.put(:pds_roster_index, v)
+        v
+
+      v ->
+        v
+    end
+  end
+
+  # SORTED AND UNIQUE, so the field is a property of the SET and not of source order — a
+  # callee moved from the top of a body to the bottom must not read as a stale verdict.
+  defp roster_callee_fp(d, index) do
+    d
+    |> callees(index)
+    |> Enum.map(&{label(&1), roster_def_fp(&1)})
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> :erlang.phash2()
+    |> to_string()
+  end
+
+  defp roster_compare(r, d, line, index) do
     mfa = label(d)
     dfp = roster_def_fp(d)
+    cfp = roster_callee_fp(d, index)
 
     moved =
       [
         if(r.anchor_mfa != mfa, do: "anchor_mfa moved #{r.anchor_mfa} -> #{mfa}"),
-        if(r.def_fp != dfp, do: "def_fp moved #{r.def_fp} -> #{dfp}")
+        if(r.def_fp != dfp, do: "def_fp moved #{r.def_fp} -> #{dfp}"),
+        # A ROW WITH NO `callee_fp` IS NOT STALE, IT IS UNPRICED. Every row on this roster
+        # carries one, and a row added without one must not read as a repaired callee.
+        if(Map.get(r, :callee_fp) && r.callee_fp != cfp,
+          do: "callee_fp moved #{r.callee_fp} -> #{cfp} (a ONE-HOP callee of this def changed — the def itself did not have to)"
+        )
       ]
       |> Enum.reject(&is_nil/1)
 
     state = if moved == [], do: :fresh, else: :stale
-    %{state: state, line: line, mfa: mfa, fp: dfp, moved: moved}
+    %{state: state, line: line, mfa: mfa, fp: dfp, callee_fp: cfp, moved: moved}
   end
 
   # IT LIVES IN THE UNCONDITIONAL CHECKS LIST, WITH ITS OWN SCOPE CALL — never as a fifth
@@ -11443,9 +11509,9 @@ defmodule PDS.Census do
             " — each was judged against a def that no longer exists in that shape, so it is DEMOTED TO UNJUDGED in the roster block above and a human owes it a re-derivation; this arm never edits a verdict"
 
         true ->
-          "#{fresh} roster verdict(s) still name the def they were derived against — anchor_mfa AND def_fp both re-derived this run, never transcribed" <>
+          "#{fresh} roster verdict(s) still name the def they were derived against — anchor_mfa, def_fp AND callee_fp all re-derived this run, never transcribed" <>
             if(absent > 0, do: " (#{absent} row(s) absent from this corpus — ROSTER-ANCHORS-EXIST owns those)", else: "") <>
-            ". BLIND SHAPE, STATED: both granularities are SAME-FILE. `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and a future repair confined to a CALLEE moves no byte inside the roster row's own def, so this arm would print PASS through it — the SAME hop the register's CALLEE-DERIVED figure now counts (see the JUDGMENT REGISTER block: it is DECLARED and COUNTED there, and it is not covered there either)"
+            ". THE SAME-FILE BLIND SHAPE IS CLOSED AT ONE HOP, AND PRICED: `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and 501fb9670 (#8952) moved `Scim.deprovision_user/3` without moving a byte of the def that calls it; `callee_fp` fingerprints the ONE-HOP callee set so both are seen. Measured before it was built, over the same 95 api/lib commits that settled def_fp (`elixir scripts/pds-roster-callee-churn.exs`, which halts unless it re-derives PDS-D558's 2 def_fp fires): 3 fires vs 2, and ONE unrelated fire per 95 commits either way — the widening is one true positive at zero noise. BLIND SHAPE THAT REMAINS, STATED: the fingerprint is ONE hop. A repair confined to a callee OF A CALLEE moves nothing this arm reads, and the depth was not widened because nothing has priced depth 2 on this population"
       end
 
     {"ROSTER-VERDICT-FRESH", not vacuous? and stale == [] and unresolved == [], why}
@@ -12255,6 +12321,23 @@ defmodule PDS.Census do
       exit: 1,
       expect: ["FAIL  ROSTER-VERDICT-FRESH", "anchor_mfa moved", "cors_preflight/2"],
       proves: "a roster verdict whose def was RENAMED under an identical body reds too — def_fp cannot see this one, so neither granularity alone is the arm"
+    },
+    %{
+      name: "ROSTER-CALLEE-FP-MOVED",
+      corpus: :repo,
+      argv: [],
+      # THE HOP THIS ARM WAS BLIND TO, AND THE ROW IT ACTUALLY HAPPENED TO. 501fb9670
+      # (#8952, PDS-D503) edited `Scim.deprovision_user/3` — the one-hop callee whose
+      # internals this row's PROVEN basis describes — and moved NO byte inside
+      # `ScimUsersController.delete/2`. Both same-file granularities printed PASS through it;
+      # `scripts/pds-roster-callee-churn.exs` re-derives that commit as a callee_fp fire and
+      # as neither of the other two. Perturbing the RECORDED value is the same divergence
+      # from the side a selftest can edit, exactly as ROSTER-DEF-FP-MOVED does.
+      mut: {"callee_fp: " <> "\"58639899\"", "callee_fp: \"58639899-perturbed\""},
+      exit: 1,
+      expect: ["FAIL  ROSTER-VERDICT-FRESH", "callee_fp moved", "scim_users_controller.ex"],
+      refute: ["PASS  ROSTER-VERDICT-FRESH"],
+      proves: "a roster verdict whose CALLEE changed under an untouched def reds — the blind shape this arm printed for nine waves, and the one neither def_fp nor anchor_mfa can see by construction"
     },
     %{
       name: "ROSTER-FRESH-NOT-VACUOUS",
