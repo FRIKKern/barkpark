@@ -1,0 +1,99 @@
+# main-red-owner — an ADVISORY workflow that reds on main's tip gets an OWNER.
+#
+# WHAT WAS BROKEN (task-6005859f86872319). posix-vacuous-green-census failed on
+# main's tip for ELEVEN HOURS across EIGHT consecutive runs and cost nobody a
+# second. It is advisory, so it cannot block a merge; no PR ever surfaced it; and
+# a lane's close-out reads its own PRs, never main's health. An advisory red on
+# main has NO OWNER BY CONSTRUCTION — not because anyone was careless, but
+# because there was no mechanism whose job it was to notice.
+#
+# WHY AN ISSUE AND NOT A RED CHECK. Reddening a ninth advisory check reproduces
+# the disease one layer out: nobody is assigned to a check. An issue has an
+# assignee, a notification, and a state a human must clear, and it is the only
+# artifact here that a lane close-out can be pointed at. scripts/main-red-owner.sh
+# opens ONE deduped issue, refreshes it every hour, comments only when the red SET
+# changes, and CLOSES IT ITSELF the moment main's tip is green — so a stale issue
+# cannot become the next thing nobody owns.
+#
+# THEREFORE THIS RUN'S CONCLUSION MEANS "DELIVERY WORKED", NOT "MAIN IS GREEN".
+# A delivered red exits 0. The run fails only when ownership could NOT be
+# delivered: the predicate could not read its inputs (exit 4), or the issue API
+# refused (exit 5). It fails closed both ways — a zero-red report from a broken
+# query is the exact failure the predicate exists to stop.
+#
+# WHY A SCHEDULE. A standing red is a LEVEL, not an event: it is already red when
+# this workflow is added, and no webhook fires for "still red". Residuals, stated
+# rather than papered over: a ~60-90 minute observation window (GitHub queues
+# cron under load), silence during an Actions outage, and GitHub's 60-day
+# auto-disable of scheduled workflows in an inactive repo. The push arm on main
+# narrows the first of those to the merge that causes the red.
+#
+# WHY THE pull_request ARM IS NARROW. It exists ONLY so the hermetic arms below
+# are not orphaned (D26). Being paths-filtered keeps every name in this file out
+# of the required set (generator stage S4), belt and braces with the live job's
+# `if:`, and the live job never runs on a PR: it writes issues and reads ~110
+# GitHub endpoints, neither of which belongs on a PR head.
+
+name: main-red-owner
+
+on:
+  schedule:
+    # Hourly. The incident this answers stood for 11 hours; an hour is the
+    # coarsest window that still makes "nobody noticed for a shift" impossible.
+    - cron: "43 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "scripts/main-red-owner.sh"
+      - "scripts/main-red-predicate.sh"
+      - ".github/workflows/main-red-owner.yml"
+
+permissions:
+  contents: read
+  actions: read
+  # The delivery scope. Without it every issue write 403s and the script exits 5.
+  issues: write
+
+concurrency:
+  group: main-red-owner
+  cancel-in-progress: false
+
+jobs:
+  own-the-red:
+    name: a red on main's tip gets an owner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # THE ARMS, FIRST AND HERMETICALLY. Present-in-file is not
+      # fires-when-it-should: this step stubs `gh` and the predicate and proves
+      # the mechanism still opens on a red, stays silent on a green, closes
+      # itself, and refuses when it cannot read. It runs on EVERY event,
+      # including pull_request, so a PR that breaks the delivery logic reds here
+      # before it can merge into a silence.
+      - name: arms (hermetic, no network)
+        run: bash scripts/main-red-owner.sh --selftest
+
+      # NEVER ON A PULL REQUEST. This step writes issues and reads ~110 GitHub
+      # endpoints; a PR head is the wrong place for both, and a check name born
+      # on a PR head is eligible for the required set, which this repo refuses
+      # for any API-reading check.
+      - name: read main's tip and deliver ownership
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt"
+          rc=${PIPESTATUS[0]}
+          {
+            echo "## main-red-owner"
+            echo
+            echo '```'
+            tail -40 "$RUNNER_TEMP/mro.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
