@@ -456,8 +456,35 @@ func newMCPHTTPServer(handler http.Handler, limiter *mcpRateLimiter) *http.Serve
 // Expiration, while Barkpark tokens legitimately never expire.
 func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifest.Manifest, toolset string, nouns []string) (http.Handler, error) {
 	// No ambient credential, ever: scrub the process token from the base context
-	// (belt-and-braces — getServer overwrites Token per request regardless).
+	// (belt-and-braces — getServer overwrites Token per request regardless) AND
+	// withdraw the right to read one out of the process environment.
+	//
+	// The Token scrub alone was NOT the whole boundary, and the gap was a
+	// confused deputy. `auth_tier: ingest` commands — every bulldocs.*, session.*
+	// and sheets.* verb the manifest declares — do not authenticate with
+	// ctx.Token at all; ingestSecret (run.go) read BARKPARK_INGEST_TOKEN /
+	// PAPERFLOW_INGEST_TOKEN straight out of os.Environ, AFTER this scrub and
+	// after getServer installed the caller's bearer. So a remote caller that
+	// presented no credential whatsoever had its request signed with the SERVING
+	// PROCESS'S ingest secret and the write went through. Clearing
+	// AmbientCredentialsOK here is what makes the per-request token seam total:
+	// from this point every tier, ingest included, can only use a credential the
+	// request itself carried. A caller holding the ingest secret sends it as its
+	// bearer and is served exactly as before; a caller holding nothing sends no
+	// Authorization header downstream and RequireIngestToken refuses it.
+	//
+	// Note which half is load-bearing: this is a REFUSAL TO SUBSTITUTE, not a
+	// warning. The stderr line below is explanatory only — it tells an operator
+	// whose unit file exports the var why their ingest tools now ask callers for
+	// a credential. Guidance alone was considered and rejected as the boundary:
+	// nothing enforces it, and the next supervisor that exports the var would
+	// re-open the hole in silence.
 	base.Token = ""
+	base.AmbientCredentialsOK = false
+
+	if os.Getenv("BARKPARK_INGEST_TOKEN") != "" || os.Getenv("PAPERFLOW_INGEST_TOKEN") != "" {
+		out.errf("mcp serve: an ingest secret is set in this process's environment and is NOT used on behalf of remote callers — ingest-tier tools (bulldocs/session/sheets verbs, exposed by --tools all or a matching --tools <noun>) authenticate with the credential each request presents in its own Authorization header, so a caller that presents none is refused downstream")
+	}
 
 	// A missing task noun must NOT take the endpoint down. The startup manifest
 	// here is fetched with no credential, so on a stock Barkpark it is the
