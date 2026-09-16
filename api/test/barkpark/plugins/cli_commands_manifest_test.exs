@@ -439,7 +439,13 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       # POST, so write-tier — `release` moves a task's claim lease.
       assert release.auth_tier == "write"
-      assert release.flags == []
+
+      # `dataset` is appended by the ROUTE-derived rule in
+      # `Barkpark.Plugins.Tasks.declare_dataset_on_doc_id_route/1` (#18611):
+      # `/v1/tasks/:doc_id/release` carries `:doc_id`, so the route can answer a
+      # 409 `ambiguous_dataset` and must declare the disambiguator that clears it.
+      # Pinned exactly, not loosened — this list is the drift guard.
+      assert Enum.map(release.flags, & &1.name) == ["dataset"]
 
       # task.claim declares required worker_id body arg (server requires it).
       claim_arg_names = Enum.map(claim.args, & &1.name)
