@@ -184,6 +184,27 @@ check "$([ -d "$R10/pds-proof-art.f00d0002" ] && echo yes || echo no)" no \
 check "$(store_fingerprint "$R10")" "$(store_fingerprint "$R9")" \
       "arm 10 · … and even the mutant never reaches the parked store"
 
+# ── ARM 13 · THE QUIET MUTATION ─────────────────────────────────────────────
+# The pair above only proves an arm can go red. It says nothing about whether it
+# goes red for the RIGHT reason — a matrix that reds on any edit at all is a
+# checksum, not a test. So: mutate a COMMENT line and nothing else, on the same
+# fixture, and require the verdict to be byte-identical to arm 9's control.
+QUIET="$TMPTOP/mutant-comment-only.sh"
+sed 's|^# THE LEAK, RE-MEASURED (pds-bl-artifact-dir-retention)$|# THE LEAK, RE-MEASURED — a comment edit, and nothing else|' "$SUBJECT" >"$QUIET"
+chmod +x "$QUIET"
+if cmp -s "$SUBJECT" "$QUIET"; then
+  bad "arm 13 · the quiet mutation edited NOTHING — it measures nothing"
+else
+  ok "arm 13 · the quiet mutation changed the subject (one comment line)"
+fi
+R13="$TMPTOP/r13"; mk9 "$R13"
+run_subject "$QUIET" "$R13" --keep 1 --apply
+check "$RC" 0 "arm 13 · QUIET — a comment-only edit still exits 0"
+check "$([ -d "$R13/pds-proof-art.f00d0002" ] && echo yes || echo no)" yes \
+      "arm 13 · QUIET — the newest run still survives (the red in arm 10 was the CLAUSE, not the edit)"
+check "$([ -d "$R13/pds-proof-art.f00d0001" ] && echo yes || echo no)" no \
+      "arm 13 · QUIET — and the older one is still pruned"
+
 # ── ARM 11 · fail-closed on knobs it cannot evaluate ────────────────────────
 R11="$TMPTOP/r11"; mkdir -p "$R11"; plant_full_store "$R11"
 plant_dir "$R11" pds-proof-art.aaaa0004 100000 99999999
