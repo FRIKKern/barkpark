@@ -11286,8 +11286,11 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
        `if @test_env do … else … end`. Only one arm survives into any given build, but the AST walker
        sees both — a **third** shape the head walker cannot tell apart, and it arrived with nothing
        reddening.
-     All five are benign only in the weak sense that no file among them carries an `ok: true` site and
-     **0 of the 75 site-owning groups collide**. They are a real key limitation and they go in the
+     All five are benign only in the weak sense that no file among them carries an `ok: true` site. The
+     companion "**0 of the 75 site-owning groups collide**" is TRUE AT 29cb76e60 AND IS NOT RE-DERIVED
+     HERE — this probe collects defs, never sites — so it is carried with its sha and not as a present-
+     tense fact; on a tree where the within-group count has already moved 3 to 5, that is the honest
+     spelling. They are a real key limitation and they go in the
      header — and so does the fact that **the count is tree-volatile too: it went 3 → 5 in six weeks
      with no change whatsoever to the key.**
 
