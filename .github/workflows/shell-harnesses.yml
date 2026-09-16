@@ -3619,7 +3619,7 @@ jobs:
       - name: "workflow-owner-check.sh --selftest (6 refusal arms + 2 quiet + control)"
         run: bash scripts/workflow-owner-check.sh --selftest
 
-      - name: "ci-pr-checkrun-floor.sh --selftest (hermetic; required-context map)"
+      - name: "ci-pr-checkrun-floor.sh --selftest (hermetic: required-context map + the completeness control both ways)"
         run: bash scripts/ci-pr-checkrun-floor.sh --selftest
 
       - name: "LIVE: every workflow off the PR path has a named owner"

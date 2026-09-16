@@ -12,14 +12,31 @@
 # workflows to `push: main` can go below it, because none of the movable
 # workflows are in it.
 #
-# MEASURED 2026-09-16 on PR #18492 head 0a193e12e4 (and reproduced on four more
-# open heads, 65-69 runs, zero variance in the floor):
+# RE-MEASURED 2026-09-16 AFTER REBASING ONTO origin/main (the first filing of this
+# number was taken against a main 35 commits older, so it was re-derived rather
+# than inherited). On the two heads whose four required runs had all CONCLUDED:
 #     console-harness  9  (publishes `Console gate`)
 #     elixir           8  (publishes `Elixir gate`)
 #     cloud            7  (publishes `Cloud gate`)
 #     pr-task-gate     2  (publishes `PR references an active task`)
 #     ------------------
 #     FLOOR           26   > 20, before one advisory workflow is considered.
+#
+# THE FIRST FILING ALSO CLAIMED "ZERO VARIANCE IN THE FLOOR" AND THAT CLAIM WAS
+# FALSE — RETRACTED HERE RATHER THAN QUIETLY DROPPED. Re-measuring four open heads
+# read 26 (#18568), 26 (#18554), 24 (#18558) and 22 (#18573). The spread is NOT a
+# property of the repo; it is THIS SCRIPT reading a run that had not finished
+# creating its job rows. Proved by asking the run feed directly: every head that
+# read low had a required run at `status: in_progress` (#18573 elixir + cloud,
+# #18558 console-harness), and every head that read 26 had all four at
+# `completed`. A job count taken mid-run is a PREFIX of the real one, so the old
+# "zero variance" line was reporting the instrument's own sampling noise as a
+# property of the subject.
+#
+# THAT IS WHY `measure` NOW REFUSES ON AN UNFINISHED HEAD (exit 4) instead of
+# printing the smaller number. The undercount direction is the fail-safe one — a
+# short count argues AGAINST this script's own verdict — but a number that is
+# wrong in a safe direction is still wrong, and the number is what gets quoted.
 #
 # Reaching <20 therefore requires FOLDING JOBS inside the required workflows,
 # which changes the published context names and the `.exclusions` rows in
@@ -74,6 +91,22 @@ for f, cs in sorted(hits.items()):
 PY
 }
 
+# THE COMPLETENESS CONTROL. Reads a run feed and the required-workflow file set
+# and prints one `<file>\t<status>` row per required run that has NOT concluded.
+# Silence means every required run is `completed` and the job counts below are
+# final. Split out of `measure` so the selftest can drive it from FIXTURES — a
+# control that can only be exercised against the live API is a control nobody
+# ever sees fire.
+incomplete_required_runs() {
+  REQMAP="$1" python3 - "$2" <<'PY'
+import json, os, sys
+reqfiles = {l.split('\t')[0] for l in os.environ['REQMAP'].strip().splitlines() if l.strip()}
+for r in json.loads(sys.argv[1]).get('workflow_runs', []):
+    if os.path.basename(r.get('path', '')) in reqfiles and r.get('status') != 'completed':
+        print("%s\t%s" % (os.path.basename(r['path']), r.get('status')))
+PY
+}
+
 measure() {
   local ref="$1" sha
   if printf '%s' "$ref" | grep -qE '^[0-9]+$'; then
@@ -91,6 +124,14 @@ measure() {
     || { echo "REFUSE: cannot read run feed for $sha" >&2; return 4; }
   local nruns; nruns=$(printf '%s' "$runs" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["workflow_runs"]))')
   [ "${nruns:-0}" -gt 1 ] || { echo "REFUSE: control failed — $nruns run(s) on this head; a feed that sees one thing cannot discriminate" >&2; return 4; }
+
+  local unfinished; unfinished=$(incomplete_required_runs "$reqmap" "$runs")
+  if [ -n "$unfinished" ]; then
+    echo "REFUSE: completeness control failed — a required-context run on this head has not concluded, so its job rows are a PREFIX and the floor would read LOW:" >&2
+    printf '%s\n' "$unfinished" | sed 's/^/  still /' >&2
+    echo "  (re-run once these conclude; a mid-run count is the instrument, not the repo)" >&2
+    return 4
+  fi
 
   REQMAP="$reqmap" python3 - "$REPO" "$runs" "$TARGET" <<'PY'
 import json, os, subprocess, sys
@@ -168,6 +209,41 @@ EOF
   if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q '^cloud.yml'; then
     _ok "QUIET: fixture maps cleanly" "cloud.yml"
   else _no "QUIET: fixture maps cleanly" "rc=$rc: $out"; fi
+
+  # ── THE COMPLETENESS CONTROL, DRIVEN BOTH WAYS OFF FIXTURES ──────────────
+  # This is the arm that would have caught the retracted "zero variance" claim in
+  # the header. The fixture map is deliberately the two-file shape, not the real
+  # four, so the arms exercise nothing but the predicate.
+  local rmap; rmap=$(printf 'cloud.yml\tCloud gate\nelixir.yml\tElixir gate\n')
+
+  # RED ARM: one required run mid-flight must be NAMED. Revert the `!= completed`
+  # test in incomplete_required_runs and this arm goes silent — which is exactly
+  # the state that read 22 instead of 26.
+  out=$(incomplete_required_runs "$rmap" '{"workflow_runs":[
+    {"path":".github/workflows/cloud.yml","status":"completed"},
+    {"path":".github/workflows/elixir.yml","status":"in_progress"}]}')
+  if printf '%s' "$out" | grep -q '^elixir\.yml.in_progress$'; then
+    _ok "RED: in-flight required run named" "$out"
+  else _no "RED: in-flight required run named" "got: [$out]"; fi
+
+  # QUIET ARM: the same shape with both concluded must print NOTHING. A control
+  # that fires on a healthy head is a control the fleet learns to ignore.
+  out=$(incomplete_required_runs "$rmap" '{"workflow_runs":[
+    {"path":".github/workflows/cloud.yml","status":"completed"},
+    {"path":".github/workflows/elixir.yml","status":"completed"}]}')
+  if [ -z "$out" ]; then _ok "QUIET: all concluded is silent" "no rows"
+  else _no "QUIET: all concluded is silent" "got: [$out]"; fi
+
+  # DISCRIMINATION CONTROL: an ADVISORY workflow still running is irrelevant to
+  # the floor (it is never summed into it), so it must NOT refuse. Without this
+  # arm the predicate could be `status != completed` over ALL runs and both arms
+  # above would still pass, while the script refused on nearly every live head.
+  out=$(incomplete_required_runs "$rmap" '{"workflow_runs":[
+    {"path":".github/workflows/cloud.yml","status":"completed"},
+    {"path":".github/workflows/elixir.yml","status":"completed"},
+    {"path":".github/workflows/doc-gates.yml","status":"in_progress"}]}')
+  if [ -z "$out" ]; then _ok "CONTROL: advisory in-flight ignored" "no rows"
+  else _no "CONTROL: advisory in-flight ignored" "got: [$out]"; fi
 
   rm -rf "$tmp"
   echo "── $pass passed, $fail failed ──"
