@@ -706,15 +706,55 @@ fetch_prs() { # -> prints JSON array, or the error body on failure
   # green that poll 1 saw is now still screamed about when poll 2 cannot be
   # completed. Before this, a transport failure on a LATER poll silently
   # swallowed an rc-1 verdict the run had already earned — probe (p-5).
-  local last_full="" last_full_i=0
+  # THE KEPT PASS IS THE MOST INFORMATIVE ONE, NOT THE MOST RECENT
+  # (task-589fb46ee65456e7, criterion 2; measured on main run 35121820618,
+  # 2026-09-16T16:25:41Z — the FIRST failing run that already carried the
+  # keep-the-last-pass fix from #18600).
+  #
+  # That run logged, in order:
+  #
+  #   poll 1/3: 28 row(s) answered mergeable=UNKNOWN (lazily computed)
+  #   poll 2/3: 50 row(s) answered mergeable=UNKNOWN (lazily computed)
+  #   poll 3/3 could not list pull requests: HTTP 502
+  #   the re-poll could not be completed, but poll 2/3 read the WHOLE population
+  #   BLIND — classified 0 of 50 open pull request(s)
+  #
+  # Poll 1 was a complete cursor-walk of the same 50 rows with 22 of them
+  # ANSWERED. The run threw that away, kept poll 2 because it was later, and
+  # then told the operator it had classified NOTHING. It had classified 22.
+  #
+  # This is the SAME defect #18600 fixed, one layer in: #18600 stopped a later
+  # TRANSPORT failure from discarding an earlier complete pass; a later pass
+  # that completes but answers MORE rows UNKNOWN discarded one just as
+  # silently. GitHub invalidates mergeability behind every merge, so under a
+  # merge burst the later poll is routinely the BLINDER one, and re-polling
+  # made the run see LESS.
+  #
+  # WHY THIS IS NOT A SILENCER. Keeping the best pass can only ADD classified
+  # rows, so it can only ADD screams: a stale green visible in poll 1 and
+  # invalidated by poll 2 is now reported (rc 1) instead of swallowed by a
+  # BLIND (rc 5) that named no pull request. The only red it removes is a
+  # BLIND the run had already disproved by classifying rows, and a run where
+  # NO pass classified anything still exits 5 — probe (p-7m) holds that line.
+  # Staleness is bounded by this run's own poll window and is stated out loud,
+  # the same disclosure the tail fallback below already makes.
+  local last_full="" last_full_i=0 last_full_unknown=-1
   while [ "$i" -lt "$ATTEMPTS" ]; do
     i=$((i + 1))
     out="$(fetch_pr_pages "$repo")"; rc=$?
     if [ "$rc" = "0" ]; then
-      last_full="$out"; last_full_i="$i"
       unknown="$(jq '[.[] | select(.mergeable == "UNKNOWN")] | length' <<<"$out" 2>/dev/null || echo 0)"
-      if [ "${unknown:-0}" = "0" ] || [ "$i" -ge "$ATTEMPTS" ]; then
+      unknown="${unknown:-0}"
+      if [ "$last_full_unknown" -lt 0 ] || [ "$unknown" -lt "$last_full_unknown" ]; then
+        last_full="$out"; last_full_i="$i"; last_full_unknown="$unknown"
+      fi
+      if [ "$unknown" = "0" ]; then
         printf '%s' "$out"
+        return 0
+      fi
+      if [ "$i" -ge "$ATTEMPTS" ]; then
+        [ "$last_full_i" = "$i" ] || red "  poll $i/$ATTEMPTS answered $unknown UNKNOWN, but poll $last_full_i/$ATTEMPTS read the WHOLE population with only $last_full_unknown UNKNOWN — reporting THAT read, because a later poll that sees LESS is not a fresher verdict, it is a blinder one."
+        printf '%s' "$last_full"
         return 0
       fi
       red "  poll $i/$ATTEMPTS: $unknown row(s) answered mergeable=UNKNOWN (lazily computed) — re-polling"
