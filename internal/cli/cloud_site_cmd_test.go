@@ -80,7 +80,7 @@ type siteCP struct {
 	// POST /v1/sites/:id/deployments/:dep/artifact — the prebuilt lane's second
 	// call. The recorded Content-Length is the point of the test: a piped upload
 	// arrives chunked (-1) and the server cannot reject it early.
-	artifactResp   fakeResp
+	artifactResp fakeResp
 	// artifactRespFn, when set, BUILDS the artifact response from the request the
 	// fake actually received — the only way a test can pin the client against a
 	// digest the control plane computed over the real wire bytes rather than one
