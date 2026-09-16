@@ -3879,6 +3879,21 @@ USAGE
   bp cloud site open       <site> [--print-only]
   bp cloud site preflight [--dir <path>] [--skip-build]            build your LOCAL tree and check that build — it reads NOTHING about the remote site, its content binding, its dataset or its instance
   bp cloud site settings  <site> [--theme <palette>] [--doc-type <type>] [--prebuilt-enabled true|false]
+  bp cloud site show      <site>                                   show one site
+  bp cloud site deployments <site> [--limit N] [--all]             a window of the site's deployments
+  bp cloud site env set   <site> KEY=VAL [KEY=VAL...]              replace the encrypted env blob
+  bp cloud site domain add <site> <domain>                         add a domain
+  bp cloud site github connect <site> --repo owner/repo            link a repo for auto-deploy
+  bp cloud site logs      <site> [<deployment-id>]                 build-log URL, or the recorder's record
+  bp cloud site matrix                                             print the SITE COMMAND MATRIX
+
+  EVERY verb above also answers as 'bp sites <verb>' — the two nouns are two
+  SPELLINGS of one tree, reaching the same implementation, route and output.
+  Two exceptions, both because the KIND really differs: 'create' is
+  spelling-bound (this noun SPAWNS a content-bound site; 'bp sites create' makes
+  a CONTAINER site), and 'bp sites deploy' is refused because a container site
+  deploys with 'bp deploy <site>' while a spawned one deploys here. Run
+  'bp cloud site matrix' for the table.
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.

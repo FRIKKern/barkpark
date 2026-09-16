@@ -1967,6 +1967,25 @@ USAGE
   bp sites logs <site>                              print latest deployment's build log URL
   bp sites logs <site> <deployment-id>              the recorder's build RECORD for ONE deployment
                                                     (operator-gated; the record, never the log bytes)
+  bp sites status|doctor|rollback|delete <site>     the per-site lifecycle verbs
+  bp sites open|settings|preflight ...              (identical to the 'bp cloud site' spelling)
+  bp sites matrix                                   print the SITE COMMAND MATRIX
+
+TWO SPELLINGS, ONE TREE
+  'bp sites <verb>' and 'bp cloud site <verb>' are the same command tree under
+  two nouns: every verb above answers at both, reaching the same implementation,
+  the same route and the same output. 'bp sites matrix' prints the whole table.
+
+  TWO EXCEPTIONS, both because the KIND is really different:
+    create — 'bp sites create' makes a CONTAINER site (your own repo, built and
+             run as an image); 'bp cloud site create' SPAWNS a content-bound
+             site on one of your instances. Same route, different body.
+    deploy — 'bp sites deploy' is REFUSED on purpose, because the two kinds have
+             two doors: a container site deploys with 'bp deploy <site>', a
+             spawned site with 'bp cloud site deploy <site>'. Nothing guesses.
+
+  RESERVED, never a site verb: 'bp cloud deploy' and 'bp cloud rollback' act on
+  an INSTANCE (the blue/green code-slot flip of a whole Barkpark box).
 
 WHAT IT DOES
   drives the Barkpark Cloud control plane's hosted-site surface — a site is a
