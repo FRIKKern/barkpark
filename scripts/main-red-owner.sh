@@ -310,7 +310,7 @@ elif [ "$PRC" = 1 ] && [ -n "$REDS" ]; then
     echo "read at JOB level, so a \`continue-on-error\` run that laundered a failing job"
     echo "into \`success\` is counted red here."
     echo
-    printf '%s\n' "$REDS" | sed 's/^/- `/; s/$/`/'
+    printf '%s\n' "$REDS" | sed 's/	/  ·  /g' | sed 's/^/- `/; s/$/`/'
     echo
     echo "**An advisory red has no owner by construction.** It cannot block a merge, so no"
     echo "PR surfaces it and no lane close-out reads it; the incident that produced this"
