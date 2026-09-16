@@ -14157,8 +14157,16 @@ test("paletteMoveIndex clamps out-of-range and handles an empty list", () => {
   assert.equal(hooks.paletteMoveIndex(2, 5, "nudge"), 2); // unknown dir → clamp
 });
 
+// GR49 — the viewer envelopes both palette arms are measured against. OPERATOR_ME
+// is the exact shape operatorVisible accepts (nested under `user`, strictly ===
+// true); the rest are the near-misses that must NOT open the row.
+const PAL_OPERATOR_ME = { user: { id: "u1", email: "op@example.com", platform_operator: true } };
+const PAL_MEMBER_ME = { user: { id: "u2", email: "member@example.com", platform_operator: false } };
+
 test("paletteNavItems carries the frozen IA, the three Fleet lenses, and every Settings view", () => {
-  const nav = hooks.paletteNavItems();
+  // GR49: the registry is now a function of the viewer — a non-operator envelope
+  // is the baseline IA (the Operator arm is pinned in its own test below).
+  const nav = hooks.paletteNavItems(PAL_MEMBER_ME);
   const byId = Object.fromEntries(nav.map((n) => [n.id, n]));
   for (const id of ["nav-overview", "nav-fleet", "nav-fleet-attention",
     "nav-fleet-inflight", "nav-fleet-healthy", "nav-sites", "nav-activity"]) {
@@ -14172,6 +14180,81 @@ test("paletteNavItems carries the frozen IA, the three Fleet lenses, and every S
     assert.equal(n.kind, "nav");
     assert.equal(typeof n.run, "function");
   }
+});
+
+test("paletteNavItems offers Operator to a platform operator and to NOBODY else (GR49)", () => {
+  const ids = (me) => hooks.paletteNavItems(me).map((n) => n.id);
+
+  // ARM 1 — an operator GETS the row, pointed at #operator, in the Go to group.
+  const opNav = hooks.paletteNavItems(PAL_OPERATOR_ME);
+  const op = opNav.find((n) => n.id === "nav-operator");
+  assert.ok(op, "a platform operator must be offered the Operator row");
+  assert.equal(op.label, "Operator");
+  assert.equal(op.group, "Go to");
+  assert.equal(op.kind, "nav");
+  assert.equal(typeof op.run, "function");
+  // It is ONE row, and it does not displace the frozen IA.
+  assert.equal(opNav.filter((n) => n.id === "nav-operator").length, 1);
+  assert.equal(opNav.length, hooks.paletteNavItems(PAL_MEMBER_ME).length + 1);
+
+  // ARM 2 — the NEGATIVE arm, which is the one that matters: every envelope that
+  // is not a true platform operator gets NO Operator row, and no near-miss opens
+  // it. These are exactly operatorVisible's fail-closed cases.
+  for (const [name, me] of [
+    ["explicit false", PAL_MEMBER_ME],
+    ["absent flag", { user: { id: "u3", email: "x@example.com" } }],
+    ["no user key", {}],
+    ["truthy 1, not ===true", { user: { platform_operator: 1 } }],
+    ['string "true"', { user: { platform_operator: "true" } }],
+    ["FLAT platform_operator (the GR37 false-negative shape)", { platform_operator: true }],
+    ["team owner is a DIFFERENT axis", { role: "owner", user: { platform_operator: false } }],
+    ["null me", null],
+    ["me not loaded yet", undefined],
+  ]) {
+    assert.ok(!ids(me).includes("nav-operator"),
+      "Operator must NOT be offered for: " + name);
+    // And nothing else leaks the route either — no row targets #operator.
+    assert.ok(!hooks.paletteNavItems(me).some((n) => String(n.id).includes("operator")),
+      "no operator-shaped row may survive for: " + name);
+  }
+
+  // ONE GATE, NOT TWO: the palette's answer is operatorVisible's answer, row for
+  // row, over the same envelopes the sidebar gate is pinned against.
+  for (const me of [PAL_OPERATOR_ME, PAL_MEMBER_ME, {}, null, undefined,
+    { platform_operator: true }, { user: { platform_operator: 1 } }]) {
+    assert.equal(ids(me).includes("nav-operator"), hooks.operatorVisible(me),
+      "palette visibility must BE operatorVisible, not a second rule");
+  }
+});
+
+test("paletteNavItems refuses to be called argument-free — the GR49 anti-revert pin", () => {
+  // The whole defect was a registry that took no arguments and so could not see
+  // who was asking. If someone drops the parameter, THIS reds first.
+  assert.throws(() => hooks.paletteNavItems(), /requires the \/v1\/me envelope/,
+    "an argument-free call must throw, not silently answer for nobody");
+  assert.equal(hooks.paletteNavItems.length, 1,
+    "paletteNavItems must declare exactly one (identity) parameter");
+  // Passing the undefined a caller genuinely holds is NOT the error case — it is
+  // the fail-closed case, and it must answer.
+  assert.ok(Array.isArray(hooks.paletteNavItems(undefined)));
+});
+
+test("paletteRegistry carries the viewer's Operator row through to the palette rows (GR49)", () => {
+  const opReg = hooks.paletteRegistry({ me: PAL_OPERATOR_ME });
+  assert.ok(opReg.some((i) => i.id === "nav-operator"),
+    "an operator's palette registry must contain the Operator row");
+  const memberReg = hooks.paletteRegistry({ me: PAL_MEMBER_ME });
+  assert.ok(!memberReg.some((i) => i.id === "nav-operator"),
+    "a member's palette registry must NOT contain the Operator row");
+  // Exactly one row differs between the two viewers — the palette gains the
+  // Operator destination and nothing else changes shape.
+  assert.equal(opReg.length, memberReg.length + 1);
+  // Spread into THIS realm's Array — the hooks come out of a vm sandbox, so a
+  // sandbox array is never deepStrictEqual to a literal here.
+  const memberIds = [...memberReg.map((i) => i.id)];
+  assert.deepEqual(
+    [...opReg.map((i) => i.id).filter((id) => !memberIds.includes(id))],
+    ["nav-operator"]);
 });
 
 test("paletteActionItems are safe actions only, each with a run()", () => {
@@ -14215,10 +14298,11 @@ test("paletteSiteItems map primary domain + framework hint + drill-in run", () =
 
 test("paletteRegistry orders static nav + actions first, then instances, then sites", () => {
   const reg = hooks.paletteRegistry({
+    me: null, // GR49: pin the viewer so the nav block's size is not meCache's business
     instances: [{ id: "bp-1", name: "guerrilla", host: "h" }],
     sites: [{ id: "s1", domains: ["a.example.com"] }],
   });
-  const staticCount = hooks.paletteNavItems().length + hooks.paletteActionItems().length;
+  const staticCount = hooks.paletteNavItems(null).length + hooks.paletteActionItems().length;
   assert.equal(reg[staticCount].group, "Instances"); // instances immediately after the static block
   assert.equal(reg[reg.length - 1].group, "Sites"); // sites last
   // Every registry row has the full shape.
@@ -14231,10 +14315,17 @@ test("paletteRegistry orders static nav + actions first, then instances, then si
 });
 
 test("paletteRegistry with no data is the static slate — the instant-open guarantee", () => {
-  const reg = hooks.paletteRegistry();
-  const staticCount = hooks.paletteNavItems().length + hooks.paletteActionItems().length;
+  // `me: null` pins the VIEWER (GR49 made the nav block viewer-dependent); the
+  // point of the test is unchanged — no instances, no sites, no fetch.
+  const reg = hooks.paletteRegistry({ me: null });
+  const staticCount = hooks.paletteNavItems(null).length + hooks.paletteActionItems().length;
   assert.equal(reg.length, staticCount); // nav + actions only, no instance/site rows
   assert.ok(!reg.some((i) => i.group === "Instances" || i.group === "Sites"));
+  // And the truly argument-free call still answers (it falls back to the live
+  // /v1/me cache) — the instant-open path must never throw on an empty console.
+  const bare = hooks.paletteRegistry();
+  assert.ok(Array.isArray(bare) && bare.length > 0);
+  assert.ok(!bare.some((i) => i.group === "Instances" || i.group === "Sites"));
 });
 
 // ════════════════════════════════════════════════════════════════════════════
