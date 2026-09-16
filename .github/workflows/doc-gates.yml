@@ -114,6 +114,15 @@ on:
       # but the test itself matched nothing, so an edit that guts the gate would
       # never have run it (the design/mirror-fence.test.mjs shape).
       - "design/template-theme-contract.test.mjs"
+      # stw-backlog-catalog-family: the CATALOG half of the same family — every
+      # barkpark.template.json in the repo conforms to the manifest schema, and
+      # every create-barkpark-app starter tree is enrolled in AVAILABLE_TEMPLATES
+      # and mirrored into cloud/priv/templates. Its subjects ride `templates/**`
+      # and the js/cloud globs, but the test itself matched nothing — the
+      # design/mirror-fence.test.mjs shape, again.
+      - "design/template-manifest-contract.test.mjs"
+      - "templates/barkpark.template.schema.json"
+      - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
       # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
@@ -466,6 +475,15 @@ on:
       # but the test itself matched nothing, so an edit that guts the gate would
       # never have run it (the design/mirror-fence.test.mjs shape).
       - "design/template-theme-contract.test.mjs"
+      # stw-backlog-catalog-family: the CATALOG half of the same family — every
+      # barkpark.template.json in the repo conforms to the manifest schema, and
+      # every create-barkpark-app starter tree is enrolled in AVAILABLE_TEMPLATES
+      # and mirrored into cloud/priv/templates. Its subjects ride `templates/**`
+      # and the js/cloud globs, but the test itself matched nothing — the
+      # design/mirror-fence.test.mjs shape, again.
+      - "design/template-manifest-contract.test.mjs"
+      - "templates/barkpark.template.schema.json"
+      - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
       # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
@@ -1049,6 +1067,15 @@ jobs:
           # edition. Enrolment is a PREDICATE (ships public/bp-graph.js, or the
           # manifest pins a theme), so a sixth template enrols itself.
           node design/template-theme-contract.test.mjs
+          # stw-backlog-catalog-family: the CATALOG half. Nothing in the repo read
+          # the JSON Schema the manifests declare with `$schema` — Go validates its
+          # own struct over its own embedded copies, so a create-barkpark-app
+          # manifest was unvalidated by anything at all. Enrolment is a PREDICATE
+          # (any file NAMED barkpark.template.json, build output pruned), so a new
+          # template or a new mirror root enrols itself. The one list that must
+          # stay a list — AVAILABLE_TEMPLATES, a published TS union — gets the arm
+          # that REDS when a starter tree exists and the list does not name it.
+          node design/template-manifest-contract.test.mjs
           # cloud-console-hardening wave-5 (D41): the emit --write attribution
           # fence's standing regression test. Drives the real emit.mjs CLI against
           # a throwaway copy of the tree and asserts the fence REFUSES an

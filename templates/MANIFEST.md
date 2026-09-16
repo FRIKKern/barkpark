@@ -107,3 +107,18 @@ publish-needs-type rule, returning the first violation. Run the gate:
 ```sh
 go test ./internal/template/...
 ```
+
+`Validate` reads Go's own struct over the manifests EMBEDDED in the provisioner
+catalog, so a manifest that never reaches Go — a `create-barkpark-app`
+starter's — was unvalidated by anything. The JSON Schema that every manifest
+declares with `$schema` gets its reader here:
+
+```sh
+node design/template-manifest-contract.test.mjs
+```
+
+It finds manifests by a PREDICATE (any file named `barkpark.template.json`,
+build output pruned), so a new template or a new mirror root enrols itself, and
+it carries the arm that reds when a `create-barkpark-app` starter tree exists
+that `AVAILABLE_TEMPLATES` does not name or `cloud/priv/templates` does not
+mirror.
