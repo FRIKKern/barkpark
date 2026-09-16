@@ -84,11 +84,18 @@ case " $* " in
       *)    echo '[{"name":"a"},{"name":"b"},{"name":"c"}]'; exit 0;;
     esac;;
   *"--json conclusion,headSha,createdAt,status"*)
-    if [ -n "${MRP_NOID:-}" ]; then
-      printf '[{"conclusion":"%s","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed"}]\n' "${MRP_CONC:-failure}"
-    else
-      printf '[{"conclusion":"%s","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed","databaseId":4242}]\n' "${MRP_CONC:-failure}"
-    fi
+    # MRP_CANC=1 prepends a NEWER cancelled row in front of the verdict row (the
+    # main-collapse shape: a merge evicts the pending run, destroying its verdict
+    # while older, genuine verdicts sit right behind it). MRP_CANC=only emits a
+    # feed of nothing BUT cancels, which must still read CANNOT READ.
+    if [ -n "${MRP_NOID:-}" ]; then _ID=""; else _ID=',"databaseId":4242'; fi
+    _CANCROW='{"conclusion":"cancelled","headSha":"cccccccccccccccc","createdAt":"2026-02-02T00:00:00Z","status":"completed"'"$_ID"'}'
+    _VERDROW='{"conclusion":"'"${MRP_CONC:-failure}"'","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed"'"$_ID"'}'
+    case "${MRP_CANC:-}" in
+      only) printf '[%s]\n' "$_CANCROW";;
+      ?*)   printf '[%s,%s]\n' "$_CANCROW" "$_VERDROW";;
+      *)    printf '[%s]\n' "$_VERDROW";;
+    esac
     exit 0;;
 esac
 exit 1
@@ -98,7 +105,7 @@ STUB
   _arm(){ # label FEED CONC FJOB NOID want-exit needle [forbidden]
     local lbl="$1" feed="$2" conc="$3" fjob="$4" noid="$5" wrc="$6" need="$7" bad="${8:-}"
     out=$(PATH="$d/bin:$PATH" MRP_FEED="$feed" MRP_CONC="$conc" MRP_FJOB="$fjob" MRP_NOID="$noid" \
-          bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
+          MRP_CANC="${MRP_CANC_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
     if [ "$rc" != "$wrc" ]; then _no "$lbl" "exit=$rc (want $wrc) | $(printf '%s\n' "$out" | tail -1)"; return; fi
     case "$out" in *"$need"*) : ;; *) _no "$lbl" "output lacks [$need]"; return;; esac
     if [ -n "$bad" ]; then case "$out" in *"$bad"*) _no "$lbl" "output CONTAINS the forbidden [$bad]"; return;; esac; fi
@@ -130,6 +137,39 @@ STUB
   # run, a green must stay SILENT. Without this, a rule that shouted UNDESCENDED-GREEN on every
   # green would pass the arm above and be useless.
   _arm "descended green stays silent"  many success ""  "" 0 "red 0" "UNDESCENDED-GREEN"
+  # ── THE MAIN-COLLAPSE ARMS (gates-r20, task-9ee58a247b158826) ───────────────
+  # A CANCELLED newest run is a DESTROYED verdict. Before this fix the selector
+  # took the newest row with ANY conclusion, so `cancelled` won and the workflow
+  # was bucketed CANNOT READ — which is how shell-harnesses.yml sat RED on main
+  # for 11 consecutive completed runs, unseen by this instrument.
+  # ARM THAT REDS WHEN THE FIX IS REVERTED: a cancelled row NEWER than a failure
+  # must still report RED ON MAIN (exit 1). Under the old selector this returned
+  # exit 2 with "CANNOT READ", so reverting the selector fails this arm.
+  # THE NEEDLES ON THESE ARMS ARE COUNT-FREE ON PURPOSE. An earlier draft pinned the
+  # literal "red 54 · green 0 · unread 0" and went stale INSIDE ITS OWN COMMIT: this PR
+  # adds .github/workflows/main-collapse-gates.yml, a branch-driven push workflow, so
+  # the denominator moved 54 -> 55 and both cancel arms failed against the very tree
+  # that introduced them. What the arm actually asserts is "unread 0" -- every workflow
+  # reached a verdict THROUGH the cancel -- which the pre-fix selector could not
+  # produce (it bucketed all of them unread and exited non-zero).
+  # NO `forbidden` ARGUMENT ON THESE ARMS: the predicate's own prose prints the
+  # literals "RED ON MAIN" and "CANNOT READ" on every invocation, so a forbidden-string
+  # check on either fires unconditionally and the arm would fail over its own
+  # documentation rather than over behaviour. The exit code carries that half.
+  MRP_CANC_ARM=1 _arm "red behind a cancel is seen" many failure "" "" 1 "green 0 · unread 0"
+  # ...and it must SAY that it stepped over one, or the skip is silent.
+  MRP_CANC_ARM=1 _arm "the skipped cancel is named" many failure "" "" 1 "DESTROYED VERDICT"
+  # THE QUIET ARM: a cancelled row in front of a genuine SUCCESS is still green,
+  # and must not manufacture a red. (Without this, "call everything behind a
+  # cancel red" would pass the arm above and be worse than the bug.)
+  MRP_CANC_ARM=1 _arm "green behind a cancel stays green" many success "" "" 0 "red 0 · green"
+  # ...and it must still have READ every verdict. Split from the arm above because
+  # unread rows are not reds: an assertion that only says "red 0" passes over a run
+  # in which nothing was measured at all.
+  MRP_CANC_ARM=1 _arm "green behind a cancel reads every verdict" many success "" "" 0 "· unread 0"
+  # THE ABSENCE MUST SURVIVE: a feed of nothing but cancels has no verdict at
+  # all and must still refuse — this is the case where CANNOT READ is TRUE.
+  MRP_CANC_ARM=only _arm "cancels only still refuses" many failure "" "" 2 "verdicts were DESTROYED, not missing"
   # The tags-only partition must fire against this repo's real workflows.
   out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success MRP_FJOB= MRP_NOID= bash "$_MRP_SELF" acme/widget 2>&1)
   case "$out" in
@@ -138,7 +178,7 @@ STUB
   esac
   rm -rf "$d"
   local total=$((pass+fails))
-  if [ "$total" -lt 10 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
+  if [ "$total" -lt 15 ]; then echo "SELFTEST: CANNOT READ — only $total arm(s) ran; this tally measures nothing"; return 1; fi
   [ "$fails" = 0 ] && { echo "SELFTEST: $pass/$total arms pass"; return 0; }
   echo "SELFTEST: $fails of $total arm(s) FAILED"; return 1
 }
@@ -200,12 +240,60 @@ PYEOF
   BASE=$(basename "$f")
   # PER-WORKFLOW, NOT WINDOWED. Take the most recent run with a real conclusion:
   # an in-progress run has conclusion null and must never be read as a verdict.
-  ROW=$(gh run list --repo "$REPO" --workflow="$BASE" --branch main --limit 20 \
-          --json conclusion,headSha,createdAt,status,databaseId 2>/dev/null \
-        | jq -r '[.[]|select(.status=="completed" and .conclusion!=null and .conclusion!="")]
+  # ── A CANCELLED NEWEST RUN IS A DESTROYED VERDICT, NOT A VERDICT ───────────
+  # FOUND 2026-09-16 by gates-r20 (task-9ee58a247b158826). The five main-collapse
+  # workflows (grep -l 'main-collapse: harness-ok' .github/workflows/*.yml) put
+  # every main push in ONE concurrency group, so each merge EVICTS the pending
+  # intermediate: the newest row on main is very often `completed/cancelled`.
+  # This selector used to take the newest row with ANY non-null conclusion, so a
+  # cancel landed in the `*)` arm and the workflow was bucketed CANNOT READ.
+  # SPECIMENS, both measured the morning this was fixed:
+  #   shell-harnesses.yml  newest 4 rows cancelled, and behind them ELEVEN
+  #                        consecutive `failure` runs back to 2026-09-15T11:38Z
+  #                        — a main red this instrument could not see.
+  #   web-fork-drift.yml   newest row cancelled 2026-09-13T15:58Z, with 13
+  #                        successes and one failure behind it.
+  # So: the verdict is the newest run that actually CONCLUDED one. Cancelled,
+  # skipped, neutral and action_required are NOT verdicts; they are skipped over,
+  # and the fact that they were is ANNOTATED, never silently swallowed. A feed
+  # containing ONLY non-verdicts still reads CANNOT READ — the absence is real
+  # there. The limit is 50, not 20, because a collapse storm can cancel more than
+  # 20 consecutive runs of one workflow.
+  WFEED=$(gh run list --repo "$REPO" --workflow="$BASE" --branch main --limit 50 \
+          --json conclusion,headSha,createdAt,status,databaseId 2>/dev/null)
+  ROW=$(printf '%s' "$WFEED" \
+        | jq -r '[.[]|select(.status=="completed" and (.conclusion|IN("success","failure","timed_out","startup_failure")))]
                  | sort_by(.createdAt) | reverse | .[0] // empty')
+  NEWEST=$(printf '%s' "$WFEED" \
+        | jq -r '[.[]|select(.status=="completed" and .conclusion!=null and .conclusion!="")]
+                 | sort_by(.createdAt) | reverse | .[0].conclusion // empty')
+  SKIPPED=$(printf '%s' "$WFEED" \
+        | jq -r '[.[]|select(.status=="completed" and .conclusion!=null and .conclusion!=""
+                             and (.conclusion|IN("success","failure","timed_out","startup_failure")|not))]|length' 2>/dev/null)
+  EVICTED=""
+  if [ -n "$NEWEST" ] && [ "$NEWEST" != "success" ] && [ "$NEWEST" != "failure" ] \
+     && [ "$NEWEST" != "timed_out" ] && [ "$NEWEST" != "startup_failure" ]; then
+    EVICTED=" [newest completed main run was $NEWEST — a DESTROYED VERDICT, not a verdict; ${SKIPPED:-?} non-verdict row(s) skipped to reach the run below]"
+  fi
   if [ -z "$ROW" ]; then
-    unseen=$((unseen+1)); printf '%s\tno completed main run EVER\n' "$BASE" >> "$UNSEEN_LIST"; continue
+    # No run ever CONCLUDED a verdict on main. Distinguish structural absence (no
+    # run was created) from destroyed verdicts (runs exist, all cancelled), the
+    # same way the `*)` arm used to.
+    TC=$(gh api "repos/$REPO/actions/workflows/$BASE/runs?branch=main&per_page=1" --jq '.total_count' 2>/dev/null)
+    CN=$(printf '%s' "$WFEED" | jq -r '[.[]|select(.conclusion=="cancelled")]|length' 2>/dev/null)
+    unseen=$((unseen+1))
+    if [ "${CN:-0}" -gt 0 ] 2>/dev/null; then
+      # LOCAL EVIDENCE OUTRANKS total_count: we are HOLDING cancelled rows for
+      # this workflow, so runs demonstrably exist even if the count query failed.
+      printf '%s\tno main run ever concluded a VERDICT — %s cancelled row(s) in the last 50 (total %s on main): verdicts were DESTROYED, not missing\n' \
+        "$BASE" "$CN" "${TC:-?}" >> "$UNSEEN_LIST"
+    elif [ "${TC:-0}" = "0" ]; then
+      printf '%s\tno completed main run EVER — and total_count=0: NO MAIN RUN WAS EVER CREATED (structural)\n' "$BASE" >> "$UNSEEN_LIST"
+    else
+      printf '%s\tno main run ever concluded a VERDICT — runs EXIST (total %s on main, %s cancelled in the last 50): verdicts were DESTROYED, not missing\n' \
+        "$BASE" "${TC:-?}" "${CN:-?}" >> "$UNSEEN_LIST"
+    fi
+    continue
   fi
   # (the unread annotation below uses cli's discriminator — see the *: arm)
   CONC=$(printf '%s' "$ROW" | jq -r '.conclusion'); SHA=$(printf '%s' "$ROW" | jq -r '.headSha[0:9]')
@@ -236,7 +324,7 @@ PYEOF
   fi
   case "$CONC" in
     failure|timed_out|startup_failure)
-      red=$((red+1)); printf '%s\t%s\t%s\t%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$LAUNDERED" >> "$RED_LIST";;
+      red=$((red+1)); printf '%s\t%s\t%s\t%s%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$LAUNDERED" "$EVICTED" >> "$RED_LIST";;
     success)
       # THE NO-DESCENT WARNING MUST FIRE ON GREEN TOO. Found by gates-r19-w11 while
       # vendoring this file, measured with a control: NOID+success -> green 53, exit 0,
@@ -250,23 +338,12 @@ PYEOF
       green=$((green+1))
       case "$LAUNDERED" in
         *"NOT performed"*)
-          printf 'UNDESCENDED-GREEN\t%s\t%s\t%s%s\n' "$SHA" "$WHEN" "$BASE" "$LAUNDERED" >> "$UNSEEN_LIST";;
+          printf 'UNDESCENDED-GREEN\t%s\t%s\t%s%s%s\n' "$SHA" "$WHEN" "$BASE" "$LAUNDERED" "$EVICTED" >> "$UNSEEN_LIST";;
       esac;;
-    *) unseen=$((unseen+1))
-       # A CANCEL DESTROYS A VERDICT; IT DOES NOT DESTROY THE RUN RECORD (cli, 2026-09-15).
-       # A cancelled run still EXISTS in the runs list with conclusion=cancelled, so
-       # total_count settles in ONE call whether an absence is STRUCTURAL (no run was ever
-       # created) or merely UNMEASURED (runs exist, verdicts were destroyed). Main's own
-       # sweep destroyed verdicts tonight; this is how main bounds its own damage instead
-       # of guessing. CONTROLS: cli-release.yml (tags-only) reads 0; elixir.yml reads 7450.
-       TC=$(gh api "repos/$REPO/actions/workflows/$BASE/runs?branch=main&per_page=1" --jq '.total_count' 2>/dev/null)
-       CN=$(gh api "repos/$REPO/actions/workflows/$BASE/runs?branch=main&per_page=100" --jq '[.workflow_runs[]|select(.conclusion=="cancelled")]|length' 2>/dev/null)
-       if [ "${TC:-0}" = "0" ]; then
-         printf '%s\tlast completed = %s — and total_count=0: NO MAIN RUN WAS EVER CREATED (structural)\n' "$BASE" "$CONC" >> "$UNSEEN_LIST"
-       else
-         printf '%s\tlast completed = %s (%s) — runs EXIST (total %s on main, %s cancelled in last 100): a VERDICT was destroyed, not a run\n' \
-           "$BASE" "$CONC" "$WHEN" "${TC:-?}" "${CN:-?}" >> "$UNSEEN_LIST"
-       fi;;
+    *) # UNREACHABLE BY CONSTRUCTION: the selector above admits only the four
+       # verdict conclusions. If this fires, the selector and this case have
+       # drifted apart — refuse loudly rather than bucket the row somewhere.
+       echo "CANNOT READ: $BASE selected a non-verdict conclusion '$CONC' — selector/case drift"; exit 4;;
   esac
 done
 

@@ -235,6 +235,35 @@ if [ "$selftest" -eq 1 ]; then
   [ "$rcfix" -eq 0 ] && sok "(0b) the here-string fix returns 0 on the same input" ||
     sno "(0b) the here-string fix returned $rcfix"
 
+  # (0c) SED as the producer — the shape task-b9eb6d9337a43370 c1 named and no
+  # fixture covered.  `sed` is the most common FILTER in this tree's gates, and a
+  # filter is the producer as far as the next stage is concerned: it streams, so
+  # `grep -q` can answer and exit while sed still has most of the file to write.
+  # The 141/EPIPE platform split of (0)/(0a) applies here too, so this arm asks
+  # for NON-ZERO and REPORTS the rc rather than demanding a number.
+  #
+  # ORDER MATTERS: this runs BEFORE the static fixture below, so the fixture is
+  # never classified by the scanner until the shape has been shown to really
+  # fail on THIS box.  A fixture the scanner reports while the shape no longer
+  # misbehaves is a green with no subject.
+  rcsed=0
+  (
+    set -o pipefail
+    sed -n 's/^hit$/hit/p' "$std/long.txt" | grep -q '^hit$'
+  ) 2>/dev/null || rcsed=$?
+  if [ "$rcsed" -ne 0 ]; then
+    sok "(0c) non-vacuity: a TRUE \`sed FILE | grep -q\` really comes back FAILED under pipefail (rc $rcsed on this box)"
+  else
+    sno "(0c) sed | grep -q returned 0 — the sed-producer form does not reproduce here, so the fixture below tests a ghost"
+  fi
+  rcsedfix=0
+  (
+    set -o pipefail
+    grep -q '^hit$' <<<"$(sed -n 's/^hit$/hit/p' "$std/long.txt")"
+  ) || rcsedfix=$?
+  [ "$rcsedfix" -eq 0 ] && sok "(0d) the command-substitution fix returns 0 on the same sed output" ||
+    sno "(0d) the command-substitution fix returned $rcsedfix"
+
   say() { # say <name> <body> <want: HIT|MISS>
     printf '#!/usr/bin/env bash
 set -uo pipefail
@@ -248,6 +277,11 @@ set -uo pipefail
     MISS:*) sno "$1: wanted silence, reported $n" ;;
     esac
   }
+  # The STATIC counterpart of (0c): the scanner must actually REPORT the shape
+  # (0c) just proved is live.  Two halves of one claim — a live failure nobody
+  # reports is a blind spot, a report of a shape that no longer fails is noise.
+  say sed-into-grep-q 'sed -n "s/^RELAND_STATUS=//p" "$f" | grep -q "^ok$" || exit 1' HIT
+
   say hit-if 'if printf "%s\n" "$x" | grep -q foo; then :; fi' HIT
   say hit-or 'printf "%s" "$x" | grep -q foo || exit 1' HIT
   say miss-grep-full 'if printf "%s\n" "$x" | grep foo >/dev/null; then :; fi' MISS
