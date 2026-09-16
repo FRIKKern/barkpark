@@ -188,8 +188,7 @@ defmodule BarkparkCloud.Notifications.AlertDetailReachabilityTest do
      :literal_detail},
     {:provision_succeeded, "barkpark_cloud/web/router.ex", :dispatch_barkpark_event,
      :no_payload_arg},
-    {:subscription_past_due, "barkpark_cloud/web/router.ex", :dispatch_event,
-     :literal_no_detail},
+    {:subscription_past_due, "barkpark_cloud/web/router.ex", :dispatch_event, :literal_no_detail},
     {:trial_expired, "barkpark_cloud/workers/trial_expiry_worker.ex", :dispatch_event,
      :literal_no_detail},
     {:trial_expiring, "barkpark_cloud/workers/trial_expiry_worker.ex", :dispatch_event,
@@ -287,7 +286,8 @@ defmodule BarkparkCloud.Notifications.AlertDetailReachabilityTest do
       bp = barkpark_for(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
-      conn = post_json("/v1/internal/provision-jobs/#{job.id}/fail", %{error: @capture}, @worker_token)
+      conn =
+        post_json("/v1/internal/provision-jobs/#{job.id}/fail", %{error: @capture}, @worker_token)
 
       # FIRST: the fixture really drove the producer. Without this the mail
       # assertion below could pass on an email nobody sent.
