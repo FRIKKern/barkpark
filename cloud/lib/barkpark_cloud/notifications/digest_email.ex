@@ -322,6 +322,14 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     # sites, never a per-site league table: the counts and percentages name
     # nobody, and the population is already narrowed to sites this recipient can
     # read by name elsewhere.
+    #
+    # `site_limit` GOVERNS THE `sites` LEAGUE TABLE ONLY. The coverage envelope
+    # carries its own separately-bounded `never_covered_sites`, which the
+    # coverage clause DOES print by name
+    # (dr-w35-bl-digest-blind-to-never-covered-sites) — so "the counts and
+    # percentages name nobody" above is a claim about the RATE, and stopped
+    # being a claim about the whole deploy block the day that list started
+    # rendering. Both lists come out of the same `site_ids`-narrowed query.
     census = DeployLedger.census(from, now, site_ids: site_ids, site_limit: 0)
 
     %{
@@ -634,9 +642,13 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # thing out loud precisely so nobody reads the second one into it. The window
   # is named INSIDE the clause and not left to the line prefix, because this
   # sentence gets quoted on its own.
-  defp coverage_clause(%{coverage: %{cohorts: [_ | _] = cohorts, maturity_seconds: maturity}} = w) do
+  defp coverage_clause(
+         %{coverage: %{cohorts: [_ | _] = cohorts, maturity_seconds: maturity} = coverage} = w
+       ) do
     "Coverage over #{w.label} (COVERED means the site has since rebuilt, not that an edit " <>
-      "of yours shipped): " <> Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity))
+      "of yours shipped): " <>
+      Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity)) <>
+      never_covered_sites_clause(coverage)
   end
 
   defp coverage_clause(_),
@@ -715,6 +727,83 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
        do: "#{number(n)} in #{environment}"
 
   defp environment_part(%{never_covered: n}), do: "#{number(n)} in an unnamed environment"
+
+  # WHICH SITES ARE SITTING DARK, BY NAME (dr-w35-bl-digest-blind-to-never-covered-sites).
+  # The cohort clauses above give a COUNT and the environment split gives a
+  # WHERE; neither can answer WHICH, and an operator who cannot name the site
+  # cannot go and look at it. The ledger has computed the named tail
+  # (`never_covered_sites`, with its `_total` and `_truncated` siblings) since
+  # #11534 and this module threw the whole envelope away — the same shape
+  # `environment_clause/2` fixed one key earlier, reproduced at the envelope
+  # level.
+  #
+  # IT IS POOLED ACROSS BOTH COHORTS ON PURPOSE, exactly as the ledger pools it:
+  # a site is stuck or it is not, and whether the row that stranded it
+  # terminated `deferred` or `failed` is the cohort clauses' question, not this
+  # list's. That is also why it hangs off the coverage ENVELOPE and not off a
+  # cohort — a per-cohort copy would print the same site twice.
+  #
+  # TENANCY. Every name here came out of `coverage_cohorts/2` over `scoped`,
+  # which `DeployLedger.census/3` narrowed with the recipient's own `site_ids`
+  # before any name was resolved; `deploy_health/1` refuses an unscoped read
+  # outright. A site that can be named in this email is a site this recipient
+  # was already reading by name elsewhere in it.
+  defp never_covered_sites_clause(coverage) do
+    coverage
+    |> Map.get(:never_covered_sites, [])
+    |> List.wrap()
+    |> Enum.filter(&readable_site?/1)
+    |> case do
+      [] ->
+        ""
+
+      sites ->
+        " — the sites still not covered: " <>
+          Enum.map_join(sites, ", ", &site_part/1) <> site_truncation_tail(coverage, sites)
+    end
+  end
+
+  # A shape this module cannot read costs this fragment and never the morning
+  # email, for the same reason `cohort_clause/2` names every count it prints.
+  # `never_covered` must be a positive integer: a site the ledger reported with
+  # a zero is not sitting dark, and printing it would be a false alarm with a
+  # real site's name on it.
+  defp readable_site?(%{never_covered: n}) when is_integer(n) and n > 0, do: true
+  defp readable_site?(_), do: false
+
+  # THE NAME, THEN THE SLUG, THEN AN HONEST REFUSAL. `name` is NULLABLE at the
+  # ledger on purpose — a site deleted since the deployment was written resolves
+  # to no name at all — so this walks down to whatever identifier survives and
+  # says "a site since deleted" rather than printing an empty string or a bare
+  # UUID at a human.
+  defp site_part(%{name: name} = s) when is_binary(name) and name != "",
+    do: "#{name}#{site_where(s)} (#{number(s.never_covered)})"
+
+  defp site_part(%{slug: slug} = s) when is_binary(slug) and slug != "",
+    do: "#{slug}#{site_where(s)} (#{number(s.never_covered)})"
+
+  defp site_part(s), do: "a site since deleted#{site_where(s)} (#{number(s.never_covered)})"
+
+  defp site_where(%{environment: environment})
+       when is_binary(environment) and environment != "",
+       do: " in #{environment}"
+
+  defp site_where(_s), do: " in an unnamed environment"
+
+  # THE TOP-N OF A LONGER TAIL MUST NEVER READ AS THE WHOLE TAIL. The ledger
+  # bounds the list and carries `never_covered_sites_total` beside it precisely
+  # so this sentence can be written; an email that printed twenty names and
+  # stopped would be telling a reader the fleet has twenty stuck sites when it
+  # may have two hundred.
+  defp site_truncation_tail(coverage, shown) do
+    total = Map.get(coverage, :never_covered_sites_total)
+
+    if Map.get(coverage, :never_covered_sites_truncated) == true and is_integer(total) do
+      " (#{number(length(shown))} of #{number(total)} — the list is truncated)"
+    else
+      ""
+    end
+  end
 
   # The two counts that are neither covered nor never-covered, stated only when
   # they exist: a row too young to judge is not a stuck site, and a row nobody
