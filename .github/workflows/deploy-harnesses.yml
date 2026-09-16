@@ -159,7 +159,10 @@ jobs:
           # -- the firing control (task-6f18e71a351f8081 D): prove the step CAN red --
           ctl="$(mktemp -d)"
           trap 'rm -rf "$ctl"' EXIT
-          victim="$(ls deploy/*.sh | head -1)"
+          # The glob itself yields the first file; `ls … | head -1` puts a
+          # truncating reader in front of a producer under `set -euo pipefail`,
+          # which is the 141 shape this repo scans for.
+          for victim in deploy/*.sh; do break; done
           cp "$victim" "$ctl/planted.sh"
           # SC2034: assigned and never used. -S warning must catch this.
           printf '\nbp_planted_unused_variable="task-6f18e71a351f8081 D control"\n' >> "$ctl/planted.sh"
@@ -355,7 +358,11 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq >/dev/null && apt-get install -y -qq git ca-certificates >/dev/null
             git --version
-            git --version | grep -qE "git version 2\.34\." || { echo "::error::apt git on ubuntu:22.04 is no longer 2.34 — this probe no longer models the box; re-point it"; exit 1; }
+            # HERE-STRING, never `git --version | grep -q` — the same D37 shape
+            # this file spells out 200 lines below. `grep -q` exits on its first
+            # match, the producer takes SIGPIPE, and `bash -euo pipefail -c`
+            # turns the resulting 141 into a container failure.
+            grep -qE "git version 2\.34\." <<<"$(git --version)" || { echo "::error::apt git on ubuntu:22.04 is no longer 2.34 — this probe no longer models the box; re-point it"; exit 1; }
             git clone --quiet --depth 1 --branch main "$REPO_URL" /repo && cd /repo
             git -c core.hooksPath=/dev/null -c protocol.version=0 pull --ff-only origin main
             echo "pinned form (protocol.version=0): OK on $(git --version)"

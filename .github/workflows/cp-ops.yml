@@ -270,7 +270,13 @@ jobs:
                 || { echo "box_ip must be an IPv4"; exit 1; }
               $SSH "root@${CP_HOST}" "
                 set -euo pipefail
-                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                # No pipe into head: under pipefail a truncating reader SIGPIPEs
+                # its producer and the pipeline returns 141 -- a step failure
+                # under set -e, and a silently wrong status otherwise, visible
+                # only when docker is slow enough to still be writing. head on
+                # a regular FILE cannot SIGPIPE anything.
+                docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+                c=\$(head -1 /tmp/cp-ops-cid.txt)
                 [ -n \"\$c\" ] || { echo 'no control_plane container'; exit 1; }
                 WT=\$(docker exec \"\$c\" printenv WORKER_TOKEN)
                 [ -n \"\$WT\" ] || { echo 'WORKER_TOKEN unset in container'; exit 1; }
@@ -363,11 +369,28 @@ jobs:
               fi
               $SSH "root@${CP_HOST}" "
                 set -uo pipefail
-                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                # No pipe into head: under pipefail a truncating reader SIGPIPEs
+                # its producer and the pipeline returns 141 -- a step failure
+                # under set -e, and a silently wrong status otherwise, visible
+                # only when docker is slow enough to still be writing. head on
+                # a regular FILE cannot SIGPIPE anything.
+                docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+                c=\$(head -1 /tmp/cp-ops-cid.txt)
                 [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
                 if [ -n '$NEEDLE' ]; then
-                  docker logs --since 3h \"\$c\" 2>&1 | grep -F '$NEEDLE' -B 2 -A 60 | head -300 \
-                    || echo 'no log match for $NEEDLE in the last 3 hours'
+                  # The 141 trap, and why the old one-liner LIED. Under pipefail
+                  # head -300 closes the pipe on its 301st line, grep dies of
+                  # SIGPIPE, the pipeline reports 141 and the || arm printed
+                  # 'no log match' over 300 lines of matches it had just printed
+                  # -- the verdict inverted by the size of the match, which is
+                  # exactly the case an operator is grepping for. grep now drains
+                  # into a file and owns the verdict; head reads that file.
+                  docker logs --since 3h \"\$c\" >/tmp/cp-ops-logs.txt 2>&1
+                  if grep -F '$NEEDLE' -B 2 -A 60 /tmp/cp-ops-logs.txt >/tmp/cp-ops-hits.txt; then
+                    head -300 /tmp/cp-ops-hits.txt
+                  else
+                    echo 'no log match for $NEEDLE in the last 3 hours'
+                  fi
                 else
                   docker logs --since 90m \"\$c\" 2>&1 | tail -300
                 fi
@@ -393,7 +416,13 @@ jobs:
               # surviving Stripe-side subscription is the operator's to handle.
               $SSH "root@${CP_HOST}" "
                 set -euo pipefail
-                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                # No pipe into head: under pipefail a truncating reader SIGPIPEs
+                # its producer and the pipeline returns 141 -- a step failure
+                # under set -e, and a silently wrong status otherwise, visible
+                # only when docker is slow enough to still be writing. head on
+                # a regular FILE cannot SIGPIPE anything.
+                docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+                c=\$(head -1 /tmp/cp-ops-cid.txt)
                 [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
                 docker exec \"\$c\" bin/barkpark_cloud rpc \
                   'BarkparkCloud.Billing.grant_forever(\"$TEAM\") |> IO.inspect(label: \"grant_forever\")'
