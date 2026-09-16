@@ -1617,9 +1617,7 @@ defmodule Barkpark.Sites.DeployRunner do
             do: "prebuilt artifact STAGING FAILED (box fault)",
             else: "prebuilt artifact REFUSED"
 
-        Logger.warning(
-          "[site-deploy] #{verdict} for #{inspect(req.slug)}: #{code} — #{message}"
-        )
+        Logger.warning("[site-deploy] #{verdict} for #{inspect(req.slug)}: #{code} — #{message}")
 
         {:error, code, message}
     end

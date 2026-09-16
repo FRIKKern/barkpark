@@ -578,6 +578,7 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
     test "500, not 400, when the BOX could not stage a perfectly good artifact", %{conn: conn} do
       run_state = Path.join(System.tmp_dir!(), "bp-ctl-ro-#{System.unique_integer([:positive])}")
       File.mkdir_p!(run_state)
+
       on_exit(fn ->
         File.chmod(run_state, 0o700)
         File.rm_rf(run_state)
