@@ -91,8 +91,13 @@ case " $* " in
     if [ -n "${MRP_NOID:-}" ]; then _ID=""; else _ID=',"databaseId":4242'; fi
     _CANCROW='{"conclusion":"cancelled","headSha":"cccccccccccccccc","createdAt":"2026-02-02T00:00:00Z","status":"completed"'"$_ID"'}'
     _VERDROW='{"conclusion":"'"${MRP_CONC:-failure}"'","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed"'"$_ID"'}'
+    # MRP_CANC=two adds a SECOND, OLDER verdict row (MRP_OLD) behind the first.
+    # This is web-fork-drift.yml's real shape and the only one that can tell
+    # "newest verdict wins" apart from "any verdict behind the cancel wins".
+    _OLDROW='{"conclusion":"'"${MRP_OLD:-failure}"'","headSha":"0123456789abcdef","createdAt":"2025-12-01T00:00:00Z","status":"completed"'"$_ID"'}'
     case "${MRP_CANC:-}" in
       only) printf '[%s]\n' "$_CANCROW";;
+      two)  printf '[%s,%s,%s]\n' "$_CANCROW" "$_VERDROW" "$_OLDROW";;
       ?*)   printf '[%s,%s]\n' "$_CANCROW" "$_VERDROW";;
       *)    printf '[%s]\n' "$_VERDROW";;
     esac
@@ -105,7 +110,7 @@ STUB
   _arm(){ # label FEED CONC FJOB NOID want-exit needle [forbidden]
     local lbl="$1" feed="$2" conc="$3" fjob="$4" noid="$5" wrc="$6" need="$7" bad="${8:-}"
     out=$(PATH="$d/bin:$PATH" MRP_FEED="$feed" MRP_CONC="$conc" MRP_FJOB="$fjob" MRP_NOID="$noid" \
-          MRP_CANC="${MRP_CANC_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
+          MRP_CANC="${MRP_CANC_ARM:-}" MRP_OLD="${MRP_OLD_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
     if [ "$rc" != "$wrc" ]; then _no "$lbl" "exit=$rc (want $wrc) | $(printf '%s\n' "$out" | tail -1)"; return; fi
     case "$out" in *"$need"*) : ;; *) _no "$lbl" "output lacks [$need]"; return;; esac
     if [ -n "$bad" ]; then case "$out" in *"$bad"*) _no "$lbl" "output CONTAINS the forbidden [$bad]"; return;; esac; fi
@@ -170,6 +175,17 @@ STUB
   # THE ABSENCE MUST SURVIVE: a feed of nothing but cancels has no verdict at
   # all and must still refuse — this is the case where CANNOT READ is TRUE.
   MRP_CANC_ARM=only _arm "cancels only still refuses" many failure "" "" 2 "verdicts were DESTROYED, not missing"
+  # ── NEWEST VERDICT WINS, NOT "ANY VERDICT BEHIND THE CANCEL" (gates-r20b, 2026-09-16) ──
+  # web-fork-drift.yml's real main feed is cancel / success(newest) / ... / failure(older).
+  # EVERY cancel arm above carries exactly ONE verdict row behind the cancel, so all of them
+  # pass unchanged under a selector that reaches past the newest verdict to an older one --
+  # which would report web-fork-drift RED off a 2026-09-03 failure that thirteen later
+  # successes have already superseded. These two arms are the pair that discriminates: the
+  # SAME two rows, order swapped, must reach OPPOSITE verdicts. One alone proves nothing
+  # (a selector hard-wired to "green" passes the first; one hard-wired to "red" passes the
+  # second); it is the disagreement between them that pins the ordering.
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure _arm "newest success outranks an older failure" many success "" "" 0 "red 0 · green"
+  MRP_CANC_ARM=two MRP_OLD_ARM=success _arm "newest failure outranks an older success" many failure "" "" 1 "RED ON MAIN"
   # The tags-only partition must fire against this repo's real workflows.
   out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success MRP_FJOB= MRP_NOID= bash "$_MRP_SELF" acme/widget 2>&1)
   case "$out" in
@@ -253,6 +269,24 @@ PYEOF
   #                        — a main red this instrument could not see.
   #   web-fork-drift.yml   newest row cancelled 2026-09-13T15:58Z, with 13
   #                        successes and one failure behind it.
+  # WHY web-fork-drift's CANCEL IS NOT A CONCURRENCY EVICTION -- measured
+  # 2026-09-16 by gates-r20b (task-690e90b601f5b276), because the sentence above
+  # sits under a main-collapse heading and a reader will otherwise apply the
+  # main-collapse remedy to a workflow that does not have that disease:
+  #   * web-fork-drift.yml is NOT one of the main-collapse workflows
+  #     (`grep -l 'main-collapse: harness-ok' .github/workflows/*.yml` does not
+  #     list it), and its main concurrency group has been PER-SHA since #15730
+  #     landed 2026-09-03 -- ten days BEFORE the cancel. A per-sha group cannot
+  #     evict itself.
+  #   * At head d58a0985, 24 of the 27 workflow runs on main were cancelled
+  #     within one second of each other -- architecture, ci, doc-gates, js-tests,
+  #     twoslash and nineteen more, in unrelated concurrency groups. Concurrency
+  #     is per-group and cannot cross workflow files, so this was a repo-wide
+  #     mass cancel of one sha, not an eviction. Changing any concurrency group
+  #     would have fixed nothing.
+  # The defect was in THIS SELECTOR, not in web-fork-drift.yml, and #18556 fixed
+  # it: the workflow now reads GREEN off its 2026-09-12T11:39Z success, annotated
+  # with the destroyed verdict it stepped over.
   # So: the verdict is the newest run that actually CONCLUDED one. Cancelled,
   # skipped, neutral and action_required are NOT verdicts; they are skipped over,
   # and the fact that they were is ANNOTATED, never silently swallowed. A feed
