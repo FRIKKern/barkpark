@@ -212,6 +212,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # The selftest is where this gate's MUTATION arms live — a verb dropped
+      # from internal/cli's dispatch table must RED a doc that still prints it,
+      # and a token the table never declares must RED too. Unrun, they prove
+      # nothing: #18555 turned runCloudSite()'s verb switch into a lookup table
+      # and the resolver went blind to every `bp cloud site` verb, which is
+      # exactly the drift these arms measure. Never piped — a gate piped through
+      # tail or grep -q reports the PIPE's exit code.
+      - name: Self-test the resolver (its negative half must red)
+        run: node tooling/doc-truth/verify-bp-commands.mjs --selftest
       # Repo-RELATIVE paths ONLY: the resolver does join(root, rel) which
       # concatenates, so an absolute path resolves to a non-existent file and
       # exits 2 (a false "target not found") instead of adjudicating. --offline

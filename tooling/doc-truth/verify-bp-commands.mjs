@@ -37,7 +37,8 @@
 // Exit 0 only when every printed command was adjudicated and none is
 // unresolved. Dependency-free. ESM, node: builtins only.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, cpSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -365,6 +366,101 @@ function selftest() {
     const r = verifyDocs([fix("clean")], { manifestPath: "docs/cli/fixtures/does-not-exist.json" });
     return (r.sources.ok === false && /SOURCE A UNAVAILABLE/.test(r.sources.errors.join(" "))) ||
       `run did not fail: ok=${r.sources.ok} errors=${JSON.stringify(r.sources.errors)}`;
+  });
+
+  // ── VERB TABLES: dispatch that is DATA, not syntax ───────────────────────
+  //
+  // #18555 replaced runCloudSite()'s verb switch with a lookup table
+  // (internal/cli/site_verb_matrix.go). A reader keyed to `case "x":` saw NO
+  // verbs and reported every correct `bp cloud site …` line in templates/ as
+  // UNRESOLVED — a false red on docs nobody had touched
+  // (task-130384a036e99eb6). The resolver now reads the TABLE.
+  //
+  // BOTH ARMS, because either failure is silent:
+  //   · the POSITIVE checks RED if the reader is reverted to case-scraping, or
+  //     if it stops citing the table row that adjudicated the verb;
+  //   · the MUTATION checks RED if the reader is widened into one that answers
+  //     "parses" for tokens the table does not declare — the vacuous green
+  //     this whole gate exists to prevent.
+  const tableCite = (line) => {
+    const r = verdict(line);
+    if (r.verdict !== PROVEN) return `${r.verdict}: ${r.reasons.join("|")}`;
+    const cited = (r.authority || []).filter((a) => /^D .*site_verb_matrix\.go:\d+$/.test(a));
+    return cited.length > 0 ||
+      `resolved but cited no verb-table row: ${JSON.stringify(r.authority)}`;
+  };
+  for (const v of ["create", "deploy", "status", "rollback", "delete", "ls"]) {
+    check(`VERB TABLE: \`bp cloud site ${v}\` resolves THROUGH siteVerbMatrix`, () =>
+      tableCite(`bp cloud site ${v}`));
+  }
+  check("VERB TABLE: an Aliases cell resolves (`bp cloud site build` → deploy)", () =>
+    tableCite("bp cloud site build"));
+  check("VERB TABLE: the other spelling reads the SAME table (`bp sites logs`)", () =>
+    tableCite("bp sites logs"));
+  check("VERB TABLE: a token the table does NOT declare still REDs", () => {
+    const r = verdict("bp cloud site redeploy");
+    return (r.verdict === UNRESOLVED && /redeploy/.test(r.reasons.join(" "))) ||
+      `${r.verdict}: ${r.reasons.join("|")} — the table reader answers for verbs the table never declares`;
+  });
+  check("VERB TABLE SCOPE: a spawner-only verb still REFUSES at the fleet noun", () => {
+    const r = verdict("bp sites deploy");
+    return (r.verdict === UNRESOLVED && /deploy/.test(r.reasons.join(" "))) ||
+      `${r.verdict} — the Scope column was ignored; every verb reads as offered at every noun`;
+  });
+
+  // MUTATION on a COPY of internal/cli — the arm that fires on REAL drift: a
+  // verb retired in the table while a doc still prints it. The tree is copied,
+  // not edited, so nothing here can touch the working tree.
+  const runProbe = (printed, edit) => {
+    const tmp = mkdtempSync(join(tmpdir(), "bp-verb-table-"));
+    try {
+      cpSync(join(REPO_ROOT, "internal/cli"), join(tmp, "internal/cli"), { recursive: true });
+      let changed = true;
+      if (edit) {
+        const f = join(tmp, "internal/cli/site_verb_matrix.go");
+        const before = readFileSync(f, "utf8");
+        const after = edit(before);
+        changed = after !== before;
+        if (changed) writeFileSync(f, after);
+      }
+      writeFileSync(join(tmp, "probe.md"), "```sh\n" + printed + "\n```\n");
+      return { changed, report: verifyDocs(["probe.md"], { root: tmp, offline: true }) };
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  };
+  const dropRow = (verb) => (src) =>
+    src.replace(new RegExp(`\\n\\t\\t\\{\\n\\t\\t\\tVerb: "${verb}",[\\s\\S]*?\\n\\t\\t\\},`), "");
+
+  check("CONTROL: the probe doc GREENs against the UNMUTATED copy", () => {
+    const { report } = runProbe("bp cloud site rollback <slug>", null);
+    return (report.totals.commands === 1 && report.totals.unresolved === 0) ||
+      `commands=${report.totals.commands} unresolved=${report.totals.unresolved} — ` +
+      "the mutation checks below would be measuring a broken harness, not the mutation";
+  });
+  check("MUTATION: retire `rollback` from the table and the doc printing it REDs", () => {
+    const { changed, report } = runProbe("bp cloud site rollback <slug>", dropRow("rollback"));
+    if (!changed) return "the row-drop did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} of ${report.totals.commands} — ` +
+      "a verb deleted from the table still resolves";
+  });
+  check("MUTATION: drop the `build` alias and `bp cloud site build` REDs", () => {
+    const { changed, report } = runProbe("bp cloud site build <slug>",
+      (src) => src.replace(' Aliases: []string{"build"},', ""));
+    if (!changed) return "the alias-drop did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} — aliases are not read from the table`;
+  });
+  check("MUTATION: widen deploy's Scope and `bp sites deploy` stops refusing", () => {
+    // The scope column is READ, not decoration: flip spawner-only to shared and
+    // the fleet noun starts answering. If this stays UNRESOLVED the scope check
+    // above is passing for some other reason.
+    const { changed, report } = runProbe("bp sites deploy <slug>",
+      (src) => src.replace("Scope: siteVerbSpawnerOnly", "Scope: siteVerbShared"));
+    if (!changed) return "the scope flip did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 0) ||
+      `still UNRESOLVED with the scope widened: ${report.unresolved.map((x) => x.reasons.join("|")).join(" ")}`;
   });
 
   // the templates/** corpus, on the real files: E is what closes the UNPROVEN

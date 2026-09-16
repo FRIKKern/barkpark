@@ -433,8 +433,20 @@ own sources**, because no single one knows the whole surface:
 | A | manifest rows | `docs/cli/fixtures/full-manifest.json` | the server-declared noun/verb tree (`doc`, `task`, `workspace`, …). Drop it and manifest-driven commands go falsely RED |
 | B | `completionNouns` | `internal/cli/builtins.go` | the built-in top-level nouns. B knows `cloud` is a noun — and nothing more |
 | C | `parseHzArgs` allowlists | `internal/cli/*.go` | a leaf's declared value/bool flags |
-| D | router switch tables | `internal/cli/*.go` (`case "x":` + `if verb == "x"`) | the DEPTH. **Not optional**: `bp cloud barkpark ls` cannot be RED from A+B+C, because B has `cloud` and nothing left can adjudicate the token after it |
+| D | router dispatch | `internal/cli/*.go` (`case "x":`, `if verb == "x"`, and verb TABLES like `siteVerbMatrix`) | the DEPTH. **Not optional**: `bp cloud barkpark ls` cannot be RED from A+B+C, because B has `cloud` and nothing left can adjudicate the token after it |
 | E | `"--flag"` literals | `internal/cli/*.go`, file-scoped | hand-rolled parsers that declare no allowlist. Without E, `bp login --device` and every `bp vercel quick-setup` flag is UNPROVEN |
+
+**D reads dispatch by SHAPE, not by spelling.** A `switch`/`case "x":` and a
+lookup table are two spellings of one fact, and a reader keyed to either one
+goes blind the moment the other is used: #18555 replaced `runCloudSite()`'s verb
+switch with `siteVerbMatrix` and every correct `bp cloud site …` line in
+`templates/` went UNRESOLVED on docs nobody had touched. D therefore reads the
+TABLE — its `Verb:`, `Aliases:`, `Scope:` and handler columns — and reaches it
+the way the binary does, by following the call that hands a user-typed token
+into it. A function that merely RENDERS a table (`bp sites matrix`) donates no
+verbs to anything. The selftest holds both arms: dropping a row, dropping an
+alias, or widening a `…Only` scope each changes a verdict, and a token the table
+never declares still REDs.
 
 **Laws.** A token that resolves in NO source is UNRESOLVED and the gate FAILS —
 it never skips what it cannot adjudicate. A source that cannot be LOADED fails
