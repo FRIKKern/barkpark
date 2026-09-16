@@ -546,7 +546,9 @@ defmodule BarkparkWeb.ShareController do
   # sibling helper just shed, and it does not guard `Tenancy.Auth` at all. It
   # guards the bare `Repo.get(ApiToken, id)` on the next line: that is Ecto's
   # own fetch, NOT a Barkpark chokepoint, and binding a non-UUID string to a
-  # `:binary_id` column raises `Ecto.Query.CastError` → 500. There is no total
+  # `:binary_id` column raises `Ecto.Query.CastError` → an opaque 400
+  # (phoenix_ecto maps that struct to 400; 500 is Plug's `Any` fallback, which
+  # covers the nil / non-binary FunctionClauseError class). There is no total
   # by-id accessor for an `ApiToken` in `Barkpark.Auth` today, so this guard is
   # the only thing standing between `DELETE /v1/shares/tokens/not-a-uuid` and a
   # crash oracle. Delete it and `share_controller_test.exs`'s "a malformed

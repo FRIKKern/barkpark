@@ -2159,7 +2159,9 @@ const EXPECTATIONS = {
   "promote-in-flight": {
     what: "the new build streams on top; Current stays on the live deploy",
     container: "site-body",
-    includes: ["dep-pill dep-building", "dep-current", ">Redeploy<", ">Roll back to this<"],
+    // gr-backlog-d24: the deploy chip is the shared `.status-pill` family now, so
+    // the role class alone no longer identifies THIS pill — pin the label too.
+    includes: ["status-pill-label\">Building<", "dep-current", ">Redeploy<", ">Roll back to this<"],
   },
   // cch-deploy-detail-render-has-no-cap: the live sub-caption at its STORE cap.
   // The first scenario in this harness to carry a `.deploy-detail` longer than
@@ -2214,7 +2216,7 @@ const EXPECTATIONS = {
     what: "the Current chip has migrated to the now-live deploy",
     container: "site-body",
     includes: ["dep-current", ">Redeploy<", ">Roll back to this<"],
-    excludes: ["dep-pill dep-building"],
+    excludes: ["status-pill-label\">Building<"],
   },
   // cch-w25-s3: the deploy rail, FAILED. The first scenario in this harness
   // whose console carries a rail STAGE entry — before it,
@@ -3939,9 +3941,12 @@ const EXPECTATIONS = {
       const body = (reg.get("site-body") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#site-body rendered empty");
       // States-complete: live current / crash / blocked / cancelled pills.
-      assert.ok(body.includes("dep-pill dep-live"), "live pill renders");
-      assert.ok(body.includes("dep-pill dep-failed"), "failed pill renders");
-      assert.ok(body.includes("dep-pill dep-cancelled"), "cancelled pill renders");
+      // gr-backlog-d24: one pill family — the STATE is now a role (+ variant) plus
+      // the ledger's own word, so each arm pins both halves rather than a class
+      // that is shared with every other neutral/ok pill on the screen.
+      assert.ok(body.includes("status-pill--ok") && body.includes('status-pill-label">Live<'), "live pill renders");
+      assert.ok(body.includes("status-pill--danger") && body.includes('status-pill-label">Failed<'), "failed pill renders");
+      assert.ok(body.includes("status-pill--stopped") && body.includes('status-pill-label">Cancelled<'), "cancelled pill renders");
       assert.ok(body.includes("dep-current"), "the Now-live chip marks the current row");
       assert.ok(body.includes(">Roll back to this<"), "the prior live row offers rollback");
       // The v4 failure panels: crash red + blocked amber, dot included.

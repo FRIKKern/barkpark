@@ -650,7 +650,7 @@
 # "FAIL app.css — baseline mismatch with 0 misses": MISSES 0 is what makes this an
 # unrecorded ADD rather than a parity defect. styleguide.html PASSED unchanged at 84.
 # Bumped in the SAME COMMIT as the CSS hunk (D158).
-1340
+1337
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -723,3 +723,16 @@
 # on every run, so it is not the waiver-absolving-nothing shape E19 exists for.
 # MISSES 0 and the styleguide sheet's 84 are unchanged: this diff removes one authored
 # head and adds none.
+# gr-backlog-d24 2026-09-16 (console/r20-console-statusmeta): 1340 -> 1337, -3 authored
+# rule heads. The `.dep-*` pill family is RETIRED into the one `.status-pill` family
+# (parent decision 24): seven heads leave (the base plus live / failed /
+# building+pushing / queued / deferred / cancelled) and four arrive
+# (`.status-pill--hollow`, `.status-pill--warn.status-pill--hollow`,
+# `.status-pill--stopped`, `.status-pill--stopped .status-pill-dot`).
+# NOT arithmetic — the arithmetic above is only the STORY. 1337 is the return of
+# cssom-parity.mjs's own exported `authoredHeads(app.css).length` run on this branch.
+# The SAME call on origin/main's app.css returned 1340, matching the baseline it
+# replaces; that control is what says the -3 is this diff and not a resolver
+# difference. MISSES is not re-measured here (it needs a browser) and nothing in this
+# diff adds a construct the CSSOM parses differently from the authored text: every
+# head removed and added is a plain class selector in the top-level cascade.

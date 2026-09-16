@@ -4,7 +4,9 @@ defmodule Barkpark.SecretsCastgapContractTest do
   functions take `scope` as a RAW binary and thread it straight into an Ecto
   query against a `:binary_id` column — a non-UUID binary raises
   `Ecto.Query.CastError` (the binary_id CastError gotcha), which the HTTP
-  surface would serve as a 500.
+  surface would serve as an opaque 400 `internal_error` — phoenix_ecto maps
+  that struct to 400, NOT the 500 this moduledoc used to claim. See
+  `casterror_status_contract_test.exs`.
 
   These tests are GREEN TODAY and document that context-layer contract: the
   context deliberately does NOT self-protect against garbage binaries (a

@@ -6,7 +6,8 @@ defmodule BarkparkWeb.NonBinaryParamSweepTest do
   Phoenix's `Plug.Conn.Query` parser turns `?q[]=a&q[]=b` into a LIST and
   `?q[k]=v` into a MAP. A controller that then feeds that value to
   `String.split/2`, `escape_like/1`, an Ecto cast, or a `<<_>>`-headed function
-  clause raises `FunctionClauseError` / `Ecto.CastError` → HTTP 500 instead of a
+  clause raises `FunctionClauseError` (Plug's `Any` fallback → HTTP 500) or
+  `Ecto.Query.CastError` (phoenix_ecto → an opaque HTTP 400) instead of a
   clean 4xx. Every scalar-param read now flows through the one shared
   `BarkparkWeb.ParamCoercion.bin/1` seam (list/map/other → nil), so a hostile or
   malformed query degrades to the missing-param path rather than crashing.

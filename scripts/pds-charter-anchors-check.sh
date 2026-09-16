@@ -24,6 +24,14 @@
 # ignore it — but it prints a LOWER-THE-CEILING line so the number cannot drift
 # quietly upward behind a stale floor.
 #
+# RULE (arm C, ratchet): the same, for the FILE-LESS citation form `` `:NNN` ``
+# (and `` `:NNN-MMM` ``) that PDS-D101 and PDS-D116 used. Arm B cannot see these
+# — its pattern requires the filename — and that is the worse form, not the
+# milder one: a bare `:2240` names no file at all, so a reader cannot even ask
+# which blob it was true against, and no machine can resolve it. It is ratcheted
+# separately rather than folded into arm B so a gain in one form can never be
+# hidden by a loss in the other.
+#
 # Usage: bash scripts/pds-charter-anchors-check.sh [charter-path]
 # Exit 0 = every anchor resolves and no new bare citation appeared. Exit 1 = a
 # citation no longer resolves; the output names each one.
@@ -38,6 +46,10 @@ cd "$REPO_ROOT" || exit 2
 # Legacy bare `pds-pull-proof.sh:NNN` citations still in the charter. Lower this
 # as decisions are converted to anchors; raising it is the thing arm B refuses.
 LEGACY_BARE_CEILING="${PDS_ANCHOR_LEGACY_CEILING:-15}"
+
+# File-less `` `:NNN` `` citations still in the charter (arm C). Same ratchet
+# rule: lower it as decisions are converted; raising it is what arm C refuses.
+FILELESS_CEILING="${PDS_ANCHOR_FILELESS_CEILING:-641}"
 
 if [ ! -f "$CHARTER" ]; then
   printf 'pds-charter-anchors-check: charter not found: %s\n' "$CHARTER" >&2
@@ -96,10 +108,15 @@ fi
 # Arm B — the legacy bare-citation ratchet.
 bare="$(grep -oE 'pds-pull-proof\.sh`?:[0-9]' "$CHARTER" | wc -l | tr -d ' ')"
 
+# Arm C — the FILE-LESS bare-citation ratchet. grep -o prints one match per
+# occurrence (grep -c would count LINES, and a charter line can carry three).
+fileless="$(grep -oE '`:[0-9]+(-[0-9]+)?`' "$CHARTER" | wc -l | tr -d ' ')"
+
 printf '\n'
 printf 'anchors checked ..... %s (arm A: each must resolve to exactly 1 line)\n' "$checked"
 printf 'anchors rotted ...... %s\n' "$fails"
 printf 'legacy bare cites ... %s (ceiling %s)\n' "$bare" "$LEGACY_BARE_CEILING"
+printf 'file-less cites ..... %s (ceiling %s)\n' "$fileless" "$FILELESS_CEILING"
 
 if [ "$bare" -gt "$LEGACY_BARE_CEILING" ]; then
   printf '\nFAIL: a NEW bare `pds-pull-proof.sh:NNN` citation was added (%s > ceiling %s).\n' "$bare" "$LEGACY_BARE_CEILING"
@@ -108,6 +125,16 @@ if [ "$bare" -gt "$LEGACY_BARE_CEILING" ]; then
   fails=$((fails + 1))
 elif [ "$bare" -lt "$LEGACY_BARE_CEILING" ]; then
   printf '\nPROGRESS: legacy bare citations are down to %s. LOWER THE CEILING to %s in this script\n' "$bare" "$bare"
+  printf '          so the gain is locked in. This is NOT a failure.\n'
+fi
+
+if [ "$fileless" -gt "$FILELESS_CEILING" ]; then
+  printf '\nFAIL: a NEW file-less `:NNN` citation was added (%s > ceiling %s).\n' "$fileless" "$FILELESS_CEILING"
+  printf '      A citation that names no file cannot be resolved by any reader or any machine.\n'
+  printf '      Cite content instead: `<path>`@`<a unique literal from the line you mean>`\n'
+  fails=$((fails + 1))
+elif [ "$fileless" -lt "$FILELESS_CEILING" ]; then
+  printf '\nPROGRESS: file-less citations are down to %s. LOWER THE CEILING to %s in this script\n' "$fileless" "$fileless"
   printf '          so the gain is locked in. This is NOT a failure.\n'
 fi
 

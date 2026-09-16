@@ -1500,7 +1500,7 @@ defmodule BarkparkCloud.DeployLedger do
   ## Every attempt lands in a NAMED state (D256)
 
   `volume` used to be the only place a deploy that WORKED appeared, and it shared
-  that residue with every row still in flight and every row somebody cancelled.
+  that residue with every row still in flight and every row the fleet cancelled.
   A census whose success count is "the part we did not name" cannot be checked by
   anyone, so the census now names the whole population:
 
@@ -1510,7 +1510,9 @@ defmodule BarkparkCloud.DeployLedger do
       for an unrelated reason, and cannot ever be wrong out loud.
     * `in_flight` — `queued` / `building` / `pushing`: attempted, not settled.
       Its own cohort because "not failed yet" is not "succeeded".
-    * `cancelled` — somebody stopped it. Neither a failure nor a success.
+    * `cancelled` — the fleet stopped it (an auto-deploy refusal, a preview
+      supersede or teardown, or a box filing the terminal). Never a human:
+      there is no human cancel path. Neither a failure nor a success.
     * `residual` — attempted rows whose `status` this census does not name.
       `deployments.status` is a CHECK-less varchar, so the honest answer to a
       status nobody has taught the census about is a number that GOES UP —
@@ -2651,12 +2653,28 @@ defmodule BarkparkCloud.DeployLedger do
   live deliveries and ZERO non-null `content_rev`, so a naive key filter would
   silently omit an entire customer site.
 
-  Rows nobody is WAITING on — `status == "cancelled"`, a deploy a human
-  deliberately stopped — are reported the same way: an explicit `cancelled`
-  count at both census and per-site level. They are not observations, so they
-  are neither delivered nor censored, and the still-waiting cohort this
-  envelope publishes cannot contain one by construction
-  (`dr-w11-bl-cancelled-rows-count-as-waiting`).
+  Rows nobody is WAITING on — `status == "cancelled"` — are reported the same
+  way: an explicit `cancelled` count at both census and per-site level. They are
+  not observations, so they are neither delivered nor censored, and the
+  still-waiting cohort this envelope publishes cannot contain one by
+  construction (`dr-w11-bl-cancelled-rows-count-as-waiting`).
+
+  A `cancelled` row does NOT mean a person intervened. No human cancel path
+  exists — nothing in `cloud/lib` lets someone stop a deploy, and the console
+  ships no such affordance. Every producer is machine-driven
+  (`dr-w16-bl-cancelled-rows-rationale-is-wrong`):
+
+    * `Sites.AutoDeployWorker.refuse/1` — the prebuilt-overwrite guard. The
+      FLEET refuses a content auto-deploy that would overwrite a customer's
+      prebuilt release, and mints the refusal as a `cancelled` row.
+    * `Registry.cancel_preview/2` — preview supersede (a newer push to the same
+      branch) and branch teardown (the branch-delete webhook).
+    * A build box filing `status: "cancelled"` on the fenced builder/agent
+      transition route. Agent-token gated; a machine caller, never a person.
+
+  So the reason a cancelled row must not read as still-waiting is not "do not
+  accuse a user of their own action" — it is "do not report as content that has
+  not arrived yet a deploy the fleet itself refused to ship".
 
   Every percentile is an INSEPARABLE node — the value cannot travel without its
   window width, its sample and its censored count:
@@ -2881,13 +2899,17 @@ defmodule BarkparkCloud.DeployLedger do
     #
     # Before this split every non-live row was a candidate WAIT — delivered by
     # the site's next live mark, CENSORED ("still waiting", lower bound
-    # `as_of - inserted_at`) when there was none. A deploy a human deliberately
-    # stopped therefore read as still waiting, and `dr-w11-s5-waiting-alert`
-    # reads exactly that cohort: it would have emailed a team "STILL WAITING >=
-    # 3d" about a deploy the team itself cancelled. Nobody is waiting on a
-    # deploy a human stopped. The excluded rows are COUNTED here, so the
-    # denominator still names them and the census cannot read rosier than the
-    # fleet is.
+    # `as_of - inserted_at`) when there was none. A row the FLEET refused
+    # therefore read as still waiting, and `dr-w11-s5-waiting-alert` reads
+    # exactly that cohort: it would have emailed a team "STILL WAITING >= 3d"
+    # about a publish this control plane itself declined to ship. Nobody is
+    # waiting on content that stopped trying to arrive. The excluded rows are
+    # COUNTED here, so the denominator still names them and the census cannot
+    # read rosier than the fleet is.
+    #
+    # The producers are machine-driven, never a person
+    # (`dr-w16-bl-cancelled-rows-rationale-is-wrong`): see the `delivery/3`
+    # moduledoc for the enumerated list.
     #
     # A cancelled row whose site HAS a later live mark is still just
     # `cancelled` — deliberately NOT delivered. That later mark belongs to some

@@ -288,9 +288,9 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   end
 
   # Binary_id scar: a non-UUID :id must fold into not_found, NOT raise
-  # Ecto.CastError → 500 inside the id: get_by cast. Any authed user could
+  # Ecto.Query.CastError → an opaque 400 inside the id: get_by cast. Any authed user could
   # trigger the 500 trivially by DELETEing a garbage id.
-  test "DELETE a non-UUID credential id → 404 not_found, never a CastError 500", %{
+  test "DELETE a non-UUID credential id → 404 not_found, never an Ecto.Query.CastError 400", %{
     token: token,
     user: user
   } do

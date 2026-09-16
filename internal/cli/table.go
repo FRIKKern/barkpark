@@ -376,7 +376,8 @@ func statusRole(value string) string {
 }
 
 // pickColumns builds a stable column list from the union of row keys. Identity
-// columns (_id/id/title/name/subject — a ticket's title is its subject) lead;
+// columns (_id/id/title/name/subject/slug/worker — a ticket's title is its
+// subject, and a roster row's identity is its worker) lead, ahead of status;
 // the rest follow alphabetically; underscore "system" keys are dropped from the
 // table view to keep it readable (full data is one -o json away).
 //
@@ -404,7 +405,14 @@ func pickColumns(rows []any, requested []string) []string {
 	}
 
 	lead := []string{}
-	for _, k := range []string{"_id", "id", "title", "name", "subject", "slug", "status"} {
+	// "worker" leads "status" on purpose. A fleet roster row (`bp fleet roster`)
+	// carries no identity key at all — no _id/id/title/name/subject/slug — so
+	// before "worker" joined this list the only lead column was "status" and the
+	// row rendered status, agent, capacity, last_seen, scope, ttl_s, worker: the
+	// one cell naming WHICH worker the row is about sorted LAST, alphabetically,
+	// off the right edge of a narrow terminal. kubectl-style reading is
+	// subject-then-state, so the subject comes first.
+	for _, k := range []string{"_id", "id", "title", "name", "subject", "slug", "worker", "status"} {
 		if seen[k] {
 			lead = append(lead, k)
 			delete(seen, k)

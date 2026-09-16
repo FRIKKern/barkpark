@@ -129,4 +129,50 @@
 # Re-measured AFTER the final rebase, per the regeneration rule (never hand-counted).
 #
 # Filed under task-ab1d5320e09c9e72.
-113
+
+# ── RE-MEASURED 2026-09-16 (task-0c3f58ec7fb18137): 113 → 108, AND THE RATCHET
+#    WAS ALREADY BROKEN ON MAIN ────────────────────────────────────────────────
+# origin/main e01c3c22e measures 114, not the 113 recorded above, so
+# .github/workflows/pipefail-sigpipe-scan.yml has been RED on main's tip (latest
+# concluded run on 469aa5917: failure). A rise is a new site, which is exactly
+# what the ratchet is for — it worked. This change lands the fixes and banks the
+# result, by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 108 finding(s) — high 108 · medium 0 · low 0 — over 424 file(s)
+#
+# COMPOSITION OF THE −6, all in .github/workflows run: bodies (task row c1). The
+# row filed EIGHT high sites there; re-measured on e01c3c22e the real number is
+# SIXTEEN — the row's 8 predates the 2026-09-12 detector widening recorded above
+# and was inherited, not re-measured.
+#
+#   cp-ops.yml  control-plane-logs (grep -F … | head -300 || echo 'no log match')
+#       THE ONE THAT ACTUALLY LIED. Under `set -uo pipefail` in the remote shell,
+#       head -300 closes the pipe on line 301, grep dies of SIGPIPE, the pipeline
+#       reports 141 and the || arm prints "no log match for <needle> in the last
+#       3 hours" directly underneath 300 lines of matches. The verdict inverts
+#       with the SIZE of the match — i.e. exactly when the operator needed it.
+#       Measured: 10/10 false "no log match" on a quiet box, 9/10 under load.
+#   cp-ops.yml  ×3  `c=$(docker ps -q --filter … | head -1)` → file + head FILE
+#   deploy-harnesses.yml  `victim="$(ls deploy/*.sh | head -1)"` → the glob
+#   deploy-harnesses.yml  `git --version | grep -qE …` → `grep -qE … <<<"$(…)"`
+#
+# THE TEN LEFT IN .github/workflows ARE NOT UNDER pipefail+`set -e`, and each is
+# left deliberately rather than churned (a fix with no failure mode is noise):
+#   cp-ops.yml:96,97,149,406 — inside a REMOTE ssh command string whose shell
+#       sets no pipefail (96/97/406) or sets `-uo` with NO `-e` on a BARE command
+#       (149). The scanner reads the OUTER run: body's `set -euo pipefail` and
+#       attributes it to text inside the quoted remote command; that attribution
+#       is wrong for these four.
+#   elixir-main-red-attribution.yml:132, reland-check.yml:215,299,300,301,302 —
+#       all under `set -uo pipefail` with NO `-e`, all captured into a plain
+#       assignment, so the 141 is DISCARDED and the captured first line is still
+#       correct. Latent: adding `-e` to those steps makes all six live.
+#
+# CONTROL for the "cannot fire today" half, so it is a measurement and not an
+# opinion: a SMALL producer (10 lines) into `head -1` under `set -euo pipefail`,
+# 40 runs under 8 CPU spinners, failed 0/40. The same shape with a 200k-line
+# producer failed 10/10. The small-producer sites are latent, not safe.
+#
+# Filed under task-0c3f58ec7fb18137.
+108

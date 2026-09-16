@@ -294,8 +294,7 @@ func renderRank(layer []*mmNode, g *mmGraph, W int, ctx RenderCtx) ([]string, ma
 // content+4 wide (2 border + 2 padding), so the box is a clean rectangle.
 func renderNodeBox(n *mmNode, content int, ctx RenderCtx) []string {
 	g := shapeGlyphs(n.shape)
-	label := sanitizeText(n.label)
-	lines := wrapLines(label, content)
+	lines := mermaidLabelLines(n.label, content)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
@@ -535,7 +534,7 @@ func renderBand(g *mmGraph, rank map[string]int, pr int, parents, children map[s
 		if lk.label == "" || count[lk.xc] != 1 {
 			continue
 		}
-		txt := []rune(" " + sanitizeText(lk.label))
+		txt := []rune(" " + mermaidLabelFlat(lk.label))
 		start := lk.xc + 1
 		if start+len(txt) > W {
 			continue
@@ -578,7 +577,7 @@ func renderEdgeLegend(g *mmGraph, rank map[string]int, deferred []mmEdge, W int,
 		}
 		line := labelFor(g, e.from) + " " + arrow + " " + labelFor(g, e.to)
 		if e.label != "" {
-			line += "  " + sanitizeText(e.label)
+			line += "  " + mermaidLabelFlat(e.label)
 		}
 		items = append(items, item{line})
 	}
@@ -610,7 +609,7 @@ func renderEdgeLegend(g *mmGraph, rank map[string]int, deferred []mmEdge, W int,
 // labelFor returns a node's display label (falling back to its id).
 func labelFor(g *mmGraph, id string) string {
 	if n, ok := g.byID[id]; ok && n.label != "" {
-		return sanitizeText(n.label)
+		return mermaidLabelFlat(n.label)
 	}
 	return sanitizeText(id)
 }

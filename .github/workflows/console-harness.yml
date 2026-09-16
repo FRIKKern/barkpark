@@ -152,6 +152,8 @@ on:
       - "js/packages/react/src/status-vocab.gen.ts"
       - "templates/search-starter/public/bp-graph.js"
       - "templates/astro-search-starter/public/bp-graph.js"
+      - "templates/search-starter/app/globals.css"
+      - "templates/astro-search-starter/src/styles/globals.css"
       - ".github/required-checks.json"
       - ".github/workflows/cloud.yml"
       - "scripts/console-*"
@@ -629,6 +631,19 @@ jobs:
       # PIN 1454 — bumped 2026-09-15 from 1453 on console/internal-tree-blocking-coverage.
       # PIN 1456 — bumped 2026-09-15 from 1454 on console/w57-s4-suspended-js-test:
       # PIN 1459 — bumped 2026-09-15 from 1456 on console/css-check-main-guard:
+      # PIN 1463 — bumped 2026-09-16 from 1459 on r20-console-statusmeta:
+      # +4 tests for the gr-backlog-d24 statusMeta vocabulary — (a+e) readable,
+      # total and closed over the ledger's statuses; (b) and (c) the REVERSION
+      # arms proving no `dep-pill` class literal survives in app.js and no
+      # `.dep-*` PILL rule survives in app.css; (d) every ledger status renders
+      # through the shared family. RE-MEASURED, never arithmetic: `bash
+      # scripts/console-harness.sh` on this branch resolved the declared Node 20
+      # (banner MATCHES __node-version, so the cchi-w61-bl self-guard PASSES and
+      # the pass count is the CI-comparable one) and printed `# tests 1463 /
+      # # pass 1463 / # fail 0`; THIS STEP'S OWN AWK summed 1463 over that log.
+      # CONTROL: the diff against origin/main 783e688f94 adds exactly 4 top-level
+      # `test(` registrations and removes none, so +4 is exactly these arms and
+      # main's standing 1459 is unmoved by anything else in this PR.
       # +3 tests asserting the E11 SCAN SET off the now-importable citationScanFiles()
       # and its list-equality with the set the gate actually scans.
       # Row cch-bl-css-check-gate-body-not-importable.
@@ -711,7 +726,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1459-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1463-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -727,14 +742,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1459 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1459 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1463 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1463 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1459 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1459 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1459 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1463 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1463 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1463 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1459 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1463 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

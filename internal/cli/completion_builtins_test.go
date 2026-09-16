@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -150,16 +152,23 @@ func TestBuiltinCompletionPathsCoverDispatchedCloudTree(t *testing.T) {
 			"add them in completion_builtins.go so `bp cloud <TAB>` offers every command", missing)
 	}
 
-	// 2. `bp cloud site <TAB>` — every verb runCloudSite dispatches, under BOTH
-	//    dispatcher spellings (`site` and the `sites` alias).
-	siteBody, ok := bodies["runCloudSite"]
-	if !ok {
-		t.Fatal("runCloudSite not found — the scanner or the dispatcher moved; fix this guard")
+	// 2. `bp cloud site <TAB>` — every verb the SITE COMMAND MATRIX declares,
+	//    under BOTH dispatcher spellings (`site` and the `sites` alias). The
+	//    switch this used to read is gone: runCloudSite and runSites now both
+	//    route through siteVerbMatrix (site_verb_matrix.go), so the matrix IS
+	//    the dispatch truth and the guard reads it directly — one table, no
+	//    regex over a switch that can be reshaped out from under it.
+	var siteVerbs []string
+	for _, bnd := range siteVerbMatrix {
+		if bnd.handler(siteSpellingSpawner) == nil {
+			continue
+		}
+		siteVerbs = append(siteVerbs, bnd.names()...)
 	}
-	siteVerbs := dispatchCaseVerbs(siteBody)
-	if len(siteVerbs) < 5 {
-		t.Fatalf("only %d cases parsed out of runCloudSite (%v) — the switch shape changed; "+
-			"fix this guard before trusting it", len(siteVerbs), siteVerbs)
+	siteVerbs = dedupeSorted(siteVerbs)
+	if len(siteVerbs) < 15 {
+		t.Fatalf("only %d verbs read out of siteVerbMatrix (%v) — the table shrank or "+
+			"the reader broke; fix this guard before trusting it", len(siteVerbs), siteVerbs)
 	}
 	for _, prefix := range []string{"cloud site", "cloud sites"} {
 		if missing := missingFrom(builtinPathCandidates(prefix), siteVerbs); len(missing) > 0 {
@@ -170,10 +179,31 @@ func TestBuiltinCompletionPathsCoverDispatchedCloudTree(t *testing.T) {
 
 	// 3. `bp cloud site <verb> --<TAB>` — every flag the verb's handler declares
 	//    through parseHzArgs. This is the half that made --prebuilt invisible.
-	handlers := dispatchCaseHandlers(siteBody)
+	//    The handler NAME comes from the func value in the matrix, so a verb
+	//    repointed at a different handler is followed automatically. Fleet
+	//    handlers reach the table through fleetAdapter's closure and parse their
+	//    flags by hand rather than through parseHzArgs, so they resolve to a
+	//    `.funcN` name and are skipped — the floor below keeps that skip honest.
+	handlers := map[string]string{}
+	for _, bnd := range siteVerbMatrix {
+		fn := bnd.handler(siteSpellingSpawner)
+		if fn == nil {
+			continue
+		}
+		name := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			name = name[i+1:]
+		}
+		if strings.HasPrefix(name, "func") {
+			continue // fleetAdapter closure — no parseHzArgs declaration to read
+		}
+		for _, n := range bnd.names() {
+			handlers[n] = name
+		}
+	}
 	if len(handlers) < 5 {
-		t.Fatalf("only %d case->handler pairs parsed out of runCloudSite — the switch "+
-			"shape changed; fix this guard before trusting it", len(handlers))
+		t.Fatalf("only %d verb->handler pairs resolved out of siteVerbMatrix — the "+
+			"table or the resolver changed; fix this guard before trusting it", len(handlers))
 	}
 	sawAnyFlag := false
 	for _, verb := range siteVerbs {
@@ -183,7 +213,7 @@ func TestBuiltinCompletionPathsCoverDispatchedCloudTree(t *testing.T) {
 		}
 		body, ok := bodies[handler]
 		if !ok {
-			t.Errorf("runCloudSite dispatches %q to %s, which the scanner did not find", verb, handler)
+			t.Errorf("siteVerbMatrix routes %q to %s, which the scanner did not find", verb, handler)
 			continue
 		}
 		flags := parseHzArgsFlags(body)

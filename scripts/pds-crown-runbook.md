@@ -389,3 +389,52 @@ target. A severable headroom abort of 3/4 is an honest designed outcome and does
 **not** close it. The gate is now known to be closed on essentially every idle draw
 (§0(ii)), so both temptations are live: "lower the floor" and "call a lucky partial
 the crown proof". Refuse both.
+
+## 8. Artifact retention — and the two directories the sweep cannot see
+
+Every run that reaches rung 0a writes a dev-profile export of PRODUCTION content
+into `$PDS_ARTIFACT_ROOT/pds-proof-art.<tag>`. **Re-measured, because the filed
+"~51 MB" is a mean and not a per-run constant:** 952 MB across the 18 abandoned
+directories the ownership trap was built against is a 52.9 MB mean; run
+`3fa886ec` (2026-07-20), which took both legs of rung 1, left 55,947,776 B of tar
+plus 7,987,874 B of blobs — **63.9 MB in one directory**; the wave-21 fire record
+cites 76 MB. A run that ABORTS before the export costs ~4 KB. So the denominator
+is *per run that completes rung 0a*, it tracks the dataset's size, and it is
+53–76 MB over the measured window.
+
+`pds-pull-proof.sh` removes the directory it created on a CLEAN exit and retains
+it after any FAIL, ABORT or non-zero exit — which is correct, and is why a
+backlog accumulates: **the directories that survive are exactly the ones from
+failed runs.** Two verbs clear it, and they do not overlap:
+
+```sh
+scripts/pds-pull-proof.sh --sweep-artifacts            # dry run, then --apply
+scripts/pds-artifact-retention.sh --keep 3             # dry run, then --apply
+```
+
+**Use the second one after a climb.** The harness sweep's name predicate accepts
+`pds-proof-art.<hex>` only, and `pds-crown-launch.sh` exports
+`PDS_PROOF_ARTIFACTS=/tmp/pds-proof-art.pds-w14.<hex>` — so **every
+launcher-fired run's directory is refused by name**, permanently, and the sweep
+reports `0 directory(ies) proved owned` over a disk that is not empty. Measured
+on the author's box, 2026-09-16, over the same two real directories: the sweep
+refuses both as "not a name this harness makes"; the retention verb accepts both
+and falls through to the honest next question (unmarked and younger than 24h).
+Correcting the predicate in `pds-pull-proof.sh` needs a chartered thaw (§6);
+the retention verb reads both shapes from outside the freeze.
+
+The second difference is recency. The sweep's only recency notion is a 24h floor
+for UNMARKED directories, so a marked directory whose run died five minutes ago
+is removable — the freshest bundle, which is the one a reader wants after a
+red. `pds-artifact-retention.sh` is **keep-N**: the N newest survive whatever
+their age, on top of every refusal the sweep makes plus a quiesce window for a
+run that may still be writing. It is a dry run unless `--apply` is passed, it
+refuses rather than guesses on any knob it cannot evaluate, and it asserts the
+parked full-export store byte-unchanged across its own walk — exit 3 if it is
+not. `bash scripts/pds-artifact-retention.test.sh` is its 35-arm hermetic
+matrix, including the pair that deletes the keep-window clause from a copy and
+shows the newest directory being destroyed.
+
+**Never point either verb at `$PDS_FULL_EXPORT_DIR`.** The parked bundle is
+deliberately outside the run scope so the next run reuses a sha-matched bundle
+for zero attempts; re-taking it costs a ~1.03 GB export against the budget.

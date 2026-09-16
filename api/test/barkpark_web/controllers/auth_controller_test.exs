@@ -402,7 +402,8 @@ defmodule BarkparkWeb.AuthControllerTest do
     test "a MALFORMED session id is 404 not_found, never a binary_id 500", %{token_a: a} do
       # The Ecto.UUID.cast guard in Accounts.revoke_user_session_by_id/2 rejects
       # the garbage BEFORE Repo.get_by, so a live session deleting a non-UUID id
-      # gets the same clean 404 as an unknown-but-valid id — no CastError → 500.
+      # gets the same clean 404 as an unknown-but-valid id — no Ecto.Query.CastError
+      # → opaque 400.
       resp = authed(a) |> delete("/v1/auth/sessions/not-a-uuid") |> json_response(404)
       assert resp["error"]["code"] == "not_found"
 

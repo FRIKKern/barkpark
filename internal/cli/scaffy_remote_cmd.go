@@ -425,6 +425,15 @@ func runScaffyPull(out *writer, g globals, args []string) int {
 	}
 	out.outf("preview the exact substituted lines: bp scaffy run %s --var K=V... --dry-run", filepath.ToSlash(destRel))
 	out.outf("running it is consent-gated: the run enumerates the CMDs and asks first (or pass --yes)")
+	// Adoption greeting, human output only: a stranger's repo has no .scaffy/
+	// gitignore line, so their first `bp scaffy run` would stage receipts for
+	// commit. Print-only and once per repo per machine — see
+	// scaffy_gitignore_hint.go for where the already-greeted bit lives. The
+	// machine envelope is a contract, so it never carries advice; skipping the
+	// mark there also means a later human pull still gets greeted.
+	if cwd, werr := os.Getwd(); werr == nil {
+		maybePrintScaffyGitignoreHint(out, cwd)
+	}
 	return exitOK
 }
 

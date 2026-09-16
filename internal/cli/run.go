@@ -418,6 +418,16 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		discardDeleteUnpublished, tail = extractDiscardDraftDeleteFlag(tail)
 	}
 
+	// `bp doc patch --edit-claimed-draft`: the FOURTH additive, opt-in flag the
+	// manifest never declares, stripped here for the same reason as the ones
+	// above — it must never reach splitArgs. See claimed_draft_patch_guard.go
+	// for what it opts into; the guard itself runs below, beside the other
+	// write gates.
+	var editClaimedDraft bool
+	if cmd.ID == docPatchCommandID {
+		editClaimedDraft, tail = extractClaimedDraftPatchFlag(tail)
+	}
+
 	// `bp task ls --match <substring>`: the THIRD additive, opt-in flag the
 	// manifest never declares, stripped here for the same reason as the two
 	// above — GET /v1/tasks accepts no substring filter (its filter container is
@@ -577,6 +587,16 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// while this one is only destructive for SOME documents. So it probes, and
 	// refuses only when it has to. Runs last, immediately before the send.
 	if code, refused := guardDiscardDraft(out, g, ctx, m, cmd, tail, discardDeleteUnpublished); refused {
+		return code
+	}
+
+	// Claim-wall pre-flight (claimed_draft_patch_guard.go): `bp doc patch task
+	// drafts.<id>` on a row whose PUBLISHED twin is claimed mints a draft the
+	// publish wall will refuse forever, and the receipt prints that doomed
+	// publish as the remedy. Gate it here, beside the other write gates and
+	// immediately before the send, so the refusal arrives BEFORE the unlandable
+	// write rather than one command later.
+	if code, refused := guardClaimedDraftPatch(out, g, ctx, m, cmd, tail, editClaimedDraft); refused {
 		return code
 	}
 

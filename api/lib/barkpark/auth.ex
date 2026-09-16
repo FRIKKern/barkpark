@@ -350,8 +350,10 @@ defmodule Barkpark.Auth do
 
   def revoke_token(token_id) when is_binary(token_id) do
     # Guard the UUID cast: the id column is :binary_id, so a non-UUID token_id
-    # (e.g. from `DELETE /v1/shares/tokens/garbage`) would raise Ecto.CastError
-    # → 500. A malformed id can't identify any row, so it's a clean not_found.
+    # (e.g. from `DELETE /v1/shares/tokens/garbage`) would raise
+    # Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that struct to 400;
+    # it is NOT Ecto.CastError). A malformed id can't identify any row, so it's a
+    # clean not_found.
     case Repo.uuid_or_nil(token_id) do
       nil ->
         {:error, :not_found}
@@ -691,7 +693,8 @@ defmodule Barkpark.Auth do
   @spec revoke_app_token_by_id(binary(), ApiToken.t()) :: {:ok, ApiToken.t()} | {:error, atom()}
   def revoke_app_token_by_id(token_id, %ApiToken{} = actor) when is_binary(token_id) do
     # Same UUID cast guard as revoke_token/1: the id column is :binary_id, so a
-    # non-UUID would raise Ecto.CastError -> 500 instead of a clean not_found.
+    # non-UUID would raise Ecto.Query.CastError -> an opaque 400 instead of a clean
+    # not_found.
     case Repo.uuid_or_nil(token_id) do
       nil ->
         {:error, :not_found}

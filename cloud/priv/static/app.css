@@ -2015,8 +2015,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* ===================================================== DEPLOYMENTS
    gr-p3-site-detail (v4, screens2/05): the deploy ladder is ONE card — hairline-
    separated rows inside a single surface — instead of a stack of boxed rows.
-   Row anatomy: mono ref · status pill (.dep-pill CONSUMED, never restyled here —
-   GR11/D24) · environment · trigger provenance (Manual / Content update, GR27:
+   Row anatomy: mono ref · status pill (the shared `.status-pill` family,
+   CONSUMED and never restyled here — GR11/D24) · environment · trigger provenance (Manual / Content update, GR27:
    never a named human) · duration · when. */
 .deploys {
   display: flex; flex-direction: column;
@@ -2105,8 +2105,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* dwb-webhook-deploy / D11: BLOCKED tone — a born-failed GitHub-push deploy is a
    capability that isn't enabled yet, not a crash. Calm amber/informational, NOT
    error-red. Warn tokens are theme-invariant (status hues are shared across
-   themes) and --warn-strong text on a --warn tint is the same pattern .dep-building
-   uses in both themes, so no [data-theme] override is needed. Pill stays "Failed". */
+   themes) and --warn-strong text on a --warn tint is the same pattern a building
+   deploy's `.status-pill--warn` uses in both themes, so no [data-theme] override is needed. Pill stays "Failed". */
 .deploy-fail--blocked {
   color: var(--warn-strong);
   background: var(--warn-soft);
@@ -2184,68 +2184,24 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   opacity: 0.85;
 }
 
-/* status pill — distinct from the dot-badge; colour-coded per lifecycle state */
-.dep-pill {
-  flex: 0 0 auto;
-  display: inline-flex; align-items: center;
-  height: 22px; padding: 0 10px;
-  font-size: 12px; font-weight: 600;
-  border-radius: var(--pill);
-  border: 1px solid var(--border);
-  background: var(--muted-surface);
-  color: var(--muted-text);
-}
-.dep-live    { color: var(--ok); background: hsl(var(--ok-hsl) / 0.12); border-color: hsl(var(--ok-hsl) / 0.35); }
-.dep-failed  { color: var(--danger); background: hsl(var(--danger-hsl) / 0.10); border-color: hsl(var(--danger-hsl) / 0.30); }
-.dep-building, .dep-pushing { color: var(--warn-strong); background: hsl(var(--warn-hsl) / 0.12); border-color: hsl(var(--warn-hsl) / 0.35); }
-.dep-queued  { color: var(--muted-text); }
-/* cch-w64-s6: deferred is the SEVENTH status (registry/deployment.ex @statuses)
-   and, like cancelled before its rule existed, it had none — so it fell through
-   to the .dep-pill base, which the comment below records as byte-identical to
-   .dep-queued on colour AND background AND border in both themes. A build the
-   box REFUSED therefore impersonated a build still waiting its turn: the one
-   reading that costs a person the most, because it says "be patient" about a
-   round that did not run.
-   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze, on the wave-13 D157
-   shape (charter D787's carve-out is for THIS rule and nothing else): an ADD,
-   never a restyle — no other .dep-* rule and no .status-pill is touched.
-   THE VOICE: warn HUE, but NOT .dep-building's filled warn chip. Reusing that
-   would swap impersonating-queued for impersonating-building in the same pixel,
-   in the wave whose subject is states that impersonate each other. It follows
-   .dep-cancelled's precedent instead — a row no longer holding a build slot
-   gives up the filled chip — while keeping amber and a SOLID hairline, because
-   unlike a deliberate stop a deferral wants attention. Three-way distinct:
-   filled+muted (queued), filled+amber (building), open+amber (deferred),
-   open+dashed+dim (cancelled). Contrast is gated: --warn-strong on --surface is
-   declared in __css_check CONTRAST_PAIRS (the transparent ground is why this
-   rule owes a pair the tinted variant would not). */
-.dep-deferred {
-  color: var(--warn-strong);
-  background: transparent;
-  border-color: hsl(var(--warn-hsl) / 0.35);
-}
-/* cch-w13-s3: cancelled is a TERMINAL, deliberately-stopped deployment (the
-   server's own sixth status — auto_deploy_worker.refuse/1 mints one on an
-   ordinary content publish, Registry.cancel_preview/2 on a branch delete), and
-   until this rule existed it had NO rule at all: the class fell through to the
-   .dep-pill base, which is byte-identical to .dep-queued (whose only
-   declaration re-states the base colour) on colour AND background AND border,
-   in both themes. A finished abort read as "waiting to start".
-   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze (wave-13 charter D157):
-   an ADD, never a restyle — no other .dep-* rule and no .status-pill is touched.
-   The voice is HOLLOW, not coloured: --ok and --danger are both wrong for a
-   deliberate stop (and D143 measured them only 19° apart under the ember
-   identity), so cancelled steps DOWN a tone (--dim) and gives up its filled
-   chip for a dashed hairline — the row still occupies the ladder but no longer
-   claims a slot. The dash carries the meaning without colour, so the state
-   survives greyscale and colour-blind viewing. Contrast is gated: the
-   --dim-on---surface pair is declared in __css_check CONTRAST_PAIRS. */
-.dep-cancelled {
-  color: var(--dim);
-  background: transparent;
-  border-style: dashed;
-  border-color: rgba(var(--cc-line-rgb), 0.28);
-}
+/* gr-backlog-d24: THE `.dep-*` PILL FAMILY IS RETIRED — absorbed into the one
+   `.status-pill` family above (parent decision 24 / GR11). What stood here:
+   `.dep-pill` (its own box metrics, no dot) plus one bespoke rule per server
+   status — `.dep-live`, `.dep-failed`, `.dep-building, .dep-pushing`,
+   `.dep-queued`, `.dep-deferred`, `.dep-cancelled`. Two families painting the
+   same idea is why `cancelled` and later `deferred` each shipped RULELESS and
+   impersonated `queued`: the dep base's fall-through look WAS the queued look,
+   so an omission was invisible rather than loud.
+   Where each look went, so the ladder is provably intact and nothing lost a
+   voice: live -> `--ok`, failed -> `--danger`, building/pushing -> `--warn`,
+   queued -> `--neutral`, deferred -> `--warn --hollow` (warn hue, open chip),
+   cancelled -> `--neutral --stopped` (dim, dashed hairline). The mapping is not
+   this comment's to keep: it is DEPLOY_STATUS_META in app.js (grep -n
+   'DEPLOY_STATUS_META' app.js), which __css_check E13 reads and holds total
+   over DEPLOY_STATUSES — and E13 also reds if any `.dep-pill` / `.dep-<status>`
+   rule returns, so re-forking the grammar fails the gate.
+   `.dep-side` / `.dep-promote` / `.dep-current` survive: they are the deploy
+   row's LAYOUT and action affordances, never pills. */
 
 /* gh-5: per-deployment live build console — the deploy-side twin of .new-console */
 .deploy-console { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
@@ -2953,8 +2909,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
        badge column is never squeezed narrower than its own content.
 
    GR11/GR25: `.fleet-status` and `.fleet-main` are WRAPPERS. Neither is one of
-   the four quarantined pill families (`status-pill`, `dep-pill`, `tlv-badge`,
-   `badge`/`fresh-badge`) and no pill rule block is touched here. */
+   the quarantined pill families (`status-pill` — which since decision 24 is
+   also every deploy status chip — `tlv-badge`, `badge`/`fresh-badge`) and no pill rule block is touched here. */
 @media (min-width: 900px) {
   .fleet-row { flex-wrap: wrap; }
   .fleet-main { flex: 1 1 auto; min-width: 200px; }
@@ -3832,6 +3788,37 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .status-pill--danger .status-pill-dot { background: var(--danger); }
 .status-pill--neutral { background: var(--muted-surface); border-color: var(--border); }
 .status-pill--neutral .status-pill-dot { background: var(--dim); }
+/* SHAPE VARIANTS (gr-backlog-d24). The five roles above carry HUE; these two
+   carry the two chip SHAPES the retired `.dep-*` family owned and the role set
+   did not. They are composed WITH a role (`status-pill--warn status-pill--
+   hollow`) and are declared after every role rule so the fill is the thing they
+   override — never the hue, never the dot.
+   --hollow: the filled chip given up, hue and dot kept. Its shipped use is a
+   DEFERRED deploy: amber, because a round the box refused wants attention, but
+   no longer a filled chip, because the row no longer holds a build slot. The
+   label composites straight onto the card, so `--text` on `--surface` (already a
+   declared CONTRAST_PAIRS pair) is the gated combination.
+   --stopped: a deliberate, TERMINAL halt (a cancelled deploy). It steps down a
+   tone and trades the fill for a DASHED hairline — the dash carries the meaning
+   without colour, so the state survives greyscale and colour-blind viewing, and
+   `--ok`/`--danger` (only 19deg apart under the ember identity, D143) are both
+   wrong for a stop nobody needs to act on. `--dim` on `--surface` is gated in
+   CONTRAST_PAIRS. */
+.status-pill--hollow { background: transparent; }
+/* The hollow chip gave up its tinted ground, so the HUE has to move into the
+   label or the state loses its voice entirely — this is the one place the
+   family's `--text` label is overridden, and only for the role that composes
+   with --hollow today. `--warn-strong` on `--surface` is gated in
+   CONTRAST_PAIRS (the transparent ground is why this rule owes a pair the
+   filled variant does not). */
+.status-pill--warn.status-pill--hollow { color: var(--warn-strong); }
+.status-pill--stopped {
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(var(--cc-line-rgb), 0.28);
+  color: var(--dim);
+}
+.status-pill--stopped .status-pill-dot { background: var(--dim); }
 /* dark-theme refinement: lift the role tints for legibility on the dark surface */
 [data-theme="dark"] .status-pill--ok { background: hsl(var(--ok-hsl) / 0.22); }
 [data-theme="dark"] .status-pill--info { background: hsl(var(--info-hsl) / 0.22); }
