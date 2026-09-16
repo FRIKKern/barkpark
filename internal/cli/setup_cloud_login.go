@@ -256,7 +256,7 @@ func promptFleetChoice(out *writer, reader *bufio.Reader, n int) (int, bool) {
 	return num - 1, true
 }
 
-// cloudNoAdminToken handles GetCredentials' 404 no_admin_token: the picked
+// cloudNoAdminToken handles GetCredentialsForTeam's 404 no_admin_token: the picked
 // Barkpark never had an admin token captured (an older or ip-only provision). It
 // explains, then offers a manual token paste (feeds the same connect) or a
 // logged-in-only finish — never a dead end.

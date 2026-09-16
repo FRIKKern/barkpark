@@ -376,7 +376,7 @@ func finishLoginConnect(out *writer, cfg *Config) int {
 // server, we do NOT silently re-point it — we report the barkpark and how to
 // connect, leaving the active server untouched (exit 0). When the active server IS
 // this barkpark, it's a reconnect: we fall through and re-save with a FRESH admin
-// token (GetCredentials always mints/returns the current one).
+// token (GetCredentialsForTeam always mints/returns the current one).
 func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) int {
 	target := fleetTarget(only.URL, only.Host)
 	if only.Team != nil && strings.EqualFold(strings.TrimSpace(only.Team.Role), "member") {

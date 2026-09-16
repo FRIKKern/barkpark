@@ -1052,18 +1052,19 @@ type Credentials struct {
 	Host       string `json:"host"`
 }
 
-// GetCredentials fetches a Barkpark's stored admin token via
-// GET /v1/barkparks/:id/credentials (Bearer). The route is team-admin-gated and
-// team-scoped: a non-admin gets 403 and an instance in another team (or no such
-// id) is the SAME 404 (no existence leak) — both surface verbatim via cloudError.
-// A 404 "no_admin_token" means the instance never had one captured (e.g. an
-// ip-only/legacy provision).
-func (c *Client) GetCredentials(ctx context.Context, id string) (Credentials, error) {
-	return c.getCredentials(ctx, id, "")
-}
-
-// GetCredentialsForTeam fetches credentials using an explicit team membership
-// context. An empty teamID is intentionally identical to GetCredentials.
+// GetCredentialsForTeam fetches a Barkpark's stored admin token via
+// GET /v1/barkparks/:id/credentials (Bearer), in an explicit team membership
+// context. The route is team-admin-gated and team-scoped: a non-admin gets 403
+// and an instance in another team (or no such id) is the SAME 404 (no existence
+// leak) — both surface verbatim via cloudError. A 404 "no_admin_token" means the
+// instance never had one captured (e.g. an ip-only/legacy provision).
+//
+// An empty (or whitespace-only) teamID sends NO X-Barkpark-Team header, which is
+// the caller's way of saying "use my default team context" — that is the ONLY
+// entry point now. A bare GetCredentials(ctx, id) wrapper existed for exactly
+// that case and was deleted (2026-09-16, wbqs-go-dead-exports): it had zero
+// callers outside its own test, so it advertised a choice no running path made.
+// The empty-teamID branch is still covered — see TestGetCredentialsWithoutTeam.
 func (c *Client) GetCredentialsForTeam(ctx context.Context, id, teamID string) (Credentials, error) {
 	return c.getCredentials(ctx, id, strings.TrimSpace(teamID))
 }

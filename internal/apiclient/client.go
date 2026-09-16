@@ -83,6 +83,16 @@ func firstEnv(names ...string) string {
 
 // ConfigFromEnv builds a Config from the BARKPARK_* environment variables,
 // applying the same defaults the TUI's main() used inline.
+//
+// KEPT DELIBERATELY, not residue (decided 2026-09-16, wbqs-go-dead-exports).
+// It has no call site today — the CLI reads the env layer through envContext so
+// an UNSET var cannot mask the persisted config (internal/cli/cli.go
+// resolveContext/envContext/bakedDefaults), and that relocation is what left this
+// function caller-free. It stays because it is the DECLARED shape of the env
+// contract for an embedder that wants the historical one-call floor, and because
+// internal/cli's TestApiclientChainMatchesTheCliChain parses THIS function's body
+// by name to prove the two alias chains have not drifted. Deleting the function
+// reds that guard; re-point the guard before ever removing it.
 func ConfigFromEnv() Config {
 	// axi-b4: the same alias chain internal/cli's envContext resolves through
 	// (ServerEnvNames / TokenEnvNames). Duplicated rather than imported because
