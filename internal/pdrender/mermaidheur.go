@@ -3,7 +3,6 @@ package pdrender
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -121,7 +120,7 @@ func lrFits(g *mmGraph, m flowMetrics, ctx RenderCtx) bool {
 	for _, layer := range m.layers {
 		content := 0
 		for _, n := range layer {
-			if w := lipgloss.Width(sanitizeText(n.label)); w > content {
+			if w := mermaidLabelWidth(n.label); w > content {
 				content = w
 			}
 		}
@@ -248,7 +247,7 @@ func renderFlowTree(g *mmGraph, ctx RenderCtx) []string {
 			// The wire: branch + optional label + arrow (or plain for open links).
 			relation := ""
 			if e.label != "" {
-				relation += " " + sanitizeText(e.label) + " ─"
+				relation += " " + mermaidLabelFlat(e.label) + " ─"
 			}
 			if e.head {
 				relation += "▶ "
