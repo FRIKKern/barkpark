@@ -45,7 +45,8 @@ import (
 //	scripts/ledger/claim-health.sh:92      doc = row.get("doc") if dict else row
 //	scripts/branch-owner.sh:229            row = d.get("doc") if dict else d
 //	scripts/epic-zero-criteria-census.sh:214,392,419,532
-//	scripts/withdrawn_but_met.py:193 · scripts/pdf-mvp0-journey-proof.sh:1414
+//	scripts/withdrawn_but_met.py:193        rows.append(obj["doc"])
+//	scripts/pdf-mvp0-journey-proof.sh:1414  doc = d.get("doc") or d
 //	.codex/skills/legendary-cycle/scripts/validate_legendary_cycle.py:171,205
 //
 // Nine files, all CORRECT today, all of which would start reading the sentinel

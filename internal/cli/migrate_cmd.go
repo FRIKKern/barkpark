@@ -496,7 +496,8 @@ func migrateTypeReceipt(typ string, written, total int) string {
 // that a document was WRITTEN. createIfNotExists against an id that already
 // exists still yields a row — `{"id":"drafts.cine-probe-x","operation":"noop",
 // "document":{…the EXISTING document, unchanged _rev…}}` — because
-// mutations.ex:427-443 returns {:ok, existing, "noop"} and apply_mutations
+// mutations.ex `apply_one/3`'s createIfNotExists clause returns
+// {:ok, existing, "noop"} and apply_mutations
 // renders every {:ok, doc, op} tuple as a results row alike. The probe's batch
 // arm makes it concrete: [existing, new] came back as 2 results with operations
 // [noop, create] — one write. So len(results) counts applied mutations, and a

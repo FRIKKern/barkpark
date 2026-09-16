@@ -37,7 +37,8 @@ import (
 //
 // to client.go makes TestManifestPathDrift red with
 //
-//	client.go:407: /v1/data/quokka/* — no manifest command declares this path
+//	client.go:<wherever it was planted>: /v1/data/quokka/* — no manifest
+//	command declares this path
 //
 // and removing it greens. (Measured 2026-09-15. That is the Go->fixture
 // direction; TestManifestPathDriftDetectsRenamedRoute below covers the

@@ -177,7 +177,8 @@ var codeExit = map[string]int{
 	//                             disallows (tasks/close.ex:107). A different
 	//                             status is a different request.
 	//   sentinel_worker_id:<w>    the worker id is a placeholder — "none",
-	//                             "null", "nil", "-" (tasks/internal.ex:179).
+	//                             "null", "nil", "-"
+	//                             (tasks/internal.ex `@sentinel_worker_ids`).
 	//                             A real identity is a different request.
 	//   merge_gated_criterion     a builder `--met` on a criterion the LEAD
 	//                             closes at merge (tasks/stamp.ex:275). Fix:
