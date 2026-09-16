@@ -787,13 +787,14 @@ prose that preceded it.
   tempting.
 
 - **PDS-D101 — Anything touching rungs 2–6 runs as a full `--all`; `--only 3,4` is FORBIDDEN.**
-  `canonical_order` (`:2177-2191`) enforces ladder order only WITHIN one process; DEV_BUNDLE and
+  `canonical_order` (`scripts/pds-pull-proof.sh`@`canonical_order() { # space-separated ids`)
+  enforces ladder order only WITHIN one process; DEV_BUNDLE and
   PULL_BUNDLE are bash globals that do not survive a process boundary; step 6's guard-off control
   clears the stamp and reboots with no restore; and step 4 has no guard (D97). So a deferred 3/4
   re-run must be `--all`, which necessarily re-imports the clobber, re-pins the sha, re-brackets
   step 8, and re-runs 6 AFTER 4 — and reuses a parked bundle for 0 attempts when the sha held
-  (`:1249-1261`). THE DEFERRAL RULE: any deferral of 3/4 also defers 6, enforced by making `--all`
-  the only deferral mechanism.
+  (`scripts/pds-pull-proof.sh`@`acquire_full_bundle() {`). THE DEFERRAL RULE: any deferral of 3/4
+  also defers 6, enforced by making `--all` the only deferral mechanism.
 
 - **PDS-D102 — Env hygiene is MECHANISM, not discipline: the run greps its own transcript.** D79
   fires (an unexported `PDS_CONTROL_PG` prints `instrument control: NOT RUN` and still reaches a
@@ -937,13 +938,37 @@ prose that preceded it.
   safety property and the transcript must say so.
 
 - **PDS-D116 — ONE `--all` INVOCATION, NEVER SPLIT.** Step 6's terminality is enforced by
-  `canonical_order()` (`:2240`, silently re-sorts ANY `--only` list into ladder order and prints a
-  NOTE) plus step 4's own PULL_BUNDLE-this-run guard (`:1665`, PDS-D97) — NOT by anything inside
-  `step_6`, whose only cross-step precondition is `PULL_BUNDLE` (`:2003`, step 1's artifact). Both
+  `canonical_order()` (`scripts/pds-pull-proof.sh`@`canonical_order() { # space-separated ids`,
+  silently re-sorts ANY `--only` list into ladder order and prints a
+  NOTE — `scripts/pds-pull-proof.sh`@`NOTE: steps reordered to ladder order`) plus step 4's own
+  PULL_BUNDLE-this-run guard
+  (`scripts/pds-pull-proof.sh`@`Re-run with step 1 selected (--only 1,4)`, PDS-D97) — NOT by anything
+  inside
+  `step_6`, whose only cross-step precondition is `PULL_BUNDLE`
+  (`scripts/pds-pull-proof.sh`@`PULL_BUNDLE=""      # the bundle step 1 actually imported`, step 1's
+  artifact). Both
   mechanisms are PER-INVOCATION. A split climb (bank the cheap ladder now, take 3/4 later on the same
   target) defeats both: step 4 would scan a step-6-clobbered target with nothing to stop it and print
-  CLEAN off contaminated state. Severability still holds WITHIN one run — `run_steps` (`:2256`) is an
+  CLEAN off contaminated state. Severability still holds WITHIN one run — `run_steps`
+  (`scripts/pds-pull-proof.sh`@`run_steps() { # space-separated ids`) is an
   unconditional loop with no short-circuit, so an aborted 3/4 still lets 5/6/7/8 execute.
+
+  *Citation form, amended 2026-09-16 under PDS-D299 (`pds-bl-charter-anchors-stale-vs-frozen-blob`).
+  D101 and D116 are UNCHANGED as claims — only their pointers moved. Their six line anchors
+  (D101 cited lines 2177-2191 and 1249-1261; D116 cited 2240, 1665, 2003 and 2256) carried NO
+  FILENAME and resolved to whitespace or unrelated code, and they did so IN THE FROZEN BLOB THEY
+  WERE WRITTEN AGAINST, not merely after it: in that blob lines 2240 and 2003 are blank, 1665 is a
+  bare `return 1`, 2177 is a bare `fi`. The rot is therefore NOT repairable by re-pointing at that
+  blob's true numbers — and it must not be attempted, because PDS-D732 forbids typing a freeze hash
+  and PDS-D296 records that PDS-D100's freeze is climb-scoped and now derived at run time, so there
+  is no repo-wide blob for a number to be true against. The anchors therefore cite CONTENT:
+  `` `<path>`@`<literal>` ``. Each of the six literals above resolves to EXACTLY ONE line both in the
+  dead freeze blob and on today's `origin/main` — the anchor form is blob-independent, which is what
+  makes the pin survive a harness thaw instead of needing to be re-checked after one.
+  `bash scripts/pds-charter-anchors-check.sh` is the enforcement: arm A reds when an anchor stops
+  resolving or starts matching two lines, arm B refuses a NEW `pds-pull-proof.sh:NNN` citation, and
+  arm C ratchets the file-less `` `:NNN` `` form these two decisions used — 641 of which survive
+  elsewhere in this charter, every one unresolvable by machine because it names no file.*
 
 - **PDS-D117 — THE RUNBOOK CARRIES THE INVOCATION; the harness must never self-heal it.** The
   harness pins `BARKPARK_HOME` / `PDS_SCRATCH_POINTER` per-invocation from a `date+$$` RUN_TAG
