@@ -62,9 +62,19 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		machine = briefManifest(m)
 	}
 
+	// The min_cli floor the server advertises, checked against THIS binary.
+	// `bp capabilities` is the command a human runs to ask what a box can do,
+	// so it is where a floor this binary does not meet has to be legible —
+	// advisory, on stderr, in every output shape, and silent otherwise.
+	// See min_cli_gate.go for why this reports and never refuses.
+	minCLIMsg := minCLINotice(m.Server)
+
 	switch out.output {
 	case "json":
 		out.renderJSON(machine)
+		if minCLIMsg != "" {
+			out.errf("%s", minCLIMsg)
+		}
 		out.errf("%s", builtinPointerLine())
 	case "yaml":
 		// Round-trip through JSON to a generic value for the YAML emitter.
@@ -72,11 +82,20 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		var v any
 		_ = json.Unmarshal(b, &v)
 		out.renderYAML(v)
+		if minCLIMsg != "" {
+			out.errf("%s", minCLIMsg)
+		}
 		out.errf("%s", builtinPointerLine())
 	default:
 		tree := m.Tree()
-		out.outf("server:    %s (%s)", m.Server.Name, m.Server.Version)
+		// `advertised` and not `running`: server.version is the app's mix
+		// version, frozen (0.1.0 on a prod box running 0.2.26.929). The
+		// running-release oracle is GET /status.json, not this field.
+		out.outf("server:    %s (advertised %s — running release: GET /status.json)", m.Server.Name, m.Server.Version)
 		out.outf("base_url:  %s", m.Server.BaseURL)
+		if m.Server.MinCLI != nil && *m.Server.MinCLI != "" {
+			out.outf("min_cli:   %s (advisory — reported, never enforced as a refusal)", *m.Server.MinCLI)
+		}
 		out.outf("auth_tier: %s", m.AuthTier)
 		out.outf("manifest:  v%s  etag=%s", m.ManifestVersion, m.ETag)
 		out.outf("")
@@ -93,6 +112,9 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		// only — the manifest contract, the brief projection, and every byte of
 		// machine stdout are untouched; machine mode gets the same fact as ONE
 		// stderr line above.
+		if minCLIMsg != "" {
+			out.errf("%s", minCLIMsg)
+		}
 		if lines := builtinCapabilityLines(); len(lines) > 0 {
 			out.outf("")
 			for _, line := range lines {

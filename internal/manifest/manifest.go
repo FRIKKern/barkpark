@@ -103,6 +103,22 @@ type ChatProviderCaps struct {
 
 // Server identifies the responding Barkpark instance. APIVersion and MinCLI are
 // optional/additive (pointers + omitempty) so a manifest that omits them parses.
+//
+// VERSION IS A PLACEHOLDER — NOTHING MAY BRANCH ON IT. Server-side it is
+// Application.spec(:barkpark, :vsn), i.e. the mix.exs project version, which is
+// frozen: the prod box at 89.167.28.206 answered server.version "0.1.0" on
+// 2026-09-16 while its own /status.json reported version "0.2.26.929" (commit
+// ca4534461). Display it, never compare it. The honest running-release oracle
+// is GET /status.json, or the control plane, which holds each box's
+// self-reported version and git_commit.
+//
+// MINCLI IS ADVISORY. Server-side it is a hardcoded literal ("1.0.0" on prod),
+// not derived from the running build, and every published bp release is tagged
+// v0.2.x — strictly below it. A blocking gate keyed on today's value would
+// therefore refuse 100% of released clients. It is decoded (it MUST be: Parse
+// uses DisallowUnknownFields, so dropping the field would fail every manifest
+// that carries it) and reported by internal/cli minCLICheck, never enforced as
+// a refusal.
 type Server struct {
 	Name       string  `json:"name"`
 	Version    string  `json:"version"`
