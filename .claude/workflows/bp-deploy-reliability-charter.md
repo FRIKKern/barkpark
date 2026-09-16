@@ -768,7 +768,14 @@ otherwise re-derive the same wrong premise from the same wish.
   (build processes held ~9 MB of swap while the box held 2,160 MB). **`MemoryHigh` on `barkpark.service`
   is the real fix and this wave DOES NOT SET IT** — `:erlang.memory()` could not be read (epmd empty,
   `bin/barkpark` has no `rpc` verb), so WHICH subsystem grows is UNPROVEN, and a guessed threshold trades
-  periodic OOM kills for permanent reclaim stalls (PSI memory `full avg10` is already 4.46). This wave
+  periodic OOM kills for permanent reclaim stalls (PSI memory `full avg10` is already 4.46 —
+  **CORRECTED 2026-09-16, `dr-bl-w6-memoryswapmax-not-memoryhigh`: the figure is 0.60, not 4.46.**
+  Re-measured on guerrilla: `/proc/pressure/memory` `full avg10=0.60 avg60=0.58 avg300=0.63`
+  (`some avg10=3.42`). Memory pressure on that box is BURSTY, not sustained; the sustained
+  pressure is CPU (`/proc/pressure/cpu some avg300=74.01`). Do not re-quote 4.46. The sentence's
+  CONCLUSION — that a guessed threshold trades kills for stalls — survives the correction; only
+  its magnitude was wrong, and it was wrong in the direction that made the argument look
+  stronger than the box supports). This wave
   ships the MEASUREMENT (`beam_pss_bytes`, `beam_swap_bytes` from `/proc`); the bound is filed.
 
 - **D40 — `attentionStatus()` IS BLIND TO PRESSURE, RE-PROVED BY RUN, AND THAT IS THE OWNER'S ACTUAL
@@ -1720,11 +1727,27 @@ rather than a remembered sentence: `vm_memory_total` 560.7 MB against a same-min
 `beam_swap` 630.3 MB = 1,508.9 MB, a **948 MB / 2.69× gap**, with PSS corroborated against
 `/proc/<pid>/smaps_rollup` inside 2% — so a bound read off `:erlang.memory()` would sit ~2.6× below the
 2.98–3.30 GB anon-rss the kernel has actually been reaping (32 of 32 OOM victims are `beam.smp`, two of
-them today, on a unit with `MemoryHigh=infinity`). The correct input is PSS+swap or, better, the per-slot
+them today, on a unit with `MemoryHigh=infinity`). **CORRECTED 2026-09-16,
+`dr-bl-w6-memoryswapmax-not-memoryhigh`: the census is 32-of-33, not 32-of-32.** The 30-day window
+holds 33 kills, and the 33rd is `bp-oom-probe-B.service` — our OWN memcg probe, deliberately killed
+inside its own cgroup. Quoting 32-of-32 launders a probe we fired into a perfect record we
+observed; the beam share is 97.0%, not 100%. Every `beam.smp` kill remains `global_oom` /
+`CONSTRAINT_NONE` with `task_memcg` = a `barkpark-slot` unit, so the reading the sentence rests on
+is unchanged. The correct input is PSS+swap or, better, the per-slot
 cgroup `MemoryPeak`/`MemorySwapPeak` systemd already keeps — **and a prerequisite nobody had named is now
 filed: the agent's `findBeamPID` returns the LEXICALLY FIRST `/proc` entry named `beam.smp`, so across a
 blue/green cutover (8m30s of overlap today) the `beam_*` series silently changes process, in violation of
-the standing `pds-w11-paired-control-measure` ruling to sample ALL slots and report the MAX.** The pool
+the standing `pds-w11-paired-control-measure` ruling to sample ALL slots and report the MAX.**
+**CORRECTED 2026-09-16, `dr-bl-w6-memoryswapmax-not-memoryhigh`: the beam-PID pin was never a
+prerequisite for the BOUND, and later waves read this paragraph as if it were.** The two clauses above
+are about different inputs and only one of them needs the pin. The cgroup counters are PER SLOT by
+construction and PID-agnostic — a bound derived from them is unaffected by which `beam.smp` the agent
+happens to find. The pin is a prerequisite for the `beam_*` TIME SERIES being trustworthy across a
+cutover (worth doing, taken in `dr-w6-s4-space-reaches-eyes`); it is not one for `MemoryHigh`. Whatever
+keeps `MemoryHigh` parked, it is not this — waiting on the pin waits for nothing. The peaks themselves
+have a REAL prerequisite, and it is a different one: they reset per unit invocation and read 0 on a
+stopped unit, so they must be sampled and PERSISTED or a census silently loses every restarted slot
+(`deploy/slot-memory-peaks.sh`). The pool
 partition stays with `jpf-bl-oban-pool-partition` (D28, D65, D75). Disk RECLAMATION stays with
 `jpf-runtime-image-pruning` — this wave makes jarl's 25 GB VISIBLE and NAMED (D69, D71) and deletes
 nothing. `db_unavailable` on the wire is filed, not built: `errors.ex:205-209` shows a new code drags the
