@@ -1559,22 +1559,38 @@ func warnIfServerPromisesMoreRows(out *writer, body []byte) {
 	out.userErr("this page did not fill, but the server reports more rows beyond it (page.has_more is true) — a short page is NOT the whole population here; page with --offset or re-run with --all")
 }
 
-// pageEffectiveLimit reads `page.limit` — the limit the server ACTUALLY
-// applied, after its own clamp — from a list envelope. The second return is
-// false when the envelope carries no readable page block, which is the honest
-// "this route told me nothing" and must never be confused with a limit of 0:
-// every caller below treats !ok as "no clamp evidence" and falls back to the
-// row-count heuristic rather than inventing a reduction.
+// pageEffectiveLimit reads the limit the server ACTUALLY applied, after its own
+// clamp, from a list envelope. The second return is false when the envelope
+// carries no readable limit, which is the honest "this route told me nothing"
+// and must never be confused with a limit of 0: every caller treats !ok as "no
+// clamp evidence" and falls back to the row-count heuristic rather than
+// inventing a reduction.
+//
+// TWO SPELLINGS, SAME FACT — the same split pageHasMore was fixed for. The task
+// routes nest it (`page.limit`, snake_case); GET /v1/data/query and the search
+// route echo it at the TOP level (`limit`, alongside `hasMore`/`nextOffset`/
+// `count` — query_controller.ex clamps to [1,1000] and documents the echo as
+// existing precisely so a paginator can read back what was applied). Reading
+// only the nested spelling left the doc-query and search envelopes answering
+// !ok, which is the hole warnIfDefaultPageMayBeTruncated's own comment names.
+// The nested block wins when both are present; it is the more specific shape.
 func pageEffectiveLimit(payload []byte) (int, bool) {
 	var env struct {
 		Page *struct {
 			Limit *int `json:"limit"`
 		} `json:"page"`
+		Limit *int `json:"limit"`
 	}
-	if json.Unmarshal(payload, &env) != nil || env.Page == nil || env.Page.Limit == nil {
+	if json.Unmarshal(payload, &env) != nil {
 		return 0, false
 	}
-	return *env.Page.Limit, true
+	if env.Page != nil && env.Page.Limit != nil {
+		return *env.Page.Limit, true
+	}
+	if env.Limit != nil {
+		return *env.Limit, true
+	}
+	return 0, false
 }
 
 // pageHasMore reports the server's own `page.has_more`. A missing block or a
@@ -1589,19 +1605,42 @@ func pageEffectiveLimit(payload []byte) (int, bool) {
 // function always answered false for. Both spellings are read; either one
 // saying true is the server promising more rows.
 func pageHasMore(payload []byte) bool {
+	more, stated := pageHasMoreStated(payload)
+	return stated && more
+}
+
+// pageHasMoreStated is pageHasMore's three-valued form, for the callers that
+// must tell "the server says there is nothing more" apart from "the server said
+// nothing at all". A WARNING can collapse those two — an absent field must
+// promise nothing, so pageHasMore folds absent into false. A LOOP TERMINATION
+// cannot: a pager that reads an absent field as "drained" stops on the first
+// envelope that omits it, and a pager that reads it as "continue" never stops.
+// The second return is whether either spelling was present at all.
+func pageHasMoreStated(payload []byte) (more bool, stated bool) {
 	var env struct {
 		Page *struct {
-			HasMore bool `json:"has_more"`
+			HasMore *bool `json:"has_more"`
 		} `json:"page"`
 		HasMore *bool `json:"hasMore"`
 	}
 	if json.Unmarshal(payload, &env) != nil {
-		return false
+		return false, false
 	}
-	if env.Page != nil && env.Page.HasMore {
-		return true
+	if env.Page != nil && env.Page.HasMore != nil {
+		if *env.Page.HasMore {
+			return true, true
+		}
+		// The nested block stated false; a top-level true still wins, matching
+		// pageHasMore's "either one saying true is the server promising more".
+		if env.HasMore != nil && *env.HasMore {
+			return true, true
+		}
+		return false, true
 	}
-	return env.HasMore != nil && *env.HasMore
+	if env.HasMore != nil {
+		return *env.HasMore, true
+	}
+	return false, false
 }
 
 func defaultPageLimit(cmd manifest.Command) int {
