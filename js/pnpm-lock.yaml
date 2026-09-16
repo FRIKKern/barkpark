@@ -487,6 +487,9 @@ importers:
         specifier: workspace:^
         version: link:../react
     devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.39
       '@types/react':
         specifier: ^19
         version: 19.2.14
