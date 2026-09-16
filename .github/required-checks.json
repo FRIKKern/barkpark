@@ -738,6 +738,14 @@
     {
       "context": "Required contexts cannot conclude cancelled",
       "reason": "S7 EXCLUDED BY DECISION: required-checks-drift.yml job `required-context-never-cancels` — a standalone guard (no aggregator above it) that reds when a REQUIRED context's latest run on the head concluded `cancelled`, the third refusal shape `scripts/bp-merge.sh` already enforces. Its own header (the block above `required-context-never-cancels:`) prescribes exactly this row: \"S7 exclusion row in .github/required-checks.json, as its siblings do\". It carries NO continue-on-error, deliberately, so its red renders as a red — but it grades the merge button's inputs, not this PR's tree, so it does not gate. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): reported `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "main-collapse criterion + runs-window gates",
+      "reason": "S4 PATHS-FILTERED: main-collapse-gates.yml carries a workflow-level `on: pull_request: paths:` filter (`.github/workflows/**`, `scripts/**`, `tooling/**`, `docs/**`), so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). main-collapse-gates.yml job `gates`. The two gates out of task-9ee58a247b158826 for the main-collapse blind spot: scripts/main-collapse-criterion-check.sh --selftest (a ledger criterion may not name \"the next main <collapsible workflow> run\") and scripts/main-runs-window-check.sh (an un-paginated `actions/runs?branch=main` query reads ~81 seconds of history, so its empty result is CANNOT READ, never absence). ADDED BY HAND 2026-09-16 (task-4cc30d3e12d890f9): the job landed in dae09beca (#18556), postdating both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 35118032891 (head 03a30ffdbc7069d1b927df5efbc4e468b8d03815)."
+    },
+    {
+      "context": "workflow-owner-check.sh named-owner guard",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `workflow-owner`. Harness for scripts/workflow-owner-check.sh — the named-owner guard that refuses a workflow with no owner named in it, plus the six refusal arms, two quiet arms and the discrimination control its own header describes. ADDED BY HAND 2026-09-16 (task-4cc30d3e12d890f9): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 35124976180 (head 9fa1c08c6c310c6a12ef7d4d0600dd4291ed8435)."
     }
   ]
 }

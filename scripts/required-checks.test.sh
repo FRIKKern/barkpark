@@ -2655,7 +2655,18 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "registry impact check harness"
         --expect-unrendered "Required contexts cannot conclude cancelled"
         --expect-unrendered "scratchpad-reaper.sh skip-gate + floor matrix"
-        --expect-unrendered "task-dup-sweep calibration + vacuity arms")
+        --expect-unrendered "task-dup-sweep calibration + vacuity arms"
+        # ── 2026-09-16 (task-4cc30d3e12d890f9): the .exclusions row added in the same
+        # commit as this line, paying the SIXTH place in the same PR. main-collapse-gates.yml
+        # job `gates` landed in dae09beca (#18556), postdates the frozen fixture pair, and is
+        # paths-filtered — so the pair cannot render it and the generator reports it LOST.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly this
+        # name as MISSING ACK_EX.
+        --expect-unrendered "main-collapse criterion + runs-window gates"
+        # Same PR, second name: shell-harnesses.yml job `workflow-owner` landed after the
+        # first push here and the census clause named it on the next settled head it sampled.
+        # DERIVED the same way — scripts/required-checks-ack-derive.sh, one name at a time.
+        --expect-unrendered "workflow-owner-check.sh named-owner guard")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
