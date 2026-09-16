@@ -706,6 +706,38 @@
     {
       "context": "Journey smoke — live demo (report mode, never gates)",
       "reason": "S4 PATHS-FILTERED: search-starter-smoke.yml carries a workflow-level `on: pull_request: paths:` filter (templates/search-starter/**, tooling/search-smoke/**, the workflow itself), so on a PR touching none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-starter-smoke.yml job `live-journey`. The live journey smoke against the deployed demo, in REPORT mode — its own name says it never gates. It is DOUBLY disqualified: beyond the path filter, its job-level `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'` means it is SKIPPED on every pull_request head, and GitHub counts `skipped` as satisfying a required context (D19), so requiring it would pin a green that certifies nothing. In no required aggregator's `needs:` and carrying no continue-on-error, so a red fails its own job and blocks no merge. ADDED BY HAND 2026-09-12 (task-32fe5f327e91f23d). The workflow is paths-filtered on its `pull_request` arm, so the frozen fixture pair cannot render it and the generator must be acknowledged with `--expect-unrendered` in scripts/required-checks.test.sh's ACK_EX. MEASURED over the 30 most recent merged PR heads (2026-09-12): it renders on exactly ONE of them (#17963) — which is precisely why a single-head census reported a different subset of the gap on every run."
+    },
+    {
+      "context": "a cron that has never succeeded is visible",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `scheduled-arm-health`. Harness for scripts/scheduled-arm-health.sh — the scheduled-arm health reader that makes a cron which has NEVER succeeded visible rather than silently absent. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "claim-health resolves the claim by shape (16 arms)",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `claim-health`. Harness for scripts/ledger/claim-health.sh — the 16-arm matrix that resolves a ledger claim by SHAPE rather than by a single field path. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "every declared dispatch target actually dispatches",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `undispatched-target`. Harness for scripts/undispatched-target-check.sh — proves every declared dispatch target is actually reachable, the gap that lets a path filter silently orphan a job. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "orchestrate-tasks launch recipe + per-session lane files",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `orchestrate-launch-recipe`. Harness for the orchestrate-tasks launch recipe and its per-session lane files — a docs/recipe consistency matrix, never a verdict about a PR head. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "registry impact check harness",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `registry-impact-check`. Harness for the registry impact check — it grades the instrument that reports which registries a change touches. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "scratchpad-reaper.sh skip-gate + floor matrix",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `scratchpad-reaper`. Harness for scripts/scratchpad-reaper.sh — the skip-gate and floor matrix that keeps the reaper from deleting a live session's scratchpad. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "task-dup-sweep calibration + vacuity arms",
+      "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `task-dup-sweep`. Harness for the task-dup-sweep calibration, including its vacuity arms — a sweep that finds zero duplicates because it scanned nothing is the failure this matrix refuses. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): the job postdates both `generated_from_shas`, so the census could not see it and `Required-check spec drift (advisory)` reported it `unaccounted` on run 34968620058."
+    },
+    {
+      "context": "Required contexts cannot conclude cancelled",
+      "reason": "S7 EXCLUDED BY DECISION: required-checks-drift.yml job `required-context-never-cancels` — a standalone guard (no aggregator above it) that reds when a REQUIRED context's latest run on the head concluded `cancelled`, the third refusal shape `scripts/bp-merge.sh` already enforces. Its own header (the block above `required-context-never-cancels:`) prescribes exactly this row: \"S7 exclusion row in .github/required-checks.json, as its siblings do\". It carries NO continue-on-error, deliberately, so its red renders as a red — but it grades the merge button's inputs, not this PR's tree, so it does not gate. ADDED BY HAND 2026-09-16 (task-0a48c7b64d5ab0f1): reported `unaccounted` on run 34968620058."
     }
   ]
 }
