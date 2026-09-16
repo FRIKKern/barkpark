@@ -13028,6 +13028,123 @@ tail runs 12–30h past it (D569); (6) the crown's scheduled trigger has never o
 (7) prebuilt deploys and lost fenced CASes are invisible to the abandonment gauge, and it is production-only by
 construction (D559).
 
+**THE SEVEN RESIDUALS, CLASSED AND RE-RUNNABLE — 2026-09-16, `dr-w34-bl-residual-seven-unverified`.** The list
+above is a SEVEN-item block that mixes THREE evidence classes without saying so, and a reader cannot tell which
+sentences a future owner can re-check with the binary in hand. They are classed here, each with its own re-run
+command, and the ones that were never re-derived stay **UNVERIFIED** rather than being quietly promoted. **This
+lane could not ssh, walk prod, or touch the live control plane**, so every `live-DB` item below is re-run text
+and nothing else — printing any of them as a plain statement is the level-skip D592 forbids. The `code` and
+`Actions` items WERE re-derived this turn against `origin/main` `4282f116c`, and their output is quoted.
+
+| # | class | status | re-run |
+|---|---|---|---|
+| 1 | **live-DB** + code control | **UNVERIFIED** (count); self-citation **CONFIRMED** | SQL below, query (d); self-citation control quoted below |
+| 2 | **code** (label) + **live-DB** (count) | label **RE-DERIVED and rephrased**; `0 rows all-time` **UNVERIFIED** | `git show "origin/main:api/lib/barkpark/sites/deploy_runner.ex" \| sed -n '2924,2932p'`; SQL query (b) |
+| 3 | **code** | **RE-DERIVED** | `git show "origin/main:cloud/lib/barkpark_cloud/deploy_ledger.ex" \| sed -n '605p'` |
+| 4 | **code** (mechanism) + **live-DB** (population) | mechanism **RE-DERIVED**; `exactly 2 preview rows, zero preview-live ever` **UNVERIFIED** | `git show "origin/main:cloud/lib/barkpark_cloud/deploy_ledger.ex" \| sed -n '2092,2100p'`; SQL query (c) |
+| 5 | **live-DB** (`rpc`, not SQL) | **UNVERIFIED** | `DeployLedger.delivery/3` via `/app/bin/barkpark_cloud rpc` at b+0h/6h/12h/36h from `2026-08-05T21:13:50Z` — `eval` cannot do it (Repo not started, D572) |
+| 6 | **Actions** | **RE-DERIVED — and REFUTED** | `gh run list --workflow=crown-reconcile.yml --limit 400 --json event,createdAt,conclusion` |
+| 7 | **code** | **RE-DERIVED** | `git show "origin/main:cloud/lib/barkpark_cloud/deploy_ledger.ex" \| sed -n '482,499p;2815,2821p'` |
+
+**THE ONE SQL, WITH ITS ANTI-VACUITY CONTROL (unrun here).** Control plane `178.105.92.191`, container
+`cloud-db-1`; the live slot is **GREEN, not blue** — a recipe hardcoding `cloud-control_plane_blue-1` fails with
+an error that reads like a code fault (D572). `psql` needs the container's own `$POSTGRES_USER`/`$POSTGRES_DB`.
+
+```sh
+cat > /tmp/w34resid.sql <<'SQL'
+SELECT count(*) AS total FROM deployments;                                            -- (a) ANTI-VACUITY CONTROL
+SELECT count(*) AS exit15 FROM deployments WHERE failure_reason ILIKE '%exit 15%';    -- (b) residual 2
+SELECT environment,status,count(*) FROM deployments GROUP BY 1,2 ORDER BY 1,2;        -- (c) residual 4
+SELECT site_id,content_rev,status,inserted_at FROM deployments
+  WHERE failure_reason LIKE '%rebuilds in a row for this site%' ORDER BY inserted_at; -- (d) residual 1
+SQL
+ssh -i ~/.ssh/barkpark_indx root@178.105.92.191 \
+  'docker exec -i cloud-db-1 sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -f -"' \
+  < /tmp/w34resid.sql; echo rc=$?
+```
+
+**(a) IS THE ANTI-VACUITY CONTROL AND IT GOVERNS EVERY COUNT ABOVE.** A zero `exit15` beside a zero `total` is a
+broken query, not a finding; the same for a preview cohort that is absent because the GROUP BY returned nothing
+at all. Query (c) answers residual 4's BOTH halves only if a `preview|live` row WOULD have appeared — the runner
+states that explicitly or the reading is void. Query (d) does not by itself prove "saved": that needs the LATER
+`live` row on the same `{site_id, environment}`. `deferral_depth = deferral_bound` is **UNSATISFIABLE by
+construction** for the deferred population (D544), so the abandonment set is reachable only by the prose scan in
+(d). And the standing warning that made all four unverifiable in the first place: **a full disk makes a mutation
+run report 4 failures that reproduce as 2 — any count taken on a full disk is suspect IN BOTH DIRECTIONS.**
+
+**RESIDUAL 1 — THE SELF-CITATION IS CONFIRMED, WITH A LIVE CONTROL.** `947c0dbd0de8` and `91284be29666` are
+`content_rev` values on the live `deployments` table, **not repo commits, so no grep can settle them**; they are
+recorded here as a SELF-CITATION WITH NO INDEPENDENT DERIVATION. The absence was proven, not inspected — the
+grep was shown live on the same file first, and `git cat-file` was shown live on a sha that IS an object:
+
+```
+$ git show "origin/main:.claude/workflows/bp-deploy-reliability-charter.md" | grep -c "D592"   →  1   (CONTROL: grep is live)
+$ … | grep -n "947c0dbd0de8"   →  13021 (the audited sentence), 13346 (D592 restating the audit)  — no third site
+$ … | grep -n "91284be29666"   →  13022 (the audited sentence), 13347 (D592 restating the audit)  — no third site
+$ git cat-file -t 4282f116c    →  commit                          (CONTROL: the command can answer)
+$ git cat-file -t 947c0dbd0de8 →  fatal: Not a valid object name
+$ git cat-file -t 91284be29666 →  fatal: Not a valid object name
+```
+
+That rules out the reading that they are commits and rules IN nothing. Settling them needs query (d) plus the
+later `live` row on the same key.
+
+**RESIDUAL 2 IS REPHRASED: THE `exit 15` LABEL IS TWO-PRODUCER AMBIGUOUS, NOT WRONG — AND THERE ARE SIX
+PRODUCERS ACROSS THREE LOCK FAMILIES, NOT FOUR ACROSS TWO.** `deploy_runner.ex:2929-2932` already names BOTH engine
+locks — `"the box's fleet build slot (900s) or this site's own deploy lock (1200s) (exit 15)"` — so "D38 names
+the wrong lock" is FALSE AS PHRASED and the honest residual is that one exit code carries two causes and the
+label cannot pick between them. The producers, every line re-derived against `origin/main` this turn:
+
+| lock family | budget | producers on `origin/main` |
+|---|---|---|
+| site deploy lock | `-w 1200` | `deploy/site-deploy.sh:3533`, `deploy/site-deploy-node.sh:3510` |
+| fleet build gate (`build_gate_acquire`, `deploy/lib/site-deploy-common.sh:349,394`) | `-w 900` | `deploy/site-deploy.sh:3833`, `deploy/site-deploy-node.sh:3802` |
+| control-plane / instance deploy lock | `-w 1800` | `deploy/cp-deploy.sh:189`, `deploy/instance-deploy.sh:448` |
+
+**The earlier count of "four producers across two lock families" omitted the fleet-build-gate arm** — which is
+the arm `deploy_runner.ex:2924-2928` calls "the far likelier cause". The 1800s family is a different surface
+(control-plane and instance deploys are not run by `DeployRunner`), so the label is not wrong about it; it
+simply never speaks for it. **Every published anchor for this residual had rotted**: `deploy_runner.ex:2061` →
+`:2929-2932`, `site-deploy.sh:1995` → `:3533`, `site-deploy-node.sh:1585` → `:3510`, `cp-deploy.sh:32` → `:189`,
+`instance-deploy.sh:144` → `:448` — 5 of 5, consistent with this epic's own measurement that 67% of task-body
+`path:NNN` anchors are stale. The `0 rows all-time` half stays **UNVERIFIED**; only query (b) settles it.
+
+**RESIDUAL 3 — RE-DERIVED.** `@coverage_basis` (`deploy_ledger.ex:605`) states in the code itself that coverage
+answers "is this site stuck NOW", never "was it stuck back then", and is a claim about THE SITE rebuilding
+rather than about the row's own payload — i.e. a stuck-site detector, not a delivery rate, and unable to
+separate abandonment from stuckness. No live read is needed; the sentence is a code fact.
+
+**RESIDUAL 4 — MECHANISM RE-DERIVED, POPULATION UNVERIFIED.** `live_marks/1` (`deploy_ledger.ex:2092-2100`)
+keys the covering marks on `{site_id, environment}`, with the reason in the source: *"a PREVIEW build going live
+is not the production site rebuilding, and claiming it were would be a vacuous green in the flagship
+instrument"*, and *"the key can only move a row COVERED → PENDING, never the reverse"*. So a preview arm with no
+later preview-live row is uncoverable BY CONSTRUCTION. That is the whole mechanism half. **"Exactly 2 preview
+rows, both failed, zero preview-live rows ever" is a population count and stays UNVERIFIED** — query (c), read
+against control (a).
+
+**RESIDUAL 5 — UNVERIFIED, AND NOT ANSWERABLE BY A ROW COUNT AT ALL.** The 12–30h healing tail (p95 refuses at
+b+0h and b+6h, first prints 7,820s at b+12h, settles to 336s by b+36h) needs `DeployLedger.delivery/3` run at
+four offsets from `2026-08-05T21:13:50Z` via `rpc`. Its anti-vacuity control is the b+36h call returning a
+NUMBER: four consecutive refusals are a broken invocation, not a healing tail.
+
+**RESIDUAL 6 — RE-DERIVED AND REFUTED AS OF 2026-09-16.** `crown-reconcile.yml:99-104` carries
+`schedule: - cron: "5 */6 * * *"`, and the schedule trigger HAS fired: over the most recent 400 runs
+(**anti-vacuity control: 400 runs returned, split `push` 335 / `pull_request` 52 / `schedule` 13**) there are
+**13 `schedule` runs between 2026-09-13T15:42:59Z and 2026-09-16T16:16:23Z, 12 `success` and 1 `failure`**
+(`34766428978`). "The crown's scheduled trigger has never once run the reconcile" was true when written and is
+**FALSE NOW**; it is retained above as the historical record and corrected here. The 400-run window does not
+reach back to 2026-08-09, so it dates the recovery no earlier than 2026-09-13 — one schedule run is enough to
+refute the claim, and no depth of history could restore it.
+
+**RESIDUAL 7 — RE-DERIVED.** Two code facts, both in `deploy_ledger.ex` on `origin/main`. (i) The abandonment
+marker is PROSE in `failure_reason` (`@abandonment_marker :444`, applied at `:1902`), so — in the module's own
+words at `:482-499` — "a failed row that recorded NO reason at all cannot be tested for it: the predicate does
+not answer 'no', it does not run"; those rows are published beside the number as `abandoned_unreadable`, and the
+count is a LOWER BOUND whenever that is non-zero. A prebuilt deploy and a lost fenced CAS both terminate without
+writing the refusal-chain prose, so neither is visible to the gauge. (ii) Production-only is a `WHERE`, not a
+convention: `where: d.environment == "production"` at `:2821` (and `:2931`, `:3011`), safe because the column is
+`NOT NULL DEFAULT 'production'`. Unkeyable rows are counted in `unmetered` rather than dropped.
+
 ### Wave 2026-08-09 (wave 33) — REVIEWED · Paper `deploy-reliability-wave-33-2026-08-09` · grade **A**
 
 **Five of six slices built, reviewed, gate-green on the reviewed state, pushed and PR'd. Nothing merged — the
