@@ -121,7 +121,7 @@ func TestDatasetRefusalNamesTheDeclaredReason(t *testing.T) {
 		t.Fatalf("task.ready has no declared dataset reason (found=%v) — the manifest-wide enumeration should have caught this", found)
 	}
 	ctx := manifest.Context{Server: "https://s.example", Dataset: "staging", DatasetTyped: true}
-	msg := refuseUnrepresentableDataset(cmd, ctx)
+	msg := refuseUnrepresentableDataset(cmd, ctx, nil)
 	if !strings.Contains(msg, d.Reason) {
 		t.Errorf("refusal does not carry the declared reason %q:\n%s", d.Reason, msg)
 	}
@@ -141,7 +141,7 @@ func TestWorkspaceRefusalWinsWhenBothApply(t *testing.T) {
 		ProjectExplicit:   true,
 		DatasetTyped:      true,
 	}
-	msg := refuseUnrepresentableScope(datasetUnscopableCmd(), ctx)
+	msg := refuseUnrepresentableScope(datasetUnscopableCmd(), ctx, nil)
 	if !strings.Contains(msg, "-w gyldendal") {
 		t.Errorf("the more severe -w/-p refusal was not the one reported:\n%s", msg)
 	}

@@ -163,7 +163,7 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// A stated -w/-p this command's URL can neither carry nor mirror is refused
 	// BEFORE any I/O — the alternative is a successful answer about the wrong
 	// workspace (scope_honesty.go).
-	if msg := refuseUnrepresentableScope(cmd, ctx); msg != "" {
+	if msg := refuseUnrepresentableScope(cmd, ctx, m.Commands); msg != "" {
 		return nil, &dispatchError{msg: msg, withUsage: true}
 	}
 
