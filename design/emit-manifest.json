@@ -16,7 +16,7 @@
     "cloud/priv/static/app.js#cloud SPA audit action labels": "72c1694cf655b8322c1bb96e5a526a798771caeb0c1763a3d61b1007caaaa4ab",
     "cloud/priv/static/app.js#cloud SPA theme ids": "51bedecd9f9fe16523d18b510564d07d7ca605feedcdef0c12d8fdfc8ed4d09f",
     "cloud/priv/static/styleguide.html#living styleguide swatches": "09c39abf2838df0d33ea6e8a50e2d9d801686b315d95832c4af48e2bb2f66094",
-    "internal/pdrender/tokens_gen.go#Go pdrender": "a43355a3619909d5c5a21f5a3d3e1b3f9969a3a405cabcbfad81af55d3f7f5a6",
+    "internal/pdrender/tokens_gen.go#Go pdrender": "e4667355574f6694446db94cc283887689d4fc37e27be9c2ffab7cce5632b7e1",
     "internal/semrole/chrome_gen.go#Go CLI chrome": "a55b48dbdff4c327e7a456bcc894f2a423d75c6509c91cd695355ae7ac90734d",
     "internal/semrole/tokens_gen.go#Go semrole": "e15a4495b1f473b8465bffc84c9dca5621e03aba8a42bb0577f03f400629c5bf",
     "internal/taskboard/tokens_gen.go#Go board": "9215c045732c56f88ced73d318b154a15e94724a369cdfe6a2d6417e7c9c9852",

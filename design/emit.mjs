@@ -267,6 +267,37 @@ export const READING_STEPS = ["h1", "h2", "h3", "body"];
 // order IS the ladder order design/validate.mjs asserts monotonic, and every step
 // here has a consumer in paper-surface.css — an entry with none is a dead token.
 export const AIR_STEPS = ["code", "table", "asciicast", "callout", "stats", "figure"];
+// ── THE TERMINAL COLLAPSE RULE (canonical home) ──────────────────────────────
+// This constant is where the six-rung air ladder's terminal behaviour is
+// RECORDED. The web surface can paint 24.2px, 29.9px, 31.9px, 34.1px, 36.1px and
+// 40.0px and a reader sees six distinct openings. A terminal cannot: its only
+// vertical unit is a ROW, and `space.air.beat` is 22px ≈ exactly one row. So the
+// whole ladder lives between 1.1 and 1.82 rows — six web rungs land on TWO honest
+// terminal values, and any Go table that spells six different row counts is
+// claiming a precision no terminal can render.
+//
+// AIR_ROW_SPLIT is where the SECOND row is earned. It is a PREDICATE over the
+// ratio, not a hand-written list of block kinds: retune a ratio in tokens.json
+// (or add a seventh rung) and the Go ladder re-derives instead of silently
+// disagreeing with the source. 1.6 sits in the ladder's widest interior gap —
+// callout 1.55 to stats 1.64 — so the split falls where the source itself is
+// least committed, and every rung is on the same side of it as the measured
+// benchmark (tooling/paper-excellence/evidence/erasure.html: code/table/
+// asciicast/callout open one row, stats/figure two).
+//
+// Emitted into internal/pdrender/tokens_gen.go as GenAirRowSplit and applied by
+// pdrender.AirRows (internal/pdrender/air.go); design/check.mjs Part P censuses
+// both arms so neither the ratios nor the split can land dead.
+export const AIR_ROW_SPLIT = 1.6;
+// airRows collapses one web air ratio to its honest terminal row count.
+export const airRows = (ratio) => (ratio >= AIR_ROW_SPLIT ? 2 : 1);
+// ruleGlyph collapses a px rule WEIGHT to the terminal's only means of drawing
+// one: the glyph. A terminal line is always one cell tall, so 2px vs 1px cannot
+// be a thickness — it is heavy box-drawing vs light. Derived from the px value
+// (>= the structural weight is heavy), so retuning space.section.rule or
+// space.rule.hairline in tokens.json moves the terminal ladder with it.
+export const RULE_HEAVY_PX = 2;
+export const ruleGlyph = (px) => (px >= RULE_HEAVY_PX ? "━" : "─");
 // The EVIDENCE BAND inputs (tokens.space.evidence), in emission order. Emitted as
 // `--tok-evidence-*`; paper-surface.css composes all five into ONE width
 // expression, so what ships is the law and not a resolved pixel. Every key here
@@ -1523,6 +1554,9 @@ function pdrenderGo(themes = loadThemes()) {
   // muted-text reading family above (GenInk/GenDim are a DIFFERENT, warmer set).
   const cliChrome = (name, role) =>
     `\tGenChrome${name} = lipgloss.AdaptiveColor{Light: "${c.cliChrome[role].light}", Dark: "${c.cliChrome[role].dark}"}`;
+  // Terminal space ladder inputs (see the emitted block below for the doctrine).
+  const air = tokens.space.air;
+  const sec = tokens.space.section;
   // Neutral callout tone (color.cliCalloutNeutral → hex) — the neutral peer of
   // the four status tones, consumed by Theme.Callout's "neutral" arm.
   const neut = c.cliCalloutNeutral;
@@ -1612,6 +1646,53 @@ function pdrenderGo(themes = loadThemes()) {
     `\tGenReadingFontStack     = ${JSON.stringify(tokens.font.reading.stack)}`,
     `\tGenReadingHeadingWeight = ${r.headingWeight}`,
     `\tGenReadingBodySize      = ${r.body.size}`,
+    ")",
+    "",
+    // ── terminal space ladder (space.air / space.section / space.rule) ───────
+    "// Generated terminal space ladder (design/tokens.json space.air /",
+    "// space.section / space.rule). The web surface paints these as PIXELS; a",
+    "// terminal has one vertical unit, the ROW, and space.air.beat (22px) is ≈ one",
+    "// row — so the six-rung web air ladder collapses to TWO honest terminal",
+    "// values. Nothing below spells a per-kind row count: GenAirRatios carries the",
+    "// source ratios verbatim, GenAirRowSplit carries the documented collapse",
+    "// threshold (design/emit.mjs AIR_ROW_SPLIT), and pdrender.AirRows (air.go)",
+    "// applies one to the other. A hand-written six-step table is exactly the fake",
+    "// precision this arm exists to refuse.",
+    "var GenAirRatios = map[string]float64{",
+    ...alignMap(AIR_STEPS.map((k) => `\t"${k}": ${air[k]},`)),
+    "}",
+    "",
+    "// GenAirOrder is the emission order (lightest opening → heaviest), matching",
+    "// AIR_STEPS in design/emit.mjs.",
+    `var GenAirOrder = []string{${AIR_STEPS.map((k) => `"${k}"`).join(", ")}}`,
+    "",
+    "// GenRuleGlyph is the terminal's rendering of the TWO weights a paper draws",
+    "// horizontal lines at (space.section.rule = 2px structural, space.rule.hairline",
+    "// = 1px everything else). A terminal cannot vary a line's thickness, so the",
+    "// weight becomes the GLYPH: heavy for a section boundary, light for a table",
+    "// underline, a divider, a heading rule. Derived from the px values, not typed:",
+    "// a weight of 2px or more is the structural one.",
+    "var GenRuleGlyph = map[string]string{",
+    ...alignMap([
+      `\t"hairline": ${JSON.stringify(ruleGlyph(tokens.space.rule.hairline))},`,
+      `\t"section": ${JSON.stringify(ruleGlyph(sec.rule))},`,
+    ]),
+    "}",
+    "",
+    "// GenAirRowSplit is the collapse threshold (a ratio at or above it earns a",
+    "// SECOND blank row). GenAirRowsDefault is the air a block that is not on the",
+    "// ladder opens with. GenSectionGapRows is space.section.beat (4.18 air beats ≈",
+    "// 92px, the benchmark artifact's section margin) rounded to whole rows: the air",
+    "// that says one section ENDED, the half of the boundary device the rule glyph",
+    "// completes. GenSectionHeadGapRows is space.section.gap (the artifact's 16px",
+    "// .sec-head padding-top) in rows: the air between the rule and the words.",
+    "const (",
+    ...alignEq([
+      `\tGenAirRowSplit = ${AIR_ROW_SPLIT}`,
+      "\tGenAirRowsDefault = 1",
+      `\tGenSectionGapRows = ${Math.round(sec.beat)}`,
+      `\tGenSectionHeadGapRows = ${Math.round(sec.gap / air.beat)}`,
+    ]),
     ")",
     "",
     "// Generated categorical viz palettes (design/tokens.json color.pdrenderChart /",

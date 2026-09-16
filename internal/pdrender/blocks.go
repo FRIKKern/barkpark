@@ -52,7 +52,7 @@ func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 		if ruleW < 1 {
 			ruleW = 1
 		}
-		rule := ctx.Theme.Rule.Render(strings.Repeat("─", ruleW))
+		rule := ctx.Theme.Rule.Render(strings.Repeat(RuleGlyph("hairline"), ruleW))
 		lines = append(lines, rule)
 	}
 	return lines

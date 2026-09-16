@@ -230,8 +230,13 @@ func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
 	}
 	parts := make([]string, 0, len(blocks)*2)
 	emitted := 0
+	prevType := ""
 	for i := 0; i < len(blocks); {
 		var lines []string
+		// The air the block ABOUT to render opens with (air.go: the collapsed
+		// two-step terminal ladder from design/tokens.json space.air).
+		openType := blocks[i].Type
+		openIdx := i
 		// Consecutive field blocks render as ONE aligned definition list — a dim
 		// label column + value column — instead of a stack of two-line pairs.
 		if isFieldGroupType(blocks[i].Type) {
@@ -249,9 +254,27 @@ func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
 			continue
 		}
 		if emitted > 0 {
-			parts = append(parts, "") // rhythm: one blank line between visible blocks
+			// rhythm: the opening block's air, in whole terminal rows. A SECTION
+			// BOUNDARY (an L2 heading that follows non-heading content) spends the
+			// section gap instead — the air half of the boundary device, whose
+			// other half is the heavy rule the head draws.
+			rows := AirRows(openType)
+			boundary := isSectionBoundary(blocks, openIdx, prevType)
+			if boundary {
+				rows = GenSectionGapRows
+			}
+			for n := rows; n > 0; n-- {
+				parts = append(parts, "")
+			}
+			if boundary {
+				parts = append(parts, ctx.Theme.Rule.Render(sectionRule(ctx.Width)))
+				for n := GenSectionHeadGapRows; n > 0; n-- {
+					parts = append(parts, "")
+				}
+			}
 		}
 		parts = append(parts, lines...)
+		prevType = openType
 		emitted++
 	}
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
