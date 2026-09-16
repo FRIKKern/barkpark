@@ -50,15 +50,18 @@ defmodule Barkpark.Content.SchemaDeskViewsTest do
   end
 
   test "every required key is required" do
+    # `assert {:error, x} = call(), "message"` puts the message where a match
+    # failure can never read it, so the key being tested is carried by an
+    # explicit refute instead — a failure then names WHICH key was accepted.
     for key <- ~w(id title type by) do
-      assert {:error, changeset} = apply_views([Map.delete(@good, key)]),
-             "a view missing #{key} was accepted"
-
+      missing = apply_views([Map.delete(@good, key)])
+      refute match?({:ok, _}, missing), "a view missing #{key} was accepted"
+      {:error, changeset} = missing
       assert errors_on(changeset)[:desk]
 
-      assert {:error, blank} = apply_views([Map.put(@good, key, "   ")]),
-             "a view with a blank #{key} was accepted"
-
+      blank_result = apply_views([Map.put(@good, key, "   ")])
+      refute match?({:ok, _}, blank_result), "a view with a blank #{key} was accepted"
+      {:error, blank} = blank_result
       assert errors_on(blank)[:desk]
     end
   end
