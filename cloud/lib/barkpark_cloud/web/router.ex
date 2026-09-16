@@ -10080,12 +10080,22 @@ defmodule BarkparkCloud.Web.Router do
 
   ## Builder routes — the off-box build plane (P2 / Move A).
   ##
-  ## Builders authenticate with a user session token for now (a dedicated
-  ## builder-token type is a hardening follow-up). Auth scope: a builder may
-  ## claim any queued deployment regardless of team — the build plane is
-  ## fleet-wide. The user-token check is a coarse "is this a real user of
-  ## Barkpark Cloud" gate. Sites the builder touches still belong to whichever
-  ## team owns them; the builder never re-team a deployment.
+  ## Builders authenticate with the BOX'S OWN hashed, revocable agent token:
+  ## every `/v1/builder/*` route below gates on `Auth.require_agent/2`, which
+  ## verifies the bearer through `Registry.verify_agent_token/1` and assigns
+  ## `:current_barkpark`. There is no user-session path here, and no shared
+  ## fleet WORKER_TOKEN either — `jpf-w1-builder-identity` moved these routes
+  ## off `Auth.require_worker/2`; see the CHARTER D14 note on
+  ## `/v1/builder/claim` for why identity and scope had to land together.
+  ## Auth scope: the identity is per-box AND the queries behind it are narrowed
+  ## to that box's own sites (`Registry.claim_queued_deployment_for_barkpark/2`
+  ## for the claim), so a builder reaches only deployments for Barkparks it
+  ## hosts — the build plane is NOT fleet-wide. Sites the builder touches still
+  ## belong to whichever team owns them; the builder never re-teams a
+  ## deployment.
+  ##
+  ## (The `/v1/internal/*` route immediately below is not a builder route — it
+  ## is the off-box Go provisioner and still gates on `Auth.require_worker/2`.)
 
   # POST /v1/internal/provision-jobs/:id/fail {error} → mark the job failed; the
   # Barkpark stays provisioning. IDEMPOTENT + status-guarded:
