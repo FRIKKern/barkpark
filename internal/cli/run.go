@@ -745,6 +745,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		out.errf("bp: %s", note)
 	}
 
+	// An unscoped index page WITHHOLDS every doc_id that lives in two datasets
+	// and the client used to discard the server's own list of what it withheld
+	// (`page.dataset_ambiguous`). Measured 2026-09-16: `bp task ls --all` served
+	// 9424 rows with all eleven live twins absent and nothing said. Silent on
+	// every envelope carrying no withheld set, so a single-dataset ledger renders
+	// byte-identically (dataset_ambiguous.go). The --all walk emits its own copy
+	// of this from inside paginatedAllWalk, where the stitch happens.
+	warnIfDatasetTwinsWithheld(out, unwrapResult(respBody))
+
 	// The claim lives at a DIFFERENT path per read verb and the wrong one never
 	// errors: `.doc.claim` is correct for `task get` and absent from every flat
 	// `ls`/`ready`/`prime` row, so a get-shaped reader answers UNCLAIMED on 30
@@ -3660,6 +3669,13 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 	// its page — the row this page must open with. Empty before the first page,
 	// and empty for any boundary the server left unverifiable.
 	anchor := ""
+	// The doc_ids the server WITHHELD from these pages because they exist in
+	// more than one dataset. Unioned across pages and re-attached to the stitch
+	// below: the re-wrap emits `{key: rows}` and drops every sibling of the row
+	// array, so `--all` — the one mode whose premise is "this is the whole
+	// population" — was the one mode that lost the server's own statement of
+	// what it left out (dataset_ambiguous.go).
+	var twins []datasetTwin
 	for {
 		pageURL := withOffsetLimit(baseURL, offset, pageSize+1)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
@@ -3697,6 +3713,7 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 		if key == "" {
 			key = k
 		}
+		twins = mergeDatasetTwins(twins, datasetTwinsFromPage(unwrapResult(respBody)))
 		// Split the lookahead off the page. It anchors the NEXT request and is
 		// never rendered, so the emitted rows stay exactly the pageSize windows
 		// the walk has always emitted.
@@ -3768,6 +3785,9 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			// re-wrap below, whose mustArray pins an empty result to [] rather
 			// than null.
 			if offset == 0 && filter == nil {
+				// The verbatim body still carries page.dataset_ambiguous, so the
+				// machine half needs nothing here — only the prose half.
+				warnIfDatasetTwinsWithheld(out, unwrapResult(respBody))
 				renderSuccess(out, cmd, respBody)
 				return exitOK, false
 			}
@@ -3790,6 +3810,14 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 	// any page it could not read a key from, so an unknown envelope can no
 	// longer reach the success renderer.
 	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
+	// Carry the withheld set across the stitch, under the SAME
+	// `page.dataset_ambiguous` path a single page uses, so one jq expression
+	// reads both modes. A no-op when nothing was withheld — the stitch of a
+	// twin-free ledger stays byte-identical, because a field that is always
+	// present measures nothing. Rows are untouched: this REPORTS the omission,
+	// it does not un-collapse the page.
+	wrapped = attachDatasetTwins(wrapped, twins)
+	warnIfDatasetTwinsWithheld(out, wrapped)
 	renderSuccess(out, cmd, mustResult(wrapped))
 	return exitOK, false
 }
