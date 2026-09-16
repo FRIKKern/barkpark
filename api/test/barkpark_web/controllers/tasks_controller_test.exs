@@ -508,6 +508,11 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       # RED WITHOUT the `page` block: nil, and a caller cannot tell a bounded
       # page from a complete one.
+      # task-8483029782444df4 added the four `dataset*` keys to this block — the
+      # index now honours `?dataset=` and an envelope must state the scope it
+      # served. Kept as an EXACT map rather than four `["page"]["x"]` reads so
+      # it still reds on an unannounced key: a page block that grows in silence
+      # is the same class of defect as one that never existed.
       assert body["page"] == %{
                "limit" => 100,
                "offset" => 0,
@@ -518,7 +523,11 @@ defmodule BarkparkWeb.TasksControllerTest do
                # request's `?offset=`, and it is present exactly when
                # `has_more` is true. A `has_more: true` with nothing to page
                # with is the defect this key exists to close.
-               "next_offset" => 100
+               "next_offset" => 100,
+               "dataset" => nil,
+               "datasets" => ["production"],
+               "dataset_scope" => "all-datasets-in-scope",
+               "dataset_ambiguous" => []
              }
     end
 
@@ -569,7 +578,12 @@ defmodule BarkparkWeb.TasksControllerTest do
                "returned" => 2,
                "has_more" => true,
                # offset + returned, so the walk advances past what it just read.
-               "next_offset" => 4
+               "next_offset" => 4,
+               # task-8483029782444df4 — see the bare-GET test above.
+               "dataset" => nil,
+               "datasets" => ["production"],
+               "dataset_scope" => "all-datasets-in-scope",
+               "dataset_ambiguous" => []
              }
     end
 
