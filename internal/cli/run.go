@@ -530,6 +530,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// paginated walk and the single send, so every refusal path sees it.
 	out.credentialSent = req.headers["Authorization"] != ""
 
+	// The caller's explicit column projection, read off the RESOLVED url (the
+	// only place that knows whether `--fields` actually reached the server).
+	// The table renderer honours it so a named column renders as empty cells
+	// instead of vanishing when no row on the page carries a value; an
+	// inferred column is unaffected. Set here, with the writer in hand, rather
+	// than inside the writer-less buildManifestRequest, and before both the
+	// single send and the --all walk so every page renders the same columns.
+	out.requestedColumns = requestedColumnsFromURL(cmd, req.url)
+
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
 	if g.dryRun {
 		return dryRun(out, cmd, req.url, req.headers, req.body)

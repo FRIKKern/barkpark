@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"sort"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/FRIKKern/barkpark/internal/semrole"
 	"github.com/mattn/go-runewidth"
 )
@@ -246,7 +248,7 @@ func renderRows(out *writer, rows []any, meta map[string]any) {
 		return
 	}
 
-	cols := pickColumns(rows)
+	cols := pickColumns(rows, out.requestedColumns)
 	if len(cols) == 0 {
 		// No object keys to columnize — a bare array of scalars (e.g. a
 		// `["a","b"]` list response, which renderTable's []any case forwards
@@ -377,10 +379,24 @@ func statusRole(value string) string {
 // columns (_id/id/title/name/subject — a ticket's title is its subject) lead;
 // the rest follow alphabetically; underscore "system" keys are dropped from the
 // table view to keep it readable (full data is one -o json away).
-func pickColumns(rows []any) []string {
+//
+// requested is the projection the CALLER named (`--fields title,description`),
+// empty when the columns are INFERRED. The two are not the same question. An
+// inferred column that is empty on every row of the page carries no
+// information, so deriving columns from the keys PRESENT is right for it. A
+// requested one is a question the caller asked: dropping it answers "there is
+// no such field" with the same silence as "no row on this page has a value",
+// and those are not interchangeable — a sparse catalog page hid the
+// `description` column that `scaffy ls --remote` projects on purpose, at exit
+// 0. So a named column is rendered even when every cell is blank; an unnamed
+// one keeps today's behaviour, and a key NOT in the payload and NOT requested
+// is still absent (rendering every key would defeat the projection).
+func pickColumns(rows []any, requested []string) []string {
 	seen := map[string]bool{}
+	hasObject := false
 	for _, r := range rows {
 		if obj, ok := r.(map[string]any); ok {
+			hasObject = true
 			for k := range obj {
 				seen[k] = true
 			}
@@ -412,7 +428,61 @@ func pickColumns(rows []any) []string {
 		}
 		sort.Strings(cols)
 	}
-	return cols
+	if !hasObject {
+		// A bare scalar array has no columns to name; renderRows wraps it in a
+		// synthetic "value" column. Honouring a projection here would print a
+		// header of empty columns over data that has no keys at all.
+		return cols
+	}
+	return withRequestedColumns(cols, lead, requested)
+}
+
+// withRequestedColumns folds the caller's explicit projection into the inferred
+// column list: every requested name appears, in the order it was requested,
+// whether or not any row on the page carries a value for it.
+//
+// Ordering is deliberately conservative. Identity columns the caller did NOT
+// name (_id, which the API returns on every projected row) keep their front
+// seat, so `--fields title,description` reads `_id  title  description` —
+// today's table plus the column that was silently missing, not a reshuffle.
+// Inferred columns the caller did not name follow, in pickColumns' order.
+// Returns cols untouched when nothing was requested.
+func withRequestedColumns(cols, lead, requested []string) []string {
+	req := make([]string, 0, len(requested))
+	inReq := make(map[string]bool, len(requested))
+	for _, r := range requested {
+		r = strings.TrimSpace(r)
+		if r == "" || inReq[r] {
+			continue
+		}
+		inReq[r] = true
+		req = append(req, r)
+	}
+	if len(req) == 0 {
+		return cols
+	}
+	merged := make([]string, 0, len(cols)+len(req))
+	added := make(map[string]bool, len(cols)+len(req))
+	add := func(c string) {
+		if !added[c] {
+			added[c] = true
+			merged = append(merged, c)
+		}
+	}
+	for _, c := range lead {
+		if !inReq[c] {
+			add(c)
+		}
+	}
+	for _, c := range req {
+		add(c)
+	}
+	for _, c := range cols {
+		if !inReq[c] {
+			add(c)
+		}
+	}
+	return merged
 }
 
 func sortedKeys(m map[string]any) []string {
@@ -489,4 +559,54 @@ func truncateCell(s string, max int) string {
 		return runewidth.Truncate(s, max, "")
 	}
 	return runewidth.Truncate(s, max, "...")
+}
+
+// fieldsProjectionFlag is the manifest flag whose value is a comma-separated
+// response projection (`--fields title,description` on doc.get/ls/query and
+// search.query). It is also the query-string parameter the API reads, which is
+// why requestedColumnsFromURL can answer off the RESOLVED url.
+const fieldsProjectionFlag = "fields"
+
+// requestedColumnsFromURL reads the caller's explicit column projection off the
+// url the dispatch actually resolved, for the table renderer to honour.
+//
+// The RESOLVED url is the honest source. The projection can arrive as a
+// command-local flag, and applyQuery is the one place that decides whether a
+// value reaches the server at all (a knob the client drops never becomes a
+// column) — so reading the url cannot claim a projection the request did not
+// carry. The manifest declaration is still required first: `fields` is only a
+// projection on the commands that declare it, and a route that grows an
+// unrelated `?fields=` parameter must not silently reshape its table.
+//
+// Returns nil for a command with no such flag, a url that carries no `fields`,
+// or an empty value.
+func requestedColumnsFromURL(cmd manifest.Command, rawURL string) []string {
+	if !commandDeclaresFlag(cmd, fieldsProjectionFlag) {
+		return nil
+	}
+	i := strings.IndexByte(rawURL, '?')
+	if i < 0 {
+		return nil
+	}
+	q, err := url.ParseQuery(rawURL[i+1:])
+	if err != nil {
+		return nil
+	}
+	return splitFieldsProjection(q.Get(fieldsProjectionFlag))
+}
+
+// splitFieldsProjection splits a comma-separated projection value into column
+// names, dropping empties and preserving the caller's order.
+func splitFieldsProjection(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	cols := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			cols = append(cols, p)
+		}
+	}
+	return cols
 }
