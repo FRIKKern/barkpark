@@ -91,6 +91,18 @@ var manifestCollectionFields = map[string]string{
 // scanManifestFactStringMatches is the whole predicate, in one place, so the
 // tree sweep and both controls exercise the SAME code.
 func scanManifestFactStringMatches(fset *token.FileSet, f *ast.File) []manifestFactHit {
+	return scanWithManifestBindings(fset, f, bindManifestIdents(f))
+}
+
+// bindManifestIdents is the BINDING half of the detector, split out from the
+// matching half so the reachability floor below can measure it directly.
+//
+// The split exists because of a measured hole, not for tidiness: every control
+// in this file before it was SYNTHETIC — each parses a source string that
+// literally spells `manifest.Command`, so each keeps passing no matter what the
+// real tree looks like. Nothing asserted that the detector still binds anything
+// in the tree it actually gates. See TestManifestFactDetectorReachesTheRealTree.
+func bindManifestIdents(f *ast.File) map[string]string {
 	bound := map[string]string{}
 	bind := func(name, typ string) {
 		if name != "" && name != "_" {
@@ -169,7 +181,13 @@ func scanManifestFactStringMatches(fset *token.FileSet, f *ast.File) []manifestF
 		}
 		return true
 	})
+	return bound
+}
 
+// scanWithManifestBindings is the MATCHING half: given the identifiers already
+// bound to manifest types, report every string match whose haystack is a field
+// reached off one of them.
+func scanWithManifestBindings(fset *token.FileSet, f *ast.File, bound map[string]string) []manifestFactHit {
 	var hits []manifestFactHit
 	ast.Inspect(f, func(n ast.Node) bool {
 		c, ok := n.(*ast.CallExpr)
@@ -442,5 +460,149 @@ func TestManifestFactDetectorStaysQuietOnLegitimateStringWork(t *testing.T) {
 	}
 	if hits := scanManifestFactStringMatches(fset, f); len(hits) != 0 {
 		t.Fatalf("detector fired on legitimate string work: %+v", hits)
+	}
+}
+
+// ── The reachability floor (task-0f89f5ac08cf44b6) ──────────────────────────
+//
+// TestNoStringMatchStandsInForAManifestDeclaredFact carries a VACUITY floor —
+// it fails if it scanned fewer than 200 non-test files. That floor measures
+// that the walk reached the tree. It does NOT measure that the detector can
+// still SEE anything in it, and those are different facts.
+//
+// Measured 2026-09-16, the gap is real: setting manifestQualifier to a package
+// name nothing imports makes a tree-wide hit IMPOSSIBLE, and the live gate
+// above still reports `ok` — 423 files scanned, floor satisfied, zero hits, a
+// green with no subject. The three synthetic controls DO catch that particular
+// mutation, but only because each parses a source string that literally spells
+// `manifest.Command`; they would go on passing against a tree that had aliased
+// its import (`mf "…/internal/manifest"`), renamed the package, or stopped
+// importing it, because they never read the tree at all.
+//
+// So this test asserts the one thing no synthetic fixture can: that on the
+// REAL tree, right now, the binding half still binds. If this reds while the
+// gate above stays green, the gate's zero has stopped meaning "no instances"
+// and started meaning "no subjects".
+//
+// Floors are set well under today's measurement — 133 bindings across 61 of
+// 424 non-test files, printed by this test's t.Log so the next reader sees the
+// live number rather than this comment's — so ordinary refactoring does not
+// trip them; they catch a COLLAPSE, not drift. (The floors were first drafted
+// at 150 bindings from a grep of textual `manifest.` occurrences, which counts
+// a different quantity — call sites and type literals as well as bindings —
+// and this test promptly failed on its own author. The number in a floor must
+// come from the thing the floor measures.)
+func TestManifestFactDetectorReachesTheRealTree(t *testing.T) {
+	repo := repoRootForGuard(t)
+	fset := token.NewFileSet()
+	bindingFiles, bindings := 0, 0
+	scanned := 0
+	for _, r := range guardScanRoots {
+		root := filepath.Join(repo, r)
+		if _, err := os.Stat(root); err != nil {
+			t.Fatalf("scan root %s missing: %v", root, err)
+		}
+		if err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+				return nil
+			}
+			f, perr := parser.ParseFile(fset, p, nil, 0)
+			if perr != nil {
+				return nil
+			}
+			scanned++
+			if n := len(bindManifestIdents(f)); n > 0 {
+				bindingFiles++
+				bindings += n
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("walk %s: %v", root, err)
+		}
+	}
+	if scanned < 200 {
+		t.Fatalf("scanned only %d non-test .go files — the walk did not reach the tree", scanned)
+	}
+	const (
+		minBindingFiles = 30
+		minBindings     = 60
+	)
+	if bindingFiles < minBindingFiles || bindings < minBindings {
+		t.Fatalf("the detector binds %d identifier(s) across %d file(s) of %d scanned (floors: %d files, %d bindings).\n"+
+			"Nothing in the tree is bound to a %s.* type any more, so TestNoStringMatchStandsInForAManifestDeclaredFact "+
+			"cannot report a hit and its green says nothing. Either the manifest import was aliased/renamed (teach "+
+			"bindManifestIdents the new spelling) or the consumers genuinely moved (re-point guardScanRoots) — do not "+
+			"lower these floors to restore the green.",
+			bindings, bindingFiles, scanned, minBindingFiles, minBindings, manifestQualifier)
+	}
+	t.Logf("reachability: %d bindings across %d/%d non-test files", bindings, bindingFiles, scanned)
+}
+
+// ── The unswept-lane sweep record (task-0f89f5ac08cf44b6) ───────────────────
+//
+// The parent row (task-ce8f04315a6d1f10) required six disjoint Go-tree lanes to
+// state which files they swept "so absence is distinguishable from coverage".
+// Two lanes left no branch, no PR and no child row, so for their areas the
+// tree's silence was uninterpretable. Those areas were re-swept by hand on
+// 2026-09-16 at c74b28975 — every non-test strings.Contains/HasPrefix/HasSuffix
+// occurrence read, and every one found to be legitimate text-grammar parsing
+// (mermaid and diff syntax, the scaffy DSL, hcloud's INI-ish context file,
+// docker tag prefixes) or already the FIXED side of a shipped lane
+// (scaffy/apply.go reads o.Mark.Name, the declared fact, exactly as #14304
+// landed it). Verdict: swept, clean, no findings.
+//
+// The reason that sweep is CHEAP to trust — and the reason this record is a
+// test rather than a comment — is that none of these packages imports
+// internal/manifest, so the manifest sub-shape cannot occur in them at all.
+// That is what makes their hand-sweep final. The moment one of them does import
+// it, the hand-sweep's premise is gone and the record above is stale: this test
+// reds and says so, instead of the note quietly rotting in a comment.
+//
+// (The AST gate itself DOES reach these packages — planting the seed defect in
+// internal/pdrender on 2026-09-16 made TestNoStringMatchStandsInForAManifest-
+// DeclaredFact fail on it, which is the control proving their zero is a real
+// reading and not an unvisited directory.)
+func TestReSweptLanesStillHoldNoManifestConsumer(t *testing.T) {
+	repo := repoRootForGuard(t)
+	// The six areas no merged lane PR touched, by elimination from #14115,
+	// #14297, #14300, #14304, #14305, #14306.
+	reswept := []string{"pdrender", "scaffy", "builder", "runtime", "hetzner", "provisioner"}
+	fset := token.NewFileSet()
+	for _, pkg := range reswept {
+		root := filepath.Join(repo, "internal", pkg)
+		if _, err := os.Stat(root); err != nil {
+			t.Errorf("re-swept area internal/%s is gone: %v — the sweep record no longer describes the tree", pkg, err)
+			continue
+		}
+		files := 0
+		if err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+				return nil
+			}
+			f, perr := parser.ParseFile(fset, p, nil, 0)
+			if perr != nil {
+				return nil
+			}
+			files++
+			if n := len(bindManifestIdents(f)); n > 0 {
+				rel := strings.TrimPrefix(p, repo+string(filepath.Separator))
+				t.Errorf("%s now binds %d %s.* value(s). internal/%s was hand-swept on 2026-09-16 and cleared on the "+
+					"premise that it consumes no manifest type; that premise no longer holds, so re-read its "+
+					"strings.Contains/HasPrefix/HasSuffix sites against the declarations before trusting the record above.",
+					rel, n, manifestQualifier, pkg)
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("walk internal/%s: %v", pkg, err)
+		}
+		if files == 0 {
+			t.Errorf("internal/%s held no non-test .go files — this area's check ran vacuously", pkg)
+		}
 	}
 }
