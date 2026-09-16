@@ -742,27 +742,74 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
   # detail in the email channel, and for provision_failed / deployment_failed /
   # agent_unreachable that string is the RAW failure reason. An email leaves our
   # boundary for good, so it is scrubbed on the way out.
+  #
+  # ## WHAT THESE ARMS DO AND DO NOT PROVE (cchi-w27-bl-scrub-test-green-by-construction)
+  #
+  # Every arm below hand-builds `%{detail: capture}` and calls `EventEmail.build/4`
+  # DIRECTLY. The assertions are live — neuter `FailureCopy.raw/1` to
+  # `def raw(value), do: value` and all three red — but a unit arm cannot say
+  # whether any producer in `cloud/lib` ever emits the payload it just invented.
+  # That question is answered next door, and the two answers differ per event:
+  #
+  #   * `:provision_failed`   — LIVE. `router.ex`'s
+  #     `POST /v1/internal/provision-jobs/:id/fail` dispatches
+  #     `%{detail: job.error}`, the off-box provisioner's own string.
+  #   * `:deployment_failed`  — LIVE. `Registry.maybe_dispatch_deployment_failed/2`
+  #     and the reaper's `DeploymentAlertWorker` both carry the deployment's
+  #     `failure_reason` through `deployment_failed_payload/2` as `:detail`.
+  #   * `:agent_unreachable`  — PROPHYLACTIC. Its two producers pass NO `:detail`:
+  #     `router.ex`'s health flip calls `dispatch_barkpark_event/2` with no
+  #     payload at all, and `health/staleness_worker.ex` passes `%{name: …}`.
+  #     `detail/1` therefore returns "" on every live dispatch of this event, so
+  #     the arm below exercises a state production cannot currently reach. It is
+  #     KEPT — a prophylactic assertion is the cheap half of the guard that makes
+  #     adding a detail-carrying producer safe — but its green is NOT coverage of
+  #     a live path, and nothing here should be read as saying it is.
+  #
+  # THE PROPHYLACTIC LABEL IS NOT SELF-MAINTAINING, AND THE FILING PROVES IT.
+  # This row was filed saying `:deployment_failed` had "ZERO dispatch sites
+  # anywhere in the repository". True when written; wave 28 S6 then gave it two,
+  # and the suite stayed 34/34 green while the premise rotted. So the label is
+  # backed by a TEST, not by this comment:
+  # `test/barkpark_cloud/notifications/alert_detail_reachability_test.exs` derives
+  # the dispatch census from `cloud/lib` and reds the moment `:agent_unreachable`
+  # gains a payload that can carry `:detail` — naming this arm as the thing to
+  # promote. The same file drives the two LIVE producers end to end.
   describe "EventEmail — the alert body is scrubbed before it leaves the boundary" do
     @email_secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
     @email_capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
 
-    for event <- [:provision_failed, :deployment_failed, :agent_unreachable] do
+    # The events a real producer can reach `detail/1` with. Producer-level arms
+    # for both live in `alert_detail_reachability_test.exs` §2; these stay as the
+    # unit floor.
+    for event <- [:provision_failed, :deployment_failed] do
       test "#{event}: the secret never reaches the inbox" do
-        email =
-          EventEmail.build(
-            %EmailSettings{},
-            unquote(event),
-            %{name: "My Barkpark", detail: @email_capture},
-            "owner@example.com"
-          )
-
-        refute email.text_body =~ @email_secret
-        assert email.text_body =~ "Authorization: Bearer [redacted]"
-
-        # The surrounding sentence is intact — a scrubbed alert is still an
-        # actionable alert.
-        assert email.text_body =~ "My Barkpark"
+        assert_capture_scrubbed(unquote(event))
       end
+    end
+
+    # PROPHYLACTIC — no producer passes `:detail` for this event, so this green
+    # is not live-path coverage. See the block comment above; the reachability
+    # census reds if that stops being true.
+    test "agent_unreachable (PROPHYLACTIC — no producer passes :detail): the secret never reaches the inbox" do
+      assert_capture_scrubbed(:agent_unreachable)
+    end
+
+    defp assert_capture_scrubbed(event) do
+      email =
+        EventEmail.build(
+          %EmailSettings{},
+          event,
+          %{name: "My Barkpark", detail: @email_capture},
+          "owner@example.com"
+        )
+
+      refute email.text_body =~ @email_secret
+      assert email.text_body =~ "Authorization: Bearer [redacted]"
+
+      # The surrounding sentence is intact — a scrubbed alert is still an
+      # actionable alert.
+      assert email.text_body =~ "My Barkpark"
     end
 
     test "a git SHA in the alert body survives — the commit is still readable" do
