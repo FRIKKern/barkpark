@@ -78,27 +78,52 @@ psql_() { PGPASSWORD="$PGPASS_" psql -X -q -t -A -h "$PGHOST_" -U "$PGUSER_" "$@
 # ── The forbidden patterns, in one place: the checks and the grep control
 # both read this list, so a pattern can never be proven-live in one and
 # silently different in the other.
-CRASH_PATTERNS='undefined_table|Postgrex.Error|relation .* does not exist|DrainWorker.*terminating'
+# Each alternative is listed separately so the control below can prove EVERY
+# one of them fires; an alternation checked as a whole passes on one arm while
+# another is silently typo'd.
+#
+# `relation .* does not exist` is deliberately pinned to `[error]`: Postgres
+# emits that phrase as a benign NOTICE from inside migrations themselves
+# (`trigger "oban_notify" for relation "public.oban_jobs" does not exist,
+# skipping`), and an unpinned pattern reds a perfectly clean cold boot.
+CRASH_ALTERNATIVES=(
+  'undefined_table'
+  '\(Postgrex\.Error\)'
+  'DrainWorker.*terminating'
+  '\[error\].*relation .* does not exist'
+)
+CRASH_PATTERNS="$(IFS='|'; echo "${CRASH_ALTERNATIVES[*]}")"
 ENDPOINT_PATTERN='Running BarkparkWeb\.Endpoint'
 
-# ── Grep control: prove both patterns FIRE. An absence verdict from a regex
-# that matches nothing is not evidence of anything.
+# Grep control: prove every pattern FIRES. An absence verdict from a regex that
+# matches nothing is not evidence of anything.
 control_log="$WORK_DIR/control.log"
 cat > "$control_log" <<'CTL'
-[error] Postgrex.Protocol (#PID<0.1.0>) disconnected
-** (Postgrex.Error) ERROR 42P01 (undefined_table) relation "workspaces" does not exist
+[error] Postgrex.Protocol (#PID<0.1.0>) disconnected: ** (Postgrex.Error) ERROR 42P01 (undefined_table)
+[error] GenServer #PID<0.2.0> terminating: relation "plugin_settings" does not exist
 [error] Oban.Plugins.DrainWorker terminating
 [info] Running BarkparkWeb.Endpoint with Bandit 1.5.0 at 0.0.0.0:4000 (http)
 CTL
-if grep -Eq "$CRASH_PATTERNS" "$control_log"; then
-  ok "control: the crash-storm patterns match a known-bad log"
+for alt in "${CRASH_ALTERNATIVES[@]}"; do
+  if grep -Eq "$alt" "$control_log"; then
+    ok "control: crash pattern /$alt/ fires on a known-bad log"
+  else
+    bad "control: crash pattern /$alt/ matched NOTHING - a clean verdict from it would be meaningless"
+  fi
+done
+# Negative control for the pinned one: the benign migration NOTICE must NOT red
+# a clean boot.
+benign_log="$WORK_DIR/benign.log"
+printf '%s\n' '14:16:01.889 [info] trigger "oban_notify" for relation "public.oban_jobs" does not exist, skipping' > "$benign_log"
+if grep -Eq "$CRASH_PATTERNS" "$benign_log"; then
+  bad "control: the crash patterns red on a BENIGN migration notice - check 1 would be a false alarm"
 else
-  bad "control: CRASH_PATTERNS matched nothing in the synthetic bad log — every clean verdict below would be meaningless"
+  ok "control: the benign migration notice does NOT trip the crash patterns"
 fi
 if grep -Eq "$ENDPOINT_PATTERN" "$control_log"; then
   ok "control: the endpoint-banner pattern matches a known endpoint banner"
 else
-  bad "control: ENDPOINT_PATTERN matched nothing — 'no endpoint line' would be meaningless"
+  bad "control: ENDPOINT_PATTERN matched nothing - 'no endpoint line' would be meaningless"
 fi
 
 # ── A database with no tables at all: the empty pgdata volume.
