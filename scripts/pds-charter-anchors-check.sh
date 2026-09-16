@@ -2,7 +2,7 @@
 # pds-charter-anchors-check.sh — PDS-D299 made runnable.
 #
 # PDS-D299 is law: "ADJUDICATE BY CONTENT; CITED LINE NUMBERS ARE UNTRUSTWORTHY."
-# A `file.sh:1330` citation is a SNAPSHOT — it silently stops resolving the next
+# A bare `file.sh:<line>` citation is a SNAPSHOT — it silently stops resolving the next
 # time the file grows a line above it, and nothing reds. A CONTENT anchor is a
 # PREDICATE: it names bytes that either are in the file or are not, so it can be
 # checked by machine on every commit, forever, with no baseline to maintain.

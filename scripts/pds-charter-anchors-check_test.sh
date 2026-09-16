@@ -8,6 +8,14 @@
 # the exact regression it was written for.
 #
 # Credential-free, target-free, no network. Usage: bash scripts/pds-charter-anchors-check_test.sh
+#
+# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
+# scripts/pds-charter-anchors-check_test.sh` step on the `PDS census / parity /
+# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml, and
+# .github/ is the gates lane's fence, not the deploy/PDS lane's. This exemption
+# is a HANDOFF, not a verdict: until that line lands, a revert of the charter
+# anchors is caught by running this file BY HAND, and by nothing else. Wiring
+# row: see the PR body. Baseline at authoring: 10 passed, 0 failed.
 
 # shellcheck disable=SC2016  # backticks inside single quotes are literal citation syntax, not expansions
 set -uo pipefail
