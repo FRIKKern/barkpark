@@ -169,11 +169,17 @@ func scaffyRemoteDoc(id, rev, concept, variant, domain, source string) map[strin
 }
 
 // chdirTemp moves the test into a fresh temp dir (pull writes relative to the
-// cwd, exactly like run/remove resolve the repo root).
+// cwd, exactly like run/remove resolve the repo root) and makes the adoption
+// hint hermetic: its already-greeted marker goes to a temp config dir (never
+// the developer's real one — os.UserConfigDir ignores XDG_CONFIG_HOME on
+// darwin), and `git check-ignore` is pinned to "not an answer" so every pull
+// test takes the deterministic literal-.gitignore path.
 func chdirTemp(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	t.Chdir(root)
+	withTempHintMarkerHome(t)
+	withGitignoreCheckExit(t, 128)
 	return root
 }
 
