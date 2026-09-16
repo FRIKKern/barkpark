@@ -128,6 +128,11 @@ defmodule Barkpark.Plugins.OnixEdit.Export.CodelistSource do
     map
   end
 
+  # The only paths reaching this are the two module-level `@..._subpath`
+  # constants resolved against the app's own priv dir — no request data, no
+  # user input, nothing a caller can steer. Same posture as
+  # `Export.Validator`'s XSD read, annotated the same way.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_source!(path) do
     case File.read(path) do
       {:ok, contents} ->
