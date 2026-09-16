@@ -18,7 +18,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
   use Oban.Testing, repo: BarkparkCloud.Repo
 
   alias BarkparkCloud.{Accounts, Registry}
-  alias BarkparkCloud.Registry.Vault
+  alias BarkparkCloud.Registry.{Deployment, Vault}
   alias BarkparkCloud.Sites.{AutoDeployWorker, Deploy, FakeBoxRelay}
 
   @instance_url "https://acme.barkpark.cloud"
@@ -446,6 +446,92 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       assert [fresh] = content_autos(site) |> Enum.reject(&(&1.id == in_flight.id))
       assert fresh.coalesced_attempts == 0
     end
+    # dr-w19-bl-coalesced-counter-reads-a-confident-zero — WHY THE COUNTER READS
+    # ZERO, SETTLED BY A TEST THAT CAN TELL THE TWO CAUSES APART.
+    #
+    # A counter reading zero has two indistinguishable causes: the phenomenon
+    # does not happen, or the increment never fires. Prod reads essentially zero
+    # (charter D313: 6 attempts on 1 row, ever) and the filing set that zero
+    # beside 1,371 `deferred` rows from the same day, as if 1,371 coalesces had
+    # gone uncounted. THEY ARE NOT A DENOMINATOR FOR IT. They are the OTHER
+    # BRANCH of the same decision, and the two are mutually exclusive by
+    # construction:
+    #
+    #   a second publish arrives
+    #     ├─ the site's previous row is STILL ACTIVE (queued/building/pushing)
+    #     │    → `deployments_active_site_env_index` refuses the INSERT
+    #     │    → `{:duplicate, building}` → defer_behind_running_build
+    #     │    → NO ROW MINTED, `coalesced_attempts` += 1
+    #     └─ the previous row has SETTLED
+    #          → the index permits the INSERT → A ROW IS MINTED
+    #          → `coalesced_attempts` is never touched
+    #
+    # `deferred` is TERMINAL (`Deployment.@transitions` maps it to `[]`), so on a
+    # busy box every round settles its own row before the next attempt runs and
+    # the SECOND branch is the only one reachable. 1,371 deferral rows are 1,371
+    # proofs that the mint branch was taken — not 1,371 missed increments. The
+    # window in which the coalesce branch CAN fire is the span a row spends
+    # active: minutes on a healthy build, ONE HTTP ROUND TRIP on a busy box
+    # (claim → `building` → 409 → `deferred`), against a 60s debounce. That is
+    # the whole explanation for the near-zero.
+    #
+    # NOT MEASURED WITH THE `oban_jobs`-MINUS-`deployments` ESTIMATOR, here or in
+    # the PR that carried this test: post-migration that subtraction goes
+    # NEGATIVE (651 jobs vs 658 rows, i.e. -7) because rows also arrive from
+    # non-AutoDeployWorker triggers, and `oban_jobs` prunes at 7 days. It cannot
+    # size this or anything else. The discriminator below needs no estimator: it
+    # runs both regimes through the same counter in one test.
+    test "THE ZERO IS THE REGIME, NOT A DEAD COUNTER: the same counter reads 3 in flight and 0 behind a busy box" do
+      # ── ARM A: a row genuinely IN FLIGHT. The counter fires. ────────────────
+      {bp, live_site} = setup_site()
+
+      {:ok, in_flight} = Deploy.enqueue(live_site, bp, true, "content-auto")
+      {:ok, in_flight} = Registry.claim_deployment(in_flight.id, "worker-1")
+      assert in_flight.status == "building"
+
+      # The precondition, asserted rather than assumed: there IS an active row
+      # for the index to refuse a second insert against.
+      assert %Deployment{id: id} = Deploy.active_production_deployment(live_site.id)
+      assert id == in_flight.id
+
+      for _ <- 1..3 do
+        assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => live_site.id})
+      end
+
+      assert Registry.get_deployment(in_flight.id).coalesced_attempts == 3
+
+      # ── ARM B: THE PRODUCTION REGIME — a busy box, which is what 2026-08-07
+      # actually was (failed 18, deferred 1,371). The counter reads ZERO, and
+      # that zero is the CORRECT answer. ─────────────────────────────────────
+      busy_site = static_site(bp, %{slug: "blog-busy-#{System.unique_integer([:positive])}"})
+      Process.put(:site_deploy_starter, Deploy.SyncStarter)
+      program_busy_box(busy_site)
+
+      for round <- 1..5 do
+        # THE PRECONDITION OF THE ZERO, asserted every round: at the moment the
+        # attempt runs there is NO active row, so the coalesce branch is not
+        # merely unvisited — it is unreachable. This is the assertion that makes
+        # ARM B evidence rather than a re-observation of a zero.
+        assert is_nil(Deploy.active_production_deployment(busy_site.id)),
+                "round #{round}: a settled deferral must leave the active set"
+
+        assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => busy_site.id})
+      end
+
+      rows = content_autos(busy_site)
+
+      # Five attempts, five rows of their own — the mint branch, five times.
+      assert Enum.count(rows, &(&1.status == "deferred")) == 5
+      assert Enum.sum(Enum.map(rows, & &1.coalesced_attempts)) == 0
+
+      # THE DISCRIMINATOR, in one line: a dead counter would read 0 in BOTH
+      # arms. This counter reads 3 and then 0, in the same process, against the
+      # same column, minutes apart in wall-clock and zero lines apart in code.
+      # The production zero is a fact about the fleet's regime, not about the
+      # increment.
+      assert Registry.get_deployment(in_flight.id).coalesced_attempts == 3
+    end
+
 
     test "RETRY ACCOUNTING: six consecutive busy boxes never DISCARD the rebuild" do
       {_bp, site} = setup_site()

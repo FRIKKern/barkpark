@@ -173,6 +173,34 @@ defmodule BarkparkCloud.DeployLedger do
   data, and a bare `SUM` over 2026-08-06 returns a confident `0` for a day whose
   true coalesced volume was ~1,563. The floor is therefore a CODE CONSTANT — the
   migration's applied instant — and any window starting before it is REFUSED.
+
+  ABOVE THE FLOOR, A LOW NUMBER IS A REGIME FACT AND NOT A DEAD COUNTER
+  (dr-w19-bl-coalesced-counter-reads-a-confident-zero). The reading that made
+  this suspect was `0` beside 1,371 `deferred` rows from the same day, read as
+  1,371 uncounted coalesces. It is not a gap: the two are the EXCLUSIVE branches
+  of one decision in `AutoDeployWorker.drive/2`. A second publish either finds
+  the site's previous row STILL ACTIVE — `deployments_active_site_env_index`
+  refuses the INSERT, no row is minted, this counter is bumped — or finds it
+  SETTLED, in which case the INSERT succeeds, a row IS minted, and this counter
+  is never reached. `deferred` is TERMINAL, so on a busy box every round settles
+  its own row before the next attempt runs: 1,371 deferral rows are 1,371 proofs
+  that the MINT branch was taken. The span in which the coalesce branch can fire
+  is the time a row spends active — minutes on a healthy build, one HTTP round
+  trip on a busy box (claim → `building` → 409 → `deferred`) — against a 60s
+  debounce, which is the whole explanation for the near-zero.
+
+  THE COUNTER IS ALIVE, PROVED BY A TEST THAT CAN TELL THE TWO CAUSES APART:
+  `auto_deploy_worker_test.exs`'s "THE ZERO IS THE REGIME, NOT A DEAD COUNTER"
+  runs both regimes through the same column and reads 3 in flight and 0 behind a
+  busy box. A dead counter reads 0 in BOTH. Mutation-proved in both directions:
+  deleting the `record_coalesced_attempt/1` call reds the in-flight arm only;
+  adding `"deferred"` to `Deploy.active_production_deployment/1`'s status list
+  reds the busy-box arm only.
+
+  NOT SIZED WITH `oban_jobs` MINUS `deployments`. That estimator subtracts two
+  populations that are not nested: rows also arrive from non-AutoDeployWorker
+  triggers, so post-migration it goes NEGATIVE (651 jobs vs 658 rows, -7), and
+  `oban_jobs` prunes at 7 days. It cannot size this or anything else.
   """
 
   import Ecto.Query, warn: false
@@ -424,7 +452,7 @@ defmodule BarkparkCloud.DeployLedger do
 
   @box_door_basis "every row in the window whose failure_reason carries the box's own capacity-409 marker, whatever status it settled in — the door's REFUSALS, which is a superset of the door's RE-QUEUES"
 
-  @coalesced_basis "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from `volume`, never folded into it"
+  @coalesced_basis "attempts that minted NO deployment row (AutoDeployWorker coalesced them onto an in-flight build) — DISJOINT from `volume`, never folded into it. A LOW READING IS A REGIME FACT, NOT A GAP: coalescing and minting a row are the two EXCLUSIVE branches of one decision (previous row still active → coalesce and count here; previous row settled → a row is minted and this is never touched), so `deferred` rows are the OTHER branch and can never be a denominator for this number"
 
   # What each rate's denominator COUNTS — the D34 convention label, emitted so no
   # percentage travels without saying what it is a percentage OF.
