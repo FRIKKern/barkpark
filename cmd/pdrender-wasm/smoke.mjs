@@ -188,5 +188,93 @@ for (const width of [20, 80]) {
 }
 console.log("SMOKE OK: shared nested-list fixture, mixed markers, 20/80 columns and light/dark");
 
+
+// ── image mosaic through the REAL blob (wasm-tui-image-mosaic) ───────────────
+//
+// bpRenderTUI takes an optional 5th argument: the reader's {src: base64} image
+// map. These arms prove, through the actually-built wasm and the committed
+// loader, that:
+//   (1) with no map, an image block keeps the honest "(view in Studio)" box
+//       — the pre-fix behaviour, and still the behaviour when JS pre-fetch fails;
+//   (2) with a valid same-origin PNG, the SAME block paints a half-block mosaic
+//       (no box). Revert the ImageResolver wiring in main.go and this arm reds;
+//   (3) a third-party / cross-origin src, and malformed or oversized entries,
+//       keep the box — the Go-side bounds, not the page's good manners;
+//   (4) none of the above throws: a hostile map costs you the picture, never
+//       the render.
+const MOSAIC_SRC = "/media/smoke-mosaic.png";
+// A 24×12 truecolor PNG (536 bytes), generated deterministically; small enough
+// to inline, large enough that the no-upscale mosaic emits many half-block cells.
+const MOSAIC_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAABgAAAAMCAIAAAD3UuoiAAAB30lEQVR4nA3MkbrGMAyA4fI4PC6Pw+PyODwOfs/P5XF4HB6Xx+VdxznvBbylFJaCFNZCLWwFLeyFVjgKVjgLXvgVeuEqROEuZOEpjMJbmIWvUIqwCCKsQhU2QYVdaMIhmHAKLvyELlxCCLeQwiMM4RWm8Ml/VFkqUlkrtbJVtLJXWuWoWOWseOVX6ZWrEpW7kpWnMipvZVa++h8piyLKqlRlU1TZlaYciimn4spP6cqlhHIrqTzKUF5lKp/+R42lIY21URtbQxt7ozWOhjXOhjd+jd64GtG4G9l4GqPxNmbja/+RsRhirEY1NkON3WjGYZhxGm78jG5cRhi3kcZjDOM1pvHZf+QsjjirU53NUWd3mnM45pyOOz+nO5cTzu2k8zjDeZ3pfP4fdZaOdNZO7Wwd7eyd1jk61jk73vl1eufqROfuZOfpjM7bmZ2v/0fBEkiwBjXYAg32oAVHYMEZePALenAFEdxBBk8wgjeYwRf/UbIkkqxJTbZEkz1pyZFYciae/JKeXEkkd5LJk4zkTWby5X80WAYyWAd1sA10sA/a4BjY4Bz44Dfog2sQg3uQg2cwBu9gDr7xH02WiUzWSZ1sE53skzY5JjY5Jz75TfrkmsTknuTkmYzJO5mTb/IHxiiNMCHYseMAAAAASUVORK5CYII=";
+
+const imageDoc = JSON.stringify({
+  blocks: [{ id: "img-1", type: "image", src: MOSAIC_SRC, alt: "Smoke mosaic" }],
+});
+const STUDIO_BOX = "view in Studio";
+const HALF_BLOCK = "▀"; // the mosaic's one and only cell glyph
+
+function renderImages(map) {
+  return render(imageDoc, 80, "dark", "", map);
+}
+
+// (1) no usable map → honest box (also covers a reader that never pre-fetched)
+for (const [label, arg] of [["omitted", undefined], ["null", null], ["empty", {}], ["not-an-object", "nope"]]) {
+  const out = arg === undefined ? render(imageDoc, 80, "dark", "") : renderImages(arg);
+  if (!out.includes(STUDIO_BOX)) fail("image map " + label + ": expected the honest box, got:\n" + out);
+  if (out.includes(HALF_BLOCK)) fail("image map " + label + ": painted a mosaic with no usable map");
+}
+console.log('SMOKE OK: no/empty/invalid image map -> honest "(view in Studio)" box');
+
+// (2) valid same-origin PNG → mosaic (the arm that reds if the wiring is reverted)
+const mosaicOut = renderImages({ [MOSAIC_SRC]: MOSAIC_PNG_B64 });
+if (mosaicOut.includes(STUDIO_BOX)) {
+  fail("valid image map still rendered the box — ImageResolver not wired:\n" + mosaicOut);
+}
+if (!mosaicOut.includes(HALF_BLOCK)) fail("valid image map produced no half-block cells");
+if (!/background:#[0-9a-f]{6}/.test(mosaicOut)) fail("mosaic emitted no 24-bit background colour");
+if (!mosaicOut.startsWith('<pre class="bp-tui-pre">') || !mosaicOut.endsWith("</pre>")) {
+  fail("mosaic output broke the <pre> wrapper");
+}
+console.log("SMOKE OK: same-origin image map -> half-block mosaic (" + mosaicOut.length + " bytes)");
+
+// (3) bounds — each of these must keep the box, and must not throw
+const refusals = [
+  ["cross-origin absolute", { "https://evil.example/x.png": MOSAIC_PNG_B64 }],
+  ["protocol-relative", { "//evil.example/x.png": MOSAIC_PNG_B64 }],
+  ["data: url", { "data:image/png;base64,AAAA": MOSAIC_PNG_B64 }],
+  ["relative path", { "media/x.png": MOSAIC_PNG_B64 }],
+  ["malformed base64", { [MOSAIC_SRC]: "!!!! not base64 !!!!" }],
+  ["unsupported mime (webp)", { [MOSAIC_SRC]: Buffer.from("RIFF    WEBPVP8 junkjunk").toString("base64") }],
+  ["oversized entry", { [MOSAIC_SRC]: "A".repeat(8 * 1024 * 1024) }],
+  ["non-string value", { [MOSAIC_SRC]: 12345 }],
+];
+for (const [label, map] of refusals) {
+  let out;
+  try {
+    out = renderImages(map);
+  } catch (e) {
+    fail("refused image map (" + label + ") THREW instead of degrading: " + e);
+  }
+  if (!out.includes(STUDIO_BOX)) fail(label + ": expected the honest box, got:\n" + out.slice(0, 400));
+  if (out.includes(HALF_BLOCK)) fail(label + ": painted a mosaic from a refused entry");
+}
+console.log("SMOKE OK: " + refusals.length + " refused image-map shapes degraded to the honest box without throwing");
+
+// (4) a refused entry alongside a good one leaves the good one working
+const mixedDoc = JSON.stringify({
+  blocks: [
+    { id: "img-1", type: "image", src: MOSAIC_SRC, alt: "Smoke mosaic" },
+    { id: "img-2", type: "image", src: "https://evil.example/x.png", alt: "Third party" },
+  ],
+});
+const mixed = render(mixedDoc, 80, "dark", "", {
+  [MOSAIC_SRC]: MOSAIC_PNG_B64,
+  "https://evil.example/x.png": MOSAIC_PNG_B64,
+});
+if (!mixed.includes(HALF_BLOCK)) fail("mixed doc: the same-origin image lost its mosaic");
+if (!mixed.includes(STUDIO_BOX)) fail("mixed doc: the third-party image lost its honest box");
+console.log("SMOKE OK: mixed doc — same-origin mosaic AND third-party box in one render");
+
 console.log("SMOKE OK: all " + slateFixtures.length + " slate fixtures (m17→m26) rendered through the wasm reader with three refutations each");
 process.exit(0);
