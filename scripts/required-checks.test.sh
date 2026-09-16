@@ -3838,7 +3838,7 @@ df2a0ce56f7b  C  .claude/workflows/bp-studio-space-priority-charter.md:47    D23
 e56a9d69eae8  B  .claude/workflows/bp-studio-space-priority-charter.md:2445  D250 STRIKES the old memory
 9dacf1fcfe5d  C  .claude/workflows/bp-studio-structure-polish-charter.md:63  R1, verified at its date
 c1679f421f3e  C  .claude/workflows/bp-truth-grip-charter.md:134              dated record
-a8aa0142eb43  B  docs/ops/merge-gates.md:239                                 "false since 2026-07-28"
+aaa39774bb61  B  docs/ops/security-gates.md:76                               "false since 2026-07-28" — the sentence moved here when the Security-gates section was split out of merge-gates.md
 a6fb32e3a3bc  C  tooling/grip/ledger/bpgraph-tripwire-selftest-2026-07-26.md:14        dated recipe ledger
 798c02f0775f  C  tooling/grip/ledger/cch-w35-protection-claim-census-2026-08-06.md:79   READ 2026-08-06: quotes the blanket claim as the SHAPE advisory_prose_check cannot reach — a bare quoted phrase, so the fence correctly does NOT exempt it
 041309eecfc1  C  tooling/grip/ledger/cch-w35-protection-claim-census-2026-08-06.md:126  READ 2026-08-06: dated finding about a FOREIGN charter's :96 and why that alternation branch is enumerated; true of that file on that day

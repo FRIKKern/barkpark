@@ -52,7 +52,7 @@ name: security
 #                   OTP 27+ — it is the single documented --ignore-advisory-ids
 #                   suppression in the audit step. A NEW CVE reds the fleet.
 #
-# Policy of record: docs/ops/merge-gates.md §Security gates.
+# Policy of record: docs/ops/security-gates.md (split out of merge-gates.md).
 #
 # ── THE SKIP SHIM (transplanted from elixir.yml / console-harness.yml) ───────
 #
