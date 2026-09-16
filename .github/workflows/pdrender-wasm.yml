@@ -27,6 +27,16 @@ on:
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
+      # The recipe this gate exists to prove, and the committed loader the smoke
+      # harness instantiates the fresh blob against. Both were absent until
+      # task-519d5ea68ddca27f: `make wasm` could be broken, emptied, or re-pointed
+      # and this gate stayed silent (live: PR #18481 touched only Makefile and
+      # rendered no pdrender-wasm row). Bare `Makefile`, not `**/Makefile` — the
+      # root Makefile is the only tracked Makefile in the repo and the only one
+      # carrying the `wasm` / `wasm-siblings-check` targets; the recursive glob
+      # would fire this gate on any future nested Makefile that cannot affect it.
+      - "Makefile"
+      - "api/priv/static/assets/bp-wasm-exec.js"
   pull_request:
     paths:
       - "cmd/pdrender-wasm/**"
@@ -35,6 +45,16 @@ on:
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
+      # The recipe this gate exists to prove, and the committed loader the smoke
+      # harness instantiates the fresh blob against. Both were absent until
+      # task-519d5ea68ddca27f: `make wasm` could be broken, emptied, or re-pointed
+      # and this gate stayed silent (live: PR #18481 touched only Makefile and
+      # rendered no pdrender-wasm row). Bare `Makefile`, not `**/Makefile` — the
+      # root Makefile is the only tracked Makefile in the repo and the only one
+      # carrying the `wasm` / `wasm-siblings-check` targets; the recursive glob
+      # would fire this gate on any future nested Makefile that cannot affect it.
+      - "Makefile"
+      - "api/priv/static/assets/bp-wasm-exec.js"
 
 concurrency:
   # Never cancel main; collapse superseded PR runs.
