@@ -39,6 +39,79 @@
 # does not itself re-publish an address or a host.
 set -uo pipefail
 
+SELF_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+# --- --selftest ---------------------------------------------------------------
+# Distrust vacuous green. Both arms print `ok:` when they find nothing, and a
+# scanner that has gone BLIND prints the same `ok:`. Each case below builds a
+# throwaway 2-commit repo, plants exactly ONE violation, and re-invokes THIS
+# script against it via CHARTER_HYGIENE_ROOT/_BASELINE — so the assertions drive
+# the shipping gate, not a copy of it. It plants nothing in this repo.
+if [ "${1:-}" = "--selftest" ]; then
+  st_fail=0
+  # Fixture addresses use a NON-REAL final octet in each real /24: the arms are
+  # /24 predicates, so these exercise the same branch without this guard
+  # itself republishing a host address the ruling is about.
+  st_case() { # $1 expected rc, $2 label, $3 shell body run inside the fixture
+    local want="$1" label="$2" body="$3" dir rc out
+    dir=$(mktemp -d)
+    (
+      cd "$dir" || exit 2
+      git init -q . && git config user.email t@t.invalid && git config user.name t
+      mkdir -p .claude/workflows tooling/grip/ledger
+      # a GRANDFATHERED charter that legitimately carries a forward marker
+      printf 'ssh root@89.167.28.7 -i ~/.ssh/barkpark_indx\n' > .claude/workflows/old-charter.md
+      printf 'measured on 157.180.90.7\n' > tooling/grip/ledger/row.md
+      git add -A && git commit -qm baseline
+      eval "$body"
+    ) >/dev/null 2>&1
+    base=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+    out=$(CHARTER_HYGIENE_ROOT="$dir" CHARTER_HYGIENE_BASELINE="$base" bash "$SELF_PATH" 2>&1); rc=$?
+    if [ "$rc" -eq "$want" ]; then
+      echo "ok:   selftest: $label (rc=$rc)"
+    else
+      echo "FAIL: selftest: $label expected rc=$want got rc=$rc"
+      printf '%s\n' "$out" | sed 's/^/        /'
+      st_fail=1
+    fi
+    rm -rf "$dir"
+  }
+
+  # POSITIVE CONTROL: the untouched fixture must PASS. Without this every case
+  # below could be passing for the wrong reason (a scanner that always reds).
+  st_case 0 "clean fixture passes"                    ':'
+  st_case 1 "arm B reds on a NEW charter with a host marker" \
+    'printf "ssh root@89.167.28.7\n" > .claude/workflows/new-charter.md; git add -A'
+  st_case 1 "arm B reds on a NEW charter with an ssh key path" \
+    'printf "ssh -i ~/.ssh/barkpark_indx box\n" > .claude/workflows/new.md; git add -A'
+  st_case 1 "arm B reds on a NEW charter with an operator address" \
+    'printf "owner: me@guerrilla.no\n" > .claude/workflows/new.md; git add -A'
+  # DISCRIMINATION: the SAME payload in a grandfathered charter must stay quiet.
+  # If this case reds, arm B is banning the marker, not the new-file predicate.
+  st_case 0 "arm B stays quiet when a grandfathered charter grows the same marker" \
+    'printf "ssh root@89.167.28.7\n" >> .claude/workflows/old-charter.md'
+  st_case 0 "arm B stays quiet on a NEW charter with no marker" \
+    'printf "a clean new charter\n" > .claude/workflows/new.md; git add -A'
+  # ARM A overrides every exclusion — including the evidence tree.
+  st_case 1 "arm A reds on a zero-baseline address in the evidence tree" \
+    'printf "tenant a@gyldendal.no\n" >> tooling/grip/ledger/row.md'
+  st_case 0 "arm A ignores a forward marker in the evidence tree" \
+    'printf "measured on 178.105.92.7 via ~/.ssh/barkpark_indx\n" >> tooling/grip/ledger/row.md'
+  # A guard that cannot establish its baseline must REFUSE, not pass silently.
+  d=$(mktemp -d); (cd "$d" && git init -q . && git commit -q --allow-empty -m x) >/dev/null 2>&1
+  if CHARTER_HYGIENE_ROOT="$d" CHARTER_HYGIENE_BASELINE=0000000000000000000000000000000000000000 \
+       bash "$SELF_PATH" >/dev/null 2>&1; then
+    echo "FAIL: selftest: an unresolvable baseline PASSED — the guard can go blind"; st_fail=1
+  else
+    echo "ok:   selftest: an unresolvable baseline refuses instead of passing"
+  fi
+  rm -rf "$d"
+
+  echo ""
+  [ "$st_fail" -eq 0 ] && { echo "charter-corpus-hygiene --selftest: PASS"; exit 0; }
+  echo "charter-corpus-hygiene --selftest: FAILED"; exit 1
+fi
+
 BASELINE="${CHARTER_HYGIENE_BASELINE:-a5c5486163a16b16956ab20a7c5932650f5fd05c}"
 ROOT="${CHARTER_HYGIENE_ROOT:-}"
 if [ -n "$ROOT" ]; then cd "$ROOT" || exit 2; else
