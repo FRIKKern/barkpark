@@ -195,7 +195,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # `fetch-depth: 0` IS LOAD-BEARING — DO NOT DROP IT BACK TO THE DEFAULT.
+      #
+      # The pds gate below re-runs tooling/pds/recipes.json against the REAL
+      # repository, and every one of those recipes reads `origin/main`; two of
+      # them read HISTORY (`origin/main~1`, and the pinned ancestor
+      # 6e53d27824206c5cbda4eb8916795921064165e9). actions/checkout's default
+      # `fetch-depth: 1` gives a one-commit shallow clone, and on a
+      # pull_request it never creates `origin/main` at all — so those reads
+      # exit 128/1 for reasons that have nothing to do with the claims being
+      # adjudicated, and the adjudicator correctly rules them REFUTED.
+      #
+      # MEASURED 2026-09-16, and this job had NEVER been green since the pds
+      # step was wired on 2026-09-12: push-to-main runs failed 3 checks
+      # (5.7 ancestry, 8.8 four rows RE-DERIVED, 9.1 no REFUTED row), and the
+      # pull_request arm failed 15 (every `origin/main` read exiting 128).
+      # Reproduced outside CI by running the suite in a `--depth 1` clone of
+      # this repo: the SAME three names, same commit — so the split was the
+      # CHECKOUT SHAPE, not the board, and NOTHING here was re-baselined.
+      # A full clone of that same commit prints `276 checks, 0 failed`.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
