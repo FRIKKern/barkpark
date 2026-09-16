@@ -726,14 +726,42 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     }
   end
 
-  defp with_coverage(window, cohorts) do
-    Map.put(window, :coverage, %{
+  defp with_coverage(window, cohorts, opts \\ []) do
+    envelope = %{
       clock: "the SAME clock as `deferral_wait`",
       basis: "COVERAGE, and only coverage",
       as_of: @read_at,
       maturity_seconds: 86_400,
       cohorts: cohorts
-    })
+    }
+
+    # The envelope-level named tail is OPTIONAL in this helper on purpose: every
+    # pre-existing fixture below omits it, and those fixtures are the control
+    # that the clause stays silent when the ledger names nobody.
+    envelope =
+      case Keyword.fetch(opts, :sites) do
+        {:ok, sites} ->
+          Map.merge(envelope, %{
+            never_covered_sites: sites,
+            never_covered_sites_total: Keyword.get(opts, :sites_total, length(List.wrap(sites))),
+            never_covered_sites_truncated: Keyword.get(opts, :sites_truncated, false)
+          })
+
+        :error ->
+          envelope
+      end
+
+    Map.put(window, :coverage, envelope)
+  end
+
+  defp site_entry(name, environment, never_covered, opts \\ []) do
+    %{
+      site_id: Keyword.get(opts, :site_id, "00000000-0000-0000-0000-00000000000#{never_covered}"),
+      name: name,
+      slug: Keyword.get(opts, :slug),
+      environment: environment,
+      never_covered: never_covered
+    }
   end
 
   test "the coverage partition reaches the reader, with its window and its fence named" do
@@ -820,6 +848,165 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     refute body =~ "of those,"
     refute body =~ "a cohort the digest could not read"
+  end
+
+  ## ── WHICH SITES, BY NAME (dr-w35-bl-digest-blind-to-never-covered-sites) ──
+  ##
+  ## The count says HOW MANY and the environment split says WHERE. Only this
+  ## list says WHICH, and an operator who cannot name the site cannot go and
+  ## look at it. The ledger has computed the named tail since #11534; the digest
+  ## threw the whole envelope away.
+
+  test "a never-covered site is NAMED in the digest, not merely counted" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [
+            cohort("deferred", 502, 502, 0),
+            cohort("failed", 18, 16, 2,
+              by_environment: [%{environment: "production", never_covered: 2}]
+            )
+          ],
+          sites: [
+            site_entry("Aurora Docs", "production", 2),
+            site_entry("Beacon Marketing", "preview", 1)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # THE NAME IS THE ASSERTION. "the list is non-empty" would pass on a clause
+    # that printed two anonymous bullets, which is the exact anonymity this
+    # list exists to end.
+    assert body =~
+             " — the sites still not covered: Aurora Docs in production (2), Beacon Marketing in preview (1)"
+
+    # …and it rides the SAME line as the counts it names, so the sentence cannot
+    # be quoted without its population.
+    [line] = for l <- String.split(body, "\n"), l =~ "Coverage over last 24h", do: l
+    assert line =~ "Aurora Docs"
+    assert line =~ "2 still not after 24.0h"
+  end
+
+  test "a fully covered window names NOBODY — the clause cannot invent a site" do
+    # THE CONTROL. Same fixture shape, nothing sitting dark: the ledger sends an
+    # empty tail and the digest must print no name at all. A morning email that
+    # names a site next to a clean cohort is a false alarm with a real site's
+    # name on it.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("deferred", 502, 502, 0), cohort("failed", 18, 18, 0)],
+          sites: []
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "18 of 18 failed rows have since been covered by a later live build, 0 still"
+    refute body =~ "the sites still not covered"
+    refute body =~ "Aurora Docs"
+    refute body =~ "a site since deleted"
+  end
+
+  test "a site the ledger reported with a zero is not printed as sitting dark" do
+    # NON-VACUITY, THE THIRD DIRECTION: the tail is a list OF never-covered
+    # sites, so an entry whose count is zero is not one and must not be named.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 17, 1)],
+          sites: [
+            site_entry("Quiet Site", "production", 0),
+            site_entry("Loud Site", "production", 1)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "the sites still not covered: Loud Site in production (1)"
+    refute body =~ "Quiet Site"
+  end
+
+  test "a truncated tail says so — the top N can never read as the whole tail" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 16, 2)],
+          sites: [site_entry("Aurora Docs", "production", 2)],
+          sites_total: 37,
+          sites_truncated: true
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "Aurora Docs in production (2) (1 of 37 — the list is truncated)"
+  end
+
+  test "an untruncated tail carries NO truncation sentence" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 16, 2)],
+          sites: [site_entry("Aurora Docs", "production", 2)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "the sites still not covered: Aurora Docs in production (2)."
+    refute body =~ "the list is truncated"
+  end
+
+  test "a site whose name the ledger could not resolve falls back, and never raises" do
+    # `name` is NULLABLE at the ledger — a site deleted since the deployment was
+    # written resolves to no name. The slug survives it; when neither does, the
+    # row is still reported, because a dropped row would make the named list
+    # disagree with the count it is naming.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 15, 3)],
+          sites: [
+            site_entry(nil, "production", 2, slug: "aurora-docs"),
+            site_entry(nil, nil, 1)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "the sites still not covered: aurora-docs in production (2), a site since deleted in an unnamed environment (1)"
+  end
+
+  test "an envelope with NO never_covered_sites key still renders — one fragment, never the email" do
+    # Every fixture written before this clause existed omits the key; the digest
+    # reads it with `Map.get/3` for the same reason its cohort head names every
+    # count it prints.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 15, 3)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "15 of 18 failed rows have since been covered by a later live build, 3 still not after 24.0h."
+
+    refute body =~ "the sites still not covered"
   end
 
   test "the reach limit is named, and it is the widest window the email reports" do
