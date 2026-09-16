@@ -21,6 +21,7 @@ lib/barkpark/plugins/indx/persistence.ex	load
 lib/barkpark/plugins/media.ex	load_schema!
 lib/barkpark/plugins/onixedit.ex	book_raw_with_subschemas
 lib/barkpark/plugins/onixedit/export.ex	to_file
+lib/barkpark/plugins/onixedit/export/codelist_source.ex	read_source!
 lib/barkpark/plugins/onixedit/export/validator.ex	bounded_xmllint
 lib/barkpark/plugins/onixedit/export/validator.ex	run_xmllint
 lib/barkpark/plugins/onixedit/schemas/contributor.ex	definition_map
