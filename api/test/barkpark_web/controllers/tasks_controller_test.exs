@@ -1883,6 +1883,48 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["doc"]["claim"]["epoch"] == epoch
     end
 
+    # task-66cc8ad999fa5a24 — `--ack-gate` ON THE WIRE. The GitHub reporter-loop
+    # flag is the ONE machine signal the census and the close gate read, and
+    # until this flag existed no writer with a `bp` verb could mint it: the
+    # eleven pre-gate `gh-<num>` rows could be given a criterion that READ like
+    # an acknowledgement and was invisible to both. Proven end to end here
+    # because the controller's `put_opt` is the seam that carries it.
+    test "--ack-gate on a --miss SEED mints the reporter-loop flag; in-range does not",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [%{"criterion" => "the first bar", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: to_string(epoch)})
+
+      # In range: the flag is dropped — a stored criterion is never retro-flagged.
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=the+first+bar&miss=true&note=still+going&ack-gate=true",
+          body
+        )
+
+      assert resp.status == 200
+      [first] = Jason.decode!(resp.resp_body)["doc"]["content"]["acceptance_criteria"]
+      refute Map.has_key?(first, "ack_gate")
+
+      # One past the end: the SEED mints it, born unmet.
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=1&criterion-text=ACKNOWLEDGED+UPSTREAM&miss=true&note=backfilled&ack-gate=true",
+          body
+        )
+
+      assert resp.status == 200
+      [_first, seeded] = Jason.decode!(resp.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert seeded["criterion"] == "ACKNOWLEDGED UPSTREAM"
+      assert seeded["ack_gate"] == true
+      assert seeded["met"] == false, "seeding the obligation never discharges it"
+    end
+
     # D56 — the guard on the WIRE. An index-only --met stamp (the exact shape
     # five of eight Wave-4 builders sent) is a 409 whose message tells the caller
     # what to type, and it writes nothing. The message is not decoration: the bp

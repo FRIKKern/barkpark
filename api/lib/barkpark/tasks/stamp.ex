@@ -244,8 +244,12 @@ defmodule Barkpark.Tasks.Stamp do
     # A REASON or nothing. A non-string (the legacy `true`) is not an override.
     merge_gated = normalize_merge_gated(Keyword.get(opts, :merge_gated))
     observed_rev = Keyword.get(opts, :observed_rev)
+    # The reporter-loop flag, carried only to the SEED clause of
+    # `Internal.merge_criteria/2` — the literal `true` and nothing else.
+    ack_gate = Keyword.get(opts, :ack_gate) == true
 
-    with {:ok, update, result_tag} <- build_update(index, outcome, worker_id, criterion_text) do
+    with {:ok, update, result_tag} <- build_update(index, outcome, worker_id, criterion_text),
+         update = put_ack_gate(update, ack_gate) do
       do_stamp_txn(
         task_id,
         worker_id,
@@ -325,6 +329,17 @@ defmodule Barkpark.Tasks.Stamp do
 
   defp build_update(_index, {:withdraw, _no_note}, _worker, _text), do: {:error, :note_required}
   defp build_update(_index, _outcome, _worker, _text), do: {:error, :invalid_criteria}
+
+  # THE BACKFILL DOOR (task-66cc8ad999fa5a24). `--ack-gate` rides a `--miss`
+  # seed so a maintainer can give a PRE-GATE `gh-<num>` row the acknowledgement
+  # criterion it was born without. The flag is only ever MINTED, and only by
+  # `Internal.seed_criterion/4` — an in-range index drops it on the floor, which
+  # is why it can be passed on any stamp without becoming a way to retro-flag
+  # somebody else's criterion. Seeding the obligation never discharges it: the
+  # newborn entry is `met: false`, so the close gate refuses the row until the
+  # comment URL is stamped.
+  defp put_ack_gate(update, true), do: Map.put(update, "ack_gate", true)
+  defp put_ack_gate(update, _), do: update
 
   # Thread the expected criterion text into the merge as the CAS `"criterion"`
   # key — only when it is a real, non-empty string (nil/"" stay permissive).

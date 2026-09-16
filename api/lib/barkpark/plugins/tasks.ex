@@ -1272,6 +1272,12 @@ defmodule Barkpark.Plugins.Tasks do
               "REQUIRED with --met (optional with --miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[N].criterion. Do not retype it as an inline shell argument — bp reads it from a FILE with --criterion-text-file <path> (or `-` for stdin), because criterion wording is MARKDOWN and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION. It is the off-by-one guard — a --met stamp with NO text is REJECTED (409 criterion_text_required), and one whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour."
           },
           %{
+            name: "ack_gate",
+            type: "bool",
+            summary:
+              "Mint the GitHub REPORTER-LOOP flag on a criterion this stamp SEEDS (index == the current criteria length). Use it with --miss to give a PRE-GATE gh-<num> row — one born before the acknowledgement criterion existed — the criterion it never got, so the census and the close gate can see the obligation: the flag `ack_gate: true` is the ONLY thing either reads, never the wording. It is mint-only and seed-only: passing it at an in-range index does nothing, and no verb anywhere can clear it. Seeding the obligation does NOT discharge it — the criterion is born unmet, so a done/cancelled close of that row is then refused (409 acknowledgement_unposted) until the comment URL is stamped as evidence."
+          },
+          %{
             name: "met",
             type: "bool",
             summary: "Mark the criterion met. Requires non-empty --evidence."

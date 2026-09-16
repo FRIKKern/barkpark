@@ -2730,6 +2730,25 @@ defmodule BarkparkWeb.TasksController.Params do
     end
   end
 
+  @doc """
+  `true` when a stamp asks to MINT the reporter-loop flag on a criterion it is
+  seeding (task-66cc8ad999fa5a24), else `nil` — the `put_opt` shape.
+
+  Read from both wire spellings (`ack_gate` JSON body / `ack-gate` manifest flag
+  → query key) and through `stamp_flag?/1`, the same truthiness every other
+  stamp flag uses, so `--ack-gate` behaves like `--miss` on the wire.
+
+  It only ever ADDS an obligation: `Internal.seed_criterion/4` mints the flag on
+  a NEWBORN criterion and nothing anywhere can clear it, so there is nothing for
+  a hostile caller to gain and the door stays a 400-free boolean.
+  """
+  @spec stamp_ack_gate(map()) :: true | nil
+  def stamp_ack_gate(params) do
+    if stamp_flag?(Map.get(params, "ack_gate") || Map.get(params, "ack-gate")),
+      do: true,
+      else: nil
+  end
+
   defp stamp_flag?(v), do: v in [true, "true", "1"]
 
   # The optional criterion-text guard, from either wire shape. A non-string /
