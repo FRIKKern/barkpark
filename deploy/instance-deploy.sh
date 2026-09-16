@@ -1204,6 +1204,57 @@ restore_slot_sha() { # any post-stamp failure path: the slot is being retired
 }
 systemctl daemon-reload
 
+# ---- DECISION (task-f94dc334001ec8d0, 2026-09-16): a SLOT box COMPILES ON-BOX.
+# It does NOT consume the prebuilt api/_build artifact that
+# .github/workflows/release-artifact.yml mints per api-touching merge. That
+# artifact's only consumer is scripts/fetch-prebuilt.sh (via
+# scripts/apply-update.sh) on SINGLE-CHECKOUT boxes; fetch-prebuilt.sh exits 3
+# on a checkout with a .slots dir, and nothing here fetches it. pds wave-49 left
+# that asymmetry undecided. It is decided now: DECLINED, on three measured
+# grounds, none of which is "it would be hard".
+#
+# 1. THE ARTIFACT IS NOT ORDERED BEFORE THIS SCRIPT. release-artifact.yml and
+#    deploy.yml both fire on the same push and run CONCURRENTLY; neither waits
+#    for the other. Measured over the 22 main-branch pushes (2026-09-13..15)
+#    that produced BOTH a successful release-artifact run and a successful
+#    deploy run for the same sha, the artifact was published AFTER the
+#    "Deploy content instance over SSH" step had already STARTED in 14 of 22;
+#    in the remaining 8 the artifact led by at most 158s, which is inside the
+#    window this script spends on git/env/caddy before it reaches `mix`. So the
+#    fetch would take its fallback path on essentially every deploy — a new
+#    network dependency on the zero-downtime critical path, bought for a saving
+#    that is usually not there. Making it reliable means BLOCKING the deploy on
+#    a CI job, which trades guaranteed latency for occasional latency.
+#
+# 2. THE ARTIFACT BUNDLES `deps`, WHICH IS NOT PER-SLOT. build-prebuilt.sh tars
+#    `_build/prod` AND `deps`, and `api/_build_<slot>/prod/lib/<dep>/priv` is a
+#    relative symlink four levels up into the SHARED `api/deps/<dep>/priv` (28
+#    such symlinks in a prod build tree). Applying the artifact whole therefore
+#    writes state the ACTIVE slot is serving through — the one invariant this
+#    whole script exists to hold ("only the idle root is touched"). Extracting
+#    `_build/prod` alone dodges that, but then deps.get/deps.compile must still
+#    run on-box, which is the expensive half of the build anyway.
+#
+# 3. THE SHA IS CHOSEN BY THE BOX, NOT BY THE RUN. Both channels land on
+#    `reset --hard FETCH_HEAD` — production takes whatever origin/main is at
+#    fetch time (deliberately: burst merges coalesce, see deploy/README.md), and
+#    the staging channel deploys ANY ref, including `pull/<n>/head`, for which
+#    release-artifact.yml (`on: push: branches: [main]`) never mints anything.
+#    A per-sha artifact cache cannot serve a deployer that picks its own sha.
+#
+# REVISIT IF any one of these stops being true: release-artifact.yml becomes a
+# `needs:` of the instance-deploy job (fixes 1 and 3), or build-prebuilt.sh
+# starts publishing a deps-free, build-root-relocatable `_build/prod` (fixes 2).
+# Until then the prebuilt lane stays single-checkout-only and the mint is NOT
+# wasted — the control-plane/freshen path does consume it.
+#
+# GUARDED, not merely written: deploy/instance-deploy_test.sh, Case "the slot
+# deployer COMPILES ON-BOX and fetches no prebuilt artifact" — a happy deploy's
+# recorded curl argv carries no `releases/download` / `api-build.tar.zst` /
+# `stamp.json` (with a non-empty-log control so the absence is not vacuous), and
+# the upstream refusal is exercised both ways (a .slots fixture exits 3, the
+# same script without .slots does not). Add a fetch here and those arms red.
+#
 # ---- Clean-build the idle slot's root while the active slot keeps serving
 # its own untouched root. A build failure = zero downtime. The golden rules
 # still hold: from-scratch build (fresh HEEx), deps.compile --force.
