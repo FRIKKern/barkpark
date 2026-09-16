@@ -257,7 +257,18 @@ echo "  citations  : ${CITES:-0} introduced occurrence(s) over: ${DISTINCT:-(non
 : > "$WORK/defs.head"
 if [ -z "$DIFF_FILE" ] && ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$CHARTER_PATH" 2>/dev/null; then
   if defs_at "$HEAD_SHA" > "$WORK/defs.head.all" 2>/dev/null; then
-    comm -13 "$WORK/defs.base" <(sort "$WORK/defs.head.all") 2>/dev/null \
+    # A TEMP FILE, NOT A PROCESS SUBSTITUTION. Process substitution is a
+    # bashism (the token is deliberately not written here: it would enrol this
+    # file back in the census population it is being removed from). Under a
+    # POSIX `sh` (which is what `/bin/sh` is on macOS — bash 3.2 in POSIX mode)
+    # it is a parse error at EXPANSION time, so this script would die here
+    # having already printed its controls, and the caller reads the exit status
+    # of the last completed command. That is the vacuous-green class
+    # scripts/posix-vacuous-green-census.sh hunts; this file is not on its
+    # roster and does not carry the interpreter guard, so the construct simply
+    # does not belong here. The temp file is exactly equivalent under bash.
+    sort "$WORK/defs.head.all" > "$WORK/defs.head.sorted"
+    comm -13 "$WORK/defs.base" "$WORK/defs.head.sorted" 2>/dev/null \
       | sort -n > "$WORK/defs.head" || : > "$WORK/defs.head"
     echo "  same-PR    : this PR's charter diff defines $(grep -c . < "$WORK/defs.head" | tr -d ' ') new number(s) — exempt, see the header"
   fi
