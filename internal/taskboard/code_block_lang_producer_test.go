@@ -150,7 +150,7 @@ func TestGoldenPaperFixtureUsesTheContractLanguageField(t *testing.T) {
 		}
 	}
 	if codeBlocks == 0 {
-		t.Fatalf("the golden paper fixture no longer contains a code block — the paper "+
+		t.Fatalf("the golden paper fixture no longer contains a code block — the paper " +
 			"goldens stopped covering the field this lock guards; restore one or retire this test")
 	}
 }
