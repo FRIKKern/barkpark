@@ -123,6 +123,24 @@ rides the same-origin HTTP `/api/find` route. That's a soft degrade, not a
 failure. One public-read site token satisfies both the search channel and the
 flat `/v1/graph` corpus route.
 
+### `BARKPARK_TOKEN` is READ-ONLY, and this site ships no control that needs more
+
+Because the same value is inlined into the browser bundle above, it must be a
+**public-read** token — and a public-read token is refused on every non-`GET`
+against the API's token-gated pipeline (it answers `403 {"code":"forbidden"}`,
+never a partial success). So a spawned site cannot trigger an index rebuild, and
+**this template ships no admin control that pretends otherwise**: there is no
+`app/api/admin/*` route here. A Next route handler that attached
+`Authorization: Bearer ${BARKPARK_TOKEN}` to a `POST .../reindex` used to exist
+and could only ever 403; handing it a write token instead would have shipped a
+write credential to every visitor, which is strictly worse. Rebuild the index
+from a trusted machine with a write-scoped token instead — `bp` on your laptop
+or CI, never from the site.
+
+`token-guard.test.mjs` pins this: the route stays deleted, no file under
+`templates/search-starter` references `admin/reindex`, and no route handler in
+the template builds an upstream `/reindex` URL.
+
 ## Serving under `/sites/<slug>/`
 
 Unlike a single-page site, the finder is **multi-route** (`/d/[type]/[slug]`,
