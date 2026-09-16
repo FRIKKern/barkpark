@@ -401,8 +401,11 @@
         <h2>05 · Status pills, plan chip, provider marks</h2>
         <p class="sg-note">
           Pill grammar: glyph + colour + word — three redundant channels, told ONCE per row.
-          The status-pill is the single status voice; the deployment pill and dot-badge ship as
-          they are today (decision 24 folds them into statusMeta in the sweep wave). Provider
+          The status-pill is the single status voice, and since the decision-24 sweep that
+          includes every DEPLOY status chip: the `.dep-*` family is retired and the second row
+          below is the same family, driven by <code>statusMeta</code> in app.js. Two SHAPE
+          variants compose with a role — <code>--hollow</code> (open chip: deferred) and
+          <code>--stopped</code> (dashed, dimmed: cancelled). Provider
           marks are hollow (identity, never status). The plan chip is the only place plan state
           appears outside Billing. Lifecycle glyphs are tinted live through each state's status
           role via <code>.bp-inst--&lt;state&gt;</code>.
@@ -417,11 +420,13 @@
               <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
             </div>
             <div class="sg-row">
-              <span class="dep-pill dep-live">Live</span>
-              <span class="dep-pill dep-building">Building</span>
-              <span class="dep-pill dep-pushing">Pushing</span>
-              <span class="dep-pill dep-queued">Queued</span>
-              <span class="dep-pill dep-failed">Failed</span>
+              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Building</span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Pushing</span></span>
+              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Queued</span></span>
+              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Failed</span></span>
+              <span class="status-pill status-pill--warn status-pill--hollow"><span class="status-pill-dot"></span><span class="status-pill-label">Deferred</span></span>
+              <span class="status-pill status-pill--neutral status-pill--stopped"><span class="status-pill-dot"></span><span class="status-pill-label">Cancelled</span></span>
               <span class="sg-plan-chip">Supporter</span>
             </div>
             <div class="sg-row">

@@ -5324,9 +5324,16 @@ test("dr-w5-followup (c2): EVERY statusPill render site is enumerated FROM THE C
   // from something that is not a classifyBp state (the update badge, the meter
   // pill, a token's Active/Disabled). So covering statusOf covers all four
   // sites by construction, and this is the assertion that keeps that true.
+  // gr-backlog-d24 re-aimed this at the indirection the sweep introduced. There
+  // is now ONE emitter, statusMetaPill, and statusPill is a DELEGATION to it —
+  // so "statusPill paints statusOf's answer" is two links, and both are pinned:
+  // (i) the emitter composes the head from its meta's role, and (ii) statusPill
+  // hands it statusOf(bp) and nothing else.
   const producers = (APP_SRC.match(/status-pill status-pill--' \+ esc\(([a-zA-Z0-9_.]+)\)/g) || []);
-  assert.ok(producers.some((p) => p.includes("esc(s.role)")),
-    "statusPill no longer paints its role from statusOf's answer");
+  assert.ok(producers.some((p) => p.includes("esc(meta.role)")),
+    "statusMetaPill no longer paints its role from the meta it was handed");
+  assert.match(APP_SRC, /function statusPill\(bp, extraClass\) \{\s*return statusMetaPill\(statusOf\(bp\), extraClass\);\s*\}/,
+    "statusPill is no longer a pure delegation to statusMetaPill over statusOf's answer");
 
   // ── THE RENDERS. All four sites, driven, for both new states.
   const STRAINED = { ...VITAL_BOX({ cpu_cores: 2, load15: 3.6 }), id: "b1", name: "guerrilla" };
@@ -18489,13 +18496,13 @@ test("gr-p3: a cancelled row states its state through the pill, no invented copy
   // this test being satisfied by a blanket discard.
   const bare = { id: "dc", status: "cancelled", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:01:00Z" };
   const html = hooks.deployRow(bare, null);
-  assert.match(html, /dep-pill dep-cancelled/);
+  assert.match(html, /status-pill--neutral status-pill--stopped/);
   assert.match(html, /Cancelled/);
   assert.doesNotMatch(html, /deploy-fail/, "a cancelled row with nothing to say invents no panel");
   assert.equal(hooks.deployIsRefusal(bare, "cancelled"), false, "silence is not a refusal");
   // THE TWIN: the same status, the same pill, but the server sent words.
   const spoken = hooks.deployRow({ ...bare, failure_reason: "refused: … --prebuilt …" }, null);
-  assert.match(spoken, /dep-pill dep-cancelled/, "still a cancelled row");
+  assert.match(spoken, /status-pill--neutral status-pill--stopped/, "still a cancelled row");
   assert.match(spoken, /deploy-fail/, "a cancelled row that HAS something to say says it");
 });
 
@@ -18565,7 +18572,7 @@ test("gr-p3: siteDetailHtml — domains mount present, Scale stays read-only, re
   // The connected GitHub button carries the mono repo name (v4 header), not a bare verb.
   assert.match(html, /id="site-github"[^>]*><span class="mono">acme\/site<\/span>/);
   // The headline chip is honest: current live row → Live.
-  assert.match(html, /dep-pill dep-live/);
+  assert.match(html, /status-pill status-pill--ok/);
 });
 
 // ── cch-w48-s2 (charter D539): THE ONE ADMIN DOOR AMONG FIVE MEMBER-LEGAL ONES ─
@@ -19069,14 +19076,20 @@ test("cch-w16-s4: all FOUR Visit anchors are gated — siteRow, globalSiteRow an
 test("cch-w16-s4: the never-deployed DETAIL grows the neutral chip — it used to say nothing at all", () => {
   const never = s4Site(S4_STATES[4]);
   const detail = hooks.siteDetailHtml(never, S4_BP, [], "acme-never.acme.com", []);
-  assert.equal(countAll(detail, "dep-pill"), 1, "exactly one status chip in the head");
+  // gr-backlog-d24: the old instrument counted `dep-pill`, which worked only
+  // while the deploy chip had a family of its OWN — under the unified grammar
+  // that class is shared with every other neutral pill on the page, so counting
+  // it measures the page, not this chip. Count the chip's own LABEL instead:
+  // the assertion was always "the head states this once", never "one pill".
+  assert.equal(countAll(detail, ">Not deployed</span>"), 1, "exactly one status chip in the head");
+  assert.equal(countAll(detail, 'title="Not deployed to production"'), 1, "…and it is not duplicated");
   assert.ok(detail.includes(">Not deployed</span>"), "the visible copy matches the LIST word for word");
   assert.ok(detail.includes('title="Not deployed to production"'), "the tooltip names the environment");
   assert.ok(detail.includes('aria-label="Not deployed to production"'), "and so does the accessible name");
   // The deployed detail is unchanged: a live pointer + a live row still reads Live.
   const liveDetail = hooks.siteDetailHtml(
     s4Site(S4_STATES[0]), S4_BP, [{ id: "d-live", status: "live" }], "acme-live.acme.com", []);
-  assert.ok(liveDetail.includes("dep-live") && !liveDetail.includes(">Not deployed<"),
+  assert.ok(liveDetail.includes("status-pill--ok") && !liveDetail.includes(">Not deployed<"),
     "a live site is untouched by the neutral case");
 });
 
@@ -19116,9 +19129,11 @@ test("ssw8: siteLiveUrl — the manufactured 'Visit ↗' strips to URL-safe BEFO
 test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the pointer names a live row, else nothing", () => {
   const site = { current_deployment_id: "d1" };
   const live = [{ id: "d1", status: "live" }];
-  assert.match(hooks.siteStatusChip(site, live), /dep-live/);
+  assert.match(hooks.siteStatusChip(site, live), /status-pill--ok/);
   const building = [{ id: "d2", status: "building" }, { id: "d1", status: "live" }];
-  assert.match(hooks.siteStatusChip(site, building), /dep-building">Deploying/);
+  assert.match(hooks.siteStatusChip(site, building), /status-pill--warn/);
+  assert.match(hooks.siteStatusChip(site, building), />Deploying</,
+    "this surface keeps its own copy — the grammar unifies the LOOK, not the words");
   // Pointer names a row that is not in the list (stale) → no chip, never invented.
   // This site HAS served a build, so "Not deployed" here would be the same lie
   // in the other direction: silence is the only honest answer.
@@ -19127,8 +19142,9 @@ test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the po
   // detail head said NOTHING about deployment while offering two doors to the
   // site. It now takes D182's ruled pair.
   const never = hooks.siteStatusChip({}, []);
-  assert.match(never, /class="dep-pill"/, "the neutral chip rides the BARE base class — this slice ships no CSS");
-  assert.ok(!/dep-live|dep-building|dep-queued|dep-failed/.test(never), "no borrowed status colour");
+  assert.match(never, /class="status-pill status-pill--neutral"/,
+    "the neutral chip rides the family's neutral role and no variant");
+  assert.ok(!/status-pill--(ok|warn|danger|hollow|stopped)/.test(never), "no borrowed status colour or shape");
   assert.match(never, />Not deployed</, "the VISIBLE copy is the list's word for word");
   assert.match(never, /title="Not deployed to production"/, "the tooltip names the environment");
   assert.match(never, /aria-label="Not deployed to production"/, "…and so does the accessible name");
@@ -19232,7 +19248,8 @@ test("cch-w64-s6: a DEFERRED row is a refusal too — it speaks, once, and its p
     "…and a status word alone still invents no copy");
 
   const html = hooks.deployRow(deferred, null);
-  assert.match(html, /dep-pill dep-deferred/, "its own pill class — no longer the .dep-queued-identical base");
+  assert.match(html, /status-pill--warn status-pill--hollow/,
+    "its own role+variant — warn hue on an OPEN chip, never the queued look");
   assert.match(html, /class="deploy-fail deploy-fail--blocked"/, "a refusal is a decision, not a crash");
   assert.match(html, /already at capacity/, "the box's own sentence reaches the person");
   // SAID ONCE (charter D793). The old guard was `d.detail === deployRefusalCopy(d)`,
@@ -19286,7 +19303,7 @@ test("cch-w28-bl: deployIsRefusal — cancelled WITH copy, never cancelled alone
 
 test("cch-w28-bl: deployRow — a refused publish renders the remedy, calm-toned, exactly once", () => {
   const html = hooks.deployRow(refusedRow(), null);
-  assert.match(html, /dep-pill dep-cancelled/, "still honestly Cancelled");
+  assert.match(html, /status-pill--neutral status-pill--stopped/, "still honestly Cancelled");
   assert.match(html, /class="deploy-fail deploy-fail--blocked"/, "a refusal is a decision, not a crash — amber, not crash-red");
   assert.match(html, /bp cloud site deploy/, "THE REMEDY reaches the person");
   assert.match(html, /--prebuilt/);
@@ -19299,7 +19316,7 @@ test("cch-w28-bl: deployRow — a refused publish renders the remedy, calm-toned
 
 test("cch-w28-bl: previewRow — the twin renders the same refusal (it used to be untestable)", () => {
   const html = hooks.previewRow(refusedRow({ branch: "main", preview_host: "p.acme.dev" }));
-  assert.match(html, /dep-pill dep-cancelled/);
+  assert.match(html, /status-pill--neutral status-pill--stopped/);
   assert.match(html, /class="deploy-fail deploy-fail--blocked"/);
   assert.match(html, /bp cloud site deploy/);
   assert.match(html, /--prebuilt/);
@@ -33536,4 +33553,127 @@ test("cch-w73-bl FENCE CONTROL: removing the fence reds THIS test — the member
     "UNFENCED, reproduced: the member's boot POSTs the install the router will refuse");
   assert.ok(!/Only a team admin can connect GitHub/.test(w73Toasts(nodes)),
     "…and the true sentence is gone with the fence that produced it");
+});
+
+// ── gr-backlog-d24: THE ONE STATE GRAMMAR ────────────────────────────────────
+//
+// WHAT THIS PINS AND WHY IT IS NOT "PRESENT IN FILE". The sweep's claim is a
+// NEGATIVE one — that a SECOND vocabulary for deploy state no longer exists —
+// and a negative claim is exactly the kind an "is the new helper there?" test
+// cannot make. So the arms below are written to RED IF THE SWEEP IS REVERTED,
+// in both of the ways a revert can happen: someone re-emits a `dep-pill` class
+// literal at a call site (arm b), or someone re-authors a `.dep-*` rule in
+// app.css for a chip to fall into (arm c). Arm (a) keeps the vocabulary total
+// and closed, arm (d) drives every status through the real renderer, and arm
+// (e) is the one that refuses a vacuous green: if the grammar's own table
+// cannot be read out of app.js, every other arm here is measuring nothing.
+//
+// The gate-side twin is __css_check.mjs E13, which reads the SAME table and
+// holds it against DEPLOY_STATUSES and against app.css's rules. Two readers,
+// two failure surfaces, one source of truth.
+const D24_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
+const D24_EXPECTED = {
+  live: "status-pill status-pill--ok",
+  failed: "status-pill status-pill--danger",
+  building: "status-pill status-pill--warn",
+  pushing: "status-pill status-pill--warn",
+  queued: "status-pill status-pill--neutral",
+  deferred: "status-pill status-pill--warn status-pill--hollow",
+  cancelled: "status-pill status-pill--neutral status-pill--stopped",
+};
+
+test("gr-backlog-d24 (a+e): the statusMeta vocabulary is readable, total and closed over the ledger's statuses", () => {
+  // (e) VACUOUS-GREEN GUARD FIRST. Everything below reads this table; a table
+  // this test cannot find would make the rest of the file's grammar arms pass
+  // while measuring nothing at all.
+  const start = APP_SRC.indexOf("var DEPLOY_STATUS_META = {");
+  assert.ok(start !== -1, "DEPLOY_STATUS_META could not be located in app.js");
+  const body = APP_SRC.slice(start, APP_SRC.indexOf("};", start));
+  const table = {};
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g)) {
+    const role = /\brole\s*:\s*"([a-z-]+)"/.exec(m[2]);
+    const variant = /\bvariant\s*:\s*"([a-z-]+)"/.exec(m[2]);
+    table[m[1]] = { role: role && role[1], variant: variant ? variant[1] : "" };
+  }
+  assert.equal(Object.keys(table).length, D24_STATUSES.length,
+    "the table parsed as " + JSON.stringify(Object.keys(table)));
+  // (a) TOTAL over the ledger's statuses, and every role from the closed five.
+  const ROLES = ["ok", "info", "warn", "danger", "neutral"];
+  for (const st of D24_STATUSES) {
+    assert.ok(table[st], "no DEPLOY_STATUS_META entry for status " + st +
+      " — statusMeta() would fall it through to neutral, which IS the queued look");
+    assert.ok(ROLES.includes(table[st].role), st + " names role " + table[st].role +
+      ", outside the closed five — a sixth hue invented at a call site is how two families happened");
+  }
+});
+
+test("gr-backlog-d24 (b): no `dep-pill` class literal is emitted anywhere — the REVERSION arm over app.js", () => {
+  // A quoted string carrying the class, not a mention: the tombstone comments
+  // that explain the retirement name the dead classes on purpose, and a grep
+  // that counted those would red on its own documentation.
+  const emitted = (APP_SRC.match(/["'][^"'\n]*\bdep-pill\b/g) || []);
+  assert.deepEqual(emitted, [],
+    "a dep-pill class literal is back in app.js — render the chip through " +
+    "deployStatusPill()/statusMetaPill() so there stays exactly one state grammar");
+  // And the CONTROL, so this arm is not green by construction: the same reader,
+  // run over a source with one literal restored, MUST find it.
+  // Through replaceUnique, not a bare `.replace`: a string needle takes the FIRST
+  // match anywhere and is silent when the anchor drifts, so an unapplied mutation
+  // would leave this control green over an unmodified source. replaceUnique REFUSES
+  // on nought hits AND on more than one, which is strictly stronger than the
+  // `notEqual` a bare replace would need — the refusal is the re-derive signal.
+  const reverted = replaceUnique(
+    APP_SRC,
+    "deployStatusPill(st) + \"</div>\"",
+    "'<span class=\"dep-pill dep-' + esc(st) + '\">' + esc(cap(st)) + \"</span></div>\"",
+    { what: "gr-backlog-d24 (b) control: restore one dep-pill literal" });
+  assert.equal((reverted.match(/["'][^"'\n]*\bdep-pill\b/g) || []).length, 1,
+    "the reader cannot see a restored dep-pill literal — this arm would be green over a revert");
+});
+
+test("gr-backlog-d24 (c): no `.dep-*` PILL rule survives in app.css — the REVERSION arm over the stylesheet", () => {
+  const cssRaw = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const css = cssRaw.replace(/\/\*[\s\S]*?\*\//g, "");   // comments are not rules
+  const revived = [...new Set(
+    (css.match(/\.dep-(?:pill|queued|building|pushing|live|failed|cancelled|deferred)\b/g) || []))].sort();
+  assert.deepEqual(revived, [],
+    "the retired .dep-* pill family is back in app.css: " + revived.join(", "));
+  // CONTROL: the same reader over a stylesheet with one rule restored.
+  assert.equal(
+    ((css + "\n.dep-cancelled { color: var(--dim); }")
+      .match(/\.dep-(?:pill|queued|building|pushing|live|failed|cancelled|deferred)\b/g) || []).length,
+    1, "the reader cannot see a restored .dep-* rule — this arm would be green over a revert");
+  // …and the family it was absorbed INTO really is painted, or the sweep moved
+  // the states somewhere that does not exist.
+  for (const v of ["ok", "info", "warn", "danger", "neutral", "hollow", "stopped"]) {
+    assert.ok(css.includes(".status-pill--" + v), ".status-pill--" + v + " has no rule");
+  }
+});
+
+test("gr-backlog-d24 (d): every ledger status renders through the shared family, and no state lost its look", () => {
+  const seen = {};
+  for (const st of D24_STATUSES) {
+    const html = hooks.deployRow(
+      { id: "d-" + st, status: st, inserted_at: "2026-09-16T10:00:00Z", updated_at: "2026-09-16T10:01:00Z" },
+      null);
+    const m = /<span class="(status-pill[^"]*)"/.exec(html);
+    assert.ok(m, st + ": the row renders no status-pill at all");
+    assert.equal(m[1], D24_EXPECTED[st], st + ": wrong class attribute");
+    assert.match(html, new RegExp('<span class="status-pill-label">' + st[0].toUpperCase() + st.slice(1) + "</span>"),
+      st + ": the label is not the ledger's own word");
+    seen[st] = m[1];
+  }
+  // EVERY STATE IS STILL REACHABLE AND STILL DISTINCT. building/pushing shared a
+  // rule before the sweep and share a role after it — that is the ONLY pair the
+  // old family collapsed, so six distinct looks is the number that says nothing
+  // was silently merged into something else on the way across.
+  assert.equal(seen.building, seen.pushing, "building and pushing kept their shared voice");
+  assert.equal(new Set(Object.values(seen)).size, 6,
+    "a state lost its look in the absorption: " + JSON.stringify(seen));
+  // An UNKNOWN status is still rendered verbatim and still judged by nobody.
+  const unknown = hooks.deployRow({ id: "d-x", status: "teleporting" }, null);
+  assert.match(unknown, /<span class="status-pill status-pill--neutral"/,
+    "an unlearned status must take the neutral role, never a borrowed colour");
+  assert.match(unknown, /<span class="status-pill-label">Teleporting<\/span>/,
+    "…and render its own word, never an invented one");
 });
