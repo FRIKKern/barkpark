@@ -589,10 +589,17 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
 
       :ok = File.chmod!(run_state, 0o500)
 
-      assert {:error, :eacces} = File.mkdir_p(Path.join(run_state, "precondition-probe")),
-             "precondition broken: a 0500 run-state dir still accepts a mkdir, so this test " <>
-               "cannot induce E_STAGING_FAILED (running as root?). The 500 it asserts below " <>
-               "would be measuring nothing."
+      # BIND FIRST, THEN ASSERT. `assert pattern = expr, message` evaluates the
+      # match as an ordinary match, so a mismatch raises MatchError and kills
+      # the process before `assert/2` is ever called — the authored message is
+      # dead code on exactly the path it was written for
+      # (`scripts/unreachable-assert-message-check.sh`).
+      probe = File.mkdir_p(Path.join(run_state, "precondition-probe"))
+
+      assert probe == {:error, :eacces},
+             "precondition broken: a 0500 run-state dir still accepts a mkdir (got " <>
+               "#{inspect(probe)}), so this test cannot induce E_STAGING_FAILED — running as " <>
+               "root? The 500 it asserts below would be measuring nothing."
 
       body =
         conn
