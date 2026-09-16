@@ -1609,8 +1609,16 @@ defmodule Barkpark.Sites.DeployRunner do
         :ok
 
       {:error, code, message} ->
+        # An operator reading journald gets the same split the caller does:
+        # REFUSED means go fix the tarball, STAGING FAILED means go fix the box.
+        # One word, and it is the difference between the right person looking.
+        verdict =
+          if PrebuiltArtifact.internal_failure?(code),
+            do: "prebuilt artifact STAGING FAILED (box fault)",
+            else: "prebuilt artifact REFUSED"
+
         Logger.warning(
-          "[site-deploy] prebuilt artifact REFUSED for #{inspect(req.slug)}: #{code} — #{message}"
+          "[site-deploy] #{verdict} for #{inspect(req.slug)}: #{code} — #{message}"
         )
 
         {:error, code, message}
