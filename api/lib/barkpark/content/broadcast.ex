@@ -20,6 +20,29 @@ defmodule Barkpark.Content.Broadcast do
       flush reverses to restore original order).
     * `:barkpark_deferred_webhooks` — list of
       `{dataset, action, type, doc_id, document, event_id, opts}`.
+    * `:barkpark_deferred_owner` — a boolean OWNERSHIP claim, set by whoever
+      promises to flush. See below.
+
+  ## The queue needs an OWNER, and an unowned queue is now COUNTABLE
+
+  Queueing is keyed on `Repo.in_transaction?/0`, which says a transaction is
+  open — never who opened it. So any caller that opened a transaction of its
+  own, without taking the flush/clear triad, silently swallowed every broadcast
+  and webhook a document write made inside it: the `documents` row and the
+  `mutation_events` row COMMIT, the queue dies with the process dictionary
+  entry, `Dispatcher.dispatch_async/7` is never called, and therefore not even
+  the `webhook_fanout phase=selected` record exists. The symptom is a publish
+  (or delete) with zero `webhook_deliveries` rows and NO log line at all —
+  indistinguishable, from outside, from a fan-out task that crashed.
+
+  `with_deferred_queue/1` (and `write_atomically/1`, and
+  `Content.Mutations.apply_mutations/2`) claim `:barkpark_deferred_owner`
+  BEFORE opening their transaction. When `maybe_broadcast/2` or
+  `maybe_dispatch_webhook/7` finds an open transaction with NO owner, it still
+  queues (dispatching pre-commit would announce state that can roll back) but
+  emits `[:barkpark, :content, :deferred_broadcast, :orphaned]` telemetry plus a
+  `deferred_broadcast_orphan ` warning line naming the dataset/type/action/doc.
+  The loss stays a loss; it stops being invisible.
 
   ## Topic shapes
 
@@ -39,6 +62,11 @@ defmodule Barkpark.Content.Broadcast do
 
   @paper_type "paper"
   @paper_default_dataset "production"
+
+  # Process-dict slot holding the deferred-queue OWNERSHIP claim. Its presence
+  # is the promise that someone will call `flush_deferred_broadcasts/0` on
+  # commit and `clear_deferred_broadcasts/0` on rollback.
+  @deferred_owner_key :barkpark_deferred_owner
 
   @doc """
   Broadcast a document mutation to the dataset, per-doc, and workspace-scoped
@@ -243,8 +271,7 @@ defmodule Barkpark.Content.Broadcast do
     if Repo.in_transaction?() do
       fun.()
     else
-      Process.put(:barkpark_deferred_broadcasts, [])
-      Process.put(:barkpark_deferred_webhooks, [])
+      claim_deferred_queue()
 
       try do
         Repo.transaction(fn ->
@@ -341,6 +368,7 @@ defmodule Barkpark.Content.Broadcast do
   # Defer if we're inside a transaction; broadcast immediately otherwise.
   defp maybe_broadcast(topic, msg) do
     if Repo.in_transaction?() do
+      record_orphan_if_unowned(:broadcast, %{topic: topic})
       queue = Process.get(:barkpark_deferred_broadcasts, [])
       Process.put(:barkpark_deferred_broadcasts, [{topic, msg} | queue])
     else
@@ -371,6 +399,14 @@ defmodule Barkpark.Content.Broadcast do
   # emits workspace/project-scoped sync-tags.
   defp maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts) do
     if Repo.in_transaction?() do
+      record_orphan_if_unowned(:webhook, %{
+        dataset: dataset,
+        action: action,
+        type: type,
+        doc_id: doc_id,
+        event_id: event_id
+      })
+
       queue = Process.get(:barkpark_deferred_webhooks, [])
 
       Process.put(
@@ -396,6 +432,7 @@ defmodule Barkpark.Content.Broadcast do
   (concern H) on commit.
   """
   def flush_deferred_broadcasts do
+    Process.delete(@deferred_owner_key)
     queue = Process.delete(:barkpark_deferred_broadcasts) || []
 
     queue
@@ -426,8 +463,106 @@ defmodule Barkpark.Content.Broadcast do
   `apply_mutations` (concern H) on rollback.
   """
   def clear_deferred_broadcasts do
+    Process.delete(@deferred_owner_key)
     Process.delete(:barkpark_deferred_broadcasts)
     Process.delete(:barkpark_deferred_webhooks)
+    :ok
+  end
+
+  @doc """
+  Run `fun` as the OWNER of the deferred broadcast/webhook queue.
+
+  For callers that open a `Repo.transaction` of their own around a document
+  write — `Media.delete_file/2`'s row+asset-doc delete, `Tenancy.delete_workspace/1` —
+  and therefore inherit the deferral without inheriting the duty to flush it.
+  Claims the queue BEFORE `fun` runs (so the claim is already in place when the
+  transaction opens and `maybe_dispatch_webhook/7` starts queueing), then
+  flushes on an `{:ok, _}` result and clears on anything else, an exception, or
+  a throw/exit.
+
+  NESTING is a no-op by design: when a queue owner is already registered (an
+  enclosing `apply_mutations`, `write_atomically/1`, or an outer
+  `with_deferred_queue/1`) `fun` runs AS IS. Re-claiming would reset the
+  queue and DISCARD everything the outer owner has already queued — the exact
+  loss this function exists to stop.
+  """
+  @spec with_deferred_queue((-> term())) :: term()
+  def with_deferred_queue(fun) when is_function(fun, 0) do
+    if Process.get(@deferred_owner_key) do
+      fun.()
+    else
+      claim_deferred_queue()
+
+      try do
+        fun.()
+      rescue
+        e ->
+          clear_deferred_broadcasts()
+          reraise e, __STACKTRACE__
+      catch
+        kind, reason ->
+          clear_deferred_broadcasts()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      else
+        {:ok, _} = ok ->
+          flush_deferred_broadcasts()
+          ok
+
+        other ->
+          clear_deferred_broadcasts()
+          other
+      end
+    end
+  end
+
+  @doc """
+  Reset the deferred queue and CLAIM ownership of it. Call before opening the
+  transaction, never inside it. Public because the mutation spine
+  (`Content.Mutations`) and the paper document-op path (`Papers.BlockOps`) own
+  their own transaction boundaries and flush by hand.
+  """
+  @spec claim_deferred_queue() :: :ok
+  def claim_deferred_queue do
+    Process.put(:barkpark_deferred_broadcasts, [])
+    Process.put(:barkpark_deferred_webhooks, [])
+    Process.put(@deferred_owner_key, true)
+    :ok
+  end
+
+  # A transaction is open and NOBODY claimed the queue, so nothing will flush
+  # it: this broadcast/webhook is already lost. Make the loss countable —
+  # telemetry for a metrics pipeline, a greppable `deferred_broadcast_orphan`
+  # warning for journald. Can never fail its caller.
+  defp record_orphan_if_unowned(kind, meta) do
+    unless Process.get(@deferred_owner_key) do
+      metadata = Map.put(meta, :kind, kind)
+
+      try do
+        :telemetry.execute(
+          [:barkpark, :content, :deferred_broadcast, :orphaned],
+          %{count: 1},
+          metadata
+        )
+      rescue
+        _ -> :ok
+      catch
+        _, _ -> :ok
+      end
+
+      try do
+        Logger.warning(
+          "deferred_broadcast_orphan kind=#{kind} " <>
+            Enum.map_join(Enum.sort(Map.to_list(meta)), " ", fn {k, v} ->
+              "#{k}=#{inspect(v)}"
+            end)
+        )
+      rescue
+        _ -> :ok
+      catch
+        _, _ -> :ok
+      end
+    end
+
     :ok
   end
 
