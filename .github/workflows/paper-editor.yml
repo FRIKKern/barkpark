@@ -41,6 +41,9 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
+      # reader's own clauses every run, so a tone added here must run this job.
+      - "api/lib/barkpark/portable_doc/render/walk.ex"
       # corpus 1 of the rendered sweep below — a golden fixture added or
       # re-frozen here is a new block this workflow must render, and without
       # this line the job that renders it cannot see it.
@@ -57,6 +60,9 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
+      # reader's own clauses every run, so a tone added here must run this job.
+      - "api/lib/barkpark/portable_doc/render/walk.ex"
       # corpus 1 of the rendered sweep below — a golden fixture added or
       # re-frozen here is a new block this workflow must render, and without
       # this line the job that renders it cannot see it.
