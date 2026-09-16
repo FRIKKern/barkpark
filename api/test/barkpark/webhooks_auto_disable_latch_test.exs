@@ -201,5 +201,35 @@ defmodule Barkpark.WebhooksAutoDisableLatchTest do
       assert later_gap > first_gap,
              "a receiver down for a week must be probed ~24x/day, not on every event"
     end
+
+    test "the backoff has a CEILING — a long-dark endpoint is still probed, never abandoned" do
+      wh = hook()
+      latch(wh)
+      latched = reload(wh)
+
+      # `next_probe_at/1` is pure over the struct, so the streak can be varied
+      # directly instead of driving hundreds of give-ups through the DB.
+      gap = fn failures ->
+        w = %{latched | consecutive_failures: failures}
+        DateTime.diff(Webhooks.next_probe_at(w), w.auto_disabled_at, :second)
+      end
+
+      assert gap.(@threshold + 3) > gap.(@threshold + 1),
+             "the interval must double while the streak is still short"
+
+      # ...and then STOP doubling. Without a ceiling the interval grows without
+      # bound and an endpoint dark for a week is effectively never probed again
+      # — the one-way stop this row exists to remove, reintroduced by arithmetic.
+      capped = gap.(@threshold + 40)
+
+      assert capped == gap.(@threshold + 400),
+             "past the ceiling the interval must be FLAT, not merely slower-growing"
+
+      assert capped <= 3600,
+             "a still-dead receiver must be re-probed at least hourly"
+
+      assert capped > gap.(@threshold + 3),
+             "the ceiling must sit ABOVE the ramp, or the backoff never backs off"
+    end
   end
 end
