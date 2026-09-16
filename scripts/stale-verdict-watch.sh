@@ -281,6 +281,14 @@ PAGE_ATTEMPTS="${SVW_PAGE_ATTEMPTS:-4}"
 # the failure the single heavy query already had, and carrying it across would
 # be shipping the same defect in a new shape.
 ROLLUP_MAX="${SVW_ROLLUP_MAX:-25}"
+# THE PER-ROW RESOLVE BUDGET. Every row the population walk answered UNKNOWN is
+# re-asked ONE AT A TIME (measured ~0.7s each, see MERGE_ONE_QUERY above), so a
+# fully-cold population of N rows costs N requests. This caps that at a number
+# larger than the population this repo has ever carried; past it the run
+# resolves the first RESOLVE_MAX and leaves the rest UNKNOWN, which is reported
+# as unread rows and never as classified ones. A cap that silently classified
+# would be the laundering this watch exists to refuse.
+RESOLVE_MAX="${SVW_RESOLVE_MAX:-200}"
 ROLLUP_FIXTURE=""
 # Backoff BETWEEN page retries. The old budget spent all three of its attempts
 # inside ~60 seconds against a deterministic 504 — three shots at the same wall.
@@ -461,16 +469,70 @@ query($owner:String!,$name:String!,$first:Int!,$after:String){
     pullRequests(states:OPEN, first:$first, after:$after,
                  orderBy:{field:CREATED_AT,direction:DESC}){
       pageInfo{ hasNextPage endCursor }
-      nodes{ number mergeable mergeStateStatus updatedAt headRefOid isDraft }
+      nodes{ number mergeable updatedAt headRefOid isDraft }
     }
   }
 }'
 
 PR_NORMALISE_LIGHT_JQ='
 [ .data.repository.pullRequests.nodes[]
-  | { number, mergeable, mergeStateStatus, headRefOid, updatedAt,
+  | { number, mergeable, mergeStateStatus: null, headRefOid, updatedAt,
       isDraft: (.isDraft // false),
       statusCheckRollup: [] } ]'
+
+# ── THE THIRD PASS: mergeStateStatus IS THE COST, AND IT IS PER ROW ─────────
+# MEASURED IN CI 2026-09-16 (runs 35131226693 / 35131624861, probe pushed on a
+# branch so it ran under the WORKFLOW'S OWN GITHUB_TOKEN — the same query from a
+# personal token answered page 2 in 1.9s on 3 of 3 and refutes nothing, because
+# the fault does not live in the query text alone). Against 48 open pull
+# requests, each variant three times:
+#
+#   fields                                   size  page 1    page 2
+#   number mergeable mergeStateStatus …        25   3.1s      HTTP 502 @10.5s, 3/3
+#   number mergeable …            (no mSS)     25   0.45s     0.5s, 3/3 OK
+#   number mergeStateStatus …  (no mergeable)  25   3.0s      HTTP 502 @10.5s, 3/3
+#   number updatedAt …          (neither)      25   0.8s      0.4s, 3/3 OK
+#
+# So the expensive field is mergeStateStatus, NOT mergeable — dropping
+# mergeable while keeping mergeStateStatus still 502s, and dropping
+# mergeStateStatus while keeping mergeable does not. Every 502 arrived at
+# ~10.5s, which is GitHub's GraphQL timeout answered by the gateway as an HTML
+# 502: a resolver that ran out of budget, never a random gateway fault.
+#
+# AND NO PAGE SIZE IS SAFE, which is why this is not a smaller --page-size. A
+# full walk at size 10 got two pages through and 502d on page 3; at size 5 it
+# got FIVE pages through (the fifth already at 7.2s) and 502d on page 6. The
+# cost is PER ROW and it is the cold row that is expensive: asking
+# mergeStateStatus forces GitHub to compute the merge commit synchronously, and
+# the pages that answered quickly were the ones an earlier variant had already
+# warmed. A page size that survives a warm population walls on a cold one.
+#
+# THE OTHER HALF OF THE SAME COIN, and the reason the fix is not simply
+# "drop the field": mergeStateStatus is what FORCES the computation. Asked cold
+# WITHOUT it, 24 of 25 rows answered mergeable=UNKNOWN in 0.45s — fast and
+# blind, which is this row's original symptom. Cheap-and-UNKNOWN and
+# expensive-and-502 are the same wall seen from two sides.
+#
+# THE SHAPE THAT ESCAPES IT: ask per PULL REQUEST. A single-row query carrying
+# mergeable AND mergeStateStatus answered in 0.54-0.91s for 8 of 8 rows, every
+# one of them computed (MERGEABLE/BLOCKED, CONFLICTING/DIRTY), because one
+# row's computation cannot exhaust a budget sized for a page of them. So the
+# population walk asks the CHEAP fields and never 502s, and every row that
+# comes back UNKNOWN is then resolved ONE AT A TIME below. The whole population
+# is still read — "I could not see the whole population" is the BLIND state
+# this watch exists to refuse, and no arm here can turn an unread row green.
+#
+# mergeStateStatus is DISPLAY-ONLY in this script (the reported/draft/unknown
+# lines print it; nothing classifies on it), so the population read carries it
+# as null and it is filled in per row — by the resolve below for rows that were
+# UNKNOWN, and by the rollup query for CONFLICTING rows. A row nobody asked
+# about prints "—", which is honest: nothing was read.
+MERGE_ONE_QUERY='
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){ number mergeable mergeStateStatus }
+  }
+}'
 
 # One PR's rollup. Asked only for CONFLICTING numbers, at most ROLLUP_MAX of them.
 ROLLUP_QUERY='
@@ -478,6 +540,7 @@ query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
       number
+      mergeStateStatus
       commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:100){ nodes{
         __typename
         ... on CheckRun { name conclusion completedAt status }
@@ -627,7 +690,7 @@ fetch_pr_pages() { # <repo> -> JSON array | error body
 #      look. An unreadable population must be distinguishable from an empty one
 #      AT THE POINT OF THE READ, not three functions later.
 enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
-  local repo="$1" rows="$2" nums cnt n out roll map owner name
+  local repo="$1" rows="$2" nums cnt n out roll map mss st owner name
   nums="$(jq -r '[ .[] | select(.mergeable == "CONFLICTING") | .number ] | .[]' <<<"$rows" 2>/dev/null)" || {
     red "  the population could not be scanned for CONFLICTING rows"; return 2; }
   cnt="$(printf '%s\n' "$nums" | grep -c . || true)"
@@ -643,7 +706,7 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
   fi
 
   owner="${repo%%/*}"; name="${repo##*/}"
-  map='{}'
+  map='{}'; mss='{}'
   for n in $nums; do
     if [ -n "$ROLLUP_FIXTURE" ]; then
       out="$(jq -c --argjson n "$n" '.[$n | tostring] // empty' < "$ROLLUP_FIXTURE" 2>/dev/null)"
@@ -656,6 +719,11 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
         red "  the status rollup for #$n did not come back as a pull request payload"; return 2; }
       roll="$(printf '%s' "$out" | jq -c "$ROLLUP_NORMALISE_JQ" 2>/dev/null)" || {
         red "  the status rollup for #$n did not normalise"; return 2; }
+      # mergeStateStatus rides along on a query this row already pays for. It
+      # is DISPLAY ONLY — an absent one prints "—" and changes no verdict — so
+      # a miss here is never a failed read.
+      st="$(printf '%s' "$out" | jq -r '.data.repository.pullRequest.mergeStateStatus // empty' 2>/dev/null)"
+      [ -z "${st:-}" ] || mss="$(jq -c --argjson n "$n" --arg s "$st" '. + {($n|tostring): $s}' <<<"$mss" 2>/dev/null || printf '%s' "$mss")"
     fi
     map="$(jq -c --argjson n "$n" --argjson r "$roll" '. + {($n | tostring): $r}' <<<"$map" 2>/dev/null)" || {
       red "  the rollup for #$n could not be added to the map"; return 2; }
@@ -664,14 +732,64 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
   # EVERY conflicting row must come back carrying its rollup. A row that asked
   # for one and did not get one is a failed read, and it fails here rather than
   # being handed to the verdict as an empty list.
-  out="$(jq -c --argjson m "$map" '
+  out="$(jq -c --argjson m "$map" --argjson s "$mss" '
       [ .[] | if .mergeable == "CONFLICTING"
-              then . + { statusCheckRollup: ($m[(.number|tostring)] // null) }
+              then . + { statusCheckRollup: ($m[(.number|tostring)] // null),
+                         mergeStateStatus: ($s[(.number|tostring)] // .mergeStateStatus) }
               else . end ]' <<<"$rows" 2>/dev/null)" || {
     red "  the rollups could not be merged into the population"; return 2; }
   printf '%s' "$out" | jq -e 'all(.[]; .statusCheckRollup != null)' >/dev/null 2>&1 || {
     red "  a CONFLICTING row came back without a rollup — refusing rather than treating it as empty"; return 2; }
   printf '%s' "$out"
+  return 0
+}
+
+# THE PER-ROW RESOLVE. Every row the cheap population walk answered UNKNOWN is
+# re-asked on its own, because a one-row mergeStateStatus query computes that
+# one merge commit inside the budget while a page of them does not (the
+# measurement is at MERGE_ONE_QUERY above).
+#
+# THIS CAN ONLY ADD CLASSIFIED ROWS, NEVER REMOVE OR INVENT ONE. It writes back
+# ONLY a mergeable GitHub actually answered with, and only MERGEABLE or
+# CONFLICTING — an answer of UNKNOWN, a transport failure, or an unparseable
+# body all leave the row exactly as the walk found it, which is UNKNOWN, which
+# is still printed as a warning row and still counts against `classified`. So
+# there is no path through here that turns a row this run could not read into a
+# green, and a population where every resolve fails is still BLIND at rc 5.
+#
+# It never fails: the caller has a population either way, and a resolve that
+# could not happen is indistinguishable in effect from not having tried.
+resolve_unknown() { # <repo> <rows-json> -> prints rows
+  local repo="$1" rows="$2" owner name nums cnt n out m st map merged
+  nums="$(jq -r '[ .[] | select(.mergeable == "UNKNOWN") | .number ] | .[]' <<<"$rows" 2>/dev/null)" || {
+    printf '%s' "$rows"; return 0; }
+  cnt="$(printf '%s\n' "$nums" | grep -c . || true)"
+  [ "${cnt:-0}" -eq 0 ] && { printf '%s' "$rows"; return 0; }
+  owner="${repo%%/*}"; name="${repo##*/}"
+  if [ "$cnt" -gt "$RESOLVE_MAX" ]; then
+    red "  $cnt row(s) answered mergeable=UNKNOWN and the per-row resolve cap is $RESOLVE_MAX — resolving the first $RESOLVE_MAX. The rest stay UNKNOWN: they are reported as rows this run did NOT read, never as classified ones."
+    nums="$(printf '%s\n' "$nums" | head -n "$RESOLVE_MAX")"
+  fi
+  map='{}'
+  for n in $nums; do
+    out="$(gh api graphql -f query="$MERGE_ONE_QUERY" -F owner="$owner" -F name="$name" -F number="$n" 2>&1)" || continue
+    m="$(jq -r '.data.repository.pullRequest.mergeable // "UNKNOWN"' <<<"$out" 2>/dev/null)" || continue
+    [ "$m" = "MERGEABLE" ] || [ "$m" = "CONFLICTING" ] || continue
+    st="$(jq -r '.data.repository.pullRequest.mergeStateStatus // empty' <<<"$out" 2>/dev/null)"
+    map="$(jq -c --argjson n "$n" --arg m "$m" --arg s "${st:-}" \
+             '. + {($n|tostring): {mergeable:$m, mergeStateStatus:(if $s == "" then null else $s end)}}' \
+             <<<"$map" 2>/dev/null)" || { map='{}'; break; }
+  done
+  merged="$(jq -c --argjson m "$map" \
+    '[ .[] | . + ($m[(.number|tostring)] // {}) ]' <<<"$rows" 2>/dev/null)" || merged=""
+  if [ -n "$merged" ]; then
+    local before after
+    before="$(jq 'length' <<<"$map" 2>/dev/null || echo 0)"
+    [ "${before:-0}" -eq 0 ] || red "  resolved $before of $cnt UNKNOWN row(s) one at a time — the bulk page cannot compute mergeability without walling, a single row can."
+    printf '%s' "$merged"
+  else
+    printf '%s' "$rows"
+  fi
   return 0
 }
 
@@ -743,6 +861,10 @@ fetch_prs() { # -> prints JSON array, or the error body on failure
     i=$((i + 1))
     out="$(fetch_pr_pages "$repo")"; rc=$?
     if [ "$rc" = "0" ]; then
+      # The walk is cheap and therefore blind-ish; this is where it stops being
+      # blind. Placed BEFORE the UNKNOWN count so the re-poll budget below is
+      # spent on rows a per-row read could not resolve either.
+      out="$(resolve_unknown "$repo" "$out")"
       unknown="$(jq '[.[] | select(.mergeable == "UNKNOWN")] | length' <<<"$out" 2>/dev/null || echo 0)"
       unknown="${unknown:-0}"
       if [ "$last_full_unknown" -lt 0 ] || [ "$unknown" -lt "$last_full_unknown" ]; then
@@ -1005,7 +1127,7 @@ render() { # reads the verdict JSON on stdin
     "  DRAFT  \(.reported_draft | length)" +
       (if (.reported_draft | length) > 0 then " — \(.reported_draft | map(.number) | sort | map("#\(.)") | join(", "))  (a draft cannot be merged, so it asserts no actionable verdict — printed below, NOT counted, NOT failed on)" else " — no draft pull request is asserting a stale green" end),
     (.reported_draft | sort_by(.number)[] |
-      "  DRAFT, not counted: #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt) — GitHub refuses to merge a draft and the merge sweep skips it, so this stale green cannot reach main. Mark it ready and it is NOVEL on the very next run."),
+      "  DRAFT, not counted: #\(.number)  \(.mergeStateStatus // "—")  head \(.headRefOid[0:9])  verdict as of \(.updatedAt) — GitHub refuses to merge a draft and the merge sweep skips it, so this stale green cannot reach main. Mark it ready and it is NOVEL on the very next run."),
     (if (.ratchet.pinned_draft | length) > 0
      then "  ^ PINNED-DRAFT \(.ratchet.pinned_draft | length) — \(.ratchet.pinned_draft | map(.number) | sort | map("#\(.)") | join(", ")): pinned, still asserting a stale green, and now a DRAFT. NOT called healed — drafting is reversible and the pin outlives it. Delete the line only when the row stops reporting entirely."
      else empty end),
@@ -1034,7 +1156,7 @@ render() { # reads the verdict JSON on stdin
      else "ok — no CONFLICTING pull request is asserting a green required verdict that main has moved past (classified \(.classified) of \(.open) open)." end),
     (.reported | sort_by(.number)[] | . as $row |
       "",
-      "  #\(.number)  \(.mergeStateStatus)  head \(.headRefOid[0:9])  verdict as of \(.updatedAt)  [\(if ([$v.ratchet.known[] | select(.number == $row.number)] | length) > 0 then "KNOWN — pinned: " + ([$v.ratchet.entries[]? | select(.number == $row.number) | .reason] | first // "—") else "NOVEL" end)]",
+      "  #\(.number)  \(.mergeStateStatus // "—")  head \(.headRefOid[0:9])  verdict as of \(.updatedAt)  [\(if ([$v.ratchet.known[] | select(.number == $row.number)] | length) > 0 then "KNOWN — pinned: " + ([$v.ratchet.entries[]? | select(.number == $row.number) | .reason] | first // "—") else "NOVEL" end)]",
       (.ctx[] |
         "      \(.name)\(" " * (if (34 - (.name | length)) > 0 then 34 - (.name | length) else 1 end))" +
         (if (.hits | length) == 0 then "NEVER RENDERED"

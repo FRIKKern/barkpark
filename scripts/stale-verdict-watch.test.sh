@@ -1135,6 +1135,139 @@ else
     || bad "(p-7m) MUTATION SURVIVED: expected 5 with last-pass-wins, got $mrc: $mout"
 fi
 
+# ═══ (p-8) mergeStateStatus IS THE WALL, AND THE PER-ROW RESOLVE IS THE WAY ══
+section "(p-8) the population page cannot carry mergeStateStatus; UNKNOWN rows resolve one at a time"
+
+# THE DEFECT THIS OWNS, measured in CI 2026-09-16 (runs 35131226693 and
+# 35131624861, the probe pushed on a branch so it ran under the workflow's own
+# GITHUB_TOKEN). Asking `mergeStateStatus` across a page of 25 open pull
+# requests returned HTTP 502 with an HTML body at ~10.5s on 3 of 3 attempts,
+# while the SAME page without that one field answered in 0.45s; dropping
+# `mergeable` instead and keeping `mergeStateStatus` still 502'd. No page size
+# escapes it — a full walk walled at page 3 of size 10 and page 6 of size 5 —
+# because the cost is per COLD row: that field forces GitHub to compute the
+# merge commit inside the request. Asked cold WITHOUT it, 24 of 25 rows came
+# back mergeable=UNKNOWN, which is this watch's original blindness. A
+# single-row query carrying BOTH fields answered 8 of 8 in 0.54-0.91s.
+#
+# The stub below encodes exactly that transport: a population page carrying
+# `mergeStateStatus` 502s, one without it answers UNKNOWN, and a per-PR query
+# answers a computed verdict. So these probes fail if the shipped query starts
+# asking for that field again, and fail if the per-row resolve stops running.
+MSTUB="$TMP/m-stub"; mkdir -p "$MSTUB"
+MLOG="$TMP/m-stub.log"
+
+# Built here rather than derived from an earlier section's fixture, so a later
+# edit to those cannot silently change which row these probes are about.
+M_ROLL="[]"
+for c in "${CTX[@]}"; do
+  M_ROLL="$(jq -c --arg n "$c" --arg t "$OLD" \
+    '. + [{__typename:"CheckRun", name:$n, conclusion:"SUCCESS", completedAt:$t, status:"COMPLETED"}]' <<<"$M_ROLL")"
+done
+jq -n --argjson roll "$M_ROLL" \
+  '{data:{repository:{pullRequests:{
+      pageInfo:{hasNextPage:false, endCursor:null},
+      nodes:[{number:9201, mergeable:"UNKNOWN",
+              headRefOid:"0123456789abcdef0123456789abcdef01234567",
+              updatedAt:"2026-08-01T00:00:00Z",
+              commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}]}}}}' \
+  > "$TMP/m-page-unknown.json"
+jq -n --argjson roll "$M_ROLL" \
+  '{data:{repository:{pullRequest:{number:9201, mergeStateStatus:"DIRTY",
+      commits:{nodes:[{commit:{statusCheckRollup:{contexts:{nodes:$roll}}}}]}}}}}' \
+  > "$TMP/m-rollup.json"
+jq -n '{data:{repository:{pullRequest:{number:9201, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY"}}}}' \
+  > "$TMP/m-one-conflicting.json"
+jq -n '{data:{repository:{pullRequest:{number:9201, mergeable:"UNKNOWN", mergeStateStatus:null}}}}' \
+  > "$TMP/m-one-unknown.json"
+
+mk_mstub() { # <mode: resolve|hard-unknown>
+  cat > "$MSTUB/gh" <<MSTUBEOF
+#!/usr/bin/env bash
+echo "\$@" >> "$MLOG"
+mode="$1"
+case "\$1 \${2:-}" in
+  "api repos/"*) cat "$COMMITS"; exit 0 ;;
+esac
+# The per-PR ROLLUP query is the one that also selects statusCheckRollup; the
+# per-PR MERGEABILITY query is the one that does not. Telling them apart here
+# is what makes a passing probe mean the script issued the right one.
+if grep -q 'pullRequest(number:' <<<"\$*"; then
+  if grep -q 'statusCheckRollup' <<<"\$*"; then cat "$TMP/m-rollup.json"; exit 0; fi
+  if [ "\$mode" = "hard-unknown" ]; then cat "$TMP/m-one-unknown.json"; else cat "$TMP/m-one-conflicting.json"; fi
+  exit 0
+fi
+# THE MEASURED WALL: a population page that asks for mergeStateStatus times out.
+if grep -q 'mergeStateStatus' <<<"\$*"; then
+  echo "HTTP 502: Bad gateway (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+cat "$TMP/m-page-unknown.json"; exit 0
+MSTUBEOF
+  chmod +x "$MSTUB/gh"
+}
+run_mstub() { # <mode> [script] [extra…]
+  local mode="$1"; shift
+  local script="${1:-$WATCH}"; shift || true
+  : > "$MLOG"; mk_mstub "$mode"
+  env PATH="$MSTUB:/usr/bin:/bin:/usr/sbin:/sbin" SVW_RETRY_SLEEP="0 0 0" SVW_PAGE_SLEEP="0 0 0 0" \
+    bash "$script" --spec "$SPEC" --repo FRIKKern/barkpark --commits "$COMMITS" \
+      --baseline '' --page-size 1 "$@" 2>&1
+}
+
+out="$(run_mstub resolve)"; rc=$?
+[ "$rc" = "1" ] && ok "(p-8) against a transport that 502s any page asking mergeStateStatus, the run still READS and reds at exit 1" \
+  || bad "(p-8) expected exit 1, got $rc — the population was not read: $out"
+grep -q '#9201' <<<"$out" \
+  && ok "(p-8) …and the row the bulk page could only call UNKNOWN is named in the verdict" \
+  || bad "(p-8) #9201 never reached the verdict: $out"
+grep -qi 'BLIND' <<<"$out" \
+  && bad "(p-8) the run called itself BLIND while a per-row read had classified the row: $out" \
+  || ok "(p-8) …and never calls itself BLIND, because a row it could resolve is a row it read"
+grep -q 'pullRequest(number:' "$MLOG" \
+  && ok "(p-8) …and a per-PR query was actually issued, so the resolve is the live path and not an accident of the fixture" \
+  || bad "(p-8) no per-PR query was ever issued: $(cat "$MLOG")"
+
+# (p-8m1) MUTATION — PUT mergeStateStatus BACK ON THE POPULATION PAGE. If that
+# field returns to the bulk query the stub's 502 fires on every page and the
+# run goes UNREACHABLE, which is precisely the red this fix exists to clear.
+M1="$TMP/mut-p8-field.sh"
+sed 's/nodes{ number mergeable updatedAt headRefOid isDraft }/nodes{ number mergeable mergeStateStatus updatedAt headRefOid isDraft }/' \
+  "$WATCH" > "$M1"
+if ! grep -q 'nodes{ number mergeable mergeStateStatus updatedAt headRefOid isDraft }' "$M1"; then
+  bad "(p-8m1) MUTATION did not apply — the light query moved, so (p-8) proves nothing"
+else
+  mout="$(run_mstub resolve "$M1")"; mrc=$?
+  [ "$mrc" = "6" ] \
+    && ok "(p-8m1) MUTATION CAUGHT: with mergeStateStatus back on the page the same transport goes UNREACHABLE (exit 6) — the field is the wall, not the page size" \
+    || bad "(p-8m1) MUTATION SURVIVED: expected 6 with mergeStateStatus on the page, got $mrc: $mout"
+fi
+
+# (p-8m2) MUTATION — REMOVE THE PER-ROW RESOLVE. The cheap page answers UNKNOWN
+# for every row, so without the resolve the run is BLIND at rc 5. That is the
+# original symptom of this row, reproduced on demand.
+M2="$TMP/mut-p8-resolve.sh"
+sed 's/^      out="\$(resolve_unknown "\$repo" "\$out")"$/      : no resolve/' "$WATCH" > "$M2"
+if grep -q 'out="$(resolve_unknown "$repo" "$out")"' "$M2"; then
+  bad "(p-8m2) MUTATION did not apply — the resolve call moved, so (p-8) proves nothing"
+else
+  mout="$(run_mstub resolve "$M2")"; mrc=$?
+  [ "$mrc" = "5" ] \
+    && ok "(p-8m2) MUTATION CAUGHT: without the per-row resolve the same population is BLIND (exit 5) — the resolve is what classifies it" \
+    || bad "(p-8m2) MUTATION SURVIVED: expected 5 without the resolve, got $mrc: $mout"
+fi
+
+# (p-8d) DISARM — THE GREEN THIS MUST NOT BUY. When the per-PR read ALSO
+# answers UNKNOWN there is nothing to resolve, and the resolve must not invent
+# a classification to look useful: the run stays BLIND and still names the row.
+out="$(run_mstub hard-unknown)"; rc=$?
+[ "$rc" = "5" ] \
+  && ok "(p-8d) a row the per-row read ALSO cannot compute stays UNKNOWN and the run is still BLIND (exit 5)" \
+  || bad "(p-8d) expected 5 when nothing resolves, got $rc — the resolve manufactured a classification: $out"
+grep -q '? #9201' <<<"$out" \
+  && ok "(p-8d) …and the unresolved row is still printed as a row this run did not read" \
+  || bad "(p-8d) the unresolved row vanished from the report: $out"
+
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
 

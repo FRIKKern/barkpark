@@ -1,0 +1,325 @@
+
+── (a) CONFLICTING + stale green → reported, exit 1 ──
+  ok   exit 1 (red)
+  ok   #9001 is named in the verdict
+  ok   the staleness distance is counted from main's history (10 commits)
+  ok   mutation: a green newer than every main commit is NOT stale (exit 0)
+  ok   mutation: the clean verdict says so plainly
+
+── (b) MERGEABLE but behind main (strict:false) → NOT reported, exit 0 ──
+  ok   exit 0 — being behind main is what strict:false permits
+  ok   #9002 is not reported
+  ok   it is still COUNTED in the population
+  ok   mutation: the SAME row flipped to CONFLICTING IS reported (exit 1)
+
+── (c) duplicate entries: the occurrence count launders a FAILURE, all-of-present does not ──
+  ok   all-of-present says 0 assert a full 4-of-4
+  ok   the occurrence count is shown reporting 1, and named as the over-report
+  ok   the laundered FAILURE is printed on the context line, not swallowed
+  ok   the row is still red on its OTHER stale greens (exit 1)
+  ok   mutation: without the duplicate, both countings agree at 1 — the gap is the duplicate, not a constant
+
+── (d) PARTIAL — an UNKNOWN row beside a classified one → warned, never dropped, exit 2 ──
+  ok   exit 2 — not green, not red: partially classified
+  ok   a WARNING ROWS block is printed
+  ok   #9004 is named — the naive CONFLICTING filter would have dropped it silently
+  ok   the population counts it as UNKNOWN
+  ok   the sentence carries its coverage (classified 1 of 2 open), so the conclusion cannot be read without it
+  ok   …and the clean sentence is absent while any row went unread
+  ok   mutation: red wins over unknown (exit 1)
+  ok   mutation: the unknown row is STILL printed next to the red
+
+── (d2) TOTAL — every row UNKNOWN → BLIND, exit 5, and no clean sentence ──
+  ok   exit 5 — 0 of 2 rows classified is BLIND, a code of its own
+  ok   the sentence says BLIND and carries "classified 0 of 2 open"
+  ok   the clean sentence never appears on a blind run
+  ok   the population line still prints in full (it always did — the fix is the sentence and the conclusion, not the denominator)
+  ok   both unread rows are still named individually
+  ok   mutation: one classified row demotes BLIND to the exit-2 warning
+  ok   the router has its own 5) arm and sentence for BLIND
+  ok   …and the router exits 1 on rc=5, so a blind run can no longer conclude success
+  ok   the script's own EXIT CODES header documents 5 where the arms are defined
+  ok   arm 5 does not repeat arm 1's 'keep failing every 30 minutes'
+  ok   …it says the next run re-reads and clears this by itself, and that a PERSISTENT 5 means the read is broken
+
+── (e) the population is derived from the payload at run time ──
+  ok   the counts follow the payload (3/1/2/0)
+  ok   no live number is baked into the verdict
+
+── (f) a PR where required contexts NEVER RENDERED is not laundered into 'clean' ──
+  ok   the 1-of-1 class (#6057/#6086's shape) is called out separately
+  ok   the absent contexts are printed as NEVER RENDERED
+
+── (g) the workflow file cannot launder its own scream ──
+  ok   no continue-on-error anywhere in the workflow
+  ok   level-triggered: */30 cron
+  ok   workflow_dispatch is available for an on-demand read
+  ok   the watch job never renders on a PR head, so its name can never enter the required set
+  ok   permissions carry pull-requests: read (the read this verdict needs)
+  ok   permissions carry checks: read
+  ok   permissions carry contents: read
+  ok   the contended .github/workflows/main-gate-watch.yml is untouched by this slice
+
+── (h) docs/ops/merge-gates.md carries the present-but-stale-pass case ──
+  ok   merge-gates.md names the stale-pass case and points at this watch
+
+── (j) rc=3 is credential/spec ONLY; the compute fault has its own code ──
+  ok   an unreadable spec exits 3 (configuration)
+  ok   …and names the spec, not the payload
+  ok   an unparseable payload exits 4 (compute), NOT 3
+  ok   …and the sentence says COMPUTE FAULT
+  ok   …and never claims the credential could not read (it had just read the payload)
+  ok   …and reports the bytes it successfully read, so 'it could not read' is refutable from the log
+  ok   the script's own EXIT CODES header documents 4
+  ok   …and still documents 3 as configuration
+  ok   the router has its own arm and sentence for 4
+  ok   …and the 3 arm still speaks about the credential
+
+── (k) a payload above Linux MAX_ARG_STRLEN *and* macOS's total argv still computes ──
+  ok   the generated PR payload is 1800892B ≥ 1153434B — over Linux's 131072B per-arg cap AND over macOS's ~1 MiB total argv
+  ok   the generated commits payload is 189000B — over the 131072B per-arg cap too (the second argv word)
+  ok   no 'Argument list too long' — nothing large travels by argv any more
+  ok   the verdict COMPUTES over the oversized payload and reds on its stale greens (exit 1)
+  ok   …over the WHOLE population (140 open · 35 CONFLICTING), not a truncated prefix
+  ok   …and the staleness distance is measured against the oversized commit history
+  ok   no payload travels by --argjson; only small scalars do
+  ok   both payloads travel by --slurpfile from a file (honest-gates D44's ratified idiom)
+
+── (l) transport silence gets its own codes — (e) exit 6, (f) exit 7, (g) the workflow answers both ──
+  ok   (l-e) the pull-request list being unreadable exits 6 (UNREACHABLE), not the rc=2 warning the workflow maps to success
+  ok   (l-e) …and says UNREACHABLE, naming the zero coverage
+  ok   (l-e) …and states it classified nothing, so the log cannot be read as a clean population
+  ok   (l-f) an unreadable commit history exits 7 (DISTANCE UNREADABLE), a different code from the unreadable population
+  ok   (l-f) …and says DISTANCE UNREADABLE
+  ok   (l-f) …and never prints the clean sentence: the early return did not fall through into an empty commit window
+  ok   (l-f) an EMPTY commit window turns the same red fixture green (exit 0) — which is exactly why 7 returns early instead of continuing
+  ok   (l-g) --attempts 0 exits 3 at the argv parse (configuration), not silently through the transport code
+  ok   (l-g) …and the error line names the ARGUMENT; it used to print the transport sentence ('could not list pull requests after 0 attempts'), blaming a read that never happened
+  ok   (l-g) a non-numeric --attempts exits 3 and names the argument
+  ok   (l-g) the router has its own 6 arm for UNREACHABLE
+  ok   (l-g) …and arm 6 exits 1
+  ok   (l-g) the router has its own 7 arm for DISTANCE UNREADABLE
+  ok   (l-g) …and arm 7 exits 1
+  ok   (l-g) the two arms name DIFFERENT remedies (the poll budget vs the commits API) — which is why they are two codes
+  ok   (l-g) …and arm 7 refuses the credential explanation, because the PR read succeeded
+  ok   arm 2 no longer claims to cover an unread pull-request list
+  ok   …and arm 2 keeps exit 0: partial coverage really is a warning
+  ok   the script's EXIT CODES header documents 6
+  ok   …and documents 7
+  ok   …and 2's wording is TIGHTENED to partial coverage, which is all it still means
+
+── (m) trend — the count's movement since the last READ run (dr-w29) ──
+  ok   (m1) with no state file the trend says so — movement is UNKNOWN, not zero
+  ok   (m2) the trend does not change the verdict (still exit 1)
+  ok   (m2) the red carries the count AND its movement — a shrinking backlog reads as -2
+  ok   (m2) …and this run, which READ, appended its own READ line for the next baseline
+  ok   (m3) the cancelled run's dangling START is counted UNREAD, in those words
+  ok   (m3) …and the baseline is the READ run behind it, so +0 is measured against a real read
+  ok   (m4) the blind run still exits 5 with the state file in play
+  ok   (m4) the blind run left a START and no READ — zero coverage never becomes a baseline
+  ok   (m4) …and the next run counts the blind run UNREAD, baselined on the READ before it
+  ok   (m5) with only dangling STARTs the trend refuses a baseline and counts them UNREAD
+
+── (n) the pinned baseline: NOVEL fails, KNOWN warns, HEALED fails ──
+  ok   (n1) with an EMPTY pin a stale conflicted row is NOVEL and exits 1
+  ok   (n1) …and it is named NOVEL
+  ok   (n2) a pinned row is KNOWN and the run exits 0
+  ok   (n2) …counted KNOWN
+  ok   (n2) …and the row is still printed in full: the debt stays visible in a green run
+  ok   (n2) …with its staleness distance intact
+  ok   (n3) a NEW conflicted row beside a pinned one still exits 1
+  ok   (n3) …and only the unpinned #9002 is novel
+  ok   (n4) a pinned entry that stopped reporting exits 8 — the baseline must shrink
+  ok   (n4) …#9001 is named HEALED
+  ok   (n4) …with the exact remedy printed
+  ok   (n5) the same empty population with an EMPTY pin exits 0 — (n4) reds on the PIN, not on emptiness
+  ok   (n6) an all-UNKNOWN population is BLIND (5), never a baseline-drift verdict
+  ok   (n6) …the pinned row is counted UNREAD
+  ok   (n6) …and HEALED stays empty on a read that did not happen
+  ok   (n7) a pinned NUMBER at a new HEAD is novel and exits 1
+  ok   (n7) …and the message says the pin describes a different tree
+  ok   (n8) a reasonless pin is refused (3), never silently honoured
+  ok   (n9) an unopenable --baseline is refused (3), never treated as empty
+  ok   (n10) the committed baseline exists at scripts/stale-verdict-watch.baseline
+  ok   (n10) …and the shipped file parses (exit 0, not a 3 configuration fault)
+
+── (o) --selftest is a prover, not a decoration ──
+  ok   (o) --selftest passes on the shipped ratchet
+  ok   (o) …and prints a real pass/fail count
+  ok   (o) …over 32 assertions, so the count is not a vacuous zero
+  ok   (o) --selftest LOSES under SVW_MUTATE=pin-any (exit 1)
+  ok   (o) …and the pin-any mutation actually applied to the program
+  ok   (o) --selftest LOSES under SVW_MUTATE=never-healed (exit 1)
+  ok   (o) …and the never-healed mutation actually applied to the program
+  ok   (o) --selftest LOSES under SVW_MUTATE=head-blind (exit 1)
+  ok   (o) …and the head-blind mutation actually applied to the program
+  ok   (o) an ambient SVW_MUTATE is IGNORED by a normal run (still exit 1)
+  ok   (o) …and the switch IS real inside a selftest child, so the line above tested the guard, not a no-op
+
+── (p) the paged pull-request read — pages, retries a page, and still exits 6 when it cannot read ──
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-1) a two-page population still reds at exit 1
+  ok   (p-1) …and BOTH pages' rows are reported — the cursor was carried past page 1
+  ok   (p-1) …and page 2 was asked for with the cursor page 1 named
+  ok   (p-1) …in exactly 2 population page requests, so paging is not re-reading the whole population per row
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-2) a single-page 504 is survived: the run still reaches its verdict (exit 1)
+  ok   (p-2) …with both rows still present, so the pages read before the failure were not discarded
+  ok   (p-2) …and it was the PAGE that was retried (2 cursor requests), not the whole query
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-3) a read that 504s on every attempt STILL exits 6 UNREACHABLE — the fix did not buy paging with the refusal
+  ok   (p-3) …and says UNREACHABLE
+  ok   (p-3) …and never prints the clean sentence over a population it never read
+  ok   (p-3) …and states it classified nothing
+  ok   (p-4) --page-size '0' is a configuration fault (exit 3), not a read
+  ok   (p-4) --page-size '-1' is a configuration fault (exit 3), not a read
+  ok   (p-4) --page-size 'abc' is a configuration fault (exit 3), not a read
+  ok   (p-4) --page-size '101' is a configuration fault (exit 3), not a read
+  ok   (p-4) --page-attempts 0 is a configuration fault (exit 3)
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-5) disarm: a MERGEABLE, fresh row read through the SAME paged transport exits 0
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-6) a completed poll survives a failed re-poll — the run still reaches its rc-1 verdict
+  ok   (p-6) …and the CONFLICTING row with the stale green is still named
+  ok   (p-6) …over the REAL population size (2 open), so nothing was truncated into the denominator
+  ok   (p-6) …and never claims it does not know how many pull requests exist
+  ok   (p-6) …and SAYS which poll the reported read came from, so the staleness of the rows is on the record
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-6m) with the fallback removed the same population exits 6 UNREACHABLE again — the fix is live, not decorative
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-7) a blinder re-poll does not erase the pass that saw the stale green — still exit 1
+  ok   (p-7) …and the CONFLICTING row poll 1 classified is named
+  ok   (p-7) …and never calls itself BLIND while holding a pass that classified a row
+  ok   (p-7) …and SAYS which poll it reported from and why, so the staleness is on the record
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-7d) a run where NO poll classified anything STILL exits 5 BLIND — the selection bought no green
+  ok   (p-7d) …and still says BLIND
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (p-7m) with keep-the-LAST-pass restored the same population exits 5 BLIND again — the fix is live, not decorative
+
+── (i) disarm: prove these probes are able to fail ──
+  ok   an empty population exits 0 — the red is conditional, not unconditional
+  ok   a nonsense assertion fails, so the greps above are load-bearing
+
+
+── (m) the LIVE page loop: a GraphQL page above macOS total argv still appends to the population ──
+scripts/stale-verdict-watch.test.sh: line 1175: q_rollup: command not found
+  ok   the generated live page is 1584610B ≥ 1153434B
+  ok   (m) no 'Argument list too long' on the live page loop
+  ok   (m) the oversized page was appended and all 100 rows classified
+
+
+── (q) a DRAFT conflicted PR is not NOVEL — it is printed, not counted ──
+  ok   (q1) a DRAFT conflicted PR asserting a stale green exits 0
+  ok   (q1) …and the NOVEL count is 0
+  ok   (q1) …and #15631 is PRINTED on its own labelled draft line, not silenced
+  ok   (q1) …and no RED sentence was printed
+  ok   (q2) the SAME row not marked draft exits 1
+  ok   (q2) …and #15631 is named NOVEL
+  ok   (q2) …and it is NOT on the draft line
+
+── (r) a non-JSON error page is reported with its STATUS, not as `<html>` ──
+  ok   (r1) a 504 HTML error page is reported WITH its status
+  ok   (r1) …and `<html>` is never the whole diagnostic on its own
+  ok   (r1) …with the old first-line-of-body still printed, so this ADDED and removed nothing
+  ok   (r2) …and the run STILL exits 6 UNREACHABLE (rc=6) — the refusal is unchanged
+  ok   (r2) …and still says UNREACHABLE
+  ok   (r2) …and never prints the clean sentence over a population it never read
+  ok   (r2) …and the UNREACHABLE line itself carries the status the workflow's rc=6 text sends the operator to find
+  ok   (r3) a 403 rate-limited page is reported as HTTP 403, not as `<html>`
+  ok   (r3) …and a rate limit is a transport silence (exit 6), not a credential fault
+  ok   (r3) …and carries gh's own reason, so 'the budget' is readable off the log
+  ok   (r3) …and 504 and 403 are DISTINGUISHABLE from the log alone, with no wall-clock reconstruction
+  ok   (r4) a 401 page is a CONFIGURATION FAULT (exit 3), not a transport silence
+  ok   (r4) …and the status that made it one is printed
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: syntax error near unexpected token `number:'
+scripts/stale-verdict-watch.test.sh: command substitution: line 840: `pullRequest(number:)'
+scripts/stale-verdict-watch.test.sh: line 840: repoll-loses-page-2: command not found
+scripts/stale-verdict-watch.test.sh: line 840: repoll-goes-blind: command not found
+scripts/stale-verdict-watch.test.sh: line 840: always-unknown: command not found
+  ok   (r5) the unchanged happy path still reads both pages and reds at exit 1
+  ok   (r5) …and prints no transport diagnostic at all, because there was no error to digest
+  ok   (r6) the mutation APPLIED: 4 call site(s) became head -1, 0 remain
+  ok   (r6) …and against the mutant the retry line reads `: <html>` again, so (r1) is a probe and not a decoration
+  ok   (r6) …while the real script never does — both directions
+  ok   (r7) a JSON 403 names the secondary rate limit instead of printing `{`
+  ok   (r7) …and no longer prints the opening brace as the whole diagnostic
+  ok   (r7) …and a permissions 403 reads DIFFERENTLY, which is the whole point
+  ok   (r7) …the permissions 403 names its own cause
+  ok   (r7) a one-line JSON body works too — gh prints both shapes
+  ok   (r7) an HTML 502 still reports its status — the fallback is intact
+  ok   (r7) a JSON body with NO message field still falls back to the first line
+  ok   (r7b) the mutation APPLIED — the message extraction is disabled in the mutant
+  ok   (r7b) without the extraction the 403 is back to `{` — (r7) measures the new code
+
+── (m) a read fault and a stale green scream under different names ──
+  ok   rc=0: 'Stale verdict watch read fault' green, 'Stale verdict watch' green (clean:-neither-check-run-screams,-and-the-VERDICT-name-publishes-the-green)
+  ok   rc=1: 'Stale verdict watch read fault' green, 'Stale verdict watch' RED (stale-green:-ONLY-'Stale-verdict-watch'-screams)
+  ok   rc=2: 'Stale verdict watch read fault' green, 'Stale verdict watch' green (PARTIAL-warning:-neither-check-run-screams)
+  ok   rc=3: 'Stale verdict watch read fault' RED, 'Stale verdict watch' skipped (CONFIGURATION-FAULT:-ONLY-the-fault-name-screams)
+  ok   rc=4: 'Stale verdict watch read fault' RED, 'Stale verdict watch' skipped (COMPUTE-FAULT:-ONLY-the-fault-name-screams)
+  ok   rc=5: 'Stale verdict watch read fault' RED, 'Stale verdict watch' skipped (BLIND-RUN:-ONLY-the-fault-name-screams)
+  ok   rc=6: 'Stale verdict watch read fault' RED, 'Stale verdict watch' skipped (UNREACHABLE-(run-34589487018):-ONLY-the-fault-name-screams,-verdict-name-SKIPPED-not-green)
+  ok   rc=7: 'Stale verdict watch read fault' RED, 'Stale verdict watch' skipped (DISTANCE-UNREADABLE:-ONLY-the-fault-name-screams)
+  ok   rc=8: 'Stale verdict watch read fault' green, 'Stale verdict watch' RED (BASELINE-DRIFT:-ONLY-'Stale-verdict-watch'-screams)
+  ok   rc=9: 'Stale verdict watch read fault' RED, 'Stale verdict watch' skipped (ROLLUP-BUDGET:-ONLY-the-fault-name-screams)
+  ok   a stale green (fault/verdict = green/RED) and an UNREACHABLE transport silence (RED/skipped) scream under DIFFERENT names
+  ok   on rc=3 'Stale verdict watch' is SKIPPED, not green — no population, no verdict
+  ok   on rc=4 'Stale verdict watch' is SKIPPED, not green — no population, no verdict
+  ok   on rc=5 'Stale verdict watch' is SKIPPED, not green — no population, no verdict
+  ok   on rc=6 'Stale verdict watch' is SKIPPED, not green — no population, no verdict
+  ok   on rc=7 'Stale verdict watch' is SKIPPED, not green — no population, no verdict
+  ok   on rc=9 'Stale verdict watch' is SKIPPED, not green — no population, no verdict
+  ok   if the fence drifts and rc=3 reaches the verdict role anyway, the router reds instead of guessing
+  ok   if the fence drifts and rc=4 reaches the verdict role anyway, the router reds instead of guessing
+  ok   if the fence drifts and rc=5 reaches the verdict role anyway, the router reds instead of guessing
+  ok   if the fence drifts and rc=6 reaches the verdict role anyway, the router reds instead of guessing
+  ok   if the fence drifts and rc=7 reaches the verdict role anyway, the router reds instead of guessing
+  ok   if the fence drifts and rc=9 reaches the verdict role anyway, the router reds instead of guessing
+  ok   an undefined rc ('11') reds in both roles (fault=1 verdict=1) — never a silent pass
+  ok   an undefined rc ('') reds in both roles (fault=1 verdict=1) — never a silent pass
+  ok   an undefined rc ('x') reds in both roles (fault=1 verdict=1) — never a silent pass
+  ok   (m) MUTANT 1: a softened router passes on rc=6, and the table above asserts it must RED
+  ok   (m) MUTANT 2: a router that emits the fault name unconditionally reds the fault role on rc=1 (exit 1), which the pair assertion above forbids
+  ok   (m) MUTANT 3: with rc 6 dropped from the fence the verdict name reds on a transport silence (RED), identical to rc=1 — the fence is what separates them
+  ok   the workflow wires the roles to two different check-run names: Stale verdict watch read fault|Stale verdict watch|fenced=3,4,5,6,7,9
+  ok   (m) MUTANT 4: dropping rc 6 from the verdict job's fence is CAUGHT by the wiring reader — the verdict job `stale-verdict-watch` fences off ['3', '4', '5', '7', '9'], expected ['3', '4', '5', '6', '7', '9'] — an unfenced read fault would red it as a stale green
+  ok   (m) MUTANT 5: giving both jobs ONE check-run name is CAUGHT — both jobs render the SAME check-run name 'Stale verdict watch'; the fault job's check-run name is 'Stale verdict watch'
+  ok   stale-verdict-watch-route.sh passes bash -n
+── stale-verdict-watch: 229 passed, 0 failed ──
