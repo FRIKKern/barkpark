@@ -15599,3 +15599,95 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
   **RE-FREEZE:** derived, per PDS-D732 — the preflight reads the freeze from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` at run time, so THE MERGE ITSELF IS THE RE-FREEZE and the harness is frozen again from attempt 1. The PR body quotes the POST-MERGE OID read with `git rev-parse origin/main:scripts/pds-pull-proof.sh` — `git rev-parse`, never `shasum` (PDS-D154) — and that OID is the evidence stamped on the row's thaw criterion (c4). No hand-typed hash is introduced anywhere.
 
   PAYS: `pds-bl-cond-d-job-blind-false-abort` c0, c1, c2, c3 and c4. Its own anchors are stale and were re-derived by symbol, not line: `cond_d` is NOT at `pds-pull-proof.sh:1327` (it is inside `acquire_full_bundle`, some 1000 lines later), and the job split is NOT at `deploy.yml:44-70` (that range is the `on: push: paths:` filter; the jobs are the `control-plane:` and `instance:` keys under `jobs:`). SOURCE: this PR (branch `deploy/r17-cond-d-thaw`).
+
+## LATE ADJUDICATION — THE DRAFT-TWIN POLICY SPLIT, RULED (decided 2026-09-16, task `pds-w29-bl-twin-policy-split`)
+
+PDS-D409 filed the split and deliberately did not rule it. This is the ruling. Every anchor below was
+re-derived against `origin/main` at `3c89c3b94` on 2026-09-16T18:36:08Z and is carried as a CONTENT
+anchor (PDS-D299), because **all four of PDS-D409's line citations had rotted** and two of them now
+name unrelated code.
+
+- **PDS-D747 — PDS-D409's FOUR ANCHORS ARE ALL STALE, ONE OF THE FOUR SURFACES WAS ALREADY RULED ON
+  MAIN, AND THERE IS A FIFTH SURFACE THE ROW NEVER SAW.** Corrections, each re-derived:
+
+  | PDS-D409 said | What `origin/main` `3c89c3b94` actually holds |
+  |---|---|
+  | `board.ex:210-219` = twin collapse | that range is `snapshot/1`'s loader preamble. The collapse is ~100 lines below in `load_task_docs/1`: `api/lib/barkpark/tasks/board.ex`@`Enum.group_by(fn d -> Content.published_id(d.doc_id) end)` then `api/lib/barkpark/tasks/board.ex`@`Enum.find(twins, hd(twins), fn d -> d.status == "published" end)` |
+  | `queue.ex:146-166` = conditional collapse | the collapse is still there and still conditional, but that range is now `ready_query/1`'s scope preamble; the policy sentence is `api/lib/barkpark/tasks/queue.ex`@`only a draft with a same-scope published twin is suppressed, by axis 3 above.` |
+  | `board.go:613-614` = prefix-stripping join | now `internal/taskboard/board.go`@`func buildByBare(byID map[string]Task) map[string]Task {`; the strip itself lives one file over at `internal/taskboard/detail_data.go`@`func bareID(id string) string { return strings.TrimPrefix(id, draftsPrefix) }`, and the third site is `internal/taskboard/paper.go`@`put("drafts."+pub, chip)` |
+  | `tasks_next_cmd.go:77` = the drafts perspective | the line is still 77, but it is **not the only one** — a SECOND `Perspective: "drafts"` sits in `printReadyFrontierHeader`. The commented site is `internal/cli/tasks_next_cmd.go`@`Perspective: "drafts", // tasks live as drafts, exactly like` |
+
+  **ALREADY RULED:** the RESOLVE axis — "which physical row does this doc_id mean" — was closed on
+  main by `Barkpark.Tasks.TwinResolver` (PRs #16474, #16513), which names this very row and rules for
+  the board's policy: `api/lib/barkpark/tasks/twin_resolver.ex`@`board's**: *collapse, published wins*`.
+  Nothing here re-opens it.
+
+  **THE FIFTH SURFACE:** `Barkpark.Tasks.Fleet` carries THREE more verbatim copies of `canonical_twin/1`
+  (`load_listeners/2`, `current_tasks_by_worker/2`, and the by-ids read), anchored at
+  `api/lib/barkpark/tasks/fleet.ex`@`# canonical row (published wins), Board-style.`. Same policy,
+  four copies of the function across two modules, no shared home.
+
+- **PDS-D748 — THERE ARE NOT THREE POLICIES. THERE IS ONE RULE WITH A CARVE-OUT, ONE READER THAT DOES
+  NOT APPLY IT, AND ONE TRANSPORT SETTING THAT IS NOT A POLICY AT ALL.** The ruling, per surface:
+
+  1. **`Tasks.Board` / Studio board — COLLAPSE, PUBLISHED WINS. CORRECT, and it is the reference.**
+     It is what `TwinResolver` already adopted for every by-id door.
+  2. **`Tasks.Queue` / ready queue — CORRECT AS IS, and it is NOT a competing policy.** Its conditional
+     collapse is rule 1 with its premise absent: an UNPAIRED `drafts.<id>` row has no published twin,
+     so it IS the row of record and is admitted as itself. `TwinResolver` keeps this carve-out by name.
+     Dropping it would make the entire mutate-created task population unreadable.
+  3. **`Tasks.Fleet` — CORRECT POLICY, DUPLICATED CODE.** Fold the four `canonical_twin/1` copies onto
+     one home. Filed, not done here.
+  4. **TUI board (`internal/taskboard`) — WRONG, AND IT IS THE ONLY DISPLAY-SIDE DEFECT.** It joins
+     ACROSS twins by `bareID` and never drops one, so a twinned pair renders TWO cards where Studio
+     renders one. RULED: the TUI must collapse at the snapshot seam with the same published-wins rule.
+  5. **`bp task next --frontier` — AN EXCEPTION IN FORM, THE RULE IN SUBSTANCE. IT SURVIVES UNCHANGED.**
+     `Perspective` is a read perspective on the CONTENT STORE — whether a never-published document is
+     visible at all — not an answer to "which twin wins". A task born through `/v1/data/mutate` lives
+     only at `drafts.<id>`; a `"published"` perspective would return an EMPTY frontier, i.e. the claim
+     queue would be structurally blind to exactly the population the queue's carve-out (2) exists to
+     keep readable. So `--frontier` is not a fourth policy; it is the transport setting that makes the
+     unpaired-draft carve-out reachable from the client, and it is CONSISTENT with the rule rather than
+     an escape from it. **A future unification that flips it to `"published"` is a REGRESSION, not a
+     cleanup**, and this entry is the standing refusal of that change. Both call sites are exempt.
+
+  **NO SLICE MAY UNIFY THESE AS A SIDE EFFECT.** Each surface that changes is filed as its own row
+  with its own file set (PDS-D409's standing instruction, kept).
+
+- **PDS-D749 — YES: A DRAFT ROW MUST BE VISIBLY LABELLED ON EVERY READER THAT CAN SHOW ONE. AND
+  `canonical_twin`'s `hd(twins)` FALLBACK IS JUSTIFIED — BUT IT MAY NOT STAY SILENT.**
+
+  **Why labelled.** The only surfaces that can display an unpaired draft are ones where the `drafts.`
+  SPELLING is the sole signal the row is not published — and every one of them destroys that signal
+  before display: `Content.published_id/1` on the Elixir side, `bareID`/`BareID` on the Go side. The
+  reader deliberately removes the one discriminator and prints NOTHING in its place. Measured, with a
+  control: `grep -i draft` over the TUI card renderers (`render.go`, `detail_render.go`,
+  `components.go`) returns ZERO while a control grep for `blocked` in the same files returns lines;
+  the same probe over the Studio board LiveView returns only twin-RESOLUTION code (the exact/`drafts.`
+  fetch fallback) against a control of 26 `blocked` lines. The absence is real on both surfaces. That
+  is the silent-wrong-answer shape `TwinResolver` closed on the resolve axis, left open on the display
+  axis.
+
+  **Why the fallback stays.** `hd(twins)` is reached ONLY when no twin in the bucket is published, and
+  under the carve-out that draft IS the row of record — picking it is the right answer, not a guess.
+  What is wrong is that it is correct only because the bucket has exactly one member in the case that
+  matters, and that invariant is **unstated and untested**: `hd/1` over an `Enum.group_by` bucket built
+  from an unordered `Repo.all` is insertion order, so a bucket reaching `hd/1` with MORE than one member
+  is a twinned pair with no published side — a data defect being rendered as an ordinary card. RULED:
+  keep the fallback, assert the invariant, and carry the draft marker either way.
+
+  **THE SLICES (c3), filed 2026-09-16, each with its own file set and none unifying another:**
+
+  | row | surface | file set |
+  |---|---|---|
+  | `task-3e8b5f82d3562109` | TUI board must collapse (PDS-D748 item 4) | `internal/taskboard/board.go`, `fetch.go`, `board_test.go` |
+  | `task-9d0c7adbbe1a5af1` | the draft marker on every reader (PDS-D749) | `api/lib/barkpark/tasks/board.ex`, `api/lib/barkpark/plugins/tasks/web/board_live.ex`, `internal/taskboard/types.go`, `render.go`, `detail_render.go` |
+  | `task-a7c3a17984689b3d` | tests pinning the chosen policy (c4) | `api/test/barkpark/tasks/board_test.exs`, `internal/taskboard/board_test.go` |
+  | `task-f7d389c21c68839f` | the fifth surface's three duplicate copies (PDS-D747) | `api/lib/barkpark/tasks/fleet.ex`, `api/lib/barkpark/tasks/board.ex` |
+
+  `Tasks.Queue` and `bp task next --frontier` get NO row, deliberately: PDS-D748 rules both correct as
+  they stand, and the absence of a slice is the ruling, not an oversight.
+
+  PAYS: `pds-w29-bl-twin-policy-split` c0 (PDS-D747), c1 (PDS-D748), c2 (PDS-D749), c3 (the table
+  above). c4 is NOT paid here — its tests live in `api/test/**` and `internal/taskboard/**`, outside
+  this ruling's fence, and are filed as `task-a7c3a17984689b3d`.
