@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   """
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
@@ -36,6 +37,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
             Barkpark.Content.Validation.check_tree(content, title, schema)
         end
 
+      # The workspace's language, once, before any render site (E7, #87).
+      errs = BarkparkWeb.StudioLocale.localize_findings(errs)
+      warns = BarkparkWeb.StudioLocale.localize_findings(warns)
+
       socket = assign(socket, validation_warnings: warns)
 
       case errs do
@@ -43,7 +48,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           {:noreply,
            socket
            |> assign(validation_errors: errs)
-           |> put_flash(:error, "Fix validation errors before publishing")}
+           |> put_flash(:error, gettext("Fix validation errors before publishing"))}
 
         _ ->
           opts = Shared.hook_opts(socket)

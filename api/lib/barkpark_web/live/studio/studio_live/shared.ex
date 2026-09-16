@@ -1711,10 +1711,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   parity E1.6 warnings, E1.11 nested). Without a schema the save path's own
   flat verdict stands and there are no warnings.
   """
-  def validation_findings(nil, _title, _content, errs), do: %{errors: errs || %{}, warnings: %{}}
+  def validation_findings(nil, _title, _content, errs),
+    do: %{errors: BarkparkWeb.StudioLocale.localize_findings(errs || %{}), warnings: %{}}
 
-  def validation_findings(schema, title, content, _errs),
-    do: Barkpark.Content.Validation.check_tree(content, title, schema)
+  def validation_findings(schema, title, content, _errs) do
+    # Translated ONCE here, in the workspace's language (E7 follow-up), so
+    # every render site — top-level field, composite subfield, array row,
+    # localized text, codelist — shows the same words.
+    %{errors: errs, warnings: warns} =
+      Barkpark.Content.Validation.check_tree(content, title, schema)
+
+    %{
+      errors: BarkparkWeb.StudioLocale.localize_findings(errs),
+      warnings: BarkparkWeb.StudioLocale.localize_findings(warns)
+    }
+  end
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil
