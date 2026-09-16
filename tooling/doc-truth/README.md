@@ -558,24 +558,12 @@ corpus REFUSES rather than passing clean.
 
 ### When your PR touches a doc — three rules
 
-1. **A new durable fact goes into its CANONICAL OWNER.** `canonical-for` in the
-   G1 header is unique repo-wide, so every topic has exactly one document that
-   owns it; adding the fact to a second doc is how one topic ends up with two
-   answers that disagree. If the owner is at its byte ceiling, that is an OWNER
-   DECISION (split, retire, or re-budget) — not a licence to write the fact
-   somewhere else.
-2. **An INDEPENDENT READER reviews the doc change, not just the code change.** A
-   second reader asks a different question: the author already knows what the
-   sentence was meant to say. Name what you want checked — that the route in the
-   link is the one you meant, that the example is the one you ran.
-3. **RE-RUN the supported startup paths a doc names.** If your change touches
-   something a doc's allowlisted example depends on, declare it —
-   `<!-- doc-exec: allowlisted deps=path/one,path/two -->` — and the gate will
-   re-run that example on your PR instead of leaving it to rot until someone
-   else's. Unmarked fences are never run, so an example you want PROTECTED has
-   to say so.
-
-Note for the doc owner: the canonical entry for this gate belongs in
-`docs/ops/merge-gates.md` §"Documentation review rules", which is **5 bytes**
-under its 64000B budget — adding it needs a budget decision this gate's author
-is not allowed to make, so the coverage table above stands here until then.
+The three contributor rules — a new durable fact goes into its CANONICAL OWNER,
+an INDEPENDENT READER reviews the doc change, and RE-RUN the supported startup
+paths a doc names — plus the coverage table saying what is mechanised and what
+is review-only, are CANONICAL in
+[`docs/ops/merge-gates.md`](../../docs/ops/merge-gates.md) §"When your PR
+touches a doc — three contributor rules". They are not restated here: that page
+is the `canonical-for: merge-gates` owner, and one topic gets one answer. This
+file stays the MECHANISM: what the extractor sees, what the corpus excludes, and
+how the twelve regression arms prove it.
