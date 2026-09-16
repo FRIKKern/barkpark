@@ -106,7 +106,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
       @full_book_path
       |> File.read!()
       |> Jason.decode!()
-      |> Map.put("productForm", "ZZ")
+      |> Map.put("productForm", "QQ")
 
     {:ok, doc} =
       %Document{}

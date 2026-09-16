@@ -197,11 +197,11 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
     # It must now come back as a structured sibling of the xsd_invalid envelope.
     # No xmllint needed: the raise fires during render, before the XSD gate.
     test "unseeded ProductForm code yields invalid_code, not a raise" do
-      book = Map.put(load_fixture("minimal-book"), "productForm", "ZZ")
+      book = Map.put(load_fixture("minimal-book"), "productForm", "QQ")
 
       assert {:error, {:invalid_code, detail}} = Export.to_iodata(book)
       assert detail["codelist"] == "product_form"
-      assert detail["code"] == "ZZ"
+      assert detail["code"] == "QQ"
       assert detail["message"] =~ "unknown_product_form_code"
     end
 
@@ -210,17 +210,17 @@ defmodule Barkpark.Plugins.OnixEdit.ExportTest do
         put_in(
           load_fixture("minimal-book"),
           ["contributors", Access.at(0), "contributorRole"],
-          "Z99"
+          "Q99"
         )
 
       assert {:error, {:invalid_code, detail}} = Export.to_iodata(book)
       assert detail["codelist"] == "contributor_role"
-      assert detail["code"] == "Z99"
+      assert detail["code"] == "Q99"
     end
 
     test "to_string/1 propagates the invalid_code envelope" do
-      book = Map.put(load_fixture("minimal-book"), "productForm", "ZZ")
-      assert {:error, {:invalid_code, %{"code" => "ZZ"}}} = Export.to_string(book)
+      book = Map.put(load_fixture("minimal-book"), "productForm", "QQ")
+      assert {:error, {:invalid_code, %{"code" => "QQ"}}} = Export.to_string(book)
     end
   end
 
