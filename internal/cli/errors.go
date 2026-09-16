@@ -63,6 +63,14 @@ type apiError struct {
 	// away. Set from the dispatched request's headers (run.go), so it is a fact
 	// about what was sent, not a guess from config.
 	credentialSent bool
+	// datasetRemedy is the inbound half of the scope-honesty contract: the
+	// `ambiguous_dataset` refusal's remedy, restated in the dialect the operator
+	// can actually type. Derived at the dispatch site (handleResponseHinted),
+	// because it needs the COMMAND — whether `-d` is typeable here is a manifest
+	// question, not an error-code one. "" for every other refusal. It is purely
+	// additive: it never touches the exit ladder and never edits serverHint,
+	// which stays the headline because the server knows most.
+	datasetRemedy string
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -747,7 +755,28 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 // details is omitted, so renderErrorEnvelope's ~60 detail-less call sites emit
 // byte-identical bytes through this delegation.
 func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string, details json.RawMessage) bool {
+	return renderErrorEnvelopeRemedy(out, code, msg, requestID, hint, details, "")
+}
+
+// renderErrorEnvelopeRemedy is renderErrorEnvelopeDetailed plus `bp_remedy` —
+// the CLIENT's restatement of the refusal in the dialect this CLI speaks.
+//
+// It is a SEPARATE key from `hint`, never an edit of it. `hint` is the server's
+// own words and a parser that keys on it must keep reading exactly what the
+// server said; `bp_remedy` is the CLI's own, and is emitted only when the CLI
+// has something to add. Omitted when empty, so all ~60 existing call sites emit
+// byte-identical bytes.
+//
+// It has to exist at all because the human branch below is not the branch most
+// callers reach: `bp` renders the error ENVELOPE by default, so a remedy that
+// lived only on the stderr line would be invisible to the operator who typed
+// the plain command. Measured live 2026-09-16 — a bare `bp task get <twin>`
+// prints this envelope on stdout and nothing on stderr.
+func renderErrorEnvelopeRemedy(out *writer, code, msg, requestID, hint string, details json.RawMessage, remedy string) bool {
 	errObj := map[string]any{"code": code, "message": msg}
+	if remedy != "" {
+		errObj["bp_remedy"] = remedy
+	}
 	if requestID != "" {
 		errObj["request_id"] = requestID
 	}
