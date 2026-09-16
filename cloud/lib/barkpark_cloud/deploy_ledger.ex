@@ -2947,6 +2947,82 @@ defmodule BarkparkCloud.DeployLedger do
 
   def content_on_web?(_site_id), do: false
 
+  @doc """
+  The id of the EARLIEST failed production deployment for `site_id`, or `nil`
+  when the site has none.
+
+  ## What this is for — the per-site LATCH, not a second "is it up" question
+
+  `content_on_web?/1` above decides WHETHER a failed attempt destroyed content.
+  It does not bound HOW MANY times the fleet says so. A site with nothing on the
+  web reads `false` on every attempt, so a site that fails 135 times in an hour
+  earned 135 emails through a gate that was working exactly as designed.
+
+  This is the other half: WHICH ONE of an episode's failures is the notice. The
+  answer is the earliest, and it is derived rather than latched in a table for a
+  reason that is a property of the data and not a convenience.
+
+  ## Why one query can stand in for stored latch state
+
+  `Deployment`'s `@transitions` make `"live" => []` — live is TERMINAL. So
+  `content_on_web?/1` is MONOTONE: once a site has a live production row it has
+  one forever, and the predicate can go `false -> true` but never back. Two
+  consequences, and the latch rests on both:
+
+    * A site that reads dark NOW read dark at every earlier instant, so every
+      earlier failed production row of that site also passed the narrowing and
+      also produced an email. "An email already went out for this episode" is
+      therefore exactly "an earlier failed production row exists" — a fact
+      already in the table, not a flag that has to be written and could drift
+      from it.
+    * The episode never has to be CLEARED. When the site finally goes live the
+      narrowing itself closes and the alarm is silent regardless, so a latch
+      that is never re-armed and a latch that is re-armed on recovery are the
+      same latch. There is no stale-flag failure mode because there is no flag.
+
+  ## Why the EARLIEST row and not "does any other row exist"
+
+  Both synchronous producers dispatch POST-COMMIT and the reaper's bulk passes
+  have already committed too, so the attempt being judged is ITSELF in the
+  table. "Does another failed row exist" is then true for every row of a sweep
+  that terminated N rows of one site at once — each sees the others and ALL N
+  are suppressed, including the first. Naming the single earliest row makes the
+  verdict independent of how many rows commit together: exactly one row of any
+  site is ever the earliest, whether it arrived alone or in a batch of 135.
+
+  `(inserted_at, id)` is the order, not `inserted_at` alone: a bulk pass stamps
+  one timestamp across every row it touches, and ties have to break somewhere
+  other than "whatever the planner returned first" or the notice moves between
+  reads of the same table.
+
+  Production-scoped, exactly as `content_on_web?/1` is, so the two halves of the
+  decision are asked about the same cohort. A non-castable id answers `nil` for
+  the reason the predicate above answers `false`: this runs on the reaper's
+  post-commit path, where a raise re-drives a sweep whose rows are already
+  terminal, and `nil` is the verdict that does not manufacture a suppression.
+  """
+  @spec first_production_failure_id(Ecto.UUID.t()) :: Ecto.UUID.t() | nil
+  def first_production_failure_id(site_id) when is_binary(site_id) do
+    case Ecto.UUID.cast(site_id) do
+      {:ok, id} ->
+        Repo.one(
+          from(d in Deployment,
+            where: d.site_id == ^id,
+            where: d.environment == "production",
+            where: d.status == "failed",
+            order_by: [asc: d.inserted_at, asc: d.id],
+            limit: 1,
+            select: d.id
+          )
+        )
+
+      :error ->
+        nil
+    end
+  end
+
+  def first_production_failure_id(_site_id), do: nil
+
   # One site's rows folded into observations. `live_marks` is that site's ordered
   # list of "content answered on the web at" instants; a row that did not itself
   # reach live is DELIVERED by the first mark at or after it (that is when the

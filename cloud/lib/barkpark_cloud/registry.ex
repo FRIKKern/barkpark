@@ -10778,12 +10778,22 @@ defmodule BarkparkCloud.Registry do
   # The narrowing is otherwise untouched: a routine failure still asks
   # `destroyed_content?/1` and still dispatches `:deployment_failed`, so this
   # split reclassifies none of the ~870-a-day flood.
+  #
+  # task-2db350610ca0a168: AND THE GATE IS NOW `alarm?/1`, WHICH IS BOTH HALVES.
+  # `destroyed_content?/1` alone answers a question about the SITE, so it says
+  # the same thing to every attempt while the site is dark — 135 failures in an
+  # hour passed it 135 times. `alarm?/1` is that narrowing AND the per-site
+  # episode latch, and producers call it rather than either half so the two
+  # cannot be picked up separately. The abandonment branch stays ABOVE it and is
+  # therefore unlatched, for the reason the paragraph above gives: it is a
+  # different event, and the most severe outcome in the fleet must not be the
+  # one the volume ruling quiets.
   defp dispatch_deployment_failed(%Deployment{} = deployment) do
     cond do
       AbandonmentPolicy.abandonment?(deployment) ->
         dispatch_deployment_abandoned(deployment)
 
-      DeploymentFailedPolicy.destroyed_content?(deployment) ->
+      DeploymentFailedPolicy.alarm?(deployment) ->
         dispatch_deployment_failed(
           deployment.site_id,
           deployment.failure_reason,
@@ -10965,15 +10975,45 @@ defmodule BarkparkCloud.Registry do
   # two rows of the same site. The verdict map is built first, then applied — the
   # single predicate is still `DeploymentFailedPolicy.destroyed_content?/1`, so
   # the reaper and the two synchronous producers cannot drift apart.
+  #
+  # task-2db350610ca0a168: AND THE LATCH IS APPLIED HERE TOO, still at one read
+  # per distinct site. The narrowing's verdict cannot differ between two rows of
+  # one site; the LATCH deliberately can, and must — a mass reap that terminates
+  # 27 rows of one dark site is precisely the shape the volume ruling exists to
+  # bound, and it must collapse to ONE alert rather than to 27 or to 0.
+  #
+  # WHY THE EARLIEST ID AND NOT "HAS A SIBLING". The four bulk passes have
+  # already committed when this runs, so all 27 rows are in the table and all 27
+  # can see each other; "does another failed row exist" is true for every one of
+  # them and would silence the site completely. Naming the single earliest row
+  # is the same verdict whether the rows arrived one at a time or together.
+  #
+  # A reaped row whose id is not the episode notice is dropped BEFORE the Oban
+  # insert, so a latched alert costs no job row, exactly as a narrowed one does.
   defp destroyed_content_alerts(alerts) do
     verdicts =
       alerts
       |> Enum.map(fn {site_id, _reason, _identity} -> site_id end)
       |> Enum.uniq()
-      |> Map.new(&{&1, DeploymentFailedPolicy.destroyed_content?(%{site_id: &1})})
+      |> Map.new(
+        &{&1,
+         {DeploymentFailedPolicy.destroyed_content?(%{site_id: &1}),
+          DeploymentFailedPolicy.episode_notice_id(&1)}}
+      )
 
-    Enum.filter(alerts, fn {site_id, _reason, _identity} -> Map.fetch!(verdicts, site_id) end)
+    Enum.filter(alerts, fn {site_id, _reason, identity} ->
+      {destroyed?, notice_id} = Map.fetch!(verdicts, site_id)
+      destroyed? and episode_notice?(notice_id, Map.get(identity, :deployment_id))
+    end)
   end
+
+  # UNKEYABLE IS NOT QUIET (charter D3), the same ruling
+  # `DeploymentFailedPolicy.first_notice_of_episode?/1` makes on the synchronous
+  # paths: a site the ledger names no failed row for, or an identity carrying no
+  # deployment id, is alerted rather than silently dropped.
+  defp episode_notice?(nil, _deployment_id), do: true
+  defp episode_notice?(_notice_id, nil), do: true
+  defp episode_notice?(notice_id, deployment_id), do: notice_id == deployment_id
 
   # The narrowing can empty a non-empty sweep, and an empty sweep must not reach
   # `Oban.insert_all/1` — the same reason the head clause above exists.
