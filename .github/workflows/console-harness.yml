@@ -150,6 +150,7 @@ on:
       - "web/lib/status-ladder.gen.ts"
       - "web/public/bp-graph.js"
       - "js/packages/react/src/status-vocab.gen.ts"
+      - "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
       - "templates/search-starter/public/bp-graph.js"
       - "templates/astro-search-starter/public/bp-graph.js"
       - "templates/search-starter/app/globals.css"
