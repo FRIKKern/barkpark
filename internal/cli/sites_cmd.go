@@ -46,42 +46,27 @@ import (
 var uuidLike = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // runSites is the `bp sites <verb>` dispatcher. A bare `bp sites` is the list
-// view (the most common path). Any other verb routes to its sub-command.
+// view (the most common path). Every other verb resolves through THE SITE
+// COMMAND MATRIX (site_verb_matrix.go) — the one table `bp cloud site` routes
+// through too, so the two spellings cannot drift into two behaviours. There is
+// deliberately no switch here: a `case` arm added back would be a verb only one
+// noun answers, which is the defect the matrix retired.
 func runSites(out *writer, args []string) int {
 	if len(args) == 0 {
 		return runSitesList(out, nil)
 	}
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
-			printSitesHelp(out)
-			return exitOK
+	// `preflight` and `matrix` own their OWN -h pages, so route them before the
+	// family-level help below would swallow it (the same carve-out runCloudSite
+	// makes — one behaviour, two nouns).
+	if verb := args[0]; verb != "preflight" && verb != "matrix" {
+		for _, a := range args {
+			if a == "-h" || a == "--help" {
+				printSitesHelp(out)
+				return exitOK
+			}
 		}
 	}
-
-	verb := args[0]
-	rest := args[1:]
-	switch verb {
-	case "ls", "list":
-		return runSitesList(out, rest)
-	case "show", "get":
-		return runSitesShow(out, rest)
-	case "create", "new":
-		return runSitesCreate(out, rest)
-	case "deployments", "deploys":
-		return runSitesDeployments(out, rest)
-	case "env":
-		return runSitesEnv(out, rest)
-	case "domain", "domains":
-		return runSitesDomain(out, rest)
-	case "github":
-		return runSitesGithub(out, rest)
-	case "logs", "log":
-		return runSitesLogs(out, rest)
-	default:
-		// A bare positional that isn't a known verb is treated as the list view
-		// being passed extra junk — surface a usage error rather than guessing.
-		return useError(out, "usage", fmt.Sprintf("unknown sites command %q (run `bp sites -h` for usage)", verb), exitUsage)
-	}
+	return dispatchSiteVerb(out, globals{}, siteSpellingFleet, args[0], args[1:])
 }
 
 // runSitesList renders `bp sites` — the fleet of hosted sites under the user's
@@ -1982,6 +1967,25 @@ USAGE
   bp sites logs <site>                              print latest deployment's build log URL
   bp sites logs <site> <deployment-id>              the recorder's build RECORD for ONE deployment
                                                     (operator-gated; the record, never the log bytes)
+  bp sites status|doctor|rollback|delete <site>     the per-site lifecycle verbs
+  bp sites open|settings|preflight ...              (identical to the 'bp cloud site' spelling)
+  bp sites matrix                                   print the SITE COMMAND MATRIX
+
+TWO SPELLINGS, ONE TREE
+  'bp sites <verb>' and 'bp cloud site <verb>' are the same command tree under
+  two nouns: every verb above answers at both, reaching the same implementation,
+  the same route and the same output. 'bp sites matrix' prints the whole table.
+
+  TWO EXCEPTIONS, both because the KIND is really different:
+    create — 'bp sites create' makes a CONTAINER site (your own repo, built and
+             run as an image); 'bp cloud site create' SPAWNS a content-bound
+             site on one of your instances. Same route, different body.
+    deploy — 'bp sites deploy' is REFUSED on purpose, because the two kinds have
+             two doors: a container site deploys with 'bp deploy <site>', a
+             spawned site with 'bp cloud site deploy <site>'. Nothing guesses.
+
+  RESERVED, never a site verb: 'bp cloud deploy' and 'bp cloud rollback' act on
+  an INSTANCE (the blue/green code-slot flip of a whole Barkpark box).
 
 WHAT IT DOES
   drives the Barkpark Cloud control plane's hosted-site surface — a site is a

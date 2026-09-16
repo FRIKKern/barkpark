@@ -47,16 +47,21 @@ var builtinCompletionPaths = map[string][]string{
 		"usage", "verify", "webhook", "webhooks", "workspace", "workspaces",
 	},
 
-	// `bp cloud site <TAB>` / `bp cloud sites <TAB>` — runCloudSite
-	// (cloud_site_cmd.go). The plural spelling is a dispatcher alias, so it
-	// carries the identical verb list.
+	// `bp cloud site <TAB>` / `bp cloud sites <TAB>` — every verb in the SITE
+	// COMMAND MATRIX (site_verb_matrix.go), which both `bp cloud site` and the
+	// top-level `bp sites` dispatch through. The plural spelling is a dispatcher
+	// alias, so it carries the identical verb list.
 	"cloud site": {
-		"build", "create", "delete", "deploy", "doctor", "list", "ls", "open",
-		"preflight", "rm", "rollback", "settings", "status",
+		"build", "create", "delete", "deploy", "deployments", "deploys",
+		"doctor", "domain", "domains", "env", "get", "github", "list", "log",
+		"logs", "ls", "matrix", "open", "preflight", "rm", "rollback",
+		"settings", "show", "status",
 	},
 	"cloud sites": {
-		"build", "create", "delete", "deploy", "doctor", "list", "ls", "open",
-		"preflight", "rm", "rollback", "settings", "status",
+		"build", "create", "delete", "deploy", "deployments", "deploys",
+		"doctor", "domain", "domains", "env", "get", "github", "list", "log",
+		"logs", "ls", "matrix", "open", "preflight", "rm", "rollback",
+		"settings", "show", "status",
 	},
 
 	// Per-verb flags. Sourced from each handler's parseHzArgs declaration; the
