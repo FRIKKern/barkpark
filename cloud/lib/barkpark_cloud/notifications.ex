@@ -286,7 +286,7 @@ defmodule BarkparkCloud.Notifications do
         # deliberately absent from `chat_events` (it takes no route), so the
         # view has to state it separately or the vocabulary reads as smaller
         # than it is.
-        chat_always_send: @chat_always_send
+        chat_always_send: chat_always_send()
       },
       event_view
     )
@@ -2057,6 +2057,20 @@ defmodule BarkparkCloud.Notifications do
 
   @doc "The chat-routing event names (strings). Drives the UI matrix + validation."
   def chat_events, do: @chat_events
+
+  @doc """
+  The chat events that fan out with NO per-event route — `test`, `trial_expiring`
+  and `trial_expired` (`@chat_always_send`).
+
+  cch-w42-bl: this exists so a census can cover them WITHOUT re-typing the
+  literal. They are deliberately absent from `chat_events/0` (they take no
+  route), so before this accessor the only way to reach them from a test was to
+  copy the list — the pinned-list smell D356 forbids, and the reason
+  `trial_expiring` sat outside the wave-42 event census. `settings_view/2`
+  renders THIS function, so the console view and any census read one source.
+  """
+  @spec chat_always_send() :: [String.t()]
+  def chat_always_send, do: @chat_always_send
 
   @doc "The known chat channel kinds (delegates to ChannelConfig)."
   def chat_channel_types, do: ChannelConfig.types()
