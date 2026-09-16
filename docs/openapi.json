@@ -9507,6 +9507,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 `ambiguous_dataset` refusal names: one doc_id may live in two datasets of a single workspace+project, and the task doors REFUSE such an id rather than picking a dataset you did not name. Omit it and nothing is picked for you — an unambiguous id reads normally and an ambiguous one is still refused.",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
