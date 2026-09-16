@@ -49,7 +49,13 @@
   <!-- Keyboard: the canvas is tabindex=0; Tab focuses the graph, focus
        delegates into the role=tree, arrows traverse and recenter the camera. -->
 
-  <script src="bp-graph.js"></script>
+  <!-- Loaded straight from the served copy: this harness lives OUTSIDE
+       api/priv/static/assets on purpose (it is dev-only scaffolding and
+       must not be publicly served), so it reaches the canonical renderer
+       by relative path. Open this file directly (file:// or any static
+       server rooted at the repo) — it needs no Phoenix.
+       README.md in this directory explains why. -->
+  <script src="../../priv/static/assets/bp-graph.js"></script>
   <script>
     // ── rich sample dataset (~60 nodes) ──────────────────────────────────
     // Root = a hub "page" referenced by many; an author hub referenced by
