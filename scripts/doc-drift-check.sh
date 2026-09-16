@@ -56,6 +56,24 @@
 #  rule: touching a listed file re-runs that doc's examples even when the doc
 #  itself is untouched, which is the whole point — an example rots when its
 #  DEPENDENCY changes, not when its prose does.
+
+# INTERPRETER GUARD — this file uses process substitution, which a POSIX-mode
+# bash cannot parse. `sh scripts/doc-drift-check.sh` would run everything above that line and
+# then die with the status of the LAST COMPLETED command — a vacuous green from a
+# gate that compared NOTHING. Refuse instead, before any check runs. The guard must
+# stay POSIX-parseable and must stay FIRST: anything it sits below is code a
+# POSIX-mode shell has already run. Enforced by scripts/posix-vacuous-green-census.sh.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "doc-drift-check.sh: needs bash (this gate uses process substitution); run: bash scripts/doc-drift-check.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "doc-drift-check.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this gate's process substitution; run: bash scripts/doc-drift-check.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"

@@ -43,6 +43,24 @@
 # domain also reds), and the host arms match the /24 each box sits in (so a
 # sibling host reds too). That is both broader coverage and the reason this file
 # does not itself re-publish an address or a host.
+
+# INTERPRETER GUARD — this file uses process substitution, which a POSIX-mode
+# bash cannot parse. `sh scripts/charter-corpus-hygiene-check.sh` would run everything above that line and
+# then die with the status of the LAST COMPLETED command — a vacuous green from a
+# gate that compared NOTHING. Refuse instead, before any check runs. The guard must
+# stay POSIX-parseable and must stay FIRST: anything it sits below is code a
+# POSIX-mode shell has already run. Enforced by scripts/posix-vacuous-green-census.sh.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "charter-corpus-hygiene-check.sh: needs bash (this gate uses process substitution); run: bash scripts/charter-corpus-hygiene-check.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "charter-corpus-hygiene-check.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this gate's process substitution; run: bash scripts/charter-corpus-hygiene-check.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 set -uo pipefail
 
 SELF_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
