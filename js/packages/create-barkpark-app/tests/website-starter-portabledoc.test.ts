@@ -178,7 +178,9 @@ describe('controls — the assertions above discriminate', () => {
     // fired on the word would be red on the correct state (and so useless);
     // one that never fires would be quiet on the reverted state (and so
     // vacuous). Both directions, on real page source.
-    const correct = read(PAGES[0].file)
+    const about = PAGES.find((p) => p.label === 'about')
+    expect(about).toBeDefined()
+    const correct = read(about!.file)
     expect(correct).toContain('PortableText') // the comment is genuinely there
     expect(usesPortableText(correct)).toBe(false) // and is correctly ignored
 
