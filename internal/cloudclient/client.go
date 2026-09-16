@@ -123,13 +123,38 @@ type Barkpark struct {
 	Provider string `json:"provider"`
 
 	// Additive (charter decision 15) — the triage-status axes.
-	Suspended         bool   `json:"suspended"`
-	SuspendedReason   string `json:"suspended_reason"`
-	UpdateState       string `json:"update_state"`
-	ProvisionStatus   string `json:"provision_status"`
-	ProvisionError    string `json:"provision_error"`
-	DeprovisionStatus string `json:"deprovision_status"`
-	DeprovisionError  string `json:"deprovision_error"`
+	Suspended       bool   `json:"suspended"`
+	SuspendedReason string `json:"suspended_reason"`
+	// SINCE WHEN the box has been suspended (task-85c531c2adbf0dff, producer
+	// cch-w54-bl / PR #14694). `Suspended` and `SuspendedReason` above said THAT
+	// and WHY and stopped there, so every `bp cloud` reader could name a
+	// suspension and its cause but never its day — the exact gap cch-w54-bl
+	// closed for the console and left open for the CLI. The payload census caught
+	// it the moment the key landed and carried a KNOWN OPEN :unread allowlist row
+	// naming this task as its tracker; this field is what deletes that row.
+	//
+	// POINTER ON PURPOSE, the same reason `SiteDeployment.RefusalPhase` is one
+	// (PR #18566). NULL MEANS NOT SUSPENDED, never "suspended at an unknown
+	// time": `Registry.unsuspend_barkpark/1` and the bulk resume clear
+	// suspended/suspended_reason/suspended_at together, so a live box never
+	// carries a stale stamp. A plain `string` would collapse that null and a real
+	// RFC3339 stamp into the same `""`, and an older control plane that omits the
+	// key entirely would be indistinguishable from a plane that answered "no
+	// suspension". The pointer keeps the three apart at decode.
+	//
+	// AND THE ABSENCE MUST NOT BE PAPERED OVER. The console's own bug here was
+	// exactly that: `suspendedCardBannerHtml` fell through to a helper computed
+	// off `sub.current_period_end` — the NEXT renewal day — and painted a FUTURE
+	// date as a past-tense suspension day. No reader of this field may substitute
+	// a billing date, a beat time, or a zero-value date for a nil. `bp cloud
+	// status` renders a nil as an explicit em dash (`suspendedSinceMark`) and
+	// `-o json` emits NO KEY at all.
+	SuspendedAt       *string `json:"suspended_at"`
+	UpdateState       string  `json:"update_state"`
+	ProvisionStatus   string  `json:"provision_status"`
+	ProvisionError    string  `json:"provision_error"`
+	DeprovisionStatus string  `json:"deprovision_status"`
+	DeprovisionError  string  `json:"deprovision_error"`
 
 	// Self-update TRUTH (isu-w5) — the full version + policy the control plane
 	// mirrors from each instance's own update verdict and the team's autoupdate
