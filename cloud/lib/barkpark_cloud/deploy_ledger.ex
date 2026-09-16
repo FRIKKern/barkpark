@@ -1819,6 +1819,40 @@ defmodule BarkparkCloud.DeployLedger do
     }
   end
 
+  @doc """
+  THE ONE BOUNDARY THAT REFUSES ANYTHING, as a value a caller can compute with.
+
+  `census/3` already carries every boundary on the wire under `boundaries`, and
+  the refusal reason names this one verbatim in prose. Neither is usable by a
+  renderer that wants to answer the reader's next question — "is this door
+  broken, or is it just waiting?" — because the prose has to be parsed and the
+  wire list is a list of four whose refusing member is not marked.
+
+  So the instant is READ, never re-typed: a renderer that computes "this window
+  measures again from X" off this function cannot drift from the constant
+  `straddled_boundary/2` actually tests against. Pure, no DB, no clock.
+  """
+  @spec refusal_boundary() :: %{
+          subject: String.t(),
+          instant: DateTime.t(),
+          method: String.t(),
+          source: String.t(),
+          voids: String.t()
+        }
+  def refusal_boundary, do: @deferred_status_boundary
+
+  @doc """
+  Does the window `from`..`to` STRADDLE the refusal boundary — i.e. is every
+  RATIO over it a blend of two vocabularies?
+
+  The same predicate `census/3` refuses on, exported so a caller that already
+  holds a refused node can tell a boundary straddle apart from the other reasons
+  a rate refuses (too small a sample, an unreadable ledger) WITHOUT reading the
+  prose. `false` for a window wholly on either side.
+  """
+  @spec straddles_refusal_boundary?(DateTime.t(), DateTime.t()) :: boolean()
+  def straddles_refusal_boundary?(from, to), do: not is_nil(straddled_boundary(from, to))
+
   # A window STRADDLES a boundary when the boundary instant falls strictly
   # inside it. A window wholly on one side is internally consistent — every row
   # in it was labelled by the same vocabulary — and refusing it too would make
