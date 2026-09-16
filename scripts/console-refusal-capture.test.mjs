@@ -307,3 +307,75 @@ test("cch-w63-bl: every exclusion carries a written reason", () => {
     assert.ok(e.why && e.why.length > 80, `${e.file} is excluded with no real reason`);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (5) THE EXCLUSION'S PRECONDITION, DERIVED — NOT THE PROSE, THE REACHABILITY
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Every EXCLUDED entry rests on ONE load-bearing claim: no gate step runs this
+// file, so nothing ever captures its stderr and normalising it would be a shape
+// with no reader. Until now that claim lived only in the `why` string, which
+// means `EXCLUDED` was a one-line escape hatch: drop a REAL gate instrument in
+// there with 80 characters of plausible prose and both DERIVED arms above go
+// quiet about it forever. That is the failure direction this file keeps being
+// filed against, so the claim is now DERIVED on every run.
+//
+// A mention is not an invocation. Four of the nine excluded files are named in
+// console-harness.yml and cloud.yml — all of them inside `#` comment lines that
+// explain why nothing runs them. Full-line comments are dropped before the scan
+// for exactly that reason (measured: keeping them makes 4 of 9 look reachable).
+const WORKFLOW_DIR = ".github/workflows";
+
+/** Non-comment lines of every workflow, as one blob per file. */
+function workflowCommandLines() {
+  const out = [];
+  for (const f of fs.readdirSync(path.join(ROOT, WORKFLOW_DIR)).sort()) {
+    if (!/\.ya?ml$/.test(f)) continue;
+    const src = fs.readFileSync(path.join(ROOT, WORKFLOW_DIR, f), "utf8");
+    for (const line of src.split("\n")) {
+      if (/^\s*#/.test(line)) continue;   // a comment ABOUT a file is not a call TO it
+      out.push({ file: `${WORKFLOW_DIR}/${f}`, line });
+    }
+  }
+  return out;
+}
+
+const COMMAND_LINES = workflowCommandLines();
+
+/** The workflow lines that INVOKE `node <rel>` in command position, if any. */
+function workflowInvocationsOf(rel) {
+  const esc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(^|[\\s;&|(\`"'])node\\s+(?:--[^\\s]+\\s+)*${esc}(\\s|$|["'\`;&|)])`);
+  return COMMAND_LINES.filter((c) => re.test(c.line));
+}
+
+test("cch-w63-bl (DERIVED): the workflow-invocation reader can SEE a call — positive control", () => {
+  // Without this arm, a reader that answers "unreachable" for every path would
+  // pass every exclusion vacuously: a green with no subject. breakpoint-sweep
+  // is a real `run:` step of console-harness.yml's console-unit job.
+  assert.ok(COMMAND_LINES.length > 500,
+    `only ${COMMAND_LINES.length} non-comment workflow lines — the workflow scan collapsed`);
+  const control = "cloud/priv/static/__preview__/breakpoint-sweep.mjs";
+  const hits = workflowInvocationsOf(control);
+  assert.ok(hits.length > 0,
+    `the reader cannot see the known invocation of ${control}; every exclusion below would pass vacuously`);
+
+  // And it must be able to say NO — a file nobody runs, and a mere MENTION.
+  assert.deepEqual(workflowInvocationsOf("cloud/priv/static/__preview__/no-such-file-anywhere.mjs"), []);
+  const mentionOnly = COMMAND_LINES.filter((c) => /__terminal_verb_dump\.mjs/.test(c.line));
+  assert.deepEqual(mentionOnly, [],
+    "a dump file is named only inside comment lines; if it shows up here the comment strip broke");
+});
+
+test("cch-w63-bl (DERIVED): no EXCLUDED file is invoked by a workflow run: line", () => {
+  assert.ok(EXCLUDED.length >= 9, `EXCLUDED collapsed to ${EXCLUDED.length} entries`);
+  const reachable = [];
+  for (const e of EXCLUDED) {
+    const hits = workflowInvocationsOf(e.file);
+    if (hits.length) reachable.push(`${e.file}\n      invoked at: ${hits.map((h) => `${h.file}: ${h.line.trim()}`).join("\n                  ")}`);
+  }
+  assert.deepEqual(reachable, [],
+    "an EXCLUDED file that a workflow DOES run. Its exclusion rests on 'no gate step reaches it',\n" +
+    "and that claim is now false — so the capture is blind to a refusal a job really publishes.\n" +
+    "Normalise it or make it CONFORMING; do not leave it excluded:\n  " + reachable.join("\n  "));
+});
