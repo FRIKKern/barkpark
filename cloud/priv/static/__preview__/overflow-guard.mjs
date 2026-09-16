@@ -12112,7 +12112,8 @@ async function main() {
     //  THE TWO VALUES, AND WHY THEY ARE COMPARABLE AT ALL. `freshnessModel`
     //  spells a live production deploy "Live" and a cancelled one "Cancelled"
     //  (`siteStatusPill` paints that into `.status-pill-label`); `cap(st)`
-    //  spells the ladder pill the same two words (`deployRow` → `.dep-pill`).
+    //  spells the ladder pill the same two words (`deployRow` → the shared
+    //  `.status-pill`, since gr-backlog-d24 retired the second `.dep-*` family).
     //  Re-derive by symbol, never by line:
     //    grep -n 'function freshnessModel\|function siteStatusPill' cloud/priv/static/app.js
     //    grep -n 'function deployRow' cloud/priv/static/app.js
@@ -12189,8 +12190,8 @@ async function main() {
       if (!(tOf(newestPreview) > tOf(headProd))) {
         return die(`${D}: the cancelled preview (${newestPreview.updated_at}) is NOT newer than the live production deploy (${headProd.updated_at}) — the whole point of the shape is that the newest row of ANY environment is the preview, so a filter that ignored environment entirely would still pass`);
       }
-      // `cap(st)` is what BOTH surfaces spell (app.js `deployRow` →
-      // `.dep-pill`, and `freshnessModel`'s live arm), so the expected word is
+      // `cap(st)` is what BOTH surfaces spell (app.js `deployRow` → the shared
+      // `.status-pill`, and `freshnessModel`'s live arm), so the expected word is
       // DERIVED from the fixture's own live production head rather than typed.
       const wantPill = headProd.status.charAt(0).toUpperCase() + headProd.status.slice(1);
       const previewLeadS = Math.round((tOf(newestPreview) - tOf(headProd)) / 1000);
@@ -12245,7 +12246,13 @@ async function main() {
           `(function(){var d=document.documentElement;` +
           `var v=document.querySelector('section.view:not([hidden])');` +
           `var rows=document.querySelectorAll('#site-deploys .deploy-row');` +
-          `var h=rows[0]?rows[0].querySelector('.dep-pill'):null;` +
+          // gr-backlog-d24: the ladder head is a `.status-pill` now, and a row can
+          // carry TWO of them (the ledger's failure-class chip sits beside the
+          // status chip in `.dep-side`). The status chip is the LAST one in the
+          // row, so take the last rather than the first — `querySelector` here
+          // would read the failure class and compare the wrong string.
+          `var ps=rows[0]?rows[0].querySelectorAll('.status-pill'):[];` +
+          `var h=ps.length?ps[ps.length-1]:null;` +
           `var hm=rows[0]?rows[0].querySelector('.deploy-meta'):null;` +
           `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),rows:rows.length,` +
           ` previews:document.querySelectorAll('.deploys.previews .deploy-row.preview-row').length,` +
@@ -12290,7 +12297,7 @@ async function main() {
           vacuous = true;
         }
         if (!det.head) {
-          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: the ladder head's .dep-pill is ${det.head === null ? "ABSENT" : "EMPTY"} — there is no ladder status to compare`);
+          fail(D, `${FRESH_SCEN}/${theme}@${FRESH_WIDTH}#site/${FRESH_SITE_ID}: the ladder head's .status-pill is ${det.head === null ? "ABSENT" : "EMPTY"} — there is no ladder status to compare`);
           vacuous = true;
         }
         if (vacuous) {
