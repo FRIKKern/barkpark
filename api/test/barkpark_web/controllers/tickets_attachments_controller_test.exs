@@ -312,7 +312,7 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
     # The guard this pins lives in `Media.get_file/2` (`Repo.uuid_or_nil`), and
     # was proven only at media_test.exs's context layer. THIS is the HTTP-boundary
     # assertion: a non-UUID :asset_id must be an enveloped 404, never an
-    # Ecto.Query.CastError escaping as a 500.
+    # Ecto.Query.CastError escaping as an opaque 400.
     for {label, asset_id} <- [
           {"a plain word", "garbage"},
           {"a UUID-shaped-but-invalid string", "not-a-uuid-0000-0000-0000-000000000000"},

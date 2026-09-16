@@ -44,8 +44,8 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   `{:error, :not_found}` — 404, never 403 — so a key can't probe which ids
   exist. Lookups go through `Content.get_document/4`, which filters on the
   `doc_id` STRING column (not the `:binary_id` primary key), so there is no
-  `Ecto.CastError` surface here — a raw, non-UUID id is a plain no-match, not a
-  500 (the binary_id CastError gotcha applies only to `Repo.get/2` by PK, which
+  `Ecto.Query.CastError` surface here — a raw, non-UUID id is a plain no-match,
+  not a 400 (the binary_id CastError gotcha applies only to `Repo.get/2` by PK, which
   this module never calls).
   """
 

@@ -635,7 +635,8 @@ defmodule Barkpark.Tenancy do
   #
   # Guarded on the `:binary_id` cast the same way `get_workspace_by_id/1` is: an
   # internal caller threading a non-UUID `:workspace_id` would otherwise raise
-  # `Ecto.CastError` → 500 on a read path. A malformed id matches no row → nil,
+  # `Ecto.Query.CastError` → an opaque 400 on a read path (NOT `Ecto.CastError`,
+  # which never fires on a binary_id bind). A malformed id matches no row → nil,
   # which is the pre-existing answer for that input.
   #
   # Uncached, deliberately. `DefaultScopeCache` memoises the ONE instance
@@ -669,7 +670,7 @@ defmodule Barkpark.Tenancy do
   def get_workspace_by_id(nil), do: nil
 
   def get_workspace_by_id(id) when is_binary(id) do
-    # Guard the :binary_id cast: a non-UUID id would raise Ecto.CastError → 500
+    # Guard the :binary_id cast: a non-UUID id would raise Ecto.Query.CastError → 400
     # the moment a caller wires a raw :id path param in. A malformed id matches
     # no row → nil, matching the guarded siblings (auth, media, webhooks, …).
     case Repo.uuid_or_nil(id) do

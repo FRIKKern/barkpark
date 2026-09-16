@@ -233,7 +233,7 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
 
   # ── (D) CRASH — a non-string `dataset` query param ───────────────────────
 
-  test "(D) ?dataset[]=x returns a clean 4xx, not a raised CastError / 500",
+  test "(D) ?dataset[]=x returns a clean 4xx, not a raised Ecto.Query.CastError",
        %{path: path, operator_raw: operator_raw} do
     conn =
       build_conn()

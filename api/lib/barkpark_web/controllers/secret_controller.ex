@@ -262,7 +262,7 @@ defmodule BarkparkWeb.SecretController do
   # Default workspace on flat routes too. The scoped route threads the
   # resolved workspace id, guarded through `Repo.uuid_or_nil/1` BEFORE it
   # reaches the Secrets read/write paths: they take scope as a raw binary and
-  # a non-UUID raises `Ecto.Query.CastError` — a 500 (see
+  # a non-UUID raises `Ecto.Query.CastError` — an opaque 400 (see
   # secrets_castgap_contract_test.exs). A forged/garbage id and a scoped
   # route without a resolved workspace both fold into an opaque 404 on EVERY
   # verb; `{:error, :invalid_scope}` never reaches the wire

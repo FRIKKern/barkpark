@@ -281,7 +281,7 @@ defmodule Barkpark.Scim do
   @spec get_org_user(Organization.t(), binary()) :: User.t() | nil
   def get_org_user(%Organization{} = org, user_id) when is_binary(user_id) do
     # #672 class: `user_id` binds to `:binary_id` columns (Membership.principal_id,
-    # User.id). A non-UUID path param would raise Ecto.CastError → 500; guard the
+    # User.id). A non-UUID path param would raise Ecto.Query.CastError → 400; guard the
     # cast so a malformed id folds into the existing not_found (`nil`) branch → 404.
     case Repo.uuid_or_nil(user_id) do
       nil -> nil
@@ -440,7 +440,7 @@ defmodule Barkpark.Scim do
   @spec get_org_group(Organization.t(), binary()) :: Group.t() | nil
   def get_org_group(%Organization{id: oid}, id) when is_binary(id) do
     # #672 class: `id` binds to Group's `:binary_id` PK. A non-UUID path param
-    # would raise Ecto.CastError → 500; guard the cast so a malformed id folds
+    # would raise Ecto.Query.CastError → 400; guard the cast so a malformed id folds
     # into the existing `nil` branch → SCIM 404.
     case Repo.uuid_or_nil(id) do
       nil -> nil

@@ -40,7 +40,7 @@ defmodule Barkpark.TenancyTest do
   describe "by-id lookups guard the :binary_id cast" do
     # These are public context functions with @spec binary() | nil. A raw,
     # non-UUID id (the moment a controller wires an :id path param in — the
-    # #672 mistake) would raise Ecto.CastError → 500 on the bare Repo.get.
+    # #672 mistake) would raise Ecto.Query.CastError → an opaque 400 on the bare Repo.get.
     # Ecto.UUID.cast keeps the contract nil-on-absent/malformed.
     test "get_workspace_by_id/1 returns nil for a non-UUID id" do
       assert Tenancy.get_workspace_by_id("not-a-uuid") == nil

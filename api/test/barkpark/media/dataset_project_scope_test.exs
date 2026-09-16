@@ -366,7 +366,7 @@ defmodule Barkpark.Media.DatasetProjectScopeTest do
       assert Tenancy.scope_project_id([]) == seeded_project.id
     end
 
-    test "a malformed workspace_id answers nil rather than raising Ecto.CastError" do
+    test "a malformed workspace_id answers nil rather than raising Ecto.Query.CastError" do
       assert is_nil(Tenancy.scope_project_id(workspace_id: "not-a-uuid"))
     end
   end

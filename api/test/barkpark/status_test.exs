@@ -3,7 +3,8 @@ defmodule Barkpark.StatusTest do
   Behavior-preservation guard for `Status.get_incident/1` after it was
   de-duplicated onto the canonical `Repo.uuid_or_nil/1` (uuid-guarded-fetch).
   A valid id still resolves the row; a non-UUID string (or a well-formed but
-  absent UUID) folds to `nil` — never an `Ecto.CastError` 500.
+  absent UUID) folds to `nil` — never an `Ecto.Query.CastError` (which
+  phoenix_ecto maps to an opaque 400, not the 500 this note used to claim).
   """
   use Barkpark.DataCase, async: true
 

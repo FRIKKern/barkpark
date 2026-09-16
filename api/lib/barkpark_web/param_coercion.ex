@@ -5,9 +5,11 @@ defmodule BarkparkWeb.ParamCoercion do
   Phoenix's `Plug.Conn.Query` parser turns `?q[]=a&q[]=b` into a LIST and
   `?q[k]=v` into a MAP. A controller that then pattern-matches or casts that
   value assuming it is a binary — `String.split/2`, an Ecto `d.type == ^type`,
-  a `<<_>>`-headed function clause — raises `FunctionClauseError` /
-  `Ecto.CastError`, and the request 500s instead of returning a clean 4xx.
-  (Same family as the `binary_id` CastError guard on `Repo.get`.)
+  a `<<_>>`-headed function clause — raises `FunctionClauseError` (Plug's `Any`
+  fallback → 500) or `Ecto.Query.CastError` (phoenix_ecto → an opaque 400
+  `internal_error`). Either way the caller gets a crash-shaped answer instead of
+  a clean 4xx. (Same family as the `binary_id` CastError guard on `Repo.get`;
+  note the struct is `Ecto.Query.CastError`, never `Ecto.CastError`.)
 
   `bin/1` collapses every non-binary shape to `nil` — the "param absent"
   sentinel that every downstream param builder already handles — so a hostile

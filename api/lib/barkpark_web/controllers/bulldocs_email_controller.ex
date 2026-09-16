@@ -91,7 +91,10 @@ defmodule BarkparkWeb.BulldocsEmailController do
   # routes (only `/d/:dataset/...` carries it as a path segment), so Plug hands
   # us whatever `?dataset[]=x` / `?dataset[a]=b` decodes to — a list or a map.
   # A non-binary lands on `x.dataset == ^dataset` against a :string column and
-  # raises Ecto.Query.CastError, which has no Plug.Exception impl → a raw 500.
+  # raises Ecto.Query.CastError. phoenix_ecto DOES carry a Plug.Exception impl
+  # for that struct ({Ecto.Query.CastError, 400}), so it surfaces as an opaque
+  # 400 `internal_error`, not a raw 500 — either way it is a crash-shaped answer
+  # to a soft-fail-able input.
   # A dataset is a SCOPE SELECTOR with a documented default, so a malformed one
   # fails soft to that default (same guard shape as MetaController.show/2).
   #
