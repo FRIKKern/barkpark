@@ -194,6 +194,13 @@ on:
       # so neither depends on a broader glob staying broad.
       - "js/packages/react/src/status-vocab.gen.ts"
       - "web/lib/status-ladder.gen.ts"
+      # the THIRD of the same family (task-76f7830182282c6d): apps/mobile's
+      # taskboard.tsx was the last hand copy and is now a consumer of this
+      # artifact. apps/mobile/** matches NO glob in this workflow — the `**/*.ts`
+      # trigger above covers it today, but the react line right above exists for
+      # exactly the reason this one does: a generated file must not depend on a
+      # broader glob staying broad to reach the ONE gate that byte-checks it.
+      - "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
@@ -558,6 +565,13 @@ on:
       # so neither depends on a broader glob staying broad.
       - "js/packages/react/src/status-vocab.gen.ts"
       - "web/lib/status-ladder.gen.ts"
+      # the THIRD of the same family (task-76f7830182282c6d): apps/mobile's
+      # taskboard.tsx was the last hand copy and is now a consumer of this
+      # artifact. apps/mobile/** matches NO glob in this workflow — the `**/*.ts`
+      # trigger above covers it today, but the react line right above exists for
+      # exactly the reason this one does: a generated file must not depend on a
+      # broader glob staying broad to reach the ONE gate that byte-checks it.
+      - "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
