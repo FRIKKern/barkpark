@@ -6048,8 +6048,24 @@ defmodule PDS.Census do
 
   defp declared_path(%{key: {path, _, _, _}}), do: path
 
+  # THE COLUMN IS NAMED ONCE AND READ TWICE — here, and by `unwrapped/1`, which has to
+  # know where this wrapper breaks in order to undo it. Two typed 74s would be two lenses
+  # wearing one name, and the selftest would assert against the wrong one the day either
+  # moved.
+  @wrap_column 74
+
   defp wrap(text, indent, hang \\ "") do
-    width = 74 - String.length(indent)
+    text
+    |> wrap_lines(indent, hang)
+    |> Enum.each(&p/1)
+  end
+
+  # THE BREAKING IS SEPARATED FROM THE PRINTING so the selftest can ask this wrapper what
+  # it does to a real sentence instead of asserting against a hand-typed approximation of
+  # it (the fixture trap: a fixture encodes a shape the system never emits, and the arm
+  # then measures the fixture).
+  defp wrap_lines(text, indent, hang) do
+    width = @wrap_column - String.length(indent)
 
     text
     |> String.split(" ")
@@ -6066,7 +6082,7 @@ defmodule PDS.Census do
     end)
     |> then(fn {lines, cur} -> Enum.reverse([cur | lines]) end)
     |> Enum.with_index()
-    |> Enum.each(fn {line, i} -> p(indent <> if(i == 0, do: "", else: hang) <> line) end)
+    |> Enum.map(fn {line, i} -> indent <> if(i == 0, do: "", else: hang) <> line end)
   end
 
   # ------------------------------------------------------- judgment register report
@@ -13996,6 +14012,8 @@ defmodule PDS.Census do
     p("  prose — NEVER a bucket count, so an honest lens correction can never red it.")
     p("")
 
+    unwrap_checks!()
+
     src = File.read!(@self_source)
     # THE OS PID IS LOAD-BEARING (PDS-D542). System.unique_integer/1 is VM-LOCAL: eight
     # concurrent VMs joined onto one shared TMPDIR produced the IDENTICAL root FIVE times,
@@ -14050,6 +14068,54 @@ defmodule PDS.Census do
     else
       p("SELFTEST FAILED — #{length(failed)} case(s) did not behave as required. Read the FAIL lines.")
       System.halt(1)
+    end
+  end
+
+  # THE TWO ARMS ON `unwrapped/1`, RUN BEFORE ANY CASE AND BUILT BY THE CENSUS'S OWN
+  # PRODUCERS — hop_refusal/2 assembles the sentence, wrap_lines/3 breaks it. A hand-typed
+  # fixture here would encode a shape this file never emits and the arms would be
+  # measuring the fixture; these two read the same two functions the live report reads.
+  # Both refusals are raises, not skips: a selftest that reported OK while its own
+  # substring check was inert is the exact failure this repairs.
+  defp unwrap_checks! do
+    indent = "             "
+    targets = for i <- 1..8, do: {"FixtureController.helper_number_#{i}/3", nil, nil}
+    sentence = hop_refusal([], targets)
+    rendered = Enum.join(wrap_lines(sentence, indent, ""), "\n")
+    needle = "FixtureController.helper_number_8/3 [emits nothing — a SECOND hop]"
+
+    # THE ARM THAT REDS IF THE REPAIR IS REVERTED — and, first, the check that it is not
+    # asserting over a sentence that never wrapped, which would pass with unwrapped/1
+    # deleted and prove nothing.
+    if String.contains?(rendered, needle) do
+      raise "unwrap arm is VACUOUS: this wrapper did not break across #{inspect(needle)}, " <>
+              "so the arm below would pass with unwrapped/1 doing nothing at all"
+    end
+
+    unless String.contains?(unwrapped(rendered), needle) do
+      raise "unwrap arm FAILED: unwrapped/1 did not recover #{inspect(needle)} from this " <>
+              "census's own wrapped rendering of the refusal that contains it"
+    end
+
+    # THE ARM THAT MUST STAY QUIET. Two short lines sit nowhere near @wrap_column, so no
+    # wrap could have broken between them; joining them anyway is the fusing failure.
+    intact = "  PASS  A-SHORT-ARM\n  FAIL  B-SHORT-ARM"
+
+    unless unwrapped(intact) == intact do
+      raise "unwrap arm FAILED: unwrapped/1 joined two SHORT lines no wrap could have " <>
+              "broken — it is fusing unrelated emissions, not undoing this file's wrapper"
+    end
+
+    # THE ARM THE FIRST SHAPE OF THIS GUARD FAILED, AND THE REASON IT IS HERE. Asking
+    # only "would the next word have fit?" admits every bare `p/1` line longer than the
+    # column — and this census prints many: 2073 joins over a 2591-line run, a plain
+    # line-joiner wearing a guard's comment. `sentence` is the SAME production string the
+    # arms above wrap, taken UNWRAPPED, so the specimen is one this file really emits.
+    unbroken = sentence <> "\n  PASS  A-SHORT-ARM"
+
+    unless String.length(sentence) > @wrap_column and unwrapped(unbroken) == unbroken do
+      raise "unwrap arm FAILED: unwrapped/1 undid a break after a line LONGER than the " <>
+              "column — no wrap emitted that line, so no wrap made that break"
     end
   end
 
@@ -14266,9 +14332,30 @@ defmodule PDS.Census do
   # half-proven: the other half is that it names NONE on the repaired corpus, and no list
   # of expected substrings can state that. Absent from a case, it is [] and changes
   # nothing about how every case before this wave is judged.
+  # THE ASSERTION IS PINNED TO THE FINDING, NOT TO THE INDENT (r20, settling
+  # ONEHOP-DECIDES-AND-REFUSES). The census word-wraps its prose at @wrap_column, so a
+  # string an arm asserts can be emitted IN FULL and still be absent from the raw text,
+  # split across two lines by a column nobody chose. That is not a hypothesis: the
+  # ONEHOP case asserted `AuthController.issue_session/3 [emits nothing — a SECOND hop]`
+  # from the day it was written (#9232) and the census printed it broken after `a` on
+  # every run since, so the case was RED FROM BIRTH and the file's own note one screen
+  # over ("any string a --selftest case asserts has to live on a line of its own or the
+  # case is pinned to the indent rather than to the finding") named the defect without
+  # reaching this judge.
+  #
+  # THE REFUTE SIDE IS THE HALF THAT COULD COST A GREEN. An `expect` defeated by a wrap
+  # is a loud permanent red; a `refute` defeated by a wrap is SILENT — the forbidden
+  # string is printed, the wrapper breaks it, and the arm reports that it never appeared.
+  # Both sides read the unwrapped view for that reason.
+  #
+  # NEITHER CHECK IS WEAKENED: a raw hit still counts, so every assertion that passes
+  # today passes unchanged, and the unwrapped view can only ADD matches.
   defp judge_selftest_case(base, c, out, code, _ctx) do
-    missing = Enum.reject(c.expect, &String.contains?(out, &1))
-    present = Enum.filter(Map.get(c, :refute, []), &String.contains?(out, &1))
+    unwrapped = unwrapped(out)
+    seen? = &(String.contains?(out, &1) or String.contains?(unwrapped, &1))
+
+    missing = Enum.reject(c.expect, seen?)
+    present = Enum.filter(Map.get(c, :refute, []), seen?)
 
     cond do
       code != c.exit ->
@@ -14289,6 +14376,49 @@ defmodule PDS.Census do
       true ->
         Map.merge(base, %{ok?: true, why: "exit #{c.exit} · printed #{inspect(hd(c.expect))}"})
     end
+  end
+
+  # THE INVERSE OF wrap/3, AND IT REFUSES TO BE A PLAIN LINE-JOINER. Joining every line
+  # to its neighbour would recover the wrapped strings and, in the same move, fuse two
+  # UNRELATED emissions into a match nobody printed — a vacuous green one line over from
+  # the red it was written to fix. So two lines are joined only across a break THIS
+  # WRAPPER COULD HAVE MADE: wrap/3 keeps `indent <> line` within @wrap_column, so it
+  # breaks before a word only when that word would not have fit. A break the wrapper
+  # could not have produced stays a break.
+  defp unwrapped(out) do
+    out
+    |> String.split("\n")
+    |> Enum.reduce({[], nil}, fn line, {acc, prev} ->
+      # `prev` is the PRECEDING ORIGINAL LINE, never the joined accumulator — measuring
+      # the growing join would make the width test true forever and swallow the file.
+      case acc do
+        [cur | rest] when prev != nil ->
+          if wrap_break?(prev, line),
+            do: {[cur <> " " <> String.trim_leading(line) | rest], line},
+            else: {[line, cur | rest], line}
+
+        _ ->
+          {[line | acc], line}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.join("\n")
+  end
+
+  defp wrap_break?(prev, next) do
+    word = next |> String.trim_leading() |> String.split(" ") |> hd()
+
+    # BOTH HALVES OF THE WRAPPER'S OWN INVARIANT, and the first is what keeps this from
+    # being a line-joiner in a guard's clothing. wrap/3 emits `indent <> line` WITHIN the
+    # column, so a line LONGER than it was never produced by wrapping and the break after
+    # it is a `p/1` boundary — and this census prints many such lines (the conversion
+    # rows run past 150 characters). Testing only the second half admitted every one of
+    # them: 2073 joins over a 2591-line run, which is the plain line-joiner this refuses
+    # to be. With the first half, only lines the wrapper could have emitted are joined.
+    word != "" and String.trim(prev) != "" and
+      String.length(prev) <= @wrap_column and
+      String.length(prev) + 1 + String.length(word) > @wrap_column
   end
 
   # THE TSV BACK INTO A MAP. Unresolved rows carry a fifth column and are skipped on
