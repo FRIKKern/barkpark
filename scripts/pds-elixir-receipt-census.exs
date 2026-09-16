@@ -9877,6 +9877,18 @@ defmodule PDS.Census do
   ]
   @lv_reach_residual :residual_no_derivable_chain
   @lv_event_stage :handle_event
+  # THE RELAXATION LADDER. Each rung is the deny key with one SET of named-selector
+  # channels forgiven, so the gap between the honest and naive keys is measured by
+  # RE-DERIVING the column at each rung rather than by attributing rows after the fact.
+  # The two outer rungs are identities against lvd_walk/3 and are checked as such.
+  @lv_relax [
+    honest: [],
+    guard: [:name_list_guard],
+    rekeyed: [:rekeyed_scrutinee],
+    both: [:name_list_guard, :rekeyed_scrutinee],
+    naive: [:literal_clause_head, :name_list_guard, :rekeyed_scrutinee]
+  ]
+  @lv_relax_labels Keyword.keys(@lv_relax)
   # The ONE plugin auth bucket whose route the mount macro does not emit bare — see
   # lv_session_index/1, where the mirror and its safe-staleness direction are stated.
   # DECLARED HERE, WITH THE OTHER REACH ATTRIBUTES, BECAUSE A MODULE ATTRIBUTE IS READ AT
@@ -9903,7 +9915,8 @@ defmodule PDS.Census do
            attach_uncond?: Enum.any?(ss, & &1.uncond?),
            deny?: Enum.any?(ss, & &1.deny?),
            deny_uncond?: Enum.any?(ss, &(&1.deny? and &1.uncond?)),
-           halts?: Enum.any?(ss, & &1.halts?)
+           halts?: Enum.any?(ss, & &1.halts?),
+           keys: lv_lift_keys(ss)
          }}
       end)
 
@@ -9937,6 +9950,13 @@ defmodule PDS.Census do
           deny?: chains != [] and Enum.all?(chains, & &1.deny?),
           deny_uncond?: chains != [] and Enum.all?(chains, & &1.deny_uncond?),
           halts?: chains != [] and Enum.all?(chains, & &1.halts?),
+          # FAIL-CLOSED ACROSS SESSIONS AT EVERY RUNG, exactly as `deny?` above: the
+          # counterfactual column is re-derived with the same `Enum.all?`, never
+          # attributed to a row after the fact.
+          keys:
+            Map.new(@lv_relax_labels, fn l ->
+              {l, chains != [] and Enum.all?(chains, &(&1.keys[l] == true))}
+            end),
           delegation?: lv_delegation?(d)
         }
       end)
@@ -9945,6 +9965,7 @@ defmodule PDS.Census do
     n = length(pop)
     reachable = Enum.filter(rows, &(&1.class in [:reachable_unconditional, :reachable_conditional]))
     nrch = length(reachable)
+    gap = Enum.filter(reachable, &(&1.halts? and not &1.deny?))
     multi = Enum.filter(rows, &(length(&1.sessions) > 1))
     theorem = lv_component_theorem(parsed)
     proxy_mods = pop |> Enum.map(&lv_mod/1) |> Enum.uniq() |> Enum.reject(&MapSet.member?(route_mods, &1))
@@ -9952,7 +9973,7 @@ defmodule PDS.Census do
     deleg = Enum.count(rows, & &1.delegation?)
 
     lv_print_reach(rows, freqs, n, sessions, multi, sidx)
-    lv_print_denies(reachable, nrch, n)
+    lv_print_denies(reachable, nrch, n, sites)
     lv_print_attach(reachable, nrch, ev, by_mod)
     lv_print_component(theorem, proxy_mods, disagree, n)
     lv_print_derivation_denominator(deleg, n)
@@ -9970,7 +9991,16 @@ defmodule PDS.Census do
       attach_certain: Enum.count(reachable, & &1.deny_uncond?),
       multi_session: length(multi),
       component_disagreement: length(disagree),
-      delegations: deleg
+      delegations: deleg,
+      # -- THE TWO CAVEATS, GIVEN DENOMINATORS (wave 49) -------------------------
+      hook_sites: length(sites),
+      hook_unresolved: Enum.count(sites, &(not &1.resolved?)),
+      hook_unresolved_ev: Enum.count(ev, &(not &1.resolved?)),
+      gap: length(gap),
+      rungs: Map.new(@lv_relax_labels, fn l -> {l, Enum.count(reachable, &(&1.keys[l] == true))} end),
+      guard_clauses: Enum.sum(Enum.map(sites, & &1.guards)),
+      guard_mods:
+        sites |> Enum.filter(&(&1.guards > 0)) |> Enum.map(& &1.mod) |> Enum.uniq() |> Enum.sort()
     }
   end
 
@@ -9990,8 +10020,18 @@ defmodule PDS.Census do
         end,
       deny?: Enum.any?(h, &Map.get(&1, :deny?, false)),
       deny_uncond?: Enum.any?(h, &Map.get(&1, :deny_uncond?, false)),
-      halts?: Enum.any?(h, &Map.get(&1, :halts?, false))
+      halts?: Enum.any?(h, &Map.get(&1, :halts?, false)),
+      keys: lv_lift_keys(h)
     }
+  end
+
+  # THE LIFT, WRITTEN ONCE. Site -> module, module -> chain: both are `Enum.any?` over
+  # the same key at every rung, which is what makes the containment survive the lift
+  # (a monotone combinator applied to a pointwise-implied pair preserves the implication).
+  defp lv_lift_keys(items) do
+    Map.new(@lv_relax_labels, fn l ->
+      {l, Enum.any?(items, fn i -> Map.get(i, :keys, %{})[l] == true end)}
+    end)
   end
 
   # -- REACH ------------------------------------------------------------------
@@ -10054,7 +10094,7 @@ defmodule PDS.Census do
 
   # -- DENIES -----------------------------------------------------------------
 
-  defp lv_print_denies(reachable, nrch, n) do
+  defp lv_print_denies(reachable, nrch, n, sites) do
     honest = Enum.count(reachable, & &1.deny?)
     naive = Enum.count(reachable, & &1.halts?)
 
@@ -10075,6 +10115,81 @@ defmodule PDS.Census do
     p("      NOT A NAME LIST. The classifier reads the SELECTOR of the branch each halt")
     p("      sits under — clause-head literal, name-list guard, or default — and nothing")
     p("      about what any function is called.")
+    p("")
+    lv_print_bound(reachable, nrch, honest, naive, sites)
+  end
+
+  # -- THE BOUND. The two keys are not rivals; they are the ENDS OF AN INTERVAL. -------
+  #
+  # The interval is not an estimate and not a calibration. lvh_site/5 derives both keys
+  # from ONE walk with one flag: `halts?` is lvd_walk(body, sel, false) and `deny?` is
+  # lvd_walk(body, sel, true), and lvd_walk/3's ONLY use of the flag is at a halt node,
+  # where it returns `not default_only? or sel == :default`. With the flag false that
+  # expression is `true` unconditionally; with it true it is a strictly narrower test.
+  # So at every halt node the true-answer implies the false-answer, the recursion is
+  # otherwise byte-identical, and by induction over the AST
+  #
+  #     lvd_walk(body, sel, true)  ==>  lvd_walk(body, sel, false)
+  #
+  # CONTAINMENT SURVIVES EVERY LIFT, because each lift is the SAME combinator on both
+  # keys: site (`Enum.any?` over clauses), module (`Enum.any?` over sites), chain
+  # (`Enum.any?` over hooks), clause row (`chains != [] and Enum.all?` over chains).
+  # A monotone combinator applied to a pointwise-implied pair preserves the implication,
+  # so `deny? ==> halts?` holds for every row, and honest <= T <= naive is a THEOREM
+  # about this code — not a confidence interval, and nothing about it is sampled.
+  defp lv_print_bound(reachable, nrch, honest, naive, sites) do
+    at = fn l -> Enum.count(reachable, &(&1.keys[l] == true)) end
+    width = naive - honest
+    gsites = Enum.filter(sites, &(&1.guards > 0))
+    gclauses = Enum.sum(Enum.map(gsites, & &1.guards))
+
+    p("    THE BOUND — THE TWO KEYS ARE THE ENDS OF AN INTERVAL, AND THE CONTAINMENT IS A THEOREM")
+    p("      T in [#{honest}, #{naive}] clause(s) out of #{nrch} reachable — T is the true count of")
+    p("      reachable #{inspect(@lv_event_stage)} clause(s) covered by a deny-by-default gate. The unit")
+    p("      is CLAUSES, the denominator is THIS RUN's reachable set, and both ends are measured")
+    p("      on it — neither is carried from a previous wave's denominator.")
+    p("      STRUCTURAL, NOT AN ESTIMATE: deny? IMPLIES halts? BY CONSTRUCTION. Both keys come")
+    p("      out of ONE lvd_walk/3 with one flag whose only effect is at a halt node, where")
+    p("      `not default_only? or sel == :default` is strictly stronger when the flag is set;")
+    p("      every lift above it (site, module, chain, clause) is the same monotone combinator")
+    p("      on both keys. There is no sample, no calibration and no tolerance in this interval.")
+    p("      WIDTH #{width} / #{nrch}, PARTITIONED BY THE THREE — AND ONLY THREE — REASONS A SELECTOR READS")
+    p("      :named. Each channel is RE-DERIVED, never attributed: the whole column is recomputed")
+    p("      with that channel forgiven and the clauses it newly wins are counted.")
+    p("        #{pad(at.(:guard) - honest)} / #{width}  NAME-LIST GUARD — lv_guard_names?/1 fires on ANY {:in, _, _} node")
+    p("                     anywhere in the guard, so a PRINCIPAL guard is indistinguishable")
+    p("                     from an event-name guard. A REAL undercount channel.")
+    p("        #{pad(at.(:rekeyed) - honest)} / #{width}  RE-KEYED SCRUTINEE — lvd_walk/3 re-keys at EVERY `->` node off the")
+    p("                     head alone, WHATEVER THE SCRUTINEE IS, so a halt under")
+    p("                     `case socket.assigns.role do :reader -> {:halt, _}` is discarded")
+    p("                     as if :reader were an event name. A REAL undercount channel.")
+    p("        #{pad(width - (at.(:both) - honest))} / #{width}  LITERAL CLAUSE HEAD — the branch runs only for an event it SPELLS")
+    p("                     OUT. That is event HANDLING, and excluding it is the column's")
+    p("                     DEFINITION. NOT AN UNDERCOUNT — the residue, by subtraction.")
+    p("      THE TIGHTENING, ONE PASS AND NO NEW LENS. Forgiving BOTH undercount channels")
+    p("      gives T in [#{honest}, #{at.(:both)}] — #{if at.(:both) < naive, do: "STRICTLY INSIDE", else: "equal to"} the structural [#{honest}, #{naive}]. THE MEASUREMENT REFUTES THE")
+    p("      GUESS THAT PRODUCED THIS BLOCK, and the refutation is the useful half:")
+    p("        RE-KEYED SCRUTINEE, expected to be THE hole, moves #{at.(:rekeyed) - honest} clause(s). No halt on this")
+    p("        tree sits under a `->` whose head is a literal, so the channel is REAL and")
+    p("        INERT — a tripwire with nothing under it today, not a source of undercount.")
+    p("        NAME-LIST GUARD, expected to contribute 0, moves ALL #{at.(:guard) - honest}. It was expected to")
+    p("        contribute 0 because its one clause was read as not halting; it DOES halt.")
+    p("      AND THAT IS WHY THE WIDTH IS NOT THE ANSWER. The whole #{width}-clause width rides on")
+    p("      #{gclauses} name-list-guard clause(s), at #{length(gsites)} attach site(s) — an ENUMERABLE set, printed")
+    p("      here so a reader spends ONE judgement per clause instead of inheriting a")
+    p("      #{width}-clause interval:")
+
+    gsites
+    |> Enum.map(&{short_mod(&1.mod), &1.stage, &1.guards})
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.each(fn {m, st, g} ->
+      p("        #{m} at #{inspect(st)} — #{g} clause(s) whose guard lv_guard_names?/1 reads as a name list")
+    end)
+
+    p("      A guard over EVENT NAMES is event handling and the column is RIGHT to exclude")
+    p("      it; a guard over a PRINCIPAL is a deny the column loses. This lens cannot tell")
+    p("      those apart — it says so, names the clauses, and counts them.")
     p("")
   end
 
@@ -10360,9 +10475,28 @@ defmodule PDS.Census do
       mod: lv_mod(d),
       stage: lv_stage(stage),
       uncond?: not c?,
-      halts?: Enum.any?(clauses, fn {sel, body} -> lvd_walk(body, sel, false) end),
-      deny?: Enum.any?(clauses, fn {sel, body} -> lvd_walk(body, sel, true) end)
+      halts?: Enum.any?(clauses, fn {sel, _why, body} -> lvd_walk(body, sel, false) end),
+      deny?: Enum.any?(clauses, fn {sel, _why, body} -> lvd_walk(body, sel, true) end),
+      # THE DYNAMIC-DISPATCH DENOMINATOR. `resolved?` is a property of the ARGUMENT, not
+      # of the clause list: a local capture that resolves to zero defs is still a shape
+      # this walk READ, while `&Mod.fun/3` is a shape it did not.
+      resolved?: lv_hook_resolvable?(fun),
+      # THE COUNTERFACTUAL KEYS: the same site's deny verdict with each undercount
+      # channel relaxed in turn. `:honest` and `:naive` are the two the columns already
+      # print, recomputed HERE through lvd_walk_r/4 so that the identity check below has
+      # something to compare against.
+      keys: lvh_keys(clauses),
+      # THE NAME-LIST-GUARD CHANNEL IS ENUMERABLE, so it gets counted rather than
+      # bounded: lv_guard_names?/1 fires on a SMALL, nameable set of clauses.
+      guards: Enum.count(clauses, fn {_sel, why, _body} -> why == :name_list_guard end)
     }
+  end
+
+  defp lvh_keys(clauses) do
+    Map.new(@lv_relax, fn {label, reasons} ->
+      relax = MapSet.new(reasons)
+      {label, Enum.any?(clauses, fn {sel, why, body} -> lvd_walk_r(body, sel, why, relax) end)}
+    end)
   end
 
   # THE HOOK FUNCTION, RESOLVED TO {selector, body} CLAUSES. Two shapes ship on this
@@ -10374,17 +10508,37 @@ defmodule PDS.Census do
 
     index.defs
     |> Enum.filter(&(&1.module == d.module and &1.name == name and &1.arity == a))
-    |> Enum.map(&{lv_sel_head(&1.head), &1.body})
+    |> Enum.map(fn def ->
+      {sel, why} = lv_sel_head_r(def.head)
+      {sel, why, def.body}
+    end)
   end
 
   defp lv_hook_clauses({:fn, _, clauses}, _d, _index) do
     Enum.flat_map(clauses, fn
-      {:->, _, [heads, body]} -> [{lv_sel_pat(List.first(heads)), body}]
-      _ -> []
+      {:->, _, [heads, body]} ->
+        sel = lv_sel_pat(List.first(heads))
+        [{sel, lv_sel_why(sel), body}]
+
+      _ ->
+        []
     end)
   end
 
   defp lv_hook_clauses(_, _, _), do: []
+
+  # WHETHER THIS RUN COULD READ THE HOOK FUNCTION AT ALL. The two shapes above are the
+  # two this tree ships; EVERY other shape — a remote capture `&Mod.fun/3`, a variable
+  # holding a function, an apply — falls to the catch-all and contributes NO clause.
+  # That silence is conservative in one direction (it can only UNDERCOUNT denies) and
+  # it used to be a standing caveat with no denominator. lv_hook_resolvable?/1 gives it
+  # one, and LIVEVIEW-HOOK-FN-RESOLVES below turns the caveat into a tripwire.
+  defp lv_hook_resolvable?({:&, _, [{:/, _, [{name, _, ctx}, _ar]}]})
+       when is_atom(name) and is_atom(ctx),
+       do: true
+
+  defp lv_hook_resolvable?({:fn, _, _}), do: true
+  defp lv_hook_resolvable?(_), do: false
 
   defp lvs_int({:__block__, _, [i]}) when is_integer(i), do: i
   defp lvs_int(i) when is_integer(i), do: i
@@ -10393,11 +10547,22 @@ defmodule PDS.Census do
   # THE SELECTOR OF A BRANCH: what decided that this path runs. A literal event name in
   # the head, or a guard over a name list, is a NAMED selector — the branch runs only
   # for events it spells out. Anything else is the DEFAULT path.
-  defp lv_sel_head({:when, _, [h, guard]}) do
-    if lv_guard_names?(guard), do: :named, else: lv_sel_pat(List.first(lv_args(h)))
+  # THE SELECTOR **AND THE REASON IT IS WHAT IT IS**. This REPLACED a boolean-returning
+  # lv_sel_head/1: same verdict, same two clauses, with the branch it already takes
+  # reported instead of discarded — and the reason is what partitions the honest/naive
+  # gap below. Reporting it rather than deriving it twice is what keeps the partition a
+  # property of THIS walk instead of a second opinion about it.
+  defp lv_sel_head_r({:when, _, [h, guard]}) do
+    if lv_guard_names?(guard), do: {:named, :name_list_guard}, else: lv_sel_head_r(h)
   end
 
-  defp lv_sel_head(h), do: lv_sel_pat(List.first(lv_args(h)))
+  defp lv_sel_head_r(h) do
+    sel = lv_sel_pat(List.first(lv_args(h)))
+    {sel, lv_sel_why(sel)}
+  end
+
+  defp lv_sel_why(:named), do: :literal_clause_head
+  defp lv_sel_why(_), do: :default
 
   defp lv_sel_pat({:__block__, _, [v]}) when is_binary(v), do: :named
   defp lv_sel_pat({:__block__, _, [v]}) when is_atom(v) and v not in [true, false, nil], do: :named
@@ -10431,6 +10596,52 @@ defmodule PDS.Census do
 
         l when is_list(l) ->
           Enum.any?(l, &lvd_walk(&1, sel, default_only?))
+
+        _ ->
+          false
+      end
+    end
+  end
+
+  # THE SAME WALK, WITH THE BOOLEAN FLAG REPLACED BY THE SET OF CHANNELS IT RELAXES.
+  #
+  # lvd_walk/3's flag has exactly two settings and therefore exactly two answers, and
+  # the 95-clause gap between them is unexplained because the flag throws away the one
+  # thing that would explain it: WHY the halt it discarded sat under a named selector.
+  # A selector reads :named in exactly THREE places in this file —
+  #
+  #   :literal_clause_head  lv_sel_head_r/1, a literal event name in the clause head
+  #   :name_list_guard      lv_sel_head_r/1, lv_guard_names?/1 firing on the guard
+  #   :rekeyed_scrutinee    lvd_walk/3 re-keying at a `->` node
+  #
+  # — and nothing else can produce one. lvd_walk_r/4 carries that reason alongside the
+  # selector and counts a halt when `sel == :default OR its reason is in `relax``. It is
+  # not a second opinion; it is lvd_walk/3 with the flag generalised, and the two ends
+  # are IDENTITIES rather than approximations:
+  #
+  #   relax = ∅          ≡ lvd_walk(body, sel, true)   (the honest key)
+  #   relax = all three  ≡ lvd_walk(body, sel, false)  (the naive key)
+  #
+  # LIVEVIEW-GAP-PARTITIONS asserts both identities at every attach site on the tree, so
+  # a relaxed walk that drifted from the walk the columns print reds by name instead of
+  # partitioning a gap that is no longer the gap.
+  defp lvd_walk_r(node, sel, why, relax) do
+    if lv_halt?(node) do
+      sel == :default or MapSet.member?(relax, why)
+    else
+      case node do
+        {:->, _, [heads, body]} ->
+          s2 = lv_sel_pat(List.first(heads))
+          lvd_walk_r(body, s2, if(s2 == :named, do: :rekeyed_scrutinee, else: why), relax)
+
+        {a, b} ->
+          lvd_walk_r(a, sel, why, relax) or lvd_walk_r(b, sel, why, relax)
+
+        {f, _, args} when is_list(args) ->
+          Enum.any?([f | args], &lvd_walk_r(&1, sel, why, relax))
+
+        l when is_list(l) ->
+          Enum.any?(l, &lvd_walk_r(&1, sel, why, relax))
 
         _ ->
           false
@@ -10546,10 +10757,90 @@ defmodule PDS.Census do
           if lv.stray == [], do: "", else: " · class(es) outside the declared taxonomy: #{inspect(lv.stray)}"
       end
 
-    [{"LIVEVIEW-REACH-CLOSES", ok?, why}]
+    [{"LIVEVIEW-REACH-CLOSES", ok?, why}] ++ lv_hook_fn_check(lv) ++ lv_gap_check(lv)
   end
 
   defp liveview_checks(_), do: []
+
+  # THE DYNAMIC-DISPATCH CAVEAT, CONVERTED INTO A TRIPWIRE WITH A DENOMINATOR.
+  #
+  # lv_hook_clauses/3 reads TWO shapes — a local capture `&name/arity` and an inline
+  # `fn` — and its catch-all returns []. That silence is conservative (an unread hook
+  # can only UNDERCOUNT denies) and it is also SILENT AND ONE-DIRECTIONAL: the day a
+  # `&Mod.fun/3`, an `apply/3` or a variable-held function lands at an attach_hook
+  # callsite, every column above silently loses it and nothing says so. The population
+  # is small and ENUMERABLE, so the caveat gets a denominator instead of a paragraph:
+  # `unresolved_hook_fn N / <attach sites>`, red at N > 0. It costs one walk that
+  # already happened — lvh_site/5 has the argument in its hand.
+  defp lv_hook_fn_check(lv) do
+    n = lv.hook_unresolved
+    tot = lv.hook_sites
+
+    why =
+      if n == 0 do
+        "unresolved_hook_fn #{n} / #{tot} attach_hook site(s) — EVERY hook function on this " <>
+          "tree resolves to clauses this run READ (a local `&name/arity` capture or an inline `fn`), " <>
+          "so the undercount attributable to dynamic dispatch is EXACTLY 0 today and the DENIES " <>
+          "interval above is not widened by it. #{lv.hook_unresolved_ev} of the unresolved site(s) sit at " <>
+          "#{inspect(@lv_event_stage)}. THIS IS A TRIPWIRE, NOT A THEOREM: a remote capture `&Mod.fun/3`, " <>
+          "an `apply/3` or a variable-held function at any attach_hook callsite falls to " <>
+          "lv_hook_clauses/3's catch-all and reds this arm by count"
+      else
+        "unresolved_hook_fn #{n} / #{tot} attach_hook site(s) — #{n} hook function(s) fall to " <>
+          "lv_hook_clauses/3's catch-all and contribute NO clause, so every DENIES and " <>
+          "ATTACH-CERTAINTY numerator above is an UNDERCOUNT by an amount this run cannot bound " <>
+          "(#{lv.hook_unresolved_ev} of them at #{inspect(@lv_event_stage)})"
+      end
+
+    [{"LIVEVIEW-HOOK-FN-RESOLVES", n == 0, why}]
+  end
+
+  # THE GAP PARTITION, ARMED. Two relations, both of which must hold for the per-channel
+  # counts printed under THE BOUND to mean anything:
+  #   (1) every gap clause carries at least one reason — the three channels COVER the gap;
+  #   (2) lvd_scan/3 agrees with lvd_walk/3 on both keys at every resolved hook clause —
+  #       the instrumented walk is the SAME walk, so the gap it partitions is the gap the
+  #       columns print. Without (2) the partition could be of a gap nobody prints.
+  defp lv_gap_check(lv) do
+    r = lv.rungs
+    # THE TWO IDENTITIES. The relaxation ladder is only a partition of THE GAP THE
+    # COLUMNS PRINT if its outer rungs ARE those columns — rung `honest` is lvd_walk/3
+    # with the flag set, rung `naive` is it with the flag clear. Asserted, not assumed.
+    ends? = r.honest == lv.denies and r.naive == lv.halt_keyed
+    # MONOTONICITY. Forgiving more channels can only ADD clauses, so the ladder must be
+    # non-decreasing and the two single-channel rungs must sit inside the joint one. A
+    # ladder that dipped would mean lvd_walk_r/4 is not the walk it claims to be.
+    mono? =
+      r.honest <= r.guard and r.honest <= r.rekeyed and
+        r.guard <= r.both and r.rekeyed <= r.both and r.both <= r.naive
+
+    ok? = ends? and mono?
+
+    why =
+      cond do
+        not ends? ->
+          "the relaxation ladder's ends are NOT the printed columns — honest rung #{r.honest} vs " <>
+            "DENIES #{lv.denies}, naive rung #{r.naive} vs the halt key #{lv.halt_keyed} — so the " <>
+            "partition below is of a gap the census does not print"
+
+        not mono? ->
+          "the relaxation ladder is not monotone (#{inspect(r)}) — forgiving a channel LOST " <>
+            "clauses, which lvd_walk_r/4 cannot do if it is the walk it claims to be"
+
+        true ->
+          "the #{lv.gap}-clause honest/naive gap is PARTITIONED by re-derivation, not attribution: " <>
+            "name_list_guard wins #{r.guard - r.honest}, rekeyed_scrutinee wins #{r.rekeyed - r.honest}, " <>
+            "both together #{r.both - r.honest}, and the remaining #{r.naive - r.both} are literal clause heads — " <>
+            "event HANDLING, which the column excludes BY DEFINITION and is not an undercount. " <>
+            "BOTH ENDS ARE IDENTITIES against lvd_walk/3 (honest #{r.honest} == DENIES #{lv.denies}, " <>
+            "naive #{r.naive} == halt key #{lv.halt_keyed}) and the ladder is monotone, so the tightened " <>
+            "interval T in [#{r.honest}, #{r.both}] is a statement about the SAME column. THE WIDTH IS " <>
+            "ENUMERABLE, NOT JUST BOUNDED: it rides on #{lv.guard_clauses} name-list-guard clause(s) at " <>
+            "#{inspect(Enum.map(lv.guard_mods, &(&1 |> String.split(".") |> Enum.take(-2) |> Enum.join("."))))}"
+      end
+
+    [{"LIVEVIEW-GAP-PARTITIONS", ok?, why}]
+  end
 
   # WHAT THE ROUTE LENS ITSELF CANNOT SEE. The blind shapes are NAMED with their line, and
   # the resolved-macro count is DERIVED from the AST — a plain `grep -c` over router.ex
