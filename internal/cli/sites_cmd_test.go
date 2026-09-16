@@ -1134,7 +1134,9 @@ func TestSitesRequiresLogin(t *testing.T) {
 		}},
 		{"sites deployments", func(out *writer) int { return runSites(out, globals{}, []string{"deployments", "blog"}) }},
 		{"sites env set", func(out *writer) int { return runSites(out, globals{}, []string{"env", "set", "blog", "K=V"}) }},
-		{"sites domain add", func(out *writer) int { return runSites(out, globals{}, []string{"domain", "add", "blog", "x.example.com"}) }},
+		{"sites domain add", func(out *writer) int {
+			return runSites(out, globals{}, []string{"domain", "add", "blog", "x.example.com"})
+		}},
 		{"sites logs", func(out *writer) int { return runSites(out, globals{}, []string{"logs", "blog"}) }},
 		{"deploy", func(out *writer) int { return runDeploy(out, []string{"blog", "--artifact-url", "file:///tmp/x"}) }},
 	}
