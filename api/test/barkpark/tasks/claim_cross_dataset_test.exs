@@ -260,7 +260,11 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
       # only to break a tie — would silently hand back a twin the caller did not
       # ask for, which is the wrong-row read the whole rule exists to end.
       assert {:error, :not_found} =
-               Tasks.claim_by_id(doc_id, "worker-named-empty", Keyword.put(scope, :dataset, "no-such-dataset"))
+               Tasks.claim_by_id(
+                 doc_id,
+                 "worker-named-empty",
+                 Keyword.put(scope, :dataset, "no-such-dataset")
+               )
 
       for twin <- twins do
         after_call = Repo.get!(Document, twin.id)
@@ -292,7 +296,11 @@ defmodule Barkpark.Tasks.ClaimCrossDatasetTest do
         )
 
       assert {:ok, %Document{id: id}} =
-               Tasks.claim_by_id(doc_id, "worker-named-single", Keyword.put(scope, :dataset, @primary))
+               Tasks.claim_by_id(
+                 doc_id,
+                 "worker-named-single",
+                 Keyword.put(scope, :dataset, @primary)
+               )
 
       assert id == only.id
     end
