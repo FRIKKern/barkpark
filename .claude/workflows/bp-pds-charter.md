@@ -718,8 +718,9 @@ prose that preceded it.
   blue/green, so a deploy is a memory TROUGH first — three coexisting BEAMs plus a live
   `deps/req` compile bottomed at 2248 MB. Worse, pouncing breaks gate (a) (`DEPLOYED_SHA` is pinned
   once, at step 0a's SSH read —
-  `scripts/pds-pull-proof.sh`@`source of truth: the box's own git HEAD over SSH`) AND step 0b (`scripts/pds-pull-proof.sh`@`is NOT an ancestor of the worktree`
-  hard-fails when the served sha is not an ancestor of the worktree). Why: it trades a gate the box
+  `scripts/pds-pull-proof.sh`@`source of truth: the box's own git HEAD over SSH`) AND step 0b —
+  `scripts/pds-pull-proof.sh`@`is NOT an ancestor of the worktree`
+  hard-fails when the served sha is not an ancestor of the worktree. Why: it trades a gate the box
   passes most of the time for two gates it is guaranteed to fail. The dominant driver of
   MemAvailable here is aggregate quiet, not BEAM freshness.
 
