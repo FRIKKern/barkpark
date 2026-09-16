@@ -21,6 +21,7 @@ package cli
 //	rotate     <instance> <webhook-id>                  (prints the new secret ONCE)
 //	deliveries <instance> <webhook-id>
 //	replay     <instance> <webhook-id> <event-id>
+//	test-send  <instance> <webhook-id>                 (one synthetic probe)
 //	reconcile  <instance>                  [--dry-run]  (re-assert the doc-type filter)
 //
 // Every verb takes `--dataset <ds>` (default "production") and the CLI-wide
@@ -34,6 +35,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -90,6 +92,8 @@ func runCloudWebhook(out *writer, g globals, args []string) int {
 		return runWebhookDeliveries(out, cfg, rest)
 	case "replay":
 		return runWebhookReplay(out, cfg, rest)
+	case "test-send", "test":
+		return runCloudWebhookTestSend(out, cfg, rest)
 	case "reconcile":
 		// g rides along because --dry-run is a GLOBAL flag: parseGlobals strips it
 		// from args ANYWHERE on the line, so a verb that only looked at its own
@@ -450,6 +454,148 @@ func runWebhookReplay(out *writer, cfg *Config, rest []string) int {
 	// for the endpoint being live.
 	out.outf("note: a replay is delivered even when the webhook is inactive (manual redelivery).")
 	return exitOK
+}
+
+// runCloudWebhookTestSend is `bp cloud webhook test-send <instance> <webhook-id>`
+// — the terminal twin of the console's "Send test" button (GR45). It POSTs to
+// the SAME proxy route the SPA calls; the instance fires ONE synthetic
+// `webhook.test` envelope at the endpoint in a single synchronous attempt and
+// answers with the resulting delivery row.
+//
+// IT PRINTS THE ENDPOINT'S ANSWER, NEVER A CANNED "sent". A test-send the
+// CONTROL PLANE accepted (HTTP 200, ok:true) says nothing about whether the
+// ENDPOINT accepted anything: the request succeeded and the delivery may still
+// have been refused with a 500. Conflating the two is how a broken endpoint gets
+// a green tick, so the verdict is read out of the returned delivery and it is
+// THREE-WAY (the same grammar app.js's testSendVerdict uses):
+//
+//	accepted    — a 2xx from the endpoint
+//	rejected    — a real non-2xx from the endpoint
+//	unconfirmed — still pending, or an older instance that echoed no status at
+//	              all: reported AS unknown, never a tick and never an accusation
+//
+// THE EXIT CODE FOLLOWS THE RATIFIED `bp webhook test-send` CONTRACT, not a new
+// one: exit 0 stands by default even for a REJECTED probe (the route reports the
+// verdict in a 2xx body BY DESIGN — docs/cli/error-exit-table.md), and
+// --fail-on-failed-delivery is the opt-in escape hatch for the one caller that
+// cannot act on a printed line, a script (run.go, failOnFailedDeliveryFlag). The
+// two surfaces of one operation must not disagree about what an exit code means.
+//
+// A failing probe is harmless to the endpoint's health: the instance writes the
+// delivery row with a NULL endpoint_id, so it never counts toward the
+// auto-disable streak. The verb says so, because an operator watching a red
+// verdict needs to know the probe did not just disable their webhook.
+func runCloudWebhookTestSend(out *writer, cfg *Config, rest []string) int {
+	const usage = "bp cloud webhook test-send <instance> <webhook-id> [--dataset <ds>] [--fail-on-failed-delivery]"
+	a, err := parseHzArgs(rest, []string{"dataset"}, []string{"fail-on-failed-delivery"}, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	pos, ok := webhookPositionals(out, a, 2, usage)
+	if !ok {
+		return exitUsage
+	}
+	id, rerr := resolveOpenBarkparkID(cfg, pos[0])
+	if rerr != nil {
+		return openResolveFail(out, rerr)
+	}
+	whID := pos[1]
+	res, err := cfg.CloudClient().WebhookTestSend(cloudCtx(), id, webhookDataset(a), whID)
+	if err != nil {
+		return cloudFail(out, "send test event", err)
+	}
+	if code, done := webhookRespond(out, res, pos[0]); done {
+		return code
+	}
+	del := webhookDelivery(res.Data)
+	verdict := webhookTestVerdict(del)
+	out.outf("test event sent to webhook %s — endpoint %s", whID, webhookTestVerdictLabel(verdict))
+	out.outf("  status: %s  code: %s  latency: %s ms  attempts: %s",
+		webhookCell(del["status"]), webhookCell(del["last_status_code"]),
+		webhookCell(del["last_latency_ms"]), webhookCell(del["attempts"]))
+	switch verdict {
+	case webhookTestRejected:
+		out.outf("note: the probe is logged with no endpoint_id, so this failure does NOT count toward the auto-disable streak.")
+		if a.bools["fail-on-failed-delivery"] {
+			return exitGeneric
+		}
+	case webhookTestUnconfirmed:
+		out.outf("note: the instance reported no verdict — the delivery is still pending, or this instance is too old to echo one.")
+	}
+	return exitOK
+}
+
+// The three test-send verdicts. They are the CLI half of app.js's
+// testSendVerdict, deliberately spelled the same so a console toast and a
+// terminal line can never disagree about the same delivery row.
+const (
+	webhookTestAccepted    = "accepted"
+	webhookTestRejected    = "rejected"
+	webhookTestUnconfirmed = "unconfirmed"
+)
+
+// webhookTestVerdict reads the endpoint's real answer out of the returned
+// delivery. The STATUS CODE decides when there is one — it is the endpoint's own
+// word — and only when the row carries none does the status STRING get a say
+// (`ok` is the only success state webhooks/delivery.ex enumerates). An absent
+// code and an unrecognised/pending status is `unconfirmed`, never a success: a
+// row the instance could not report on has not been proven delivered.
+func webhookTestVerdict(del map[string]any) string {
+	code, hasCode := webhookDeliveryCode(del)
+	if hasCode {
+		if code >= 200 && code < 300 {
+			return webhookTestAccepted
+		}
+		return webhookTestRejected
+	}
+	switch strings.ToLower(strings.TrimSpace(cellString(del["status"]))) {
+	case "ok", "delivered", "success":
+		return webhookTestAccepted
+	case "failed", "failed_giveup", "giveup", "error":
+		return webhookTestRejected
+	}
+	return webhookTestUnconfirmed
+}
+
+// webhookDeliveryCode pulls the endpoint's HTTP status off a delivery row,
+// accepting BOTH spellings the instance has used (`last_status_code` on a
+// delivery record, `status_code` on the leaner probe shape). JSON numbers decode
+// as float64; a string-typed code from an exotic encoder is parsed too, so the
+// verdict does not silently fall through to "unconfirmed" on a shape wobble.
+func webhookDeliveryCode(del map[string]any) (int, bool) {
+	for _, key := range []string{"last_status_code", "status_code"} {
+		v, present := del[key]
+		if !present || v == nil {
+			continue
+		}
+		switch n := v.(type) {
+		case float64:
+			return int(n), true
+		case int:
+			return n, true
+		case json.Number:
+			if i, err := n.Int64(); err == nil {
+				return int(i), true
+			}
+		case string:
+			if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// webhookTestVerdictLabel is the human half of the verdict, on the headline line.
+func webhookTestVerdictLabel(verdict string) string {
+	switch verdict {
+	case webhookTestAccepted:
+		return "ACCEPTED it"
+	case webhookTestRejected:
+		return "REJECTED it"
+	default:
+		return "has not answered yet (verdict unknown)"
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,6 +1285,8 @@ VERBS
   rotate     <instance> <webhook-id>       new signing secret (shown ONCE)
   deliveries <instance> <webhook-id>       recent delivery attempts
   replay     <instance> <webhook-id> <event-id>   re-deliver one stored event
+  test-send  <instance> <webhook-id>       fire ONE synthetic probe and report
+                                           what the endpoint answered
   reconcile  <instance>                    re-assert the doc-type filter on the
                                            site-autodeploy-* rows  [--dry-run]
 
@@ -1146,6 +1294,8 @@ FLAGS
   --dataset <ds>   the dataset to scope to (default "production")
   --yes, -y        skip the delete confirmation (scripts)
   --dry-run        (reconcile) print what would change and write NOTHING
+  --fail-on-failed-delivery
+                   (test-send) exit non-zero when the ENDPOINT refused the probe
   -o json          emit the proxy envelope verbatim (the contract)
 
 NOTES
@@ -1158,6 +1308,12 @@ NOTES
     a site whose doc_type it cannot read is reported, skipped, and exits non-zero.
   rm asks you to type the webhook id (or URL) back — it drops delivery history.
   replay works even when the webhook is inactive (a manual redelivery).
+  test-send prints the ENDPOINT's answer, not the request's — a rejected probe is
+    never rendered as a success, and an instance that reports no verdict says so.
+    The exit code follows 'bp webhook test-send': 0 by default even on a refusal
+    (the verdict rides a 2xx body by design), non-zero only with
+    --fail-on-failed-delivery. The probe is logged with no endpoint_id, so a
+    failing test never counts toward the auto-disable streak.
   An unreachable or too-old instance degrades honestly, never hangs.`
 	out.outf("%s", help)
 }
