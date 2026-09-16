@@ -87,6 +87,67 @@ PROV_BIN="${1:-}"
 log() { echo "[cp-deploy $(date -u +%H:%M:%S)] $*"; }
 compose() { docker compose -f "$COMPOSE_FILE" --profile blue --profile green "$@"; }
 
+# ---- CUTOVER LEDGER (dr-w26-bl-cp-deploy-eats-a-scheduled-sampler-tick) -----
+# WHAT THIS IS FOR. `Oban.Plugins.Cron` (OSS) enqueues only on a tick a RUNNING
+# node observes; it never backfills a tick nobody was up for. A control-plane
+# container replacement crossing a cron boundary therefore eats that tick
+# SILENTLY: no `oban_jobs` row is created, so there is no `discarded`, no
+# `retryable`, no failed row, nothing to count. Measured on 2026-08-08: the
+# 15-minute `usage_samples` series reads 23:22 / 23:37 / [NOTHING] / 00:07 /
+# 00:22 across a clean blue/green cutover, and `UsageSamplerWorker` showed
+# 664 completed / 1 discarded — the loss is invisible from the job table.
+#
+# THE ONLY WAY ANYONE COULD TELL a missing MEASUREMENT from a stopped WORKER
+# was reading container uptime BY HAND (`docker ps`, `Exited (137) …`), on the
+# box, after the fact — an instrument that (a) needs ssh, (b) is gone the moment
+# the container is recreated again, and (c) reads identically to "someone
+# already remediated it" when it is stale.
+#
+# So the deploy writes down its OWN cutover window, in a durable append-only
+# file, at the three instants that bound it. That turns the question
+# "was a deploy crossing 23:52Z?" into a grep instead of a live box walk, and it
+# is what `deploy/cp-cutover-gaps.sh` reads to classify each missing tick as
+# deploy-attributable or unexplained. The deploy is the only party that KNOWS
+# these instants; nothing downstream can reconstruct them.
+#
+# NON-FATAL, ALWAYS. Every call is `|| true`-equivalent by construction (the
+# function swallows its own failures): a full disk or a read-only /opt must
+# never turn a good deploy red over bookkeeping. A ledger that is missing lines
+# degrades the analyzer to "unexplained", which is the SAFE direction — it
+# over-reports work for a human rather than laundering a loss into "expected".
+CUTOVER_LEDGER="${BARKPARK_CP_CUTOVER_LEDGER:-$APP/.slots/cp-cutovers.log}"
+# Bounded on purpose: ~6 lines per deploy and ~80 control-plane deploys a week
+# means an unbounded file is a slow leak on a box whose disk filling is already
+# a recorded outage (2026-08-31). 4000 lines is >6 weeks of history at that rate.
+CUTOVER_LEDGER_MAX_LINES="${BARKPARK_CP_CUTOVER_LEDGER_MAX_LINES:-4000}"
+# One id per RUN of this script, so the analyzer can pair a start with its end
+# even when two deploys interleave in the file (they cannot today — the deploy
+# lock serializes them — but the pairing must not DEPEND on that).
+CUTOVER_DEPLOY_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+cutover_stamp() {
+  local event="$1"; shift
+  local line ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
+  line="CPCUTOVER deploy_id=${CUTOVER_DEPLOY_ID} event=${event} ts=${ts}"
+  line="${line} old_sha=${OLD:-unknown} new_sha=${NEW:-unknown}"
+  line="${line} active_port=${ACTIVE_PORT:-unknown} target_slot=${TARGET:-unknown}"
+  line="${line} run_id=${GITHUB_RUN_ID:-none}"
+  [ "$#" -gt 0 ] && line="${line} $*"
+  mkdir -p "$(dirname "$CUTOVER_LEDGER")" 2>/dev/null || return 0
+  printf '%s\n' "$line" >> "$CUTOVER_LEDGER" 2>/dev/null || return 0
+  # Trim from the FRONT (oldest first) and only when over budget. `tail -n` into
+  # a temp then move: an in-place truncate of a file another process may be
+  # appending to is how a ledger loses the line it was just given.
+  local n
+  n="$(wc -l < "$CUTOVER_LEDGER" 2>/dev/null || echo 0)"
+  case "$n" in ''|*[!0-9\ ]*) return 0 ;; esac
+  if [ "$n" -gt "$CUTOVER_LEDGER_MAX_LINES" ]; then
+    tail -n "$CUTOVER_LEDGER_MAX_LINES" "$CUTOVER_LEDGER" > "$CUTOVER_LEDGER.trim" 2>/dev/null &&
+      mv "$CUTOVER_LEDGER.trim" "$CUTOVER_LEDGER" 2>/dev/null
+  fi
+  return 0
+}
+
 # Serialize overlapping runs (back-to-back merges, manual + CD).
 # ---- Queued-lock heartbeat (task-8811b4b25c529dbe) --------------------------
 # A SILENT wait is what killed the CI leg, never the deploy itself. `flock -w
@@ -336,6 +397,10 @@ if [ "$TARGET_PORT" = "$ACTIVE_PORT" ]; then
   exit 16
 fi
 log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
+# The cutover window OPENS here: every container replacement this run can
+# perform happens after this line, so a cron tick lost to this deploy is lost
+# inside [deploy_start, deploy_end].
+cutover_stamp deploy_start
 
 # The slot that is SERVING RIGHT NOW — the one container the endpoint clearer
 # below must never unplug. Derived from the SAME blue/green marker the flip
@@ -475,6 +540,11 @@ ensure_shared_services() { compose_up_repair "db/postfix up" db postfix; }
 # serving throughout, so every abort path here is zero-downtime. Re-asserts
 # db+postfix so no abort path can strand them stopped.
 abort_deploy() {
+  # An abort still booted (and now removes) a container, and `ensure_shared_services`
+  # below can restart db/postfix — so the cutover window must be CLOSED here too.
+  # Without this stamp an aborted deploy leaves an open-ended window and the
+  # analyzer falls back to its bounded default, which over-attributes.
+  cutover_stamp deploy_aborted result=abort
   compose rm -sf "control_plane_$TARGET" >/dev/null 2>&1 || true
   docker tag cloud-control_plane:rollback cloud-control_plane:latest 2>/dev/null || true
   git reset --hard "$OLD"
@@ -619,6 +689,8 @@ if ! echo "$code" | grep -qE '^(200|301|302)$'; then
   abort_deploy; exit 14
 fi
 
+cutover_stamp flip target_port="$TARGET_PORT"
+
 # ---- Drain, then retire the old slot. Its container is kept stopped (and its
 # image is held by that stopped container, so no prune below can reclaim it) so
 # a human can roll back in seconds.
@@ -652,6 +724,11 @@ sleep 5
 for c in $(docker ps -q --filter "publish=$ACTIVE_PORT"); do
   log "stopping old slot container on :$ACTIVE_PORT ($c)"; docker stop -t 30 "$c"
 done
+# The OLD node's Oban scheduler dies here. Between `flip` and this line BOTH
+# nodes are up; before `flip` only the old one is. Stamping all three means a
+# reader can say which side of the handoff a missing tick fell on without ever
+# asking the box what its containers were doing.
+cutover_stamp old_slot_stopped
 
 # ---- Post-flip disk hygiene (the other half of the 2026-08-31 outage fix):
 # every deploy used to leave one more image behind, forever — 839 of them when
@@ -772,4 +849,5 @@ if [ -f deploy/bake-server-image.sh ]; then
   log "image-bake timer: $(systemctl is-enabled barkpark-image-bake.timer 2>/dev/null || echo not-installed)"
 fi
 
+cutover_stamp deploy_end result=ok
 log "DONE — control plane slot $TARGET live at $(git rev-parse --short HEAD)"
