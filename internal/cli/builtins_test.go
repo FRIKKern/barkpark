@@ -262,7 +262,7 @@ func TestBashCompletionVerbsStructural(t *testing.T) {
 		// manually — never handed to compgen -W, which would re-expand them.
 		`case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in`,
 		`"doc create") __bpflags='--publish --set';;`,
-		`for __bpword in $__bpflags $globals; do`,
+		`for __bpword in $__bpflags $__bppath $globals; do`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("bash script missing %q:\n%s", want, script)
@@ -280,7 +280,7 @@ func TestZshCompletionVerbsStructural(t *testing.T) {
 		// flag tokens are untrusted → each element single-quoted in the array
 		// literal (zsh command-substitutes an unquoted `flags=(...)` on assignment).
 		`"doc create") flags=('--publish' '--set');;`,
-		`compadd -- $flags $globals`,
+		`compadd -- $flags $bpath $globals`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("zsh script missing %q:\n%s", want, script)

@@ -147,6 +147,12 @@ func runScaffyLs(out *writer, g globals, args []string) int {
 	return runScaffyLsRemote(out, g)
 }
 
+// scaffyRemoteFields is the catalog projection `scaffy ls --remote` asks for —
+// and, because it is named rather than inferred, the exact column list its
+// table renders (renderRows/pickColumns). One constant so the request and the
+// rendered header cannot drift into disagreeing about what was asked for.
+const scaffyRemoteFields = "title,concept,variant,domain,description"
+
 // runScaffyLsRemote fetches the concept × variant × domain catalog over the
 // generic query endpoint (D50 — zero new API; tokenless works when the schema
 // is public) and renders it through the existing table machinery: the
@@ -168,7 +174,7 @@ func runScaffyLsRemote(out *writer, g globals) int {
 	offset := 0
 	for {
 		params := url.Values{}
-		params.Set("fields", "title,concept,variant,domain,description")
+		params.Set("fields", scaffyRemoteFields)
 		params.Set("order", "concept:asc")
 		params.Set("limit", strconv.Itoa(scaffyRemotePageLimit))
 		params.Set("offset", strconv.Itoa(offset))
@@ -201,6 +207,13 @@ func runScaffyLsRemote(out *writer, g globals) int {
 	if out.machineOut() {
 		out.renderRaw(payload)
 	} else {
+		// The catalog projects its columns on the caller's behalf (the same
+		// list the pages above ask for), so the table must show every one of
+		// them. `description` is the column this exists for: it is empty on a
+		// freshly scaffolded catalog page, and an inferred table drops an
+		// all-empty column — reporting "no such column" for a field the query
+		// asked for by name, at exit 0.
+		out.requestedColumns = splitFieldsProjection(scaffyRemoteFields)
 		renderTable(out, payload)
 	}
 	return exitOK

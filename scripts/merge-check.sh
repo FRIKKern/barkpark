@@ -17,6 +17,24 @@
 #    another is how an unmeasured commit lands.
 set -uo pipefail
 
+# INTERPRETER GUARD — shebang-independent, and it must stay ABOVE the first
+# process substitution in this file. A shebang is not a guard: `sh scripts/
+# merge-check.sh` never reads it, and bash-in-POSIX-mode cannot parse `<(`, so
+# the script dies mid-parse and the caller reads whatever exit code the dying
+# shell happened to produce. That is the vacuous green this repo's
+# scripts/posix-vacuous-green-census.sh exists to refuse; both arms below are
+# required by it (a `${BASH_VERSION}` -z refusal AND a `*:posix:*` SHELLOPTS arm).
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "merge-check.sh: needs bash (this script uses process substitution); run: bash scripts/merge-check.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "merge-check.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/merge-check.sh" >&2
+    exit 2
+    ;;
+esac
+
 # ============================================================================
 # SHARED STATE + FUNCTIONS.
 # DEFINED ABOVE --selftest ON PURPOSE. The A6 lesson in this file is that a probe

@@ -549,8 +549,19 @@ defmodule BarkparkWeb.TasksController do
       # one narrowing that answers with a DIFFERENT, lean body (doc_id + title),
       # so it branches here rather than composing as another where-clause below.
       case params["id_prefix"] || filters["id_prefix"] do
-        p when is_binary(p) and p != "" -> id_prefix_lookup(conn, p)
-        _ -> do_index(conn, params, filters)
+        p when is_binary(p) and p != "" ->
+          id_prefix_lookup(conn, p)
+
+        _ ->
+          # THE DELTA READ (task-a60d5a14346c43bb). Parsed HERE, beside the two
+          # other fail-closed doors, so a malformed instant is refused before a
+          # single row is read — and so the refusal is a 400 naming the key
+          # rather than an unnarrowed 200 the caller cannot tell from a real
+          # answer.
+          case Params.parse_updated_since(params, filters) do
+            {:ok, updated_since} -> do_index(conn, params, filters, updated_since)
+            {:error, reason} -> bad_request(conn, reason)
+          end
       end
     else
       {:error, reason} -> invalid_filter(conn, reason)
@@ -591,7 +602,16 @@ defmodule BarkparkWeb.TasksController do
     })
   end
 
-  defp do_index(conn, params, filters) do
+  defp do_index(conn, params, filters, updated_since) do
+    # THE WATERMARK. Read from the clock BEFORE the query runs, echoed back on a
+    # delta request, and meant to be fed straight into the next poll's
+    # `updated_since`. Taking it first (and comparing INCLUSIVELY in
+    # `Tasks.Query.maybe_filter_updated_since/2`) biases the window to OVERLAP:
+    # a row written while this page was being built comes back once more next
+    # poll instead of falling into a gap between two exclusive windows. A
+    # client's own clock is the wrong source for this — a few seconds of skew
+    # the wrong way is silent, permanent data loss on the delta path.
+    as_of = DateTime.utc_now()
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
@@ -702,6 +722,13 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_parent_id(filters["parent"])
       |> Params.maybe_filter_parent_id(filters["parent_id"])
       |> Params.maybe_filter_label(filters["label"])
+      # THE DELTA READ (task-a60d5a14346c43bb). `updated_since` is bound and
+      # parsed in `index/2` (fail-closed: an unparseable instant is a 400, never
+      # a silent full page) and reaches the query as a `%DateTime{}` or nil.
+      # It composes as one more where-clause on the SAME base — `limit`/`offset`
+      # and the cursor still mean what they meant — so a poller that narrows to
+      # its own window pays for the rows that actually moved.
+      |> Params.maybe_filter_updated_since(updated_since)
       |> Params.apply_index_order(parent)
 
     # bl-api-tasks-stable-cursor: the keyset seek. Parsed AFTER `parent` is
@@ -718,19 +745,37 @@ defmodule BarkparkWeb.TasksController do
       {:ok, cursor} ->
         docs = query |> Params.apply_index_cursor(cursor) |> Repo.all()
 
-        json(
-          conn,
+        body =
           task_list_response(docs, conn, params,
             limit: limit,
             offset: offset,
             cursor_axis: Params.cursor_axis(parent),
             cursor_requested?: Params.cursor_requested?(params)
           )
-        )
+
+        json(conn, maybe_put_delta(body, updated_since, as_of))
 
       {:error, reason} ->
         bad_request(conn, reason)
     end
+  end
+
+  # The delta envelope. ADDITIVE and OMITTED WHEN THE CALLER DID NOT ASK, so
+  # every request that predates `updated_since` reads a byte-identical body —
+  # the same rule `next_cursor` follows one function up.
+  #
+  # `as_of` is the continuation token: pass it as the next poll's
+  # `updated_since` and the page carries exactly the rows that moved in between.
+  # Without it a client would have to invent the value from its own clock, and
+  # the failure mode of a clock that runs fast is a window that skips rows
+  # silently.
+  defp maybe_put_delta(body, nil, _as_of), do: body
+
+  defp maybe_put_delta(body, %DateTime{} = updated_since, as_of) do
+    Map.put(body, :delta, %{
+      updated_since: DateTime.to_iso8601(updated_since),
+      as_of: DateTime.to_iso8601(as_of)
+    })
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────

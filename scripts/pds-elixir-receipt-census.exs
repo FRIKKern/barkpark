@@ -3507,8 +3507,10 @@ defmodule PDS.Census do
   # and callees/2 resolves {:local, f} only inside the CALLING module — so an imported
   # helper is not merely mis-attributed, it is STRUCTURALLY INVISIBLE to the call
   # graph. The corpus's one honest `select:`-inside-the-update writer,
-  # Barkpark.Tasks.Internal.fenced_content_write/4 (internal.ex:50, `select: d` at
-  # :54), is reached ONLY by `import Barkpark.Tasks.Internal, only: [...]`, so wave
+  # Barkpark.Tasks.Internal.fenced_content_write/4 (its `select: d` rides the
+  # rev-fenced `Repo.update_all` in that function's own body — cited by SYMBOL,
+  # not by line, because the line anchor is what rotted), is reached ONLY by
+  # `import Barkpark.Tasks.Internal, only: [...]`, so wave
   # 33's lens could never name it. Each entry is {calling_module_segs, fun_name,
   # imported_module_segs}.
   defp collect_imports(ast), do: imports(ast, [], [])

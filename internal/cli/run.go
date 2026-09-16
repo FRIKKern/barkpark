@@ -163,7 +163,7 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// A stated -w/-p this command's URL can neither carry nor mirror is refused
 	// BEFORE any I/O — the alternative is a successful answer about the wrong
 	// workspace (scope_honesty.go).
-	if msg := refuseUnrepresentableScope(cmd, ctx); msg != "" {
+	if msg := refuseUnrepresentableScope(cmd, ctx, m.Commands); msg != "" {
 		return nil, &dispatchError{msg: msg, withUsage: true}
 	}
 
@@ -529,6 +529,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// avoid naming a remedy the caller already applied. Set before both the
 	// paginated walk and the single send, so every refusal path sees it.
 	out.credentialSent = req.headers["Authorization"] != ""
+
+	// The caller's explicit column projection, read off the RESOLVED url (the
+	// only place that knows whether `--fields` actually reached the server).
+	// The table renderer honours it so a named column renders as empty cells
+	// instead of vanishing when no row on the page carries a value; an
+	// inferred column is unaffected. Set here, with the writer in hand, rather
+	// than inside the writer-less buildManifestRequest, and before both the
+	// single send and the --all walk so every page renders the same columns.
+	out.requestedColumns = requestedColumnsFromURL(cmd, req.url)
 
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
 	if g.dryRun {
@@ -2034,6 +2043,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 					unsetKeys = append(unsetKeys, key)
 					continue
 				}
+				if err := checkSetKeyIndexing(kv, key); err != nil {
+					return nil, nil, "", err
+				}
 				if err := checkSetKeyNesting(kv, key); err != nil {
 					return nil, nil, "", err
 				}
@@ -2058,6 +2070,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 				return nil, nil, "", fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
 			}
 			key := kv[:eq]
+			if err := checkSetKeyIndexing(kv, key); err != nil {
+				return nil, nil, "", err
+			}
 			if err := checkSetKeyNesting(kv, key); err != nil {
 				return nil, nil, "", err
 			}
@@ -2128,6 +2143,50 @@ func setNestingError(kv, key, example string) error {
 		"so %q does not nest — it lands a literal key. Set the inner field directly, "+
 		"e.g. --set '%s' (use --file to send a body verbatim if you really meant a literal key)",
 		kv, key, example)
+}
+
+// checkSetKeyIndexing refuses a --set key carrying a bracket segment —
+// `acceptance_criteria[5]`, `blocks[0].text`, anything shaped `name[…]`.
+//
+// task ve-bl-stamp-flatkey-bug: a row once carried two top-level content keys
+// literally named `acceptance_criteria[5].evidence` and
+// `acceptance_criteria[5].met` while the real acceptance_criteria array was
+// untouched. The merge at every write path is SHALLOW
+// (Barkpark.Content.Mutations.apply_one/3), so a bracket is never an index into
+// a stored list any more than a dot is a path: `--set
+// 'acceptance_criteria[5]:={…}'` stored the bracketed STRING as a key, returned
+// a rev and exited 0. The evidence landed where no reader looks and the
+// criterion stayed unmet — a success-shaped write with the canonical array
+// unchanged.
+//
+// The dotted-key refusal below did not catch it; worse, its hint SPELLED it.
+// Given `acceptance_criteria[5].evidence` it took the head up to the first dot
+// and advised `--set 'acceptance_criteria[5]:={…}'` — the one spelling that
+// lands the residue. So this check runs FIRST, and a bracketed key never
+// reaches that hint.
+//
+// The `key:=null` unset branch is deliberately upstream of this call: naming a
+// bracketed key literally is the only way its author can delete residue an
+// older CLI stored, exactly as for a dotted one.
+func checkSetKeyIndexing(kv, key string) error {
+	open := strings.IndexByte(key, '[')
+	if open < 0 && !strings.ContainsRune(key, ']') {
+		return nil
+	}
+	head := key
+	if open > 0 {
+		head = key[:open]
+	}
+	hint := "set the WHOLE field, e.g. --set '" + head + ":=[…]' with the full list"
+	if head == "acceptance_criteria" {
+		hint = "stamp the criterion through its own verb — `bp task stamp <id> <worker> <epoch> " +
+			"--criterion N --criterion-text-file crit.txt --met --evidence '…'` — which updates the array element"
+	}
+	return fmt.Errorf("invalid --set %q: --set fields are merged INTO the document's content by a SHALLOW merge, "+
+		"so %q is not an index into a stored list — it lands a literal key of that name beside the real %q, "+
+		"and the write still returns a rev. %s (use --file to send a body verbatim, or `--set '%s:=null'` on a patch "+
+		"to DELETE a literal key an older client stored)",
+		kv, key, head, hint, key)
 }
 
 // checkSetKeyNesting refuses a --set key containing a dot. The merge is SHALLOW

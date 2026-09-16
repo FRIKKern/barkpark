@@ -34,6 +34,22 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalog do
   underscored to match the audit-action grammar the router keys on; only the
   upstream PATH carries the hyphen the instance API spells.
 
+  ## Tier here vs ROLE on the caller's side (task-8ccc571ab4d4e713)
+
+  The `tier` column above is about the WRITE, not about who may ask. The caller's
+  role is gated at the router, and the two are now reconciled in the one
+  direction that matters: **the instance's own flat `/v1/webhooks/*` scope sits
+  behind `:flat_admin_api`** — the box opens none of these doors to anything but
+  an admin token — so every `:mutate` capability here is relayed only for a TEAM
+  ADMIN (`Auth.require_team_admin` in front of each route). The plane never rates
+  a WRITE below the instance that owns it, because the relay spends the
+  platform's stored, decrypted instance admin token on the caller's behalf.
+
+  The deliberate exception, and the only one: the `:read` pair `webhook.list` and
+  `webhook.show` stay member-tier (charter D673 — a read grants nothing durable
+  and keeps a member able to see their own team's configuration). `webhook.deliveries`
+  is `:read` but gates at admin anyway: it returns payload BODIES.
+
   ## Tiers — and why there is NO :destroy tier here (charter decision D46)
 
   The instance catalog v1 has exactly two tiers:

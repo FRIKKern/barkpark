@@ -73,6 +73,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # dataset-scoped to the optional `dataset` param (default: all datasets in
   # scope, published-preferred first row).
   defdelegate maybe_filter_dataset(query, dataset), to: TaskQuery
+  defdelegate maybe_filter_updated_since(query, since), to: TaskQuery
 
   # Tenancy boundary: route the workspace clause through the ONE shared,
   # fail-CLOSED helper (`Scope.scope_to_workspace/3`) — the SAME semantic the
@@ -1360,7 +1361,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # is `bp task get`'s not_found path, which needs a "did you mean" and nothing
   # else. It is listed here and in the flat allowlist so the fail-closed doors
   # let it through; `index/2` branches on it.
-  @index_filter_keys ~w(id_prefix kind label lifecycle_status parent parent_id phase_id type)
+  @index_filter_keys ~w(id_prefix kind label lifecycle_status parent parent_id phase_id type updated_since)
 
   # ─── The sibling read routes (task-e1b74c19174cb2c1) ─────────────────────
   #
@@ -1424,7 +1425,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # `parent_id` is therefore listed as an ACCEPTED ALIAS of `parent` rather than
   # refused: refusing the spelling the schema itself teaches would trade a wrong
   # answer for a wrong lesson.
-  @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label id_prefix)
+  @index_flat_keys ~w(view limit offset cursor type kind lifecycle_status parent parent_id phase_id label id_prefix updated_since)
   @ready_flat_keys ~w(view limit offset phase_id order worker)
   @prime_flat_keys ~w(view limit offset worker order)
   @events_flat_keys ~w(since limit doc_id payload)
@@ -1472,6 +1473,58 @@ defmodule BarkparkWeb.TasksController.Params do
   dropped filter. The `:index` seat of `parse_route_filters/2`.
   """
   def parse_index_filters(params) when is_map(params), do: parse_route_filters(params, :index)
+
+  @doc """
+  Parse `?updated_since=` / `?filter[updated_since]=` on `GET /v1/tasks` — the
+  DELTA READ.
+
+  `{:ok, nil}` when absent or blank (the route is unnarrowed, byte-identical to
+  every request that predates this key), `{:ok, %DateTime{}}` for an ISO-8601
+  instant, `{:error, message}` otherwise.
+
+  FAIL-CLOSED, and that is the whole point of parsing it here rather than
+  letting `maybe_filter_updated_since/2`'s non-`DateTime` catch-all eat it. An
+  unparseable timestamp that fell through as a no-op would answer a delta poll
+  with the FULL corpus under a 200 — the exact "false confirmation" shape the
+  flat/container allowlists above exist to prevent, except worse: the caller
+  asked for the cheap page and silently got the expensive one, forever.
+
+  An offset-bearing form (`2026-09-16T09:00:00+02:00`) is accepted and shifted
+  to UTC by `DateTime.from_iso8601/1`; a date with no time, or a naive form
+  with no zone, is refused with a message that spells a correct example,
+  because guessing a zone for a caller is how a delta window silently moves by
+  hours.
+  """
+  def parse_updated_since(params, filters \\ %{}) when is_map(params) and is_map(filters) do
+    raw = params["updated_since"] || Map.get(filters, "updated_since")
+
+    case raw do
+      nil ->
+        {:ok, nil}
+
+      v when is_binary(v) ->
+        case String.trim(v) do
+          "" ->
+            {:ok, nil}
+
+          trimmed ->
+            case DateTime.from_iso8601(trimmed) do
+              {:ok, dt, _offset} -> {:ok, dt}
+              {:error, _} -> {:error, updated_since_message(trimmed)}
+            end
+        end
+
+      _ ->
+        {:error, updated_since_message(nil)}
+    end
+  end
+
+  defp updated_since_message(raw) do
+    got = if is_binary(raw), do: " (got #{inspect(raw)})", else: ""
+
+    "updated_since must be an ISO-8601 instant WITH a zone, " <>
+      "e.g. 2026-09-16T07:45:00Z#{got}"
+  end
 
   @doc """
   The claim-time criteria refusal, which has to TEACH rather than merely refuse.

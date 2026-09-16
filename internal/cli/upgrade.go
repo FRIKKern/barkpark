@@ -284,9 +284,26 @@ func compareVersions(a, b string) int {
 }
 
 // releaseCacheFile is the on-disk cache of the newest resolved cli-v* release,
-// living beside config.json in the config dir. It is refreshed by the
-// network-bearing `bp doctor --onboarding` and read — NETWORK-FREE — by
-// `bp whoami`, which must never make an HTTP call on its always-run hot path.
+// living beside config.json in the config dir. It is the SINGLE SOURCE OF TRUTH
+// for "what is the newest release": every network-bearing surface writes it
+// (`bp doctor --onboarding`, `bp upgrade`, the update-notice background
+// resolve) and every consumer reads it — `bp whoami`, which must never make an
+// HTTP call on its always-run hot path, and the update notice / stale-client
+// note in update_notice.go.
+//
+// update-check.json (updateCheckCache) deliberately does NOT keep a second copy
+// of that version. The two files are not redundant, because their CheckedAt
+// stamps measure different things and MUST NOT be merged:
+//
+//	cli-release-cache.json .checked_at — when a resolve SUCCEEDED. It dates the
+//	    value, so a stale reading can be reported as "unreported" rather than
+//	    compared. Written only on success.
+//	update-check.json      .checked_at — when a lookup was ATTEMPTED. It is a
+//	    throttle, stamped BEFORE the fetch and kept even when the fetch fails,
+//	    so a network outage cannot make every bp invocation retry.
+//
+// Collapsing them would either make whoami trust a day-stale version after a
+// FAILED check, or make a failing network re-dial on every single run.
 const releaseCacheFile = "cli-release-cache.json"
 
 // releaseCacheTTL bounds how long a cached release reading stays trustworthy. A
@@ -360,12 +377,14 @@ func writeReleaseCache(latest string) error {
 	return nil
 }
 
-// readReleaseCache returns the cached release reading and whether it is FRESH:
-// present on disk, non-empty, and written within releaseCacheTTL. It NEVER
-// touches the network — a missing, unreadable, malformed, empty, or stale cache
-// all read as (zero, false), which whoami renders as an honest "unreported". A
-// future CheckedAt (clock skew) is also treated as stale, never as fresh.
-func readReleaseCache() (releaseCache, bool) {
+// loadReleaseCacheRecord returns the on-disk reading WITHOUT the freshness
+// gate: (record, true) whenever a well-formed, non-empty record exists, however
+// old. This is the raw single source of truth for the resolved release version;
+// the two consumers gate it differently and that difference is deliberate —
+// see readReleaseCache (whoami: TTL-gated) and releaseCacheLatest (the update
+// notice: never TTL-gated, so an offline operator is still told they are
+// behind). It NEVER touches the network.
+func loadReleaseCacheRecord() (releaseCache, bool) {
 	path, err := releaseCachePath()
 	if err != nil {
 		return releaseCache{}, false
@@ -379,6 +398,34 @@ func readReleaseCache() (releaseCache, bool) {
 		return releaseCache{}, false
 	}
 	if strings.TrimSpace(rc.Latest) == "" || rc.CheckedAt.IsZero() {
+		return releaseCache{}, false
+	}
+	return rc, true
+}
+
+// releaseCacheLatest returns the newest resolved release version recorded on
+// disk, or "" when there is none. It applies NO TTL: the update notice and the
+// refusal-time stale-client note must keep naming a known-newer release while
+// the operator is offline or GitHub is down — the 24h updateCheckInterval
+// already throttles the LOOKUP, and re-checking is exactly what those lines ask
+// the operator to do. whoami's freshness verdict is the caller that needs the
+// age gate, and it uses readReleaseCache instead.
+func releaseCacheLatest() string {
+	rc, ok := loadReleaseCacheRecord()
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(rc.Latest)
+}
+
+// readReleaseCache returns the cached release reading and whether it is FRESH:
+// present on disk, non-empty, and written within releaseCacheTTL. It NEVER
+// touches the network — a missing, unreadable, malformed, empty, or stale cache
+// all read as (zero, false), which whoami renders as an honest "unreported". A
+// future CheckedAt (clock skew) is also treated as stale, never as fresh.
+func readReleaseCache() (releaseCache, bool) {
+	rc, ok := loadReleaseCacheRecord()
+	if !ok {
 		return releaseCache{}, false
 	}
 	age := time.Since(rc.CheckedAt)

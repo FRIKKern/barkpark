@@ -89,14 +89,14 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/domain admin  attach a custom domain — platform-zone or any customer FQDN already pointed at the box (V2 ownership proof)
       POST    /v1/barkparks/:id/vercel-deploy admin  wire a Vercel deploy for the instance's site
       GET     /v1/barkparks/:id/api/webhooks user  proxy → the instance's own webhooks list (admin token stays server-side)
-      POST    /v1/barkparks/:id/api/webhooks user  proxy → create a webhook on the instance
+      POST    /v1/barkparks/:id/api/webhooks admin proxy → create a webhook on the instance (team-admin: an instance-admin-token verb)
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → show one instance webhook
-      PUT     /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → update one instance webhook
-      DELETE  /v1/barkparks/:id/api/webhooks/:webhook_id user  proxy → delete one instance webhook
+      PUT     /v1/barkparks/:id/api/webhooks/:webhook_id admin proxy → update one instance webhook (team-admin)
+      DELETE  /v1/barkparks/:id/api/webhooks/:webhook_id admin proxy → delete one instance webhook (team-admin)
       POST    /v1/barkparks/:id/api/webhooks/:webhook_id/rotate admin proxy → rotate a webhook signing secret (team-admin: a credential verb)
       GET     /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries admin proxy → a webhook's delivery log (team-admin: payload bodies)
-      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay user  proxy → replay one delivery
-      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send user  proxy → one-shot synthetic webhook test-send
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay admin proxy → replay one delivery (team-admin)
+      POST    /v1/barkparks/:id/api/webhooks/:webhook_id/test-send admin proxy → one-shot synthetic webhook test-send (team-admin)
       GET     /v1/admin/autoupdate worker    global fleet-autoupdate policy snapshot
       POST    /v1/admin/autoupdate/halt worker  halt fleet autoupdate (kill-switch)
       POST    /v1/admin/autoupdate/resume worker  resume fleet autoupdate
@@ -5745,20 +5745,51 @@ defmodule BarkparkCloud.Web.Router do
     proxy_instance_webhook(conn, :"webhook.list")
   end
 
+  # task-8ccc571ab4d4e713 (ruled: ARM B EXTENDED TO THE WHOLE `:mutate` TIER).
+  # Every mutating instance-webhook proxy verb gates at team admin. The fact the
+  # filing did not have: the instance's OWN webhook surface — the flat
+  # `/v1/webhooks/*` scope this proxy relays to — sits behind `:flat_admin_api`,
+  # i.e. the box opens NONE of these doors to anything but an admin token. The
+  # control plane spends the platform's stored, decrypted PLAINTEXT instance
+  # admin token on the caller's behalf (`dispatch_instance_api/4` →
+  # `instance_api_headers(admin_token)`), so the caller's tier is the ONLY thing
+  # between a plain member and an admin-token-bearing write to the customer's
+  # box. A plane that rates a WRITE below the instance that owns it is lending a
+  # credential the instance would not have lent.
+  #
+  # This also settles the sibling contrast the row named: POST
+  # /v1/barkparks/:id/push-relay is `Auth.require_team_admin` and PROVISIONS one
+  # webhook. Provisioning one is admin; creating, mutating, replaying and firing
+  # arbitrary ones is now admin too. The two no longer contradict.
+  #
+  # TWO verbs stay member-tier: the `:read` pair `list` and `show`. That is the
+  # one remaining place the plane deliberately rates a capability BELOW the
+  # instance that owns it, and its reason is the D673 line the
+  # suspended-instance branch of `dispatch_instance_api/4` already draws — a read
+  # grants nothing durable and keeps a member able to SEE the configuration of
+  # their own team's box. The third read, `deliveries`, is NOT in that pair: it
+  # returns payload BODIES (customer data) and moved to admin under
+  # task-a0f4f8757ba28e76.
   post "/v1/barkparks/:id/api/webhooks" do
-    proxy_instance_webhook(conn, :"webhook.create")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.create")
   end
 
   get "/v1/barkparks/:id/api/webhooks/:webhook_id" do
     proxy_instance_webhook(conn, :"webhook.show")
   end
 
+  # task-8ccc571ab4d4e713 (ARM B EXTENDED): a `:mutate` — and `update` is also the
+  # enable/disable toggle (`{active: bool}` through the same capability).
   put "/v1/barkparks/:id/api/webhooks/:webhook_id" do
-    proxy_instance_webhook(conn, :"webhook.update")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.update")
   end
 
+  # task-8ccc571ab4d4e713 (ARM B EXTENDED): a `:mutate`.
   delete "/v1/barkparks/:id/api/webhooks/:webhook_id" do
-    proxy_instance_webhook(conn, :"webhook.delete")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.delete")
   end
 
   # task-a0f4f8757ba28e76 (ruled ARM B): rotating a signing secret is a CREDENTIAL
@@ -5780,16 +5811,27 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.deliveries")
   end
 
+  # task-8ccc571ab4d4e713 (ARM B EXTENDED): a `:mutate` — a replay re-emits a
+  # stored delivery to the customer's endpoint. It also sits under the
+  # already-admin `deliveries` read, so a member could not name an event_id to
+  # replay without one.
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/deliveries/:event_id/replay" do
-    proxy_instance_webhook(conn, :"webhook.replay")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.replay")
   end
 
   # webhook TEST-SEND (GR45 — always spelled "webhook test-send"; the
   # notifications email test-send is an unrelated surface). One-shot synthetic
   # event to the customer's endpoint, single attempt: a `:mutate` because the
   # instance really does make the outbound request and record a delivery row.
+  # task-8ccc571ab4d4e713 (ARM B EXTENDED): the sharpest of the five. The
+  # instance really does emit an outbound HTTP request to the customer's endpoint
+  # and write a delivery row — and `Registry.InstanceApiCatalog` already recorded
+  # that api/'s own `webhook.test-send` is role ADMIN. The plane no longer rates
+  # it below the instance that owns it.
   post "/v1/barkparks/:id/api/webhooks/:webhook_id/test-send" do
-    proxy_instance_webhook(conn, :"webhook.test_send")
+    conn = Auth.require_team_admin(conn, [])
+    if conn.halted, do: conn, else: proxy_instance_webhook(conn, :"webhook.test_send")
   end
 
   # POST /v1/providers → 201 {provider: ...}. Provider-neutral connect:
@@ -13633,9 +13675,12 @@ defmodule BarkparkCloud.Web.Router do
   # malformed id is the SAME 404 as a teamless caller (no existence leak). A
   # resolved instance dispatches through the catalog capability.
   defp proxy_instance_webhook(conn, capability) do
-    # The two admin-gated verbs (rotate, deliveries) arrive with the principal
-    # already resolved by Auth.require_team_admin; do not verify the session a
-    # second time. Same skip gate_role/4 applies. Every other verb resolves here.
+    # task-8ccc571ab4d4e713: the SEVEN admin-gated verbs (create, update, delete,
+    # rotate, deliveries, replay, test_send — every `:mutate` plus the
+    # payload-bodies read) arrive with the principal already resolved by
+    # Auth.require_team_admin; do not verify the session a second time. Same skip
+    # gate_role/4 applies. Only the two remaining member-tier reads (list, show)
+    # resolve here.
     conn =
       if conn.assigns[:current_user], do: conn, else: Auth.require_user(conn, [])
 
