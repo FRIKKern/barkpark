@@ -1103,16 +1103,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
     {"barkpark_json/6", :unread, "custom_host",
      "dr-w11-payload-divergence-close — the attached platform-zone host."},
-    # THIS ROW IS A HOLE MOVING, NOT A HOLE TRADED FOR ANOTHER. `suspended_at`
-    # was a Side C row (UNSERIALIZED: written by every suspension, emitted by no
-    # serializer). cch-w54-bl emitted it, so that row is DELETED above and
-    # `@schema_unserialized_floor` fell 25 -> 24. What is left is strictly
-    # smaller and one arm to the right: the key is now ON the wire and the Go
-    # client does not decode it yet. The console — the reader this fix exists
-    # for — reads it from the same payload immediately, so the browser half is
-    # closed; only `bp` is still blind.
-    {"barkpark_json/6", :unread, "suspended_at",
-     "cch-w54-bl-suspended-at-is-written-but-never-serialized closed the SERIALIZER half; task-85c531c2adbf0dff is the live tracker for THIS half. The billing-suspension stamp is EMITTED since cch-w54-bl and decoded by nobody: internal/cloudclient's Barkpark struct declares the `Suspended` and `SuspendedReason` fields (json:\"suspended\" / json:\"suspended_reason\") and stops there, so `bp` can still say a box is suspended and why but never SINCE WHEN. Cited by FIELD rather than by line because this struct is appended to constantly and a line number here would rot within the week. Adding the third field is a one-line change in internal/, outside the cloud/-only fence of the PR that emitted the key; it is filed rather than smuggled."},
+    # THE `suspended_at` ROW IS GONE (task-85c531c2adbf0dff, the tracker the
+    # deleted row itself named). It read:
+    #
+    #   {"barkpark_json/6", :unread, "suspended_at", "…the billing-suspension
+    #    stamp is EMITTED since cch-w54-bl and decoded by nobody…"}
+    #
+    # cch-w54-bl put the key on the wire and was fenced to cloud/, so it filed
+    # that KNOWN OPEN row rather than smuggling a Go edit past its scope. The
+    # Go edit is now IN THIS COMMIT: `internal/cloudclient/client.go`'s
+    # `Barkpark` struct declares `SuspendedAt *string json:"suspended_at"`
+    # beside `Suspended` and `SuspendedReason`, and `bp cloud status` renders
+    # the day (DETAIL cell `since <day>`, `-o json` key `suspended_at`) with a
+    # nil rendered as an explicit em dash and NO json key.
+    #
+    # THE TWO EDITS ARE ONE COMMIT BY CONSTRUCTION, not by discipline: this arm
+    # refuses BOTH halves alone. Leaving the row after the decoder lands reds as
+    # "no longer unread (allowlisted but now decoded — DELETE the allowlist
+    # row)", which is how this deletion was measured rather than assumed. The
+    # Go-tag floor above moves 379 -> 380 in the same commit for the same one
+    # tag.
     # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
     # They read as "decoded by NOBODY", and all three are decoded today by
     # `internal/cli/cloud_support_cmd.go:1460-1462`, which declares
@@ -1946,7 +1956,35 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # other seven sites are names already in the union and move the SITE register
   # below instead. CONTROL: the same scan with tokens.go excluded returns 373,
   # byte-equal to the value this line replaces.
-  @go_tag_pinned 379
+  # 379 -> 380 (task-85c531c2adbf0dff). `internal/cloudclient/client.go`'s
+  # `Barkpark` struct gains ONE tag, `json:"suspended_at"` — the billing
+  # suspension stamp `barkpark_json/6` has emitted since cch-w54-bl and no Go
+  # struct decoded. `suspended_at` is a name the package did NOT have, so it
+  # joins the NAME union and this floor moves by exactly one. It is the same
+  # edit that deletes the `{"barkpark_json/6", :unread, "suspended_at", …}` row
+  # from `@known_open` above, which is why both pins move in ONE commit: the
+  # UNREAD arm refuses either half alone.
+  #
+  # MEASURED ON THIS TREE by the PIN CO-EDIT arm, which printed
+  # "@go_tag_pinned 379 -> 380", never derived by arithmetic from the diff.
+  #
+  # CONTROL: the same scan with `internal/cloudclient/client.go` restored to its
+  # origin/main content (`git show origin/main:internal/cloudclient/client.go`)
+  # returns 379 — byte-equal to the value this line replaces, and green against
+  # the old pin — so the scan is measuring the population these pins are taken
+  # against and the +1 is this PR's tag and nothing else.
+  #
+  # `@go_tag_sites` below does NOT move, and that is MEASURED rather than
+  # assumed: the SITE arm read 727 sites on this tree against 726 accounted for
+  # by the OLD floor, and 380 names − 138 registered names + 485 registered
+  # sites = 727 reconstructs it exactly. `suspended_at` is declared at exactly
+  # ONE site, so it belongs to this pin's once-declared class and the register
+  # refuses a row of 1 by name.
+  #
+  # `@emitted_pinned` does NOT move either — this slice writes no Elixir
+  # serializer. It declares a READER for a key `barkpark_json/6` already emits,
+  # which is the whole point of the pair.
+  @go_tag_pinned 380
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
