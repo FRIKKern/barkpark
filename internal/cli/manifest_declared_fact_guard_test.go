@@ -55,7 +55,8 @@ import (
 // the pre-#14115 shape and requires the hit; running it over the real
 // internal/cli/run.go at 7d5b948c0^ (the commit before the fix) reports
 //
-//	run.go:1429:6: Contains(cmd.HTTP.PathTemplate, …) [cmd is manifest.Command]
+//	run.go, at the sole pre-fix call site: Contains(cmd.HTTP.PathTemplate, …)
+//	[cmd is manifest.Command]
 //
 // and NOTHING else in that 2,700-line file — so the detector is selective, not
 // a blanket ban on strings.Contains. TestManifestFactDetectorStaysQuietOn-
