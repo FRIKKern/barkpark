@@ -34,6 +34,25 @@
 //                 same run; (b) the three viewport widths must yield three
 //                 DIFFERENT containerRight values.
 //
+// THE ANSWER IT GAVE, 2026-09-17: the reader STRETCHES. Outer box full-bleed in
+// 18/18 cases and the last child flush in 15/15 measured cases, identically in
+// the stacked and the horizontal arrangement (the 3 excluded cases are the
+// .bp-pipe scroll container overflowing on purpose; its own outer box is still
+// flush). components.ex emits these three families with NO reference to the
+// block's `layout` key, so the reader's HTML for the stacked twin `sample_m5`
+// and the horizontal twin `sample_m10` is byte-identical and the orientation
+// distinction exists only in pdrender. Carried into the pdrender lane as
+// task-587aef9aaf6f8248 (uniform Path-A, both orientations).
+//
+// It also SUPERSEDES a stale verdict: pdle-r2-le-children-close stamped
+// "cards stretch, notes container-stretch/content-left, pipeline LEFT-PACKS"
+// off `web/components/portable-doc.tsx`, a file that no longer exists. The JS
+// reader (js/packages/react/src/blocks/core.ts) now emits the same `bp-*`
+// classes as the Elixir emitter, and web mounts them inside
+// `.bp-paper-surface` (web/components/paper-editor-doc.tsx) — one stylesheet,
+// one answer. Which is the whole reason this is a rendered measurement and not
+// a reading: a source reading dates faster than the thing it describes.
+//
 //   Run:  node src/__compose_fullbleed_render.mjs
 //   Env:  BP_CHROME=/path/to/chrome     pin the binary
 //         BP_FULLBLEED_VERBOSE=1        print the full measurement table
