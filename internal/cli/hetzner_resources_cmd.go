@@ -605,6 +605,10 @@ FLEET (control plane — needs 'bp login')
             source is quiet, never a fake zero          (bp cloud usage -h)
   members   your team's seats + pending invitations, the console's Members
             panel in the terminal                       (bp cloud members -h)
+  token     mint · ls · revoke the control-plane credential a CI job bears —
+            the console's API-tokens panel, from the terminal. The plaintext is
+            NEVER printed by default: --out writes a 0600 file, --reveal is the
+            explicit opt-in                              (bp cloud token -h)
   autoupdate pin · unpin · pause · resume one instance's self-update policy
                                                     (bp cloud autoupdate -h)
   rollout   the fleet-wide autoupdate brake: status · halt · resume
