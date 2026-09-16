@@ -53,9 +53,16 @@ func closeRefusalSourcePaths(t *testing.T) []string {
 		t.Fatalf("getwd: %v", err)
 	}
 	for i := 0; i < 8; i++ {
-		tasks := filepath.Join(dir, "api", "lib", "barkpark", "tasks")
-		closePath := filepath.Join(tasks, "close.ex")
-		stampPath := filepath.Join(tasks, "stamp.ex")
+		// WHOLE-PATH literal runs on purpose. scripts/go-path-escape-check.sh
+		// resolves a walk-up read from the run of >=3 adjacent string literals,
+		// so joining a `tasks` DIRECTORY first and appending the basenames
+		// afterwards censuses the read as the bare directory
+		// `api/lib/barkpark/tasks` — a path no `…/tasks/**` glob in
+		// go-tests.yml on.push.paths can match, which is a red on the ratchet.
+		// Naming each file end-to-end makes the census say exactly what
+		// go-tests.yml declares: the two .ex files, and nothing wider.
+		closePath := filepath.Join(dir, "api", "lib", "barkpark", "tasks", "close.ex")
+		stampPath := filepath.Join(dir, "api", "lib", "barkpark", "tasks", "stamp.ex")
 		if _, err := os.Stat(closePath); err == nil {
 			if _, err := os.Stat(stampPath); err == nil {
 				return []string{closePath, stampPath}
