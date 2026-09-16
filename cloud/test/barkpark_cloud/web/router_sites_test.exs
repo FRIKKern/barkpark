@@ -591,20 +591,25 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert json_body(conn)["site"]["id"] == site.id
     end
 
-    # PINS TODAY'S PAT CONTRACT, deliberately — see the PR body for the cost.
+    # THE D219 RE-TIERING, DRIVEN — dr-w14-bl-pat-cannot-read-the-owners-number.
     #
-    # The refusal on the two reads above is CREDENTIAL-CLASS, not role-class: no
-    # PAT of any tier reaches a `:session` route, so a read PAT is 401 (not 403 —
-    # `require_user` never saw a session token) on both, while the single-
-    # deployment poll, which is gated `{:ability, "read"}`, answers 200 on a REAL
-    # row with the SAME token. A member's read PAT is equally 401.
+    # This test used to pin the opposite fact, and the pin's own comment recorded
+    # the cost: with the LIST route session-only, no automation credential could
+    # compute the owner's number, because `bp cloud site status` reads the ledger
+    # through it (ListSpawnSiteDeployments) and the single-deployment poll returns
+    # exactly one row — an outcome, never a rate. That refusal was
+    # CREDENTIAL-CLASS, not role-class: every PAT tier got 401, because
+    # `Auth.require_user/2` never saw a session token and the ability gate was not
+    # consulted at all.
     #
-    # The consequence, stated so the pin is deliberate: no automation credential
-    # can compute the owner's number, because `bp cloud site status` reads the
-    # ledger through the session-only list route. Re-tiering it to
-    # {:ability, "read"} sits inside cloud-console-hardening's auth fence and is
-    # FILED, not built here (deploy-reliability charter D219).
-    test "a read PAT is 401 on BOTH owner reads while the single-deployment poll is 200" do
+    # The cross-epic ruling (deploy-reliability charter D219, inside
+    # cloud-console-hardening's auth fence) re-tiered the LIST route — and ONLY
+    # the list route — to `{:ability, "read"}`. So the line this test draws moved
+    # by exactly one path: `GET /v1/sites/:id` is still session-only and still
+    # 401s the very same token, in the same call, three lines apart. That
+    # adjacency is the assertion: it proves the change is a re-tier of one route
+    # and not a collapse of the session tier.
+    test "a read PAT now LISTS deployments (D219) while GET /v1/sites/:id stays 401" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
@@ -618,19 +623,58 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       assert stored.abilities == ["read"]
 
+      # THE DENOMINATOR, reachable by an automation credential at last. Asserted
+      # on the ROWS, not on the status: an admitted gate proves the door opened,
+      # only rows prove a number can be computed.
       list = call(:get, "/v1/sites/#{site.id}/deployments", nil, read_pat)
-      assert list.status == 401
-      assert json_body(list)["error"] == "unauthorized"
+      assert list.status == 200
+      assert [%{"id" => listed}] = json_body(list)["deployments"]
+      assert listed == dep.id
 
+      # THE UNMOVED HALF. Same token, same site, the sibling read — still 401,
+      # still `unauthorized` (not 403), because that route still runs
+      # `Auth.require_user/2` and never reaches an ability gate.
       show = call(:get, "/v1/sites/#{site.id}", nil, read_pat)
       assert show.status == 401
+      assert json_body(show)["error"] == "unauthorized"
 
-      # The SAME token, on the SAME site, one path segment deeper — 200 on a real
-      # row. The refusal above is therefore about the credential CLASS the route
-      # accepts, not about what the token is allowed to read.
+      # The SAME token, one path segment deeper — 200 on a real row, as it always
+      # was. The list now agrees with its own child instead of contradicting it.
       poll = call(:get, "/v1/sites/#{site.id}/deployments/#{dep.id}", nil, read_pat)
       assert poll.status == 200
       assert json_body(poll)["deployment"]["id"] == dep.id
+    end
+
+    # THE LOW SIDE of the same widening. A read PAT belonging to a DIFFERENT team
+    # must not reach this list by naming the id — and the refusal must be 404, the
+    # same answer a nonexistent id gets, never a 403 that would confirm the site
+    # exists.
+    test "another team's read PAT is 404 on this site's deployments, identical to a nonexistent id" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, _dep} = Registry.create_deployment(site, %{git_ref: "a"})
+
+      {outsider, outsider_team} = user_with_team()
+
+      {:ok, outsider_pat, _} =
+        Accounts.create_personal_access_token(outsider, outsider_team, %{
+          name: "outsider-read",
+          abilities: ["read"]
+        })
+
+      # The token is live and read-capable — without this the 404 could just mean
+      # "broken token" and the fence would be unproven.
+      assert call(:get, "/v1/sites", nil, outsider_pat).status == 200
+
+      foreign = call(:get, "/v1/sites/#{site.id}/deployments", nil, outsider_pat)
+      assert foreign.status == 404
+      assert json_body(foreign)["error"] == "not_found"
+      refute Map.has_key?(json_body(foreign), "deployments")
+
+      absent = call(:get, "/v1/sites/#{Ecto.UUID.generate()}/deployments", nil, outsider_pat)
+      assert absent.status == 404
+      assert foreign.resp_body == absent.resp_body
     end
   end
 

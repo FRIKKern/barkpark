@@ -19,7 +19,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
   Three things are pinned here:
 
     1. THE GRID — every (credential × tier) cell, admitted or refused, including
-       the eight formerly-refused read cells.
+       the ten formerly-refused read cells.
     2. THE REJECTED WIDENING — a `deploy` PAT is still refused by every
        write-gated route. `deploy ⊇ write` would hand a launch-only credential
        DELETE /v1/sites/:id; if anyone adds it, the PATCH pin reds.
@@ -111,13 +111,23 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
 
   ## The route census the matrix drives, derived from the gates in router.ex.
 
-  # The four READ-gated routes — all GET (machine-checked below). These are the
-  # eight flip cells: {write, deploy} × these four.
+  # The five READ-gated routes — all GET (machine-checked below). These are the
+  # ten flip cells: {write, deploy} × these five.
+  #
+  # `GET /v1/sites/:id/deployments` joined this list in the D219 re-tiering
+  # (dr-w14-bl-pat-cannot-read-the-owners-number). It spent its whole life in
+  # `session_routes/1` below, pinned at 401 for EVERY PAT tier; the pin's own
+  # comment said "when it IS re-tiered, this test flips to admitted and the flip
+  # is the proof". This is that flip. It is the only route that can express a
+  # DENOMINATOR — a window of deployments rather than the single row the poll
+  # returns — so it is what lets an automation credential compute the site
+  # owner's own deploy number at all.
   defp read_routes(%{site: site, deployment: dep}) do
     [
       {:get, "/v1/me", nil},
       {:get, "/v1/barkparks", nil},
       {:get, "/v1/sites", nil},
+      {:get, "/v1/sites/#{site.id}/deployments", nil},
       {:get, "/v1/sites/#{site.id}/deployments/#{dep.id}", nil}
     ]
   end
@@ -137,18 +147,24 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     ]
   end
 
-  # The two SESSION-TIER reads (deploy-reliability W14 S4). Neither is gated on an
-  # ability at all: both go through the 2-arity `with_team_site(conn, fun)`, which
-  # defaults to `:session` (router.ex:11065), so NO PAT of any tier reaches them —
-  # the refusal is 401 (no session token was ever seen), never the ability gate's
-  # 403. They were ABSENT from @driven_routes entirely, and the census's own
-  # anti-vacuity tripwire (`missing_routes/1`) only polices routes already IN the
-  # census — so an absent route is invisible to it and nothing asserted their tier
-  # in EITHER direction.
+  # The SESSION-TIER read (deploy-reliability W14 S4, narrowed to one by the D219
+  # re-tiering). It is not gated on an ability at all: `GET /v1/sites/:id` calls
+  # `Auth.require_user/2` directly, so NO PAT of any tier reaches it — the refusal
+  # is 401 (no session token was ever seen), never the ability gate's 403. It was
+  # ABSENT from @driven_routes entirely, and the census's own anti-vacuity
+  # tripwire (`missing_routes/1`) only polices routes already IN the census — so
+  # an absent route is invisible to it and nothing asserted its tier in EITHER
+  # direction.
+  #
+  # ITS FORMER TWIN, `GET /v1/sites/:id/deployments`, MOVED to `read_routes/1`:
+  # the D219 ruling re-tiered the LIST route and only the list route. The
+  # single-site read stays session-only and stays pinned here, so this census
+  # still proves the session tier is a live tier and not an empty one — and so a
+  # future widening of `/v1/sites/:id` has to delete an assertion rather than
+  # slip past one.
   defp session_routes(%{site: site}) do
     [
-      {:get, "/v1/sites/#{site.id}", nil},
-      {:get, "/v1/sites/#{site.id}/deployments", nil}
+      {:get, "/v1/sites/#{site.id}", nil}
     ]
   end
 
@@ -166,11 +182,15 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     {"get", "/v1/me"},
     {"get", "/v1/barkparks"},
     {"get", "/v1/sites"},
-    {"get", "/v1/sites/:id/deployments/:dep_id"},
-    # The two session-tier reads — in the census so a deletion is loud, and driven
-    # below so their tier is asserted at all.
-    {"get", "/v1/sites/:id"},
+    # Re-tiered from `:session` to `{:ability, "read"}` by D219
+    # (dr-w14-bl-pat-cannot-read-the-owners-number). It stays in @driven_routes
+    # across the move — that is the point of this list: the ROUTE is pinned as
+    # existing, and which census drives it is what says the tier.
     {"get", "/v1/sites/:id/deployments"},
+    {"get", "/v1/sites/:id/deployments/:dep_id"},
+    # The session-tier read — in the census so a deletion is loud, and driven
+    # below so its tier is asserted at all.
+    {"get", "/v1/sites/:id"},
     {"patch", "/v1/sites/:id"},
     {"post", "/v1/sites/:id/deploy"},
     {"post", "/v1/sites/:id/rollback"},
@@ -245,8 +265,8 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
 
   ## 2. The grid
 
-  describe "read-gated routes (the eight flip cells)" do
-    test "a write PAT is admitted by all four read-gated GETs" do
+  describe "read-gated routes (the ten flip cells)" do
+    test "a write PAT is admitted by all five read-gated GETs" do
       s = scope()
       {token, _} = pat(s, ["write"])
 
@@ -256,7 +276,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       end
     end
 
-    test "a deploy PAT is admitted by all four read-gated GETs" do
+    test "a deploy PAT is admitted by all five read-gated GETs" do
       s = scope()
       {token, stored} = pat(s, ["deploy"])
       # The mint is exclusive: asking for deploy yields exactly ["deploy"].
@@ -268,7 +288,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       end
     end
 
-    test "a read PAT and a root PAT are admitted by all four (unchanged)" do
+    test "a read PAT and a root PAT are admitted by all five" do
       s = scope()
       {read_token, _} = pat(s, ["read"])
       {root_token, _} = pat(s, ["root"])
@@ -295,22 +315,35 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       poll = call(:get, "/v1/sites/#{s.site.id}/deployments/#{s.deployment.id}", nil, token)
       assert poll.status == 200
       assert Jason.decode!(poll.resp_body)["deployment"]["id"] == s.deployment.id
+
+      # The D219 re-tiering, asserted on the PAYLOAD and not on the gate. An
+      # admitted status proves the door opened; only ROWS prove the credential can
+      # compute a number. This is the whole point of the widening: the poll above
+      # returns one row and can state an outcome, this returns a WINDOW and can
+      # state a rate.
+      list = call(:get, "/v1/sites/#{s.site.id}/deployments", nil, token)
+      assert list.status == 200
+      body = Jason.decode!(list.resp_body)
+      assert [%{"id" => dep_id, "site_id" => site_id}] = body["deployments"]
+      assert dep_id == s.deployment.id
+      assert site_id == s.site.id
+      assert Map.has_key?(body, "next_cursor")
     end
   end
 
-  ## 2a. The session tier (deploy-reliability W14 S4)
+  ## 2a. The session tier (deploy-reliability W14 S4, narrowed by D219)
 
-  # These two reads carry every owner-facing deployment number in the
-  # deploy-reliability epic, and until now the grid did not mention them. The pin
-  # is deliberate and it has a cost, stated here so it is not folklore: freezing
-  # the 401 freezes "no automation credential can compute the owner's number",
-  # because `bp cloud site status` reads the ledger through the session-only list
-  # route (ListSpawnSiteDeployments). Re-tiering it to {:ability, "read"} is a
-  # cross-epic call inside cloud-console-hardening's auth fence — FILED, not made
-  # here (deploy-reliability charter D219). When it IS re-tiered, this test flips
-  # to admitted and the flip is the proof.
+  # `GET /v1/sites/:id` is what is LEFT of this tier. Its former twin, the
+  # deployments LIST, was re-tiered to {:ability, "read"} by D219's cross-epic
+  # ruling (dr-w14-bl-pat-cannot-read-the-owners-number) and now lives in
+  # `read_routes/1`; the flip of that one route out of this census IS the proof
+  # the ruling was carried out, exactly as the old comment here promised.
+  #
+  # The remaining pin is still load-bearing, and for the same reason it always
+  # was: it proves the session tier is a LIVE tier with a member in it, so
+  # "every PAT tier is 401 here" cannot go vacuous by the tier emptying out.
   describe "session-tier reads (no PAT reaches them)" do
-    test "EVERY PAT tier is 401 on both session-tier reads — a credential class, not an ability" do
+    test "EVERY PAT tier is 401 on the session-tier read — a credential class, not an ability" do
       s = scope()
 
       for abilities <- [["read"], ["write"], ["deploy"], ["root"]] do
@@ -338,7 +371,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
                200
     end
 
-    test "a session IS admitted by both — and by role BLINDNESS, not by an owner grant" do
+    test "a session IS admitted — and by role BLINDNESS, not by an owner grant" do
       s = scope()
 
       for {method, path, body} <- session_routes(s) do
@@ -348,7 +381,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       end
 
       # The role axis is not consulted at all: a plain member of the SAME team
-      # reads both. The mutation proof for this lives in router_sites_test.exs.
+      # reads it. The mutation proof for this lives in router_sites_test.exs.
       member = user_fixture()
       {:ok, _} = Accounts.add_member(s.team, member, "member")
 
@@ -358,6 +391,128 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
         assert conn.status == 200,
                "a team MEMBER should read #{label(method, path)}, got #{conn.status}"
       end
+    end
+  end
+
+  ## 2c. THE D219 WIDENING, DRIVEN FROM THE LOW-PRIVILEGE SIDE
+
+  # Proving the read PAT CAN now list deployments is only half of an authority
+  # change; the half that matters is what is STILL refused. A fence that fails
+  # open is invisible to every test written from the admitted side, because the
+  # admitted side passes either way.
+  #
+  # Three refusals, each a different axis, each driven against the SAME live
+  # route the flip above admits:
+  #
+  #   * NO CREDENTIAL — 401. The widening moved the route from `require_user` to
+  #     `require_user_or_pat` + `require_ability`; both halt an anonymous caller,
+  #     but only a driven arm can say which one this route now runs.
+  #   * A NON-MEMBER's PAT — 404, naming the site id explicitly. The token is a
+  #     real, valid, read-ability PAT; its holder is simply not in the owning
+  #     team. It must not be able to read its way in by naming the id.
+  #   * A CROSS-TENANT PAT — 404, again by explicit id. Team B's owner holds a
+  #     read PAT for team B and asks for team A's site. `with_team_site/3`
+  #     resolves through `Registry.get_team_site(current_team, id)`, so a foreign
+  #     id is the same 404 as one that never existed: an EXISTENCE leak would be
+  #     a 403, which says "that exists and you may not have it".
+  #
+  # The bound on the widening, stated so the next reader does not have to infer
+  # it: `read` is the FLOOR of the ability lattice (`Auth.ability_implies/0` —
+  # write ⊇ read, deploy ⊇ read, root ⊇ all), so there is no PAT tier that holds
+  # an ability and is refused by a `read` gate. That is why the refusal arms here
+  # are on the TENANT and CREDENTIAL axes and not on the ability axis: on a
+  # read-gated route the ability axis has no low side to test, and an arm
+  # pretending otherwise would be asserting a refusal the lattice cannot produce.
+  describe "the re-tiered deployments list (D219) refuses from below" do
+    test "an unauthenticated caller is 401 — no credential, no list" do
+      s = scope()
+
+      conn = Router.call(conn(:get, "/v1/sites/#{s.site.id}/deployments"), @opts)
+
+      assert conn.status == 401
+      assert Jason.decode!(conn.resp_body)["error"] == "unauthorized"
+    end
+
+    test "a NON-MEMBER's read PAT is 404 on the owner's site id — not 403, not 200" do
+      s = scope()
+
+      # A real read PAT, minted for a team that is not the site's. Its holder has
+      # never been a member of `s.team`.
+      outsider = user_fixture()
+      outsider_team = team_fixture()
+      {:ok, _} = Accounts.add_member(outsider_team, outsider, "owner")
+
+      {:ok, token, stored} =
+        Accounts.create_personal_access_token(outsider, outsider_team, %{
+          name: "outsider-read-#{System.unique_integer([:positive])}",
+          abilities: ["read"]
+        })
+
+      # The token is genuinely read-capable: it is admitted by a read-gated route
+      # of its OWN. Without this the 404 below could just mean "broken token".
+      assert stored.abilities == ["read"]
+      assert call(:get, "/v1/sites", nil, token).status == 200
+
+      conn = call(:get, "/v1/sites/#{s.site.id}/deployments", nil, token)
+
+      assert conn.status == 404,
+             "an outsider's read PAT should be 404 on another team's site, got #{conn.status}"
+
+      assert Jason.decode!(conn.resp_body)["error"] == "not_found"
+
+      # And it read NOTHING: no deployments key at all, so the refusal cannot be
+      # an empty-list-shaped success that a caller would render as "zero deploys".
+      refute Map.has_key?(Jason.decode!(conn.resp_body), "deployments")
+    end
+
+    test "CROSS-TENANT: team B's root PAT naming team A's site id gets the same 404 as a nonexistent id" do
+      a = scope()
+      b = scope()
+
+      # The strongest PAT that exists, on the wrong tenant — so the refusal below
+      # cannot be read as an ability shortfall.
+      {b_token, _} = pat(b, ["root"])
+
+      # Its own team's list is 200 with its own row: the token works, the route
+      # works, and the tenant fence is the ONLY thing that differs between this
+      # call and the next one.
+      own = call(:get, "/v1/sites/#{b.site.id}/deployments", nil, b_token)
+      assert own.status == 200
+      assert [%{"id" => id}] = Jason.decode!(own.resp_body)["deployments"]
+      assert id == b.deployment.id
+
+      # The SAME token, naming team A's site id explicitly.
+      foreign = call(:get, "/v1/sites/#{a.site.id}/deployments", nil, b_token)
+
+      assert foreign.status == 404,
+             "team B's root PAT should be 404 on team A's site id, got #{foreign.status}"
+
+      assert Jason.decode!(foreign.resp_body)["error"] == "not_found"
+
+      # Byte-identical to a site id that does not exist anywhere — that identity
+      # is the existence-leak protection, and it is what a 403 would break.
+      absent = call(:get, "/v1/sites/#{Ecto.UUID.generate()}/deployments", nil, b_token)
+      assert absent.status == 404
+      assert foreign.resp_body == absent.resp_body
+    end
+
+    test "the fence is the TEAM's, not the ROLE's: a plain member's read PAT lists its own team" do
+      s = scope()
+
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(s.team, member, "member")
+
+      {:ok, token, _} =
+        Accounts.create_personal_access_token(member, s.team, %{
+          name: "member-read-#{System.unique_integer([:positive])}",
+          abilities: ["read"]
+        })
+
+      conn = call(:get, "/v1/sites/#{s.site.id}/deployments", nil, token)
+
+      assert conn.status == 200
+      assert [%{"id" => id}] = Jason.decode!(conn.resp_body)["deployments"]
+      assert id == s.deployment.id
     end
   end
 
