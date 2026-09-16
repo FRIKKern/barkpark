@@ -432,6 +432,16 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		editClaimedDraft, tail = extractClaimedDraftPatchFlag(tail)
 	}
 
+	// `bp doc restore-revision --restore-onto-claimed`: the FIFTH additive,
+	// opt-in flag the manifest never declares, stripped here for the same reason
+	// as the ones above — it must never reach splitArgs. See
+	// claimed_restore_revision_guard.go for what it opts into; the guard itself
+	// runs below, beside the other write gates.
+	var restoreOntoClaimed bool
+	if cmd.ID == docRestoreRevisionCommandID {
+		restoreOntoClaimed, tail = extractClaimedRestoreRevisionFlag(tail)
+	}
+
 	// `bp task ls --match <substring>`: the THIRD additive, opt-in flag the
 	// manifest never declares, stripped here for the same reason as the two
 	// above — GET /v1/tasks accepts no substring filter (its filter container is
@@ -601,6 +611,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// immediately before the send, so the refusal arrives BEFORE the unlandable
 	// write rather than one command later.
 	if code, refused := guardClaimedDraftPatch(out, g, ctx, m, cmd, tail, editClaimedDraft); refused {
+		return code
+	}
+
+	// Claim-wall pre-flight, SECOND DOOR (claimed_restore_revision_guard.go):
+	// `bp doc restore-revision <rev_id> task` reaches the SAME trap the gate
+	// above closes — it writes the same unpublishable twin and answers a bare
+	// `ok`. It asks the same claim question through the same probe; all it adds
+	// is one hop turning the revision id into the document id. Gated here,
+	// immediately before the send, so the refusal arrives BEFORE the write
+	// rather than one failed publish later.
+	if code, refused := guardClaimedRestoreRevision(out, g, ctx, m, cmd, tail, restoreOntoClaimed); refused {
 		return code
 	}
 
