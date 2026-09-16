@@ -1,0 +1,1 @@
+Reverting any single re-point makes the sweep name that citation again as NOVEL (proved on the technical_blocks_live_test.exs components.ex qualification), and the full s20 step — all four doc-truth commands plus the sweep selftest — passes with the fix in place.

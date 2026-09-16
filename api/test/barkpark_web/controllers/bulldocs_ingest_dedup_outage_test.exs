@@ -76,7 +76,8 @@ defmodule BarkparkWeb.BulldocsIngestDedupOutageTest do
   @sessions_path "/v1/plugins/bulldocs/sessions"
   @dataset "production"
 
-  # The wire shape errors.ex:777 builds for {:error, {:dedup_unavailable, _}}:
+  # The wire shape errors.ex builds for {:error, {:dedup_unavailable, _}}
+  # (its `defp build({:error, {:dedup_unavailable, reason}})` clause):
   # ONE public code per status, so the arm wears the already-registered
   # transient-storage code and discriminates itself on `reason`.
   @code "storage_unavailable"
