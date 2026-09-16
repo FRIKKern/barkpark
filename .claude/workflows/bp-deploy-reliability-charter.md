@@ -14507,3 +14507,143 @@ publish, and the population becomes non-zero with no code change at all.** There
 or it does not get written: **the number, the denominator, the instant it was read at, and the command that
 re-derives it.** D607 bought this convention by example; D614 buys it for the cancelled population and states
 the licence question — *what does this number permit?* — as the second half nobody had written down.
+---
+
+## D615 — THE READ-ONLY MANDATE HAD NO READER BUT THE ACTOR IT CONSTRAINED. IT NOW HAS A PROGRAM, A PERMIT FOR THE ONE MEASUREMENT THAT MUST BREAK IT, AND AN OWNER-ONLY CREDENTIAL ASK. (2026-09-16)
+
+Row: `dr-w11-bl-prod-sweep-litter-and-credential`. Decided at `origin/main` **f42843f4e** and RE-RUN, not re-quoted, at **53ccd4a24** after the rebase that renumbered this decision (a sibling took D614 in the same window); every figure below holds at both. From the tree and the
+row's own text only. **NO PRODUCTION SURFACE WAS TOUCHED TO REACH THIS RULING** — no ssh, no `psql`, no live
+database, no box's `.env`. Documenting a read-only breach by committing one would have been the worst available
+outcome, and the fence was held.
+
+### THE CAUSE IS NOT THE THREE SYMPTOMS
+
+The row files three breaches from wave 11's own survey/verify fleet. They are one fault:
+
+| # | the symptom | its status |
+|---|---|---|
+| 1 | `tmp_dep_site_live` CREATEd by hand on `cloud-db-1` during a **read-only** sweep, never dropped | the OBJECT is repaired — slice `dr-w11-s6` adopts it as `deployments_site_became_live_index` (D166). **The discipline breach is not**, and that is what this decision rules on. |
+| 2 | that index `DROP`ped **four times inside rolled-back transactions on the live database**, ACCESS EXCLUSIVE on `deployments` each time, longest ~24 s | permitted going forward, under a written permit — see below. Nothing was lost. |
+| 3 | a live `DATABASE_URL` with a plaintext password read into a verifier's transcript while probing guerrilla's `/opt/barkpark/.env` | redacted on disk, present in a run log. **Owner-only.** Routed, not decided here. |
+
+**WAVE 10 HAD ALREADY WRITTEN THE RULE DOWN AND HAD ALREADY VERIFIED COMPLIANCE.**
+`dr-w10-bl-inserted-at-index-watch-item` declared the cleanup discipline in exactly the words a later reader
+would want — *"created CONCURRENTLY and its presence or removal verified by reading `pg_indexes` afterwards …
+`deployments` is back to exactly 9 indexes, zero `tmp_*`"* — and confirmed it at **05:12Z**. Hours later the same
+epic's next wave created a `tmp_*` index by hand on the same table and left it, and the table went to ten.
+
+So the finding is **not** that the rule was unclear, unknown, or unwritten. It was clear, known, written, and
+confirmed. **It failed because its only reader was the actor it constrained.** Wave 10 authored the mandate and
+attested its own compliance; both halves of the control sat inside the thing being controlled. A self-attested
+control is a statement about an author's intentions, and intentions do not survive a shift change.
+
+**THE RULING ON THE CAUSE. A READ-ONLY MANDATE THAT NOTHING CAN MECHANICALLY CHECK IS NOT A MANDATE. IT IS A
+PREFERENCE.** From here, any sweep, survey or verify lane that declares itself read-only against a production
+datastore must name which of these two it actually has. Prose alone is neither:
+
+1. **PREVENTION — the connection cannot write.** The sweep connects as a role without DDL, or sets
+   `default_transaction_read_only = on` for the session. A hand `CREATE INDEX` then fails **at the wire**, in the
+   sweeper's own transcript, at the moment of the mistake. This is the only control in this decision that does
+   not depend on anybody remembering anything, and it is the one to reach for first. It is also the one this
+   lane cannot land: it is an ops/credential act on a live box, owner-routed with the rest.
+2. **DETECTION — a reader that is not the actor.** `deploy/db-undeclared-index-census.sh` asks a database which
+   indexes it carries and diffs that against the set the migration tree DECLARES, reddening on any object no
+   migration names. It would have caught `tmp_dep_site_live` from a laptop, days later, with no cooperation from
+   and no self-report by whoever created it. **That is the whole point: it reads the RESIDUE, not the intent.**
+
+**THE INSTRUMENT, AND WHAT BUILDING IT ALREADY PROVED.** `deploy/db-undeclared-index-census.sh` has three arms —
+`--manifest` (offline, prints the declared set), `--check` (live, one `SELECT` against `pg_indexes`), `--selftest`
+(hermetic: stub `psql`, fixture migrations, no network, no credential). By run 2026-09-16, identical at f42843f4e and at the rebased base 53ccd4a24:
+`--selftest` rc=0, **11 arms, 0 failed**; `--manifest` rc=0, **300 declared index names across the two migration
+roots, BLIND SPOT 7**. It never writes — read verbs only, and arm (g) greps its own operative region for a write
+verb while arm (h) proves that grep can still find one planted in a copy. A failed, absent or **zero-row** read
+exits **2 CANNOT READ** and prints no table (arms e, f, i), because a broken read answering *"0 undeclared
+indexes"* is the precise fraud it exists to refuse.
+
+Its green is not asserted; it was **earned twice, and both faults were the same family as the breach itself**:
+
+* **PROSE IS NOT A DECLARATION.** The first cut counted any line carrying the words `CREATE INDEX`, and so pulled
+  `tmp_dep_site_live` out of the **`@moduledoc` of the very migration that DROPs it** — measured, 1 line, present
+  in the manifest. The census would have read the hand-made index as declared and stayed silent on the single
+  object it was written to catch. `derive_manifest` now tracks `@moduledoc`/`@doc` blocks and ignores them; arm
+  (j) is that specimen and arm (a) is its control.
+* **A SINGLE-LINE READER MISSES THE STATEMENT THAT MATTERS.** The wave-11 repair writes
+  `name: :deployments_site_became_live_index` on the **third** line of its `create index(`. A line-at-a-time
+  parser derives the positional name instead, and the real production index reads **UNDECLARED** — a false alarm
+  aimed at the fix. `derive_manifest` now joins a statement until its parens balance; arm (k) requires the
+  explicit name present **and** the positional one absent, so neither an always-emit nor an always-drop parser
+  passes. The two repairs moved the declared count 265 → 300 and the blind-spot count 30 → 7.
+
+**AND THE HONEST LIMIT, STATED HERE RATHER THAN DISCOVERED LATER: NOTHING REQUIRED RUNS IT YET.** `deploy/` is
+this lane's whole fence. `scripts/pds-door-census.sh` keys on `scripts/pds-*`, so this program is outside its
+denominator, and the rider that would make it THROUGH — an ExUnit exec under `api/test` plus a step in
+`.github/workflows/shell-harnesses.yml` — lives in two trees this lane may not touch. **Routed to the gates lane.**
+Until that rider lands, D615 is a decision with a runnable reader and no scheduler, which is a strictly better
+position than D615's own subject (a rule with neither) but is *not* the finished state, and this paragraph exists
+so no later reader mistakes one for the other.
+
+### THE DROP-IN-A-ROLLED-BACK-TRANSACTION MEASUREMENT IS PERMITTED, NOT FORGIVEN
+
+**A BAN WOULD BE THE WRONG RULING, AND D166 IS THE PROOF.** An index's worth cannot be established without
+removing it, and the alternative the assignment suggested — `SET enable_indexscan = off` — **lies**: Postgres
+falls back to a Bitmap Index Scan on the *same* index and understates the cost **14.5x**. Ban the honest method
+and the next verifier either guesses or reaches for a method that returns a confident wrong number. The
+measurement bought the 236x–498x figures that D166 turns into a landed migration; it was worth taking.
+
+**BUT PERMITTING IT SILENTLY WOULD ALSO BE WRONG, AND THE REASON IS SHARPER THAN "LOCKS ARE BAD".** The ACCESS
+EXCLUSIVE lock is held for the duration of the `EXPLAIN`, and the `EXPLAIN` is slow **precisely in proportion to
+how valuable the index is**. D166's own numbers: 48.4 ms with the index, **24,089 ms without**. The ~24 s
+production stall *was* the 498x payoff, read off the clock. **The better the index, the longer the outage that
+measuring it causes — monotonically.** A verifier's intuition runs the other way ("it's only an EXPLAIN"), which
+is why this has to be written down rather than left to judgement.
+
+**THE PERMIT. A production `DROP`-and-`ROLLBACK` measurement is permissible when ALL of these hold; any one
+missing and it is not a measurement, it is an outage with a spreadsheet.**
+
+1. **WRITTEN AUTHORISATION BEFORE THE FIRST STATEMENT**, from the wave lead or the owner, naming the object, the
+   table, the expected worst-case lock, and **the number of repetitions**. Retrofitted authorisation is not
+   authorisation, and this clause is the one wave 11 failed: four windows were taken where nobody had authorised
+   one. **The count is the part nobody agreed to.**
+2. **`lock_timeout` SET IN THE SAME SESSION BEFORE `BEGIN`**, to a bound stated in the authorisation. Wave 11 did
+   this, and it is why the breach is a discipline finding rather than an incident: the transaction fails fast
+   instead of queuing behind live traffic and stalling every writer on the table.
+3. **`statement_timeout` SET TOO, AND THIS IS THE CLAUSE WAVE 11 DID NOT HAVE.** `lock_timeout` bounds how long
+   you wait to ACQUIRE the lock; it says nothing about how long you HOLD it. The ~24 s was hold time. Without a
+   statement bound, the hold is whatever the un-indexed plan costs, which is unknown by construction — it is the
+   number being measured.
+4. **ONE EXPLICIT TRANSACTION PER MEASUREMENT**, `BEGIN … DROP … EXPLAIN … ROLLBACK` issued as a single batch,
+   never autocommit. A connection that dies mid-batch rolls back; an autocommit `DROP` does not, and that is the
+   difference between a measurement and a permanent loss.
+5. **`pg_indexes` RE-READ AFTER EVERY `ROLLBACK`, AND THE READ PASTED INTO THE RECORD.** The restore is *proven*,
+   not assumed, once per repetition. Wave 11 did this too, and it is the reason this decision can say "nothing
+   was lost" as a fact rather than a hope.
+6. **RECORDED WITH THE MEASUREMENT: UTC timestamps, the observed hold time per repetition, and the traffic
+   window.** The two wave-11 windows sit at roughly 06:39Z and 06:47Z; that they are known at all is what made
+   this row filable.
+7. **A RESTORED SNAPSHOT OR REPLICA IS THE DEFAULT; PRODUCTION IS THE FALLBACK, AND IT MUST BE ARGUED.** Stated
+   without pretending it is free: the 236x–498x figures depend on production row counts and cache state, so a
+   snapshot answers a slightly different question. The permit exists because sometimes that argument genuinely
+   wins. It has to be *made*, in the authorisation, not assumed.
+
+### THE CREDENTIAL IS ROUTED TO THE OWNER AND NOWHERE ELSE
+
+A verifier read guerrilla's live `DATABASE_URL` — a Postgres role password in plaintext — into its transcript. It
+is **redacted in everything written to disk**: nothing in this repo, this charter, the ledger, or any lane's notes
+carries the value, and **nothing may**. What remains is a run log retained outside the repo and outside any lane's
+reach. **Rotation is an owner act** — a new role password plus a coordinated `.env` rewrite and restart on every
+consumer — and no agent performs it, proposes a value, or re-reads that `.env` to confirm anything.
+
+**The ask is recorded for the owner in `scratchpad/orchestrate/BLOCKED-ON-USER.md`** (checked absent first, with
+the search proven live in both directions: a known-present string matched, a known-absent one did not), naming the
+credential class, the host, that it reached a run log, that it is redacted on disk, and the two dispositions —
+**rotate**, on the view that a plaintext database password in a retained transcript is disclosed by definition; or
+**accept and record the acceptance**, so the next sweep does not re-raise it. Either is a defensible owner
+decision. **"Nobody decided" is not**, and it is the state that line exists to end.
+
+### THE LITTER
+
+Query files and CSV exports left in `/tmp` on guerrilla and barkpark-cp, plus `/tmp/deps.csv` inside the
+`cloud-db-1` container. Read-only artefacts, no secret content asserted, but litter on production and outside this
+lane's fence by construction — removing them means reaching for the boxes this decision forbids reaching for.
+**Ruled a named ops act for the owner or an ops-credentialed lane, not a slice**, and deliberately not performed
+here. It is the cheapest of the four items and the only one with no argument in it.
