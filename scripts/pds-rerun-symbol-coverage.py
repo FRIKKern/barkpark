@@ -67,6 +67,49 @@ SECOND PREDICATE — SHARED (no anchors required, so it sees into the ABSTAIN se
   see a UNIQUELY wrong rerun) and it over-reports by one row per group (the row
   the command was genuinely written for is in the group too).
 
+THIRD PREDICATE — UNFALSIFIABLE-DEF (PDS-D750): a DIFFERENT AXIS, not a better P1
+
+  P1 and P2 both ask whether a rerun is ABOUT the right thing.  Neither asks
+  whether it can ever go RED, and a command that cannot fail is green forever
+  however perfectly it names its symbol.  Measured specimens:
+  `git grep -n 'defp apply_engagement' …` survives renaming that function to
+  `apply_engagement_RENAMED`, and `git grep -n 'def round_done_predicate' …`
+  survives `round_done_predicate_MUT` — each returns the MUTATED line as its
+  own evidence while exiting 0.  `git grep` matches a SUBSTRING, so a pattern
+  ending in an identifier character is a PREFIX match, and a suffix rename is
+  the commonest way a symbol actually changes.
+
+    UNFALSIFIABLE_DEF(R) <=> some positional PATTERN of a `git grep` segment of
+                             R.disposition_rerun BEGINS with a definition
+                             keyword followed by an identifier, AND ENDS in
+                             [A-Za-z0-9_] with no terminator, regex end-anchor
+                             or \b.
+
+  DEFINITION-SHAPED ONLY, and that narrowness is the ruling, not a shortcut.
+  Over the corpus this was written against, 440 of 470 git-grep reruns end in a
+  bare identifier — but 432 of those are REFERENCES (a constant, a path, a
+  workflow name, a sentence quoted out of a charter) for which no delimiter
+  exists to add.  Naming all 440 would be a finding nobody can act on; the 8
+  definition-shaped ones each have a one-character fix.
+
+FALSE POSITIVES OF P3 (a named row whose rerun is actually fine)
+  * DELIBERATE FAMILY PROBE.  `git grep -n 'defp handle_' …`, written to assert
+    a whole clause group still exists, is prefix-matching ON PURPOSE.  P3 names
+    it.  Remedy is one character (`defp handle_[a-z]`); measured frequency in
+    the corpus this shipped against was 0 of 470, which is why the arm is worth
+    its false-positive rate — and the number, not the argument, is the reason.
+  * MULTI-SEGMENT COMMANDS.  Only the FIRST positional token after `git grep`
+    in each `|`/`&&`/`;`-separated segment is read as the pattern.  An exotic
+    flag ordering can make that token the wrong one in either direction.
+
+FALSE NEGATIVES OF P3 (an unfalsifiable rerun P3 will NOT name)
+  * REFERENCE-TAIL, by construction.  `git grep -n ROSTER_PAGE_LIMIT …` is
+    just as inert under `ROSTER_PAGE_LIMIT_2`, and P3 is silent about it.  The
+    REFERENCE-TAIL count is PRINTED for exactly that reason: it is the arm's
+    own declared blind spot, sized, not hidden.
+  * NON-GREP RERUNS.  `git cat-file -e` / `git rev-list --count` shapes are not
+    read at all.
+
 CONTROLS
   Run with --selftest: two synthetic rows, one that MUST be named and one that
   MUST NOT, plus an assertion that the live corpus produces a non-empty anchor
@@ -94,6 +137,7 @@ USAGE
 """
 import json
 import re
+import shlex
 import sys
 
 MIN_ANCHOR_LEN = 4
@@ -127,6 +171,90 @@ def classify(reason, rerun):
     low = (rerun or "").lower()
     hits = {x for x in a if x.lower() in low}
     return ("covered" if hits else "named"), a, hits
+
+
+# --- P3: FALSIFIABILITY (PDS-D750) -------------------------------------------
+# Flags that consume the NEXT token, so the pattern is not mistaken for their
+# argument.  `-e` is here because `git grep -e PAT` puts the pattern there.
+GREP_FLAGS_WITH_ARG = {"-m", "--max-count", "-C", "-A", "-B", "-f"}
+
+# `-e` is NOT in that set, and the difference is load-bearing: `git grep -e PAT`
+# puts the pattern in the flag's argument slot, so treating `-e` as "skip the
+# next token" reads straight past the very thing this arm exists to inspect.
+# Control I in --selftest is that specimen, and it is there because the first
+# cut of this function got it wrong in exactly that direction.
+GREP_PATTERN_FLAGS = {"-e"}
+
+# A definition keyword opening the pattern.  This is the whole narrowing: it is
+# what separates "a symbol whose language gives it a terminator" from "a string
+# quoted out of a charter".
+DEF_KEYWORD = re.compile(
+    r"^\s*(defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct"
+    r"|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_]"
+)
+
+# A tail that a SUFFIX RENAME cannot extend: a delimiter, a regex end-anchor, or
+# a word boundary.  Anything else ending in an identifier char is a prefix match.
+ANCHORED_TAIL = re.compile(r"""(\$|\\b|\\>|[(){}\[\]:;,=<>"'/.\s|+*?^&%!@#-])$""")
+IDENT_TAIL = re.compile(r"[A-Za-z0-9_]$")
+
+
+def grep_patterns(rerun):
+    """The positional PATTERN of each `git grep` segment of a rerun string.
+
+    The rerun is DATA: it is tokenised with shlex, never executed and never
+    handed to a shell.
+    """
+    out = []
+    for seg in re.split(r"\|\||&&|;|\|", rerun or ""):
+        if not re.search(r"\bgit\s+grep\b", seg):
+            continue
+        try:
+            toks = shlex.split(seg.strip())
+        except ValueError:
+            continue
+        if "grep" not in toks:
+            continue
+        skip = False
+        take = False
+        for t in toks[toks.index("grep") + 1:]:
+            if t == "--":
+                break
+            if take:
+                out.append(t)
+                take = False
+                break
+            if skip:
+                skip = False
+                continue
+            if t in GREP_PATTERN_FLAGS:
+                take = True
+                continue
+            if t in GREP_FLAGS_WITH_ARG:
+                skip = True
+                continue
+            if t.startswith("-"):
+                continue
+            out.append(t)
+            break
+    return out
+
+
+def falsifiability(rerun):
+    """-> ('unfalsifiable-def'|'reference-tail'|'anchored'|'no-git-grep', patterns)
+
+    'unfalsifiable-def' is the FINDING.  'reference-tail' is the declared blind
+    spot: equally prefix-matching, deliberately not named (see the docstring).
+    """
+    pats = grep_patterns(rerun)
+    if not pats:
+        return "no-git-grep", pats
+    bare = [p for p in pats if IDENT_TAIL.search(p) and not ANCHORED_TAIL.search(p)]
+    if not bare:
+        return "anchored", pats
+    if any(DEF_KEYWORD.match(p) for p in bare):
+        return "unfalsifiable-def", pats
+    return "reference-tail", pats
 
 
 def shared_groups(rows):
@@ -183,6 +311,34 @@ def selftest():
     g = shared_groups(rs)
     print(f"control D (must group A only): {sorted(g)}  sizes={[len(v) for v in g.values()]}")
     ok &= list(g) == ["git grep -n A origin/main"] and len(next(iter(g.values()))) == 2
+    # --- P3 controls (PDS-D750). Each pair is a MUTATION of the other: the
+    # only difference between E and F is the terminator the law requires, and
+    # the only difference between E and G is the definition keyword that makes
+    # the arm narrow. An arm that loses either direction fails here by name.
+    v, _ = falsifiability("git grep -n 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex")
+    print(f"control E (undelimited def must be named): {v}")
+    ok &= v == "unfalsifiable-def"
+    v, _ = falsifiability("git grep -n 'defp apply_engagement(' origin/main -- api/lib/barkpark/tasks/stage.ex")
+    print(f"control F (same probe, delimited, must NOT be named): {v}")
+    ok &= v == "anchored"
+    v, _ = falsifiability("git grep -n 'def round_done_predicate' origin/main -- scripts/pds-ledger-census.sh")
+    print(f"control E2 (second specimen, undelimited, must be named): {v}")
+    ok &= v == "unfalsifiable-def"
+    v, _ = falsifiability("git grep -n 'def round_done_predicate(report):' origin/main -- scripts/pds-ledger-census.sh")
+    print(f"control F2 (second specimen, delimited, must NOT be named): {v}")
+    ok &= v == "anchored"
+    v, _ = falsifiability(r"git grep -nE 'defp apply_engagement\b' origin/main -- api/lib/barkpark/tasks/stage.ex")
+    print(f"control F3 (word-boundary anchor, whose own tail is an identifier char, must NOT be named): {v}")
+    ok &= v == "anchored"
+    v, _ = falsifiability("git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs")
+    print(f"control G (reference tail: the DECLARED blind spot, must not be a finding): {v}")
+    ok &= v == "reference-tail"
+    v, _ = falsifiability("git cat-file -e origin/main:scripts/pds-ledger-census.sh")
+    print(f"control H (non-grep rerun, must abstain): {v}")
+    ok &= v == "no-git-grep"
+    v, _ = falsifiability("git grep -n -e 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex")
+    print(f"control I (-e takes the pattern as its ARGUMENT, must still be named): {v}")
+    ok &= v == "unfalsifiable-def"
     print("SELFTEST", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -208,16 +364,37 @@ def main(argv):
     print(f"COVERED       {covered}  (rerun mentions >=1 reason anchor)")
     print(f"NAMED         {len(named)}  (anchor set non-empty, rerun mentions none)")
     print(f"ABSTAIN       {len(abstain)}  (prose-only reason: no backticked anchor — the predicate's own blind spot)")
+    # P3 — the falsifiability axis (PDS-D750). Counted over the SAME
+    # denominator so the two axes can be compared without a second fetch.
+    fals = {"unfalsifiable-def": [], "reference-tail": 0, "anchored": 0, "no-git-grep": 0}
+    for r in rows:
+        v, pats = falsifiability(r["rerun"])
+        if v == "unfalsifiable-def":
+            r["patterns"] = pats
+            fals[v].append(r)
+        else:
+            fals[v] += 1
     groups = shared_groups(rows)
     shared_rows = sum(len(v) for v in groups.values())
     print(f"SHARED        {shared_rows} rows over {len(groups)} distinct rerun strings reused by >1 row")
     print(f"UNIQUE-RERUN  {len(rows) - shared_rows}  (control: a non-zero here proves the grouping is not collapsing everything)")
+    print(f"P3 UNFALSIFIABLE-DEF  {len(fals['unfalsifiable-def'])}  (definition-shaped pattern with a bare identifier tail: a suffix rename cannot red it)")
+    print(f"P3 reference-tail     {fals['reference-tail']}  (equally prefix-matching, DELIBERATELY not named — P3's declared blind spot, sized)")
+    print(f"P3 anchored           {fals['anchored']}  (control: a non-zero here proves the tail test is not naming everything)")
+    print(f"P3 no-git-grep        {fals['no-git-grep']}  (not read by this arm at all)")
     union = {r["id"] for r in named} | {r["id"] for v in groups.values() for r in v}
     print(f"UNION         {len(union)} rows named by P1 (anchor) or P2 (shared)")
     print()
     print("== P2 SHARED RERUN GROUPS (largest first) ==")
     for cmd, v in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         print(f"  {len(v):>4} rows  {cmd[:150]}")
+    print()
+    print("== P3 UNFALSIFIABLE-DEF ==")
+    for r in fals["unfalsifiable-def"]:
+        print(f"--- UNFALSIFIABLE {r['id']}  [{r['lifecycle']}]")
+        print(f"    title   : {r['title']}")
+        print(f"    rerun   : {r['rerun'][:200]}")
+        print(f"    pattern : {r['patterns']}  <- add the language's terminator")
     print()
     print("== P1 NAMED ==")
     for r in named:
