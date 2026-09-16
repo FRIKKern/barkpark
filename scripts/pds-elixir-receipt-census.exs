@@ -10547,15 +10547,11 @@ defmodule PDS.Census do
   # THE SELECTOR OF A BRANCH: what decided that this path runs. A literal event name in
   # the head, or a guard over a name list, is a NAMED selector — the branch runs only
   # for events it spells out. Anything else is the DEFAULT path.
-  defp lv_sel_head({:when, _, [h, guard]}) do
-    if lv_guard_names?(guard), do: :named, else: lv_sel_pat(List.first(lv_args(h)))
-  end
-
-  defp lv_sel_head(h), do: lv_sel_pat(List.first(lv_args(h)))
-
-  # THE SELECTOR **AND THE REASON IT IS WHAT IT IS**. Identical verdict to lv_sel_head/1
-  # above — it is that function with the branch it already takes reported instead of
-  # discarded — and the reason is what partitions the honest/naive gap below.
+  # THE SELECTOR **AND THE REASON IT IS WHAT IT IS**. This REPLACED a boolean-returning
+  # lv_sel_head/1: same verdict, same two clauses, with the branch it already takes
+  # reported instead of discarded — and the reason is what partitions the honest/naive
+  # gap below. Reporting it rather than deriving it twice is what keeps the partition a
+  # property of THIS walk instead of a second opinion about it.
   defp lv_sel_head_r({:when, _, [h, guard]}) do
     if lv_guard_names?(guard), do: {:named, :name_list_guard}, else: lv_sel_head_r(h)
   end
