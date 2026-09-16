@@ -1395,10 +1395,17 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 	if g.limitSet {
 		limit, explicit = g.limit, true
 	}
+	body := unwrapResult(respBody)
+
+	// A LIMIT OF 0 USED TO RETURN HERE, BEFORE has_more WAS EVER READ. A
+	// paginated command that declares no `--limit` default and is called
+	// without one had no threshold to compare against, so the guard gave up —
+	// discarding the one field that needs no threshold at all. The check now
+	// falls through to the has_more backstop below instead of returning.
 	if limit <= 0 {
+		warnIfServerPromisesMoreRows(out, body)
 		return
 	}
-	body := unwrapResult(respBody)
 
 	// A SERVER-CLAMPED --limit FALLS THROUGH THE ROW-COUNT TEST BELOW, because
 	// a clamp makes the page SHORTER than what was asked. `--limit 2000`
@@ -1439,6 +1446,27 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 
 	rows, _ := extractListRows(body)
 	if len(rows) < limit {
+		// A SHORT PAGE USED TO BE TREATED AS PROOF OF COMPLETENESS, and it is
+		// not. Every branch above reasons about ROW ARITHMETIC — did the page
+		// fill, was the limit clamped — and row arithmetic is a client-side
+		// INFERENCE about a server-side fact. `page.has_more` is that fact,
+		// stated by the only party that ran the query. The guard reached it in
+		// exactly one place (explicit limit AND a readable clamp), so every
+		// other way a page can come back short while more rows remain fell
+		// through in silence: a route that bounds a page by response BYTES
+		// rather than rows (GET /v1/data/query stops at 64MB), a server whose
+		// own default is lower than the manifest's declared default, a filter
+		// applied after the limit, or simply an envelope that omits
+		// `page.limit` so pageEffectiveLimit answers !ok.
+		//
+		// The asymmetry is the whole point of the row this fixes: a caller who
+		// gets a short page concludes "that is the population". Nothing else
+		// in the response contradicts them, and the resulting count is
+		// internally consistent and wrong. So has_more is consulted LAST and
+		// UNCONDITIONALLY — it only ever adds a warning, never removes one,
+		// which is why it cannot make any complete page noisy (a complete page
+		// reports has_more:false, and a missing block reads false too).
+		warnIfServerPromisesMoreRows(out, body)
 		return
 	}
 
@@ -1447,6 +1475,23 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 		return
 	}
 	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
+}
+
+// warnIfServerPromisesMoreRows is the backstop for every page that looks
+// complete by row count but is not. It speaks only when the server itself
+// promises further rows, so it is silent on a genuinely whole page and on any
+// envelope that carries no page block at all.
+//
+// The notice rides stderr for the same reason the others do: `-o json` stdout
+// must stay parseable. The MACHINE-readable half of this contract is the
+// server's own envelope, which the CLI passes through untouched — a script
+// reading `-o json` tests `.page.has_more` (tasks) or `.hasMore` (search, doc
+// query) and gets the same fact this line states in prose.
+func warnIfServerPromisesMoreRows(out *writer, body []byte) {
+	if !pageHasMore(body) {
+		return
+	}
+	out.userErr("this page did not fill, but the server reports more rows beyond it (page.has_more is true) — a short page is NOT the whole population here; page with --offset or re-run with --all")
 }
 
 // pageEffectiveLimit reads `page.limit` — the limit the server ACTUALLY
@@ -1470,16 +1515,28 @@ func pageEffectiveLimit(payload []byte) (int, bool) {
 // pageHasMore reports the server's own `page.has_more`. A missing block or a
 // missing field reads false: this value only ever ADDS a promise of more rows,
 // so the absent case must be the one that promises nothing.
+// THE ENVELOPE HAS TWO SHAPES AND ONLY ONE WAS READ. The task routes nest the
+// page block (`page.has_more`, snake_case); GET /v1/data/query and the search
+// route state the same fact at the TOP LEVEL in camelCase (`hasMore`,
+// alongside `nextOffset` and `count`). Reading only the nested spelling meant
+// the two surfaces whose pages are bounded by response BYTES — precisely the
+// ones that can return short while more rows remain — were the two this
+// function always answered false for. Both spellings are read; either one
+// saying true is the server promising more rows.
 func pageHasMore(payload []byte) bool {
 	var env struct {
 		Page *struct {
 			HasMore bool `json:"has_more"`
 		} `json:"page"`
+		HasMore *bool `json:"hasMore"`
 	}
-	if json.Unmarshal(payload, &env) != nil || env.Page == nil {
+	if json.Unmarshal(payload, &env) != nil {
 		return false
 	}
-	return env.Page.HasMore
+	if env.Page != nil && env.Page.HasMore {
+		return true
+	}
+	return env.HasMore != nil && *env.HasMore
 }
 
 func defaultPageLimit(cmd manifest.Command) int {
