@@ -213,29 +213,32 @@ The v2 envelope (opt-in via `Accept-Version: 2`) reshapes only the
 identical across versions, so the mapping above is version-invariant; every
 other code/status is byte-identical between v1 and v2.
 
-## A 2xx body can carry its own failure verdict — `webhook test-send`
+## A 2xx that is not a plain success
 
-One route breaks the "only `error.code` sets the exit code" rule DELIBERATELY.
-`POST /v1/webhooks/:dataset/:id/test-send` (`webhook_controller.ex`
-`test_send/2`) always answers HTTP 200 with the outcome *inside* the body —
-`{"delivery":{"status":"ok"|"failed_giveup", …}}` — so the Studio SPA gets an
-immediate result with no error envelope to parse. `webhook replay` answers the
-identical shape for the same reason (both drive `Dispatcher`'s single
-synchronous attempt, `webhooks/dispatcher.ex` `record_single_attempt/3`, which
-resolves to exactly one of `ok` or `failed_giveup` — never `pending`).
+Two shapes break "only `error.code` sets the exit code".
 
-**The default, decided (task-60887badc1d2900f, option (a)): exit 0 stands.**
-`bp webhook test-send <id>` against an endpoint that refused the connection still
-exits `0` — the `delivery: failed_giveup: …` line is the truth, the exit code is
-not. A 2xx body may not mint a SECOND source of exit codes; only this route opts
-in, explicitly.
+**A 2xx body carrying its own verdict — `webhook test-send`.**
+`POST /v1/webhooks/:dataset/:id/test-send` (`webhook_controller.ex`) always
+answers 200 with the outcome *in* the body —
+`{"delivery":{"status":"ok"|"failed_giveup", …}}` — so the Studio SPA has no
+envelope to parse. `webhook replay` answers the identical shape (both drive
+`Dispatcher.record_single_attempt/3`). **Decided (task-60887badc1d2900f,
+option (a)): exit `0` stands** — the `delivery: failed_giveup: …` line is the
+truth, the exit code is not; a 2xx body may not mint a SECOND source of exit
+codes. `webhook.test-send` alone has the script escape hatch:
+`--fail-on-failed-delivery` exits `1` when `delivery.status` is anything but
+`"ok"`, output identical either way. `webhook replay` lacks it.
 
-`webhook.test-send` alone carries the escape hatch for the caller the printed
-line cannot reach — a script: `--fail-on-failed-delivery`. Passed, and with
-`delivery.status` anything but `"ok"`, the CLI exits `1` (`exitGeneric`, which is
-what a refused test probe is) instead of `0`; output is byte-identical either
-way. Unset, or on success, behaviour is untouched. `webhook replay` lacks the flag.
-
+**A write with NO body at all — `chat approve`.** `chat.approve` is the only
+manifest verb answering HTTP **204**, zero bytes (`chat_controller.ex`; the
+other empty-2xx emitters — SCIM, pulse OPTIONS — are not manifest nouns).
+`screenWriteReceipt` (run.go) NAMES it, never a blank line: exit **0**,
+`-o json` →
+`{"ok":true,"confirmed":false,"reason":"HTTP 204, no content returned …"}`,
+human/table → `not confirmed: <reason>`. **`ok` is not the discriminator**: a
+script keyed on `.ok` reads success on a write that produced no evidence
+— `confirmed:false` is the field that says so. An UNDECLARED empty **200**
+refuses: `unreadable_write_receipt`, exit **1**.
 ## Schema field references
 
 This document keys off the v1 error **envelope** (`error.code`, `error.message`,

@@ -196,7 +196,30 @@ func Execute(args []string) int {
 		// surface of One Chat, Two Surfaces. A built-in because it is a full-screen
 		// interactive Bubble Tea program with its own SSE stream, not a manifest
 		// JSON verb.
-		return runChat(out, g, ctx, rest[1:])
+		//
+		// `chat approve` is the ONE chat verb peeled to MANIFEST dispatch, and it
+		// falls THROUGH this case (no return) the way the `task` alias block does.
+		// Measured on origin/main: `bp chat approve <id> <request_id> <decision>`
+		// exited 2 with `bp chat takes no arguments besides `ls` and `unarchive``,
+		// because this case routed the whole noun into runChat, which never reaches
+		// the manifest tree. The manifest has declared `chat.approve`
+		// (POST /v1/chat/sessions/:id/approval, writes:true) the whole time.
+		//
+		// WHY THE MANIFEST PATH AND NOT A BESPOKE BUILT-IN like runChatLs /
+		// runChatUnarchive: `chat.approve` is the ONLY manifest verb in the whole
+		// API that answers an empty 204 (api/.../chat_controller.ex — SCIM and the
+		// pulse OPTIONS preflight are the other empty-2xx emitters and neither is a
+		// manifest noun). The 204 arm of screenWriteReceipt (run.go) therefore had
+		// no CLI caller at all. A built-in would route to screenBuiltinWriteReceipt
+		// instead — the OTHER half of the fence — and leave the manifest arm just
+		// as unreachable as it was. Peeling it HERE is what makes that arm live.
+		//
+		// Exactly one verb, deliberately: every other chat verb stays intercepted
+		// because the TUI is the surface for it. Widening this is a decision, not
+		// a refactor.
+		if verb != "approve" {
+			return runChat(out, g, ctx, rest[1:])
+		}
 	case "task":
 		// Task-noun verb aliases (charter decision 12; census: 2,428 `task show`
 		// + 329 `task list` typed errors — 1.19 MB of pure context waste). The
