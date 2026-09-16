@@ -138,8 +138,8 @@ lib/barkpark_web/controllers/share_link_controller.ex	serve
 lib/barkpark_web/controllers/status_controller.ex	index
 lib/barkpark_web/controllers/tickets_attachments_controller.ex	read_upload
 lib/barkpark_web/controllers/tickets_attachments_controller.ex	stream_file
+lib/barkpark_web/controllers/workspace_controller.ex	deliver_bundle
 lib/barkpark_web/controllers/workspace_controller.ex	spill_body
-lib/barkpark_web/controllers/workspace_controller.ex	stream_bundle
 lib/barkpark_web/controllers/workspace_controller.ex	with_spilled_body
 lib/barkpark_web/layouts.ex	paper_stylesheet
 lib/barkpark_web/live/studio/chat_live.ex	consume_attachments
