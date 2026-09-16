@@ -14201,3 +14201,83 @@ with its source and its date from an earlier wave's ledger (the ~9 MB, the 0 MB,
   FAILURE/CANCELLED/TIMED_OUT anywhere in the rollup", which is stricter than the rule this repo merges on
   (per-name latest-`completed_at` wins, so a superseded red is irrelevant) and would refuse merges the gate
   permits. No rows rewritten; the identification and this note are the deliverable.**
+---
+
+## D613 — TASK-AUTHORING RUBRIC: CITE THE SYMBOL. A LINE NUMBER WITH NO SHA IS NOT FALSIFIABLE. (2026-09-16)
+
+Row: `dr-w11-bl-task-body-file-line-anchors-rot-silently`. Measured at `origin/main` **d288448d9** over the
+**complete** direct-children set of `dr-backlog-never-started` (342 rows via `bp task ls --parent … --all`,
+every row carrying `.content.description`; its 3 grandchildren are all `done`, so no open row sits outside it).
+
+**THE SCOPE.** Of the **78** non-terminal rows (72 `open`, 4 `in_progress`, 2 `blocked`), **30 carry at least one
+parseable `path:NNN` anchor**, **62 anchors** in all. Under SYMBOL-IN-WINDOW(+/-5) — resolve the path against
+`git ls-files`, harvest the citing sentence's identifiers minus a stoplist minus every token derivable from the
+path itself, and ask whether one of them appears within five lines of the cited number:
+
+| verdict | n | reading |
+|---|---|---|
+| GOOD | 13 | a claim token lands within +/-5 |
+| STALE | 26 | no claim token within +/-5, or the line is out of range |
+| UNTESTABLE | 5 | the sentence names no symbol beyond the path — never scored GOOD |
+| UNRESOLVED-AMBIGUOUS | 17 | a bare basename is not an address (`router.ex` matches BOTH routers) |
+| UNRESOLVED-MISSING | 1 | no file at HEAD ends with that path |
+
+**26 stale of the 39 that are both resolvable and testable — 67%.** The stale share is NOT small, so the
+convention is not the whole answer; but it is most of it, for the reason below.
+
+**THE SEED SIX, RE-VERIFIED INDIVIDUALLY AT d288448d9 — FIVE ARE STILL WRONG, AND THE CORRECTIONS THEMSELVES
+ROTTED.** The row's body carried six anchors plus their corrections. The corrections are now as dead as the
+originals:
+
+| # | the body says | at d288448d9 |
+|---|---|---|
+| 1 | `Deploy.start/1` at cloud router `:10805`/`:12347`, corrected to `:11240`/`:12782` | **STILL WRONG, twice over.** `Deploy.start/1` no longer exists — the sites are `Sites.Deploy.start_reported/1` at `:15393` and `:17482`, and the file grew past 12k to **17,568** lines. `:11240` is a BLANK line. |
+| 2 | `@build_slot_capacity` at `deploy_runner.ex:269`, corrected to `:285` | **STILL WRONG.** `api/lib/barkpark/sites/deploy_runner.ex:395`; `:285` is blank. Also implied a cloud path — the file is under `api/`. |
+| 3 | `box_at_capacity?/2` at `:721`, corrected to `:748` | **STILL WRONG, and unrepairable.** No `def`/`defp box_at_capacity?` exists anywhere in the tree (control: the identical `git grep` finds `build_slot_capacity` in 17 places). Only the error-code STRING survives. |
+| 4 | `errors.ex` `internal_error` catch-all at `:634`, corrected to `:644` | **STILL WRONG.** The catch-all is `api/lib/barkpark/content/errors.ex:1150`; the file is 1,296 lines. |
+| 5 | api router token route at `:2342`, corrected to `:2359` | **STILL WRONG.** `:2359` is a BLANK line; `post("/v1/tokens", TokenController, :create)` is at `:3184`. |
+| 6 | `AgentEvent` under `api/lib/barkpark/registry/`, corrected to `cloud/lib/barkpark_cloud/registry/` | **CORRECT.** `cloud/lib/barkpark_cloud/registry/agent_event.ex` exists. |
+
+**The one that survived is the one with no line number.** That is the whole ruling in one row.
+
+**THE CLASS IS BIGGER THAN THE CHECKER, AND THIS IS THE LOAD-BEARING FINDING.** Two populations are invisible
+to any `path:NNN` instrument, both measured on this corpus or collected on 2026-09-16:
+
+* **BARE `:NNN` REFERENTS — 11 of the 78 open rows, 37 occurrences.** `at :269`, `is at :748` — prose-bound to a
+  filename named in an earlier clause. This row's own body is the specimen: of its six anchors, a `path:NNN`
+  grammar parses **one**. A checker aimed at its filing row would have seen one sixth of it.
+* **CLAIM ROT — a prose assertion about the code that is false with every line number correct.** Four of six
+  fresh specimens: `callees/2`'s `uniq_by` was blamed for dropping sibling clauses (refuted by run — `callee_key/1`
+  and `bfs_walk/9`'s seen-set both carry the line); `studio_chrome`'s `when event in @per_view_events` was guessed
+  not to halt (it halts, `{:halt, chrome_fallback(...)}`); `dr-bl-w8-memory-lever-belongs-on-the-build-slice`
+  asserted this charter carries no memory/swap/OOM/cgroup decision (D39, D118, D143 and D119 all exist);
+  `pds-w29-bl-twin-policy-split` cited four anchors that had ALL rotted and additionally missed a fifth surface
+  and a ruling on main that cites the row by id. **No line checker catches any of these.**
+
+**RULING — the authoring convention, binding on every row this epic files from here:**
+
+1. **CITE THE SYMBOL.** `deploy_runner.ex @build_slot_capacity`, `router.ex Deploy.start_reported/1 (2 sites)`.
+   A symbol is re-findable by `git grep` after any insertion; a number is not.
+2. **A LINE NUMBER IS AN OPTIONAL HINT AND CARRIES THE SHA IT WAS TAKEN AT** — `deploy_runner.ex:395@d288448d9`.
+   A number with no sha is not falsifiable: nothing can tell a later reader whether it ever was right.
+3. **A BARE BASENAME IS NOT AN ADDRESS.** Write the repo-relative path. 17 of 62 anchors here resolve to two or
+   more files, and `router.ex` is the worst offender in the repo.
+4. **AN ASSERTION ABOUT THE CODE CARRIES THE RUN OR THE GREP THAT PRODUCED IT.** Rules 1-3 do nothing for claim
+   rot, which was two-thirds of the fresh specimens. The prose is the thing that has to be checkable.
+5. **NEVER AUTO-CORRECT AN ANCHOR.** A moved anchor has two causes with opposite remedies — the code moved
+   (re-anchor) or the finding is gone (close the row). A rewriter picks one silently and destroys the evidence
+   for the other. `scripts/pds-task-anchor-report.sh` REPORTS and exits; its selftest arm (d) asserts the fixture
+   tree is byte-identical after a full red run.
+
+**THE INSTRUMENT.** `scripts/pds-task-anchor-report.sh --parent <id>` prints the table above and a BLIND SPOT
+line naming the bare-ref count it cannot parse, so the number never flatters itself. `--selftest` is hermetic
+and green, 10 arms, paired RED/QUIET by construction: arm (a) cites a line the symbol has MOVED away from and
+must read STALE naming the row, arm (b) cites the line it is ON and must stay GOOD. Disposed ENVIRONMENT in
+`scripts/pds-door-census.sh` — the live arm walks the ledger and exits 2 CANNOT READ rather than reporting a
+comfortable zero.
+
+**WHAT THIS DOES NOT CLOSE.** The repo-wide rubric at `docs/setup/TASK-SYSTEM.md` — its
+*"How to organize tasks (follow these for ANY task)"* section is the natural home for rules 1-4 beyond this
+epic, and it is outside the deploy fence. Routed to the lead, not edited here. And the five rotted seed anchors
+above are REPORTED, not rewritten, per rule 5: each needs a human to decide whether the code moved or the
+finding died.
