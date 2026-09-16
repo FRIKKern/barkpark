@@ -357,7 +357,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         worker: worker,
         epoch: epoch,
         caller_token_id: caller_token_id(socket),
-        scope: [workspace_id: ws_id]
+        # `dataset:` is the claim door's disambiguator
+        # (bp-task-verbs-500-on-cross-dataset-duplicate-slugs), and the board is
+        # the caller best placed to supply it: it renders ONE dataset and knows
+        # which. `{:claim}` is the only restage arm that re-resolves by doc_id —
+        # `{:close, _}` and `{:release}` carry `ctx.task_id`, the uuid this
+        # handler already resolved — so without this key a drag on a
+        # cross-dataset twin reached `Tasks.claim_by_id/3` with nothing to break
+        # the tie and the LiveView died on the refusal instead of writing the
+        # card the user was actually looking at.
+        scope: [workspace_id: ws_id, dataset: @dataset]
       })
     else
       # No resolvable write workspace, an unknown column, a row that vanished, or
@@ -655,9 +664,29 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
+  # ── THE THIRD FORK (bp-task-verbs-500-on-cross-dataset-duplicate-slugs) ────
+  # `documents` is unique on `(doc_id, type, dataset_id)`, not `(doc_id, type)`
+  # (migration 20260527134000), so one task doc_id can hold a row in two
+  # datasets — eleven such pairs live on guerrilla today. This reader filtered
+  # on doc_id + type + workspace and nothing else, so for those rows `Repo.one/1`
+  # matched TWO and raised `Ecto.MultipleResultsError`: not a refusal, a
+  # LiveView crash on the drag that touched them, with the board reconnecting to
+  # a stale card.
+  #
+  # The `d.dataset == ^@dataset` filter is not new policy — it is the filter
+  # this file's OWN sibling reader already carries (`fetch_peek_doc/1`, same
+  # exact/`drafts.` dance, twenty lines further down), and it is what the board
+  # already means everywhere else: the board subscribes to
+  # `documents:#{@dataset}`, snapshots `Board.snapshot(dataset: @dataset)` and
+  # gates fields on `@dataset`. A row in another dataset was never a card on
+  # this board, so it must not be a candidate for this board's write. With it,
+  # the twin resolves to the ONE row the board is showing, and a genuinely
+  # foreign id falls through to the same `:error` a missing id always did.
   defp fetch_task_exact(doc_id, ws_id) do
     query =
-      from(d in Document, where: d.doc_id == ^doc_id and d.type == "task")
+      from(d in Document,
+        where: d.doc_id == ^doc_id and d.type == "task" and d.dataset == ^@dataset
+      )
       |> Scope.scope_to_workspace(ws_id, nil)
 
     case Repo.one(query) do

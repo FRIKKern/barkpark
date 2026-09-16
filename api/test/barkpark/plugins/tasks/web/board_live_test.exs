@@ -778,6 +778,70 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       {:ok, ws: ws}
     end
 
+    # ── THE THIRD FORK (bp-task-verbs-500-on-cross-dataset-duplicate-slugs) ──
+    # `documents` is unique on `(doc_id, type, dataset_id)`, so a task doc_id can
+    # hold a row in two datasets — eleven such pairs live on guerrilla. The
+    # board's restage fresh-read filtered on doc_id + type + workspace and NOT on
+    # the board's own `@dataset`, so for those ids `Repo.one/1` matched two rows
+    # and raised `Ecto.MultipleResultsError` — the LiveView process dying mid-
+    # drag, not a refusal.
+    #
+    # THE DRAG NEEDS BOTH HALVES, and the read half alone is not enough — which
+    # is why the claim carries `dataset: @dataset` too. Measured by reverting
+    # `board_live.ex` and re-running this file (117 tests, 1 failure, this one):
+    #
+    #   * without the read filter — `Ecto.MultipleResultsError, expected at most
+    #     one result but got 2` out of `fetch_task_exact/2`;
+    #   * with the read filter but without `dataset:` in the restage scope —
+    #     `Barkpark.Tasks.AmbiguousTwinError` out of `Tasks.claim_by_id/3`,
+    #     because `{:claim}` is the one restage arm that re-resolves by doc_id
+    #     (the others carry the uuid).
+    #
+    # Either way the LiveView process EXITS mid-drag. This is the only arm in
+    # the file that depends on either half; the other 116 stay green across both
+    # reverts, which is what makes them the control that nothing narrowed the
+    # ordinary path.
+    test "a cross-dataset TWIN of a board card does not crash the drag — the board's own dataset wins",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-twin", "Claim me by drag", ws.id,
+        lifecycle: "open",
+        priority: 1,
+        criteria: [
+          %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+        ]
+      )
+
+      # The same doc_id, same workspace, ANOTHER dataset. It was never a card on
+      # this board (the board subscribes, snapshots and gates on `production`
+      # alone), so it must not be a candidate for this board's write either.
+      twin =
+        Repo.insert!(%Document{
+          doc_id: "dr-twin",
+          type: "task",
+          dataset: "aker-brygge",
+          status: "published",
+          title: "the twin nobody dragged",
+          rev: "rev-dr-twin-aker",
+          workspace_id: ws.id,
+          content: %{"lifecycle_status" => "open"}
+        })
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-twin", "to_col" => "in_progress"})
+
+      assert html =~ ~s(data-col="in_progress" data-doc-id="dr-twin")
+
+      claimed = Repo.get_by(Document, doc_id: "dr-twin", dataset: "production")
+      assert claimed.content["lifecycle_status"] == "in_progress"
+      assert get_in(claimed.content, ["claim", "worker"]) == "studio:admin"
+
+      # The other dataset's row is untouched — narrowing never writes a second
+      # row as a side effect.
+      untouched = Repo.get!(Document, twin.id)
+      assert untouched.content["lifecycle_status"] == "open"
+      refute untouched.content["claim"]
+    end
+
     test "dropping an open card on In Progress claims it through the fenced primitive",
          %{conn: conn, ws: ws} do
       # A claimable fixture states its bar (task-9554c64bf51a0f81): the claim-time

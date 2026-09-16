@@ -79,6 +79,27 @@ defmodule Barkpark.Tasks.Claim do
     resources = opts |> Keyword.get(:resources, []) |> normalize_resources()
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
+    # THE DISAMBIGUATOR THE REFUSAL ADVERTISES (bp-task-verbs-500-on-cross-dataset-duplicate-slugs).
+    # `AmbiguousTwinError`'s own hint says "name the dataset you mean
+    # (?dataset=<name> on the task route)", and the READ door has honoured it
+    # since the rule landed — but this WRITE door dropped it on the floor, so
+    # the remedy the refusal named did not exist on the verb that most needed
+    # it. Measured live against guerrilla 2026-09-16:
+    # `GET /v1/tasks/akbr-feedback-2026-08-epic?dataset=production` -> 200,
+    # `POST /v1/tasks/akbr-feedback-2026-08-epic/claim?dataset=production` ->
+    # 409 `ambiguous_dataset` (request_id GNW9zm1YCdlVXHsAADNB). One id, one
+    # query string, two answers: a door that refuses and then refuses its own
+    # escape hatch leaves the eleven cross-dataset rows unclaimable — and
+    # because every claim-fenced verb needs a claim first, unstampable and
+    # uncloseable too.
+    #
+    # A NAMED dataset is not a tiebreak (rule 2 forbids those): it is the
+    # caller supplying the fact whose ABSENCE is the whole reason rule 3
+    # refuses. `TwinResolver.choose/3` filters to it BEFORE the rule runs, so
+    # naming a dataset that holds no row is `not_found` — never the other
+    # twin.
+    dataset = Keyword.get(opts, :dataset)
+
     result =
       Repo.transaction(fn ->
         # PRE-RESOLUTION advisory lock (per-doc_id) — serializes concurrent
@@ -101,7 +122,7 @@ defmodule Barkpark.Tasks.Claim do
           _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.resources()])
         end
 
-        case fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+        case fetch_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
           {:error, :not_found} = err ->
             err
 
@@ -161,9 +182,9 @@ defmodule Barkpark.Tasks.Claim do
   # a textbook deadlock (claim holds row R and waits for advisory A while a
   # close holds A and waits for R). `FOR UPDATE` is preserved — it is what
   # makes the claim a CAS.
-  defp fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+  defp fetch_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
     with {:ok, %Document{id: task_uuid}} <-
-           resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
+           resolve_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
       _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(task_uuid)])
 
       # global-read: by-PK row lock inside the per-task advisory lock, on the uuid resolve_task_by_doc_id/3 just returned from a workspace/project-scoped query — the tenancy decision was made there, this re-reads the same row.
@@ -176,8 +197,8 @@ defmodule Barkpark.Tasks.Claim do
   # `Barkpark.Tasks.TwinResolver`. Every claim-fenced verb — pulse, stamp, stage,
   # close, release — resolves through here, so rule 4 ("no task verb writes to a
   # `drafts.<id>` twin while a published row exists") is this one call site.
-  defp resolve_task_by_doc_id(doc_id, workspace_id, project_id) do
-    fetch_task_exact(doc_id, workspace_id, project_id)
+  defp resolve_task_by_doc_id(doc_id, workspace_id, project_id, dataset) do
+    fetch_task_exact(doc_id, workspace_id, project_id, dataset)
   end
 
   defp lock_task_row(task_uuid) do
@@ -225,7 +246,7 @@ defmodule Barkpark.Tasks.Claim do
   # a `drafts.` twin never outranks a published row, and an unnamed cross-dataset
   # tie is REFUSED (409, naming both datasets) rather than picked. A claim is a
   # write; picking a row for the writer is the one thing this door must not do.
-  defp fetch_task_exact(doc_id, workspace_id, project_id) do
+  defp fetch_task_exact(doc_id, workspace_id, project_id, dataset) do
     # Tenancy: route through the ONE shared helper (fail-CLOSED on nil) so the
     # targeted-claim fetch shares the exact workspace/project semantics as the
     # ready-queue path (Queue.ready_query → Scope.scope_to_workspace). A nil
@@ -233,7 +254,8 @@ defmodule Barkpark.Tasks.Claim do
     TwinResolver.resolve(
       doc_id,
       &Scope.scope_to_workspace(&1, workspace_id, project_id),
-      &Repo.all/1
+      &Repo.all/1,
+      dataset: dataset
     )
   end
 
