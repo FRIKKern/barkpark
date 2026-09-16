@@ -3854,6 +3854,32 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	if d.FailureReasonRaw != "" {
 		m["failure_reason_raw"] = d.FailureReasonRaw
 	}
+	// deploy-reliability W15 S3 follow-up: WHICH PHASE the box refused in —
+	// "start" (the trigger; no build ever began) or "poll" (a beat of a build
+	// already running, killed mid-flight). The control plane has emitted this key
+	// since the W15 S3 producer slice and `SiteDeployment` declared no tag for it,
+	// so it was dropped at decode and this map could not have emitted it at any
+	// price — the same three-edit gap (struct, decoder, this map) the
+	// failure_class/failure_reason_raw pair above records one wave earlier.
+	//
+	// ABSENT IS ABSENT. The producer sends null on every row that is not a box
+	// refusal and deliberately does NOT coerce it to "start"; a nil pointer here
+	// therefore gets NO KEY, exactly as `health_exit_code` and the deferral pair
+	// do. Writing "start" for a nil would manufacture a refusal that never
+	// happened, on the ~14,000 non-refusal failed rows that carry no phase at all.
+	//
+	// An EMPTY STRING the producer actually sent is not a phase either, so it is
+	// trimmed away for display for the same reason siteRefusalHalf trims: there is
+	// no phase to print. The pointer keeps the two distinguishable in the struct.
+	//
+	// NO TAXONOMY SPLITS ON THIS, and no human line is derived from it. It is a
+	// TRIPWIRE for the first poll refusal — cloud-db-1 holds ZERO poll-phase rows
+	// all-time against 14,848 start-phase ones — not a live discriminator.
+	if d.RefusalPhase != nil {
+		if ph := strings.TrimSpace(*d.RefusalPhase); ph != "" {
+			m["refusal_phase"] = ph
+		}
+	}
 	// The refusal's two halves (task-f156b5e43bfbfe91). Emitted ONLY when the
 	// control plane sent them — a nil half gets no key at all, never an empty
 	// string, so a script can tell "this row records no typed code" from "the box

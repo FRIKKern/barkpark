@@ -1165,8 +1165,22 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # an allowlist row whose key is emitted.
     {"site_deployment_json/3", :phantom, "runtime_target",
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
-    {"site_deployment_json/3", :unread, "refusal_phase",
-     "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    # DELETED (dr-w15-s3-followup-decode-refusal-phase, the CLI half of
+    # dr-w15-s3-emit-the-two-corpses): the `:unread` row for `refusal_phase`. It
+    # said the key was "NOT yet in `bp cloud site status`" and that the slice was
+    # "fenced out of internal/cloudclient"; both are now false.
+    # `internal/cloudclient.SiteDeployment` declares `RefusalPhase *string
+    # json:"refusal_phase"` and `siteDeploymentMap` writes `refusal_phase` onto
+    # the `-o json` envelope, so the "no longer unread" arm reds on an allowlist
+    # row whose key IS decoded — the row must go. The `*string` the deleted row's
+    # producer DEMANDED is what landed: the producer never coerces a non-refusal
+    # row to "start", and a plain `string` would decode that null to "" and lose
+    # the distinction the producer spent a comment defending.
+    #
+    # Edited from the CLI lane under the same fence exception the
+    # failure_code/failure_message and slot/health_exit_code deletions below and
+    # above took: the REQUIRED Cloud gate couples this register to the Go json
+    # tags in both directions, so the deletion cannot ride a follow-up PR.
     # dr-w21-bl-route-decision-reaches-no-plane (charter D608): the two ROUTE
     # keys. `deployment_json/1` emits them in the same commit that declares the
     # columns — the whole finding is that the arm decision was durable and
@@ -1883,7 +1897,36 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # seventeen tag sites in that file are names already in the union and move
   # the SITE register below instead. CONTROL: the same scan over origin/main
   # alone returns 369, byte-equal to the value this line replaces.
-  @go_tag_pinned 372
+  #
+  # 372 -> 373 (dr-w15-s3-followup-decode-refusal-phase). ONE new NAME, ONE new
+  # SITE: `SiteDeployment.RefusalPhase` declares `json:"refusal_phase"`, the key
+  # `deployment_json/1` has emitted since W15 S3 and no Go struct named — its
+  # `:unread` allowlist row is DELETED above in this same commit, because the
+  # "no longer unread" arm reds on an allowlisted key that is now decoded.
+  #
+  # MEASURED, never summed, by replaying `Go.tag_list/1` verbatim (the same
+  # `json:"([^"]*)"` scan, comma-split, ""/"-" rejected) over the same
+  # `paths/1` file set — the 7 non-test sources of internal/cloudclient — on
+  # this tree AND on origin/main's copy of each file:
+  #
+  #   origin/main : 372 names, 709 sites
+  #   this tree   : 373 names, 710 sites
+  #   delta       : +1 name `refusal_phase`, no other name's multiplicity moved
+  #
+  # CONTROL: the origin/main arm of that same scan returns 372, byte-equal to
+  # the value this line replaces — so the scan is measuring the population these
+  # pins are taken against and not some other file set.
+  #
+  # `@go_tag_sites` below does NOT move. `refusal_phase` is declared at exactly
+  # ONE site, so it belongs to `@go_tag_pinned`'s once-declared class; a row for
+  # it here would be a count of 1 and the partition test refuses those by name.
+  # The partition still reconstructs: 239 once-declared names + 471 sites of the
+  # 134 registered names = 710 = the measured site total.
+  #
+  # `@emitted_pinned` does NOT move either — this slice writes no Elixir
+  # serializer. It declares a READER for a key `deployment_json/1` already
+  # emits, which is the whole point of the pair.
+  @go_tag_pinned 373
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
