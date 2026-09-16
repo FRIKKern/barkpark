@@ -162,7 +162,12 @@ defmodule BarkparkWeb.TasksIndexDatasetTest do
       solo = uniq("idxtwin-solo")
 
       mk_published!(twin, @primary, scope, %{"labels" => [label]})
-      mk_published!(twin, @secondary, scope, %{"labels" => [label], "dataset_twin_intended" => true})
+
+      mk_published!(twin, @secondary, scope, %{
+        "labels" => [label],
+        "dataset_twin_intended" => true
+      })
+
       mk_published!(solo, @primary, scope, %{"labels" => [label]})
 
       %{label: label, twin: twin, solo: solo}
@@ -176,8 +181,10 @@ defmodule BarkparkWeb.TasksIndexDatasetTest do
       # dropping the id in silence — the rule-3 refusal, scoped to the row.
       assert doc_ids(resp) == [ctx.solo]
 
-      assert %{"doc_id" => ctx.twin, "datasets" => Enum.sort([@primary, @secondary])} in
-               resp["page"]["dataset_ambiguous"]
+      ambiguous = resp["page"]["dataset_ambiguous"]
+      expected = %{"doc_id" => ctx.twin, "datasets" => Enum.sort([@primary, @secondary])}
+
+      assert expected in ambiguous
     end
 
     test "naming the dataset IS the disambiguation — the twin comes back, once", ctx do
