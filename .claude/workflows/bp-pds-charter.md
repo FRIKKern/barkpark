@@ -11244,17 +11244,52 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
      that is itself a **pre-#8886 copy** of the census.
   2. **"collides 3 times in 17,620 defs corpus-wide" is right in number, wrong in scope.** The 3 is the
      count of collisions **within `{path, module.name/arity}`**, measured over the corpus. The genuine
-     corpus-wide figure is **913 collision groups over 2,544 defs** — obviously so, since `def all()` and
-     `def user_agent(conn)` are byte-identical heads in 5–7 modules each. `head_hash` is nowhere near
-     unique on its own and **does not need to be**: `path` and `mfa` are in the tuple. The register header
-     must state the scope or a reader will believe the wrong thing.
-  3. **"all benign bodiless declaration heads" is FALSE for 2 of the 3.** Only `capabilities.ex
-     visible?/2` (:144 bodiless `@spec` companion vs :155 the real clause) fits. The other two —
-     `plugins/github/errors.ex inspect/2` :94 vs :138 and `plugins/indx/errors.ex inspect/2` :118 vs
-     :137 — are **genuinely distinct functions in two different `defimpl Inspect, for: …` blocks**. The
-     census's `defs/4` walker records no `defimpl` target, so both impls collapse into one `{path, mfa}`
-     and **the key cannot discriminate them.** Benign today (neither file carries an `ok: true` site) but
-     it is a real key limitation and it goes in the header.
+     corpus-wide figure — ignoring path and mfa — is **1,101 collision groups over 3,035 defs, out of
+     23,658 defs**, RE-DERIVED IN PROCESS on 2026-09-16 at bbc50effa with
+     `elixir tooling/grip/ledger/_probe_d498_head_hash_corpus.exs` run from the repo root — a READ-ONLY
+     probe that mirrors the census's own `defs/4` walker, `head_sig/1`, `label/1`, `tree_population/0`
+     and the shipped `total-meta-drop/phash2-term/v1` normaliser, all of which are `defp` in the census
+     and so cannot be called. Obviously nowhere near unique, since `def all()` is byte-identical in 7
+     modules (hash 1339030) on that same run; the widest corpus-wide groups today are init/1 at 62 defs,
+     call/2 at 40 and render/1 at 31. `head_hash` **does not need to be** unique on its own: `path` and
+     `mfa` are in the tuple. The register header must state the scope or a reader will believe the wrong
+     thing.
+
+     **THE CORPUS-WIDE FIGURE IS NORMALISER-SPECIFIC AND IT IS ALSO TREE-VOLATILE. IT IS NOT QUOTABLE
+     ACROSS A SPELLING CHANGE, AND NEVER QUOTABLE WITHOUT ITS SHA.** The partition-identity guarantee
+     between the two normalisers holds only INSIDE every `{path, mfa}` group; the corpus-wide partition
+     ignores path and mfa, so it is **not covered by that guarantee** and 913 may well be the true figure
+     under PDS-D477's partial-drop spelling. Three integers now exist for one sentence, and the same
+     probe produced two of them: the wave-36 brief recorded **913 / 2,544**; the SAME probe, run from a
+     worktree detached at 29cb76e60, prints **912 / 2,543 over 17,620 defs**; and the tip today prints
+     **1,101 / 3,035 over 23,658 defs**, because api/lib grew from 804 to 908 files between those shas.
+     That 29cb76e60 run is also how the probe is known to BE the census's walker rather than a lookalike
+     — at that sha it reproduces six independent header facts exactly: 17,620 defs, 3 within-group
+     buckets over 6 defs at the same three sites and the same lines, capabilities.ex visible?/2 =
+     52289869, `def all()` = 1339030 in 7 modules, init/1 at 53 and call/2 at 39. **A corpus-wide
+     collision count is a property of the tree on a day, not a property of the key**, so it carries its
+     sha and its normaliser or it is not quoted at all.
+  3. **"all benign bodiless declaration heads" is FALSE — and the SPLIT ITSELF moved.** The wave-36 brief
+     said 2 of the 3 were not benign; derived at 29cb76e60, only **ONE** of the three WAS benign, which
+     is the opposite reading. Re-derived at bbc50effa on 2026-09-16 the within-group collisions are
+     **5 buckets over 10 defs**, and the split is **2 benign / 3 non-benign**:
+     * **BENIGN** — a bodiless declaration head paired with its own last clause:
+       `plugins/capabilities.ex` visible?/2 (header at line 166, last clause at line 177, its `@spec`
+       companion) and `media/storage/object_key.ex` derive/3 (header at line 116, last clause at 121).
+     * **NOT BENIGN** — **genuinely distinct functions in two different `defimpl Inspect, for: …`
+       blocks**: `plugins/github/errors.ex inspect/2` at lines 94 and 138, and
+       `plugins/indx/errors.ex inspect/2` at lines 118 and 137. The census's `defs/4` walker records no
+       `defimpl` target, so both impls collapse into one `{path, mfa}` and **the key cannot discriminate
+       them.**
+     * **NOT BENIGN, AND NEW SINCE 29cb76e60** — a **compile-time branch pair**:
+       `content/dedup_wall.ex default_timeout/0` at lines 776 and 778, the two arms of an
+       `if @test_env do … else … end`. Only one arm survives into any given build, but the AST walker
+       sees both — a **third** shape the head walker cannot tell apart, and it arrived with nothing
+       reddening.
+     All five are benign only in the weak sense that no file among them carries an `ok: true` site and
+     **0 of the 75 site-owning groups collide**. They are a real key limitation and they go in the
+     header — and so does the fact that **the count is tree-volatile too: it went 3 → 5 in six weeks
+     with no change whatsoever to the key.**
 
   **The 75-site-owning-group half of D477 is CONFIRMED**: 91 owner rows → 75 groups, **0 within-group
   collisions**, and `head_hash` is **injective over all 76 owner clauses under both normalisers**. Both
