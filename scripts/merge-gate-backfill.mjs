@@ -60,6 +60,37 @@
 // changed. They are carried below BY ID with their measured reason, and the
 // report re-checks each against the live ledger rather than trusting the table.
 //
+// ── SOUND PAGING IS NOT A SOUND POPULATION ───────────────────────────────────
+// The keyset walk above fixed HOW rows are enumerated. It did not fix WHICH.
+// Until 2026-09-16 this module swept `lifecycle_status=open` only, and reported
+// that as "the residue". Measured live that day over all five NON-TERMINAL
+// statuses (considering, researching, open, in_progress, blocked):
+//
+//   considering  270 rows   13 stamp-blocked criteria
+//   researching    0 rows    0
+//   open         878 rows   13
+//   in_progress   18 rows    1
+//   blocked       14 rows    0
+//
+// 14 of the 27 sat OUTSIDE `open` — the open-only sweep saw HALF the residue
+// and called it the whole of it. A `considering` row refuses a builder's stamp
+// exactly as hard as an `open` one; nothing in the stamp guard reads
+// lifecycle_status. An enumeration is a snapshot: a perfectly stable walk over
+// the wrong filter is still a snapshot of the wrong thing.
+//
+// ── THE NAG'S REGEX IS NOT THE REGEX THAT BLOCKS A STAMP ─────────────────────
+// `MARKER_LEADING` is the AUTHORING nag's view and is reported as
+// `newly_flaggable` because criterion 4 asks what the nag SEES. It is NOT what
+// a blocked builder collides with. `bp task stamp` is refused by
+// `Barkpark.Tasks.Criteria.merge_gated?/1`, whose fallback is the UNANCHORED
+// `STAMP_GUARD` below — copied verbatim from criteria.ex `@merge_gate_worded`.
+// A criterion matching STAMP_GUARD, carrying no `merge_gate` key, and still
+// unmet is a criterion NOBODY CAN STAMP: the wide arm refuses the builder and
+// the strict arm (close.ex `merge_gate_synthetics/3`, flag-only) will not
+// autostamp it for the lead. That set — `stamp_blocked` — is the population
+// bl-merge-gate-flag-backfill-two-directions is about, and it is reported
+// separately from `newly_flaggable` because the two predicates disagree.
+//
 // USAGE
 //   node scripts/merge-gate-backfill.mjs --out sweep-a.json
 //   node scripts/merge-gate-backfill.mjs --out sweep-b.json
@@ -112,6 +143,24 @@ export const MARKER_LEADING = /^\s*[[(]?\s*\*{0,2}\s*MERGE[-\s]GATED\b/i;
 // decision has to be made against.
 export const PHRASING_FAMILY = /\bPR\s+(?:is\s+)?merged\b[^\n]{0,120}?\blead\s+closes\b/i;
 
+// THE STAMP REFUSAL PREDICATE, copied VERBATIM from
+// api/lib/barkpark/tasks/criteria.ex `@merge_gate_worded`. UNANCHORED, and
+// deliberately wider than both regexes above: it is the fallback
+// `Criteria.merge_gated?/1` uses when a criterion carries no `merge_gate` key,
+// so it — not MARKER_LEADING — decides whether `bp task stamp --met` is
+// refused. Copied, never widened; if criteria.ex changes, this must follow.
+export const STAMP_GUARD = /MERGE[-\s]GATED|MERGE[-\s]GATE\b/i;
+
+// THE NON-TERMINAL LIFECYCLE SET — the population, not just `open`.
+// `Barkpark.Tasks.Transitions` @statuses is
+//   considering researching open in_progress blocked done cancelled
+// and the last two are terminal. Everything else can still be worked, so
+// everything else can still be stamp-blocked. Sweeping `open` alone is the
+// population defect this constant exists to prevent re-introducing; the
+// selftest's POPULATION arm reds if it narrows back.
+export const NON_TERMINAL = Object.freeze(["considering", "researching", "open", "in_progress", "blocked"]);
+export const TERMINAL = Object.freeze(["done", "cancelled"]);
+
 export const CATEGORY = Object.freeze({
   FLAGGED: "FLAGGED",                 // merge_gate === true — already machine-readable
   VETOED: "VETOED",                   // merge_gate === false — an explicit author veto, never touched
@@ -125,11 +174,19 @@ export const CATEGORY = Object.freeze({
 export function classifyRow(row) {
   const id = row._id;
   const crits = Array.isArray(row.acceptance_criteria) ? row.acceptance_criteria : [];
-  const hits = { flagged: [], vetoed: [], flaggable: [], phrasing: [] };
+  const hits = { flagged: [], vetoed: [], flaggable: [], phrasing: [], stamp_blocked: [] };
 
   crits.forEach((c, idx) => {
     if (!c || typeof c !== "object") return;
     const text = typeof c.criterion === "string" ? c.criterion : "";
+    // STAMP-BLOCKED is measured FIRST and INDEPENDENTLY of the category ladder:
+    // a criterion can be both FLAGGABLE (the nag sees it) and stamp-blocked,
+    // and the two sets are reported separately because they answer different
+    // questions. `met:true` is excluded — a criterion already stamped cannot be
+    // blocked from being stamped, whatever its wording says.
+    if (c.merge_gate === undefined && c.met !== true && STAMP_GUARD.test(text)) {
+      hits.stamp_blocked.push(idx);
+    }
     if (c.merge_gate === true) return hits.flagged.push(idx);
     if (c.merge_gate === false) return hits.vetoed.push(idx);
     if (MARKER_LEADING.test(text)) return hits.flaggable.push(idx);
@@ -243,16 +300,41 @@ function bpQuery(args) {
   return body.documents;
 }
 
-function livePage({ since, limit }) {
-  return bpQuery([
+function livePageFor(status) {
+  return ({ since, limit }) => bpQuery([
     "doc", "query", "task",
-    "--filter", "lifecycle_status=open",
+    "--filter", `lifecycle_status=${status}`,
     "--filter", `_createdAt>=${since}`,
     "--order", "_createdAt:asc",
     "--limit", String(limit),
     "--fields", "acceptance_criteria,title,lifecycle_status",
     "-o", "json",
   ]);
+}
+
+/**
+ * Sweep the WHOLE non-terminal population, one keyset walk per status, unioned
+ * by `_id`. One walk per status rather than one walk over everything because
+ * `lifecycle_status` is the only filter this endpoint honours for the task
+ * collection — and because a per-status row count is the evidence that the
+ * open-only sweep was seeing a fraction. `pageFor` is injected so the selftest
+ * can drive a fake multi-status server.
+ */
+export async function sweepNonTerminal(pageFor, { pageSize = PAGE_SIZE, statuses = NON_TERMINAL } = {}) {
+  const seen = new Map();
+  const perStatus = {};
+  const notes = [];
+  let pages = 0;
+  let effectivePageSize = pageSize;
+  for (const status of statuses) {
+    const res = await enumerateKeyset(pageFor(status), { pageSize });
+    perStatus[status] = res.rows.length;
+    pages += res.pages;
+    effectivePageSize = Math.min(effectivePageSize, res.effectivePageSize);
+    for (const n of res.notes) notes.push(`[${status}] ${n}`);
+    for (const r of res.rows) if (!seen.has(r._id)) seen.set(r._id, r);
+  }
+  return { rows: [...seen.values()], pages, effectivePageSize, notes, perStatus, statuses: [...statuses] };
 }
 
 // ─── Reporting ───────────────────────────────────────────────────────────────
@@ -291,9 +373,25 @@ export function buildReport(rows, meta) {
     }
   }
 
+  // THE STAMP-BLOCKED SET — criteria NOBODY can stamp. Reported as `id#index`
+  // because the unit here is the CRITERION, not the row: one row can carry one
+  // blocked criterion and five stampable ones, and a row-level count hides that.
+  const stampBlocked = [];
+  for (const v of verdicts) for (const i of v.hits.stamp_blocked) stampBlocked.push(`${v.id}#${i}`);
+  stampBlocked.sort();
+
   const ids = rows.map((r) => r._id).sort();
   return {
     wording_census: census,
+    population: {
+      statuses: meta.statuses || ["open"],
+      per_status: meta.perStatus || null,
+      terminal_excluded: TERMINAL,
+    },
+    // The criteria.ex-wide, unflagged, unmet set: refused to the builder by the
+    // WIDE stamp arm and not autostamped for the lead by the STRICT close arm.
+    stamp_blocked: stampBlocked,
+    stamp_blocked_rows: [...new Set(stampBlocked.map((x) => x.split("#")[0]))].sort(),
     generated_at: new Date().toISOString(),
     mode: meta.mode,
     enumeration: {
@@ -418,6 +516,58 @@ function selftest() {
         eq("unwritable is excluded from newly_flaggable", rep.newly_flaggable, []);
         eq("all four specimens are listed", rep.unwritable_specimen_table.length, 4);
 
+        // ── POPULATION ARM ───────────────────────────────────────────────
+        // REDS IF THE SWEEP NARROWS BACK TO `open`. A fake server holding one
+        // flaggable row per lifecycle status; the union must carry every
+        // NON-TERMINAL one. Before 2026-09-16 the live sweep filtered
+        // `lifecycle_status=open` and this arm would return 1 of 5.
+        const gated = [{ criterion: "MERGE-GATED (the LEAD closes this): the PR is merged" }];
+        const byStatus = {
+          considering: [row("c1", "2026-03-01T00:00:00Z", gated)],
+          researching: [row("rs1", "2026-03-02T00:00:00Z", gated)],
+          open:        [row("o1", "2026-03-03T00:00:00Z", gated)],
+          in_progress: [row("p1", "2026-03-04T00:00:00Z", gated)],
+          blocked:     [row("b1", "2026-03-05T00:00:00Z", gated)],
+          done:        [row("d1", "2026-03-06T00:00:00Z", gated)],
+          cancelled:   [row("x1", "2026-03-07T00:00:00Z", gated)],
+        };
+        const pageFor = (st) => honest(byStatus[st] || []);
+        const pop = await sweepNonTerminal(pageFor, { pageSize: 3 });
+        eq("POPULATION: every non-terminal status is swept, not just `open`",
+           pop.rows.map((r) => r._id).sort(), ["b1", "c1", "o1", "p1", "rs1"]);
+        eq("POPULATION: the per-status breakdown is reported, not just a total",
+           pop.perStatus, { considering: 1, researching: 1, open: 1, in_progress: 1, blocked: 1 });
+
+        // ── QUIET ARM ────────────────────────────────────────────────────
+        // The fix must not become "sweep everything". A terminal row cannot be
+        // stamp-blocked in any way that matters — nobody is going to stamp it —
+        // and counting it would inflate the residue the flag backfill acts on.
+        // This arm STAYS QUIET while the population is exactly the five.
+        eq("QUIET: terminal rows are NOT enumerated",
+           pop.rows.filter((r) => r._id === "d1" || r._id === "x1").length, 0);
+        eq("QUIET: the union dedups a row that appears under two statuses",
+           (await sweepNonTerminal((st) => honest(st === "open" || st === "blocked" ? [row("dup", "2026-04-01T00:00:00Z", [])] : []),
+              { pageSize: 3 })).rows.length, 1);
+
+        // ── STAMP-BLOCKED ARM ────────────────────────────────────────────
+        // The nag's LEADING regex is not the regex that refuses a stamp. These
+        // three are invisible to MARKER_LEADING and visible to criteria.ex.
+        const sb = (crits) => classifyRow(row("s", "t", crits)).hits.stamp_blocked;
+        eq("STAMP-BLOCKED: a buried marker blocks a stamp though the nag is blind to it",
+           sb([{ criterion: "the close path refuses a MERGE-GATED criterion" }]), [0]);
+        eq("STAMP-BLOCKED: the `MERGE GATE` spelling counts (criteria.ex union arm)",
+           sb([{ criterion: "BOTH merge_gate SHAPES: the MERGE GATE flag and the wording" }]), [0]);
+        eq("STAMP-BLOCKED: a met criterion is NOT blocked from being stamped",
+           sb([{ criterion: "MERGE-GATED (the LEAD closes this): merged", met: true }]), []);
+        eq("STAMP-BLOCKED: an explicit flag — either value — is never blocked",
+           sb([{ criterion: "MERGE-GATED: x", merge_gate: true }, { criterion: "MERGE-GATED: y", merge_gate: false }]), []);
+        eq("STAMP-BLOCKED: the phrasing family does NOT match criteria.ex, so it is not blocked",
+           sb([{ criterion: "PR merged (lead closes on merge)" }]), []);
+        const sbrep = buildReport([row("s1", "t", [{ criterion: "MERGE-GATED: a" }, { criterion: "ok" }, { criterion: "a MERGE GATE is buried here" }])],
+                                  { mode: "selftest", pageSize: 3, effectivePageSize: 3, pages: 1, notes: [], statuses: ["open"], perStatus: { open: 1 } });
+        eq("STAMP-BLOCKED: reported per CRITERION (id#index), not per row", sbrep.stamp_blocked, ["s1#0", "s1#2"]);
+        eq("STAMP-BLOCKED: the row roll-up is deduped", sbrep.stamp_blocked_rows, ["s1"]);
+
         console.log(fails === 0 ? "\nSELFTEST PASS" : `\nSELFTEST FAIL (${fails})`);
         process.exit(fails === 0 ? 0 : 1);
       }));
@@ -440,10 +590,11 @@ async function runTwice(argv) {
   const psi = argv.indexOf("--page-size");
   const pageSize = psi === -1 ? PAGE_SIZE : Number(argv[psi + 1]);
   const sweep = async (n) => {
-    const res = await enumerateKeyset(livePage, { pageSize });
-    const rep = buildReport(res.rows, { mode: "DRY-RUN", pageSize, effectivePageSize: res.effectivePageSize, pages: res.pages, notes: res.notes });
+    const res = await sweepNonTerminal(livePageFor, { pageSize });
+    const rep = buildReport(res.rows, { mode: "DRY-RUN", pageSize, effectivePageSize: res.effectivePageSize, pages: res.pages, notes: res.notes, statuses: res.statuses, perStatus: res.perStatus });
     console.log(`SWEEP ${n}: rows=${rep.total_rows} pages=${rep.enumeration.pages} sha256=${rep.id_set_sha256}`);
-    console.log(`SWEEP ${n}: newly_flaggable=${rep.newly_flaggable.length} phrasing_family=${rep.phrasing_family.length} unwritable=${rep.unwritable.length}`);
+    console.log(`SWEEP ${n}: per_status=${JSON.stringify(rep.population.per_status)}`);
+    console.log(`SWEEP ${n}: stamp_blocked=${rep.stamp_blocked.length} newly_flaggable=${rep.newly_flaggable.length} phrasing_family=${rep.phrasing_family.length} unwritable=${rep.unwritable.length}`);
     return { rep, rows: res.rows };
   };
   const a = await sweep(1);
@@ -453,6 +604,8 @@ async function runTwice(argv) {
   const onlyB = b.rep.ids.filter((x) => !sa.has(x));
   console.log(`DELTA: only-in-1=${onlyA.length} only-in-2=${onlyB.length}  ID SETS ${onlyA.length + onlyB.length === 0 ? "IDENTICAL" : "DISAGREE"}`);
   console.log(`DELTA: newly_flaggable 1->2 = ${a.rep.newly_flaggable.length} -> ${b.rep.newly_flaggable.length}`);
+  console.log(`DELTA: stamp_blocked 1->2 = ${a.rep.stamp_blocked.length} -> ${b.rep.stamp_blocked.length}`);
+  for (const x of b.rep.stamp_blocked) console.log(`  STAMP-BLOCKED ${x}`);
 
   // SIMULATED APPLY. Flip merge_gate on exactly the rows sweep 1 called
   // FLAGGABLE — in memory, on the rows already read — and re-classify. A real
@@ -466,7 +619,7 @@ async function runTwice(argv) {
       (c && typeof c === "object" && typeof c.criterion === "string" && MARKER_LEADING.test(c.criterion) && c.merge_gate !== false)
         ? { ...c, merge_gate: true } : c) };
   });
-  const after = buildReport(applied, { mode: "SIMULATED-APPLY", pageSize, effectivePageSize: b.rep.enumeration.effective_page_size, pages: b.rep.enumeration.pages, notes: [] });
+  const after = buildReport(applied, { mode: "SIMULATED-APPLY", pageSize, effectivePageSize: b.rep.enumeration.effective_page_size, pages: b.rep.enumeration.pages, notes: [], statuses: b.rep.population.statuses, perStatus: b.rep.population.per_status });
   console.log(`SIMULATED-APPLY: newly_flaggable after applying sweep 1's ${target.size} rows = ${after.newly_flaggable.length}`);
   console.log(`SIMULATED-APPLY: unwritable still NOT counted as applied = ${after.unwritable.length}`);
   console.log(`WORDING CENSUS (open rows only): ${JSON.stringify(b.rep.wording_census)}`);
@@ -491,17 +644,21 @@ async function main(argv) {
   const psi = argv.indexOf("--page-size");
   const pageSize = psi === -1 ? PAGE_SIZE : Number(argv[psi + 1]);
 
-  const res = await enumerateKeyset(livePage, { pageSize });
+  const res = await sweepNonTerminal(livePageFor, { pageSize });
   const report = buildReport(res.rows, {
     mode: argv.includes("--apply") ? "APPLY" : "DRY-RUN",
     pageSize, effectivePageSize: res.effectivePageSize, pages: res.pages, notes: res.notes,
+    statuses: res.statuses, perStatus: res.perStatus,
   });
 
+  console.log(`population=${report.population.statuses.join(",")}  per_status=${JSON.stringify(report.population.per_status)}`);
   console.log(`mode=${report.mode}  key=_createdAt  pages=${report.enumeration.pages}  page_size=${pageSize}` +
               (report.enumeration.effective_page_size !== pageSize ? ` (server cap ${report.enumeration.effective_page_size})` : ""));
   for (const n of report.enumeration.notes) console.log(`NOTE: ${n}`);
   console.log(`open rows enumerated: ${report.total_rows}   id-set sha256: ${report.id_set_sha256}`);
   for (const [k, v] of Object.entries(report.counts)) console.log(`  ${k.padEnd(16)} ${v}`);
+  console.log(`STAMP-BLOCKED (criteria.ex wide predicate, no flag, unmet): ${report.stamp_blocked.length} criteria across ${report.stamp_blocked_rows.length} rows`);
+  for (const x of report.stamp_blocked) console.log(`    ${x}`);
   console.log(`newly flaggable this run: ${report.newly_flaggable.length}`);
   console.log(`phrasing family the AUTHORING nag cannot see: ${report.phrasing_family.length}`);
   for (const u of report.unwritable_specimen_table) {
