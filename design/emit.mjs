@@ -3376,6 +3376,18 @@ function run(mode, { force = false } = {}) {
     ...mr, currentRegion: mr.currentBlock, expectedRegion: mr.generatedBlock,
   };
 
+  // ── the orphan predicate (charter D21 hygiene) ──────────────────────────────
+  // A ledger slot is ORPHANED iff NO unit in this run claims its key. The claimed
+  // set is DERIVED from the units themselves — never from a path prefix, a name
+  // pattern, or a list — so a rename that leaves a same-path sibling behind prunes
+  // only the slot whose artifact actually went away (cloud/priv/static/app.js owns
+  // two slots; losing one must not cost the other). It deliberately INCLUDES units
+  // that ERRORED: `mr` is used here rather than `mirrorUnit` because
+  // evaluateMirror() always returns name+path, so the mirror keeps its slot even
+  // when its region failed to evaluate. Pruning is for ABSENCE, never for failure.
+  const claimedKeys = new Set([...results, mr].map(regionKey));
+  const orphanKeys = Object.keys(regions).filter((k) => !claimedKeys.has(k));
+
   // ── --adopt: bless what is on disk as this emitter's own output ─────────────
   // The one sanctioned escape from a refusal that is NOT a destructive write:
   // after relocating hand-written rules outside the marker (the fix 55d61ab4c
@@ -3390,8 +3402,17 @@ function run(mode, { force = false } = {}) {
       if (next[k] !== d) { next[k] = d; console.log(`  adopt ${u.name} (${u.path})`); adopted++; }
       else console.log(`  ok    ${u.name} (already blessed)`);
     }
+    // --adopt NAMES an orphan and KEEPS it. It cannot safely prune: it is the
+    // escape hatch used precisely when the tree is in an odd state (a merge, a
+    // half-relocated region), and a unit that errored above was skipped without
+    // its key ever reaching `next`. Dropping a slot here would delete the record
+    // of a surface that merely failed to read. --write, which enumerates the
+    // complete unit set, is the one mode allowed to remove a key.
+    for (const k of orphanKeys) {
+      console.error(`  ORPHAN ${k} — no artifact claims this slot (kept; remove it with: node design/emit.mjs --write)`);
+    }
     writeManifest(next);
-    console.log(`\nemit --adopt: ${adopted} region(s) newly blessed in ${MANIFEST_PATH}. Nothing was rewritten.`);
+    console.log(`\nemit --adopt: ${adopted} region(s) newly blessed in ${MANIFEST_PATH}${orphanKeys.length ? `, ${orphanKeys.length} orphan slot(s) named above and KEPT` : ""}. Nothing was rewritten.`);
     return;
   }
 
@@ -3434,7 +3455,16 @@ function run(mode, { force = false } = {}) {
     }
   }
 
-  const nextRegions = { ...regions };
+  // The ledger --write emits holds ONLY keys claimed in this run: spreading the old
+  // regions object (what this did before) meant a renamed or removed artifact left
+  // a dead digest behind forever, and a reader could not tell that slot from a live
+  // one. A claimed unit that could not be evaluated carries its EXISTING digest
+  // forward untouched — the loops below overwrite the ones they actually write.
+  const nextRegions = {};
+  for (const k of claimedKeys) if (k in regions) nextRegions[k] = regions[k];
+  if (mode === "write") {
+    for (const k of orphanKeys) console.log(`  PRUNE ${k} (no artifact claims this slot)`);
+  }
   for (const r of results) {
     if (r.error) { console.error(`  ERROR ${r.name}: ${r.error}`); errored++; continue; }
     if (mode === "write") {
@@ -3478,7 +3508,7 @@ function run(mode, { force = false } = {}) {
   }
   const total = results.length + 1; // + paper-editor mirror
   console.log(mode === "write"
-    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated.`
+    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated${orphanKeys.length ? ` (${orphanKeys.length} orphan slot(s) pruned)` : ""}.`
     : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror), every generated region attributed.`);
 }
 
