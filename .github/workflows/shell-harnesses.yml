@@ -3360,10 +3360,13 @@ jobs:
       # GREEN-ARM CAUSE ATTRIBUTION (task-98b3df6eab045a78, PR #16509;
       # extended by task-a6ef8e3b2c78054f + task-0b75a09ab8057598). The harness
       # ships a fake `docker` on PATH, so it needs no daemon and no image build.
-      # It refuses to pass vacuously: 56 unconditional cases with an internal
+      # It refuses to pass vacuously: 59 unconditional cases with an internal
       # count floor of 50, and its mutation proofs assert the anchors matched
       # exactly seven (container-alive) and two (the census + LiveView probes)
-      # times before they can read as a catch.
+      # times before they can read as a catch. The seven container-alive sites
+      # are ALSO pinned BY NAME (their second-argument label set), so a probe
+      # that moves reds with its own name printed and the pin cannot be
+      # satisfied by bumping a number (task-7f59063625b9a410).
       #
       # THESE NUMBERS ARE A REGISTRY, NOT DECORATION. They were 27/22/three and
       # went stale when the build-identity probe landed, which left the harness

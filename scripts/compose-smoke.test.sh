@@ -24,18 +24,41 @@
 # a scripted state machine, and runs the real green arm against it. No image is
 # built, no daemon is needed, and the run takes under a second.
 #
-# HOW THE MUTATION ARM WORKS. The fix is three `assert_container_alive` calls.
-# The harness makes a mutated COPY of the script with those calls stripped —
-# refusing if the anchor does not match exactly three times, so a mutation that
-# did not apply can never read as a catch — and runs the same scenarios against
-# it. The mutant must name wget; the real script must name the container state.
-# That is the proof re-earning itself on every run, not a pasted transcript.
+# HOW THE MUTATION ARM WORKS. The fix is SEVEN `assert_container_alive` calls
+# (it was three when this harness was written; #18391 added the build-identity,
+# plugin-census and LiveView-mount probes). The harness makes a mutated COPY of
+# the script with those calls stripped — refusing if the anchor does not match
+# exactly seven times, so a mutation that did not apply can never read as a
+# catch — and runs the same scenarios against it. The mutant must name wget;
+# the real script must name the container state. That is the proof re-earning
+# itself on every run, not a pasted transcript.
+#
+# The seven are pinned BY NAME, not only by count: each call site carries a
+# distinct label saying where it re-inspects, and the registry below compares
+# that label SET. A probe that moves reds with its own name printed, so the pin
+# cannot be satisfied by bumping a number (task-7f59063625b9a410 c2).
 #
 # WHAT IT DOES NOT CLAIM. Nothing about the real image, the real boot, or the
 # intermittent event itself. It claims only that when the container dies after
 # healthy, the harness says so — and that when the container is fine and the
 # route 500s, the harness still blames the route.
 set -uo pipefail
+
+# ── INTERPRETER GUARD — must stay ABOVE the first process substitution ──────
+# This file uses `<(…)` in the call-site registry below. bash reads a script
+# incrementally, so a POSIX-mode shell TRUNCATES at the first `<(` and can exit
+# 0 having run only the prefix — a vacuous green. The shebang does not protect
+# against `sh scripts/compose-smoke.test.sh`; these two arms do.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "compose-smoke.test.sh: needs bash (this script uses process substitution); run: bash scripts/compose-smoke.test.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "compose-smoke.test.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/compose-smoke.test.sh" >&2
+    exit 2
+    ;;
+esac
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -194,6 +217,47 @@ cp "$SMOKE" "$TMP/real/scripts/compose-smoke.sh"
 # shellcheck disable=SC2016
 ANCHORS="$(grep -c 'assert_container_alive "\$cid"' "$SMOKE" || true)"
 check "fix is present at every call site" 7 "$ANCHORS"
+
+# ── THE CALL SITES BY NAME, NOT BY COUNT (task-7f59063625b9a410 c2) ─────────
+# The bare `7` above pinned a QUANTITY. A quantity that drifts reds with
+# `want 7 got 8` and names nothing, so whoever moved it can satisfy the pin by
+# bumping the number — which is how the previous pins (`want 3 got 5`,
+# `want 2 got 4`) sat red on main for a day and were then closed by bumping.
+# Every call site already carries a distinct second argument naming WHERE it
+# re-inspects, so the set of those labels is a REGISTRY: adding, deleting or
+# renaming a probe point reds below with the label printed, and the only way to
+# satisfy it is to write the new name down.
+ALIVE_LABELS() { # ALIVE_LABELS <file> -> the sorted second-argument set
+  # shellcheck disable=SC2016
+  sed -n 's/^ *assert_container_alive "\$cid" "\(.*\)".*/\1/p' "$1" | LC_ALL=C sort
+}
+ALIVE_EXPECTED="$(LC_ALL=C sort <<'REGISTRY'
+after the health-wait loop
+the failed /status.json probe
+the failed /login probe
+the failed ${LIVE_PROBE_PATH} dead-render probe
+the failed plugin-census rpc
+the failed /status.json body read
+the failed /v1/capabilities?build=1 read
+REGISTRY
+)"
+ALIVE_ACTUAL="$(ALIVE_LABELS "$SMOKE")"
+if [ "$ALIVE_ACTUAL" != "$ALIVE_EXPECTED" ]; then
+  echo "── assert_container_alive call sites moved. Name the movers, do not bump a number ──"
+  diff <(printf '%s\n' "$ALIVE_EXPECTED") <(printf '%s\n' "$ALIVE_ACTUAL") || true
+  echo "──────────────────────────────────────────────────────────────────────────────────"
+fi
+check "every call site is a REGISTERED, named probe point" 1 \
+  "$([ "$ALIVE_ACTUAL" = "$ALIVE_EXPECTED" ] && echo 1 || echo 0)"
+# FIRES-WHEN-IT-SHOULD. Present-in-file is not a guard. Rename ONE label in a
+# copy and the comparison above must go to 0 — otherwise the registry is inert
+# and would accept a silently-moved probe point.
+ALIVE_RENAMED="$(ALIVE_LABELS "$SMOKE" | sed '1s/.*/A LABEL NOBODY REGISTERED/' | LC_ALL=C sort)"
+check "the registry FIRES on a renamed call site (control)" 0 \
+  "$([ "$ALIVE_RENAMED" = "$ALIVE_EXPECTED" ] && echo 1 || echo 0)"
+check "the control mutated exactly one label (not a vacuous no-op)" 1 \
+  "$(diff <(printf '%s\n' "$ALIVE_ACTUAL") <(printf '%s\n' "$ALIVE_RENAMED") | grep -c '^> ' || true)"
+
 # shellcheck disable=SC2016
 sed 's/^\( *\)assert_container_alive "\$cid".*/\1: # MUTATED: fix removed/' "$SMOKE" \
   > "$TMP/mutant/scripts/compose-smoke.sh"
