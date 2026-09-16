@@ -101,6 +101,34 @@ defmodule Barkpark.Tasks.Query do
   def maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
 
   @doc """
+  The DELTA-READ narrowing behind `GET /v1/tasks?updated_since=<iso8601>`.
+
+  `d.updated_at` is the row's own write watermark — every task mutation
+  re-stamps it (that is what makes the default `desc: updated_at` ordering
+  mean "most recently touched first"), so ">= a timestamp" IS "changed since
+  that moment" with no new column, no new index beyond the ordering one, and
+  no second store.
+
+  The comparison is INCLUSIVE on purpose. Its caller echoes an `as_of`
+  watermark read from the clock BEFORE the query runs, and a client feeds that
+  back on the next poll; an exclusive `>` would drop a row whose `updated_at`
+  landed exactly on the watermark, and a delta read that can silently drop a
+  row is worse than one that occasionally repeats it. The bias is OVERLAP,
+  never GAP.
+
+  WHAT THIS DOES NOT CARRY: a deletion. A row that leaves the corpus has no
+  later `updated_at` to report, so a delta caller learns about disappearance
+  only from a periodic full walk (or from `/v1/tasks/events`, which does carry
+  tombstones). Documented rather than faked.
+  """
+  def maybe_filter_updated_since(query, nil), do: query
+
+  def maybe_filter_updated_since(query, %DateTime{} = since),
+    do: from(d in query, where: d.updated_at >= ^since)
+
+  def maybe_filter_updated_since(query, _), do: query
+
+  @doc """
   Twin collapse (published-wins) — the ONE owner of the "count a twinned task
   once" law for every task READ path.
 
