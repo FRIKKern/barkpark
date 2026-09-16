@@ -12,9 +12,29 @@ defmodule BarkparkCloud.Registry.Deployment do
   is a CAS on the observed epoch (a stale-but-alive worker writing after its
   lease was swept fails the CAS).
 
-  `image_tag` is the artifact identity once built. `build_log_url` is opaque to
-  the control plane — the builder writes the log somewhere accessible (e.g. blob
-  storage) and stores the URL.
+  `image_tag` is the artifact identity once built.
+
+  `build_log_url` is opaque to the control plane, and the sentence that used to
+  stand here — "the builder writes the log somewhere accessible (e.g. blob
+  storage) and stores the URL" — was never true of any builder we shipped.
+  `internal/builder/builder.go` stamps `"file://" <> buildLogPath`: a path on the
+  BUILDER HOST's own filesystem, which nothing uploads. Neither the control
+  plane, nor the Console, nor a customer can open it (cch-w33-bl).
+
+  Two consequences, both load-bearing:
+
+    * The column keeps whatever the builder stamped — this is the raw write
+      surface and rewriting a worker's report would lose the on-host path an
+      operator with SSH can still use.
+    * The WIRE does not. `deployment_json/1` serializes this key only when the
+      scheme is `http`/`https`; every other scheme reaches a reader as nil,
+      because a key named `*_url` carrying an unopenable path is a claim the
+      system cannot honour.
+
+  The retrievable build log is a DIFFERENT mechanism, addressed by deployment id
+  and served by the black box recorder:
+  `GET /v1/sites/:id/deployments/:dep_id/build-log` (the record) and
+  `…/build-log/bytes` (a bounded, scrubbed tail). Point readers there.
   """
   use Ecto.Schema
   import Ecto.Changeset

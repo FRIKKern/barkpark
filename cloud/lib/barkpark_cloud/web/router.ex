@@ -14464,6 +14464,21 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
+  # cch-w33-bl: the scheme test behind `deployment_json/1`'s `build_log_url`.
+  #
+  # ALLOWLIST, not a denylist of `file://`: the question a reader asks is "can I
+  # open this?", and the only answer the control plane can honestly give is yes
+  # for the two schemes an HTTP client dereferences. A denylist would let the
+  # next builder that stamps `s3://`, `journal:` or a bare `/var/...` path
+  # inherit the exact lie this closes.
+  defp reachable_build_log_url(url) when is_binary(url) do
+    if String.starts_with?(url, "http://") or String.starts_with?(url, "https://"),
+      do: url,
+      else: nil
+  end
+
+  defp reachable_build_log_url(_), do: nil
+
   defp deployment_json(d) do
     %{
       id: d.id,
@@ -14472,7 +14487,29 @@ defmodule BarkparkCloud.Web.Router do
       git_ref: d.git_ref,
       artifact_url: d.artifact_url,
       image_tag: d.image_tag,
-      build_log_url: d.build_log_url,
+      # cch-w33-bl: THE URL A READER CAN ACTUALLY OPEN, or nil — never a path on
+      # somebody else's disk.
+      #
+      # `internal/builder/builder.go` stamps this column as
+      # `"file://" + buildLogPath`, a path on the BUILDER HOST's own filesystem,
+      # and nothing uploads that file anywhere. The control plane cannot open it;
+      # a customer cannot open it; the Console cannot link it. Shipping it under
+      # a key named `build_log_url` is the claim — the name says "fetch me" and
+      # every reader that printed it (`bp sites logs` prints `log: <url>`) passed
+      # the claim on.
+      #
+      # So this key now carries the value ONLY when its scheme is one a reader
+      # can dereference (`http`/`https` — the shape the moduledoc on
+      # `Registry.Deployment` always described and the builder never produced).
+      # Every other scheme, `file://` included, serializes as nil, which every
+      # consumer already handles as "no pointer" (see `runSitesLogs`'s empty arm).
+      #
+      # NOT a loss of the record: the retrievable path is the black box
+      # recorder, addressed by DEPLOYMENT ID —
+      # `GET /v1/sites/:id/deployments/:dep_id/build-log` for the record and
+      # `…/build-log/bytes` for a bounded tail of the scrubbed bytes. That route
+      # is the one to point a reader at; this column never was.
+      build_log_url: reachable_build_log_url(d.build_log_url),
       # Humanize the raw internal reason (reaper/builder jargon) at the JSON
       # boundary — server-side twin of app.js failureCopy() (#939). DB stays raw.
       #
