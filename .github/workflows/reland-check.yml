@@ -212,7 +212,10 @@ jobs:
             --base "$LEDGER_BASE" --out /tmp/tasks.json \
             --limit 1000 --max-pages 20 --timeout 20 --token "${LEDGER_TOKEN:-}")"
           printf '%s\n' "$fetch_out"
-          get() { printf '%s\n' "$fetch_out" | sed -n "s/^$1=//p" | head -1; }
+          # NOT `… | sed | head -1`: head closes the pipe, sed dies of SIGPIPE,
+          # `set -o pipefail` above + the runner's default `bash -e {0}` shell
+          # (no `shell:` key here, so -e is on) turns a TRUE read into an abort.
+          get() { local all; all="$(sed -n "s/^$1=//p" <<<"$fetch_out")"; printf '%s\n' "${all%%$'\n'*}"; }
           status="$(get RELAND_STATUS)"; pages="$(get RELAND_PAGES)"
           docs="$(get RELAND_DOCS)";     total="$(get RELAND_TOTAL)"
           truncated="$(get RELAND_TRUNCATED)"; auth="$(get RELAND_AUTH)"
@@ -296,10 +299,14 @@ jobs:
           cat /tmp/reland.err
           # Re-read STATUS from the check itself: `|| true` above means a crash
           # would otherwise leave the fetch's `ok` standing over an empty result.
-          cstatus="$(sed -n 's/^RELAND_STATUS=//p' /tmp/reland.err | head -1)"
-          digests="$(sed -n 's/^RELAND_DIGESTS_SCANNED=//p' /tmp/reland.err | head -1)"
-          zero="$(sed -n 's/^RELAND_ZERO_DIGEST=//p' /tmp/reland.err | head -1)"
-          n="$(sed -n 's/^RELAND_FINDINGS=//p' /tmp/reland.err | head -1)"
+          # Same SIGPIPE shape as `get()` above, on a FILE producer this time:
+          # `sed FILE | head -1` reports 141 under pipefail the moment reland.err
+          # carries a second matching line, and the runner's `bash -e` aborts.
+          first_of() { local all; all="$(sed -n "s/^$1=//p" /tmp/reland.err)"; printf '%s\n' "${all%%$'\n'*}"; }
+          cstatus="$(first_of RELAND_STATUS)"
+          digests="$(first_of RELAND_DIGESTS_SCANNED)"
+          zero="$(first_of RELAND_ZERO_DIGEST)"
+          n="$(first_of RELAND_FINDINGS)"
           echo "digests=${digests:-0}" >> "$GITHUB_OUTPUT"
           if [ -z "$cstatus" ]; then
             echo "status=infra" >> "$GITHUB_OUTPUT"

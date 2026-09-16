@@ -56,7 +56,7 @@ expect_rc() {
 
 expect_out() {
   local label=$1 needle=$2
-  if printf '%s' "$CHECK_OUT" | grep -qF -- "$needle"; then
+  if grep -qF -- "$needle" <<<"$CHECK_OUT"; then
     ok "$label — output names '$needle'"
   else
     bad "$label — output does NOT name '$needle'"
@@ -66,7 +66,7 @@ expect_out() {
 
 expect_no_out() {
   local label=$1 needle=$2
-  if printf '%s' "$CHECK_OUT" | grep -qF -- "$needle"; then
+  if grep -qF -- "$needle" <<<"$CHECK_OUT"; then
     bad "$label — output unexpectedly names '$needle'"
     printf '%s\n' "$CHECK_OUT" | sed 's/^/      | /'
   else

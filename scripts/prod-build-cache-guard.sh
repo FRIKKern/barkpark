@@ -116,7 +116,11 @@ guard() {
       contaminated=1
       continue
     fi
-    if ! printf '%s\n' "${allow_names[@]}" | grep -qxF "$name"; then
+    # The allowlist is every dep in mix.lock (hundreds of lines). Piped into
+    # `grep -qxF` under `set -o pipefail` (line 69) the printf takes SIGPIPE on a
+    # match and the pipeline reports 141 — a HIT read as a miss. Materialise the
+    # list first; a here-string has no producer to signal.
+    if ! grep -qxF "$name" <<<"$(printf '%s\n' "${allow_names[@]}")"; then
       say "CONTAMINANT: directory '$name' is not a dependency named in mix.lock"
       contaminated=1
     fi
