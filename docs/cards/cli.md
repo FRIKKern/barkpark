@@ -14,10 +14,8 @@ Dev-loop builtins (scoped URLs `/w/<ws>/p/<project>/v1/…`, not flat BuildURL):
 
 Canonical refs (docs/cli/): error-exit-table.md (exit codes ↔ envelope), m0-decisions.md, HANDBOOK.md, manifest.schema.json + fixtures/*.json (Go tests read them).
 
-A saved credential is BOUND to the server it was saved for: a mismatched `-s <raw-url>`/`BARKPARK_API_URL` withholds it (falls to the dev floor, stderr notice) before the manifest fetch — docs/auth.md §bp credential ↔ server pairing.
-
 ## Code anchors
-- internal/cli/cli.go — func Execute, func resolveContextProv
+- internal/cli/cli.go — func Execute
 - internal/cli/builtins.go — func runWhoami, func runCapabilities
 - internal/cli/paper_cmd.go — func runPaper
 - internal/cli/errors.go — func exitForCode, func classifyError, (apiError).hint
