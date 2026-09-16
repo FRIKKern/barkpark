@@ -2640,7 +2640,22 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Typecheck + lint + jest"
         # 2026-09-13 (task-32fe5f327e91f23d): landed during the 2026-09-12 GitHub outage,
         # after the two passes above; shell-harnesses `mix-test-strict`, paths-filtered.
-        --expect-unrendered "mix-test-strict.sh refusal + pass-through matrix")
+        --expect-unrendered "mix-test-strict.sh refusal + pass-through matrix"
+        # ── 2026-09-16 (task-0a48c7b64d5ab0f1): the eight .exclusions rows added in the
+        # same commit as this block, paying the SIXTH place in the same PR rather than
+        # leaving `Required-check spec gate` red on main the way #17111 did for ~3 hours.
+        # Seven are shell-harnesses.yml jobs (paths-filtered AND postdating the frozen
+        # fixture pair); the eighth is required-checks-drift.yml `required-context-never-cancels`.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
+        # these eight as MISSING ACK_EX and printed them in this order to be pasted here.
+        --expect-unrendered "a cron that has never succeeded is visible"
+        --expect-unrendered "claim-health resolves the claim by shape (16 arms)"
+        --expect-unrendered "every declared dispatch target actually dispatches"
+        --expect-unrendered "orchestrate-tasks launch recipe + per-session lane files"
+        --expect-unrendered "registry impact check harness"
+        --expect-unrendered "Required contexts cannot conclude cancelled"
+        --expect-unrendered "scratchpad-reaper.sh skip-gate + floor matrix"
+        --expect-unrendered "task-dup-sweep calibration + vacuity arms")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
