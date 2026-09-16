@@ -183,7 +183,7 @@ func TestCreateFamilyGateIsSelective(t *testing.T) {
 		}
 	}
 	if len(outsideWithoutFile) == 0 {
-		t.Fatalf("every command outside the create family declares --file, so the gate's "+
+		t.Fatalf("every command outside the create family declares --file, so the gate's " +
 			"selectivity is untested — it would pass identically as a blanket rule")
 	}
 
