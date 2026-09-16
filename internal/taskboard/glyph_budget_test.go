@@ -79,6 +79,11 @@ var readingGlyphExtras = map[rune]string{
 	'→': "status-timeline arrow",
 	'↳': "evidence hook under a criterion",
 	'═': "detail header rule",
+	'━': "pdrender SECTION-BOUNDARY rule — the heavy weight of design/tokens.json space.rule, " +
+		"emitted as pdrender.GenRuleGlyph[\"section\"] and spent by pdrender.Compose on an L2 " +
+		"heading that follows non-heading content (#18593). The hairline weight '─' above is the " +
+		"other weight of the same device; both are deliberate, and the heavy one stays in the " +
+		"READING set only — the board grid never draws it.",
 	'▌': "pdrender quote/callout bar (thick)",
 	'▍': "pdrender quote/callout bar (thin)",
 	'▸': "detail section marker",
