@@ -677,10 +677,41 @@ enrich_conflicting() { # <repo> <rows-json> -> prints rows; rc 0 | 2 | 9
 
 fetch_prs() { # -> prints JSON array, or the error body on failure
   local repo="$1" out i=0 rc sleep_for unknown
+  # THE LAST COMPLETE PASS, KEPT ACROSS POLLS (task-r20-stale-verdict).
+  #
+  # THE DEFECT THIS OWNS, measured on main 2026-09-16. This loop re-polls while
+  # any row answers mergeable=UNKNOWN, and every re-poll THREW AWAY the pass
+  # before it. So a run whose poll 1 read the WHOLE population and whose poll 2
+  # and poll 3 died on transport fell out of this loop with `out` holding the
+  # last ERROR BODY, returned 2, and printed upstream:
+  #
+  #   "UNREACHABLE — ... this run classified nothing and does not know how many
+  #    pull requests exist. This is a transport silence, not a green."
+  #
+  # Both halves of that sentence were FALSE. Run 35100624893 (main, 13:14:16Z)
+  # logged `poll 1/3: 55 row(s) answered mergeable=UNKNOWN` — it had read all
+  # 55 rows — and then reported that it did not know how many pull requests
+  # exist. 46 of the 54 completed main runs that day ended this way.
+  #
+  # WHAT THIS IS NOT. It is not a fallback to an EMPTY or TRUNCATED population:
+  # `last_full` is only ever assigned from a pass fetch_pr_pages returned 0 for,
+  # which is a cursor-terminated walk of the whole population, so `open` stays
+  # the real open count and no row is invented or dropped. It is not a green
+  # either: the rows it carries are exactly as UNKNOWN as they were, so an
+  # all-UNKNOWN fallback still exits 5 BLIND and a partly-UNKNOWN one still
+  # exits 2 INCONCLUSIVE. And a run where NO pass ever completed still leaves
+  # here with rc 2 and still exits 6 UNREACHABLE — probe (p-3) holds that line.
+  #
+  # WHAT IT BUYS, in the shape that matters: a CONFLICTING row with a stale
+  # green that poll 1 saw is now still screamed about when poll 2 cannot be
+  # completed. Before this, a transport failure on a LATER poll silently
+  # swallowed an rc-1 verdict the run had already earned — probe (p-5).
+  local last_full="" last_full_i=0
   while [ "$i" -lt "$ATTEMPTS" ]; do
     i=$((i + 1))
     out="$(fetch_pr_pages "$repo")"; rc=$?
     if [ "$rc" = "0" ]; then
+      last_full="$out"; last_full_i="$i"
       unknown="$(jq '[.[] | select(.mergeable == "UNKNOWN")] | length' <<<"$out" 2>/dev/null || echo 0)"
       if [ "${unknown:-0}" = "0" ] || [ "$i" -ge "$ATTEMPTS" ]; then
         printf '%s' "$out"
@@ -697,6 +728,16 @@ fetch_prs() { # -> prints JSON array, or the error body on failure
     [ -n "${sleep_for:-}" ] || sleep_for=0
     [ "$sleep_for" = "0" ] || sleep "$sleep_for"
   done
+  # The re-poll budget is spent and the last pass did not complete. If an
+  # EARLIER pass did, that pass is a population this run genuinely read, and
+  # reporting it is strictly more truthful than claiming the population could
+  # not be read at all. Said out loud, because the rows it carries are as stale
+  # as the poll that read them.
+  if [ -n "$last_full" ]; then
+    red "  the re-poll could not be completed, but poll $last_full_i/$ATTEMPTS read the WHOLE population — reporting THAT read rather than calling the population unreadable. Any row still UNKNOWN is carried as UNKNOWN and is not classified."
+    printf '%s' "$last_full"
+    return 0
+  fi
   printf '%s' "${out:-}"
   return 2
 }
