@@ -62,6 +62,82 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Extract do
   end
 
   @doc """
+  The keys a ROUTE BODY adds on top of whatever its serializer returned.
+
+  THE BLIND SPOT THIS CLOSES (dr-w18-bl-route-added-keys-escape-the-census).
+  `payload/3` walks NAMED serializer entry functions. A key `Map.put` onto the
+  payload inside a `get "/…" do … end` macro body is written by no named
+  function at all, so it is structurally invisible to a census whose entire
+  purpose is "cloud emits a key `json.Unmarshal` drops in silence". Measured on
+  the tree this landed on: adding `Map.put(:dr_w18_fake_route_key, 1)` beside
+  `Map.put(:scope, …)` on `GET /v1/deploy-ledger/census` left the whole file at
+  "43 tests, 0 failures".
+
+  SAME BOUNDS AS `payload/3`, deliberately. Only the `json(conn, 200, …)` arms
+  are read — a 4xx arm's `%{error: …, detail: …}` is a REFUSAL envelope, not the
+  payload a decoder struct is paired with, and folding it in would report
+  `error`/`detail` as UNREAD keys of `DeployCensus`. The payload expression is
+  then handed to the same `resolve_result/5` a clause result goes through, so a
+  route contributes exactly the writes a pipe step contributes and nothing else:
+  the seed is a bare variable (`census = DeployLedger.census(…)`), which
+  resolves to the empty payload, and only the route's OWN `Map.put`s survive.
+
+  A route this cannot find, or one whose 200 arm carries no payload expression,
+  is an UNRESOLVABLE refusal naming the verb and path — never an empty key set.
+  That is what makes a rotted route path red instead of quietly censusing
+  nothing: route paths and macro shapes move, and a walker that silently stops
+  matching reports "no divergence" and passes.
+  """
+  @spec route_payload(binary, atom, binary, keyword) :: payload
+  def route_payload(path, verb, route, opts \\ []) do
+    ast = ast(path, opts)
+
+    case route_bodies(ast, verb, route) do
+      [] ->
+        %{empty() | unresolvable: ["#{path}: no #{verb} #{route} route body"]}
+
+      bodies ->
+        case Enum.flat_map(bodies, &ok_payload_exprs/1) do
+          [] ->
+            %{
+              empty()
+              | unresolvable: ["#{path}: #{verb} #{route} has no json(conn, 200, …) payload"]
+            }
+
+          exprs ->
+            exprs
+            |> Enum.map(&resolve_result(&1, %{}, ast, path, opts))
+            |> merge_payloads()
+        end
+    end
+  end
+
+  defp route_bodies(ast, verb, route) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {^verb, _, [r, kw]} = node, acc when is_binary(r) and is_list(kw) ->
+          if r == route and Keyword.has_key?(kw, :do),
+            do: {node, [Keyword.get(kw, :do) | acc]},
+            else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  defp ok_payload_exprs(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:json, _, [_conn, 200, payload]} = node, acc -> {node, [payload | acc]}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  @doc """
   The accumulator writes of a MERGER helper, extracted with an explicit binding
   environment. Used by the test to prove the unresolvable-key refusal against
   `merge_job_status/4` itself rather than a synthetic fixture: call it with `%{}`
@@ -915,6 +991,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       file: @ledger,
       entry: {:census, 3},
       also: [{@router, {:deploy_census_json, 2}}],
+      # dr-w18-bl-route-added-keys-escape-the-census. `also:` reaches a NAMED
+      # wrapper; `scope` is written by no named function at all — the TEAM route
+      # `Map.put`s it inline, and that is the only route a real token can reach.
+      # So the key the CLI renders on every live call was a PHANTOM on this
+      # census's books (allowlisted KNOWN OPEN, now deleted), and a fake key
+      # added beside it changed nothing: measured before the fix, 43 tests /
+      # 0 failures with `Map.put(:dr_w18_fake_route_key, 1)` in the route.
+      route: {@router, :get, "/v1/deploy-ledger/census"},
       go: "DeployCensus"
     },
     %{
@@ -1095,33 +1179,34 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     {"site_deployment_json/3", :unread, "route_status",
      "dr-w21-bl-route-decision-reaches-no-plane emits it (charter D608: ROUTE is a SIBLING channel, never a stage). No Go reader yet — internal/cloudclient is outside this PR's fence; the follow-up declares SiteDeployment.RouteStatus as *string and DELETES this row."},
     {"site_deployment_json/3", :unread, "route_detail",
-     "dr-w21-bl-route-decision-reaches-no-plane emits it alongside route_status. Box-authored free text (same class as a stage's `detail`). No Go reader yet, same fence, same follow-up."},
+     "dr-w21-bl-route-decision-reaches-no-plane emits it alongside route_status. Box-authored free text (same class as a stage's `detail`). No Go reader yet, same fence, same follow-up."}
     # DELETED (task-62ed247e1dd0b960, the CLI half of task-f156b5e43bfbfe91): the two
     # `:unread` rows for `failure_code` / `failure_message`. `internal/cloudclient.
     # SiteDeployment` now declares both as `*string`, so the "no longer unread" arm
     # reds on an allowlist row whose key is decoded — the rows must go. Edited from
     # the cli lane under a fence exception: the REQUIRED Cloud gate couples this
     # register to the Go json tags, so the edit cannot ride a follow-up PR.
-    # ── RULING: route ENVELOPES stay OUT of this census (dr-w14-s6 followup,
-    # criterion 3, 2026-08-23). The question on the record was whether envelope
-    # keys added at the ROUTE (e.g. GET /v1/sites/:id/deployments'
-    # `next_cursor`, or the deleted `publish_clock`) should become a censused
-    # class here. They do not, for three reasons. (1) Side A's walker reads
-    # NAMED serializer entry functions (@pairs); route envelopes are composed
-    # inline in router.ex `json/3` calls, and a scanner over macro-generated
-    # route bodies is a DIFFERENT instrument with its own false-positive class
-    # — bolting it onto this file would blur what a red here means. (2) The
-    # class-level blindness already has one owner:
-    # dr-w18-bl-route-added-keys-escape-the-census (KNOWN OPEN, the `scope` row
-    # below is its second instance) — a walker fix belongs there, not as a
-    # side-effect of one envelope's reader. (3) The compensating control is
-    # typed Go readers with their own tests: the deployments envelope now has a
-    # NAMED decoder (internal/cloudclient deploymentsEnvelope) and a walked
-    # cursor (ListDeploymentsAll + TestListDeploymentsAllWalksPastTheCap), so
-    # the key this ruling was filed about is no longer silent. A divergence
-    # found later still lands here as an :unread/:phantom row, case by case. ──
-    {"DeployLedger.census/3", :phantom, "scope",
-     "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/6`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
+    # ── RULING SUPERSEDED, in the ONE place it named as its own successor
+    # (dr-w18-bl-route-added-keys-escape-the-census). The wave-14 ruling
+    # (dr-w14-s6 followup, criterion 3, 2026-08-23) held that route ENVELOPES
+    # stay out of this census, on the ground that "a scanner over macro-generated
+    # route bodies is a DIFFERENT instrument with its own false-positive class",
+    # and explicitly deferred the class-level fix to THIS row rather than to an
+    # envelope reader. The fix honours that objection instead of overruling it:
+    # there is no scanner. A route is read only where a pair DECLARES one
+    # (`route:` on the pair, the same declared-not-discovered rule `schema:`
+    # lives under, charter D426), only its `json(conn, 200, ...)` arms are read,
+    # and the payload goes through the SAME one-level `resolve_result/5` a clause
+    # result goes through — so a red here still means what it meant. The
+    # undeclared envelopes the ruling was actually about (`next_cursor` and
+    # friends) name no pair and are still out, exactly as it ruled.
+    #
+    # The row that stood here was `{"DeployLedger.census/3", :phantom, "scope"}`
+    # and it is DELETED IN THE SAME COMMIT as the `route:` declaration, because
+    # the "no longer phantom" arm reds on an allowlist row that stopped
+    # diverging — the same coupling that forced `delivery`'s deletion in W15 S3.
+    # `scope` was never a dead key: the TEAM route `Map.put`s it and `bp` renders
+    # it on every live call. What was dead was the census's ability to SEE it. ──
   ]
 
   # MERGE RESOLUTION (wave-18 review, dr-w18-s2 rebased onto origin/main).
@@ -1535,7 +1620,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # why both keys land as new `:unread` allowlist rows above rather than riding
   # free on the file-global NAME union. MEASURED by the PIN CO-EDIT arm on this
   # tree ("@emitted_pinned 172 -> 174"), never summed with an earlier delta.
-  @emitted_pinned 174
+  # 174 -> 175 (dr-w18-bl-route-added-keys-escape-the-census). EXACTLY ONE key,
+  # and it is not a new emit: `scope` has ridden the team census route since
+  # dr-w18-s1. What moved is what the walker can SEE — the census pair now
+  # declares `route: {@router, :get, "/v1/deploy-ledger/census"}`, so the two
+  # keys that route `Map.put`s join the emitted set. The delta is +1 and not +2
+  # because `delivery` was ALREADY in the union through the pair's `also:`
+  # wrapper, which is the one measurement that decides this number: the two
+  # emitters overlap, and only the walker could say by how much. The go-tag pins
+  # do not move at all — this change writes no Go, and `DeployCensus.Scope` has
+  # been declared since the slice that emitted it.
+  @emitted_pinned 175
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2214,10 +2309,27 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
   # ---------------------------------------------------------------------------
 
+  # `route:` is the ROUTE-LEVEL arm (dr-w18-bl-route-added-keys-escape-the-census).
+  # It is DECLARED PER PAIR, never auto-discovered, for the same reason `schema:`
+  # is (charter D426): pointed at the tree, a scanner over every macro-generated
+  # route body is a different instrument with its own false-positive class, and
+  # the wave-14 ruling below kept route envelopes out of this census on exactly
+  # that ground. A declaration is narrower than a scanner and carries no
+  # discovery risk — the pair NAMES the one route that composes its wire, and the
+  # keys that route adds join the same UNREAD/PHANTOM arms every serializer key
+  # already faces. Route additions are TOP-LEVEL by construction, so a `nested:`
+  # pair never picks them up: the nested contract is the literal map inside the
+  # serializer, and a route `Map.put` cannot reach into it.
   defp emitted(%{file: file, entry: entry} = pair, opts \\ []) do
     payloads =
       [{file, entry} | Map.get(pair, :also, [])]
       |> Enum.map(fn {f, e} -> Extract.payload(f, e, opts) end)
+
+    route_payload =
+      case Map.get(pair, :route) do
+        nil -> nil
+        {f, verb, route} -> Extract.route_payload(f, verb, route, opts)
+      end
 
     keys =
       payloads
@@ -2229,7 +2341,25 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       end)
       |> Enum.reduce(MapSet.new(), &MapSet.union/2)
 
-    %{keys: keys, unresolvable: Enum.flat_map(payloads, & &1.unresolvable)}
+    keys =
+      case {route_payload, Map.get(pair, :nested)} do
+        {nil, _} -> keys
+        {_, key} when is_binary(key) -> keys
+        {rp, nil} -> MapSet.union(keys, rp.top)
+      end
+
+    unresolvable =
+      Enum.flat_map(payloads, & &1.unresolvable) ++
+        if(route_payload, do: route_payload.unresolvable, else: [])
+
+    %{keys: keys, unresolvable: unresolvable}
+  end
+
+  defp route_added(pair) do
+    case Map.get(pair, :route) do
+      nil -> MapSet.new()
+      {f, verb, route} -> Extract.route_payload(f, verb, route).top
+    end
   end
 
   defp total_emitted(opts) do
@@ -2512,6 +2642,58 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       assert emitted(pair).unresolvable == [],
              "#{pair.name}: #{Enum.join(emitted(pair).unresolvable, "; ")}"
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE ROUTE ARM CAN SEE — dr-w18-bl-route-added-keys-escape-the-census
+  # ---------------------------------------------------------------------------
+  # Every arm above is a DIVERGENCE arm: it reds when two sides disagree. None of
+  # them reds when the route walker returns an empty set, because an empty set
+  # disagrees with nothing — it is the shape a walker that silently stopped
+  # matching produces, and it reads as a clean tree. That is the exact failure
+  # the file's anti-vacuity floors exist for, and the route arm needs its own:
+  # route macro shapes and route PATHS move, and `Extract.route_bodies/3` matches
+  # a literal `get "<path>" do`.
+  #
+  # Two assertions, and they fail for different reasons on purpose. The FLOOR
+  # says the declared route is genuinely read (a key set that went empty reds
+  # here first, before any pin). The REFUSAL says the walker is honest about not
+  # finding a route rather than answering an empty set — proven against a path
+  # that does not exist, which is what a rotted declaration looks like.
+  test "ROUTE ARM FLOOR: a declared route is genuinely walked, not silently empty" do
+    for pair <- Enum.filter(@pairs, &Map.has_key?(&1, :route)) do
+      {_f, verb, route} = pair.route
+      keys = route_added(pair)
+
+      refute Enum.empty?(keys),
+             "#{pair.name}: `route: #{inspect(verb)} #{route}` collected ZERO keys. " <>
+               "A route walker that stops matching reports no divergence and passes. " <>
+               "Check Extract.route_bodies/3 (the route macro shape) and " <>
+               "Extract.ok_payload_exprs/1 (the json(conn, 200, …) shape) before " <>
+               "assuming the route stopped adding keys."
+
+      assert MapSet.subset?(keys, emitted(pair).keys),
+             "#{pair.name}: route-added #{inspect(MapSet.to_list(keys))} is not inside the " <>
+               "pair's emitted set — emitted/1 stopped folding the route arm in, so every " <>
+               "key this row exists to census is back to being invisible."
+    end
+  end
+
+  test "ROUTE ARM REFUSES: a route it cannot find is an unresolvable, never an empty set" do
+    missing =
+      Extract.route_payload(@router, :get, "/v1/deploy-ledger/census-that-does-not-exist")
+
+    assert missing.top == MapSet.new()
+
+    assert Enum.any?(missing.unresolvable, &String.contains?(&1, "no get")),
+           "a route path that does not resolve must REFUSE by name: #{inspect(missing.unresolvable)}"
+
+    # The CONTROL: the same call against the path that DOES exist resolves with
+    # no refusal at all, so the arm above is measuring the missing route and not
+    # a walker that refuses everything.
+    present = Extract.route_payload(@router, :get, "/v1/deploy-ledger/census")
+    assert present.unresolvable == []
+    assert "scope" in present.top
   end
 
   test "@unmetered_pressure and merge_pressure/2's measured arm are the SAME shape" do
