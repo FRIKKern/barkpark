@@ -49,7 +49,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
 
   @type code :: String.t()
 
-  onix_lists = CodelistSource.onix_lists([17, 150, 175, 23, 25, 45, 69, 58, 65, 91, 96, 153, 154, 158, 159])
+  onix_lists =
+    CodelistSource.onix_lists([17, 150, 175, 23, 25, 45, 69, 58, 65, 91, 96, 153, 154, 158, 159])
 
   @contributor_role Map.fetch!(onix_lists, 17)
   @product_form Map.fetch!(onix_lists, 150)
@@ -98,7 +99,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_contributor_role_code` message on miss.
   """
   @spec contributor_role(code()) :: {:ok, code()}
-  def contributor_role(code) when is_binary(code), do: resolve(@contributor_role, code, "contributor_role")
+  def contributor_role(code) when is_binary(code),
+    do: resolve(@contributor_role, code, "contributor_role")
 
   @doc false
   @spec contributor_role_label(code()) :: String.t() | nil
@@ -120,7 +122,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_product_form_detail_code` message on miss.
   """
   @spec product_form_detail(code()) :: {:ok, code()}
-  def product_form_detail(code) when is_binary(code), do: resolve(@product_form_detail, code, "product_form_detail")
+  def product_form_detail(code) when is_binary(code),
+    do: resolve(@product_form_detail, code, "product_form_detail")
 
   @doc false
   @spec product_form_detail_label(code()) :: String.t() | nil
@@ -131,7 +134,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_publishing_date_role_code` message on miss.
   """
   @spec publishing_date_role(code()) :: {:ok, code()}
-  def publishing_date_role(code) when is_binary(code), do: resolve(@publishing_date_role, code, "publishing_date_role")
+  def publishing_date_role(code) when is_binary(code),
+    do: resolve(@publishing_date_role, code, "publishing_date_role")
 
   @doc false
   @spec publishing_date_role_label(code()) :: String.t() | nil
@@ -153,7 +157,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_publishing_role_code` message on miss.
   """
   @spec publishing_role(code()) :: {:ok, code()}
-  def publishing_role(code) when is_binary(code), do: resolve(@publishing_role, code, "publishing_role")
+  def publishing_role(code) when is_binary(code),
+    do: resolve(@publishing_role, code, "publishing_role")
 
   @doc false
   @spec publishing_role_label(code()) :: String.t() | nil
@@ -186,7 +191,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_product_availability_code` message on miss.
   """
   @spec product_availability(code()) :: {:ok, code()}
-  def product_availability(code) when is_binary(code), do: resolve(@product_availability, code, "product_availability")
+  def product_availability(code) when is_binary(code),
+    do: resolve(@product_availability, code, "product_availability")
 
   @doc false
   @spec product_availability_label(code()) :: String.t() | nil
@@ -230,7 +236,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_content_audience_code` message on miss.
   """
   @spec content_audience(code()) :: {:ok, code()}
-  def content_audience(code) when is_binary(code), do: resolve(@content_audience, code, "content_audience")
+  def content_audience(code) when is_binary(code),
+    do: resolve(@content_audience, code, "content_audience")
 
   @doc false
   @spec content_audience_label(code()) :: String.t() | nil
@@ -241,7 +248,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.Codelists do
   raises `ArgumentError` with an `unknown_resource_content_type_code` message on miss.
   """
   @spec resource_content_type(code()) :: {:ok, code()}
-  def resource_content_type(code) when is_binary(code), do: resolve(@resource_content_type, code, "resource_content_type")
+  def resource_content_type(code) when is_binary(code),
+    do: resolve(@resource_content_type, code, "resource_content_type")
 
   @doc false
   @spec resource_content_type_label(code()) :: String.t() | nil
