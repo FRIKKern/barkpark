@@ -270,6 +270,16 @@ mc_name_to_workflow(){
 # runs the filter once PER PAGE and emits one value per page, never a total.
 # `--paginate` with NO -q, piped to `jq -s` over the page objects, is the safe
 # form — the same rule arm A12 pins on the commit census.
+#
+# THIS IS A RUN-LEVEL READ, AND THE ROLLUP HAZARD IS MODELLED RATHER THAN IGNORED
+# (adjudicated in .github/run-level-readers.allow as KNOWS-THE-CLASS). A job-level
+# `continue-on-error` launders a red job into a green RUN, so this census can only
+# UNDER-count main failures. Under-counting lowers k in k/N, which pushes the class
+# toward OWN, which REFUSES. A laundered run can cost a true permit; it can NEVER
+# manufacture a false INHERITED, because a run reads `failure` only when a job that
+# was not continue-on-error actually failed. The PR's OWN verdict is still read
+# exclusively from check-runs; this read is only ever asked about names the commit
+# window could not see at all.
 mc_wf_main_census(){
   local out="$1" wf="$2"
   : > "$out"
