@@ -743,8 +743,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
         {:ok, sites} ->
           Map.merge(envelope, %{
             never_covered_sites: sites,
-            never_covered_sites_total:
-              Keyword.get(opts, :sites_total, length(List.wrap(sites))),
+            never_covered_sites_total: Keyword.get(opts, :sites_total, length(List.wrap(sites))),
             never_covered_sites_truncated: Keyword.get(opts, :sites_truncated, false)
           })
 
@@ -921,7 +920,10 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
         with_coverage(
           window("last 24h", 760, 502, 18, measured_rate(18, 760)),
           [cohort("failed", 18, 17, 1)],
-          sites: [site_entry("Quiet Site", "production", 0), site_entry("Loud Site", "production", 1)]
+          sites: [
+            site_entry("Quiet Site", "production", 0),
+            site_entry("Loud Site", "production", 1)
+          ]
         )
       ])
 
