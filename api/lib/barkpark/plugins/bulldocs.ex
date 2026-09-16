@@ -847,12 +847,43 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   defp own_public_host?(host) do
-    case URI.parse(BarkparkWeb.Endpoint.url()) do
-      %URI{host: own} when is_binary(own) and own != "" ->
+    case own_public_host() do
+      own when is_binary(own) and own != "" ->
         String.downcase(host) == String.downcase(own)
 
       _ ->
         false
+    end
+  end
+
+  # `BarkparkWeb.Endpoint.url/0` is an `:ets.lookup(BarkparkWeb.Endpoint, :url)`,
+  # and that table is created when the endpoint STARTS. Edge extraction is NOT
+  # a request path: `mix barkpark.edges.backfill` boots in `:one_shot` mode
+  # (`Barkpark.Application.child_specs/5`), which drops the endpoint on purpose
+  # so an operator one-shot cannot bind the live slot's port. Without this
+  # fallback the ETS read raised inside the resolver chain, the chain's
+  # per-plugin rescue swallowed it, and the sweep reported SUCCESS having
+  # projected only the non-bulldocs edges — measured on the dev corpus as
+  # 962 edges with an endpoint and 94 without, exit status 0 both times. A
+  # backfill that silently writes 10% of the graph is worse than one that dies.
+  #
+  # Same shape and same reasoning as `Barkpark.Seeds.Clean.connect_url/0`
+  # (PR #18569): the fallback is not a second source of truth, because
+  # `BarkparkWeb.Endpoint` defines no `init/2`, so Phoenix seeds that ETS table
+  # verbatim from the merged `Application.get_env(:barkpark, BarkparkWeb.Endpoint)`
+  # keyword `config/runtime.exs` writes. The live table is still preferred
+  # whenever it exists, so a serving node's answer is byte-identical to before.
+  #
+  # `:ets.whereis/1` rather than `Process.whereis/1`: the ETS table is exactly
+  # what `url/0` needs, so probing it asks the question that decides.
+  defp own_public_host do
+    if :ets.whereis(BarkparkWeb.Endpoint) == :undefined do
+      :barkpark
+      |> Application.get_env(BarkparkWeb.Endpoint, [])
+      |> Keyword.get(:url, [])
+      |> Keyword.get(:host)
+    else
+      URI.parse(BarkparkWeb.Endpoint.url()).host
     end
   end
 
