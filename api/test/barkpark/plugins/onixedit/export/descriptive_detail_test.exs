@@ -226,8 +226,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
     end
 
     test "unknown ContributorRole code raises" do
-      assert_raise ArgumentError, ~r/unknown_contributor_role_code: "Z99"/, fn ->
-        Codelists.contributor_role("Z99")
+      assert_raise ArgumentError, ~r/unknown_contributor_role_code: "Q99"/, fn ->
+        Codelists.contributor_role("Q99")
       end
     end
 
@@ -237,8 +237,8 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
     end
 
     test "unknown ProductForm code raises" do
-      assert_raise ArgumentError, ~r/unknown_product_form_code: "ZZ"/, fn ->
-        Codelists.product_form("ZZ")
+      assert_raise ArgumentError, ~r/unknown_product_form_code: "QQ"/, fn ->
+        Codelists.product_form("QQ")
       end
     end
 
@@ -261,9 +261,9 @@ defmodule Barkpark.Plugins.OnixEdit.Export.DescriptiveDetailTest do
     end
 
     test "unknown ProductForm in book.productForm raises during build" do
-      doc = Map.put(minimal_book(), "productForm", "ZZ")
+      doc = Map.put(minimal_book(), "productForm", "QQ")
 
-      assert_raise ArgumentError, ~r/unknown_product_form_code: "ZZ"/, fn ->
+      assert_raise ArgumentError, ~r/unknown_product_form_code: "QQ"/, fn ->
         xml(doc)
       end
     end
