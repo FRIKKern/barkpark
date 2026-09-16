@@ -2155,32 +2155,40 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 	case "content_binding_empty":
 		// The create door refused because the site's read token sees nothing at the
 		// bound dataset, and it shipped the STRUCTURED menu of types it CAN read.
-		// The console renders that menu from the array and STRIPS the CLI re-run
-		// line (it is CLI-voiced); the CLI is that line's home, so it keeps it.
 		// When the array survived, compose the receipt from the parts the CLI
 		// controls — the verdict, the menu rendered in the console grammar, and the
 		// re-run incantation the server built with the real dataset triple — so the
 		// menu the user reads is the machine-readable list, not a prose copy that a
 		// terser server might not send. With no usable array, the server's own
 		// sentence is the most specific true thing, so relay it whole.
+		//
+		// cch-w69-bl — THE RE-RUN IS A FIELD NOW, NOT A SENTENCE TO FIND. This
+		// branch used to locate the incantation with
+		// strings.Index(detail, "Re-run naming a type") — a match on the control
+		// plane's PROSE, the terminal twin of the console strip the same row
+		// deleted. A reword on the server made this search miss and the line
+		// vanish from the receipt, with no test on either side failing. The plane
+		// now sends it as `cli_hint` (CloudRefusal.CLIHint), so the CLI reads a
+		// key and the console reads none.
+		hint := strings.TrimSpace(re.CLIHint)
 		if menu := siteReadableTypesMenu(re.ReadableTypes); menu != "" {
 			verdict := detail
 			if i := strings.Index(detail, ". "); i != -1 {
 				verdict = detail[:i+1]
 			}
-			reRun := ""
-			if i := strings.Index(detail, "Re-run naming a type"); i != -1 {
-				reRun = strings.TrimSpace(detail[i:])
-			}
 			msg := fmt.Sprintf("%s It can read: %s.", siteRefusalDetail(verdict, "this site would build from nothing."), menu)
-			if reRun != "" {
-				msg += " " + reRun
+			if hint != "" {
+				msg += " Re-run: " + sanitizeCell(hint)
 			}
 			return msg + " " + kind.nothingClause()
 		}
 		if detail != "" {
-			return fmt.Sprintf("the control plane refused %s %q (%s): %s %s",
-				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingClause())
+			msg := fmt.Sprintf("the control plane refused %s %q (%s): %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail))
+			if hint != "" {
+				msg += " Re-run: " + sanitizeCell(hint)
+			}
+			return msg + " " + kind.nothingClause()
 		}
 		return fmt.Sprintf("the control plane refused %s %q (%s) — nothing there is readable by this site's token. %s",
 			kind.noun(), ref, sanitizeCell(re.Code), kind.nothingClause())

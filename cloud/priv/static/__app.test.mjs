@@ -25409,8 +25409,13 @@ test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu
       detail:
         "this site would build from nothing — post in production has no documents this site can read. " +
         "This site CAN read: task (12), paper (40). " +
-        "Re-run naming a type this site can read: `bp cloud site create <name> --kind static " +
-        "--framework astro --dataset acme/blog/production --doc-type <type>`",
+        "Name a content type this site can read.",
+      // cch-w69-bl: the terminal incantation is its OWN key now. The console
+      // never reads it, which is the whole point — it cannot leak into the modal
+      // however the server words it, and no strip has to notice it.
+      cli_hint:
+        "bp cloud site create <name> --kind static --framework astro " +
+        "--dataset acme/blog/production --doc-type <type>",
       readable_types: [{ type: "task", count: 12 }, { type: "paper", count: 40 }],
     },
   };
@@ -25422,12 +25427,14 @@ test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu
   assert.ok(f(r).indexOf("[object Object]") === -1, "readable_types is a list of MAPS — never String()'d");
   assert.ok(f(r).indexOf("bp cloud site create") === -1, "no CLI incantation in the modal");
   assert.ok(f(r).indexOf("--doc-type") === -1, "no CLI flag in the modal");
+  assert.ok(f(r).indexOf("cli_hint") === -1, "the hint KEY is not copy either");
   assert.ok(f(r).indexOf("422") === -1, "the status line is gone");
   // A type whose own probe reported no total is listed WITHOUT a number
   // (menu_row/1's second clause) — never with a fabricated one.
   assert.equal(f({ ok: false, status: 422, data: {
     error: "content_binding_empty",
-    detail: "this site would build from nothing — post in production has no documents this site can read. This site CAN read: paper. Re-run naming a type this site can read: `bp cloud site create …`",
+    detail: "this site would build from nothing — post in production has no documents this site can read. This site CAN read: paper. Name a content type this site can read.",
+    cli_hint: "bp cloud site create <name> --kind static --dataset acme/blog/production --doc-type <type>",
     readable_types: [{ type: "paper" }],
   } }),
     "This site would build from nothing — post in production has no documents this site can read. " +
@@ -25444,24 +25451,27 @@ test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu
     "Check the workspace/project/dataset and content type above.");
 });
 
-test("cch-w66-bl: with no menu, the 422 keeps the server's whole refusal MINUS its CLI re-run clause", () => {
+test("cch-w69-bl: with no menu, the 422 relays the server's WHOLE detail — there is nothing left to cut", () => {
   const f = hooks.siteCreateFailureCopy;
   // The 404 arm: the menu call itself was :unavailable, so `readable_types` is
-  // omitted entirely. The server's second sentence is surface-neutral and is
-  // the most specific true thing anyone has — relay it; only the `bp cloud …`
-  // line is cut, and the console's own next step replaces it.
+  // omitted entirely. Every sentence of `detail` is surface-neutral now, so all
+  // of it is relayed VERBATIM and the console appends its own next step. The
+  // terminal re-run rides `cli_hint`, which this caller never reads.
   assert.equal(f({ ok: false, status: 422, data: {
     error: "content_binding_empty",
     detail:
       "this site would build from nothing — production/post answered 404 for this site's own read token — " +
       "that dataset or type does not exist, or the type is not readable by a public-read token. " +
       "The control plane could not list what IS readable in production. " +
-      "Re-run naming a type this site can read: `bp cloud site create <name> --kind static " +
-      "--framework astro --dataset acme/blog/production --doc-type <type>`",
+      "Name a content type this site can read.",
+    cli_hint:
+      "bp cloud site create <name> --kind static --framework astro " +
+      "--dataset acme/blog/production --doc-type <type>",
   } }),
     "This site would build from nothing — production/post answered 404 for this site's own read token — " +
     "that dataset or type does not exist, or the type is not readable by a public-read token. " +
     "The control plane could not list what IS readable in production. " +
+    "Name a content type this site can read. " +
     "Check the workspace/project/dataset and content type above.");
   // A payload with the slug and NOTHING else still reads as a refusal about the
   // binding, never as a status number.
@@ -25470,14 +25480,120 @@ test("cch-w66-bl: with no menu, the 422 keeps the server's whole refusal MINUS i
     "Check the workspace/project/dataset and content type above.");
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w69-bl — THE REWORD MUTATION. The row's whole claim is that the OLD
+// console could not survive a server reword, and that the new one can. So this
+// block runs the SAME mutation against both and shows them disagree.
+//
+// THE MUTATION: the control plane rewords its refusal. Every sentence still
+// says the same facts; not one literal the old strip keyed on survives —
+// "Re-run naming a type" is gone and, in the second payload below, so is the
+// backtick-`bp ` fallback marker, because the incantation no longer lives in
+// `detail` at all. This is an ordinary copy edit: the kind a writer makes
+// without opening app.js.
+//
+// RED BEFORE THE FIX, measured against origin/main's siteDetailWithoutCliReRun
+// (reproduced VERBATIM as retiredStrip below — it is the deleted code, kept
+// here only as the control): fed the reworded CLI-voiced detail, the strip finds
+// neither marker, cuts nothing, and `bp cloud site create …` lands in a web
+// modal. Nothing in the old suite noticed, because the old suite fed the old
+// wording back to itself.
+test("cch-w69-bl: a server REWORD cannot leak CLI voice into the modal any more — and the retired strip proves it could", () => {
+  const f = hooks.siteCreateFailureCopy;
+
+  // ── ARM 1: the shipped console, fed a REWORDED surface-neutral detail.
+  // Not one word matches the fixtures above. The output is still correct,
+  // because the console reads STRUCTURE (`readable_types`) and relays prose it
+  // does not parse.
+  const reworded = { ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail:
+      "nothing here to build from — the type post has no documents in production that this site may read. " +
+      "Readable right now: task (12), paper (40). " +
+      "Choose one of those instead.",
+    cli_hint: "bp cloud site create <name> --kind static --dataset acme/blog/production --doc-type task",
+    readable_types: [{ type: "task", count: 12 }, { type: "paper", count: 40 }],
+  } };
+  assert.equal(f(reworded),
+    "Nothing here to build from — the type post has no documents in production that this site may read. " +
+    "It can read: task (12), paper (40) — pick one of those as the content type above.");
+  assert.ok(f(reworded).indexOf("bp cloud site create") === -1,
+    "the reword cannot put the incantation in the modal — it is not in `detail` to begin with");
+  assert.ok(f(reworded).indexOf("--doc-type") === -1, "no CLI flag survives the reword");
+
+  // The no-menu path takes the same mutation and still relays the whole thing.
+  const rewordedNoMenu = { ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail: "nothing here to build from — acme could not be reached, so the binding was never confirmed.",
+    cli_hint: "bp cloud site create <name> --kind static --dataset acme/blog/production --doc-type <type>",
+  } };
+  assert.equal(f(rewordedNoMenu),
+    "Nothing here to build from — acme could not be reached, so the binding was never confirmed. " +
+    "Check the workspace/project/dataset and content type above.");
+  assert.ok(f(rewordedNoMenu).indexOf("bp ") === -1, "no terminal voice in the modal");
+
+  // ── ARM 2: THE CONTROL. The retired implementation, verbatim, fed the SAME
+  // reword applied to the OLD (CLI-voiced) detail shape. It leaks.
+  function retiredStrip(detail) {
+    var s = String(detail || "");
+    var cut = s.indexOf("Re-run naming a type");
+    if (cut === -1) cut = s.indexOf("`bp ");
+    return (cut === -1 ? s : s.slice(0, cut)).trim();
+  }
+  // Control A: the OLD wording, OLD strip — it worked. This is what made the
+  // old green look earned.
+  const oldWording =
+    "this site would build from nothing — post in production has no documents this site can read. " +
+    "This site CAN read: task (12). " +
+    "Re-run naming a type this site can read: bp cloud site create <name> --doc-type <type>";
+  assert.ok(retiredStrip(oldWording).indexOf("bp cloud site create") === -1,
+    "control A: on the wording it was written against, the retired strip did cut");
+  // Control B: the SAME copy edit as arm 1, applied to the OLD shape. The strip
+  // finds neither marker (no "Re-run naming a type", and the incantation is not
+  // preceded by a backtick), cuts NOTHING, and the terminal line is relayed.
+  const rewordedOldShape =
+    "nothing here to build from — the type post has no documents in production that this site may read. " +
+    "Readable right now: task (12). " +
+    "Try again naming a type this site can read: bp cloud site create <name> --doc-type <type>";
+  assert.ok(retiredStrip(rewordedOldShape).indexOf("bp cloud site create") !== -1,
+    "control B: the retired strip LEAKS the incantation after an ordinary reword — this is the defect the row names");
+  assert.equal(retiredStrip(rewordedOldShape), rewordedOldShape,
+    "control B: it cut nothing at all");
+
+  // ── ARM 3: the code itself. No branch of the create-failure copy may key on
+  // server prose again. The two retired markers must not appear in app.js, and
+  // the console must not name `cli_hint` — reading that key IS relaying CLI
+  // voice, whatever the wording.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // COMMENTS ARE NOT CODE PATHS, and the retired names deliberately SURVIVE in
+  // app.js prose so the next reader can find this history by grepping the name
+  // that was removed. So the assertion runs over the source with whole-line `//`
+  // comments dropped — the same line-anchored rule the Elixir reader census uses.
+  const code = src.split("\n").filter((l) => l.trim().indexOf("//") !== 0).join("\n");
+  assert.ok(code.indexOf("Re-run naming a type") === -1,
+    "no code path may key on the server's prose marker");
+  assert.ok(code.indexOf("siteDetailWithoutCliReRun") === -1,
+    "the string-matching helper is deleted, not renamed around");
+  assert.ok(code.indexOf("cli_hint") === -1,
+    "the console never reads the terminal hint — that key belongs to the CLI");
+  // The stripper is LOAD-BEARING, so prove it removes something: the retired
+  // marker really is still in the file, in a comment. If this ever goes false,
+  // the three assertions above have gone vacuous for the wrong reason.
+  assert.ok(src.indexOf("Re-run naming a type") !== -1,
+    "control: the retired marker is still documented in an app.js comment");
+  assert.ok(code.length < src.length, "control: the comment stripper removed lines");
+});
+
 test("cch-w66-bl: the other four create refusals get console voice, and only the surface-neutral detail is relayed", () => {
   const f = hooks.siteCreateFailureCopy;
-  // content_binding_required — the server's detail is CLI-VOICED ("bind it with
-  // `--dataset <workspace>/<project>/<dataset>`", router.ex ~6894). The modal
-  // HAS that field: relaying the flag would send a person hunting a terminal.
+  // content_binding_required — the server's detail is SURFACE-NEUTRAL since
+  // cch-w69-bl (grep `content_binding_required` in router.ex); the `--dataset`
+  // flag rides `cli_hint`, which this console never reads. The modal AUTHORS its
+  // own line naming the three fields the person is looking straight at.
   const required = { ok: false, status: 422, data: {
     error: "content_binding_required",
-    detail: "a static site builds FROM your content — bind it with `--dataset <workspace>/<project>/<dataset>` (missing: dataset)",
+    detail: "a static site builds FROM your content — name the workspace, project and dataset it reads (missing: dataset)",
+    cli_hint: "--dataset <workspace>/<project>/<dataset>",
   } };
   assert.equal(f(required),
     "This site needs content to build from — fill in the workspace/project/dataset above.");

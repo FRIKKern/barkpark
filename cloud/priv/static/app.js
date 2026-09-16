@@ -13159,16 +13159,22 @@
     }).filter(function (s) { return !!s; }).join(", ");
   }
 
-  // cch-w66-bl — Pure: the binding refusal MINUS its CLI re-run clause. The
-  // control plane writes ONE `detail` for both surfaces and ends it with a
-  // literal `bp cloud site create … --doc-type <type>` line (router.ex ~12620).
-  // Every sentence before that line is surface-neutral and worth relaying; the
-  // incantation must never reach a modal that already HAS those fields.
-  function siteDetailWithoutCliReRun(detail) {
-    var s = String(detail || "");
-    var cut = s.indexOf("Re-run naming a type");
-    if (cut === -1) cut = s.indexOf("`bp ");
-    return (cut === -1 ? s : s.slice(0, cut)).trim();
+  // cch-w69-bl — Pure: the binding refusal's detail, relayed. THE STRIP IS GONE.
+  //
+  // siteDetailWithoutCliReRun used to live here: it cut the server's `detail` at
+  // the literal marker "Re-run naming a type" (falling back to the first "`bp ")
+  // because the control plane wrote ONE CLI-voiced sentence for two surfaces.
+  // That was a string match on someone else's prose — reword the server and this
+  // console silently relays a terminal incantation into a modal, with no test on
+  // either side failing, because each side tests against its own fixture string.
+  //
+  // The control plane now writes a SURFACE-NEUTRAL `detail` and puts the terminal
+  // re-run in its own `cli_hint` key (router.ex refuse_empty_binding — grep for
+  // `cli_hint`). The console reads `detail` and never `cli_hint`, so the modal
+  // gets no flags no matter how either sentence is worded. This function is
+  // therefore a plain read of a STRUCTURED field: it trims, and that is all.
+  function siteRelayedDetail(detail) {
+    return String(detail || "").trim();
   }
 
   // cch-w37-s1 — Pure: the create-site error line. The router answers a failed
@@ -13210,7 +13216,7 @@
     var detail = (data && typeof data.detail === "string" && data.detail) || "";
 
     if (slug === "content_binding_empty") {
-      var relayed = siteDetailWithoutCliReRun(detail);
+      var relayed = siteRelayedDetail(detail);
       var menu = siteReadableTypesMenu(data.readable_types);
       if (menu) {
         // The server's FIRST sentence is the verdict ("this site would build
@@ -13226,13 +13232,14 @@
       // No machine-readable menu: the server's own sentences are the most
       // specific true thing anyone has (why the binding is empty, and why the
       // menu is unavailable), so they all stand \u2014 and the console supplies the
-      // next step the stripped CLI line used to carry.
+      // next step in ITS OWN voice, naming the fields this modal actually has.
       return cap(relayed ||
         "this site would build from nothing \u2014 the content you bound has nothing this site can read.") +
         " Check the workspace/project/dataset and content type above.";
     }
-    // The server's detail here says "bind it with `--dataset \u2026`" \u2014 a flag, for a
-    // person who is looking straight at that field.
+    // The server's detail here is surface-neutral prose about an unnamed binding
+    // (the `--dataset` flag moved to `cli_hint`, which this console never reads).
+    // The modal has those three fields on screen, so it names them instead.
     if (slug === "content_binding_required") {
       return "This site needs content to build from \u2014 fill in the workspace/project/dataset above.";
     }

@@ -2096,10 +2096,15 @@ func TestRunCloudSiteCreateInvalidBindingExitsGeneric(t *testing.T) {
 // The fixture ships THREE rows — two with counts, one WITHOUT (bare type) — so the
 // grammar `type (count)` / bare `type` is exercised on one payload, plus a JUNK
 // row (empty type) the render must drop.
+// cch-w69-bl: the plane's `detail` is SURFACE-NEUTRAL and the incantation rides
+// its own `cli_hint` key, so this fixture carries the two halves separately —
+// and the CLI must reassemble them by reading the KEY, never by finding a
+// sentence inside `detail`.
 const emptyBindingBody = `{"error":"content_binding_empty",` +
 	`"detail":"this site would build from nothing — its token sees nothing at acme/blog/production. ` +
 	`This site CAN read: task (12), paper (40), note. ` +
-	"Re-run naming a type this site can read: `bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>`\"," +
+	`Name a content type this site can read.",` +
+	`"cli_hint":"bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>",` +
 	`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"},{"type":""}]}`
 
 // The HUMAN receipt renders the menu FROM THE ARRAY in the console grammar and
@@ -2123,9 +2128,29 @@ func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
 	if strings.Contains(stderr, "This site CAN read:") {
 		t.Fatalf("the CLI must compose from the array, not echo the server prose menu:\n%s", stderr)
 	}
-	// The bp re-run line is the CLI's home — kept, unlike the console which strips it.
+	// The bp re-run line is the CLI's home — kept, unlike the console, which now
+	// never sees it at all because it rides its own key.
 	if !strings.Contains(stderr, "--doc-type <type>") {
 		t.Fatalf("the CLI must KEEP the bp re-run line:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "bp cloud site create <name>") {
+		t.Fatalf("the re-run must come from cli_hint, whole:\n%s", stderr)
+	}
+	// cch-w69-bl MUTATION CONTROL: reword `detail` exactly as a writer would —
+	// no sentence the old strings.Index(detail, "Re-run naming a type") search
+	// could find, and no re-run text in `detail` at all. The receipt must be
+	// unchanged in substance, because the hint is read from a FIELD. On the
+	// pre-fix build this body loses the re-run line entirely and this reds.
+	reworded := `{"error":"content_binding_empty",` +
+		`"detail":"nothing here to build from — acme/blog/production holds no post this site may read. Pick a type it can see.",` +
+		`"cli_hint":"bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>",` +
+		`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"}]}`
+	_, stderr2, _ := createRefused(t, fakeResp{422, reworded})
+	if !strings.Contains(stderr2, "It can read: task (12), paper (40), note") {
+		t.Fatalf("a reworded detail must not disturb the array-derived menu:\n%s", stderr2)
+	}
+	if !strings.Contains(stderr2, "--doc-type <type>") {
+		t.Fatalf("a reworded detail must NOT cost the re-run line — that is the whole point of cli_hint:\n%s", stderr2)
 	}
 	if !strings.Contains(stderr, "No site was created") {
 		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
