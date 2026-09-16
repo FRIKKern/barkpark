@@ -1550,6 +1550,15 @@ defmodule BarkparkCloud.DeployLedger do
   `failure_rate`, with the same `@min_sample` refusal: a success percentage off
   n=10 is exactly as dishonest as a failure percentage off n=10.
 
+  EVERY `sites[]` row carries its OWN `live_rate`, same node and same refusal
+  floor (dr-w16-bl-live-per-attempt-reaches-the-site-owner). A fleet-level live
+  rate with no per-site twin sends the reader who wants to know WHICH site went
+  blind across the deferral relabel back to the diluted number — the same
+  argument that already put `terminal_failure_rate` on the site row. It reaches
+  the SITE OWNER through `GET /v1/deploy-ledger/census`, which is scoped to the
+  caller's own sites; a non-member's census never carries another team's row and
+  never folds their `live` rows into its own numerator.
+
   `failure_rate` and `volume` are UNCHANGED by all of this (D43): the new keys
   are read off the same `attempted`/`settled` split that already existed, and no
   row moves cohorts.
