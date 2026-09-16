@@ -2757,6 +2757,16 @@ export function graphPaletteBlock(t = tokens) {
   line("SLATE", g.slate);
   line("AMBER", g.amber);
   L.push("");
+  L.push("  // LIGHT-ground siblings for the four hues above — the only colours this");
+  L.push("  // renderer paints RAW on whichever ground is active. The dark values land at");
+  L.push("  // 2.53/2.31/2.33/1.52 on BG_LIGHT, all under the 3.0 WCAG non-text floor, and");
+  L.push("  // A11Y_RING is the keyboard focus ring. accent()/a11yRing()/slate()/amber()");
+  L.push("  // below pick between the pair; dark keeps its original vivid values.");
+  line("ACCENT_LIGHT", g.accentLight);
+  line("A11Y_RING_LIGHT", g.a11yRingLight);
+  line("SLATE_LIGHT", g.slateLight);
+  line("AMBER_LIGHT", g.amberLight);
+  L.push("");
   L.push("  // Monochrome node tint — one muted desaturated lavender-grey for EVERY node");
   L.push("  // on dark (the default look). Per-type colour is the opt-in \"Full color\" toggle.");
   line("MONO_DARK", g.monoDark);
