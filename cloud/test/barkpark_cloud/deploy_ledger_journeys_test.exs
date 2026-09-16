@@ -421,7 +421,6 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
     end
   end
 
-
   describe "the DEFERRED-ONLY publish population (charter D223)" do
     test "the population is runs of nothing but deferrals that nothing closed — not a contended release, not an in-flight run" do
       # THE UNIT IS THE PUBLISH. Under the ATTEMPT unit all three sites below
