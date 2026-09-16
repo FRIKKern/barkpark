@@ -1729,7 +1729,7 @@ defmodule Barkpark.CycleFleetTest do
                      [Ecto.UUID.dump!(fixture.root_id)]
                    )
         after
-          assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+          teardown_unboxed_workspace!(workspace)
         end
       end)
     end
@@ -3119,7 +3119,7 @@ defmodule Barkpark.CycleFleetTest do
             Task.await(holder, 10_000)
           end
         after
-          assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+          teardown_unboxed_workspace!(workspace)
         end
       end)
     end
@@ -3265,10 +3265,94 @@ defmodule Barkpark.CycleFleetTest do
             Task.await(holder, 10_000)
           end
         after
-          assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+          teardown_unboxed_workspace!(workspace)
         end
       end)
     end
+  end
+
+  describe "unboxed teardown leaves no committed Oban rows (cross-agent test hygiene)" do
+    # THE MUTATION ARM for `teardown_unboxed_workspace!/1`. Delete the
+    # `Repo.delete_all(Oban.Job ...)` from that helper and the first assertion
+    # below reds with a committed ProjectorWorker row still in the table; the
+    # second assertion is the CONTROL and must stay green either way, because a
+    # teardown that fixed the leak by deleting the whole table would be the same
+    # cross-agent fault aimed at whoever else is running on this box.
+    #
+    # This test is itself unboxed, so it cleans up by hand — including the
+    # foreign sentinel row it plants.
+    test "deletes this workspace's committed projector jobs and NOTHING else" do
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+        foreign_workspace_id = Ecto.UUID.generate()
+
+        {:ok, sentinel} =
+          Barkpark.EdgeProjector.ProjectorWorker.enqueue("production",
+            types: ["task"],
+            workspace_id: foreign_workspace_id,
+            project_id: Ecto.UUID.generate()
+          )
+
+        workspace = Barkpark.TenancyFixtures.create_workspace!()
+        project = Barkpark.TenancyFixtures.create_project!(workspace)
+
+        try do
+          {:ok, _dataset} = Tenancy.get_or_create_dataset(project, "production")
+
+          {:ok, _document} =
+            %Document{}
+            |> Document.changeset(%{
+              doc_id: "drafts.cycle-oban-teardown-task",
+              type: "task",
+              dataset: "production",
+              title: "Cycle oban teardown task",
+              status: "draft",
+              rev: Ecto.UUID.generate(),
+              workspace_id: workspace.id,
+              project_id: project.id,
+              content: %{"kind" => "task"}
+            })
+            |> Repo.insert()
+
+          Barkpark.EdgeProjector.Lifecycle.enqueue_rebuild(%{
+            event: :after_save,
+            doc: %{
+              doc_id: "drafts.cycle-oban-teardown-task",
+              type: "task",
+              dataset: "production",
+              workspace_id: workspace.id,
+              project_id: project.id
+            },
+            dataset: "production",
+            ctx: nil
+          })
+
+          # PRECONDITION — without a committed row of its own, the delete below
+          # would pass vacuously and prove nothing about the helper.
+          assert own_committed_projector_jobs(workspace.id) > 0,
+                 "the unboxed write must COMMIT a projector job, or this test measures nothing"
+
+          assert teardown_unboxed_workspace!(workspace) > 0
+
+          assert own_committed_projector_jobs(workspace.id) == 0,
+                 "teardown must leave no committed Oban row naming this test's workspace"
+
+          assert own_committed_projector_jobs(foreign_workspace_id) == 1,
+                 "teardown must NOT touch another run's rows — a blanket delete_all would"
+        after
+          Repo.delete_all(from(j in Oban.Job, where: j.id == ^sentinel.id))
+        end
+      end)
+    end
+  end
+
+  defp own_committed_projector_jobs(workspace_id) do
+    Repo.aggregate(
+      from(j in Oban.Job,
+        where: j.worker == "Barkpark.EdgeProjector.ProjectorWorker",
+        where: fragment("? ->> 'workspace_id' = ?", j.args, ^workspace_id)
+      ),
+      :count
+    )
   end
 
   defp legendary_wave_attrs(scope, count) do
@@ -5181,6 +5265,40 @@ defmodule Barkpark.CycleFleetTest do
 
   defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
   defp stringify_keys(value), do: value
+
+  # ── unboxed teardown: the workspace AND the Oban rows it committed ─────────
+  #
+  # `Sandbox.unboxed_run/2` COMMITS. Every document write inside one fires
+  # `Barkpark.EdgeProjector.Lifecycle`, which commits an `oban_jobs` row beside
+  # it. `Tenancy.delete_workspace/1` removes the documents but NOT those job
+  # rows — `oban_jobs` has no FK to a workspace — so each unboxed test used to
+  # strand ProjectorWorker jobs in the test database permanently. Measured on a
+  # freshly created partition on 2026-09-16: this file alone left 11 committed
+  # `scheduled` ProjectorWorker rows behind, on a database that started at 0.
+  # Those rows are then ordinary visible reads inside every later test's sandbox
+  # transaction (there is nothing to roll back), so any test that reads the
+  # queue without filtering — `all_enqueued(worker: ProjectorWorker)` — or
+  # PERFORMS what it finds there fails for whoever runs next, on an unrelated
+  # branch. Every agent on this box shares one `barkpark_test`.
+  #
+  # The delete is exact rather than broad. `Lifecycle.scope_opts/1` puts the
+  # doc's `workspace_id` into the job args, and these workspaces are created
+  # per-test, so filtering on `args ->> 'workspace_id'` removes exactly this
+  # test's rows and can never reach a concurrent run's. A blanket
+  # `Repo.delete_all(Oban.Job)` here would COMMIT — it is not inside the
+  # sandbox — and would be the same cross-agent fault pointing the other way.
+  defp teardown_unboxed_workspace!(workspace) do
+    assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+
+    {deleted, _} =
+      Repo.delete_all(
+        from(j in Oban.Job,
+          where: fragment("? ->> 'workspace_id' = ?", j.args, ^workspace.id)
+        )
+      )
+
+    deleted
+  end
 
   defp restore_test_env(key, nil), do: Application.delete_env(:barkpark, key)
   defp restore_test_env(key, value), do: Application.put_env(:barkpark, key, value)
