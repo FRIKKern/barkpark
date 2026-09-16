@@ -248,6 +248,67 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     }
   end
 
+  # ── the refusal taxonomy: WHOSE fault is it? ──────────────────────────────
+  #
+  # Every code this module emits is one of exactly two things, and the HTTP
+  # status the door renders is the only place a caller learns which:
+  #
+  #   * a CALLER FAULT — the bytes that arrived are wrong (a symlink, a
+  #     traversal, a bad digest, an over-cap archive). Repacking fixes it. 400.
+  #   * an INTERNAL FAILURE — the artifact was fine and THIS BOX could not put
+  #     it on disk (ENOSPC, EACCES, a failed rename). Nothing the caller can
+  #     change about the request changes the outcome. 500.
+  #
+  # The three internal ones used to render as 400s alongside the refusals,
+  # which told a caller "your tarball is bad" while the box's disk was full —
+  # and a caller that believes a 400 correctly STOPS RETRYING and starts
+  # repacking bytes that were never the problem.
+  #
+  # WHO RETRIES: nobody automatically, before or after. The control plane
+  # graces only AUTHORLESS 5xx (`BarkparkCloud.Sites.Deploy.transient_refusal?/1`
+  # — a body with no code, `internal_error`, or `deploy_runner_unavailable`), so
+  # a TYPED 5xx is terminal on the first answer exactly as the 400 was. What
+  # changes is the ATTRIBUTION: the deploy ledger files the row under the box's
+  # own failure class instead of the caller's, and the OPERATOR who clears the
+  # disk (or fixes the permissions) is the one who re-fires the deploy. The
+  # caller's bytes are untouched and must not be repacked.
+  @internal_failure_codes ~w(E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED)
+
+  @caller_fault_codes ~w(
+    E_ABSOLUTE_PATH E_BAD_NAME E_COMPRESSION_RATIO E_DIGEST_MISMATCH
+    E_ENTRY_TOO_LARGE E_HARDLINK E_JUNK_ENTRY E_MALFORMED E_MODE_BITS
+    E_NO_INDEX E_NOT_BASE64 E_NOT_GZIP E_PATH_TRAVERSAL E_SPECIAL_FILE
+    E_SYMLINK E_TOO_MANY_ENTRIES E_TOTAL_TOO_LARGE E_UNKNOWN_TYPE
+    E_UNSAFE_PARENT
+  )
+
+  @codes Enum.sort(@internal_failure_codes ++ @caller_fault_codes)
+
+  @doc """
+  Every `E_*` code `stage/4` can answer, sorted. The door documents its status
+  contract FROM this list rather than from a hand-kept copy, and
+  `prebuilt_artifact_code_census_test.exs` reds if the source file grows a code
+  that is in neither half.
+  """
+  @spec codes() :: [String.t()]
+  def codes, do: @codes
+
+  @doc "The codes that mean THE CALLER'S BYTES are wrong — rendered 400."
+  @spec caller_fault_codes() :: [String.t()]
+  def caller_fault_codes, do: @caller_fault_codes
+
+  @doc "The codes that mean THIS BOX broke — rendered 5xx, never 400."
+  @spec internal_failure_codes() :: [String.t()]
+  def internal_failure_codes, do: @internal_failure_codes
+
+  @doc """
+  Whether `code` is a box-side failure rather than a verdict about the caller's
+  bytes. An UNKNOWN code answers `false`: a code nobody has classified is not
+  silently promoted to a 5xx, and the census test is what catches it.
+  """
+  @spec internal_failure?(String.t()) :: boolean()
+  def internal_failure?(code) when is_binary(code), do: code in @internal_failure_codes
+
   # ── digest + envelope ─────────────────────────────────────────────────────
 
   defp decode(raw_b64) do

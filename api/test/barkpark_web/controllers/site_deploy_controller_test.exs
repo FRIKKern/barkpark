@@ -559,6 +559,104 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                |> get("/v1/admin/site-deploy", %{"slug" => "bad-digest"})
                |> json_response(200)
     end
+
+    # THE PAIR THAT PINS THE CLASS (ssw11-bl-internal-failures-reported-as-400).
+    #
+    # `stage/4` answers TWO kinds of failure through ONE `{:error, code,
+    # message}` shape, and the door used to render both 400. A 400 is a
+    # statement about the CALLER'S bytes: told one, a correct client stops
+    # retrying and repacks an artifact that was already valid, while the box's
+    # disk stays full. The test above is the QUIET arm — a genuine caller fault
+    # (`E_DIGEST_MISMATCH`) must stay 400. This one is the LOUD arm.
+    #
+    # The induction is real, not a stub: the run-state dir is made read-only, so
+    # `PrebuiltArtifact` cannot create its staging dir and answers
+    # `E_STAGING_FAILED` — exactly the EACCES shape a mis-permissioned box
+    # produces. The precondition is ASSERTED rather than assumed, so a run as
+    # root (where the chmod does not bite and the artifact would stage fine)
+    # reds with a message naming the cause instead of failing on the status.
+    test "500, not 400, when the BOX could not stage a perfectly good artifact", %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-ctl-ro-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+
+      on_exit(fn ->
+        File.chmod(run_state, 0o700)
+        File.rm_rf(run_state)
+      end)
+
+      {b64, sha} = prebuilt_artifact()
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      :ok = File.chmod!(run_state, 0o500)
+
+      # BIND FIRST, THEN ASSERT. `assert pattern = expr, message` evaluates the
+      # match as an ordinary match, so a mismatch raises MatchError and kills
+      # the process before `assert/2` is ever called — the authored message is
+      # dead code on exactly the path it was written for
+      # (`scripts/unreachable-assert-message-check.sh`).
+      probe = File.mkdir_p(Path.join(run_state, "precondition-probe"))
+
+      assert probe == {:error, :eacces},
+             "precondition broken: a 0500 run-state dir still accepts a mkdir (got " <>
+               "#{inspect(probe)}), so this test cannot induce E_STAGING_FAILED — running as " <>
+               "root? The 500 it asserts below would be measuring nothing."
+
+      body =
+        conn
+        |> admin_conn()
+        |> post(
+          "/v1/admin/site-deploy",
+          body("pb-nospace", %{"artifact_b64" => b64, "artifact_sha256" => sha})
+        )
+        |> json_response(500)
+
+      # The typed code TRAVELS unchanged — the control plane renders
+      # "<code> — <message>" and a rename would break its taxonomy. Only the
+      # class moved, and `fault` says out loud whose it is.
+      assert %{"error" => %{"code" => "E_STAGING_FAILED", "message" => message}} = body
+      assert body["error"]["fault"] == "box"
+      assert message =~ "staging"
+
+      # A box fault is not a slot-holder either: nothing ran, nothing staged.
+      assert %{"state" => "idle"} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "pb-nospace"})
+               |> json_response(200)
+    end
+
+    # The moduledoc is the door's published status contract, and it used to be a
+    # HAND-KEPT copy of the extractor's code set: it listed 19 of 22, and the
+    # three it dropped were exactly the three whose class was wrong. Both lists
+    # are generated from `PrebuiltArtifact` now, so this asserts the generation
+    # actually reached the rendered doc — a future edit that re-types a literal
+    # list reds here.
+    test "the door's moduledoc documents EVERY extractor code, from the module that emits them" do
+      {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} =
+        Code.fetch_docs(BarkparkWeb.SiteDeployController)
+
+      # Only backticked tokens: `BARKPARK_SITE_DEPLOY_APPLY` and
+      # `BUILD_GATE_SLOTS` both END in something a bare /E_[A-Z_]+/ matches.
+      documented =
+        ~r/`(E_[A-Z0-9_]+)`/
+        |> Regex.scan(moduledoc)
+        |> Enum.map(fn [_, code] -> code end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      assert documented == Barkpark.Sites.PrebuiltArtifact.codes()
+
+      # And they are not all in one bucket: the three internal ones must sit
+      # under a 500 heading, not the 400 one.
+      [internal_bullet | _] =
+        moduledoc
+        |> String.split("* **")
+        |> Enum.filter(&String.starts_with?(&1, "500** `E_"))
+
+      for code <- Barkpark.Sites.PrebuiltArtifact.internal_failure_codes() do
+        assert internal_bullet =~ "`#{code}`"
+      end
+    end
   end
 
   describe "POST — 409 single-flight is PER SLUG" do

@@ -81,7 +81,15 @@ defmodule Barkpark.Sites.DeployRunner do
   nothing (no provision, no unit) and returns `{:error, {:artifact_rejected,
   code, message}}` — it NEVER degrades to a box build, because a box build
   passes HEALTH on genuine markers while serving bytes the caller never asked
-  for. The staged dir reaches the engine as `PREBUILT_DIR` + `PREBUILT_SHA256`
+  for.
+
+  An artifact that was FINE and could not be put on disk anyway (ENOSPC,
+  EACCES, a failed rename) is NOT a refusal and does not share that shape: it
+  answers `{:error, {:artifact_staging_failed, code, message}}`, which the door
+  renders 5xx. `Barkpark.Sites.PrebuiltArtifact.internal_failure?/1` is the
+  single classifier — see its taxonomy comment for who retries.
+
+  The staged dir reaches the engine as `PREBUILT_DIR` + `PREBUILT_SHA256`
   on BOTH env sinks (`resolved_prebuilt_vars/1`), and both are persisted in the
   run manifest so a re-attach after a BEAM restart still knows the run was
   prebuilt.
@@ -470,6 +478,7 @@ defmodule Barkpark.Sites.DeployRunner do
           | {:error,
              :already_running | :box_at_capacity | :disabled | :runner_unavailable | :start_failed}
           | {:error, {:artifact_rejected, String.t(), String.t()}}
+          | {:error, {:artifact_staging_failed, String.t(), String.t()}}
           | {:error, {:provision_failed, String.t()}}
   def trigger(%DeployRequest{} = req),
     do:
@@ -1567,8 +1576,20 @@ defmodule Barkpark.Sites.DeployRunner do
     # would pass HEALTH on genuine markers while serving bytes the caller never
     # asked for. The refusal is typed and reaches the caller as a 400.
     case ingest_prebuilt(req) do
-      :ok -> provision_and_spawn(state, req)
-      {:error, code, message} -> {:reply, {:error, {:artifact_rejected, code, message}}, state}
+      :ok ->
+        provision_and_spawn(state, req)
+
+      {:error, code, message} ->
+        # SPLIT ON WHOSE FAULT IT IS. `stage/4` answers two kinds of failure
+        # through one shape, and collapsing them into `:artifact_rejected` made
+        # the door render ENOSPC, EACCES and a failed rename as 400 — "your
+        # tarball is bad" about bytes that were fine. The classification lives
+        # in `PrebuiltArtifact` (it owns the codes); the Runner only routes.
+        if PrebuiltArtifact.internal_failure?(code) do
+          {:reply, {:error, {:artifact_staging_failed, code, message}}, state}
+        else
+          {:reply, {:error, {:artifact_rejected, code, message}}, state}
+        end
     end
   end
 
@@ -1588,9 +1609,15 @@ defmodule Barkpark.Sites.DeployRunner do
         :ok
 
       {:error, code, message} ->
-        Logger.warning(
-          "[site-deploy] prebuilt artifact REFUSED for #{inspect(req.slug)}: #{code} — #{message}"
-        )
+        # An operator reading journald gets the same split the caller does:
+        # REFUSED means go fix the tarball, STAGING FAILED means go fix the box.
+        # One word, and it is the difference between the right person looking.
+        verdict =
+          if PrebuiltArtifact.internal_failure?(code),
+            do: "prebuilt artifact STAGING FAILED (box fault)",
+            else: "prebuilt artifact REFUSED"
+
+        Logger.warning("[site-deploy] #{verdict} for #{inspect(req.slug)}: #{code} — #{message}")
 
         {:error, code, message}
     end
