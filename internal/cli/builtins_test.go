@@ -258,11 +258,14 @@ func TestBashCompletionVerbsStructural(t *testing.T) {
 		`doc) __bpverbs="create delete get";;`,
 		`compgen -W "$__bpverbs $globals"`,
 		// position-3+ flag completion keyed on the "noun verb" pair. Flag tokens
-		// are untrusted, so they are single-quoted at assignment and matched
-		// manually — never handed to compgen -W, which would re-expand them.
+		// are untrusted, so they land as single-quoted elements of a bash ARRAY
+		// and are read back fully quoted — never handed to compgen -W (which
+		// re-expands its wordlist) and never as a bare $__bpflags (which would
+		// word-split AND glob).
 		`case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in`,
-		`"doc create") __bpflags='--publish --set';;`,
-		`for __bpword in $__bpflags $__bppath $globals; do`,
+		`"doc create") __bpflags=('--publish' '--set');;`,
+		`local __bpflags=()`,
+		`for __bpword in ${__bpflags[@]+"${__bpflags[@]}"} ${__bppath[@]+"${__bppath[@]}"} $globals; do`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("bash script missing %q:\n%s", want, script)
@@ -395,6 +398,91 @@ func TestBashCompletionFlagInjectionNeutralized(t *testing.T) {
 	if !strings.Contains(string(outb), payload) {
 		t.Errorf("expected neutralized literal %q among candidates; COMPREPLY:\n%s", payload, outb)
 	}
+}
+
+// TestBashCompletionFlagNotReExpanded is the mutation-proof for THIS row: a
+// hostile flag token must reach COMPREPLY as its own literal bytes, with no
+// second expansion pass of any kind. Command substitution is already covered by
+// TestBashCompletionFlagInjectionNeutralized; the pass this test measures is the
+// one single-quoting at emit CANNOT stop — the completion function re-reading
+// its own variable. Before the quoted-array fix the body looped over a bare
+// `$__bpflags`, which word-splits AND GLOBS: a manifest flag named `--x*`
+// matched `./--xSECRETFILE` in the user's cwd and bash offered that FILENAME as
+// a completion candidate, disclosing a directory listing the manifest never
+// named. Reverting the emitter to a space-joined scalar + `for __bpword in
+// $__bpflags` reds the glob arm; the space arm reds too, since a scalar cannot
+// carry a token boundary.
+func TestBashCompletionFlagNotReExpanded(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	complete := func(t *testing.T, dir string, flags []string, cur string) string {
+		t.Helper()
+		script := bashCompletionScript(strings.Join(completionNouns, " "),
+			strings.Join(completionGlobals, " "), sampleVerbMap,
+			map[string][]string{"doc create": flags})
+		harness := script + "\nCOMP_WORDS=(bp doc create " + shSingleQuote(cur) + ")\n" +
+			"COMP_CWORD=3\n_bp_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"
+		cmd := exec.Command(bashPath, "-c", harness)
+		cmd.Dir = dir
+		outb, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bash exec failed: %v\n--- harness ---\n%s\n--- output ---\n%s", err, harness, outb)
+		}
+		return string(outb)
+	}
+
+	t.Run("glob metachar is not pathname-expanded", func(t *testing.T) {
+		dir := t.TempDir()
+		// A decoy whose NAME the emitted script never contains. If it shows up in
+		// COMPREPLY the only way it got there is a pathname-expansion pass.
+		if err := os.WriteFile(dir+"/--xSECRETFILE", []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out := complete(t, dir, []string{"--x*"}, "")
+		if strings.Contains(out, "SECRETFILE") {
+			t.Errorf("RE-EXPANSION: the glob token matched a file in $PWD and leaked it as a candidate;\nCOMPREPLY:\n%s", out)
+		}
+		if !strings.Contains(out, "--x*") {
+			t.Errorf("expected the literal token %q among candidates; COMPREPLY:\n%s", "--x*", out)
+		}
+	})
+
+	t.Run("a spaced token stays one candidate", func(t *testing.T) {
+		// --zz… shares no prefix with any global, so the candidate set is the
+		// flag token alone and the count is the whole assertion.
+		out := complete(t, t.TempDir(), []string{"--zz b"}, "--zz")
+		lines := []string{}
+		for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+			if l != "" {
+				lines = append(lines, l)
+			}
+		}
+		if len(lines) != 1 || lines[0] != "--zz b" {
+			t.Errorf("a token carrying a space must survive as ONE candidate; got %q", lines)
+		}
+	})
+
+	t.Run("quiet on a well-behaved flag set", func(t *testing.T) {
+		// The negative control: nothing about the fix may change ordinary
+		// completion. This subtest must stay green in BOTH directions, so a red
+		// in the two above is attributable to re-expansion and not to a broken
+		// emitter.
+		dir := t.TempDir()
+		if err := os.WriteFile(dir+"/--xSECRETFILE", []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out := complete(t, dir, []string{"--publish", "--set"}, "--")
+		for _, want := range []string{"--publish", "--set", "--dataset"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("ordinary completion lost %q; COMPREPLY:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "SECRETFILE") {
+			t.Errorf("no glob token was present, yet a filename appeared; COMPREPLY:\n%s", out)
+		}
+	})
 }
 
 // TestZshCompletionFlagInjectionQuoted proves the zsh emitter wraps a hostile flag

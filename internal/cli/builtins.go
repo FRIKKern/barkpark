@@ -724,8 +724,9 @@ func sortedFlagKeys(flagMap map[string][]string) []string {
 // serves bash and zsh, whose single-quote semantics are identical here.)
 
 // shSingleQuoteEach single-quotes each token and space-joins them, for a context
-// (e.g. a zsh `arr=(...)` literal) that parses the quotes at assignment time and
-// performs quote removal — so the elements stay separate and land unquoted.
+// (a zsh or bash `arr=(...)` literal) that parses the quotes at assignment time
+// and performs quote removal — so the elements stay separate and land unquoted,
+// one array element per token no matter what characters the token holds.
 func shSingleQuoteEach(toks []string) string {
 	q := make([]string, len(toks))
 	for i, t := range toks {
@@ -757,22 +758,24 @@ func bashCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 		fmt.Fprintf(&cases, "      %s) __bpverbs=%q;;\n", noun, strings.Join(verbMap[noun], " "))
 	}
 	// Position 3+ offers the command's own flags, keyed on the "noun verb" pair.
-	// The flag list is single-quoted as ONE value (not %q): the untrusted flag
-	// tokens must never be command-substituted when the case body assigns
-	// __bpflags. We deliberately store the raw space-joined names (no per-token
-	// quotes) because a shell variable's value is word-split but NOT quote-removed
-	// on re-expansion — interior quotes would survive as literal characters.
+	// Untrusted flag tokens go into a bash ARRAY literal with EACH element
+	// single-quoted — never one space-joined scalar. A scalar has to be
+	// re-split to become candidates again, and an unquoted `$__bpflags` splits
+	// AND GLOBS: a manifest flag named `--x*` then matched `./--xSECRET…` and
+	// offered a filename from the user's cwd as a completion candidate. An array
+	// carries the token count with the tokens, so the loop below can read it
+	// fully quoted and no second expansion pass exists at all.
 	var flagCases strings.Builder
 	for _, key := range sortedFlagKeys(flagMap) {
-		fmt.Fprintf(&flagCases, "      %q) __bpflags=%s;;\n", key, shSingleQuote(strings.Join(flagMap[key], " ")))
+		fmt.Fprintf(&flagCases, "      %q) __bpflags=(%s);;\n", key, shSingleQuoteEach(flagMap[key]))
 	}
 	// Builtin command TREES (`cloud site`, `cloud site deploy`) key on the FULL
 	// typed prefix, not the two-word noun/verb pair the manifest flags use — a
-	// control-plane path is three and four words deep. Single-quoted for the same
-	// reason the flag case is, and matched through the same expansion-free loop.
+	// control-plane path is three and four words deep. Same quoted-array shape as
+	// the flag case, matched through the same expansion-free loop.
 	var pathCases strings.Builder
 	for _, key := range sortedFlagKeys(builtinPathMap()) {
-		fmt.Fprintf(&pathCases, "      %q) __bppath=%s;;\n", key, shSingleQuote(strings.Join(builtinPathMap()[key], " ")))
+		fmt.Fprintf(&pathCases, "      %q) __bppath=(%s);;\n", key, shSingleQuoteEach(builtinPathMap()[key]))
 	}
 	return `# bash completion for bp — eval "$(bp completion bash)" or source a saved copy.
 _bp_complete() {
@@ -793,24 +796,29 @@ _bp_complete() {
     esac
     COMPREPLY=( $(compgen -W "$__bpverbs $globals" -- "$cur") )
   else
-    local __bpflags=""
+    local __bpflags=()
     case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in
 ` + flagCases.String() + `      *) ;;
     esac
     # Builtin trees: match on every word typed so far, so "bp cloud site <TAB>"
     # offers the site verbs and "bp cloud site deploy --<TAB>" offers --prebuilt.
-    local __bppath=""
+    local __bppath=()
     case "${COMP_WORDS[*]:1:COMP_CWORD-1}" in
 ` + pathCases.String() + `      *) ;;
     esac
     # SECURITY: flag names are untrusted (manifest cache). compgen -W RE-EXPANDS
     # its wordlist — command substitution included — so a poisoned flag reaching
     # ` + "`compgen -W \"$__bpflags\"`" + ` would execute on TAB even though the
-    # assignment above is single-quoted. Match manually instead: expanding a
-    # variable word-splits but does not re-scan for $(...), so nothing runs.
+    # assignment above is single-quoted. Match manually instead, and read the
+    # arrays FULLY QUOTED: "${arr[@]}" yields one word per element with no word
+    # splitting and no pathname expansion, so a flag named --x* stays --x*
+    # instead of matching files in $PWD. The ${arr[@]+...} wrapper is the
+    # bash-3.2 empty-array guard: a bare "${arr[@]}" on an empty array is an
+    # unbound reference under "set -u" there. $globals is a baked constant, not
+    # manifest data, so it keeps its intentional split.
     local __bpword
     COMPREPLY=()
-    for __bpword in $__bpflags $__bppath $globals; do
+    for __bpword in ${__bpflags[@]+"${__bpflags[@]}"} ${__bppath[@]+"${__bppath[@]}"} $globals; do
       case "$__bpword" in "$cur"*) COMPREPLY+=("$__bpword");; esac
     done
   fi
