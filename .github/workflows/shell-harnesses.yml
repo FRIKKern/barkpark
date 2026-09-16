@@ -346,6 +346,15 @@ on:
       # edit to any of them reds here on the PR that makes it rather than leaving
       # the artefact's quoted numbers as fiction. seal-run.sh, the fifth input, is
       # already listed above.
+      # BREAKER MEASUREMENT PRECONDITION (task-33682262f429d104). Per file, never
+      # a directory glob - D26. ci-measure.sh and main-red-breaker.sh are INPUTS,
+      # not neighbours: the check compares the verdicts one EMITS against the
+      # values the other can NAME, so an edit to either can flip the verdict
+      # without touching the check.
+      - "scripts/breaker-measure-precondition.sh"
+      - "scripts/breaker-measure-precondition.test.sh"
+      - "scripts/ci-measure.sh"
+      - "scripts/main-red-breaker.sh"
       - "scripts/deploy-reliability-exit-run.sh"
       - "scripts/deploy-reliability-exit-run.test.sh"
       - "internal/cloudclient/client.go"
@@ -927,6 +936,15 @@ on:
       # DEPLOY-RELIABILITY EXIT RUNNER (W35) — mirrors the pull_request list
       # above, inputs included. A lane wired on PRs only goes dark the moment a
       # merge lands.
+      # BREAKER MEASUREMENT PRECONDITION (task-33682262f429d104). Per file, never
+      # a directory glob - D26. ci-measure.sh and main-red-breaker.sh are INPUTS,
+      # not neighbours: the check compares the verdicts one EMITS against the
+      # values the other can NAME, so an edit to either can flip the verdict
+      # without touching the check.
+      - "scripts/breaker-measure-precondition.sh"
+      - "scripts/breaker-measure-precondition.test.sh"
+      - "scripts/ci-measure.sh"
+      - "scripts/main-red-breaker.sh"
       - "scripts/deploy-reliability-exit-run.sh"
       - "scripts/deploy-reliability-exit-run.test.sh"
       - "internal/cloudclient/client.go"
@@ -1303,6 +1321,7 @@ jobs:
       tooling-harnesses: ${{ steps.sets.outputs.tooling-harnesses }}
       launcher-boot-selftest: ${{ steps.sets.outputs.launcher-boot-selftest }}
       workflow-portability: ${{ steps.sets.outputs.workflow-portability }}
+      breaker-measure-precondition: ${{ steps.sets.outputs.breaker-measure-precondition }}
       exit-runner-guard: ${{ steps.sets.outputs.exit-runner-guard }}
       cloud-static-gz: ${{ steps.sets.outputs.cloud-static-gz }}
       pds-hetzner-offline: ${{ steps.sets.outputs.pds-hetzner-offline }}
@@ -1502,6 +1521,10 @@ jobs:
           workflow-portability .claude/workflows/*.workflow.js
           workflow-portability scripts/workflow-run-shell-check.sh
           workflow-portability .github/workflows/*.yml
+          breaker-measure-precondition scripts/breaker-measure-precondition.sh
+          breaker-measure-precondition scripts/breaker-measure-precondition.test.sh
+          breaker-measure-precondition scripts/ci-measure.sh
+          breaker-measure-precondition scripts/main-red-breaker.sh
           exit-runner-guard scripts/deploy-reliability-exit-run.sh
           exit-runner-guard scripts/deploy-reliability-exit-run.test.sh
           exit-runner-guard internal/cloudclient/client.go
@@ -2808,6 +2831,48 @@ jobs:
         # rot. Both fail on zero inputs rather than reporting the success any
         # gate over nothing reports.
         run: bash scripts/workflow-run-shell-check.sh
+
+  breaker-measure-precondition:
+    needs: [changes]
+    if: needs.changes.outputs.breaker-measure-precondition == 'true'
+    name: the breaker measurement's preconditions can still be UNMET
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        # Default depth. The arms are fixture-only - no clock, no network, no
+        # history. The --report mode does read `git show -s` on two commits, but
+        # this lane deliberately does NOT run --report (see below).
+      - name: python3 is present (judge_mapping's envelope is python3-shaped)
+        id: setup
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image - add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: breaker-measure-precondition.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/breaker-measure-precondition.sh
+      - name: breaker-measure-precondition.test.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/breaker-measure-precondition.test.sh
+      - name: the precondition detector can still red, go quiet, and REFUSE (6 arms, offline)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # WHAT THIS LANE PROTECTS, and what it deliberately does not.
+        # It runs --selftest ONLY. The arms prove the detector reds on a
+        # two-valued reader (a1/a6), goes quiet on a three-valued one (a2), and
+        # REFUSES rather than printing a vacuous pass when the generator emits
+        # fewer than two distinct verdicts (a3 - the control). a4/a5 prove the
+        # reader under test is EXTRACTED from ci-measure.sh rather than copied,
+        # so an empty extraction cannot masquerade as a total collapse.
+        # It does NOT run --report. That mode reads the live ci-measure.sh and
+        # today exits 1 with NOT YET MEASURABLE, because breaker_verdict() has no
+        # name for OWNERSHIP-UNDETERMINED. Wiring a known, filed gap into a PR
+        # gate would red every PR over something no PR author can fix.
+        # No `continue-on-error` here: it launders a red into the green JOB
+        # conclusion the fleet reads.
+        run: bash scripts/breaker-measure-precondition.test.sh
 
   exit-runner-guard:
     needs: [changes]
