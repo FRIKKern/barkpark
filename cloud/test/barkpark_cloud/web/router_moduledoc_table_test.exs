@@ -408,8 +408,14 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     #
     # This is a GATE defect, never a live auth hole: every one of the eleven
     # enforces exactly what its own code says. What could not be stated was WHICH.
+    #
+    # `GET /v1/sites/:id/deployments` left this list in the D219 re-tiering
+    # (dr-w14-bl-pat-cannot-read-the-owners-number) and now sits in
+    # `pat_reachable` below: the LIST route, and only the list route, moved to
+    # `{:ability, "read"}`. `GET /v1/sites/:id` was never in this family's
+    # delegating eleven (it calls `Auth.require_user/2` in its own body) and is
+    # unchanged.
     session_only = [
-      {"GET", "/v1/sites/:id/deployments"},
       {"GET", "/v1/sites/:id/previews"},
       {"POST", "/v1/sites/:id/domains"}
     ]
@@ -427,6 +433,10 @@ defmodule BarkparkCloud.Web.RouterModuledocTableTest do
     ]
 
     pat_reachable = [
+      # D219: re-tiered from `:session`. The lens must now resolve this call site
+      # to the ABILITY branch of `with_team_site/3` — if the literal at the call
+      # site ever goes back to `:session`, this row reds by name.
+      {"GET", "/v1/sites/:id/deployments"},
       {"PATCH", "/v1/sites/:id"},
       {"DELETE", "/v1/sites/:id"},
       {"POST", "/v1/sites/:id/deploy"},

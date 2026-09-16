@@ -919,7 +919,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "GET /v1/sites/:id/deployments — a sibling node on the JSON body (was router.ex:7110)",
       audience:
-        "a SESSION-authenticated member of the site's own team, and nobody else: the route is session-only (D219), so no PAT, no CI credential and no platform seat could ever read it — and no client, page or script in five trees ever decoded the node",
+        "a SESSION-authenticated member of the site's own team, and nobody else: the route was session-only for the whole life of this node (D219 re-tiered it to {:ability, \"read\"} only afterwards, in dr-w14-bl-pat-cannot-read-the-owners-number), so while the node existed no PAT, no CI credential and no platform seat could ever read it — and no client, page or script in five trees ever decoded it",
       reason:
         "ruled the epic's vital in W11, written in W12, given a production caller in W14, and read by zero code paths in thirteen waves. Zero readers across all five corpus trees, no open PR names it, and its stay under any rider is empty. THE FIRST DELETION (dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion).",
       disposition: :deleted,

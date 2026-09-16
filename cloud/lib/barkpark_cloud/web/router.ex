@@ -194,7 +194,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       GET     /v1/sites/:id/doctor user  every substrate this site occupies, three-valued, each absence naming its repair (team-scoped)
       POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
-      GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
+      GET     /v1/sites/:id/deployments user(s)  list a site's PRODUCTION deployments, newest first (read ability) — the only route that can express a DENOMINATOR, so an automation credential can compute the owner's own deploy number (D219 re-tiering)
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
       POST    /v1/sites/:id/rollback user(s) roll a site back to a prior deployment (write ability)
       GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
@@ -5137,9 +5137,14 @@ defmodule BarkparkCloud.Web.Router do
   # → `require_user`) are untouched and still 401 a worker. Both arms are pinned
   # in `test/barkpark_cloud/platform_delivery_test.exs` §4.
   #
-  # NOT a node on GET /v1/sites/:id/deployments: that route is session-only and
-  # 401s a read PAT today, and re-tiering it is D219's cross-epic ruling — filed,
-  # not built, and emphatically not this slice's to build.
+  # NOT a node on GET /v1/sites/:id/deployments, and the reason has CHANGED
+  # without changing the answer. That route was session-only when this comment
+  # was written; D219's cross-epic ruling has since re-tiered it to
+  # `{:ability, "read"}` (dr-w14-bl-pat-cannot-read-the-owners-number), so a read
+  # PAT now reaches it. The rows here still do not belong on it: they are
+  # Barkpark's OWN platform deploys, which have no `sites` row and therefore no
+  # tenant to be scoped to — see NOT TEAM-SCOPED below. The separation is about
+  # the SUBJECT of the rows, not about the credential that can read them.
   #
   # NOT TEAM-SCOPED, on purpose. These rows are Barkpark's OWN deploys; there is
   # no `sites` row and therefore no `team_id` to scope by (that is also why they
@@ -9263,8 +9268,48 @@ defmodule BarkparkCloud.Web.Router do
   # (inserted_at, id) DESC, so a row inserted mid-pagination cannot duplicate or
   # skip a later page the way an offset would. An unparseable cursor is a 422,
   # never a silent page one.
+  #
+  # `{:ability, "read"}`, NOT `:session` — the D219 re-tiering, ruled across
+  # deploy-reliability and cloud-console-hardening and built here
+  # (dr-w14-bl-pat-cannot-read-the-owners-number).
+  #
+  # WHAT IT COST WHILE IT WAS SESSION-ONLY. This is the ONLY route that can
+  # express a DENOMINATOR — a window of production deployments, newest first,
+  # paged by keyset. The sibling poll one segment deeper
+  # (`GET /v1/sites/:id/deployments/:dep_id`) has always been PAT-reachable but
+  # returns exactly ONE row, so it can state an outcome and never a rate. With
+  # the list behind `Auth.require_user/2` the refusal was CREDENTIAL-CLASS, not
+  # role-class: every PAT tier — read, write, deploy, even root — got 401,
+  # because `require_user` never saw a session token and the ability gate was not
+  # even consulted. `bp cloud site status` reads the ledger through this route
+  # (ListSpawnSiteDeployments), so the epic's finished experience — a site owner
+  # getting a denominator — was reachable only from a browser or an interactive
+  # `bp login`, and no CI job could ever prove it.
+  #
+  # WHY WIDENING IS SAFE, AND WHAT IT IS NOT. The audience grows by exactly one
+  # credential class; the DATA does not grow at all. `deployment_json/1` (what
+  # this route serializes) is a STRICT SUBSET of `site_deployment_json/3` — the
+  # poll's own shape is `deployment_json/1` plus `stages` and `url` — so a read
+  # PAT already reads every field here, one row at a time, through a door that
+  # has been open since site-spawner D30. Nothing new crosses the boundary; only
+  # the ability to enumerate does.
+  #
+  # THE FENCE IS UNCHANGED AND IT IS THE WRAPPER'S. `with_team_site/3` resolves
+  # the site through `Registry.get_team_site(conn.assigns.current_team, id)`
+  # AFTER the credential gate, and a PAT is minted per (user, team), so
+  # `current_team` is the token's own team: another team's site id is the same
+  # 404 as one that never existed (existence-leak protection), and a non-member's
+  # PAT cannot name its way in. `site.id` from that lookup — never the path
+  # param — is what reaches `DeployLedger.list_page/2`.
+  #
+  # THE TIER IS PINNED IN THREE PLACES so it cannot drift back silently: the
+  # moduledoc route table above (`user(s)`, machine-checked by
+  # `router_moduledoc_table_test.exs` through `RouterTierLens`), the
+  # `read_routes/1` census and `@driven_routes` in
+  # `router_ability_matrix_test.exs`, and the low-privilege refusal arms beside
+  # them (non-member PAT 404, foreign-team site id 404, no credential 401).
   get "/v1/sites/:id/deployments" do
-    with_team_site(conn, fn site ->
+    with_team_site(conn, {:ability, "read"}, fn site ->
       limit = parse_limit(conn.query_params["limit"], 100, 200)
 
       # gh-6: production-only — branch previews are surfaced distinctly at
