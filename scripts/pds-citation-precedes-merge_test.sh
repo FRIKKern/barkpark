@@ -24,6 +24,17 @@
 #   9  a lens that counts any PDS-D it sees               -> UNCHECKED (2)  probe control
 #   8  the charter is absent on the base ref              -> UNCHECKED (2)
 #
+# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
+# scripts/pds-citation-precedes-merge_test.sh` step on the `PDS census / parity /
+# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml (that
+# job already TRIGGERS on these files via its `scripts/pds-*.sh` glob; it just
+# runs an enumerated list this file is not on), and .github/ is the gates lane's
+# fence, not the deploy/PDS lane's. Same handoff, same job, same reason as
+# scripts/pds-charter-anchors-check_test.sh:12. This exemption is a HANDOFF, not
+# a verdict: until that line lands, a revert of this predicate is caught by
+# running this file BY HAND, and by nothing else. Wiring row: see the PR body.
+# Baseline at authoring: 10 passed, 0 failed.
+#
 # Cases 6, 7 and 9 are the mutations that matter: they break the READER, not the
 # corpus, and each must refuse to print a verdict. An absence is never caught by
 # inspection — a broken reader and a clean corpus produce the same empty output,
