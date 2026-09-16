@@ -108,6 +108,14 @@ tooling/doc-truth/doc-refs.json
 # toolchains). Built at dev (`make dev`), at deploy (scripts/deploy-rebuild.sh),
 # and in CI (.github/workflows/pdrender-wasm.yml). The bp-wasm-exec.js loader IS
 # committed (host-stable text) and stays tracked.
+#
+# BOTH siblings are build outputs and BOTH are ignored. `make wasm` emits the
+# identity blob as well as the gzip one so that Plug.Static (gzip: true) can
+# answer /assets/bp-pdrender.wasm for an `Accept-Encoding: identity` client
+# instead of 404ing a url it advertises (het-bl-wasm-identity-404). The identity
+# file is the LARGER of the two (~11 MB vs ~3 MB) — committing it is exactly the
+# non-reproducible-artifact churn this block exists to prevent.
+api/priv/static/assets/bp-pdrender.wasm
 api/priv/static/assets/bp-pdrender.wasm.gz
 
 # Claude Code harness RUNTIME state — machine-local, never cloned. These lived
