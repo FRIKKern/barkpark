@@ -478,7 +478,7 @@ defmodule Barkpark.Content.Query do
     )
     |> maybe_scope_to_owner(type, dataset, opts)
     |> maybe_scope_to_grants(opts)
-    |> apply_filter_map(filter_map)
+    |> apply_filter_map(filter_map, dataset, opts)
   end
 
   # Row/ownership ACL (Phase 4, core-auth). Appends `scope_to_owner/2` ONLY when
@@ -550,7 +550,16 @@ defmodule Barkpark.Content.Query do
   # callers and `Content.Query` tests use them, so validation must accept them
   # exactly where a clause exists and nowhere else. Accepting them field-wide
   # would let a desk chip pass write-validation and then raise at render.
-  @doc_id_only_ops ~w(starts_with not_starts_with)
+  # `referencedBy` / `notReferencedBy` join the same list (Gyldendal parity E9).
+  # They are BUILDER-ONLY on purpose: their clause is a correlated EXISTS over
+  # `content_edges`, not a column compare, and the public wire door has no
+  # vocabulary for it. The desk structure is the caller.
+  @doc_id_only_ops ~w(starts_with not_starts_with referencedBy notReferencedBy)
+
+  # The two ops above bind a TYPE NAME, not a value of the id column. A blank or
+  # non-binary value has no clause and would otherwise fall to the catch-all and
+  # return every row — the same silent-unfiltered-set shape `hasStrong` refuses.
+  @reference_count_ops ~w(referencedBy notReferencedBy)
 
   # `in`/`nin` are the ONLY ops with an `is_list` clause in `apply_field_op/4`;
   # every other op binds a SCALAR param. Array-bracket syntax
@@ -762,18 +771,124 @@ defmodule Barkpark.Content.Query do
   # its own guard. `QueryController` still pre-guards so the HTTP surface keeps
   # its field-naming envelope (and its ordering behind `forbidden_query_field/4`);
   # this is the floor under every OTHER door.
-  defp apply_filter_map(query, map) when map_size(map) == 0, do: query
+  defp apply_filter_map(query, map, _dataset, _opts) when map_size(map) == 0, do: query
 
-  defp apply_filter_map(query, map) do
+  defp apply_filter_map(query, map, dataset, opts) do
     case validate_filter_map(map) do
       :ok -> :ok
       {:error, {field, op}} -> raise Barkpark.Content.InvalidFilterError.new(field, op)
     end
 
+    map = resolve_reference_count_ops(map, dataset, opts)
+
     Enum.reduce(map, query, fn
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
       {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
+  end
+
+  # `referencedBy: "publication"` names a TYPE; the clause needs that type's
+  # REFERENCE FIELD NAMES, which live in the schema. Resolved once here, at the
+  # chokepoint that already has `dataset` and `opts`, so `apply_field_op/4`
+  # stays a pure query builder.
+  #
+  # READ THE DOCUMENTS, NOT `content_edges`. The edge table is a MATERIALISED
+  # projection refreshed by `Barkpark.EdgeProjector` — correct for the graph
+  # view, wrong for a desk list, because an editor who has just linked a
+  # category would keep seeing it under «Kategorier uten utgivelser» until the
+  # projector next ran. This clause reads the referencing documents' own
+  # `content`, the same live predicate `Edges.find_referencing_docs/3` uses.
+  #
+  # AN UNKNOWN TYPE IS A REFUSAL, not an empty list. A desk node with a typo'd
+  # type would otherwise render an empty «med utgivelser» and a complete
+  # «uten utgivelser» — two plausible-looking lists, both lies.
+  defp resolve_reference_count_ops(map, dataset, opts) do
+    Map.new(map, fn
+      {field, %{} = ops} -> {field, Map.new(ops, &resolve_one_op(&1, field, dataset, opts))}
+      other -> other
+    end)
+  end
+
+  defp resolve_one_op({op, type}, field, dataset, opts)
+       when op in @reference_count_ops and is_binary(type) do
+    schemas = Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts))
+
+    case Enum.find(schemas, &(&1.name == type)) do
+      nil ->
+        raise Barkpark.Content.InvalidFilterError.new(field, op)
+
+      schema ->
+        {op, {type, reference_field_names(schema)}}
+    end
+  end
+
+  defp resolve_one_op(pair, _field, _dataset, _opts), do: pair
+
+  # Scalar `reference` fields and `arrayOf` fields whose element is a reference.
+  # Sanity's `references(^._id)` does not care which field carried the link, so
+  # neither does this: every reference-shaped field on the type is a candidate.
+  # No reference-shaped field on the referencing type means nothing there CAN
+  # point here, so the existence question answers false — the same verdict
+  # Sanity's `references()` gives, and the complement still partitions the set.
+  defp reference_exists(query, _type, [], negate?) do
+    if negate?, do: query, else: where(query, [d], false)
+  end
+
+  defp reference_exists(query, type, ref_fields, negate?) do
+    scalars = for {name, "reference"} <- ref_fields, do: name
+    arrays = for {name, "arrayOf"} <- ref_fields, do: name
+
+    if negate? do
+      where(
+        query,
+        [d],
+        not fragment(
+          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))",
+          ^type,
+          d.dataset,
+          d.dataset_id,
+          d.workspace_id,
+          d.project_id,
+          ^scalars,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
+          ^arrays,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id
+        )
+      )
+    else
+      where(
+        query,
+        [d],
+        fragment(
+          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))",
+          ^type,
+          d.dataset,
+          d.dataset_id,
+          d.workspace_id,
+          d.project_id,
+          ^scalars,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id,
+          ^arrays,
+          d.doc_id,
+          d.doc_id,
+          d.doc_id
+        )
+      )
+    end
+  end
+
+  defp reference_field_names(schema) do
+    for f <- schema.fields || [],
+        f["type"] == "reference" or
+          (f["type"] == "arrayOf" and get_in(f, ["of", "type"]) == "reference"),
+        is_binary(f["name"]),
+        do: {f["name"], f["type"]}
   end
 
   # `{field, ops}` -> the first {field, op} with no SQL arm, or nil.
@@ -794,6 +909,9 @@ defmodule Barkpark.Content.Query do
 
       Map.has_key?(ops, "hasStrong") and parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
         {field, "hasStrong"}
+
+      op = Enum.find(@reference_count_ops, fn op -> blank_type_value?(ops, op) end) ->
+        {field, op}
 
       op =
           Enum.find(Map.keys(ops), fn op ->
@@ -837,6 +955,13 @@ defmodule Barkpark.Content.Query do
   end
 
   defp unsupported_op?(_field, _op), do: true
+
+  defp blank_type_value?(ops, op) do
+    case Map.fetch(ops, op) do
+      {:ok, v} -> not (is_binary(v) and String.trim(v) != "")
+      :error -> false
+    end
+  end
 
   defp non_scalar_op_value?(ops, op) do
     case Map.fetch(ops, op) do
@@ -1252,6 +1377,46 @@ defmodule Barkpark.Content.Query do
   # no-op here, matching the strict-parser convention (`parse_number`,
   # `parse_ts`) — the public wire is 400-guarded up front by the controller's
   # `invalid_filter` check, which calls `parse_has_strong/1` too.
+  # ── REFERENCE-COUNT OPS (Gyldendal parity E9) ─────────────────────────────
+  #
+  # Sanity's agency desk has three lists Barkpark's filter language could not
+  # express, because each is a CORRELATED SUBQUERY over a different type:
+  #
+  #   _type == "category" && count(*[_type == "publication" && references(^._id)]) > 0
+  #   _type == "author"   && count(*[_type == "publication" && references(^._id)]) > 0
+  #   _type == "category" && count(*[_type == "publication" && references(^._id)]) == 0
+  #
+  # Only `> 0` and `== 0` appear in the real desk, so these two ops answer
+  # EXISTENCE and not a count. That is deliberate: an op named for a count would
+  # promise arithmetic this clause does not do, and the desk has never asked for
+  # it. They are also BUILDER-ONLY (`@doc_id_only_ops`), because the public wire
+  # door has no vocabulary for a subquery and a desk node is the only caller.
+  #
+  # TENANCY RIDES ON THE OUTER ROW, NOT ON opts. The referencing document must
+  # sit in the SAME dataset, workspace and project as the row being filtered, so
+  # the subquery correlates to `d`'s own scope columns rather than to a bound
+  # parameter. A call site cannot forget to scope it, because there is nothing
+  # to pass: a neighbour tenant's publication can never satisfy the EXISTS.
+  #
+  # THE COMPARISON IS AGAINST THE PUBLISHED ID, not the row's own `doc_id`. A
+  # draft row is stored as `drafts.<id>` while every reference field holds the
+  # PUBLISHED id, so comparing `doc_id` verbatim answers false for every draft
+  # twin — the same reason `Edges.find_referencing_docs/3` opens with
+  # `DraftId.published_id/1`.
+  #
+  # DRAFTS COUNT, like Sanity's desk. A referencing draft twin is its own row,
+  # and an editor who has linked a category from an unsaved publication expects
+  # that category to leave the «uten utgivelser» list at once.
+  defp apply_field_op(query, field, "referencedBy", {type, ref_fields})
+       when field in @id_fields do
+    reference_exists(query, type, ref_fields, false)
+  end
+
+  defp apply_field_op(query, field, "notReferencedBy", {type, ref_fields})
+       when field in @id_fields do
+    reference_exists(query, type, ref_fields, true)
+  end
+
   defp apply_field_op(query, field, "hasStrong", v) do
     case parse_has_strong(v) do
       {:ok, tag, min} ->
