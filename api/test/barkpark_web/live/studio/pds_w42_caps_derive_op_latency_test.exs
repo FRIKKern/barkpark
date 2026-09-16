@@ -385,8 +385,10 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
       # only the principal differs: a member USER and no token. This is the
       # shape that pays the grant `Repo.all`.
       user = user_principal!(token_assigns.current_workspace)
+
       user_assigns =
         token_assigns |> Map.put(:api_token, nil) |> Map.put(:current_user, user)
+
       user_caps = Caps.derive_from_assigns(user_assigns)
       assert user_caps.write == true
 
@@ -412,7 +414,10 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
 
   defp user_principal!(ws) do
     email = "w42-lat-#{System.unique_integer([:positive])}@example.com"
-    {:ok, user} = Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+    {:ok, user} =
+      Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
     {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
     user
   end
@@ -428,7 +433,8 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
     # steady-state op pays.
     Enum.each(1..20, fn _ -> Caps.derive_from_assigns(assigns) end)
 
-    q = queries_during(fn -> Enum.each(1..@ops, fn _ -> Caps.derive_from_assigns(assigns) end) end)
+    q =
+      queries_during(fn -> Enum.each(1..@ops, fn _ -> Caps.derive_from_assigns(assigns) end) end)
 
     {:reductions, r0} = Process.info(self(), :reductions)
     Enum.each(1..@ops, fn _ -> Caps.derive_from_assigns(assigns) end)
