@@ -1111,6 +1111,30 @@ function webBlock(themes = loadThemes()) {
   return lines.join("\n");
 }
 
+// ── surface: the starter templates' theme token region (stw-backlog-theme-matrix)
+// templates/search-starter/app/globals.css and its Astro twin carried a BYTE-COPY
+// of webBlock()'s output, and a copy cannot grow. Two defects followed, and both
+// are of the same shape — an ENUMERATION standing in for a RULE:
+//
+//   • design/themes/ ships FIVE skins; the copy enumerated FOUR. `iris` was
+//     silently absent from both starter templates, so a visitor selecting it got
+//     the evergreen fallback and no error anywhere.
+//   • 77 of 151 (selector, var) pairs had drifted from web/app/globals.css.
+//
+// Registering the region as an ARTIFACT built by webBlock() — the SAME builder the
+// web demo uses, not a template-specific near-copy — removes the class rather than
+// the instances: a SIXTH theme file reaches both templates on the next `--write`,
+// and no reviewer has to notice that it did not.
+//
+// It owns its OWN marker pair rather than the shared `BEGIN GENERATED: tokens`
+// one, because those files' outer BEGIN/END SNAPSHOT markers are read by
+// scripts/templates-literal-check.sh to exempt the block from the raw-palette
+// literal ban; a distinct inner pair leaves that script untouched and keeps the
+// generated region strictly narrower than the exemption it sits inside.
+export const TEMPLATE_TOKENS_MARKER_BEGIN =
+  "/* BEGIN GENERATED: template theme tokens (design/tokens.json + design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+export const TEMPLATE_TOKENS_MARKER_END = "/* END GENERATED: template theme tokens */";
+
 // ── surface: web TS token artifact (web/lib/tokens.gen.ts) ────────────────────
 // A whole generated TS module (kind "ts", like the Go files). Exports the LIGHT
 // canvas colours listings-map.tsx paints with, so no hex literal lives in the
@@ -2943,6 +2967,10 @@ export const ARTIFACTS = [
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
   { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
+  { name: "search-starter theme tokens", path: "templates/search-starter/app/globals.css", kind: "css",
+    markerBegin: TEMPLATE_TOKENS_MARKER_BEGIN, markerEnd: TEMPLATE_TOKENS_MARKER_END, build: webBlock },
+  { name: "astro-search-starter theme tokens", path: "templates/astro-search-starter/src/styles/globals.css", kind: "css",
+    markerBegin: TEMPLATE_TOKENS_MARKER_BEGIN, markerEnd: TEMPLATE_TOKENS_MARKER_END, build: webBlock },
   { name: "bp-graph palette (1/4)", path: "api/priv/static/assets/bp-graph.js", kind: "css",
     markerBegin: GRAPH_PALETTE_MARKER_BEGIN, markerEnd: GRAPH_PALETTE_MARKER_END, build: graphPaletteBlock },
   { name: "bp-graph palette (2/4)", path: "web/public/bp-graph.js", kind: "css",

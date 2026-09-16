@@ -10,10 +10,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ARTIFACTS, themePalette } from "./emit.mjs";
+import { ARTIFACTS, themePalette, loadThemes, TEMPLATE_TOKENS_MARKER_BEGIN } from "./emit.mjs";
 import { computeMirror } from "./paper-editor-mirror.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -202,4 +202,88 @@ test("mirror: a token scope mixing theme identity across comma-parts is a hard e
   ].join("\n");
   const bundle = "/* BEGIN GENERATED: paper-surface (x) */\nOLD\n/* END GENERATED: paper-surface */\n";
   assert.throws(() => computeMirror(surface, bundle), /mixes theme\/mode/);
+});
+
+// ── starter templates: the registry is a PREDICATE, not a list ───────────────
+// (stw-backlog-theme-matrix). The two search-starter editions used to carry a
+// hand-kept COPY of webBlock()'s output. A copy cannot grow, and it did not: a
+// fifth shipped skin (`iris`) was absent from both, and 77 of 151 (selector, var)
+// pairs had drifted. The region is now an emit.mjs artifact built by webBlock()
+// itself, and the three tests below hold that true by RULE — none of them names a
+// theme, a count, or a template path, so a sixth theme or a third template edition
+// is caught the same way the fifth and the second were not.
+const TEMPLATES_DIR = join(here, "..", "templates");
+
+// Every template file that declares a theme-identity block. Discovered by
+// WALKING the tree, never enumerated: a new template edition that pastes a
+// palette is a subject of this test the moment it lands.
+function templateThemeFiles() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name === "dist" || e.name === ".next") continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!/\.(css|scss)$/.test(e.name)) continue;
+      const text = readFileSync(p, "utf8");
+      if (text.includes('[data-bp-theme="')) out.push([p, text]);
+    }
+  };
+  walk(TEMPLATES_DIR);
+  return out;
+}
+
+test("templates: every theme-identity stylesheet under templates/ is a REGISTERED emit.mjs artifact", () => {
+  const found = templateThemeFiles();
+  // The control. An empty scan would make every assertion below vacuously true,
+  // and a silent zero is exactly how the iris hole survived: nothing looked.
+  assert.ok(found.length > 0,
+    "scanned templates/ and found NO stylesheet declaring [data-bp-theme=…]. " +
+    "Either the walk is broken or the templates lost their theme blocks; both are failures, not a pass.");
+
+  const registered = new Set(ARTIFACTS.map((a) => join(here, "..", a.path)));
+  const orphans = found.map(([p]) => p).filter((p) => !registered.has(p));
+  assert.deepEqual(orphans, [],
+    "these template stylesheets carry a [data-bp-theme=…] palette that NO design/emit.mjs " +
+    "ARTIFACTS entry owns, so `node design/emit.mjs --write` cannot reach them and a new " +
+    "theme will never arrive there:\n  " + orphans.join("\n  "));
+});
+
+test("templates: every SHIPPED theme has an on-disk identity block in every template stylesheet", () => {
+  const themes = loadThemes();
+  assert.ok(themes.length > 0, "loadThemes() returned nothing — the check below would be vacuous.");
+  const found = templateThemeFiles();
+  assert.ok(found.length > 0, "no template stylesheet found — see the control above.");
+
+  for (const [p, text] of found) {
+    for (const { name } of themes) {
+      assert.ok(text.includes(`[data-bp-theme="${name}"] {`),
+        `${p} has no [data-bp-theme="${name}"] block. design/themes/ ships it, so a visitor ` +
+        `selecting it silently renders the fallback. Run: node design/emit.mjs --write`);
+    }
+  }
+  // NEGATIVE control: a name design/themes/ does NOT ship must be absent, or the
+  // assertion above would pass on a file that simply contains every string.
+  const ghost = "__no_such_theme__";
+  assert.ok(!themes.some((t) => t.name === ghost), "fixture name collided with a real theme");
+  for (const [p, text] of found) {
+    assert.ok(!text.includes(`[data-bp-theme="${ghost}"] {`), `${p} matched a theme that does not exist`);
+  }
+});
+
+test("templates: the artifact DERIVES its theme blocks — an injected theme appears, unnamed by any literal", () => {
+  // The mutation arm. webBlock() is the shared builder, so this proves the
+  // template region grows from the THEME LIST rather than from a pasted snapshot:
+  // build with N=1 and with N=2 and the fixture block must be the difference.
+  const subjects = ARTIFACTS.filter((x) => x.markerBegin === TEMPLATE_TOKENS_MARKER_BEGIN);
+  assert.ok(subjects.length > 0, "no template theme-token artifact is registered — the loop below would be vacuous.");
+  for (const a of subjects) {
+    const one = a.build(EVER);
+    const two = a.build(THEMES);
+    assert.ok(!one.includes('[data-bp-theme="fixture"]'), `${a.path}: N=1 leaked the fixture theme`);
+    assert.ok(two.includes('[data-bp-theme="fixture"] {'), `${a.path}: N=2 did not render the injected theme`);
+    assert.ok(two.includes('[data-bp-theme="fixture"][data-theme="dark"] {'),
+      `${a.path}: the injected theme got a light block but no dark one — the two axes are orthogonal`);
+    assert.ok(two.length > one.length, `${a.path}: adding a theme did not grow the region`);
+  }
 });

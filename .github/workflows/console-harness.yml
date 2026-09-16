@@ -152,6 +152,8 @@ on:
       - "js/packages/react/src/status-vocab.gen.ts"
       - "templates/search-starter/public/bp-graph.js"
       - "templates/astro-search-starter/public/bp-graph.js"
+      - "templates/search-starter/app/globals.css"
+      - "templates/astro-search-starter/src/styles/globals.css"
       - ".github/required-checks.json"
       - ".github/workflows/cloud.yml"
       - "scripts/console-*"
