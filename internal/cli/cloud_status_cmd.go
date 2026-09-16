@@ -969,7 +969,16 @@ func slotUnitMarker(b cloudclient.Barkpark) string {
 		sites   []cloudclient.SlotUnit
 	)
 	for _, u := range p.SlotUnits {
-		if strings.Contains(u.Unit, slotUnitPrefix) {
+		// HasPrefix, not Contains: slotUnitPrefix is a PREFIX (its name and its
+		// own doc comment below both say so), and the two branches here are
+		// mutually exclusive — anything this call accepts is reported through
+		// slotUnitFailureClause and can never reach the site list. A `Contains`
+		// accepts the token ANYWHERE, so a spawned site unit that merely embeds
+		// it (`barkpark-site@barkpark-slot@blue__a.service` — systemd permits a
+		// further `@` inside an instance name) would be filed as half of the
+		// blue/green pair and its failure told as a slot failure. Pinned by
+		// TestASiteUnitEmbeddingTheSlotTokenIsStillASiteUnit.
+		if strings.HasPrefix(u.Unit, slotUnitPrefix) {
 			slots = append(slots, u)
 			switch {
 			case u.ActiveState == "active" && slotUnitRunning(u):
