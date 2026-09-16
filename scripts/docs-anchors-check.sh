@@ -669,11 +669,39 @@ HEADER_FILES=$(
   {
     find docs -name '*.md' -not -path 'docs/cli/fixtures/*'
     find . -maxdepth 2 \( -name 'CLAUDE.md' -o -name 'AGENTS.md' \) \
-      -not -path './_attic/*' -not -path './node_modules/*' \
-      -not -path './web/CLAUDE.md'
+      -not -path './_attic/*' -not -path './node_modules/*'
   } | sed 's|^\./||' | sort -u
 )
+# An IMPORT STUB owns no fact, so it cannot own a canonical-for topic and must
+# not be asked for a G1 header. This used to be `-not -path './web/CLAUDE.md'`
+# — a one-file exemption list, which is an enumeration standing where a
+# predicate belongs: web/CLAUDE.md fell out of G1 AND out of every corpus
+# derived from G1 (the §19 non-blocking-prose guard among them), and the next
+# `@AGENTS.md` stub anyone adds would have redded this gate for a non-violation.
+# The reason it was exempt is DERIVABLE and now derived: its entire content is
+# Claude Code `@path` import lines.
+# NO PIPELINE HERE, deliberately. The first cut was
+# `! printf '%s\n' "$body" | grep -qvE ...`, and under this file's
+# `set -o pipefail` a `grep -q` that exits early SIGPIPEs the printf, so the
+# pipeline returns 141, `!` turns that into TRUE, and EVERY doc in the repo was
+# classified an import stub — the G1 check went green with no subject. Loop in
+# the shell and there is no pipe to break.
+is_import_stub() {
+  local line seen=0
+  while IFS= read -r line; do
+    [ -n "${line//[[:space:]]/}" ] || continue
+    case "${line#"${line%%[![:space:]]*}"}" in
+      @*) seen=1 ;;
+      *) return 1 ;;
+    esac
+  done < "$1"
+  [ "$seen" = 1 ]
+}
 for f in $HEADER_FILES; do
+  if is_import_stub "$f"; then
+    echo "ok:   header $f (import stub: content is only @-imports, owns no fact)"
+    continue
+  fi
   h=$(header_line "$f")
   if printf '%s\n' "$h" | grep -Ec "$HEADER_RE" >/dev/null; then
     echo "ok:   header $f"
