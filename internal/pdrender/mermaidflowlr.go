@@ -3,7 +3,6 @@ package pdrender
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 )
 
 // ── flowchart LR — the responsive flex-direction transpose ───────────────────
@@ -120,7 +119,7 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 	for li, layer := range layers {
 		content := 0
 		for _, n := range layer {
-			if w := lipgloss.Width(sanitizeText(n.label)); w > content {
+			if w := mermaidLabelWidth(n.label); w > content {
 				content = w
 			}
 		}
@@ -146,11 +145,24 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 		return nil // won't fit horizontally → collapse to TD
 	}
 
-	// Vertical geometry: each rank stacks its boxes (height 3 each + vGap),
-	// vertically centered against the tallest rank. Compute node y-centers.
+	// Vertical geometry: each rank stacks its boxes, vertically centered against
+	// the tallest rank. A box is NOT a fixed 3 rows — a label carrying break tags
+	// renders 1..N text rows — so every offset below is driven by the box's OWN
+	// measured height. Hardcoding 3 here stamps a taller box into a 3-row slot and
+	// the canvas silently clips its bottom border off.
+	boxH := map[string]int{}
 	rankH := make([]int, len(layers))
 	for li, layer := range layers {
-		rankH[li] = len(layer)*3 + (len(layer)-1)*lrVGap
+		h := (len(layer) - 1) * lrVGap
+		for _, n := range layer {
+			bh := len(boxes[li][n.id])
+			if bh < 3 {
+				bh = 3
+			}
+			boxH[n.id] = bh
+			h += bh
+		}
+		rankH[li] = h
 	}
 	maxH := 0
 	for _, h := range rankH {
@@ -173,12 +185,12 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 	xRight := map[string]int{}
 	for li, layer := range layers {
 		rankX[li] = x
-		top := (maxH - rankH[li]) / 2
-		for i, n := range layer {
-			by := top + i*(3+lrVGap)
-			yc[n.id] = by + 1 // box mid row
+		by := (maxH - rankH[li]) / 2
+		for _, n := range layer {
+			yc[n.id] = by + boxH[n.id]/2 // box mid row
 			xLeft[n.id] = x
 			xRight[n.id] = x + rankW[li] - 1
+			by += boxH[n.id] + lrVGap
 		}
 		x += rankW[li] + lrBand
 	}
@@ -186,10 +198,10 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 	cv := newCanvas(W, maxH)
 	// Stamp boxes.
 	for li, layer := range layers {
-		top := (maxH - rankH[li]) / 2
-		for i, n := range layer {
-			by := top + i*(3+lrVGap)
+		by := (maxH - rankH[li]) / 2
+		for _, n := range layer {
 			stampBox(cv, rankX[li], by, boxes[li][n.id])
+			by += boxH[n.id] + lrVGap
 		}
 	}
 	// Accumulate ALL adjacent-rank edges' connectivity into one bit grid, THEN
@@ -295,7 +307,7 @@ func placeLRLabel(cv *canvas, label string, cx, ly int, ctx RenderCtx) {
 	if label == "" || ly < 0 {
 		return
 	}
-	txt := []rune(sanitizeText(label))
+	txt := []rune(mermaidLabelFlat(label))
 	start := cx - len(txt)/2
 	for i := range txt {
 		if cv.at(start+i, ly) != ' ' {
@@ -332,7 +344,7 @@ func stampBox(cv *canvas, x, y int, box []string) {
 // applies styling at readout via the kind mask. Same shape glyphs + wrapping.
 func renderNodeBoxPlain(n *mmNode, content int) []string {
 	g := shapeGlyphs(n.shape)
-	lines := wrapLines(sanitizeText(n.label), content)
+	lines := mermaidLabelLines(n.label, content)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
