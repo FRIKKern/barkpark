@@ -544,7 +544,11 @@ func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) 
 	if len(args) > 0 {
 		shell = args[0]
 	}
-	verbMap := completionVerbMap(ctx)
+	// The manifest cache supplies verbs/flags for MANIFEST nouns. Control-plane
+	// builtins (`bp cloud …`) are architecturally absent from every manifest, so
+	// their tree comes from completion_builtins.go and is UNIONed in here — one
+	// merge, so every emitter below sees one map and cannot disagree.
+	verbMap := mergeBuiltinVerbs(completionVerbMap(ctx))
 	flagMap := completionFlagMap(ctx)
 	nouns := completionNounList(verbMap)
 	globals := strings.Join(completionGlobals, " ")
@@ -584,6 +588,45 @@ func completionNounList(verbMap map[string][]string) string {
 	}
 	sort.Strings(nouns)
 	return strings.Join(nouns, " ")
+}
+
+// mergeBuiltinVerbs unions the ONE-WORD builtin completion paths (the
+// control-plane nouns in builtinCompletionPaths, plus every noun carrying a
+// verb-level built-in from the nounBuiltins registry) into the manifest-derived
+// verb map. A builtin noun then completes its verbs through exactly the same
+// position-2 machinery a manifest noun does — `bp cloud <TAB>` offers site,
+// status, deploy…, and `bp task <TAB>` offers create/frontier beside the
+// manifest verbs. The input map is never mutated (it is the cache's view).
+func mergeBuiltinVerbs(verbMap map[string][]string) map[string][]string {
+	merged := make(map[string][]string, len(verbMap)+8)
+	for n, v := range verbMap {
+		merged[n] = v
+	}
+	for _, key := range sortedBuiltinPathKeys() {
+		if hasSpace(key) {
+			continue
+		}
+		merged[key] = dedupeSorted(append(append([]string(nil), merged[key]...), builtinPathCandidates(key)...))
+	}
+	return merged
+}
+
+// builtinPathMap is the MULTI-WORD half of the same table: a space-joined
+// command prefix ("cloud site", "cloud site deploy") -> the tokens offered at
+// the next position. One-word prefixes are excluded because mergeBuiltinVerbs
+// already folded them into the position-2 verb map; listing them twice would
+// offer a noun's verbs again one position too late.
+func builtinPathMap() map[string][]string {
+	m := make(map[string][]string)
+	for _, key := range sortedBuiltinPathKeys() {
+		if !hasSpace(key) {
+			continue
+		}
+		if c := builtinPathCandidates(key); len(c) > 0 {
+			m[key] = c
+		}
+	}
+	return m
 }
 
 // completionVerbMap reads the ON-DISK manifest cache (never the network) and
@@ -723,6 +766,14 @@ func bashCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 	for _, key := range sortedFlagKeys(flagMap) {
 		fmt.Fprintf(&flagCases, "      %q) __bpflags=%s;;\n", key, shSingleQuote(strings.Join(flagMap[key], " ")))
 	}
+	// Builtin command TREES (`cloud site`, `cloud site deploy`) key on the FULL
+	// typed prefix, not the two-word noun/verb pair the manifest flags use — a
+	// control-plane path is three and four words deep. Single-quoted for the same
+	// reason the flag case is, and matched through the same expansion-free loop.
+	var pathCases strings.Builder
+	for _, key := range sortedFlagKeys(builtinPathMap()) {
+		fmt.Fprintf(&pathCases, "      %q) __bppath=%s;;\n", key, shSingleQuote(strings.Join(builtinPathMap()[key], " ")))
+	}
 	return `# bash completion for bp — eval "$(bp completion bash)" or source a saved copy.
 _bp_complete() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
@@ -746,6 +797,12 @@ _bp_complete() {
     case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in
 ` + flagCases.String() + `      *) ;;
     esac
+    # Builtin trees: match on every word typed so far, so "bp cloud site <TAB>"
+    # offers the site verbs and "bp cloud site deploy --<TAB>" offers --prebuilt.
+    local __bppath=""
+    case "${COMP_WORDS[*]:1:COMP_CWORD-1}" in
+` + pathCases.String() + `      *) ;;
+    esac
     # SECURITY: flag names are untrusted (manifest cache). compgen -W RE-EXPANDS
     # its wordlist — command substitution included — so a poisoned flag reaching
     # ` + "`compgen -W \"$__bpflags\"`" + ` would execute on TAB even though the
@@ -753,7 +810,7 @@ _bp_complete() {
     # variable word-splits but does not re-scan for $(...), so nothing runs.
     local __bpword
     COMPREPLY=()
-    for __bpword in $__bpflags $globals; do
+    for __bpword in $__bpflags $__bppath $globals; do
       case "$__bpword" in "$cur"*) COMPREPLY+=("$__bpword");; esac
     done
   fi
@@ -775,10 +832,15 @@ func zshCompletionScript(nouns, globals string, verbMap, flagMap map[string][]st
 	for _, key := range sortedFlagKeys(flagMap) {
 		fmt.Fprintf(&flagCases, "      %q) flags=(%s);;\n", key, shSingleQuoteEach(flagMap[key]))
 	}
+	// Builtin trees, keyed on the full typed prefix (see the bash emitter).
+	var pathCases strings.Builder
+	for _, key := range sortedFlagKeys(builtinPathMap()) {
+		fmt.Fprintf(&pathCases, "      %q) bpath=(%s);;\n", key, shSingleQuoteEach(builtinPathMap()[key]))
+	}
 	return `#compdef bp
 # zsh completion for bp — eval "$(bp completion zsh)" or save to a file on $fpath.
 _bp_complete() {
-  local -a nouns globals verbs flags
+  local -a nouns globals verbs flags bpath
   nouns=(` + nouns + `)
   globals=(` + globals + `)
   if (( CURRENT == 2 )); then
@@ -797,7 +859,12 @@ _bp_complete() {
     case "${words[2]} ${words[3]}" in
 ` + flagCases.String() + `      *) ;;
     esac
-    compadd -- $flags $globals
+    # Builtin trees: the whole typed prefix, so "bp cloud site deploy --<TAB>"
+    # reaches --prebuilt three words in, where the noun/verb key cannot.
+    case "${(j: :)words[2,CURRENT-1]}" in
+` + pathCases.String() + `      *) ;;
+    esac
+    compadd -- $flags $bpath $globals
   fi
 }
 compdef _bp_complete bp
@@ -831,12 +898,26 @@ func fishCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 			"complete -c bp -n '__fish_seen_subcommand_from %s; and __fish_seen_subcommand_from %s' -a '%s'\n",
 			parts[0], parts[1], fishSingleQuoteEscape(flagMap[key]))
 	}
+	// Builtin trees need an EXACT prefix match, which __fish_seen_subcommand_from
+	// cannot express (it is order-free and matches a token anywhere). __bp_path_is
+	// joins the typed tokens after `bp` and compares the whole string.
+	var pathLines strings.Builder
+	pm := builtinPathMap()
+	for _, key := range sortedFlagKeys(pm) {
+		fmt.Fprintf(&pathLines, "complete -c bp -n '__bp_path_is \"%s\"' -a '%s'\n",
+			fishSingleQuoteEscape([]string{key}), fishSingleQuoteEscape(pm[key]))
+	}
 	return `# fish completion for bp — ` + "`bp completion fish | source`" + `, or save to
 # ~/.config/fish/completions/bp.fish (then it loads automatically).
+function __bp_path_is
+  set -l toks (commandline -opc)
+  set -e toks[1]
+  test (string join " " $toks) = "$argv[1]"
+end
 complete -c bp -f
 complete -c bp -n '__fish_use_subcommand' -a '` + nouns + `'
 complete -c bp -n 'not __fish_use_subcommand' -a '` + globals + `'
-` + verbLines.String() + flagLines.String()
+` + verbLines.String() + flagLines.String() + pathLines.String()
 }
 
 // whoamiScopeLines renders whoami's scope block.
