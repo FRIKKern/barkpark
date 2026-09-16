@@ -218,6 +218,7 @@ elixir-nightly.yml|report|1440|2026-09-03: the long Elixir suite, nightly. Its r
 grip-suite.yml|periodic|1440|2026-09-06: nightly Grip suite (cron 03:25Z); carries push: branches [main]. Same 2026-09-06 c1 red as deploy-harnesses.
 landed-open-report.yml|report|1440|2026-09-07: daily ledger digest (cron 06:27Z), wired in #16640. Classified report, not critical: its own header states a red here means THE READ FAILED, findings exit 0 to the step summary, and it deliberately carries no push: arm so it renders no check run anywhere. A day late is a day late — and report class is what leaves check_fallbacks satisfied without inventing a trigger this workflow was designed not to have.
 main-gate-watch.yml|critical|30|2026-09-03: the second scream on main tip verdicts. push-refused:scripts/main-gate-watch.test.sh — a push arm was MEASURED harmful (wave 60 D721: 2 of 2 push runs red on tip 026c5b1d78 while main was green, because ~15 s after a merge no check-run row exists yet) and a committed test reds if one comes back. Its fallback is THIS probe: a workflow that may not carry a trigger fallback must at least be watched for silence.
+main-red-owner.yml|critical|60|2026-09-16 (task-6005859f86872319): hourly. Converts the verdict of scripts/main-red-predicate.sh into ONE deduped GitHub issue, so an ADVISORY workflow red on the tip of main has an owner instead of standing 11 h across 8 consecutive runs with nobody on it, which is exactly what posix-vacuous-green-census did. CRITICAL because its silence IS the defect it exists to abolish: nothing else in this tree notices a red that cannot block a merge. Carries push: branches [main] as its trigger fallback, so cron silence cannot hide a red introduced by a merge.
 paper-readers.yml|report|1440|2026-09-03: daily paper-reader digest; did not run at all on 09-03, which is the tolerated case for a report.
 pds-scratch-round-trip.yml|periodic|1440|2026-09-13: daily (cron 47 4 * * *) boot/verify/teardown of the PDS scratch target. SCHEDULE + workflow_dispatch ONLY and it may stay that way: its own header measures the run at >10 minutes (two full compiles) and calls a per-PR venue a WRONG build, so push/pull_request arms are deliberately absent. PERIODIC, not critical, precisely so check_fallbacks does not demand a trigger this workflow was designed not to have — the same argument landed-open-report.yml carries. A day-late drift report on crown infrastructure costs a day.
 pipefail-sigpipe-scan.yml|periodic|10080|2026-09-09: weekly repo-state scan for pipelines that can return 141 instead of a verdict (cron 41 5 * * 1, wired in #17081). PERIODIC because the whole point is the sweep, not the minute: the class it hunts is latent and static, a week late costs nothing, and it carries push: branches [main] plus a pull_request arm, so a week of cron silence still leaves it running on every merge. Same shape as the twoslash/grip-suite/deploy-harnesses rows.
@@ -657,6 +658,7 @@ EOF
 {"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:40:00Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "in_progress", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -678,6 +680,7 @@ FIX
   cat > "$tmp/drift-lag.ndjson" <<'FIX'
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T09:00:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -763,6 +766,7 @@ FIX
 {"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:40:00Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 {"path": "weekly-changelog.yml", "status": "completed", "created_at": "2026-08-04T11:40:00Z"}
@@ -809,6 +813,7 @@ FIX
 {"path": "main-gate-watch.yml", "status": "queued", "created_at": "2026-08-07T09:08:43Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX
@@ -847,6 +852,7 @@ FIX
 {"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T10:28:00Z"}
 {"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z"}
 {"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z"}
 {"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z"}
 {"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z"}
 FIX

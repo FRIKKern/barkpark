@@ -57,8 +57,14 @@ permissions:
   issues: write
 
 concurrency:
-  group: main-red-owner
-  cancel-in-progress: false
+  # PER PUSH SHA ON MAIN (scripts/main-run-concurrency-check.sh). GitHub keeps ONE
+  # not-yet-started run per group, so a flat group would let each merge evict the
+  # pending main run before a runner picks it up — 37 of 40 main runs cancelled
+  # when that was measured on 2026-09-02. A watcher evicted dark is the defect.
+  group: main-red-owner-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # NEVER a literal `true`: on the main ref (schedule and workflow_dispatch both
+  # run there) that self-cancels the watch dark.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   own-the-red:
