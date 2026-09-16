@@ -28,9 +28,15 @@ package cli
 // is copied into a per-request manifest.Context and rides downstream on the
 // normal dispatch seam, so Barkpark's own Auth.verify_token/1 stays the single
 // choke point and a missing/bogus bearer fails closed with the ordinary 401
-// envelope. No pre-verify middleware in v1 (charter D18: no bearer-gated
-// verify-only route exists, and the SDK's RequireBearerToken hard-401s tokens
-// without an expiry, which Barkpark tokens legitimately are).
+// envelope. D18 rules the SHAPE — token->scope forward-through, no verify-only
+// route, Auth.verify_token/1 as the single choke point; it says nothing about
+// the SDK middleware. The fail-closed behaviour is proved in code, not by the
+// charter: mcp_http_test.go TestMCPHTTPDenyPathsFailClosed (and
+// TestMCPHTTPForwardThroughBearer for the per-request token copy).
+//
+// No pre-verify middleware in v1 — D18 for the "no verify-only route" half, and
+// a Go-SDK code rationale for the rest: auth.RequireBearerToken hard-401s a
+// TokenInfo carrying no Expiration, which Barkpark tokens legitimately do not.
 
 import (
 	"context"
@@ -119,8 +125,9 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 // Why --http and not stdio: a stdio server is launched per client with the
 // user's own credential, so a manifest without the task noun is a real
 // misconfiguration the operator should see as an immediate non-zero exit. An
-// --http server holds NO ambient credential by design (forward-through, charter
-// D18), so its ONE startup manifest is always the ANONYMOUS projection of GET
+// --http server holds NO ambient credential by design (forward-through,
+// viable-everywhere charter D18), so its ONE startup manifest is always the
+// ANONYMOUS projection of GET
 // /v1/capabilities — which on a stock Barkpark carries doc/media/search/auth and
 // NO task noun. Failing fast there turns a correct, useful bridge into a systemd
 // crash loop (barkpark-mcp.service: NRestarts 2464, one exit-1 every 10 s) while
@@ -164,7 +171,8 @@ const mcpToolsetChatBestEffort = "chat-best-effort"
 // full registerPaperResources — read template + a best-effort downstream doc.ls
 // enumeration for resources/list; false (HTTP) registers the read TEMPLATE ONLY,
 // because this function runs per-request in stateless HTTP mode and an
-// enumeration GET per request would hammer the API (charter D18).
+// enumeration GET per request would hammer the API (viable-everywhere charter
+// D18: paper resources are template-only in HTTP mode).
 //
 // Under the default --tools tasks the curated task tools ARE the server, so a
 // missing task verb is a returned error (fail fast, decision 10). Under --tools
@@ -220,9 +228,9 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 		}
 		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
 		if toolset == mcpToolsetChatBestEffort {
-			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --tools chat over --http holds no ambient credential (forward-through, charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun — serving the rest of the curated chat set (document/search verbs, chat session tools, paper resources) anyway instead of exiting 1", strings.Join(curatedTaskToolNames, ", "), err)
+			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --tools chat over --http holds no ambient credential (forward-through, viable-everywhere charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun — serving the rest of the curated chat set (document/search verbs, chat session tools, paper resources) anyway instead of exiting 1", strings.Join(curatedTaskToolNames, ", "), err)
 		} else if toolset == mcpToolsetTasksBestEffort {
-			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --http holds no ambient credential (forward-through, charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun, and a caller's own bearer cannot restore them because the stateless per-request server is rebuilt from this same startup manifest; serving the chat tools and paper resources anyway instead of exiting 1 — point the server at a manifest that carries the task noun (--manifest / $BARKPARK_MANIFEST, or a Barkpark whose anonymous projection includes task) to get them back", strings.Join(curatedTaskToolNames, ", "), err)
+			out.errf("mcp serve: DEGRADED — curated task tools NOT registered (%s): register task tools: %v; --http holds no ambient credential (forward-through, viable-everywhere charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection, which carries no task noun, and a caller's own bearer cannot restore them because the stateless per-request server is rebuilt from this same startup manifest; serving the chat tools and paper resources anyway instead of exiting 1 — point the server at a manifest that carries the task noun (--manifest / $BARKPARK_MANIFEST, or a Barkpark whose anonymous projection includes task) to get them back", strings.Join(curatedTaskToolNames, ", "), err)
 		} else {
 			out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
 		}
@@ -249,7 +257,7 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 			if !bestEffort {
 				return nil, fmt.Errorf("register chat bridge tools: manifest cannot back curated --tools chat verb(s): %s (point the server at a manifest that declares them, or use --tools all)", strings.Join(missing, ", "))
 			}
-			out.errf("mcp serve: DEGRADED — --tools chat OMITTING %s: the manifest does not declare them; --http holds no ambient credential (charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection — serving the rest of the curated chat set rather than exiting 1", strings.Join(missing, ", "))
+			out.errf("mcp serve: DEGRADED — --tools chat OMITTING %s: the manifest does not declare them; --http holds no ambient credential (forward-through, viable-everywhere charter D18) so its startup manifest is the ANONYMOUS /v1/capabilities projection — serving the rest of the curated chat set rather than exiting 1", strings.Join(missing, ", "))
 		}
 	}
 
@@ -285,7 +293,9 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 // The template's fields and read handler deliberately mirror
 // registerPaperResources (mcp_resources.go) — kept as a sibling here rather
 // than a parameter on it so the resources file stays transport-agnostic and
-// byte-unchanged (charter D18: the transport split edits mcp_serve.go only).
+// byte-unchanged: the transport split edits mcp_serve.go only — the shape of
+// the ve-w2-remote-mcp-bearer slice, a code-structure rationale, not a D18
+// ruling.
 func registerPaperResourceTemplateOnly(out *writer, srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) {
 	getCmd, ok := m.Tree().Lookup("doc", "get")
 	if !ok {
@@ -315,7 +325,8 @@ func registerPaperResourceTemplateOnly(out *writer, srv *mcp.Server, g globals, 
 // runMCPServeHTTP serves the MCP protocol over Streamable HTTP on addr until
 // signalled. Stateless mode: the SDK calls getServer for every request, and the
 // per-request server is built around THAT request's Authorization bearer — the
-// forward-through design (charter D18). Returns the exit code.
+// forward-through design (viable-everywhere charter D18). Returns the exit
+// code.
 func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset string, nouns []string, addr string) int {
 	handler, err := newMCPHTTPHandler(out, g, ctx, m, toolset, nouns)
 	if err != nil {
@@ -359,7 +370,8 @@ func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.M
 
 // Timeouts and header cap for the `--http` listener. The endpoint is
 // UNAUTHENTICATED at the transport layer by design (forward-through bearer,
-// charter D18): every TCP peer that reaches the port gets a connection before
+// viable-everywhere charter D18): every TCP peer that reaches the port gets a
+// connection before
 // any credential is looked at, so slowloris / slow-body is an availability
 // hazard with no auth gate in front of it. A bare &http.Server{Handler: …}
 // applies NO deadline at all and lets a dribbling client hold a connection
@@ -411,7 +423,11 @@ func newMCPHTTPServer(handler http.Handler, limiter *mcpRateLimiter) *http.Serve
 }
 
 // newMCPHTTPHandler builds the Streamable-HTTP handler for `bp mcp serve
-// --http`. Forward-through bearer (charter D18):
+// --http`. Forward-through bearer (viable-everywhere charter D18 — the SHAPE:
+// token->scope per request, no verify-only route, Auth.verify_token/1 the
+// single choke point). The fail-closed proof is mcp_http_test.go
+// (TestMCPHTTPForwardThroughBearer, TestMCPHTTPDenyPathsFailClosed), not the
+// charter:
 //
 //   - The base context's Token is DISCARDED — the server process never uses an
 //     ambient credential (env, saved config, --token) on behalf of a remote
@@ -425,13 +441,19 @@ func newMCPHTTPServer(handler http.Handler, limiter *mcpRateLimiter) *http.Serve
 //   - Stateless: no Mcp-Session-Id bookkeeping, so getServer runs per request
 //     and one request's token can never bleed into another's.
 //   - DisableLocalhostProtection: the deploy shape is a loopback bind behind a
-//     reverse proxy (charter D19), where inbound Host headers are the public
+//     reverse proxy (viable-everywhere charter D19 — the /mcp Caddy path route
+//     over loopback :4010; the connectors charter's D34 is the ANALOGOUS but
+//     separate /connectors route on :4020, and is not what this serves), where
+//     inbound Host headers are the public
 //     hostname — the SDK's DNS-rebind guard would 403 exactly that. The proxy
 //     terminates TLS and owns origin policy.
 //
-// No RequireBearerToken pre-verify in v1 (charter D18): Barkpark has no
-// bearer-gated verify-only route, and the SDK middleware rejects TokenInfo
-// without an expiry while Barkpark tokens legitimately never expire.
+// No RequireBearerToken pre-verify in v1. Two independent reasons, only the
+// first of which is a charter ruling: (a) viable-everywhere charter D18 — the
+// forward-through shape leaves Auth.verify_token/1 the single choke point and
+// Barkpark exposes no bearer-gated verify-only route to pre-verify against;
+// (b) a Go-SDK code fact — auth.RequireBearerToken rejects a TokenInfo with no
+// Expiration, while Barkpark tokens legitimately never expire.
 func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifest.Manifest, toolset string, nouns []string) (http.Handler, error) {
 	// No ambient credential, ever: scrub the process token from the base context
 	// (belt-and-braces — getServer overwrites Token per request regardless).
