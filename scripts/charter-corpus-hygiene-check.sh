@@ -19,6 +19,12 @@
 #     `git ls-tree $BASELINE` — a PREDICATE over a path set, never a
 #     hand-maintained file list, so it cannot drift behind the corpus.
 #
+#     KNOWN, DELIBERATE EDGE: the predicate is PATH identity, not content
+#     lineage, so RENAMING a grandfathered charter reds it — the new path was
+#     not in the baseline tree. Rename detection via `git log --follow` is
+#     heuristic and would let a rename+edit launder a marker in, so the noisier
+#     direction is the safe one. The red names the file and says what to do.
+#
 # DELIBERATE EXCLUSIONS, stated here rather than left silent (ruling §"The cost"):
 #   tooling/grip/ledger/**      append-only evidence commons; a dated row must
 #                               quote what it observed. Rewriting one falsifies a
@@ -168,6 +174,8 @@ if [ -n "$B_HITS" ]; then
   echo "FAIL: [arm B] a NEW charter carries an infrastructure marker."
   echo "      Charters authored after the baseline must use placeholders"
   echo "      (<prod-ip>, <operator-email>, <ssh-key-path>). See docs/decisions/0008."
+      echo "      If this is a RENAMED grandfathered charter and not a new one, that is"
+      echo "      the known path-identity edge: move the baseline forward in this guard."
   printf '%s' "$B_HITS" | sed 's/^/      /'
   FAIL=1
 else
