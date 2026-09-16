@@ -2032,7 +2032,21 @@ defmodule BarkparkCloud.Notifications do
       attempts: 1,
       last_error: last_error,
       carrier: carrier,
-      content_sha256: Delivery.content_digest(email)
+      content_sha256: Delivery.content_digest(email),
+      # dr-w29 — and the two things a fingerprint structurally cannot give a
+      # reader who does not already hold a candidate render: the SUBJECT the
+      # transport was handed, verbatim, and the NUMERIC BLOCK parsed back OUT of
+      # that rendered subject. Same `email`, same seam, same honest default: a
+      # caller with no message in hand leaves both NULL.
+      #
+      # THE BODY IS STILL NOT STORED. The ruling is
+      # `Delivery.content_retention_ruling/0` and it is a function rather than a
+      # comment so a test can quote it — a digest BODY names sites, environments
+      # and deploy volume, and this table is read cross-team by
+      # /v1/operator/deliveries; the SUBJECT names one team's own rung counts and
+      # nothing else.
+      content_subject: Delivery.content_subject(email),
+      content_counts: Delivery.content_counts(email)
     })
     |> Repo.insert()
     |> case do

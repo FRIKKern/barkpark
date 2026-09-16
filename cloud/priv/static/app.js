@@ -4821,6 +4821,50 @@
     return '<span class="wh-del-proof"' + attr + ">" + esc(notifDeliveryProofLabel(d)) + "</span>";
   }
 
+  // dr-w29 — WHAT THE RECEIPT ACTUALLY SAID. `content_sha256` above settles a
+  // dispute and cannot start one: it answers "is this the body?" and can never
+  // answer "what did it say?" to a reader who does not already hold a candidate
+  // render. These two fields are the narrowest pair that CAN be read straight
+  // off the row — the rendered subject verbatim, and the numeric block the
+  // control plane parsed back OUT of that subject.
+  //
+  // THE BODY IS NOT HERE AND IS NOT STORED. A digest body names sites,
+  // environments and per-team deploy volume, and this same payload is served
+  // cross-team by the operator deliveries route. The subject names one team's
+  // own rung counts and nothing else, which is why the line sits exactly there.
+  //
+  // ABSENT MEANS ABSENT: a row with no stored subject reads "no subject stored"
+  // rather than vanishing, for the same reason the fingerprint segment does.
+  // The SENTENCE is authored by the control plane
+  // (`Notifications.Delivery.content_block_meaning/2`), never here — one author
+  // per caveat, or the caveat and the value drift apart.
+  function notifDeliveryCountsLabel(d) {
+    var c = d && d.content_counts;
+    if (c == null || typeof c !== "object") return "";
+    // The control plane's own word order, not this file's: re-sorting here would
+    // make the console and the subject line disagree about the same numbers.
+    var order = ["current", "behind", "diverged", "ahead_of_main", "unmeasured", "paused"];
+    var parts = [];
+    for (var i = 0; i < order.length; i++) {
+      var k = order[i];
+      if (Object.prototype.hasOwnProperty.call(c, k) && c[k] != null) {
+        parts.push(String(c[k]) + " " + k.replace(/_/g, " "));
+      }
+    }
+    return parts.join(" / ");
+  }
+
+  function notifDeliverySaidHtml(d) {
+    var subject = d && d.content_subject != null ? String(d.content_subject) : "";
+    var counts = notifDeliveryCountsLabel(d);
+    if (subject === "" && counts === "") return "";
+    var meaning = d && d.content_block_meaning != null ? String(d.content_block_meaning) : "";
+    var attr = meaning === "" ? "" : ' title="' + esc(meaning) + '"';
+    var label = subject === "" ? "no subject stored" : "said \u201c" + subject + "\u201d";
+    if (counts !== "") label = label + " \u00b7 " + counts;
+    return '<span class="wh-del-meta"' + attr + ">" + esc(label) + "</span>";
+  }
+
   // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
   // recipient leads (mono), a toned status pill, then channel · event · attempts,
   // the relative time, and — on a failure — the verbatim last_error on its own line.
@@ -4838,6 +4882,10 @@
     // because "what carried it" and "what it carried" are the same question
     // asked twice and a reader should not have to find them in two places.
     var proof = notifDeliveryProofHtml(d);
+    // dr-w29: and what it SAID rides beside what it CARRIED, because "can this
+    // row prove its body" and "what was this row's subject" are the same
+    // question at two strengths.
+    var said = notifDeliverySaidHtml(d);
     var meta = [channel, event, carrier].concat(attempts ? [attempts] : []).join(" &middot; ");
     var err = d.last_error != null && String(d.last_error) !== ""
       ? '<span class="wh-del-err">' + esc(d.last_error) + "</span>"
@@ -4850,6 +4898,7 @@
       deliveryStatusMeaningHtml(d) +
       '<span class="wh-del-meta">' + meta + "</span>" +
       proof +
+      said +
       '<span class="wh-del-spacer"></span>' +
       '<span class="wh-del-when">' + esc(fmtWhen(d.inserted_at)) + "</span>" +
       err +

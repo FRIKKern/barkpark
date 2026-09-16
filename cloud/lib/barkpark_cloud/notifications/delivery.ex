@@ -118,6 +118,13 @@ defmodule BarkparkCloud.Notifications.Delivery do
     # transport. NULL means this send was not fingerprinted — see
     # `content_digest/1` and `content_proof_meaning/1`.
     field :content_sha256, :string
+    # dr-w29: the rendered subject VERBATIM, and the numeric block parsed out of
+    # it. Both NULL for any send whose caller did not hand the receipt its
+    # `%Swoosh.Email{}`. See `content_subject/1`, `content_counts/1` and the
+    # RETENTION RULING above them — these are the only two columns on this table
+    # that carry rendered prose or rendered numbers, and both are fenced.
+    field :content_subject, :string
+    field :content_counts, :map
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -261,6 +268,187 @@ defmodule BarkparkCloud.Notifications.Delivery do
       "without the rendered message in hand. What it said cannot be proved from this row."
   end
 
+  # dr-w29 — THE RETENTION FENCES, as data. `content_retention_ruling/0` below
+  # is the prose; these three are what actually bind.
+  @subject_retention_limit 512
+  @content_count_words ~w(current behind diverged ahead_of_main unmeasured paused)
+  # `<digits> <word[ word…]>` — the shape `DigestEmail.subject/1` prints its
+  # rungs in. Anchored on nothing, because the subject is a sentence and not a
+  # format string; the CLAMP is the vocabulary above, not this pattern.
+  @count_pattern ~r/(\d+)\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)/
+
+  ## ── dr-w29: WHAT IT SAID, IN THE NARROWEST FORM THAT SAYS IT ─────────────
+
+  @doc """
+  THE RETENTION RULING for `content_subject` and `content_counts` (dr-w29 c1),
+  as a function so it is quotable by a test and by the console rather than
+  living in a PR body nobody can grep.
+
+  Written BEFORE the columns, because storing what the platform said to people
+  is a retention decision and not a technical one.
+
+  ## What is retained
+
+    * `content_subject` — the `Subject:` header of the message handed to the
+      transport, VERBATIM, and only when it is at or under
+      #{@subject_retention_limit} bytes. Over that it is NOT stored at all: a
+      truncated sentence reads as a complete one, and a half-subject in an audit
+      column is worse than an absence that says it is an absence.
+    * `content_counts` — a map whose KEY SPACE IS CLOSED
+      (`content_count_words/0`) and whose values are INTEGERS ONLY. It is parsed
+      back OUT of the rendered subject, so it is what a reader saw, not what the
+      renderer was handed.
+
+  ## What is deliberately NOT retained, and why the line is here
+
+  THE BODY. dr-w34 ruled it out and the reason has not weakened: a digest body
+  names site names, environments, per-window deploy volume and failure rates,
+  and `notification_deliveries` is read CROSS-TEAM by
+  `GET /v1/operator/deliveries`. Storing bodies there would re-open, from
+  behind, the disclosure `deliver_fleet_digest/1` partitions its payload per
+  team to prevent. `content_sha256` already proves the body: whoever claims what
+  a send said holds the render, re-renders, and compares.
+
+  The subject clears that bar where the body does not, and the difference is
+  measurable rather than asserted. `DigestEmail.subject/1` renders
+  `"Your Barkpark instances — <n> current / <n> behind / …"` — the recipient
+  team's own rung counts and NOTHING else. No site name, no environment, no
+  release string, no address, no other team's numbers. The counts are already
+  the recipient's own, on a row already stamped with the recipient's `team_id`.
+
+  ## Who can read it
+
+  Exactly the two routes that already read this row, with no new audience:
+
+    * `GET /v1/notifications/deliveries` — team-scoped, and a non-admin member
+      is further fenced to rows whose `recipient` is their OWN address. A
+      non-member of the team reads nothing on this route at all.
+    * `GET /v1/operator/deliveries` — platform operator only, cross-team, and
+      already cross-team for recipient ADDRESSES before these columns existed.
+
+  ## For how long
+
+  For the life of the delivery row. There is no retention sweeper over
+  `notification_deliveries` today — that is a stated gap, not a silence: these
+  columns inherit whatever policy the table eventually gets, and the fences
+  above (closed key space, integer values, verbatim-or-absent subject) are what
+  bound the exposure in the meantime.
+
+  ## The blast radius, as of this commit
+
+  ONE event. `record_delivery/7` fills these columns only from an `email`
+  argument, and `deliver_fleet_digest/1` is the only call site that passes one
+  (every transactional and alert caller passes six arguments). So the only rows
+  that carry a subject are `event: "fleet_digest"` rows.
+  """
+  @spec content_retention_ruling() :: String.t()
+  def content_retention_ruling do
+    "Retained: the rendered subject verbatim (at most #{@subject_retention_limit} bytes, " <>
+      "or nothing) and an integer-only count map over a closed key set. NOT retained: the " <>
+      "body — it names sites, environments and deploy volume, and this log is read " <>
+      "cross-team by the operator route. Readable by the recipient's own team " <>
+      "(members self-scoped to their own address) and by a platform operator; kept for the " <>
+      "life of the delivery row."
+  end
+
+  @doc """
+  The subject of the message handed to the transport, or `nil`.
+
+  VERBATIM OR ABSENT — never truncated. See `content_retention_ruling/0`.
+  """
+  @spec content_subject(Swoosh.Email.t() | any()) :: String.t() | nil
+  def content_subject(%Swoosh.Email{subject: subject}) when is_binary(subject) do
+    if byte_size(subject) <= @subject_retention_limit, do: subject, else: nil
+  end
+
+  def content_subject(_other), do: nil
+
+  @doc "The retention byte ceiling on `content_subject`."
+  @spec subject_retention_limit() :: pos_integer()
+  def subject_retention_limit, do: @subject_retention_limit
+
+  @doc """
+  The closed key vocabulary `content_counts/1` will store. Anything else the
+  subject says is DROPPED rather than recorded.
+
+  This is the fence that makes the column structurally incapable of becoming a
+  prose sink: a future subject change cannot smuggle a sentence in as a key,
+  because a key outside this list is not written and `changeset/2` refuses a row
+  that carries one.
+  """
+  @spec content_count_words() :: [String.t()]
+  def content_count_words, do: @content_count_words
+
+  @doc """
+  The NUMERIC BLOCK of the message handed to the transport — parsed back out of
+  the RENDERED SUBJECT, not read off the summary that produced it.
+
+  That direction is the whole point. A block copied from
+  `DigestEmail.summary/2`'s map would prove the renderer received those numbers
+  and never that it PRINTED them; a subject that dropped a rung, or printed the
+  wrong one, would be recorded as correct. Reading the render back means the
+  stored numbers are the numbers a human saw, which is what a receipt is for.
+
+  Returns `nil` — not `%{}` — when the subject states no count this vocabulary
+  knows, so "this send had no numeric block" and "this send's block was empty"
+  are not the same value.
+  """
+  @spec content_counts(Swoosh.Email.t() | any()) :: %{optional(String.t()) => integer()} | nil
+  def content_counts(%Swoosh.Email{subject: subject}) when is_binary(subject) do
+    counts =
+      @count_pattern
+      |> Regex.scan(subject)
+      |> Enum.reduce(%{}, fn [_whole, digits, words], acc ->
+        key = words |> String.downcase() |> String.replace(~r/\s+/, "_")
+
+        # FIRST OCCURRENCE WINS. A later stray phrase that happens to end in a
+        # vocabulary word must not overwrite the count the subject actually led
+        # with.
+        if key in @content_count_words and not Map.has_key?(acc, key) do
+          Map.put(acc, key, String.to_integer(digits))
+        else
+          acc
+        end
+      end)
+
+    if map_size(counts) == 0, do: nil, else: counts
+  end
+
+  def content_counts(_other), do: nil
+
+  @doc """
+  The one sentence that says what this row's stored subject and counts are — the
+  `status_meaning/1` / `content_proof_meaning/1` precedent, for the third time
+  and the same reason: a reader that renders a blank for an absence is
+  indistinguishable from one that renders a confident claim.
+  """
+  @spec content_block_meaning(String.t() | nil, map() | nil) :: String.t()
+  def content_block_meaning(subject, counts) when is_binary(subject) or is_map(counts) do
+    said =
+      if is_binary(subject),
+        do: "The subject line is stored verbatim. ",
+        else: "No subject was stored for this send. "
+
+    numbers =
+      if is_map(counts) and map_size(counts) > 0 do
+        "The counts were read back OUT of the rendered subject, so they are what a " <>
+          "reader saw. "
+      else
+        "This send stated no count this version knows how to read back. "
+      end
+
+    said <>
+      numbers <>
+      "The body itself is not stored — see content_sha256 to check a claim " <>
+      "about what it said."
+  end
+
+  def content_block_meaning(_subject, _counts) do
+    "Nothing about this send's content was stored beyond its fingerprint — the caller " <>
+      "recorded the receipt without the rendered message in hand. What it said cannot be " <>
+      "read from this row."
+  end
+
   def changeset(delivery, attrs) do
     delivery
     |> cast(attrs, [
@@ -274,7 +462,9 @@ defmodule BarkparkCloud.Notifications.Delivery do
       :last_error,
       :http_status,
       :carrier,
-      :content_sha256
+      :content_sha256,
+      :content_subject,
+      :content_counts
     ])
     # team_id is nullable: user-scoped identity emails (password-reset / verify /
     # email-change-code) belong to a user, not a team, so their delivery rows carry
@@ -285,6 +475,8 @@ defmodule BarkparkCloud.Notifications.Delivery do
     |> validate_inclusion(:channel, @channels)
     |> validate_inclusion(:carrier, @carriers)
     |> validate_publishable_last_error()
+    |> validate_length(:content_subject, max: @subject_retention_limit, count: :bytes)
+    |> validate_retained_counts()
     |> assoc_constraint(:team)
   end
 
@@ -335,4 +527,29 @@ defmodule BarkparkCloud.Notifications.Delivery do
   end
 
   defp publishable_last_error?(_value), do: false
+
+  # dr-w29 — THE FENCE THAT OUTLIVES `content_counts/1`. The parser above already
+  # drops everything outside the vocabulary, but a parser is one writer and a
+  # column is forever: this refuses the row itself, so a future call site that
+  # builds the map by hand cannot turn an integer column into a prose sink by
+  # forgetting the rule. Keys must be in the closed vocabulary; values must be
+  # integers. `nil` is always allowed — it is the honest value for a send whose
+  # message the receipt never saw.
+  defp validate_retained_counts(changeset) do
+    validate_change(changeset, :content_counts, fn :content_counts, value ->
+      cond do
+        not is_map(value) ->
+          [content_counts: "must be a map of count words to integers"]
+
+        Enum.all?(value, fn {k, v} -> to_string(k) in @content_count_words and is_integer(v) end) ->
+          []
+
+        true ->
+          [
+            content_counts:
+              "may only carry integer counts keyed by #{Enum.join(@content_count_words, ", ")}"
+          ]
+      end
+    end)
+  end
 end
