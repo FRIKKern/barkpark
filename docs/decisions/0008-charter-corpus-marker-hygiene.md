@@ -71,5 +71,7 @@ repo with many concurrent worktrees, and it belongs to the repo owner alone.
 This change is forward-only.
 
 **Also for the owner:** the same charter line that names the `gyldendal.no`
-address also names two further personal addresses on the `jarl.no` domain,
-outside this row's six markers and so untouched here.
+address also names two further personal addresses on the `jarl.no` domain, and
+`tooling/jarl-corpus-surveys/wave-a.json` carries a third on `jarl.email`. All
+three fall outside this row's six markers, so they are untouched here and the
+guard does not cover them. Widening the marker set is an owner call.
