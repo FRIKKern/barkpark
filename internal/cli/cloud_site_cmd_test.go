@@ -80,7 +80,12 @@ type siteCP struct {
 	// POST /v1/sites/:id/deployments/:dep/artifact — the prebuilt lane's second
 	// call. The recorded Content-Length is the point of the test: a piped upload
 	// arrives chunked (-1) and the server cannot reject it early.
-	artifactResp   fakeResp
+	artifactResp fakeResp
+	// artifactRespFn, when set, BUILDS the artifact response from the request the
+	// fake actually received — the only way a test can pin the client against a
+	// digest the control plane computed over the real wire bytes rather than one
+	// hard-coded beside them (ssw9-cli-prebuilt-followups).
+	artifactRespFn func(sha string, n int) fakeResp
 	artifactHits   int
 	artifactBody   []byte
 	artifactLen    int64
@@ -133,6 +138,10 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.artifactChunks = len(r.TransferEncoding) > 0
 			cp.artifactSha = r.Header.Get("X-Artifact-Sha256")
 			cp.artifactBody, _ = io.ReadAll(r.Body)
+			if cp.artifactRespFn != nil {
+				cp.write(w, cp.artifactRespFn(cp.artifactSha, len(cp.artifactBody)))
+				break
+			}
 			cp.write(w, cp.artifactResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++

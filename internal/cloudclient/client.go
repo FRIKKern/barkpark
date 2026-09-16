@@ -2060,6 +2060,32 @@ func (c *Client) SetEnv(ctx context.Context, siteID string, env map[string]strin
 // nothing but a test fixture noticed. `Bytes` is the only field any caller reads.
 type ArtifactUpload struct {
 	Bytes int64 `json:"bytes"`
+	// ssw9-cli-prebuilt-followups, the wire recheck against the MERGED control
+	// plane. Both keys are emitted by `upload_deployment_artifact/3` on main and
+	// neither was declared here, so json.Unmarshal dropped them in silence — the
+	// same failure SpawnSite.PrebuiltEnabled and SiteDeployment.SourceDigest
+	// record one wave earlier.
+	//
+	// SHA256 is the digest the control plane computed over the bytes IT received.
+	// The client already sends its own in X-Artifact-Sha256 and the CP 422s a
+	// mismatch, so this is the end-to-end CONFIRMATION rather than the check — and
+	// reading it back is what makes the round trip verifiable from the client side
+	// instead of trusted.
+	//
+	// Status is "already_uploaded" on the 200 retry arm and ABSENT on the fresh
+	// 201. That distinction is load-bearing: on `already_uploaded` the control
+	// plane deliberately does NOT re-start the driver, so a receipt claiming these
+	// bytes are about to be staged would be describing a deploy that started on an
+	// earlier request.
+	SHA256 string `json:"artifact_sha256,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// AlreadyUploaded reports whether the control plane answered the 200 retry arm —
+// the bytes were already stored under this deployment and NO driver was started
+// by this request.
+func (a ArtifactUpload) AlreadyUploaded() bool {
+	return strings.TrimSpace(strings.ToLower(a.Status)) == "already_uploaded"
 }
 
 // AddDomain appends a hostname to the site's domains array via

@@ -1927,6 +1927,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # re-measured on the MERGED tree. Two co-scoped PRs that are each green apart
   # will red main together, and the fix is always the same: measure, never sum.
   @go_tag_sites %{
+    # ssw9-cli-prebuilt-followups, MEASURED 2026-09-16 on this branch rebased onto
+    # origin/main: NEWLY DUPLICATED, 1 -> 2. `ArtifactUpload.SHA256` in
+    # internal/cloudclient/client.go joins the single existing
+    # `SiteDeployment.SourceDigest` declaration. The upload route answers with the
+    # digest the CONTROL PLANE computed over the bytes it received, and this branch
+    # reads it back so the round trip is verifiable from the client instead of
+    # trusted — until now json.Unmarshal dropped the key in silence. The NAME was
+    # already in the package union, so `@go_tag_pinned` does NOT move (the PIN
+    # CO-EDIT arm printed "0 of 4 scalar pin(s) no longer match this tree, and the
+    # SITE register moved too"); only this register can notice either site dying.
+    "artifact_sha256" => 2,
     "artifact_url" => 2,
     "as_of" => 5,
     "at" => 2,
@@ -2185,7 +2196,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.Status` — the run state the CLI verdict QUOTES rather than inventing.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one status site (17 -> 18). `SiteBuildLogStage.Status` — one stage's verdict.
     # 18 -> 19 (dr-w22-s5): `DeployBoxDoorStatus.Status`.
-    "status" => 19,
+    # ssw9-cli-prebuilt-followups, MEASURED 2026-09-16 on this branch rebased onto
+    # origin/main: 19 -> 20. `ArtifactUpload.Status` — "already_uploaded" on the
+    # control plane's 200 retry arm and ABSENT on the fresh 201, which is the field
+    # the prebuilt receipt BRANCHES on: on the retry arm no driver was started by
+    # this request, so claiming the bytes are about to be staged would date the
+    # deploy to a request that did not cause it. Rides free on the NAME union.
+    "status" => 20,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
