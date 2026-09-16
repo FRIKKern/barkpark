@@ -3827,6 +3827,18 @@ func (c *Client) WebhookDeliveries(ctx context.Context, id, dataset, webhookID s
 	return c.webhookProxy(ctx, "GET", withDataset(webhookBase(id)+"/"+esc(webhookID)+"/deliveries", dataset), nil)
 }
 
+// WebhookTestSend fires ONE synthetic `webhook.test` envelope at the endpoint —
+// POST .../webhooks/:webhook_id/test-send?dataset= (webhook.test_send,
+// :mutate). It is the same route the console's "Send test" button calls (GR45):
+// the instance delivers in a SINGLE synchronous attempt and answers with the
+// resulting delivery row, so the reply carries the endpoint's real verdict
+// (status + latency). The delivery is written with a NULL endpoint_id, so a
+// failing probe never perturbs the endpoint's auto-disable streak.
+func (c *Client) WebhookTestSend(ctx context.Context, id, dataset, webhookID string) (WebhookProxyResult, error) {
+	path := webhookBase(id) + "/" + esc(webhookID) + "/test-send"
+	return c.webhookProxy(ctx, "POST", withDataset(path, dataset), nil)
+}
+
 // WebhookReplay re-delivers one stored event to the webhook — POST
 // .../webhooks/:webhook_id/deliveries/:event_id/replay?dataset= (webhook.replay,
 // :mutate). Allowed even when the webhook is inactive (wave-C1 ratification d).

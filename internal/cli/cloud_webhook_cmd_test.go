@@ -1061,3 +1061,292 @@ func TestWebhookReconcileEmptyFleet(t *testing.T) {
 		t.Fatalf("empty report:\n%s", stdout)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// test-send — the CLI twin of the console's "Send test" button (GR45)
+// ---------------------------------------------------------------------------
+
+// webhookTestSendChip is the EXACT string cloud/priv/static/app.js's
+// webhookCliChip("test-send", instance, dataset) puts on the clipboard. It is a
+// literal here on purpose: this file is the CLI side of that contract, so if the
+// verb is ever renamed, the chip a user copies from the console stops parsing and
+// these tests are where that is caught. The chip names the verb + instance (the
+// same shape every other webhook chip uses); the operator appends the webhook id.
+const webhookTestSendChip = "bp cloud webhook test-send"
+
+// chipArgs splits a copied chip into the argv runCloudWebhook receives (the
+// leading "bp cloud webhook" is the binary + noun the dispatcher already ate).
+func chipArgs(chip string, tail ...string) []string {
+	fields := strings.Fields(chip)
+	if len(fields) < 3 {
+		return append([]string{}, tail...)
+	}
+	return append(fields[3:], tail...)
+}
+
+// okTestSendEnvelope is the instance's answer to a probe the endpoint ACCEPTED.
+const okTestSendEnvelope = `{"ok":true,"resource":"webhook","data":{"delivery":` +
+	`{"id":"d_test_1","status":"ok","last_status_code":200,"last_latency_ms":42,"attempts":1}}}`
+
+// TestWebhookTestSendRoutesAndPrintsVerdict: the copied chip's EXACT command
+// (plus the webhook id the operator appends) POSTs to the test-send proxy route
+// and prints the endpoint's real answer — status AND latency — never a canned ok.
+func TestWebhookTestSendRoutesAndPrintsVerdict(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/test-send") {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		writeEnvelope(w, 200, okTestSendEnvelope)
+	})
+	args := chipArgs(webhookTestSendChip+" "+testInstanceID, "wh_1")
+	stdout, stderr, code := runWebhook(t, "table", false, args...)
+	if code != exitOK {
+		t.Fatalf("exit = %d (stderr %q)", code, stderr)
+	}
+	if rec.count("POST", "/api/webhooks/wh_1/test-send") != 1 {
+		t.Fatalf("test-send did not route to the proxy route: %+v", rec.all())
+	}
+	// The verdict must carry the endpoint's OWN numbers. A line that says only
+	// "sent" would pass a mere substring check on the verb, so both are asserted.
+	for _, want := range []string{"ACCEPTED it", "code: 200", "latency: 42"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestWebhookTestSendChipParses: the chip's verb token is DISPATCHED, not met
+// with "unknown webhook command". This is the arm that reds if the verb is
+// renamed while the console keeps emitting the ratified spelling.
+func TestWebhookTestSendChipParses(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, okTestSendEnvelope)
+	})
+	_, stderr, _ := runWebhook(t, "table", false, chipArgs(webhookTestSendChip+" "+testInstanceID)...)
+	if strings.Contains(stderr, "unknown webhook command") {
+		t.Fatalf("the copied chip's verb does not parse: %q", stderr)
+	}
+}
+
+// TestWebhookTestSendForwardsDataset: the chip's off-default `--dataset <ds>`
+// reaches the proxy as the dataset selector, so a staging probe never fires at
+// the production endpoint.
+func TestWebhookTestSendForwardsDataset(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, okTestSendEnvelope)
+	})
+	chip := webhookTestSendChip + " " + testInstanceID + " --dataset staging"
+	if _, stderr, code := runWebhook(t, "table", false, chipArgs(chip, "wh_1")...); code != exitOK {
+		t.Fatalf("exit = %d (stderr %q)", code, stderr)
+	}
+	reqs := rec.all()
+	if len(reqs) != 1 {
+		t.Fatalf("want exactly one proxy call, got %+v", reqs)
+	}
+	if reqs[0].query != "dataset=staging" {
+		t.Fatalf("dataset not forwarded: query = %q", reqs[0].query)
+	}
+	// CONTROL: with no --dataset the same call must carry the documented default,
+	// so the assertion above is measuring forwarding and not just "a query exists".
+	rec2 := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, okTestSendEnvelope)
+	})
+	if _, _, code := runWebhook(t, "table", false, "test-send", testInstanceID, "wh_1"); code != exitOK {
+		t.Fatalf("default-dataset exit = %d", code)
+	}
+	if got := rec2.all()[0].query; got != "dataset=production" {
+		t.Fatalf("default dataset = %q, want dataset=production", got)
+	}
+}
+
+// TestWebhookTestSendRejectedIsNotOK is the heart of the row: the control plane
+// says 200/ok:true while the ENDPOINT answered 500. A canned "sent" would print a
+// success here. The verdict must be a REJECTION on stdout, with the auto-disable
+// note so the operator knows the probe is harmless.
+//
+// The EXIT stays 0 by default — that is the ratified `bp webhook test-send`
+// contract (run.go failOnFailedDeliveryFlag / docs/cli/error-exit-table.md), and
+// the second half of this test is the control that proves the exit is reading the
+// VERDICT and not the flag: the same flag against an ACCEPTED probe exits 0.
+func TestWebhookTestSendRejectedIsNotOK(t *testing.T) {
+	const rejected = `{"ok":true,"resource":"webhook","data":{"delivery":` +
+		`{"id":"d_test_2","status":"failed_giveup","last_status_code":500,"last_latency_ms":9,"attempts":1}}}`
+
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, rejected)
+	})
+	stdout, _, code := runWebhook(t, "table", false, "test-send", testInstanceID, "wh_1")
+	if code != exitOK {
+		t.Fatalf("default exit = %d, want 0 (the verdict rides a 2xx body by design)", code)
+	}
+	for _, want := range []string{"REJECTED it", "code: 500", "auto-disable streak"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "ACCEPTED it") {
+		t.Fatalf("a rejected probe claimed acceptance:\n%s", stdout)
+	}
+
+	// Opt-in: the flag turns the SAME rejected verdict into a non-zero exit, and
+	// must not change a byte of what is printed.
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, rejected)
+	})
+	flagged, _, flaggedCode := runWebhook(t, "table", false, "test-send", testInstanceID, "wh_1", "--fail-on-failed-delivery")
+	if flaggedCode != exitGeneric {
+		t.Fatalf("--fail-on-failed-delivery on a rejected probe: exit = %d, want %d", flaggedCode, exitGeneric)
+	}
+	if flagged != stdout {
+		t.Fatalf("the flag changed the rendered verdict:\nflagged: %q\ndefault: %q", flagged, stdout)
+	}
+
+	// CONTROL: the flag is reading the VERDICT, not its own presence — an accepted
+	// probe with the flag set still exits 0.
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, okTestSendEnvelope)
+	})
+	if _, _, okCode := runWebhook(t, "table", false, "test-send", testInstanceID, "wh_1", "--fail-on-failed-delivery"); okCode != exitOK {
+		t.Fatalf("--fail-on-failed-delivery on an ACCEPTED probe: exit = %d, want 0", okCode)
+	}
+}
+
+// TestWebhookTestSendUnconfirmedIsNeitherTickNorAccusation: a delivery with no
+// status code and no recognisable status (a pending row, or an instance too old
+// to echo a verdict) is reported AS unknown — not a green tick, and not an
+// accusation against a possibly-fine endpoint. It stays exit 0: the REQUEST
+// succeeded and nothing refuted the delivery.
+func TestWebhookTestSendUnconfirmedIsNeitherTickNorAccusation(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, `{"ok":true,"resource":"webhook","data":{"delivery":{"id":"d_test_3","status":"pending"}}}`)
+	})
+	stdout, _, code := runWebhook(t, "table", false, "test-send", testInstanceID, "wh_1")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0 for an unconfirmed verdict", code)
+	}
+	if !strings.Contains(stdout, "verdict unknown") || !strings.Contains(stdout, "reported no verdict") {
+		t.Fatalf("unconfirmed verdict not reported as unknown:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "ACCEPTED it") || strings.Contains(stdout, "REJECTED it") {
+		t.Fatalf("an unknown verdict was rendered as a decision:\n%s", stdout)
+	}
+}
+
+// TestWebhookTestSendServerErrors: a refused proxy call exits on the SHARED
+// ladder and prints NO verdict — "I could not send" must never read as a send.
+func TestWebhookTestSendServerErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   int
+		hint   string
+	}{
+		{"upstream 404", 404,
+			`{"ok":false,"error":{"code":"upstream_error","status":404,"detail":{"error":{"code":"not_found","message":"webhook not found"}}}}`,
+			exitNotFound, "webhook not found"},
+		{"unreachable", 502,
+			`{"ok":false,"reachable":false,"error":{"code":"instance_unreachable"}}`,
+			exitGeneric, "unreachable"},
+		{"too old", 502,
+			`{"ok":false,"error":{"code":"capability_unavailable","hint":"update this instance"}}`,
+			exitGeneric, "update this instance"},
+		{"upstream 500", 500,
+			`{"ok":false,"error":{"code":"upstream_error","status":500,"detail":{"error":{"code":"server_error","message":"boom"}}}}`,
+			exitGeneric, "boom"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+				writeEnvelope(w, tc.status, tc.body)
+			})
+			stdout, stderr, code := runWebhook(t, "table", false, "test-send", testInstanceID, "wh_1")
+			if code != tc.want {
+				t.Fatalf("exit = %d, want %d (stderr %q)", code, tc.want, stderr)
+			}
+			if !strings.Contains(stderr, tc.hint) {
+				t.Fatalf("stderr = %q, want it to carry %q", stderr, tc.hint)
+			}
+			if strings.Contains(stdout, "ACCEPTED it") || strings.Contains(stdout, "test event sent") {
+				t.Fatalf("a refused call printed a send verdict:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestWebhookTestSendJSONVerbatim: `-o json` emits the proxy envelope unchanged
+// (D4) — the CLI never becomes a second, drifting definition of the contract.
+func TestWebhookTestSendJSONVerbatim(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, okTestSendEnvelope)
+	})
+	stdout, _, code := runWebhook(t, "json", false, "test-send", testInstanceID, "wh_1")
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if strings.TrimSpace(stdout) != okTestSendEnvelope {
+		t.Fatalf("json output is not the envelope verbatim:\n%s", stdout)
+	}
+}
+
+// TestWebhookTestSendUsage: a missing webhook id is a usage error that issues NO
+// probe — a half-typed command must never fire a live request at an endpoint.
+func TestWebhookTestSendUsage(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a usage error fired a probe: %s %s", r.Method, r.URL.Path)
+	})
+	for _, args := range [][]string{
+		{"test-send", testInstanceID},
+		{"test-send", testInstanceID, "wh_1", "extra"},
+		{"test-send"},
+	} {
+		if _, _, code := runWebhook(t, "table", false, args...); code != exitUsage {
+			t.Fatalf("%v exit = %d, want %d", args, code, exitUsage)
+		}
+	}
+	if len(rec.all()) != 0 {
+		t.Fatalf("usage errors hit the network: %+v", rec.all())
+	}
+}
+
+// TestWebhookTestSendHelpListsVerb: `bp cloud webhook -h` advertises the verb.
+// The console's chip is copied by people who then read the help; a verb missing
+// from the help is a verb nobody finds.
+func TestWebhookTestSendHelpListsVerb(t *testing.T) {
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = "table"
+	if code := runCloudWebhook(w, globals{}, []string{"-h"}); code != exitOK {
+		t.Fatalf("help exit = %d", code)
+	}
+	if !strings.Contains(sout.String(), "test-send  <instance> <webhook-id>") {
+		t.Fatalf("help does not list test-send:\n%s", sout.String())
+	}
+}
+
+// TestWebhookTestVerdictShapes pins the verdict function itself against the shapes
+// the box and its older releases actually emit. The status CODE wins whenever
+// there is one; the status STRING only speaks when there is no code; anything
+// else is unconfirmed rather than a guess.
+func TestWebhookTestVerdictShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		del  map[string]any
+		want string
+	}{
+		{"2xx code", map[string]any{"last_status_code": float64(204)}, webhookTestAccepted},
+		{"lean status_code spelling", map[string]any{"status_code": float64(201)}, webhookTestAccepted},
+		{"4xx code", map[string]any{"last_status_code": float64(404)}, webhookTestRejected},
+		{"5xx code beats an ok status string", map[string]any{"last_status_code": float64(503), "status": "ok"}, webhookTestRejected},
+		{"string-typed code", map[string]any{"last_status_code": "200"}, webhookTestAccepted},
+		{"null code falls through to the status", map[string]any{"last_status_code": nil, "status": "ok"}, webhookTestAccepted},
+		{"failed_giveup, no code", map[string]any{"status": "failed_giveup"}, webhookTestRejected},
+		{"pending", map[string]any{"status": "pending"}, webhookTestUnconfirmed},
+		{"empty row", map[string]any{}, webhookTestUnconfirmed},
+	}
+	for _, tc := range cases {
+		if got := webhookTestVerdict(tc.del); got != tc.want {
+			t.Errorf("%s: verdict = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
