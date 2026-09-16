@@ -5,10 +5,19 @@
 // the exact same `internal/pdrender` code `bp paper view` runs; there is no
 // second/imitation renderer. It exposes one JS global:
 //
-//	bpRenderTUI(blocksJSON string, width int, mode string, themeID string) -> htmlString
+//	bpRenderTUI(blocksJSON string, width int, mode string, themeID string,
+//	            imageMap object) -> htmlString
 //
 // mode is the light/dark switch ("dark" default); themeID is the optional theme
 // identity (which emitted skin — "evergreen" default). The two are orthogonal.
+//
+// imageMap is the OPTIONAL {src: base64} object the reader's TUI toggle builds
+// by pre-fetching each image block's src. It becomes the RenderCtx
+// ImageResolver, so pdrender paints its half-block mosaic (imagemosaic.go)
+// instead of the "(view in Studio)" box. Every bound — same-origin, MIME,
+// bytes, dimensions, total memory — is enforced in Go by internal/wasmimages,
+// NOT by the calling page: a refused entry simply resolves to nil and keeps
+// the honest box, so a malformed or hostile map can never fail the render.
 //
 // The render produces ANSI (SGR), which we convert to self-contained HTML
 // (colored <span>s inside a <pre>) here in Go so the caller gets a
@@ -26,7 +35,39 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/FRIKKern/barkpark/internal/pdrender"
+	"github.com/FRIKKern/barkpark/internal/wasmimages"
 )
+
+// decodeImageMap turns the JS {src: base64} object into a validated image map.
+// Anything that is not a plain object — undefined, null, a string, an array of
+// junk — yields an empty map, which leaves ctx.ImageResolver nil and every
+// image block on its labeled box. Non-string values are skipped rather than
+// coerced: a number or nested object is not an encoded image.
+func decodeImageMap(v js.Value) *wasmimages.Map {
+	if v.Type() != js.TypeObject || v.IsNull() {
+		return nil
+	}
+	keys := js.Global().Get("Object").Call("keys", v)
+	if keys.Type() != js.TypeObject {
+		return nil
+	}
+	n := keys.Length()
+	if n > wasmimages.MaxEntries {
+		n = wasmimages.MaxEntries
+	}
+	order := make([]string, 0, n)
+	entries := make(map[string]string, n)
+	for i := 0; i < n; i++ {
+		k := keys.Index(i).String()
+		val := v.Get(k)
+		if val.Type() != js.TypeString {
+			continue
+		}
+		order = append(order, k)
+		entries[k] = val.String()
+	}
+	return wasmimages.Build(order, entries)
+}
 
 func renderTUI(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
@@ -49,6 +90,11 @@ func renderTUI(_ js.Value, args []js.Value) any {
 		themeID = args[3].String()
 	}
 
+	var images *wasmimages.Map
+	if len(args) > 4 {
+		images = decodeImageMap(args[4])
+	}
+
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	blocks, err := pdrender.Decode([]byte(blocksJSON))
@@ -57,6 +103,9 @@ func renderTUI(_ js.Value, args []js.Value) any {
 	}
 	theme := pdrender.ThemeFor(themeID, mode)
 	ctx := pdrender.RenderCtx{Width: width, Theme: theme, Profile: pdrender.TrueColor}
+	if images.Len() > 0 {
+		ctx.ImageResolver = images.Resolve
+	}
 	ansi := pdrender.DefaultRegistry(theme).RenderDoc(blocks, ctx)
 	return ansiToHTML(ansi)
 }
