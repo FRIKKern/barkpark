@@ -11,6 +11,15 @@
     "this file answers 'WHO'. Without it the watcher's issue is addressed to the repo,",
     "which is the same nobody one layer out.",
     "",
+    "THE INCIDENT WORKFLOW HAS NO ROW HERE ANY MORE, AND THAT IS THE GUARD WORKING.",
+    "posix-vacuous-green-census.yml was put BACK on the PR path on 2026-09-16 after the",
+    "same class recurred: 36 consecutive red census runs on main, from 9b9e26c23 onward,",
+    "for two freshly-landed unguarded scripts. On the PR path it has an owner by",
+    "construction again -- the author of the PR that adds the unguarded script -- so the",
+    "derived population no longer contains it, and workflow-owner-check.sh reds on a",
+    "STALE row for an on-PR workflow exactly as it reds on a MISSING row for an off-PR",
+    "one. It did, which is how this row came out.",
+    "",
     "THE POPULATION IS DERIVED, NEVER CURATED. A workflow belongs here iff it carries a",
     "`push:` arm and NO `pull_request:` arm -- i.e. it is off the PR path, so only the",
     "watcher can see its red. scripts/workflow-owner-check.sh recomputes that set from",
@@ -48,10 +57,6 @@
     "pipefail-sigpipe-scan.yml": {
       "owner": "gates",
       "why_off_pr": "a whole-tree census of shell scripts; its subject is the tree, so a per-PR run re-scans ~700 files to re-derive an unchanged verdict."
-    },
-    "posix-vacuous-green-census.yml": {
-      "owner": "gates",
-      "why_off_pr": "whole-tree census of interpreter-guard vacuity; same shape as above. THIS IS THE INCIDENT WORKFLOW: it stood red on main for 11 hours unowned, which is why this file exists."
     },
     "release-artifact.yml": {
       "owner": "cli",

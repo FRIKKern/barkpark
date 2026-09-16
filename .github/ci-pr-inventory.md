@@ -355,12 +355,35 @@ workflow with no `pull_request` arm starts no run.
 | workflow | check runs it published per PR | fired on | moved from | moved to | reason, in its own words |
 |---|---|---|---|---|---|
 | `cli-release-cadence.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: *"a red here is cleared by an ACT OF RELEASE, not by a change to the PR"*. A verdict that no PR can change has no business rendering on every PR — and it is in DRIFT today (5 commits past `cli-v1.21.0`), so it has been publishing an unclearable advisory red on every unrelated PR. |
-| `posix-vacuous-green-census.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: the *"population is derived from the tree on every run"*. The subject is the tree; `push: main` sees every new member within minutes of its merge, named, by the same predicate. |
+| `posix-vacuous-green-census.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: the *"population is derived from the tree on every run"*. The subject is the tree; `push: main` sees every new member within minutes of its merge, named, by the same predicate. **REVERSED 2026-09-16 — see the note below the table; the `pull_request` arm is back and this row is HISTORY, not the current state.** |
 | `pipefail-sigpipe-scan.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: *"This gate asks a question about the REPO STATE, not about a diff, so its primary venue is push-to-main plus a schedule"*. The HIGH-confidence ratchet against `scripts/pipefail-sigpipe-baseline.txt` reds identically on a main push — a rise is a rise whichever side of the merge measures it. |
 
 All three already branch on `github.event_name != 'pull_request'` inside their
 dispatcher and **run everything** on that branch, so nothing below the dispatcher
 needed editing and no job silently stops running.
+
+### `posix-vacuous-green-census.yml` was moved BACK on 2026-09-16
+
+The move above cost more than it saved, and the cost is a measurement, not an
+argument. The last green census on main was `743ae6b85` (21:26:31 +02). The very
+next commit, `9b9e26c23` (#18662), added `scripts/charter-corpus-hygiene-check.sh`
+with a process substitution and no interpreter guard; `ee125c6ae` (#18707) then
+added `scripts/doc-drift-check.sh` the same way. **36 consecutive census runs on
+main failed**, across roughly three hours, and for all of them
+`sh scripts/charter-corpus-hygiene-check.sh` exited **0** having compared nothing
+— the exact vacuous green the census exists to catch, live on main.
+
+The reason given for the move — `push: main` "sees every new member within
+minutes of its merge, named" — is true, and it is the problem: the thing it sees
+is already merged. The two check runs per PR are the price of the offender's own
+PR owning the red instead of every lane inheriting it. The arm is back, still
+with no workflow-level `paths:` (the filter stays on the `census:` job's `if:`
+over the `changes` output, so the context skips rather than going absent), and it
+still blocks nothing — the workflow publishes no context in the required set.
+
+`cli-release-cadence.yml` and `pipefail-sigpipe-scan.yml` are NOT reversed: their
+reasons are about verdicts a PR cannot change, which is a different argument from
+this one. This reversal is not evidence against theirs.
 `.github/required-checks.json` is byte-unchanged.
 `.github/main-push-workflows.txt` is byte-unchanged: its tiers are derived from
 the `push:` arm, which no edit here touches.

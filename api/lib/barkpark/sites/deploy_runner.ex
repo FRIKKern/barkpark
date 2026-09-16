@@ -1659,6 +1659,13 @@ defmodule Barkpark.Sites.DeployRunner do
       :ok ->
         spawn_run(state, req)
 
+      # An external-source site: the Provisioner deliberately did NOT touch
+      # <slug>/src (it is a clone / unpacked artifact, not ours to overwrite).
+      # The deploy proceeds exactly as it does after a marker-fresh no-op — the
+      # source is expected to already be on the box.
+      {:ok, :external_source_preserved} ->
+        spawn_run(state, req)
+
       {:error, {:provision_failed, reason}} ->
         described = describe_provision_reason(reason)
 

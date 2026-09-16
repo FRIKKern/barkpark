@@ -168,4 +168,101 @@ defmodule Barkpark.Sites.DeployRequestTest do
                DeployRequest.new(params(%{"artifact_b64" => 42, "artifact_sha256" => 7}))
     end
   end
+
+  # ── source_kind: WHO OWNS <slug>/src ──────────────────────────────────────
+  #
+  # This axis decides whether `Barkpark.Sites.Provisioner` may DELETE the site's
+  # source tree. Both directions matter and are asserted here: a value read as
+  # content-bound when it is not clobbers the customer's code; a value read as
+  # external when it is not leaves the box with no source and BUILD dies.
+
+  describe "source_kind" do
+    test "defaults to :content_bound when absent, empty, or from a pre-guard caller" do
+      assert {:ok, req} = DeployRequest.new(%{"slug" => "s", "build_id" => "b"})
+      assert req.source_kind == :content_bound
+      assert DeployRequest.content_bound?(req)
+      refute DeployRequest.external_source?(req)
+
+      assert {:ok, blank} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "b", "source_kind" => ""})
+
+      assert blank.source_kind == :content_bound
+    end
+
+    test "every accepted wire value maps to its atom, and ownership is decided BOTH ways" do
+      expected = %{
+        "content-bound" => {:content_bound, true},
+        "external-git" => {:external_git, false},
+        "external-artifact" => {:external_artifact, false}
+      }
+
+      # The table covers the enum EXACTLY — a kind added to DeployRequest with
+      # no ownership decision here reds this line.
+      assert Enum.sort(Map.keys(expected)) == DeployRequest.source_kinds()
+
+      for {wire, {atom, content_bound?}} <- expected do
+        assert {:ok, req} =
+                 DeployRequest.new(%{"slug" => "s", "build_id" => "b", "source_kind" => wire})
+
+        assert req.source_kind == atom, "#{wire} must parse to #{inspect(atom)}"
+
+        assert DeployRequest.content_bound?(req) == content_bound?,
+               "#{wire}: content_bound? must be #{content_bound?}"
+
+        # The two predicates are exact complements — no third state can open a
+        # gap that reads as "safe to delete".
+        assert DeployRequest.external_source?(req) == not content_bound?
+      end
+    end
+
+    test "an unknown source_kind is a 400, NEVER a silent drop to content-bound" do
+      for bogus <- ["external", "git", "Content-Bound", "content_bound", "../x", "  "] do
+        result = DeployRequest.new(%{"slug" => "s", "build_id" => "b", "source_kind" => bogus})
+
+        # Bound first so the message is REACHABLE (assert/2 drops a message
+        # given to the `assert pattern = expr` macro form).
+        assert match?({:error, "invalid_source_kind", _}, result),
+               "#{inspect(bogus)} was ACCEPTED (#{inspect(result)}) — an un-upgraded " <>
+                 "box would silently default it to content-bound and clobber the source"
+
+        {:error, _code, msg} = result
+        assert msg =~ "external-git"
+      end
+    end
+
+    test "a non-string source_kind is a 400" do
+      for bogus <- [123, %{}, ["external-git"], true] do
+        assert {:error, "invalid_source_kind", _} =
+                 DeployRequest.new(%{"slug" => "s", "build_id" => "b", "source_kind" => bogus})
+      end
+    end
+
+    test "a hand-built struct carrying an UNDECLARED kind is externally owned (fail-closed)" do
+      # new/1 cannot produce this — the enum is closed. A future migration or a
+      # hand-rolled struct can. The safe default for "who owns this tree?" is
+      # NOT the answer that deletes it.
+      req = %DeployRequest{slug: "s", mode: :deploy, source_kind: :external_svn}
+      refute DeployRequest.content_bound?(req)
+      assert DeployRequest.external_source?(req)
+    end
+
+    test "source_kind is INDEPENDENT of the prebuilt artifact pair" do
+      artifact = Base.encode64("prebuilt-dist-bytes")
+      sha = :crypto.hash(:sha256, "x") |> Base.encode16(case: :lower)
+
+      assert {:ok, req} =
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b",
+                 "artifact_b64" => artifact,
+                 "artifact_sha256" => sha
+               })
+
+      # A prebuilt deploy stages a dist/, not a src/ — it stays content-bound,
+      # which is exactly the behaviour that lane has today.
+      assert DeployRequest.prebuilt?(req)
+      assert req.source_kind == :content_bound
+      assert DeployRequest.content_bound?(req)
+    end
+  end
 end
