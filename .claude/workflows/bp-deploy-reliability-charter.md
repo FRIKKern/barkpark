@@ -3470,10 +3470,41 @@ Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
   unread residue is **TWO** keys (`req_per_s`, `p95_ms`), not fourteen.
 
 - **D166 — `tmp_dep_site_live` IS PRODUCTION SCHEMA IN NO MIGRATION, AND IT IS WORTH 236x–498x.**
+  [**AMENDED 2026-09-16, dw30 — THE HEADLINE IS TRUE OF 2026-08-07 AND FALSE OF TODAY'S TREE. `tmp_dep_site_live`
+  IS DECLARED SCHEMA.** The RULED line below was carried out: the migration
+  `cloud/priv/repo/migrations/20260807140000_index_deployments_site_became_live.exs` landed 2026-08-07 as #10193,
+  commit `b79d4441e` — `git merge-base --is-ancestor b79d4441e origin/main` returns 0, so it is an ancestor of
+  `origin/main`, not an open PR. Its `up` runs
+  `cloud/priv/repo/migrations/20260807140000_index_deployments_site_became_live.exs`@`execute "DROP INDEX IF EXISTS tmp_dep_site_live"`
+  once and then creates `deployments_site_became_live_index` over the identical columns and predicate; its `down`
+  deliberately does not recreate the hand-made object. **THIS AMENDMENT CLAIMS ONLY THAT THE INDEX IS DECLARED IN A
+  MIGRATION ON `origin/main`. IT DOES NOT CLAIM THE OBJECT IS GONE FROM THE PRODUCTION DATABASE** — that is a live
+  `pg_indexes` read, owner-only, recorded in `$ORCH/BLOCKED-ON-USER.md`, and nothing below was re-run against
+  cloud-db-1. The two claims fail apart: `DROP INDEX IF EXISTS` is a logged no-op on any database that never
+  carried the drift, and the migration having run says nothing about which database it ran on. **Read the live
+  question with `deploy/db-undeclared-index-census.sh`**, which diffs live `pg_indexes` against the migration
+  tree's declared set across all 300 declared names and exits 2 CANNOT READ rather than reporting a comfortable
+  zero — residue, not intent. **DO NOT act on the pre-amendment headline by re-CREATEing the object by hand or by
+  "fixing the drift": that re-introduces exactly what #10193 ended.**]
   `CREATE INDEX tmp_dep_site_live ON deployments (site_id, became_live_at) WHERE became_live_at IS NOT NULL`
   is live on cloud-db-1 (53 pages / 424 kB, `pg_class.oid` 35410 — the HIGHEST of any object on the table, so
   created last, by hand). `git grep tmp_dep_site_live origin/main` returns nothing, and neither does a grep
-  over all 327 worktrees. Measured by actual `DROP INDEX` inside a rolled-back transaction (the assignment's
+  over all 327 worktrees
+  [**AMENDED 2026-09-16, dw30 — CORRECTED BY RUN, NOT BY ASSERTION.** That grep was re-run, not re-quoted, at
+  `origin/main` **`003c5caee`** (this PR's base) on **2026-09-16T22:38Z**. It does NOT return nothing. Verbatim:
+  `git grep -c tmp_dep_site_live origin/main` prints four rows, whose trailing figures are per-file LINE COUNTS,
+  not line numbers: the charter itself 8, the migration
+  `cloud/priv/repo/migrations/20260807140000_index_deployments_site_became_live.exs` 6,
+  `deploy/db-undeclared-index-census.sh` 11, and
+  `tooling/grip/ledger/tmp-dep-site-live-index-worth-2026-08-07.md` 15 — i.e. **40 matching LINES across 4 files**;
+  `git grep --only-matching -h tmp_dep_site_live origin/main | wc -l` prints 40 too, so here lines and occurrences
+  coincide. Carry the unit: `grep -c` counts LINES, and quoting a line count as an occurrence count is how a
+  correct number acquires a wrong story. THE CONTROL, because an empty grep and a broken grep look identical:
+  `git grep -c deployments_site_became_live_index origin/main` returns non-zero hits over the same revision, so a
+  zero above would have meant a broken read, not an absent string. **The zero in the original sentence was a true
+  reading of 2026-08-07, before #10193; it is not a property of the tree, and this count will move again.**
+  Re-derive with `git grep -c tmp_dep_site_live origin/main` and record the revision beside the number or do not
+  record it (D614's rule).] Measured by actual `DROP INDEX` inside a rolled-back transaction (the assignment's
   suggested `enable_indexscan=off` is INVALID — Postgres falls back to a Bitmap Index Scan on the SAME index
   and under-states the cost 14.5x): 7 d census **48.4 ms with / 24,089 ms without** (498x, 815x buffers);
   24 h **35.4 ms / 8,349 ms** (236x); site-scoped **21.7 ms / 4,615 ms** (213x). Wave 10's own
