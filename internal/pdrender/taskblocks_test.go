@@ -56,7 +56,9 @@ func TestTaskBlocksNeverPanic(t *testing.T) {
 			"labels":   []any{nil, ""},
 		}}},
 		// task-board: missing key (unresolved), query-only, wrong-typed, empty,
-		// all-empty row, unknown status (→ open, dropped from the fixed lanes),
+		// all-empty row, unknown status (→ the `open` lane, fail-open; placement is
+		// asserted by TestTaskBoardOffLadderStatusHomesInOpen, this case only proves
+		// it does not panic),
 		// non-object rows.
 		{Type: "task-board", Attrs: map[string]any{}},
 		{Type: "task-board", Attrs: map[string]any{"query": map[string]any{"type": "task"}}},
@@ -473,5 +475,93 @@ func TestTaskBoardOpenLaneOnlyClaimable(t *testing.T) {
 		if strings.Contains(openLane, "row-"+status) {
 			t.Errorf("a %q row landed in the CLAIMABLE `open` lane — `bp task ready` serves that lane, so this manufactures phantom ready work:\n%s", status, openLane)
 		}
+	}
+}
+
+// TestTaskBoardOffLadderStatusHomesInOpen is the Go leg of the fail-open half of
+// the cancel-lane ruling (task-f2747c0f7bfe1735, residual of
+// task-881952f8d8417f4b). Giving `cancel` a lane of its own fixed the DROP, but
+// it also removed the only lifecycle status that could ever reach the lane
+// fallback — which left the fallback itself unmeasured on this surface. The
+// board-level arms that exist assert where a KNOWN status lands; nothing asserted
+// what happens to a status the manifest does not carry at all.
+//
+// The rule: an off-ladder status must still be SHOWN, in the `open` lane, because
+// roleForStatus fails open to the manifest's default_role. Vanishing is the worse
+// failure — a reader cannot tell "no such work" from "this surface will not draw
+// it" — and that is precisely the defect the cancel lane was cut to end.
+//
+// TWO ARMS:
+//   - LOUD: an off-ladder row lands in `open` and is visible. Reverting the
+//     fail-open default in roleForStatus (e.g. returning "" or cancelRole for an
+//     unrecognized status) drops the row off the board or misfiles it into the
+//     terminal lane, and this reds.
+//   - QUIET: the KNOWN rows in the same snapshot are untouched by the fallback —
+//     `ready` stays in Ready and `cancelled` stays in Cancelled. A "fix" that
+//     widened the fallback into a catch-all (sweeping real statuses into `open`)
+//     reds here even though the loud arm would still pass.
+func TestTaskBoardOffLadderStatusHomesInOpen(t *testing.T) {
+	reg := testRegistry()
+	const offLadder = "not-a-status"
+	// PRECONDITION: the status really is off the ladder. Without this the test
+	// could silently become an assertion about a rung the manifest DOES carry.
+	if role := roleForStatus(offLadder); role != "open" {
+		t.Fatalf("precondition: roleForStatus(%q) = %q, want the fail-open default %q", offLadder, role, "open")
+	}
+	for _, rung := range statusLadder {
+		if rung == offLadder {
+			t.Fatalf("precondition: %q is a manifest rung, so this test measures a KNOWN status, not the fallback", offLadder)
+		}
+	}
+
+	got := renderBlock(reg, Block{Type: "task-board", Attrs: map[string]any{"snapshot": []any{
+		map[string]any{"title": "off-ladder row", "status": offLadder},
+		map[string]any{"title": "claimable row", "status": "ready"},
+		map[string]any{"title": "abandoned row", "status": "cancelled"},
+	}}}, 40)
+
+	// LOUD: the off-ladder row is on the board at all.
+	if !strings.Contains(got, "off-ladder row") {
+		t.Fatalf("an off-ladder status (%q) VANISHED from the board — the fail-open default is gone, got:\n%s", offLadder, got)
+	}
+
+	// laneOf slices the stacked render into the named lane: its header line
+	// through the next lane header. Stacked layout (width 40) makes lane order
+	// line order, and renderBlock already ansi.Strips.
+	laneOf := func(label string) string {
+		at := strings.Index(got, label)
+		if at < 0 {
+			t.Fatalf("expected a %q lane, got:\n%s", label, got)
+		}
+		end := len(got)
+		for _, other := range []string{"Open", "Ready", "In progress", "Blocked", "Done", "Considering", "Researching", "Cancelled"} {
+			if other == label {
+				continue
+			}
+			if o := strings.Index(got, other); o > at && o < end {
+				end = o
+			}
+		}
+		return got[at:end]
+	}
+
+	openLane := laneOf("Open")
+	// LOUD: and it landed in `open` specifically, not in some other lane.
+	if !strings.Contains(openLane, "off-ladder row") {
+		t.Errorf("an off-ladder status (%q) did not home in the `open` lane — the manifest default_role is %q, got Open lane:\n%s\nfull board:\n%s", offLadder, "open", openLane, got)
+	}
+
+	// QUIET: the fallback did not widen. Known rungs keep their own lanes, and in
+	// particular the terminal rung is NOT swept into the claimable lane.
+	for _, unwanted := range []string{"claimable row", "abandoned row"} {
+		if strings.Contains(openLane, unwanted) {
+			t.Errorf("a KNOWN-status row (%q) was swept into the `open` lane — the off-ladder fallback widened into a catch-all:\n%s", unwanted, openLane)
+		}
+	}
+	if !strings.Contains(laneOf("Ready"), "claimable row") {
+		t.Errorf("the `ready` row left its own lane, got Ready lane:\n%s", laneOf("Ready"))
+	}
+	if !strings.Contains(laneOf("Cancelled"), "abandoned row") {
+		t.Errorf("the `cancelled` row left its own lane, got Cancelled lane:\n%s", laneOf("Cancelled"))
 	}
 }
