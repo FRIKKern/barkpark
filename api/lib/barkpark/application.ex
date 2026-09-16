@@ -183,13 +183,20 @@ defmodule Barkpark.Application do
         # store query is safe; refresh/0 is self-guarded, so a not-yet-ready
         # store (e.g. unmigrated DB at test boot) leaves the env baseline
         # untouched. MUST run before the banner so it reports stored shares too.
-        Barkpark.Sharing.refresh()
+        # NOT in `:one_shot`: a backfill that is not serving anything must not
+        # read the shares table, and must never print a banner announcing LAN
+        # readers this node does not expose (it has no Endpoint). Skipping the
+        # refresh also leaves the live `:shares` list untouched for the node
+        # that IS serving on the same box.
+        if boot_mode() != :one_shot do
+          Barkpark.Sharing.refresh()
 
-        # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
-        # this is a no-op (active?/0 is false) and nothing is logged. When
-        # active, warn loudly with every reachable reader URL so the operator
-        # knows the box is now exposed on the local network.
-        log_sharing_banner()
+          # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
+          # this is a no-op (active?/0 is false) and nothing is logged. When
+          # active, warn loudly with every reachable reader URL so the operator
+          # knows the box is now exposed on the local network.
+          log_sharing_banner()
+        end
 
         # Fresh-install safety: the Postgres search engine's fuzzy/typo recovery
         # relies on pg_trgm (similarity()). If the extension is missing — common
@@ -208,9 +215,9 @@ defmodule Barkpark.Application do
   @typedoc """
   How much of the tree `start/2` puts up. See `child_specs/5`.
   """
-  @type boot_mode :: :full | :seed
+  @type boot_mode :: :full | :seed | :one_shot
 
-  @boot_modes [:full, :seed]
+  @boot_modes [:full, :seed, :one_shot]
 
   @doc """
   The boot mode for THIS node, read from `:barkpark, :boot_mode` (default
@@ -273,6 +280,10 @@ defmodule Barkpark.Application do
     * `:full` — verbatim `child_specs/4`; what `bin/barkpark start` boots.
     * `:seed` — the canonical list MINUS `BarkparkWeb.Endpoint`, with the `Oban`
       child started INERT (`queues: false, plugins: false`).
+    * `:one_shot` — the canonical list MINUS `BarkparkWeb.Endpoint` and `Oban`,
+      with NO plugin boot workers, NO sync children and NO self-update children
+      (the three list ARGUMENTS are ignored, not filtered). What
+      `Barkpark.OneShot.boot!/0` puts up for an operator one-shot — see below.
 
   `:seed` exists for `Barkpark.Release.seed/0`. The seed bodies are ordinary
   application code — `Barkpark.Seeds.run/0` needs the live `Plugins.Registry`
@@ -288,10 +299,53 @@ defmodule Barkpark.Application do
   child added above appears in seed mode too and boot ORDER is preserved
   verbatim. Hand-picking a subset here would fork the order from the canonical
   list and silently change what a seeded instance contains (charter D9).
+
+  `:one_shot` exists for the operator one-shot MIX TASKS —
+  `mix barkpark.edges.backfill`, `barkpark.media.backfill`,
+  `barkpark.paper.backfill_block_ids`, `barkpark.paper.composition_migrate` —
+  which used to call `Mix.Task.run("app.start")` and therefore booted the FULL
+  tree with whatever runtime env they inherited. On guerrilla, 2026-09-02
+  08:28–08:35Z, that meant `PHX_SERVER` was set and the backfill's endpoint
+  tried to bind the LIVE slot's port: `Running BarkparkWeb.Endpoint with Bandit
+  1.12.0 at http failed, port 4001 already in use`, and the run died before the
+  backfill started. The same boot brought up a SECOND Oban draining the live
+  queues, the Github `DrainWorker` (which raised an `Oban.Registry` error before
+  Oban was up), and `SchemaBootstrap`'s onixedit codelist seeders (one hit
+  `ERROR 57014 query_canceled` under the 60 s statement_timeout).
+
+  Why the three list arguments are IGNORED rather than filtered: `plugin_children`
+  are pollers/drainers/DrainWorkers — a backfill needs none of them, and the one
+  plugin contribution it DOES need (the edge extractors) is a PURE resolver-chain
+  call off `Barkpark.Plugins.Registry`, which stays in the tree. `sync_children`
+  and `self_update_children` are the LAN/pull sync and the upstream release poller.
+  Both are dormant-by-default anyway; a one-shot never wants either.
+
+  Why `Oban` is dropped OUTRIGHT here where `:seed` keeps it inert: a seed WRITES
+  documents through `Content.apply_mutations`, which calls `Oban.insert/1`. A
+  backfill sweep does not — `Projector.rebuild_scope/3` is a DELETE-then-
+  `Content.add_edges` transaction with no job insert on the path. Dropping the
+  child is what makes "this one-shot cannot touch the live queues" a property of
+  the tree rather than a promise about its configuration.
+
+  Why `Barkpark.SchemaBootstrap` STAYS, when the incident names its codelist
+  seeders: MEASURED, not reasoned. Dropping it took the dev corpus's projected
+  edge count from 962 to ZERO — the schema registration it performs is what the
+  extractor chain resolves reference fields against, and a one-shot that boots
+  without it writes an empty graph while exiting 0. Only the expensive half is
+  suppressed, through the gate the module already has:
+  `Barkpark.SchemaBootstrap` skips `run_all_codelist_seeders/0` +
+  `CodelistHealth.log_boot_audit/0` in `:one_shot` mode, which is the
+  `ERROR 57014 query_canceled` the incident actually hit.
   """
   @spec child_specs(list(), keyword(), list(), list(), boot_mode()) :: [
           Supervisor.child_spec() | {module(), term()} | module()
         ]
+  def child_specs(_plugin_children, oban_config, _sync_children, _self_update_children, :one_shot) do
+    []
+    |> child_specs(oban_config, [], [], :full)
+    |> Enum.reject(&one_shot_excluded?/1)
+  end
+
   def child_specs(plugin_children, oban_config, sync_children, self_update_children, :seed) do
     plugin_children
     |> child_specs(oban_config, sync_children, self_update_children, :full)
@@ -433,6 +487,15 @@ defmodule Barkpark.Application do
         BarkparkWeb.Endpoint
       ]
   end
+
+  # The `:one_shot` exclusion predicate, spelled out beside the clause that uses
+  # it. Everything NOT named here survives, so a child added to the `:full` list
+  # above is present in one-shot mode too (the same derived-not-hand-picked rule
+  # `:seed` follows) — the list names what a one-shot must NOT do, and each entry
+  # carries the incident that put it there.
+  defp one_shot_excluded?(BarkparkWeb.Endpoint), do: true
+  defp one_shot_excluded?({Oban, _config}), do: true
+  defp one_shot_excluded?(_other), do: false
 
   # C4-1: fold plugin-contributed Oban Cron entries into the host's Oban
   # keyword config. Pure, side-effect-free, and unit-testable (see

@@ -90,7 +90,16 @@ defmodule Barkpark.SchemaBootstrap do
       # unrelated async test setups. Codelist DATA isn't boot-seeded in test
       # anyway (these writes fail), so tests that need it seed explicitly; skipping
       # the boot pass removes the flake source without changing what's available.
-      if Application.get_env(:barkpark, :run_boot_codelist_seeders, true) do
+      # ALSO skipped in `:one_shot` (task-557cf9a71e949768). An operator
+      # one-shot — `mix barkpark.edges.backfill` and friends, booted by
+      # `Barkpark.OneShot.boot!/0` — needs this module's SCHEMA registration
+      # (without it the dev corpus projects 0 edges instead of 962) but has no
+      # use for codelist DATA, and on guerrilla 2026-09-02 the onixedit seeder
+      # run by a backfill's boot hit `ERROR 57014 query_canceled` against the
+      # live box's 60 s statement_timeout. Gate, not deletion: the serving node
+      # and the seed eval still run every seeder exactly as before.
+      if Barkpark.Application.boot_mode() != :one_shot and
+           Application.get_env(:barkpark, :run_boot_codelist_seeders, true) do
         Barkpark.Plugins.Registry.run_all_codelist_seeders()
 
         # BOOT SELF-CHECK. Every seeder is rescued — EDItEUR rescues its own,
