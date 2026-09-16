@@ -592,3 +592,100 @@ func TestResolvePrecedence(t *testing.T) {
 		t.Errorf("server: active should beat default, got %q", ctx3.Server)
 	}
 }
+
+// Parse must reject a hostile FLAG or ARG name at the same trust boundary it
+// rejects a hostile noun/verb. A flag name is emitted as `--<name>` into the
+// completion scripts the user is told to eval (completionFlagMap in
+// internal/cli/builtins.go) and into help output; before this check the
+// noun/verb loop was the ONLY value validation in Parse, so `flags[].name` and
+// `args[].name` reached those consumers entirely unvalidated.
+//
+// MUTATION PROOF: deleting either the args or the flags loop in manifest.Parse
+// reds the corresponding half of this test. The final subtest is the QUIET arm —
+// it reds instead if the predicate is tightened onto the legitimate shape.
+func TestParseRejectsUnsafeFlagAndArgNames(t *testing.T) {
+	// A well-formed scaffold with one legit noun+command; each case swaps in a
+	// hostile name for the single arg, or the single flag.
+	withParam := func(argName, flagName string) []byte {
+		return []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[{"name":"doc","summary":"s"}],"commands":[{"id":"doc.get","noun":"doc","verb":"get","summary":"s","http":{"method":"GET","path_template":"/x"},"auth_tier":"read","args":[{"name":` +
+			jsonStr(argName) + `,"required":true,"type":"string","summary":"s"}],"flags":[{"name":` +
+			jsonStr(flagName) + `,"type":"string","summary":"s"}],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]}`)
+	}
+
+	hostile := []string{
+		`x";touch /tmp/pwn;#`,     // the completion-eval RCE payload
+		`$(touch /tmp/pwn)`,       // command substitution
+		"`touch /tmp/pwn`",        // backtick substitution
+		`a'b`,                     // breaks a single-quoted interpolation
+		`a b`,                     // whitespace splits the shell word list
+		`a;rm -rf /`,              // command separator
+		`a$IFS`,                   // shell variable
+		`-lead`,                   // a leading hyphen: `---lead` / reads as another flag
+		`help` + "\n" + `--force`, // newline smuggles a second token into help output
+		`a%s`,                     // format metacharacter into a Printf-shaped emitter
+		``,                        // empty: `--` is the end-of-flags sentinel
+		`a=b`,                     // `=` splits a flag from its value
+	}
+
+	for _, name := range hostile {
+		if _, err := Parse(withParam(name, "limit")); err == nil {
+			t.Errorf("Parse accepted hostile arg name %q; want rejection", name)
+		}
+		if _, err := Parse(withParam("id", name)); err == nil {
+			t.Errorf("Parse accepted hostile flag name %q; want rejection", name)
+		}
+	}
+
+	// QUIET ARM. Every arg/flag name the REAL manifest ships must still parse.
+	// This is not a guess: these are measured off the live
+	// GET /v1/capabilities (objectId, queryEventId) and the repo fixtures
+	// (assetId, periodStart, if-rev, criterion-text, …). camelCase is why
+	// flags/args get safeParamName and not the lowercase-only safeName — reusing
+	// safeName here would reject the live manifest and brick every bp.
+	legit := []string{
+		"id", "limit", "if-rev", "criterion-text", "correction_of_json",
+		"objectId", "queryEventId", "assetId", "periodStart", "v2", "merge-gated",
+	}
+	for _, name := range legit {
+		if _, err := Parse(withParam(name, name)); err != nil {
+			t.Errorf("Parse rejected legitimate arg/flag name %q: %v", name, err)
+		}
+	}
+}
+
+// Every arg and flag name in the shipped fixtures must survive Parse's
+// parameter-name validation. TestParseFixtures already parses them, but this
+// asserts the predicate against the name SET explicitly, so a future tightening
+// of safeParamName fails here with the offending name rather than as an opaque
+// fixture parse error.
+func TestFixtureParamNamesAreSafe(t *testing.T) {
+	for _, f := range []string{"core-manifest.json", "core-manifest-anon.json", "full-manifest.json"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", "docs", "cli", "fixtures", f))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", f, err)
+		}
+		m, err := Parse(body)
+		if err != nil {
+			t.Fatalf("parse fixture %s: %v", f, err)
+		}
+		seen := 0
+		for _, c := range m.Commands {
+			for _, a := range c.Args {
+				seen++
+				if !safeParamName.MatchString(a.Name) {
+					t.Errorf("%s: command %q arg name %q fails safeParamName", f, c.ID, a.Name)
+				}
+			}
+			for _, fl := range c.Flags {
+				seen++
+				if !safeParamName.MatchString(fl.Name) {
+					t.Errorf("%s: command %q flag name %q fails safeParamName", f, c.ID, fl.Name)
+				}
+			}
+		}
+		// A fixture with zero params would make the loop above vacuous.
+		if seen == 0 {
+			t.Errorf("%s: zero arg/flag names inspected; the assertion above measured nothing", f)
+		}
+	}
+}
