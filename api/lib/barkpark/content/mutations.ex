@@ -114,8 +114,12 @@ defmodule Barkpark.Content.Mutations do
 
   defp do_apply_mutations(mutations, dataset, opts) do
     # Initialise the deferred-broadcast queue for this process so
-    # tap_broadcast/5 knows to queue instead of broadcast immediately.
-    Process.put(:barkpark_deferred_broadcasts, [])
+    # tap_broadcast/5 knows to queue instead of broadcast immediately, and CLAIM
+    # it: the claim is what tells `maybe_dispatch_webhook/7` that this queue has
+    # a flusher. It also resets `:barkpark_deferred_webhooks`, which this line
+    # used to leave alone — a stale webhook entry stranded on this process by an
+    # unowned transaction would otherwise be dispatched by the next mutate.
+    Broadcast.claim_deferred_queue()
 
     try do
       result =

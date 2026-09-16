@@ -2358,7 +2358,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
       key_hash = document_op_key_hash(doc, target_doc_id, type, request_id, principal_key)
       exact_scope = "document_op:v1:" <> document_op_payload_fingerprint(op, opts)
 
-      Broadcast.clear_deferred_broadcasts()
+      # CLAIM, not merely clear: this path opens its own transaction and flushes
+      # by hand in `finish_document_op_transaction/4`, so it must register as the
+      # queue's owner or every webhook it defers reads as orphaned.
+      Broadcast.claim_deferred_queue()
       Writer.clear_deferred_after_save()
 
       try do
@@ -2489,7 +2492,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
         "document_block_form:v1:" <>
           block_form_payload_fingerprint(source_tag, source_params, opts)
 
-      Broadcast.clear_deferred_broadcasts()
+      # CLAIM, not merely clear: this path opens its own transaction and flushes
+      # by hand in `finish_document_op_transaction/4`, so it must register as the
+      # queue's owner or every webhook it defers reads as orphaned.
+      Broadcast.claim_deferred_queue()
       Writer.clear_deferred_after_save()
 
       try do
