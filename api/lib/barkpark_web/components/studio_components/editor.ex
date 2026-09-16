@@ -16,6 +16,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   import BarkparkWeb.Icons
 
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Views
+  alias BarkparkWeb.Studio.StudioLive.Paths
+
   alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Components.Fields.Visibility
   alias BarkparkWeb.Studio.Plugins.Adapter, as: PluginAdapter
@@ -505,6 +508,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :parent_assigns, :map, default: %{}
   attr :nav_group, :string, default: nil
 
+  # ── Document views (Gyldendal parity E10) ──────────────────────────
+  # `nav_view` is the open view's id, nil for the field form. `nav_view_docs`
+  # are the related documents that view resolved. A schema that declares no
+  # `desk.views` renders neither the tab row nor the list, byte-identical to
+  # before.
+  attr :nav_view, :string, default: nil
+  attr :nav_view_docs, :list, default: []
+  attr :scope_prefix, :string, default: ""
+
   # ── Cross-field validations (Task barkpark-cgn) ────────────────────
   # List of unsatisfied rule maps (string-keyed: name, title, level,
   # fields). Empty list → banner not rendered, no visual cost on
@@ -643,7 +655,53 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               schema={@editor_schema}
             />
           <% else %>
-            <%= if schema_groups(@editor_schema) != [] do %>
+            <%!-- DOCUMENT VIEWS (Gyldendal parity E10). Sanity's
+                  `defaultDocumentNode` puts tabs beside «Felt» that list OTHER
+                  documents related to this one. The row renders only for a
+                  schema that declares `desk.views`, and «Felt» is always the
+                  first tab so the form is one click away. --%>
+            <% doc_views = Views.views_for(@editor_schema) %>
+            <div :if={doc_views != []} class="bp-view-bar" role="tablist" data-test-id="document-views">
+              <button
+                type="button"
+                phx-click="select-view"
+                phx-value-view=""
+                role="tab"
+                aria-selected={@nav_view == nil}
+                class={"bp-view-tab " <> if(@nav_view == nil, do: "is-active", else: "")}
+                data-test-id="document-view-form"
+              ><%= gettext("Fields") %></button>
+              <button
+                :for={v <- doc_views}
+                type="button"
+                phx-click="select-view"
+                phx-value-view={v["id"]}
+                role="tab"
+                aria-selected={@nav_view == v["id"]}
+                title={v["title"]}
+                class={"bp-view-tab " <> if(@nav_view == v["id"], do: "is-active", else: "")}
+                data-test-id="document-view-tab"
+                data-view-id={v["id"]}
+              ><%= v["title"] %></button>
+            </div>
+
+            <div :if={@nav_view != nil} class="bp-view-list" data-test-id="document-view-list">
+              <p :if={@nav_view_docs == []} class="bp-pane-notice" role="status" data-test-id="document-view-empty">
+                <%= gettext("No documents yet") %>
+              </p>
+              <a
+                :for={rel <- @nav_view_docs}
+                class="pane-doc-item bp-view-row"
+                data-test-id="document-view-row"
+                data-row-type={rel.type}
+                href={Paths.studio_path(@scope_prefix, [rel.type, rel.id], @dataset)}
+              >
+                <span class="pane-doc-title"><%= rel.title %></span>
+                <span :if={rel.is_draft} class="status-pill status-draft"><%= gettext("draft") %></span>
+              </a>
+            </div>
+
+            <%= if @nav_view == nil and schema_groups(@editor_schema) != [] do %>
               <div class="bp-tab-bar" role="tablist">
                 <%= for grp <- schema_groups(@editor_schema) do %>
                   <button
@@ -668,7 +726,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   — a draft with no keystroke, and before Forms.coerce_params a
                   corrupt one. Autosave already persists each change within its
                   500 ms debounce, so recovery has nothing to restore. --%>
-            <form phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
+            <form :if={@nav_view == nil} phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`

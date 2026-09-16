@@ -195,6 +195,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       valueref_panel: nil,
       confirm_modal: nil,
       nav_group: nil,
+      # ── Document views (Gyldendal parity E10) ───────────────────────
+      # The open view's id, nil for the form, and the related documents it
+      # resolved. A schema that declares no `desk.views` never leaves nil.
+      nav_view: nil,
+      nav_view_docs: [],
       # ── Content preview side-pane (Goal barkpark-G1, task s3) ─────────
       # Doc-type-agnostic. Pane is rendered iff a plugin's
       # `content_renderer/3` callback contributes iodata via
