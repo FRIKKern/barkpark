@@ -104,6 +104,12 @@ on:
       - "design/themes/**"
       # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
       - "design/theme-emit.test.mjs"
+      # stw-backlog-theme-matrix c0: the RUNTIME half of the theme matrix — every
+      # supported search template stamps one documented data-bp-theme default and
+      # reacts to bp:themechange. Its subjects ride the `templates/**` glob below,
+      # but the test itself matched nothing, so an edit that guts the gate would
+      # never have run it (the design/mirror-fence.test.mjs shape).
+      - "design/template-theme-contract.test.mjs"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
       # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
@@ -446,6 +452,12 @@ on:
       - "design/themes/**"
       # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
       - "design/theme-emit.test.mjs"
+      # stw-backlog-theme-matrix c0: the RUNTIME half of the theme matrix — every
+      # supported search template stamps one documented data-bp-theme default and
+      # reacts to bp:themechange. Its subjects ride the `templates/**` glob below,
+      # but the test itself matched nothing, so an edit that guts the gate would
+      # never have run it (the design/mirror-fence.test.mjs shape).
+      - "design/template-theme-contract.test.mjs"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
       # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
@@ -1020,6 +1032,15 @@ jobs:
           # paper-editor mirror-scoping proofs, driven by a fixture theme OUTSIDE
           # design/themes/ so a second theme is exercised without a shipped skin.
           node design/theme-emit.test.mjs
+          # stw-backlog-theme-matrix c0: the RUNTIME half of the same matrix. The
+          # CSS gates above prove every theme is EMITTED; this one proves every
+          # supported search template stamps one documented data-bp-theme default
+          # and reacts to bp:themechange. It caught a real divergence: the Astro
+          # edition's graph pane pinned `theme: 'dark'` with no listener at all
+          # while the byte-identical renderer flipped correctly in the Next
+          # edition. Enrolment is a PREDICATE (ships public/bp-graph.js, or the
+          # manifest pins a theme), so a sixth template enrols itself.
+          node design/template-theme-contract.test.mjs
           # cloud-console-hardening wave-5 (D41): the emit --write attribution
           # fence's standing regression test. Drives the real emit.mjs CLI against
           # a throwaway copy of the tree and asserts the fence REFUSES an

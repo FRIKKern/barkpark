@@ -177,9 +177,10 @@ const nextConfig = (wsToken) => ({
   ...(base ? { basePath: base, assetPrefix: base } : {}),
   // Inline the base path into the client bundle so `lib/base-path.ts` can prefix
   // the same-origin fetches + public assets Next does NOT auto-prefix.
-  // NEXT_PUBLIC_BARKPARK_THEME: the DEPLOY-pinned default palette (evergreen |
-  // ember | fjord | charple) — the engine passes BARKPARK_THEME at build (W2
-  // theme dimension); the root layout bakes it as the data-bp-theme fallback.
+  // NEXT_PUBLIC_BARKPARK_THEME: the DEPLOY-pinned default palette
+  // (charple | ember | evergreen | fjord | iris) — the engine passes
+  // BARKPARK_THEME at build (W2 theme dimension); the root layout bakes it as
+  // the data-bp-theme fallback.
   env: {
     NEXT_PUBLIC_BP_BASE_PATH: base,
     NEXT_PUBLIC_BARKPARK_THEME: (process.env.BARKPARK_THEME || '').trim(),
