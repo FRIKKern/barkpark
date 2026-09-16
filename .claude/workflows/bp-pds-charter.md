@@ -706,18 +706,34 @@ prose that preceded it.
 - **PDS-D92 — The headroom gate is CHECK-AND-GO on a ~10-minute retry cadence.** MemAvailable was
   above the 2200 MB floor in 97/97 five-second samples across 486 s, and in 51.7% (worst day) to
   73.4% of every 10-minute `sar` sample over four days, with a 130-minute continuous open window on
-  the worst day. A failed gate (b) `return 1`s at `:1330` BEFORE `spent_now=$((spent + 1))` at
-  `:1334`. Why: a closed window costs ZERO attempts, so polling is free and the window is the box's
-  majority state — not a knife-edge to be timed.
+  the worst day. A failed gate (b) `return 1`s at the precondition bail-out
+  (`scripts/pds-pull-proof.sh`@`a full-export precondition did not hold`) BEFORE the attempt is
+  spent and flushed (`scripts/pds-pull-proof.sh`@`spent_now=$((spent + 1))`). Why: a closed window
+  costs ZERO attempts, so polling is free and the window is the box's majority state — not a
+  knife-edge to be timed.
 
 - **PDS-D93 — The deploy pounce is REFUTED and FORBIDDEN.** Across all 30 slot restarts on one day a
   deploy is worth mean +174 MB / median +146 MB with 9 of 30 NEGATIVE, and the three large rises all
   began from depressed baselines (regression to the mean, not headroom manufacture). guerrilla is
   blue/green, so a deploy is a memory TROUGH first — three coexisting BEAMs plus a live
   `deps/req` compile bottomed at 2248 MB. Worse, pouncing breaks gate (a) (`DEPLOYED_SHA` is pinned
-  once at `:562`) AND step 0b (`:661` hard-fails when the served sha is not an ancestor of the
-  worktree). Why: it trades a gate the box passes most of the time for two gates it is guaranteed to
-  fail. The dominant driver of MemAvailable here is aggregate quiet, not BEAM freshness.
+  once, at step 0a's SSH read —
+  `scripts/pds-pull-proof.sh`@`source of truth: the box's own git HEAD over SSH`) AND step 0b —
+  `scripts/pds-pull-proof.sh`@`is NOT an ancestor of the worktree`
+  hard-fails when the served sha is not an ancestor of the worktree. Why: it trades a gate the box
+  passes most of the time for two gates it is guaranteed to fail. The dominant driver of
+  MemAvailable here is aggregate quiet, not BEAM freshness.
+
+  *Citation form, amended 2026-09-16 under PDS-D299 (`pds-bl-charter-line-refs-stale`). D92 and D93
+  are UNCHANGED as claims — both were independently re-verified and both still hold on `origin/main`
+  — but their line anchors (`:1330`, `:1334`, `:562`, `:661`) were written against a pre-freeze copy
+  and resolved to unrelated code in every later blob, so two verifiers had to re-derive a correct
+  decision from scratch. Re-pointing them at today's numbers would have rotted again on the next
+  harness thaw (the "frozen" blob `e219e97cc…` is itself dead — PDS-D732, PDS-D745), so they now cite
+  CONTENT: `` `<path>`@`<literal>` ``, a unique byte string from the line meant. That form is
+  checkable by machine and has no snapshot in it — `bash scripts/pds-charter-anchors-check.sh` reds
+  when any such anchor stops resolving or starts matching two lines, and refuses any NEW bare
+  `pds-pull-proof.sh:NNN` citation. Prefer it for every future charter citation.*
 
 - **PDS-D94 — Step 0c FAILED its first-ever live execution: `mix run --no-start` starts no dep apps.**
   Measured inside the BEAM: `db_connection started? nil · postgrex started? nil · Watcher alive? nil`,
