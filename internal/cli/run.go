@@ -1953,7 +1953,7 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	// An unused redirected stdin no longer aborts anything here — the notice is
 	// unusedStdinNotice's job and rides out on manifestRequest.warnings. See
 	// that function for the contract and why the refusal was the wrong shape.
-	var obj map[string]any
+	var fileObj map[string]any
 	if files, ok := flags["file"]; ok && len(files) > 0 {
 		path := files[len(files)-1]
 		if path == "-" && !ownsProcessStdin {
@@ -1979,17 +1979,26 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		if cmd.MutationOp == "" {
 			bodyKind = "--file body"
 		}
-		if err := json.Unmarshal(raw, &obj); err != nil {
+		if err := json.Unmarshal(raw, &fileObj); err != nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object: %w", path, bodyKind, err)
 		}
-		if obj == nil {
+		if fileObj == nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object", path, bodyKind)
 		}
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
-	if obj == nil {
-		obj = map[string]any{}
+	//
+	// The --file object is the base ONLY where --set itself merges flat. A
+	// SetKey command nests its fields one level down (doc.patch: {patch: {id,
+	// type, set: {…}}}), and a --file object dropped at THIS level would land
+	// its fields as SIBLINGS of `set` inside the mutation wrapper — a body the
+	// writer does not read as field changes, with `set` left empty. See the
+	// setTarget assignment below, where a SetKey command's file object goes
+	// instead, and TestSetKeyFileBodyLandsUnderSetKey which pins both halves.
+	obj := map[string]any{}
+	if cmd.SetKey == "" && fileObj != nil {
+		obj = fileObj
 	}
 	for _, a := range cmd.Args {
 		if cmd.ArgLocation(a) != "body" {
@@ -2027,6 +2036,12 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 	setTarget := obj
 	if cmd.SetKey != "" {
 		setTarget = map[string]any{}
+		if fileObj != nil {
+			// --file on a SetKey command IS the set payload: the whole point of
+			// the flag is a body too large for a command line, and on a patch
+			// that body is the fields to change. --set keys merge on top of it.
+			setTarget = fileObj
+		}
 	}
 	// Keys a `--set key:=null` retired: on a patch they ride the mutation's
 	// `unset` list instead of storing a null (see below).
