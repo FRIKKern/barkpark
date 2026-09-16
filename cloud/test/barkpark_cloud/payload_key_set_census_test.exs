@@ -1936,7 +1936,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `@emitted_pinned` does NOT move either — this slice writes no Elixir
   # serializer. It declares a READER for a key `deployment_json/1` already
   # emits, which is the whole point of the pair.
-  @go_tag_pinned 373
+  # 373 -> 379 (ssw11-bl-no-pat-mint-verb-in-bp). RE-MEASURED ON THE REBASED
+  # TREE, not carried forward: the first reading of this slice was taken against
+  # a base where this pin still read 372, and #18566 moved it to 373 underneath
+  # it — so the delta was re-derived, never re-applied. The new
+  # internal/cloudclient/tokens.go declares 13 tag sites carrying 11 names, of
+  # which exactly SIX are names the package did not have: `abilities`,
+  # `expires_in_days`, `last_used_at`, `pat`, `revoked_at` and `tokens`. The
+  # other seven sites are names already in the union and move the SITE register
+  # below instead. CONTROL: the same scan with tokens.go excluded returns 373,
+  # byte-equal to the value this line replaces.
+  @go_tag_pinned 379
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2004,6 +2014,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # already in the package union, so `@go_tag_pinned` does NOT move (the PIN
     # CO-EDIT arm printed "0 of 4 scalar pin(s) no longer match this tree, and the
     # SITE register moved too"); only this register can notice either site dying.
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.Abilities` and
+    # `MintPATRequest.Abilities` — a name the package did not have, declared at
+    # TWO sites, so it enters this register at 2.
+    "abilities" => 2,
     "artifact_sha256" => 2,
     "artifact_url" => 2,
     "as_of" => 5,
@@ -2119,6 +2135,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.EvictedAt` joins the single existing declaration — when the recorder dropped the log.
     "evicted_at" => 2,
     "evidence" => 2,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.ExpiresAt` joins the one
+    # existing declaration elsewhere in the package — NEWLY DUPLICATED, 1 -> 2.
+    "expires_at" => 2,
     "failed" => 2,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
     "failure_class" => 3,
@@ -2135,10 +2156,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
-    "id" => 14,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.ID`, 14 -> 15.
+    "id" => 15,
     "image_tag" => 2,
     "in_flight" => 2,
-    "inserted_at" => 8,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.InsertedAt`, 8 -> 9.
+    "inserted_at" => 9,
     "instance" => 4,
     "instances" => 2,
     # cli/site-doctor-verb (ssw8-site-doctor): NEWLY DUPLICATED, 1 -> 2.
@@ -2172,7 +2199,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "mode" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one name site (11 -> 12). `SiteBuildLogStage.Name` — one stage of the
     # recorded build ladder.
-    "name" => 13,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.Name` and
+    # `MintPATRequest.Name` — two new sites, 13 -> 15.
+    "name" => 15,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
@@ -2288,7 +2319,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "terminal_failure_rate" => 2,
     "theme" => 2,
     "to" => 2,
-    "token" => 2,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). the mint envelope's own `token`
+    # field (the plaintext, handed over once), 2 -> 3.
+    "token" => 3,
     # dr-bl-w7: `top` crossed INTO this register. It was declared ONCE
     # (MetricsSpaceSites.Top, the biggest site slugs) and is now declared on
     # MetricsSpaceConsumerRoot too, naming a root's biggest children — the thing
@@ -2352,7 +2387,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go)
+  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
