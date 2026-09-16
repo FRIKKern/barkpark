@@ -73,10 +73,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-for v in EVERY_MIN GRACE_MIN OPEN_WINDOW_MIN; do
-  eval "val=\$$v"
-  case "$val" in ''|*[!0-9]*) die "--${v//_/-} must be a whole number of minutes, got '$val'" ;; esac
-done
+check_minutes() {
+  case "$2" in ''|*[!0-9]*) die "--${1} must be a whole number of minutes, got '$2'" ;; esac
+}
+check_minutes every-min "$EVERY_MIN"
+check_minutes grace-min "$GRACE_MIN"
+check_minutes open-window-min "$OPEN_WINDOW_MIN"
 [ "$EVERY_MIN" -ge 1 ] || die "--every-min must be >= 1"
 
 # ── The clock, in pure awk ───────────────────────────────────────────────────
@@ -255,6 +257,10 @@ fi
 # deploy_attributable to unexplained. If it does not, the classifier is not
 # reading the ledger at all and every "attributable" verdict it has ever printed
 # was vacuous.
+# Every out_* below is read inside check()'s eval string, which shellcheck
+# cannot follow — it is not dead, and quoting it differently would break the
+# harness. Disabled once, here, rather than eight times.
+# shellcheck disable=SC2034
 fails=0; checks_ran=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
@@ -295,6 +301,7 @@ CPCUTOVER deploy_id=20260808T234700Z-111 event=flip ts=2026-08-08T23:51:03Z old_
 CPCUTOVER deploy_id=20260808T234700Z-111 event=old_slot_stopped ts=2026-08-08T23:51:40Z old_sha=deadbee new_sha=0239dd4e active_port=4100 target_slot=green run_id=42
 CPCUTOVER deploy_id=20260808T234700Z-111 event=deploy_end ts=2026-08-08T23:54:21Z old_sha=deadbee new_sha=0239dd4e active_port=4100 target_slot=green run_id=42
 EOF
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_0808="$(analyze "$TD/ticks-0808" "$TD/ledger-0808")"; rc_0808=$?
 check "the 2026-08-08 series exits 0 (every hole is accounted)" "[ $rc_0808 -eq 0 ]"
 check "it names the missing instant 23:52:00Z" \
@@ -310,6 +317,7 @@ check "the summary carries the measured loss rate (1 of 5 = 20%)" \
 # Same ticks, EMPTY ledger. If the classifier were ignoring the ledger and
 # calling every hole attributable, this case would still say attributable.
 : > "$TD/ledger-empty"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_ctl="$(analyze "$TD/ticks-0808" "$TD/ledger-empty")"; rc_ctl=$?
 check "CONTROL: the same hole with no ledger is UNEXPLAINED, not attributable" \
   "printf '%s' \"\$out_ctl\" | grep -q 'GAP ts=2026-08-08T23:52:00Z class=unexplained'"
@@ -321,6 +329,7 @@ check "CONTROL: nothing is attributed with no windows to attribute to" \
 # Grace is 5 min; this deploy is four hours away. A classifier that matched on
 # "a deploy exists anywhere in the ledger" would pass case 2 and fail here.
 sed 's/T23:4/T19:4/; s/T23:5/T19:5/' "$TD/ledger-0808" > "$TD/ledger-far"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_far="$(analyze "$TD/ticks-0808" "$TD/ledger-far")"; rc_far=$?
 check "CONTROL: a deploy four hours away does NOT absorb the hole" \
   "printf '%s' \"\$out_far\" | grep -q 'GAP ts=2026-08-08T23:52:00Z class=unexplained'"
@@ -336,6 +345,7 @@ cat > "$TD/ticks-complete" <<'EOF'
 2026-08-09T00:07:00Z
 2026-08-09T00:22:00Z
 EOF
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_ok="$(analyze "$TD/ticks-complete" "$TD/ledger-0808")"; rc_ok=$?
 check "a complete series exits 0" "[ $rc_ok -eq 0 ]"
 check "a complete series prints NO GAP line (quiet when it should be)" \
@@ -344,6 +354,7 @@ check "a complete series reports missing=0 even with a deploy in the window" \
   "printf '%s' \"\$out_ok\" | grep -q 'missing=0 deploy_attributable=0 unexplained=0'"
 # Jitter must not manufacture a gap: a tick 90s late is still THAT tick.
 sed 's/T23:52:00Z/T23:53:30Z/' "$TD/ticks-complete" > "$TD/ticks-jitter"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_j="$(analyze "$TD/ticks-jitter" "$TD/ledger-0808")"; rc_j=$?
 check "90s of jitter is not a missing tick" \
   "[ $rc_j -eq 0 ] && printf '%s' \"\$out_j\" | grep -q 'missing=0'"
@@ -356,6 +367,7 @@ cat > "$TD/ticks-mixed" <<'EOF'
 2026-08-09T00:22:00Z
 2026-08-09T01:07:00Z
 EOF
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_mix="$(analyze "$TD/ticks-mixed" "$TD/ledger-0808")"; rc_mix=$?
 check "MIXED: one attributable + two unexplained are counted separately" \
   "printf '%s' \"\$out_mix\" | grep -q 'missing=3 deploy_attributable=1 unexplained=2'"
@@ -366,9 +378,11 @@ check "MIXED: the unexplained instants are named, not just counted" \
 # ── 6. A deploy with NO terminal event still bounds a window ────────────────
 # (a SIGKILLed deploy, a box rebooted mid-run). Bounded by --open-window-min.
 head -1 "$TD/ledger-0808" > "$TD/ledger-open"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_open="$(analyze "$TD/ticks-0808" "$TD/ledger-open")"; rc_open=$?
 check "an unterminated deploy still forms a bounded window" \
   "[ $rc_open -eq 0 ] && printf '%s' \"\$out_open\" | grep -q 'deploy_attributable=1'"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_open_narrow="$(OPEN_WINDOW_MIN=1 EVERY_MIN=$EVERY_MIN GRACE_MIN=1; analyze "$TD/ticks-0808" "$TD/ledger-open")" || true
 check "and the bound is REAL: --open-window-min is what makes it reach" \
   "[ -n \"\$out_open_narrow\" ]"
@@ -382,11 +396,13 @@ analyze "$TD/ticks-one" "$TD/ledger-0808" >/dev/null 2>&1; rc_one=$?
 check "a single tick cannot show a gap and is refused with 11" "[ $rc_one -eq 11 ]"
 analyze "$TD/does-not-exist" "$TD/ledger-0808" >/dev/null 2>&1; rc_nf=$?
 check "a missing ticks file is refused with 11" "[ $rc_nf -eq 11 ]"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_noled="$(analyze "$TD/ticks-complete" "$TD/no-such-ledger")"; rc_noled=$?
 check "a MISSING ledger is not an error — it degrades to zero windows" \
   "[ $rc_noled -eq 0 ] && printf '%s' \"\$out_noled\" | grep -q 'windows=0'"
 # Comments and blanks are ignored, not parsed as ticks.
 { echo "# a header"; echo; cat "$TD/ticks-complete"; } > "$TD/ticks-comments"
+# shellcheck disable=SC2034  # read inside check()'s eval string
 out_cm="$(analyze "$TD/ticks-comments" "$TD/ledger-0808")"
 check "comments and blank lines are ignored, not counted as ticks" \
   "printf '%s' \"\$out_cm\" | grep -q 'ticks=5 '"
@@ -404,6 +420,7 @@ if [ -r "$CPD" ]; then
   for ev in deploy_start flip old_slot_stopped deploy_end deploy_aborted; do
     check "cp-deploy.sh stamps '$ev'" "grep -qE '^[[:space:]]*cutover_stamp $ev' '$CPD'"
   done
+  # shellcheck disable=SC2034  # every var here is consumed by the sourced cutover_stamp()
   (
     CUTOVER_LEDGER="$TD/ledger-live"
     CUTOVER_LEDGER_MAX_LINES=4000
@@ -426,6 +443,7 @@ if [ -r "$CPD" ]; then
   if [ -n "$ledger_start" ]; then
     awk -v S="$ledger_start" "$AWK_CLOCK"'BEGIN{ e = iso2epoch(S); printf "%s\n%s\n%s\n", epoch2iso(e-1800), epoch2iso(e-900), epoch2iso(e+900) }' \
       > "$TD/ticks-live"
+# shellcheck disable=SC2034  # read inside check()'s eval string
     out_live="$(analyze "$TD/ticks-live" "$TD/ledger-live")"; rc_live=$?
     check "SEAM: a hole inside the window the REAL cp-deploy.sh stamped is attributable" \
       "[ $rc_live -eq 0 ] && printf '%s' \"\$out_live\" | grep -q 'deploy_attributable=1'"
@@ -436,6 +454,7 @@ if [ -r "$CPD" ]; then
   fi
   # The trim is bounded, and it keeps the NEWEST lines (a trim that kept the
   # oldest would silently answer every recent question with "unexplained").
+  # shellcheck disable=SC2034  # every var here is consumed by the sourced cutover_stamp()
   (
     CUTOVER_LEDGER="$TD/ledger-trim"
     CUTOVER_LEDGER_MAX_LINES=5
@@ -451,6 +470,7 @@ if [ -r "$CPD" ]; then
     "grep -q 'event=e11' '$TD/ledger-trim'"
   check "and drops the oldest" "! grep -q 'event=e0 ' '$TD/ledger-trim'"
   # An unwritable ledger must never fail the deploy.
+  # shellcheck disable=SC2034  # every var here is consumed by the sourced cutover_stamp()
   (
     CUTOVER_LEDGER="/proc/nonexistent-dir-dw3/ledger.log"
     CUTOVER_LEDGER_MAX_LINES=10
