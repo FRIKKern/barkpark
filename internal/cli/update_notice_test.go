@@ -177,8 +177,13 @@ func TestNoticeStaleCacheFetchesAndStamps(t *testing.T) {
 	finishUpdateNotice(&stderr, startUpdateCheck("whoami"))
 
 	got := readNoticeCache(t, root)
-	if got.Latest != "0.0.2" {
-		t.Errorf("latest = %q, want 0.0.2 (fetched from the redirect)", got.Latest)
+	// The fetched version lands in the ONE store that holds it — the release
+	// cache — not in a second copy inside update-check.json.
+	if rc, fresh := readReleaseCache(); !fresh || rc.Latest != "0.0.2" {
+		t.Errorf("release cache = %+v fresh=%v, want fresh latest 0.0.2 (fetched from the redirect)", rc, fresh)
+	}
+	if got.Latest != "" {
+		t.Errorf("update-check.json must keep no copy of the version, got %q", got.Latest)
 	}
 	stamped, err := time.Parse(time.RFC3339, got.CheckedAt)
 	if err != nil || !stamped.After(before) {
@@ -272,8 +277,11 @@ func TestNoticeCorruptCacheTreatedAsEmpty(t *testing.T) {
 		t.Errorf("corrupt cache should be treated as empty and re-fetch, got %q", stderr.String())
 	}
 	got := readNoticeCache(t, root)
-	if got.Latest != "0.0.2" || got.Notified != "0.0.2" || got.CheckedAt == "" {
+	if got.Notified != "0.0.2" || got.CheckedAt == "" {
 		t.Errorf("cache should be rebuilt cleanly after corruption: %+v", got)
+	}
+	if rc, fresh := readReleaseCache(); !fresh || rc.Latest != "0.0.2" {
+		t.Errorf("release cache after corruption = %+v fresh=%v, want fresh latest 0.0.2", rc, fresh)
 	}
 }
 
