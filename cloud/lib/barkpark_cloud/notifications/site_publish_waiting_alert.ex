@@ -31,7 +31,10 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlert do
       "cancelled"` into its own counted bucket
       (`dr-w11-bl-cancelled-rows-count-as-waiting`). A naive
       "newest attempt post-dates newest live row" query emails a team
-      "STILL WAITING >= 3d" about a deploy the team itself stopped.
+      "STILL WAITING >= 3d" about a publish the FLEET refused to ship — an
+      auto-deploy refusal, a superseded or torn down preview, or a box filing
+      the terminal. Not a deploy the team stopped: no human cancel path exists
+      (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
     * **UNMETERED ROWS ARE NOT WAITS EITHER.** A `live` row with no
       `became_live_at` reached the web at a time the ledger cannot name; it is
       counted as `unmetered`, never censored. jarl-website has 55 such rows.
