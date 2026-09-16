@@ -48,7 +48,7 @@ func run(args []string) int {
 		cacheDir   = fs.String("cache-dir", "/var/lib/barkpark-builder/images",
 			"directory for docker-saved image tarballs (consumed by the box agent)")
 		logDir = fs.String("log-dir", "/var/lib/barkpark-builder/logs",
-			"directory for per-deployment build logs (path → build_log_url file://)")
+			"directory for per-deployment build logs on THIS host (narrated to the build console as a location; not stamped as build_log_url, which only ever carries a URL a reader can fetch)")
 		platform = fs.String("platform", "",
 			"nixpacks --platform value (e.g. linux/arm64); defaults to nixpacks' own default")
 		interval = fs.Duration("interval", builder.DefaultInterval,

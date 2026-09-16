@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/buildlog"
 	"github.com/FRIKKern/barkpark/internal/secretscrub"
 )
 
@@ -88,7 +89,10 @@ func (c *buildConsole) addSecret(s string) {
 // logf formats + redacts one console line and reports it best-effort. A report
 // error is logged to stderr and swallowed — narration must never fail a build.
 // After maxConsoleFails consecutive failures the POST is skipped entirely (the
-// control plane is down; the line still lives in the durable log), so a wedged
+// control plane is down; the line still lives in the durable log — a FILE on
+// this builder host, which is why nothing stamps it as a fetchable
+// build_log_url and why the truncation marker names buildlog.ReachableDoor
+// instead), so a wedged
 // control plane can't serialize a full timeout per line across a whole build. A
 // success resets the latch. nil-safe.
 func (c *buildConsole) logf(format string, args ...any) {
@@ -140,7 +144,8 @@ func (c *buildConsole) logf(format string, args ...any) {
 // silent discard this file used to perform.
 //
 // A build whose console latched is therefore READABLE AS TRUNCATED: the marker
-// names the drop and points at the durable log, so "no failed:/activate: line
+// names the drop and names the DOOR that serves the durable log (not the
+// builder-local file path, which the reader cannot open), so "no failed:/activate: line
 // and no marker" stops being ambiguous between quiet and cut. nil-safe.
 func (c *buildConsole) logfTerminal(format string, args ...any) {
 	if c == nil {
@@ -153,7 +158,9 @@ func (c *buildConsole) logfTerminal(format string, args ...any) {
 		// Best-effort, deliberately unlatched: if the plane is still down this
 		// fails like any other line and the durable log remains the record.
 		if err := c.report("console TRUNCATED: narration was disabled mid-build after " +
-			fmt.Sprint(maxConsoleFails) + " consecutive failed reports — the lines above are NOT the whole build; the durable build log is"); err != nil {
+			fmt.Sprint(maxConsoleFails) + " consecutive failed reports — the lines above are NOT the whole build. " +
+			"The full log was written to a file on the BUILDER host, which is not a place you can open; " +
+			"the read that serves it is " + buildlog.ReachableDoor + " (`bp sites logs <site> <deployment-id>`)"); err != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-builder: truncation marker for deployment %s failed (non-fatal): %v\n", c.depID, err)
 		}
 	}
