@@ -515,7 +515,8 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
   # (charter D673). Isolation withholds the platform's maintenance attention, so
   # a `:mutate` relayed with the stored admin credential is refused BEFORE the
   # ciphertext is decrypted; a `:read` grants nothing durable and still relays.
-  # The caller is a plain "member" — the actually-reachable, non-admin path.
+  # The :read arm is driven by a plain "member" (the actually-reachable non-admin
+  # path); every :mutate arm is driven by an "admin" since task-8ccc571ab4d4e713.
   describe "a SUSPENDED box — :mutate is refused, :read still relays" do
     test "a :read still relays and still answers 200 (the grant is NOT withdrawn)" do
       {user, team} = user_with_team("member")
@@ -532,7 +533,11 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     end
 
     test "a :mutate (create) → 409 suspended with ZERO upstream requests" do
-      {user, team} = user_with_team("member")
+      # task-8ccc571ab4d4e713 (ARM B EXTENDED): `create` now gates at team ADMIN
+      # in front of the funnel, so a plain member is refused 403 there and never
+      # reaches the suspension arm this test is about. The member-side 403 has
+      # its own test in instance_api_proxy_admin_verbs_test.exs.
+      {user, team} = user_with_team("admin")
       bp = suspended_barkpark(team)
       # Programmed to SUCCEED: if the guard is missing this relays a 201 and the
       # recorded request carries the plaintext admin token.
