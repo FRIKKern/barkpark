@@ -2266,6 +2266,28 @@ var setCreateFamilyOps = map[string]bool{
 	"create": true, "createOrReplace": true, "createIfNotExists": true, "replace": true,
 }
 
+// fileBodyAside is the "or --file to send a body verbatim" escape hatch these
+// refusals offer, DERIVED from the manifest rather than asserted.
+//
+// It exists because the refusal below hardcoded that aside on BOTH arms, and
+// the `patch` arm's command declares `[set]` only: `bp doc patch` names no
+// `file` flag, so splitArgs rejects `--file` outright (exit 2). The refusal was
+// therefore answering a wrong --set key with a flag the very next invocation
+// would refuse — the same lying-surface class the W4 help fix removed from
+// usage.go (writeBodyHint derives its hint from cmd.Flags for exactly this
+// reason), surviving in a surface that fix did not reach. See also
+// commandHasFileFlag's own doc comment: "help text and guard messages must
+// never mention --file for a command whose parser rejects it."
+//
+// Empty string when the command declares no file flag, so the sentence closes
+// cleanly without it.
+func fileBodyAside(cmd manifest.Command, key string) string {
+	if !commandHasFileFlag(cmd) {
+		return ""
+	}
+	return fmt.Sprintf(" (or --file to send a body verbatim if you really meant a content field named %q)", key)
+}
+
 // checkSetIDKeyRouting refuses a `--set` key the write will never route to the
 // document id. Scoped to mutation commands: only they have an address to miss.
 func checkSetIDKeyRouting(cmd manifest.Command, kv, key string) error {
@@ -2273,14 +2295,14 @@ func checkSetIDKeyRouting(cmd manifest.Command, kv, key string) error {
 	case setCreateFamilyOps[cmd.MutationOp] && key == "id":
 		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s` keys the document as `_id` inside the payload, "+
 			"and a bare `id` is merged INTO content as an ordinary field while the row gets a GENERATED id. "+
-			"Use --set '_id=…' to choose the address (or --file to send a body verbatim if you really meant a content field named %q)",
-			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key)
+			"Use --set '_id=…' to choose the address%s",
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, fileBodyAside(cmd, key))
 	case cmd.MutationOp == "patch" && (key == "id" || key == "_id"):
 		return fmt.Errorf("invalid --set %q: %q %s here — `bp %s %s <type> <id>` addresses the document by its `<id>` argument, "+
 			"and --set fields are merged INTO content, so %q would land as an ordinary content field and move nothing. "+
-			"Drop it (or --file to send a body verbatim if you really meant a content field named %q); "+
+			"Drop it%s; "+
 			"`--set %s:=null` deletes such a key if an older bp already stored one",
-			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key, key, key)
+			kv, key, setIDKeyMechanism, cmd.Noun, cmd.Verb, key, fileBodyAside(cmd, key), key)
 	}
 	return nil
 }
