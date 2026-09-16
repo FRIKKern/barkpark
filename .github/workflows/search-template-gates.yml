@@ -133,6 +133,16 @@ on:
       - "scripts/check-vendor-freshness.mjs"
       - "scripts/recut-vendor-tarballs.sh"
       - "scripts/templates-literal-check.sh"
+      # THE SOURCE OF TRUTH THE bp-command JOB RESOLVES AGAINST. The gate reads
+      # internal/cli's own dispatch (switch arms, verb== intercepts and the verb
+      # TABLES) to decide whether a printed `bp …` command parses, and until this
+      # entry existed a CLI change matched NO pattern here. MEASURED: #18555
+      # turned runCloudSite()'s verb switch into siteVerbMatrix, this workflow
+      # did not run on it, and the first anyone heard was twelve UNRESOLVED
+      # commands on MAIN's tip — against templates/ docs nobody had touched. On
+      # the same argument as js/packages/**: a gate blind to the change it
+      # guards reports green forever.
+      - "internal/cli/**"
       - "tooling/doc-truth/verify-bp-commands.mjs"
       - "tooling/doc-truth/bp-cli-sources.mjs"
       - "tooling/doc-truth/verify-docs.mjs"
