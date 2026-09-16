@@ -690,6 +690,25 @@ func warnPrebuiltAmbientToken(out *writer, ref, dir string, lookup func(string) 
 // the user just built against and the refusal would repeat forever. So the
 // refusal names the deployment it minted, and the second run passes it back with
 // `--deployment <id>`: no new mint, the same build id, the upload lands.
+//
+// NO `--build` FLAG, AND THE REASON (the one-motion question, decided).
+// A `--build` that ran the user's own build command between the two calls, with
+// BARKPARK_BUILD_ID / BARKPARK_CONTENT_REV / BARKPARK_SITE_BASE exported into it,
+// would collapse mint→build→upload into one command and is the nicer shape. It is
+// NOT shipped, and what it would have bought is already bought:
+//
+//   - The loop it was meant to fix is the mint/rebuild/re-run one, and that loop
+//     could not terminate for a reason `--build` does not address: a prebuilt mint
+//     is nonced, so a plain re-run minted a NEW build id and refused again.
+//     `--deployment <id>` is the resume half, and the refusal above prints the
+//     exact command to re-run. Two runs, both of which converge.
+//   - `--build` would put an arbitrary user command inside bp's process for the
+//     sake of one saved invocation, and it would have to guess the command. The
+//     exports the refusal prints are the whole contract, and a shell already runs
+//     build commands better than a flag can.
+//
+// So the two-run loop stands. `--build` stays FILED rather than rejected: it is a
+// convenience on a path that now terminates, not a fix for one that did not.
 func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deploymentID string, force, follow bool) int {
 	// THE OPT-IN IS READ FIRST, BEFORE ANY WRITE. One GET of the site row, and
 	// it is the SAME read prebuiltSiteBase already did (its result is threaded
@@ -697,6 +716,9 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	// extra round trip at all.
 	site, siteRead := prebuiltSiteRow(cfg, id)
 	if code := prebuiltOptInRefusal(out, ref, id, site, siteRead); code != exitOK {
+		return code
+	}
+	if code := prebuiltStaticOnlyRefusal(out, ref, site, siteRead); code != exitOK {
 		return code
 	}
 	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
@@ -753,7 +775,23 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	if n := up.Bytes; n > 0 && n != art.WireBytes {
 		out.progressf("  control plane recorded %d bytes (client sent %d)", n, art.WireBytes)
 	}
-	out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
+	// THE CONTROL PLANE'S OWN DIGEST, read back. It hashes the bytes it received
+	// and returns them as `artifact_sha256`; a value that differs from what we
+	// declared is a disagreement about WHICH BYTES this deployment is now bound
+	// to, and the box re-verifies against the CP's hash, not ours — so a silent
+	// divergence would make every downstream check agree on the wrong bytes.
+	if cp := strings.TrimSpace(strings.ToLower(up.SHA256)); cp != "" && cp != strings.ToLower(art.SHA256) {
+		out.errf("! the control plane stored sha256 %s for this deployment, but these bytes hash to %s — the box verifies against the control plane's digest, so what goes live is not what was packed here", sanitizeCell(cp), sanitizeCell(art.SHA256))
+	}
+	if up.AlreadyUploaded() {
+		// The 200 retry arm. The bytes were already stored under this deployment
+		// and this request started NO driver — the deploy below is the one an
+		// earlier upload began, so saying "stages these bytes" here would date the
+		// deploy to a request that did not cause it.
+		out.progressf("→ already uploaded — this deployment already carries these exact bytes, so the control plane answered without starting a second deploy; what follows is the run the first upload started")
+	} else {
+		out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
+	}
 
 	streamCode, _ := streamSiteDeploy(out, cfg, ref, id, dep, follow)
 	return streamCode
@@ -809,6 +847,37 @@ func prebuiltOptInRefusal(out *writer, ref, id string, site cloudclient.SpawnSit
 	return useError(out, "failed", fmt.Sprintf(
 		"%s builds on its box — enable off-box builds first (PATCH /v1/sites/%s {\"prebuilt_enabled\": true}), or from here: bp cloud site settings %s --prebuilt-enabled true\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
 		hzCell(ref), sanitizeCell(id), hzCell(ref)), exitGeneric)
+}
+
+// prebuiltStaticOnlyRefusal is the second preflight on `bp cloud site deploy
+// <site> --prebuilt <dir>`, and it guards the axis the opt-in one does not: the
+// site's RUNTIME TARGET.
+//
+// WHY IT EXISTS. `--prebuilt` ships a built `dist/` tree and the box stages it
+// and flips a symlink — a STATIC mechanism, and the only one the prebuilt lane
+// has today (charter D96 files node/SSR as a later round). The control plane
+// does not draw that line: its deploy route sends `site.kind in ["static",
+// "node"]` down the SAME `deploy_static_site/2` arm, and `prebuilt_enabled` is
+// per-site with no kind scoping at all. So a node/SSR site that had opted in
+// would mint, pack, and upload a tarball that nothing on the box ever starts a
+// server for — a deploy that burns a nonced mint and ships bytes no visitor can
+// be served.
+//
+// It refuses BEFORE the mint for the same reason its sibling does: a prebuilt
+// mint is nonced on purpose, so a row burned by learning late cannot be re-used
+// by re-running the command.
+//
+// A FAILED READ IS NOT A REFUSAL, and neither is an absent runtime_target.
+// siteIsNode already fails closed to static when the control plane says nothing,
+// and an unreadable row is handled by the opt-in preflight above, which has
+// already said the check did not run. This guard fires only on a DEFINITE node.
+func prebuiltStaticOnlyRefusal(out *writer, ref string, site cloudclient.SpawnSite, siteRead bool) int {
+	if !siteRead || !siteIsNode(site.Kind, site.RuntimeTarget) {
+		return exitOK
+	}
+	return useError(out, "failed", fmt.Sprintf(
+		"%s runs a long-running node/SSR process, and --prebuilt is static-only: the box stages the uploaded tree and flips a symlink, so nothing would start a server for these bytes and nothing would serve them. Build it on its box instead: bp cloud site deploy %s\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
+		hzCell(ref), hzCell(ref)), exitGeneric)
 }
 
 // mintedSourceClause is the "no build started on the box" half of the mint
@@ -3943,6 +4012,9 @@ USAGE
   (a prebuilt mint is nonced, so a plain re-run would mint a new id and refuse
   again). Secrets (.env*) and .git are never packed. The site must opt in first:
   bp cloud site settings <site> --prebuilt-enabled true
+  --prebuilt is STATIC-ONLY: staging a tree and flipping a symlink is the whole
+  mechanism, so a node/SSR site (--kind node) is refused before anything is minted
+  and builds on its box instead.
   --force re-runs a build even when content and config are unchanged — it folds a
   fresh nonce so a new release is minted instead of the cached deployment.
   --deploy on create is the one-motion: it chains straight into the deploy stream
