@@ -22,13 +22,18 @@
 //                                  is exactly the vacuous green this gate kills.
 //   [C] parseHzArgs allowlists   internal/cli/*.go
 //                                — a leaf's declared value/bool flag names.
-//   [D] router switch tables     internal/cli/*.go `switch`/`case "x":` +
-//                                  `if verb == "x"` intercepts
+//   [D] router dispatch          internal/cli/*.go `switch`/`case "x":`,
+//                                  `if verb == "x"` intercepts, AND the verb
+//                                  TABLES a dispatcher looks up (siteVerbMatrix)
 //                                — the DEPTH. `bp cloud barkpark ls` is green
 //                                  under A+B+C (B has `cloud`, and nothing in
 //                                  A/B/C can adjudicate the token after it);
 //                                  only D's cloud switch can say `barkpark` is
 //                                  not a cloud command. D is not optional.
+//                                  D reads dispatch by SHAPE, not by spelling:
+//                                  a `case` arm and a table row are the same
+//                                  fact, and keying on one of them makes every
+//                                  refactor of the other a false red.
 //   [E] `"--flag"` literals      internal/cli/*.go (file-scoped)
 //                                — the micro-source for hand-rolled parsers
 //                                  (`case "--site":`, `flagDevice = "--device"`)
@@ -125,6 +130,244 @@ function newNode(id, file) {
   return { id, file, cases: new Set(), edges: new Map(), caseAt: new Map(), fn: null };
 }
 
+// ── [D2] VERB TABLES — dispatch that is DATA, not syntax ────────────────────
+//
+// WHY THIS EXISTS. A `switch`/`case "x":` is one SPELLING of dispatch, not the
+// thing itself. When internal/cli replaced runCloudSite()'s verb switch with a
+// lookup table (siteVerbMatrix, #18555), a case-scraping reader saw "no verbs
+// at all" and reported every correct `bp cloud site …` line in templates/ as
+// UNRESOLVED — a false red on docs that had not changed. The fix is NOT to
+// grep for a second spelling (`Verb: "x"` alongside `case "x":`): that is the
+// same fault one refactor later. The fix is to read the TABLE — the artifact
+// the binary itself resolves against — and to reach it the way the binary
+// does, by following the call that hands a user-typed token into it.
+//
+// WHAT IS READ, all from the table's own vocabulary:
+//   · `Verb:`/`Name:`/`Cmd:` — the canonical token
+//   · `Aliases: []string{…}`  — accepted synonyms (`bp cloud site build`)
+//   · `Scope:  …SpawnerOnly`  — a verb offered at ONE spelling; at the other
+//                               spelling it stays UNRESOLVED
+//   · handler fields (`Impl:`, `Fleet:`, `Spawner:`) — which spelling reaches
+//     which func, so flags still resolve against the real leaf ([C]/[E])
+//
+// A table is attached to a dispatcher only through a call chain that carries a
+// user token (`args[0]`, `verb`, …), so a function that merely RENDERS the
+// table (runSiteMatrix) never donates its verbs to anything.
+
+const TABLE_DECL_RE = /(?:var\s+)?([A-Za-z_]\w*)\s*(?::?=)\s*\[\]([A-Za-z_]\w*)\s*\{/g;
+const VERB_FIELD_RE = /\b(?:Verb|Name|Cmd|Command):\s*"([^"]+)"/;
+const ALIASES_FIELD_RE = /\b(?:Aliases|Alias|Synonyms):\s*\[\]string\{([^}]*)\}/;
+const SCOPE_FIELD_RE = /\b(?:Scope|Only|Availability):\s*([A-Za-z_]\w*)/;
+const HANDLER_FIELD_RE = /\b([A-Z]\w*):\s*(?:(\w+)\(\s*(\w+)\s*\)|(\w+))\s*,/g;
+const SCOPE_ONLY_RE = /([A-Z][a-z0-9]+)Only$/;
+// A row that names its own NOUN is not dispatched by its verb alone: the
+// dispatch token is the PAIR (`task create`). nounBuiltins is that shape, and
+// donating its bare verbs to a node would make `bp <anything> create`
+// resolvable — the exact vacuous green source D exists to kill.
+const QUALIFIER_FIELD_RE = /\b(?:Noun|Group|Parent|Namespace|Family):\s*"[^"]+"/;
+// the tokens a dispatcher's caller uses for "the verb the USER typed"
+const USER_TOKEN_RE = /\b(?:args|rest|tail|a|argv)\[0\]|\b(?:verb|sub|subcommand)\b/;
+const HANDLER_SKIP = new Set(["Verb", "Name", "Cmd", "Command", "Aliases", "Alias",
+  "Synonyms", "Scope", "Only", "Availability", "Summary", "KindNote", "Help", "Doc",
+  "Usage", "Desc", "Description"]);
+
+// Walk from the `{` at `open` to its matching `}`, skipping string/rune/comment
+// bodies. Returns the index just past the closing brace, or -1.
+function matchBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "`" || c === "'") {
+      const q = c;
+      i++;
+      while (i < text.length && text[i] !== q) { if (q !== "`" && text[i] === "\\") i++; i++; }
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") { while (i < text.length && text[i] !== "\n") i++; continue; }
+    if (c === "/" && text[i + 1] === "*") { i = text.indexOf("*/", i); if (i < 0) return -1; i++; continue; }
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) return i + 1; }
+  }
+  return -1;
+}
+
+// The top-level `{ … }` elements of a composite-literal body.
+function literalElements(text, bodyStart, bodyEnd) {
+  const out = [];
+  let depth = 0, elStart = -1;
+  for (let i = bodyStart; i < bodyEnd; i++) {
+    const c = text[i];
+    if (c === '"' || c === "`" || c === "'") {
+      const q = c;
+      i++;
+      while (i < bodyEnd && text[i] !== q) { if (q !== "`" && text[i] === "\\") i++; i++; }
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") { while (i < bodyEnd && text[i] !== "\n") i++; continue; }
+    if (c === "{") { if (depth === 0) elStart = i; depth++; }
+    else if (c === "}") { depth--; if (depth === 0 && elStart >= 0) { out.push({ start: elStart, text: text.slice(elStart, i + 1) }); elStart = -1; } }
+  }
+  return out;
+}
+
+// One table row, reduced to what dispatch needs.
+function parseTableEntry(elText) {
+  const vm = elText.match(VERB_FIELD_RE);
+  if (!vm) return null;
+  if (QUALIFIER_FIELD_RE.test(elText)) return { qualified: true };
+  const names = [vm[1]];
+  const am = elText.match(ALIASES_FIELD_RE);
+  if (am) for (const s of am[1].matchAll(/"([^"]+)"/g)) names.push(s[1]);
+  // Each NAME is cited at the line that literally spells it — the row's opening
+  // brace declares nothing, and the citation read-back re-opens the file and
+  // demands the token be there.
+  const nameOff = new Map();
+  for (const n of names) {
+    const off = elText.indexOf(`"${n}"`);
+    if (off >= 0) nameOff.set(n, off);
+  }
+  const sm = elText.match(SCOPE_FIELD_RE);
+  const scopeOnly = sm ? (sm[1].match(SCOPE_ONLY_RE) || [])[1] || null : null;
+  // handler fields: `Impl: fleetAdapter(runSitesList),` / `Spawner: runCloudSiteCreate,`
+  const handlers = new Map();   // field name -> leaf func name
+  for (const m of elText.matchAll(HANDLER_FIELD_RE)) {
+    const field = m[1];
+    if (HANDLER_SKIP.has(field)) continue;
+    // an adapter call donates its ARGUMENT as the leaf (fleetAdapter(runSitesEnv))
+    const fn = m[3] || m[4];
+    if (!fn || /^(?:true|false|nil)$/.test(fn)) continue;
+    handlers.set(field, fn);
+  }
+  return { names, nameOff, scopeOnly, handlers };
+}
+
+// Which verbs of `table` a call with these identifier arguments can reach, and
+// through which leaf. `ctx` is the bare identifiers at the call site — the
+// spelling constant (`siteSpellingSpawner`) is what selects a split verb's door.
+function reachableVerbs(table, ctx) {
+  const lowered = ctx.map((s) => s.toLowerCase());
+  const namesField = (field) => lowered.some((id) => id.endsWith(field.toLowerCase()));
+  // DOOR FIELDS are derived from the table's own shape, not from a name list:
+  // a field that shares a row with another handler field is a door (the
+  // spelling picks one of them). A field that is ever a row's ONLY handler is
+  // unconditional — every caller reaches it. In siteVerbMatrix that makes
+  // {Fleet, Spawner} doors and Impl unconditional, which is exactly what
+  // dispatchSiteVerb does at runtime.
+  const doorFields = new Set();
+  for (const e of table.entries) {
+    if (e.handlers.size > 1) for (const f of e.handlers.keys()) doorFields.add(f);
+  }
+  for (const e of table.entries) {
+    if (e.handlers.size === 1) doorFields.delete([...e.handlers.keys()][0]);
+  }
+  const out = [];
+  for (const e of table.entries) {
+    // a `…Only` scope names the ONE door this verb is offered at
+    if (e.scopeOnly && doorFields.size && !namesField(e.scopeOnly)) continue;
+    let leaf = null;
+    if (e.handlers.size) {
+      const uncond = [...e.handlers.entries()].find(([f]) => !doorFields.has(f));
+      const named = [...e.handlers.entries()].find(([f]) => doorFields.has(f) && namesField(f));
+      if (uncond) leaf = uncond[1];
+      else if (named) leaf = named[1];
+      else continue;   // every handler is a door and the caller named none
+    }
+    out.push({ names: e.names, at: e.at, leaf });
+  }
+  return out;
+}
+
+// Find every verb table in the CLI sources.
+function scanVerbTables(texts) {
+  const tables = new Map();   // var name -> {name, file, entries}
+  for (const [rel, text] of texts) {
+    TABLE_DECL_RE.lastIndex = 0;
+    let m;
+    while ((m = TABLE_DECL_RE.exec(text)) !== null) {
+      const varName = m[1];
+      const open = text.indexOf("{", m.index + m[0].length - 1);
+      const end = matchBrace(text, open);
+      if (end < 0) continue;
+      const entries = [];
+      for (const el of literalElements(text, open + 1, end - 1)) {
+        const e = parseTableEntry(el.text);
+        if (!e) continue;
+        if (e.qualified) { entries.length = 0; break; }   // noun-qualified table
+        const lineOf = (off) => text.slice(0, el.start + off).split("\n").length;
+        e.at = new Map();
+        for (const n of e.names) e.at.set(n, `${rel}:${lineOf(e.nameOff.get(n) ?? 0)}`);
+        entries.push(e);
+      }
+      // one row is a struct literal, not a dispatch table
+      if (entries.length < 2) continue;
+      const prev = tables.get(varName);
+      tables.set(varName, { name: varName, file: rel, entries: prev ? prev.entries.concat(entries) : entries });
+      TABLE_DECL_RE.lastIndex = end;
+    }
+  }
+  return tables;
+}
+
+// Attach each verb table to every function that hands a USER-TYPED token into
+// it, directly or through a lookup helper. Reaching the table any other way
+// (rendering it, counting it) donates nothing — that is what keeps a help
+// printer from making every verb resolvable everywhere.
+function attachVerbTables({ texts, fnBodies, funcFile, nodeFor }) {
+  const tables = scanVerbTables(texts);
+  if (tables.size === 0) return tables;
+
+  // level 0 — functions that RANGE a table
+  const provides = new Map();   // func -> Set(table var)
+  const addProvide = (fn, v) => {
+    if (!provides.has(fn)) provides.set(fn, new Set());
+    provides.get(fn).add(v);
+  };
+  for (const [fn, body] of fnBodies) {
+    for (const v of tables.keys()) {
+      if (new RegExp(`\\brange\\s+${v}\\b`).test(body) || new RegExp(`\\b${v}\\s*\\[`).test(body)) addProvide(fn, v);
+    }
+  }
+
+  // levels 1..n — a caller that passes the user's token into a provider is
+  // itself a dispatcher for that provider's tables. Three rounds cover
+  // runCloudSite → dispatchSiteVerb → lookupSiteVerb and leave room for one
+  // more hop; the set only grows, so the loop is monotone and terminating.
+  const attachments = [];       // {fn, table, ctx}
+  for (let round = 0; round < 4; round++) {
+    let grew = false;
+    for (const [fn, body] of fnBodies) {
+      for (const [callee, vars] of [...provides]) {
+        if (callee === fn) continue;
+        const callRe = new RegExp(`\\b${callee}\\s*\\(([^()]*(?:\\([^()]*\\)[^()]*)*)\\)`, "g");
+        let c;
+        while ((c = callRe.exec(body)) !== null) {
+          const argList = c[1];
+          if (!USER_TOKEN_RE.test(argList)) continue;
+          const ctx = [...argList.matchAll(/[A-Za-z_]\w*/g)].map((x) => x[0]);
+          for (const v of vars) {
+            if (!(provides.get(fn) || new Set()).has(v)) { addProvide(fn, v); grew = true; }
+            attachments.push({ fn, table: tables.get(v), ctx });
+          }
+        }
+      }
+    }
+    if (!grew) break;
+  }
+
+  for (const { fn, table, ctx } of attachments) {
+    const node = nodeFor(fn, funcFile.get(fn) || table.file);
+    for (const row of reachableVerbs(table, ctx)) {
+      for (const name of row.names) {
+        if (node.cases.has(name)) continue;   // a real `case` arm already said so
+        node.cases.add(name);
+        node.caseAt.set(name, row.at.get(name));
+        if (row.leaf) node.edges.set(name, row.leaf);
+      }
+    }
+  }
+  return tables;
+}
+
 function scanGo(root) {
   const files = goFiles(root);
   if (files.length === 0) return { ok: false, why: `no Go sources under ${CLI_DIR}` };
@@ -141,6 +384,8 @@ function scanGo(root) {
   let completionNouns = null;       // [B]
   let completionGlobals = new Set();
   let rootFn = null;
+  const texts = new Map();          // repo-relative file -> source text
+  const fnBodies = new Map();       // func name -> its body text  [D2]
 
   const nodeFor = (id, file) => {
     if (!nodes.has(id)) nodes.set(id, newNode(id, file));
@@ -150,6 +395,7 @@ function scanGo(root) {
   for (const abs of files) {
     const rel = relative(root, abs);
     const text = readFileSync(abs, "utf8");
+    texts.set(rel, text);
     const lines = text.split("\n");
 
     // [E] every `--flag` string literal in the file, file-scoped. Hand-rolled
@@ -194,6 +440,7 @@ function scanGo(root) {
         hz.set(fn, set);
       }
       if (/switch\s+noun\s*\{/.test(joined)) rootFn = fn;
+      fnBodies.set(fn, (fnBodies.get(fn) || "") + "\n" + joined);
       fnBody = [];
     };
 
@@ -255,6 +502,8 @@ function scanGo(root) {
     }
     flushFn();
   }
+
+  attachVerbTables({ texts, fnBodies, funcFile, nodeFor });
 
   if (!completionNouns || completionNouns.length === 0) {
     return { ok: false, why: `completionNouns not found in ${BUILTINS}` };
@@ -375,7 +624,7 @@ export function loadBpSources({ root = REPO_ROOT, offline = false, manifestPath 
       A: offline ? "(declared absent)" : manifestPath,
       B: BUILTINS,
       C: `${CLI_DIR}/**.go parseHzArgs allowlists`,
-      D: `${CLI_DIR}/**.go switch/case + verb== intercepts`,
+      D: `${CLI_DIR}/**.go switch/case + verb== intercepts + verb tables`,
       E: `${CLI_DIR}/**.go "--flag" literals`,
     },
   };

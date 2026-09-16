@@ -133,6 +133,16 @@ on:
       - "scripts/check-vendor-freshness.mjs"
       - "scripts/recut-vendor-tarballs.sh"
       - "scripts/templates-literal-check.sh"
+      # THE SOURCE OF TRUTH THE bp-command JOB RESOLVES AGAINST. The gate reads
+      # internal/cli's own dispatch (switch arms, verb== intercepts and the verb
+      # TABLES) to decide whether a printed `bp …` command parses, and until this
+      # entry existed a CLI change matched NO pattern here. MEASURED: #18555
+      # turned runCloudSite()'s verb switch into siteVerbMatrix, this workflow
+      # did not run on it, and the first anyone heard was twelve UNRESOLVED
+      # commands on MAIN's tip — against templates/ docs nobody had touched. On
+      # the same argument as js/packages/**: a gate blind to the change it
+      # guards reports green forever.
+      - "internal/cli/**"
       - "tooling/doc-truth/verify-bp-commands.mjs"
       - "tooling/doc-truth/bp-cli-sources.mjs"
       - "tooling/doc-truth/verify-docs.mjs"
@@ -212,6 +222,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # The selftest is where this gate's MUTATION arms live — a verb dropped
+      # from internal/cli's dispatch table must RED a doc that still prints it,
+      # and a token the table never declares must RED too. Unrun, they prove
+      # nothing: #18555 turned runCloudSite()'s verb switch into a lookup table
+      # and the resolver went blind to every `bp cloud site` verb, which is
+      # exactly the drift these arms measure. Never piped — a gate piped through
+      # tail or grep -q reports the PIPE's exit code.
+      - name: Self-test the resolver (its negative half must red)
+        run: node tooling/doc-truth/verify-bp-commands.mjs --selftest
       # Repo-RELATIVE paths ONLY: the resolver does join(root, rel) which
       # concatenates, so an absolute path resolves to a non-existent file and
       # exits 2 (a false "target not found") instead of adjudicating. --offline
