@@ -3342,6 +3342,56 @@ defmodule BarkparkCloud.DeployLedger do
   # instead of being derived from a comparison somewhere in the fold.
   @journey_sides [:pre, :post, :straddling]
 
+  # ── THE DEFERRED-ONLY PUBLISH POPULATION (charter D223) ────────────────────
+  #
+  # A journey every one of whose rows settled `deferred` and which no `live` or
+  # `failed` row ever closed: the publish reached NEITHER the web NOR a terminal
+  # failure. Under the ATTEMPT unit this population does not exist — its rows
+  # land in the same deferred bucket as every re-queue that later went live, so
+  # nothing in a row count distinguishes "re-queued and then served" from
+  # "re-queued and then nothing". It is the one thing the unit change surfaces.
+  #
+  # An open run that carries a `queued`/`building`/`pushing` row is NOT in this
+  # population: it is in flight, and the ledger has a row saying so.
+  @deferred_only_basis "a journey whose rows ALL settled `deferred` and which no `live`/`failed` row closed — the publish reached neither the web nor a terminal failure. An open run carrying an in-flight row (#{Enum.join(@in_flight_statuses, "/")}) is NOT in it: that publish is still running. Invisible to the ATTEMPT unit, whose deferred bucket cannot tell a re-queue that went live from one that went nowhere"
+
+  # RIGHT-CENSORING, AND WHY THE COUNT IS ABSOLUTE.
+  #
+  # (1) A run whose last row is recent has not FAILED to settle, it has not had
+  #     TIME to. Counting it as deferred-only reports the window edge as a
+  #     defect. So the population is split on a settling clause — the same
+  #     `last_at < as_of - 30 minutes` the abandonment census needed — and an
+  #     unsettled run is reported beside the count, never inside it. Without the
+  #     split the figure is an UPPER BOUND, and an upper bound presented as a
+  #     measurement is this epic's own error class.
+  #
+  # (2) The count is an ABSOLUTE with its window on the same line, never a rate.
+  #     The corpus that motivated the row is n=163 publishes, below
+  #     `@min_sample` #{@min_sample}: a percentage over it moves more than a
+  #     point per row. Nothing in this subtree publishes a rate, a share or a
+  #     fraction, and `deploy_ledger_journeys_test.exs` asserts the absence by
+  #     key name so that adding one reds.
+  @deferred_only_settle_rule "SETTLED means the run's last row is older than 30 minutes at `as_of`; a run younger than that is RIGHT-CENSORED — reported beside the count as `unsettled`, never inside it. Reported as an ABSOLUTE count with its window named, NEVER as a rate: the motivating corpus is n=163, below the @min_sample #{@min_sample} floor"
+
+  # The settling horizon, as the one literal. 30 minutes is the abandonment
+  # census's clause, reused rather than re-chosen: two settle horizons in one
+  # module are two answers to "has this row finished".
+  @deferred_only_settle_minutes 30
+
+  # THE D212 SPLIT. Charter D212 ruled the superficially identical abandoned-chain
+  # population BENIGN SUPERSESSION on settled data — 227 chains, 227 of them
+  # followed by a later `live` row for the same site, ZERO without. A
+  # deferred-only run followed by a later live row is the SAME shape: the
+  # publish was overtaken by a newer one that did reach the web, and no content
+  # is missing from the site. One with NO later live row is the population that
+  # is not covered by D212 and is the only one a reader may read as loss.
+  #
+  # The supersession probe deliberately looks BEYOND the pinned window's `to` —
+  # the superseding row is usually outside it, and bounding the probe by the
+  # window would manufacture strandings out of the window edge for the second
+  # time in one node.
+  @deferred_only_supersession "a deferred-only publish is SUPERSEDED when a later `live` row exists for the same site (probed BEYOND the window's end, up to `as_of`): charter D212's benign supersession, the publish was overtaken and the site is serving. UNSUPERSEDED means no later live row exists — the only cohort here a reader may read as loss, and the one D212 does not cover"
+
   @doc """
   ATTEMPTS PER RELEASE over a PINNED window, segmented by RUN.
 
@@ -3397,10 +3447,25 @@ defmodule BarkparkCloud.DeployLedger do
   * `open_runs` — trailing rows with no terminal row in the window. NOT a
     journey, never metered, counted so a reader can see how much of the window
     is still running.
+  * `deferred_only` — the SUBSET of those open runs whose every row settled
+    `deferred` (charter D223). #{@deferred_only_basis}
+
+  ## The deferred-only count is an ABSOLUTE, and it is split twice
+
+  #{@deferred_only_settle_rule}
+
+  #{@deferred_only_supersession}
+
+  `as_of` (opt, default `DateTime.utc_now/0`) is the instant the settling clause
+  and the supersession probe are taken against. A pinned historic window with a
+  default `as_of` therefore reads every one of its runs as SETTLED, which is the
+  correct answer for a window that closed weeks ago and the reason the clause is
+  not keyed on the window's `to`.
   """
   @spec journeys(DateTime.t(), DateTime.t(), keyword()) :: map()
   def journeys(%DateTime{} = from, %DateTime{} = to, opts \\ []) do
     site_ids = Keyword.get(opts, :site_ids)
+    as_of = Keyword.get(opts, :as_of, DateTime.utc_now())
 
     scoped =
       from(d in Deployment,
@@ -3447,16 +3512,58 @@ defmodule BarkparkCloud.DeployLedger do
       |> Enum.group_by(&{&1.site_id, &1.run_no})
       |> Enum.map(fn {_key, run} -> journey_row(run) end)
 
+    superseding = superseding_live(journeys, as_of)
+
     %{
       window: %{from: from, to: to},
+      as_of: as_of,
       segmentation: @journey_segmentation,
       basis: @journey_basis,
       unmetered_rule: @journey_unmetered,
       terminal_statuses: @journey_terminal_statuses,
       boundary: @journey_regime_boundary,
-      sides: Enum.map(@journey_sides, &journey_side(journeys, &1))
+      sides: Enum.map(@journey_sides, &journey_side(journeys, &1, as_of, superseding))
     }
   end
+
+  # ONE query for the whole D212 split: the LATEST `live` row at or before
+  # `as_of` for every site that owns a deferred-only run, keyed by site. A run is
+  # superseded when that instant is strictly after the run's last row.
+  #
+  # DELIBERATELY UNBOUNDED ABOVE BY THE WINDOW. The superseding row is normally
+  # outside the pinned window — that is what "a later publish overtook it" means
+  # — and bounding the probe by `to` would read the window edge as a stranding,
+  # which is the same censoring mistake the settling clause exists to refuse.
+  defp superseding_live(journeys, as_of) do
+    candidates = Enum.filter(journeys, &deferred_only?/1)
+
+    case candidates |> Enum.map(& &1.site_id) |> Enum.uniq() do
+      [] ->
+        %{}
+
+      site_ids ->
+        floor_at = candidates |> Enum.map(& &1.ended_at) |> Enum.min(DateTime)
+
+        Repo.all(
+          from(d in Deployment,
+            where:
+              d.site_id in ^site_ids and d.status == "live" and d.inserted_at > ^floor_at and
+                d.inserted_at <= ^as_of,
+            group_by: d.site_id,
+            select: {d.site_id, max(d.inserted_at)}
+          )
+        )
+        |> Map.new()
+    end
+  end
+
+  # The population predicate, in one place. A run is deferred-only when NOTHING
+  # closed it and every row in it settled `deferred` — an open run carrying a
+  # `queued`/`building`/`pushing` row is in flight, not deferred-only.
+  defp deferred_only?(%{terminal: nil, statuses: statuses}),
+    do: statuses != [] and Enum.all?(statuses, &(&1 == "deferred"))
+
+  defp deferred_only?(_journey), do: false
 
   # A run -> a journey. Sorted on the SAME key the window used, so the head this
   # reads and the head the run number was computed from cannot disagree.
@@ -3471,6 +3578,11 @@ defmodule BarkparkCloud.DeployLedger do
       head_rev: head.content_rev,
       metered: journey_metered?(head.content_rev),
       contended: Enum.any?(sorted, &(&1.status == "deferred")),
+      # Carried so the deferred-only predicate reads the run's OWN statuses
+      # rather than re-deriving "nothing but deferrals" from `contended` — which
+      # is true of a contended journey that went live, and would fold every
+      # served publish into the D223 population.
+      statuses: Enum.map(sorted, & &1.status),
       terminal: if(last.status in @journey_terminal_statuses, do: last.status, else: nil),
       started_at: head.inserted_at,
       ended_at: last.inserted_at
@@ -3498,7 +3610,7 @@ defmodule BarkparkCloud.DeployLedger do
     end
   end
 
-  defp journey_side(journeys, side) do
+  defp journey_side(journeys, side, as_of, superseding) do
     mine = Enum.filter(journeys, &(journey_side_of(&1) == side))
     live = Enum.filter(mine, &(&1.terminal == "live"))
 
@@ -3518,8 +3630,49 @@ defmodule BarkparkCloud.DeployLedger do
       # NOT a cohort and deliberately not given a rate: a run with no terminal row
       # in the window has not cost its attempts yet, and dividing by it would
       # publish a release that has not happened.
-      open_runs: Enum.count(mine, &is_nil(&1.terminal))
+      open_runs: Enum.count(mine, &is_nil(&1.terminal)),
+      deferred_only: deferred_only_node(mine, as_of, superseding)
     }
+  end
+
+  # THE D223 NODE. Counts only — no rate, no share, no fraction, and no key
+  # spelled like one. Both splits (settled/unsettled, superseded/unsuperseded)
+  # are COUNTS beside each other, so a renderer cannot put the deferred-only
+  # figure on a screen without the censoring and the D212 cohort that qualify it.
+  defp deferred_only_node(journeys, as_of, superseding) do
+    horizon = DateTime.add(as_of, -@deferred_only_settle_minutes * 60, :second)
+
+    {settled, unsettled} =
+      journeys
+      |> Enum.filter(&deferred_only?/1)
+      |> Enum.split_with(&(DateTime.compare(&1.ended_at, horizon) == :lt))
+
+    {superseded, unsuperseded} =
+      Enum.split_with(settled, &superseded?(&1, superseding))
+
+    %{
+      basis: @deferred_only_basis,
+      settle_rule: @deferred_only_settle_rule,
+      supersession_rule: @deferred_only_supersession,
+      as_of: as_of,
+      settled: %{
+        publishes: length(settled),
+        superseded: length(superseded),
+        unsuperseded: length(unsuperseded)
+      },
+      unsettled: %{
+        publishes: length(unsettled),
+        excluded_because:
+          "the run's last row is younger than the settling horizon at `as_of` — it has not failed to settle, it has not had time to. RIGHT-CENSORED: outside the count, never inside it"
+      }
+    }
+  end
+
+  defp superseded?(%{site_id: site_id, ended_at: ended_at}, superseding) do
+    case Map.get(superseding, site_id) do
+      nil -> false
+      latest_live -> DateTime.compare(latest_live, ended_at) == :gt
+    end
   end
 
   # The figure, its journey count, and the population it EXCLUDED — one node, so
@@ -3567,17 +3720,30 @@ defmodule BarkparkCloud.DeployLedger do
       "  basis         : #{node.basis}",
       "  unmetered     : #{node.unmetered_rule}",
       "  regime door   : #{DateTime.to_iso8601(node.boundary.instant)} (#{node.boundary.source}) — every figure below is per SIDE; a run that straddles the door is its own bucket"
-    ] ++ Enum.flat_map(sides, &journey_side_lines/1)
+    ] ++ Enum.flat_map(sides, &journey_side_lines(&1, node.window))
   end
 
-  defp journey_side_lines(side) do
+  defp journey_side_lines(side, window) do
     [
       "  #{journey_side_caption(side.side)}",
       "    live-terminated  : #{journey_cohort_line(side.live)}",
       "    contended subset : #{journey_cohort_line(side.live_contended)}",
       "    failed-terminated: #{journey_cohort_line(side.failed)}",
-      "    open runs (no terminal row in window, never metered): #{side.open_runs}"
+      "    open runs (no terminal row in window, never metered): #{side.open_runs}",
+      "    deferred-only    : #{deferred_only_line(side.deferred_only, window)}"
     ]
+  end
+
+  # THE D223 LINE. The count, its WINDOW, the D212 split and the censored
+  # remainder travel together — and the line says ABSOLUTE in its own words, so
+  # a reader who quotes it cannot quote a percentage that was never taken.
+  defp deferred_only_line(node, window) do
+    "#{node.settled.publishes} publishes settled DEFERRED-ONLY over " <>
+      "#{DateTime.to_iso8601(window.from)} -> #{DateTime.to_iso8601(window.to)} " <>
+      "(#{node.settled.superseded} superseded by a later live row — D212 benign; " <>
+      "#{node.settled.unsuperseded} unsuperseded); " <>
+      "#{node.unsettled.publishes} not yet settled at #{DateTime.to_iso8601(node.as_of)}, " <>
+      "EXCLUDED as right-censored — ABSOLUTE counts, never a rate"
   end
 
   defp journey_side_caption(:pre), do: "PRE-DOOR (run ended before the boundary)"
