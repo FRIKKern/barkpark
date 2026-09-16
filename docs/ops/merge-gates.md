@@ -335,7 +335,7 @@ is harmless:
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
-`.github/required-checks.json` — and reds if this page ever again describes a
+`.github/required-checks.json` — and reds if ANY agent/human-tier doc describes a
 transitive upstream of a required aggregator as unable to stop a merge.
 
 ### Where a guard that must BLOCK lives
