@@ -157,7 +157,9 @@ defmodule BarkparkCloud.DeployLedger.DrainDistribution do
     censor_edge = DateTime.add(to_at, -censor, :second)
 
     deferrals = deferrals(from_at, to_at, site_id)
-    {uncensored, censored} = Enum.split_with(deferrals, &(DateTime.compare(&1.inserted_at, censor_edge) == :lt))
+
+    {uncensored, censored} =
+      Enum.split_with(deferrals, &(DateTime.compare(&1.inserted_at, censor_edge) == :lt))
 
     marks = live_marks(uncensored, key, site_id)
     observed = uncensored |> mark_heads(gap) |> Enum.map(&observe(&1, marks, censor))
@@ -311,7 +313,11 @@ defmodule BarkparkCloud.DeployLedger.DrainDistribution do
     |> where([d], d.environment == "production")
     |> where([d], d.site_id in ^site_ids)
     |> then(fn q -> if site_id, do: where(q, [d], d.site_id == ^site_id), else: q end)
-    |> select([d], %{site_id: d.site_id, became_live_at: d.became_live_at, inserted_at: d.inserted_at})
+    |> select([d], %{
+      site_id: d.site_id,
+      became_live_at: d.became_live_at,
+      inserted_at: d.inserted_at
+    })
     |> Repo.all()
     |> Enum.flat_map(fn row ->
       # A live row with a NULL `became_live_at` carries no mark under that key.
@@ -319,8 +325,11 @@ defmodule BarkparkCloud.DeployLedger.DrainDistribution do
       # fallback would quietly make the two keys the same measurement and
       # destroy the cross-check they exist to be.
       case Map.fetch!(row, key) do
-        nil -> []
-        %DateTime{} = at -> if DateTime.compare(at, earliest) == :gt, do: [{row.site_id, at}], else: []
+        nil ->
+          []
+
+        %DateTime{} = at ->
+          if DateTime.compare(at, earliest) == :gt, do: [{row.site_id, at}], else: []
       end
     end)
     |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
