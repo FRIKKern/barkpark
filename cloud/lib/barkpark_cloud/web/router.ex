@@ -2460,7 +2460,28 @@ defmodule BarkparkCloud.Web.Router do
       # on, and the same width `bp cloud status` already asks the census for.
       deploy_to = DateTime.utc_now()
       deploy_from = DateTime.add(deploy_to, -24, :hour)
-      rmap = DeployLedger.box_rates(ids, deploy_from, deploy_to)
+      #
+      # `team_ids:` IS THE AUTHORITY HALF (dr-w10-bl). `ids` names the caller's
+      # OWN boxes, which bounds WHICH boxes appear — it does not bound whose
+      # sites are folded INTO each box node, because `sites` carries its own
+      # `team_id` and a box is a host, not a tenant. Without this the caller's
+      # own box row would carry a rate, a surface count and an absorption figure
+      # computed over another team's deploys, and no id in the response would
+      # ever say so. The narrowing rides INSIDE the fold; see `box_rates/4`.
+      #
+      # `scope=all` passes every team the caller is a MEMBER of, so the widening
+      # is exactly their own membership and never more.
+      scope_team_ids =
+        if all_teams? do
+          barkparks |> Enum.map(& &1.team_id) |> Enum.uniq()
+        else
+          case conn.assigns.current_team do
+            nil -> []
+            team -> [team.id]
+          end
+        end
+
+      rmap = DeployLedger.box_rates(ids, deploy_from, deploy_to, team_ids: scope_team_ids)
 
       json(conn, 200, %{
         barkparks:

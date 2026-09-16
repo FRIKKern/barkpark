@@ -3325,19 +3325,45 @@ defmodule BarkparkCloud.DeployLedger do
   A barkpark with NO sites at all is absent from the returned map — the caller
   renders its own "nothing to deploy" sentinel rather than this module inventing
   a rate for a box that cannot have one.
+
+  ## THE SCOPE IS APPLIED BEFORE THE RATE, NEVER AFTER IT (dr-w10-bl)
+
+  `:team_ids` narrows the FOLD, not the output map. That ordering is the whole
+  safety argument and it is not decoration: a box hosts sites, and `sites` carries
+  its OWN `team_id` alongside `barkpark_id`. Fold first and filter after and the
+  caller's box node has already absorbed a foreign team's failures into its
+  numerator and its denominator — a leak that never names the other team's site
+  and is therefore invisible to every id-shaped check. The same hazard
+  #18607 tested for on the per-site census row, one level up.
+
+  Omitting the option is the UNSCOPED fleet fold — the question an operator asks
+  ("is this box sick, counting everything on it"). Both modes are ONE
+  computation: the same query, the same `box_node/3`, the same `rate_basis/3`
+  refusal — an OPT on the one entry point rather than a second entry point, the
+  same idiom `census/3` already carries for `:site_ids`.
+
+  Today `create_site/2` derives `team_id` from the `%Barkpark{}` argument
+  (`Map.put`, never `put_new`), so the mixed-tenant box is not reachable through
+  the create door. That is a property of ONE function, not of the schema — the
+  column pair exists and `Site.changeset/2` casts both — so the fold is scoped
+  here rather than left resting on a neighbour's invariant.
   """
-  @spec box_rates([Ecto.UUID.t()], DateTime.t(), DateTime.t()) :: %{Ecto.UUID.t() => map()}
-  def box_rates(barkpark_ids, from, to)
+  @spec box_rates([Ecto.UUID.t()], DateTime.t(), DateTime.t(), keyword()) :: %{
+          Ecto.UUID.t() => map()
+        }
+  def box_rates(barkpark_ids, from, to, opts \\ [])
 
-  def box_rates([], %DateTime{} = _from, %DateTime{} = _to), do: %{}
+  def box_rates([], %DateTime{} = _from, %DateTime{} = _to, _opts), do: %{}
 
-  def box_rates(barkpark_ids, %DateTime{} = from, %DateTime{} = to) when is_list(barkpark_ids) do
+  def box_rates(barkpark_ids, %DateTime{} = from, %DateTime{} = to, opts)
+      when is_list(barkpark_ids) do
+    team_ids = Keyword.get(opts, :team_ids)
     # LEFT join, and the window bound lives in the ON clause: moved to WHERE it
     # would become an inner join and a box whose sites simply did not deploy in
     # the window would vanish — reading as "no deploy surface" (verdict
     # unchanged) instead of "asked too little to score" (a silence), which is
     # exactly the conflation this slice exists to end.
-    Repo.all(
+    base =
       from(s in Site,
         left_join: d in Deployment,
         on: d.site_id == s.id and d.inserted_at >= ^from and d.inserted_at < ^to,
@@ -3352,7 +3378,16 @@ defmodule BarkparkCloud.DeployLedger do
           count: count(d.id)
         }
       )
-    )
+
+    # THE TENANT NARROWING, INSIDE THE FOLD. It sits on `sites`, so a foreign
+    # team's site on this box contributes NOTHING — not a row to the denominator,
+    # not a site to the SURFACE count, not a deferral to absorption. Move this
+    # filter out of the query and onto the returned map and every one of those
+    # four quantities is already wrong by the time it is read.
+    scoped =
+      if is_list(team_ids), do: where(base, [s], s.team_id in ^team_ids), else: base
+
+    Repo.all(scoped)
     |> Enum.map(fn g -> Map.put(g, :class, classify(g)) end)
     |> Enum.group_by(& &1.barkpark_id)
     |> Map.new(fn {barkpark_id, groups} ->
