@@ -33617,10 +33617,16 @@ test("gr-backlog-d24 (b): no `dep-pill` class literal is emitted anywhere — th
     "deployStatusPill()/statusMetaPill() so there stays exactly one state grammar");
   // And the CONTROL, so this arm is not green by construction: the same reader,
   // run over a source with one literal restored, MUST find it.
-  const reverted = APP_SRC.replace(
+  // Through replaceUnique, not a bare `.replace`: a string needle takes the FIRST
+  // match anywhere and is silent when the anchor drifts, so an unapplied mutation
+  // would leave this control green over an unmodified source. replaceUnique REFUSES
+  // on nought hits AND on more than one, which is strictly stronger than the
+  // `notEqual` a bare replace would need — the refusal is the re-derive signal.
+  const reverted = replaceUnique(
+    APP_SRC,
     "deployStatusPill(st) + \"</div>\"",
-    "'<span class=\"dep-pill dep-' + esc(st) + '\">' + esc(cap(st)) + \"</span></div>\"");
-  assert.notEqual(reverted, APP_SRC, "the control's anchor no longer exists — re-derive it");
+    "'<span class=\"dep-pill dep-' + esc(st) + '\">' + esc(cap(st)) + \"</span></div>\"",
+    { what: "gr-backlog-d24 (b) control: restore one dep-pill literal" });
   assert.equal((reverted.match(/["'][^"'\n]*\bdep-pill\b/g) || []).length, 1,
     "the reader cannot see a restored dep-pill literal — this arm would be green over a revert");
 });
