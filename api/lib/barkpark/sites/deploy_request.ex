@@ -19,6 +19,7 @@ defmodule Barkpark.Sites.DeployRequest do
         "mode"           => "deploy" | "rollback" | "teardown",
         "runtime_target" => "static" | "node",# where the artifact runs (default "static")
         "template"       => "astro-starter" | "next-starter" | "search-starter" | "astro-search-starter", # which starter (optional)
+        "source_kind"    => "content-bound" | "external-git" | "external-artifact", # who OWNS <slug>/src (default "content-bound")
         "env"            => %{"BARKPARK_API_URL" => _, "BARKPARK_TOKEN" => _, ...}
       }
 
@@ -29,6 +30,31 @@ defmodule Barkpark.Sites.DeployRequest do
   arbitrary-source seam. `nil` (absent) is the backward-compatible default: the
   Provisioner then derives the template from `runtime_target` (static→astro,
   node→next), so every pre-template caller is unaffected.
+
+  `source_kind` is the FOURTH axis — WHO OWNS the site's `<slug>/src` tree, and
+  therefore whether `Barkpark.Sites.Provisioner` may materialize a starter over
+  it. It is a CLOSED enum validated EXACTLY like `mode`/`runtime_target`:
+
+    * `"content-bound"` (the default) — the site has no external source; its
+      source IS a shipped starter that fetches Barkpark content at build time.
+      The Provisioner OWNS `<slug>/src` and materializes into it.
+    * `"external-git"` — `<slug>/src` is (or will be) a clone of a repository
+      the customer supplied.
+    * `"external-artifact"` — `<slug>/src` is (or will be) an unpacked source
+      artifact the customer supplied.
+
+  For the last two the Provisioner does not own the tree and REFUSES to touch
+  it: `provision/1` returns `{:ok, :external_source_preserved}` instead of
+  swapping a starter into place. This axis exists BEFORE any on-box clone or
+  untar step does, deliberately — `Provisioner.provision/1` `rm_rf`-swaps
+  `<slug>/src` for any deploy whose tree is not marker-fresh, so the day an
+  external fetch lands without this field, the very next deploy deletes the
+  customer's code and replaces it with astro-starter.
+
+  It is INDEPENDENT of `artifact_b64`/`artifact_sha256`. Those carry a prebuilt
+  `dist/` (the build LEAVES the box); they say nothing about `<slug>/src`, and a
+  prebuilt request is content-bound unless the caller says otherwise — which is
+  exactly the behaviour the prebuilt lane has today.
 
   `runtime_target` (charter D63) is the SECOND axis of the deploy engine — the
   "ONE state machine, TWO runtime targets" split. `"static"` (the default,
@@ -67,6 +93,7 @@ defmodule Barkpark.Sites.DeployRequest do
             mode: :deploy,
             runtime_target: :static,
             template: nil,
+            source_kind: :content_bound,
             artifact_b64: nil,
             artifact_sha256: nil,
             env: %{}
@@ -79,6 +106,7 @@ defmodule Barkpark.Sites.DeployRequest do
           runtime_target: :static | :node,
           template:
             :astro_starter | :next_starter | :search_starter | :astro_search_starter | nil,
+          source_kind: :content_bound | :external_git | :external_artifact,
           artifact_b64: String.t() | nil,
           artifact_sha256: String.t() | nil,
           env: %{optional(String.t()) => String.t()}
@@ -125,6 +153,52 @@ defmodule Barkpark.Sites.DeployRequest do
   # spending a decode on it.
   @max_artifact_b64_bytes div(@max_artifact_bytes * 4, 3) + 64 * 1024
 
+  # The source-kind enum, as ONE table: wire string <-> struct atom <-> does the
+  # Provisioner own this tree? A predicate, not a scattered set of clauses — a
+  # fourth kind added here is automatically refused by `external_source?/1`
+  # unless it is also declared content-bound, so the FAIL-OPEN direction (a new
+  # external kind silently treated as ours, and clobbered) is unrepresentable.
+  @source_kinds %{
+    "content-bound" => {:content_bound, :provisioner_owned},
+    "external-git" => {:external_git, :externally_owned},
+    "external-artifact" => {:external_artifact, :externally_owned}
+  }
+
+  @doc "The `source_kind` values a caller may send. A closed enum."
+  @spec source_kinds() :: [String.t()]
+  def source_kinds, do: Map.keys(@source_kinds) |> Enum.sort()
+
+  @doc """
+  Does the Provisioner OWN this request's `<slug>/src` — i.e. may it delete the
+  tree there and materialize a starter into it?
+
+  True ONLY for `:content_bound`. Every other kind — including any kind added
+  later without a decision recorded in `@source_kinds` — is false.
+  """
+  @spec content_bound?(t()) :: boolean()
+  def content_bound?(%__MODULE__{source_kind: kind}), do: ownership(kind) == :provisioner_owned
+
+  @doc """
+  Is this site's source supplied from OUTSIDE (a git clone, an unpacked
+  artifact)? The exact complement of `content_bound?/1` — asserted as such by
+  the tests, so the two can never drift into a gap that fails open.
+  """
+  @spec external_source?(t()) :: boolean()
+  def external_source?(%__MODULE__{} = req), do: not content_bound?(req)
+
+  # Unknown atom => :externally_owned. `new/1` cannot produce one (the enum is
+  # closed), but a struct built by hand in a test or a future migration can, and
+  # the safe default for "I do not know who owns this tree" is HANDS OFF.
+  defp ownership(kind) do
+    @source_kinds
+    |> Map.values()
+    |> List.keyfind(kind, 0)
+    |> case do
+      {^kind, ownership} -> ownership
+      nil -> :externally_owned
+    end
+  end
+
   @doc "The env vars a caller may supply. Anything else is rejected."
   @spec allowed_env_keys() :: [String.t()]
   def allowed_env_keys, do: @allowed_env_keys
@@ -139,8 +213,8 @@ defmodule Barkpark.Sites.DeployRequest do
   Returns `{:error, code, message}` with a machine-readable `code`
   (`invalid_slug` | `invalid_build_id` | `invalid_content_rev` |
   `invalid_deploy_mode` | `invalid_runtime_target` | `invalid_template` |
-  `invalid_env` | `invalid_artifact` | `invalid_artifact_digest` |
-  `artifact_too_large`) on any violation.
+  `invalid_source_kind` | `invalid_env` | `invalid_artifact` |
+  `invalid_artifact_digest` | `artifact_too_large`) on any violation.
   """
   @spec new(map()) :: {:ok, t()} | {:error, String.t(), String.t()}
   def new(params) when is_map(params) do
@@ -148,6 +222,7 @@ defmodule Barkpark.Sites.DeployRequest do
          {:ok, mode} <- validate_mode(Map.get(params, "mode")),
          {:ok, runtime_target} <- validate_runtime_target(Map.get(params, "runtime_target")),
          {:ok, template} <- validate_template(Map.get(params, "template")),
+         {:ok, source_kind} <- validate_source_kind(Map.get(params, "source_kind")),
          {:ok, build_id} <- validate_build_id(mode, Map.get(params, "build_id")),
          {:ok, content_rev} <- validate_content_rev(Map.get(params, "content_rev")),
          {:ok, artifact_b64, artifact_sha256} <-
@@ -165,6 +240,7 @@ defmodule Barkpark.Sites.DeployRequest do
          mode: mode,
          runtime_target: runtime_target,
          template: template,
+         source_kind: source_kind,
          artifact_b64: artifact_b64,
          artifact_sha256: artifact_sha256,
          env: env
@@ -227,6 +303,31 @@ defmodule Barkpark.Sites.DeployRequest do
     do:
       {:error, "invalid_template",
        ~s(template must be one of "astro-starter", "next-starter", "search-starter", "astro-search-starter")}
+
+  # Source kind is the OWNERSHIP axis: it decides whether the Provisioner may
+  # delete <slug>/src. A CLOSED enum over @source_kinds, validated exactly like
+  # mode/runtime_target — never String.to_atom on request data. `nil` (absent)
+  # defaults to :content_bound, which is what every caller predating this field
+  # meant, and is the ONLY value that grants the Provisioner write ownership of
+  # the tree. An unrecognized value is a 400, NOT a silent drop to the default:
+  # a control plane that believes it said "external-git" to an un-upgraded box
+  # would otherwise get {:ok, req} and watch the next deploy delete the clone.
+  defp validate_source_kind(nil), do: {:ok, :content_bound}
+  defp validate_source_kind(""), do: {:ok, :content_bound}
+
+  defp validate_source_kind(kind) when is_binary(kind) do
+    case Map.fetch(@source_kinds, kind) do
+      {:ok, {atom, _ownership}} ->
+        {:ok, atom}
+
+      :error ->
+        {:error, "invalid_source_kind",
+         "source_kind must be one of #{Enum.map_join(source_kinds(), ", ", &inspect/1)}"}
+    end
+  end
+
+  defp validate_source_kind(_kind),
+    do: {:error, "invalid_source_kind", "source_kind must be a string"}
 
   # A rollback is a pure symlink repoint — the engine reads .previous, not a
   # build_id — so we drop any build_id passed with one rather than feed the
