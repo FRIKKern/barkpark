@@ -100,3 +100,14 @@ bites. **Order is the fix; the wrong order fails silently:**
 axes — so it passes every gate here.
 **MUST rotate before prod** — starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.
+
+## bp credential ↔ server pairing
+
+A credential resolved at bp's **active layer** (saved `config.json`, or a repo
+`.barkpark.json` naming a saved entry) is PAIRED to the server that layer
+recorded it for. When `-s <raw-url>` or `BARKPARK_API_URL` resolves a DIFFERENT
+host, bp withholds it before the first request (the `/v1/capabilities` fetch) and
+falls to the dev floor, saying so on stderr. A typed `--token`, a
+`BARKPARK_API_TOKEN`, and `-s <saved-name>` are the operator pairing the two
+themselves and are untouched. Code + decision: `resolveContextProv` "THE BINDING"
+(internal/cli/cli.go).
