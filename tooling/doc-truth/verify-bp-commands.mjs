@@ -402,6 +402,14 @@ function selftest() {
     return (r.verdict === UNRESOLVED && /redeploy/.test(r.reasons.join(" "))) ||
       `${r.verdict}: ${r.reasons.join("|")} — the table reader answers for verbs the table never declares`;
   });
+  check("VERB TABLE: a NOUN-QUALIFIED table donates no bare verbs", () => {
+    // nounBuiltins rows carry `Noun: "task", Verb: "lint"` — the dispatch token
+    // is the PAIR. Donating the bare verb would make `bp <anything> lint`
+    // resolvable, which is the vacuous green source D exists to kill.
+    const r = verdict("bp vercel lint");
+    return (r.verdict === UNRESOLVED) ||
+      `${r.verdict} — a noun-qualified row resolved by its verb alone`;
+  });
   check("VERB TABLE SCOPE: a spawner-only verb still REFUSES at the fleet noun", () => {
     const r = verdict("bp sites deploy");
     return (r.verdict === UNRESOLVED && /deploy/.test(r.reasons.join(" "))) ||

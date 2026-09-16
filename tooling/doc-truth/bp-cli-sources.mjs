@@ -160,6 +160,11 @@ const ALIASES_FIELD_RE = /\b(?:Aliases|Alias|Synonyms):\s*\[\]string\{([^}]*)\}/
 const SCOPE_FIELD_RE = /\b(?:Scope|Only|Availability):\s*([A-Za-z_]\w*)/;
 const HANDLER_FIELD_RE = /\b([A-Z]\w*):\s*(?:(\w+)\(\s*(\w+)\s*\)|(\w+))\s*,/g;
 const SCOPE_ONLY_RE = /([A-Z][a-z0-9]+)Only$/;
+// A row that names its own NOUN is not dispatched by its verb alone: the
+// dispatch token is the PAIR (`task create`). nounBuiltins is that shape, and
+// donating its bare verbs to a node would make `bp <anything> create`
+// resolvable — the exact vacuous green source D exists to kill.
+const QUALIFIER_FIELD_RE = /\b(?:Noun|Group|Parent|Namespace|Family):\s*"[^"]+"/;
 // the tokens a dispatcher's caller uses for "the verb the USER typed"
 const USER_TOKEN_RE = /\b(?:args|rest|tail|a|argv)\[0\]|\b(?:verb|sub|subcommand)\b/;
 const HANDLER_SKIP = new Set(["Verb", "Name", "Cmd", "Command", "Aliases", "Alias",
@@ -209,6 +214,7 @@ function literalElements(text, bodyStart, bodyEnd) {
 function parseTableEntry(elText) {
   const vm = elText.match(VERB_FIELD_RE);
   if (!vm) return null;
+  if (QUALIFIER_FIELD_RE.test(elText)) return { qualified: true };
   const names = [vm[1]];
   const am = elText.match(ALIASES_FIELD_RE);
   if (am) for (const s of am[1].matchAll(/"([^"]+)"/g)) names.push(s[1]);
@@ -286,6 +292,7 @@ function scanVerbTables(texts) {
       for (const el of literalElements(text, open + 1, end - 1)) {
         const e = parseTableEntry(el.text);
         if (!e) continue;
+        if (e.qualified) { entries.length = 0; break; }   // noun-qualified table
         const lineOf = (off) => text.slice(0, el.start + off).split("\n").length;
         e.at = new Map();
         for (const n of e.names) e.at.set(n, `${rel}:${lineOf(e.nameOff.get(n) ?? 0)}`);
