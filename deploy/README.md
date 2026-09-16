@@ -87,6 +87,20 @@ Unhealthy = fail closed: slot re-disabled, Caddy untouched, checkout reset
 back, exit 24. Schema stays forward — rolling back code does NOT undo a
 migration; write a compensating one.
 
+**Slot memory peaks (`deploy/slot-memory-peaks.sh`).** systemd's `MemoryPeak`/
+`MemorySwapPeak` reset per unit invocation and read 0 on a stopped unit — both
+guaranteed here, since every deploy stops one slot and starts the other. A census
+built on a live `systemctl show` therefore reports whatever the last restart left
+behind. `--sample` folds the live counters into a monotonic max in
+`/opt/barkpark/.slots/memory-peaks.tsv` (both slots plus the parent slice, the
+only counter that sees both BEAMs during a cutover); `--report` prints it. It sets
+NO resource directive: charter D118 forbids `MemorySwapMax` on the serving slot,
+and the script's header carries the placement arithmetic for the day that is
+revisited. Offline gate:
+`bash deploy/slot-memory-peaks.sh --self-test` — 15 checks against a fake
+`systemctl`, with the restart-survives assertion shown non-vacuous by mutating
+the fold, and this very count read back and asserted by the run itself.
+
 **Spawned static sites (`deploy/site-deploy.sh`).** A content-bound static site
 (Astro adapter × static symlink-swap target, Site-Spawner W1) builds and serves
 NEXT TO Phoenix on a content box, at `https://<instance>/sites/<slug>/`. It is a

@@ -328,6 +328,31 @@ cmd_selftest() {
   BARKPARK_SLOT_PEAKS_STATE="$STATE_FILE" bash "$self" --report >/dev/null 2>&1 || rc=$?
   check '--report with no state exits non-zero instead of printing nothing' '1' "$rc"
 
+  # --- ARM 9: the published count is READ BACK ------------------------------
+  # deploy/README.md publishes this engine's check count in prose. Direction
+  # matters and is the same as the site engines': the README number is the
+  # ASSERTED value and the RUN is the truth, so this guard only ever READS the
+  # README — a guard that learned its expected value from the thing it guards
+  # would be inert. It is the LAST check, so the number it compares against is
+  # this run's total INCLUDING itself. Skips when the README is absent (a box
+  # may ship the engine without the docs tree).
+  local readme readme_hits readme_count
+  readme="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)/README.md"
+  if [ ! -f "$readme" ]; then
+    printf 'skip README count guard: no %s\n' "$readme"
+  else
+    local re='deploy/slot-memory-peaks\.sh --self-test[^0-9]{1,12}[0-9]+ checks'
+    readme_hits=$(grep -oE "$re" "$readme" | wc -l | tr -d ' ')
+    if [ "$readme_hits" != 1 ]; then
+      check "README carries exactly ONE count anchor (found $readme_hits; restore \`deploy/slot-memory-peaks.sh --self-test ... <N> checks\` on ONE line)" \
+        '1' "$readme_hits"
+    else
+      readme_count=$(grep -oE "$re" "$readme" | sed -E 's/.*[^0-9]([0-9]+) checks$/\1/')
+      check "deploy/README.md's published count matches this run (README says $readme_count; the RUN is the truth — update the README in the SAME commit)" \
+        "$((CHECKS + 1))" "$readme_count"
+    fi
+  fi
+
   printf '\n%d checks, %d failures\n' "$CHECKS" "$FAILURES"
   [ "$FAILURES" -eq 0 ]
 }
