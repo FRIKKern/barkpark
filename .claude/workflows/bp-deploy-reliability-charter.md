@@ -10560,7 +10560,7 @@ over-reports by 2, so D474's all-of-present rule earns its keep live. The open d
   orphan site-less rows = **0**. The scoped census for the team that owns the fleet is **byte-identical**.
   Fleet-wide buys that team nothing and buys everyone else an unearned number.
 - **The 06:00Z send wrote 4 rows across 3 teams; two of those teams own ZERO sites** — including
-  `frikk.jarl@gyldendal.no`, the tenant this epic already has an open cross-tenant escalation about. Under
+  `<redacted-email>`, the tenant this epic already has an open cross-tenant escalation about. Under
   #11174 as written they receive "841 attempted, 555 deferred, 2.15% failed post-door" about a fleet they own
   no part of.
 - **The module contradicts itself in its own file.** `deliver_fleet_digest/1`'s doc states the ruling verbatim
