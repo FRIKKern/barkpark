@@ -446,6 +446,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       assert [fresh] = content_autos(site) |> Enum.reject(&(&1.id == in_flight.id))
       assert fresh.coalesced_attempts == 0
     end
+
     # dr-w19-bl-coalesced-counter-reads-a-confident-zero — WHY THE COUNTER READS
     # ZERO, SETTLED BY A TEST THAT CAN TELL THE TWO CAUSES APART.
     #
@@ -513,7 +514,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
         # merely unvisited — it is unreachable. This is the assertion that makes
         # ARM B evidence rather than a re-observation of a zero.
         assert is_nil(Deploy.active_production_deployment(busy_site.id)),
-                "round #{round}: a settled deferral must leave the active set"
+               "round #{round}: a settled deferral must leave the active set"
 
         assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => busy_site.id})
       end
@@ -531,7 +532,6 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       # increment.
       assert Registry.get_deployment(in_flight.id).coalesced_attempts == 3
     end
-
 
     test "RETRY ACCOUNTING: six consecutive busy boxes never DISCARD the rebuild" do
       {_bp, site} = setup_site()
