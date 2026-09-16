@@ -1,0 +1,77 @@
+{
+  "_readme": [
+    "NAMED OWNERS FOR WORKFLOWS THAT ARE OFF THE PR PATH (task-dee226be3107a98b c4).",
+    "",
+    "WHY THIS FILE EXISTS. A workflow on the PR path has an owner by construction: the",
+    "person whose PR it reddens. Move it to `push: main` and that owner disappears --",
+    "it cannot block a merge, no PR ever surfaces it, and a lane's close-out reads its",
+    "own PRs, never main's health. posix-vacuous-green-census.yml failed on main's tip",
+    "for ELEVEN HOURS across EIGHT consecutive runs and cost nobody a second",
+    "(task-6005859f86872319). scripts/main-red-owner.sh answers 'somebody must be told';",
+    "this file answers 'WHO'. Without it the watcher's issue is addressed to the repo,",
+    "which is the same nobody one layer out.",
+    "",
+    "THE POPULATION IS DERIVED, NEVER CURATED. A workflow belongs here iff it carries a",
+    "`push:` arm and NO `pull_request:` arm -- i.e. it is off the PR path, so only the",
+    "watcher can see its red. scripts/workflow-owner-check.sh recomputes that set from",
+    "the workflow files on every run and REFUSES when it does not match the keys below.",
+    "You cannot move a workflow off the PR path and forget this file: the guard reds.",
+    "",
+    "`owner` IS A LANE, not a person. Lanes are the repo's own fence table (CLAUDE.md):",
+    "api, console, deploy, gates, cli, studio. A lane outlives any individual and is",
+    "the unit a close-out can actually be pointed at. `owner` must be one of those six.",
+    "",
+    "`why_off_pr` IS LOAD-BEARING and is the one line the row demands for every move:",
+    "why the PR is the wrong place for this check, in a sentence a reader can dispute."
+  ],
+  "owners": {
+    "cli-release-cadence.yml": {
+      "owner": "cli",
+      "why_off_pr": "asks whether the RELEASE CADENCE has slipped -- a property of the tag history over time, not of any one diff; a PR cannot make it true or false."
+    },
+    "cli-release.yml": {
+      "owner": "cli",
+      "why_off_pr": "publishes a release from a tag; running it on a PR head would cut artifacts from unmerged code."
+    },
+    "deploy.yml": {
+      "owner": "deploy",
+      "why_off_pr": "ships merged code to real hosts; a PR head must never reach a box."
+    },
+    "grip-suite.yml": {
+      "owner": "gates",
+      "why_off_pr": "the Grip ledger suite reads durable ledger state, not the diff; on a PR it measures the same thing every time at full cost."
+    },
+    "landed-mark.yml": {
+      "owner": "gates",
+      "why_off_pr": "records that a PR LANDED -- the event it reports does not exist until the merge commit does."
+    },
+    "pipefail-sigpipe-scan.yml": {
+      "owner": "gates",
+      "why_off_pr": "a whole-tree census of shell scripts; its subject is the tree, so a per-PR run re-scans ~700 files to re-derive an unchanged verdict."
+    },
+    "posix-vacuous-green-census.yml": {
+      "owner": "gates",
+      "why_off_pr": "whole-tree census of interpreter-guard vacuity; same shape as above. THIS IS THE INCIDENT WORKFLOW: it stood red on main for 11 hours unowned, which is why this file exists."
+    },
+    "release-artifact.yml": {
+      "owner": "cli",
+      "why_off_pr": "builds and uploads release artifacts for a pushed ref."
+    },
+    "release.yml": {
+      "owner": "cli",
+      "why_off_pr": "cuts the release itself; tag-shaped, not diff-shaped."
+    },
+    "scaffy-catalog-drift.yml": {
+      "owner": "cli",
+      "why_off_pr": "compares the scaffy catalog against the templates on main; the comparand IS main, so on a PR it answers about the base, not the change."
+    },
+    "seal-reading.yml": {
+      "owner": "gates",
+      "why_off_pr": "seals a reading over landed history; nothing is sealed until the commit is on main."
+    },
+    "twoslash.yml": {
+      "owner": "studio",
+      "why_off_pr": "type-checks docs snippets against the PUBLISHED SDK surface, which only changes on a release."
+    }
+  }
+}
