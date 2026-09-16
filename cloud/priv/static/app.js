@@ -4783,6 +4783,44 @@
     return '<span class="wh-del-meaning">' + esc(m) + "</span>";
   }
 
+  // dr-w34 — WHAT THE RECEIPT CAN PROVE IT CARRIED. `notification_deliveries`
+  // stores an address, a transport verdict and a carrier; until this field it
+  // stored nothing about CONTENT, so a row proved a send happened and could
+  // never prove what it SAID. The only fleet digest ever delivered had to be
+  // tied to its text through a prod git reflog.
+  //
+  // `content_sha256` is the SHA-256 of the subject and bodies handed to the
+  // transport — a fingerprint, deliberately NOT the body: a digest body names
+  // sites, environments and per-team deploy volume, and this log is read
+  // cross-team by the operator route, so storing prose here would re-open the
+  // disclosure the digest partitions its payload to prevent. Whoever CLAIMS what
+  // a send said holds the render; they re-render, hash, and compare.
+  //
+  // ABSENT MEANS ABSENT, and it means something specific: a row with no
+  // fingerprint has not proved anything, so it reads "not fingerprinted" rather
+  // than vanishing. A blank and a proof look the same to a reader.
+  //
+  // The SENTENCE is not owned here. `content_proof_meaning` is authored by the
+  // control plane (`Notifications.Delivery.content_proof_meaning/1`, serialized
+  // by `delivery_json/1`) for the same reason `status_meaning` is: one author
+  // per sentence, or the caveat and the value drift apart.
+  function notifDeliveryProofLabel(d) {
+    var h = d && d.content_sha256 != null ? String(d.content_sha256) : "";
+    if (h === "") return "not fingerprinted";
+    return "fingerprint " + h.slice(0, 12);
+  }
+
+  function notifDeliveryProofHtml(d) {
+    var meaning = d && d.content_proof_meaning != null ? String(d.content_proof_meaning) : "";
+    var full = d && d.content_sha256 != null ? String(d.content_sha256) : "";
+    // The full digest rides in the title so it can be copied and compared; the
+    // short form rides in the row so it is SEEN. The title is the affordance,
+    // never the caveat — the caveat is the label itself.
+    var title = meaning === "" ? full : (full === "" ? meaning : full + " — " + meaning);
+    var attr = title === "" ? "" : ' title="' + esc(title) + '"';
+    return '<span class="wh-del-proof"' + attr + ">" + esc(notifDeliveryProofLabel(d)) + "</span>";
+  }
+
   // One delivery-log row in the webhook-deliveries visual grammar (`.wh-del-*`):
   // recipient leads (mono), a toned status pill, then channel · event · attempts,
   // the relative time, and — on a failure — the verbatim last_error on its own line.
@@ -4796,6 +4834,10 @@
       ? esc(d.attempts) + (String(d.attempts) === "1" ? " attempt" : " attempts")
       : null;
     var carrier = esc(notifDeliveryCarrierLabel(d));
+    // dr-w34: the content fingerprint rides in the SAME meta run as the carrier,
+    // because "what carried it" and "what it carried" are the same question
+    // asked twice and a reader should not have to find them in two places.
+    var proof = notifDeliveryProofHtml(d);
     var meta = [channel, event, carrier].concat(attempts ? [attempts] : []).join(" &middot; ");
     var err = d.last_error != null && String(d.last_error) !== ""
       ? '<span class="wh-del-err">' + esc(d.last_error) + "</span>"
@@ -4807,6 +4849,7 @@
       // cell run — this is the surface the control plane actually feeds.
       deliveryStatusMeaningHtml(d) +
       '<span class="wh-del-meta">' + meta + "</span>" +
+      proof +
       '<span class="wh-del-spacer"></span>' +
       '<span class="wh-del-when">' + esc(fmtWhen(d.inserted_at)) + "</span>" +
       err +

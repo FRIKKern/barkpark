@@ -4544,6 +4544,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   line-height: 1.4;
   color: var(--muted-text);
 }
+/* dr-w34 — the CONTENT FINGERPRINT segment. Mono, because it is a digest and a
+   reader compares it character by character; muted and at the type scale floor,
+   because it sits in the meta run beside the carrier rather than competing
+   with the status pill.
+   `not fingerprinted` renders in the same span and the same tone: an absence of
+   proof is a statement, not a blank. No --tone variants, so no value space for
+   __css_check's E15 to police. */
+.wh-del-proof {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 .wh-del-meta { font-size: 12px; color: var(--muted-text); }
 .wh-del-spacer { flex: 1 1 auto; }
 .wh-del-when { font-size: 12px; color: var(--muted-text); }

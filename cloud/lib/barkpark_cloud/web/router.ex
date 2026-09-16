@@ -12643,6 +12643,15 @@ defmodule BarkparkCloud.Web.Router do
       # including `null` for rows written before the column existed — the console
       # renders that absence as its own sentence rather than inventing a value.
       carrier: d.carrier,
+      # dr-w34: WHAT IT CARRIED, as a fingerprint. SHA-256 hex of the subject +
+      # bodies handed to the transport, or `null` for a send this version did not
+      # fingerprint. The meaning travels beside the value for the same reason
+      # `status_meaning` does — a reader must not be able to take the digest
+      # without the sentence that says what it can and cannot prove, and a
+      # `null` here is a claim about proof, not a missing field.
+      content_sha256: d.content_sha256,
+      content_proof_meaning:
+        BarkparkCloud.Notifications.Delivery.content_proof_meaning(d.content_sha256),
       inserted_at: d.inserted_at
     }
   end

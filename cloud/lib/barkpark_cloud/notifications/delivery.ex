@@ -114,6 +114,10 @@ defmodule BarkparkCloud.Notifications.Delivery do
     # notifications-chat: the provider HTTP status for a chat send (null for email).
     field :http_status, :integer
     field :carrier, :string
+    # dr-w34: the SHA-256 (hex) of the rendered subject + bodies handed to the
+    # transport. NULL means this send was not fingerprinted — see
+    # `content_digest/1` and `content_proof_meaning/1`.
+    field :content_sha256, :string
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -153,6 +157,110 @@ defmodule BarkparkCloud.Notifications.Delivery do
 
   def status_meanings, do: @status_meanings
 
+  ## ── dr-w34: WHAT THIS RECEIPT CARRIED ────────────────────────────────────
+
+  # The canonicalisation version. It is INSIDE the hashed bytes, so a future
+  # change to what gets covered produces a different digest for the same email
+  # rather than a silently-incomparable one: an old row and a new row can never
+  # accidentally agree across a format change.
+  @content_digest_version "bpdlv1"
+
+  @doc """
+  The content fingerprint of ONE rendered message — SHA-256, lowercase hex, of a
+  canonical envelope over `subject`, `text_body` and `html_body`.
+
+  ## Why this exists
+
+  `notification_deliveries` stores an address, a transport verdict and a
+  carrier. It has never stored a SENTENCE, so a delivery row proves a send
+  HAPPENED and can never prove what it SAID (dr-w34). The recovery routes are
+  gone too: `cloud-postfix-1` is recreated on every control-plane deploy, so the
+  SMTP trace of any given send has a lifetime measured in hours.
+
+  ## Why a hash and not the body
+
+  Retention. A digest body names sites, environments and per-team deploy volume,
+  and `notification_deliveries` is read cross-team by
+  `/v1/operator/deliveries` — storing rendered bodies there would re-open the
+  disclosure `deliver_fleet_digest/1` partitions its payload to prevent. A hash
+  proves identity without retaining prose: whoever CLAIMS what the mail said
+  holds the render, so they re-render, hash, and compare. What it cannot do is
+  reconstruct a body nobody kept, and that limit is the price of the choice.
+
+  ## What is covered, and what deliberately is not
+
+  Covered: subject, text body, html body — everything a reader of the message
+  sees. NOT covered: `to` / `from`. The recipient is already its OWN column on
+  the same row (so folding it in would prove nothing new and would stop a render
+  being checked without knowing the address), and `from` is `Mailer.from()`, a
+  constant. A `nil` body and an empty-string body hash alike, because they
+  render alike.
+
+  Returns `nil` for anything that is not a `%Swoosh.Email{}` — a caller with no
+  message in hand must leave the column NULL rather than store a digest of
+  nothing.
+  """
+  @spec content_digest(Swoosh.Email.t() | any()) :: String.t() | nil
+  def content_digest(%Swoosh.Email{} = email) do
+    :sha256
+    |> :crypto.hash(content_envelope(email))
+    |> Base.encode16(case: :lower)
+  end
+
+  def content_digest(_other), do: nil
+
+  # The exact bytes that get hashed. Newline-separated with the version first;
+  # every part is length-prefixed so no combination of subject and body can be
+  # re-cut into a different combination with the same envelope.
+  defp content_envelope(%Swoosh.Email{} = email) do
+    [
+      @content_digest_version,
+      part(email.subject),
+      part(email.text_body),
+      part(email.html_body)
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp part(value) when is_binary(value), do: "#{byte_size(value)}:" <> value
+  defp part(_value), do: "0:"
+
+  @doc """
+  Does `delivery`'s recorded fingerprint match `email`?
+
+  THE POINT OF THE COLUMN, as a predicate rather than a comparison a caller has
+  to remember to write. `true` only when the row carries a digest AND that digest
+  equals the one this message renders to. A row with no fingerprint answers
+  `false` — an unfingerprinted receipt has not proved anything, and returning
+  `true` for it would make "unproven" indistinguishable from "proven".
+  """
+  @spec content_matches?(t(), Swoosh.Email.t() | any()) :: boolean()
+  def content_matches?(%__MODULE__{content_sha256: stored}, email) when is_binary(stored) do
+    case content_digest(email) do
+      digest when is_binary(digest) -> Plug.Crypto.secure_compare(stored, digest)
+      nil -> false
+    end
+  end
+
+  def content_matches?(%__MODULE__{}, _email), do: false
+
+  @doc """
+  The one sentence that says what this row's `content_sha256` proves — the
+  `status_meaning/1` precedent, for the same reason: an absence rendered as a
+  blank is indistinguishable from a confident claim.
+  """
+  @spec content_proof_meaning(String.t() | nil) :: String.t()
+  def content_proof_meaning(digest) when is_binary(digest) do
+    "SHA-256 of the subject and bodies handed to the transport. " <>
+      "Re-render the message and hash it to check a claim about what this send said; " <>
+      "the body itself is deliberately not stored."
+  end
+
+  def content_proof_meaning(_digest) do
+    "Not fingerprinted — this send predates the content digest or was recorded " <>
+      "without the rendered message in hand. What it said cannot be proved from this row."
+  end
+
   def changeset(delivery, attrs) do
     delivery
     |> cast(attrs, [
@@ -165,7 +273,8 @@ defmodule BarkparkCloud.Notifications.Delivery do
       :attempts,
       :last_error,
       :http_status,
-      :carrier
+      :carrier,
+      :content_sha256
     ])
     # team_id is nullable: user-scoped identity emails (password-reset / verify /
     # email-change-code) belong to a user, not a team, so their delivery rows carry

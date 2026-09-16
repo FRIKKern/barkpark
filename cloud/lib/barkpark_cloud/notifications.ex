@@ -664,13 +664,18 @@ defmodule BarkparkCloud.Notifications do
             email = DigestEmail.build(summary, recipient)
             result = Mailer.deliver(email)
 
+            # dr-w34 — THE SAME STRUCT THAT WENT TO THE TRANSPORT, handed to the
+            # receipt. Not a re-render and not the `summary` it came from: a
+            # fingerprint taken from a second rendering would prove the renderer
+            # is deterministic, never that these bytes are the bytes that left.
             record_delivery(
               team_id,
               recipient,
               "fleet_digest",
               "transactional",
               result,
-              @platform_carrier
+              @platform_carrier,
+              email
             )
 
             {recipient, result}
@@ -1985,7 +1990,17 @@ defmodule BarkparkCloud.Notifications do
   # `Mailer`'s own moduledoc says transactional email ALWAYS rides the platform
   # (`Transactional.deliver_test/1` is arity-1 with no override seam), and the
   # one alert caller passes what `deliver_alert/2` measured.
-  defp record_delivery(team_id, recipient, event, kind, result, carrier) do
+  # dr-w34 — `email` is the RENDERED MESSAGE this row is the receipt for, and it
+  # is optional on purpose. A caller that HAS the `%Swoosh.Email{}` in hand passes
+  # it and the row gets a `content_sha256` fingerprint; a caller that does not
+  # passes nothing and the column stays NULL, which
+  # `Delivery.content_proof_meaning/1` renders as "not fingerprinted" rather than
+  # as a blank. The default is `nil` and NOT a computed value: the whole point of
+  # the column is that it is taken from the bytes actually handed to the
+  # transport, so a fingerprint nobody measured must never be manufactured here
+  # (the `carrier` argument above is REQUIRED for the same reason — this one can
+  # afford a default only because its default is the honest absence).
+  defp record_delivery(team_id, recipient, event, kind, result, carrier, email \\ nil) do
     {status, last_error} =
       case result do
         # dr-w26 — WHAT `{:ok, _}` ACTUALLY PROVES. It is the Swoosh adapter
@@ -2016,7 +2031,8 @@ defmodule BarkparkCloud.Notifications do
       status: status,
       attempts: 1,
       last_error: last_error,
-      carrier: carrier
+      carrier: carrier,
+      content_sha256: Delivery.content_digest(email)
     })
     |> Repo.insert()
     |> case do
