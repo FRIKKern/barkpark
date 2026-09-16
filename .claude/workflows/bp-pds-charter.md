@@ -11245,7 +11245,7 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
   2. **"collides 3 times in 17,620 defs corpus-wide" is right in number, wrong in scope.** The 3 is the
      count of collisions **within `{path, module.name/arity}`**, measured over the corpus. The genuine
      corpus-wide figure — ignoring path and mfa — is **1,101 collision groups over 3,035 defs, out of
-     23,658 defs**, RE-DERIVED IN PROCESS on 2026-09-16 at bbc50effa with
+     23,679 defs**, RE-DERIVED IN PROCESS on 2026-09-16 at 25ed0f263 with
      `elixir tooling/grip/ledger/_probe_d498_head_hash_corpus.exs` run from the repo root — a READ-ONLY
      probe that mirrors the census's own `defs/4` walker, `head_sig/1`, `label/1`, `tree_population/0`
      and the shipped `total-meta-drop/phash2-term/v1` normaliser, all of which are `defp` in the census
@@ -11262,7 +11262,12 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
      under PDS-D477's partial-drop spelling. Three integers now exist for one sentence, and the same
      probe produced two of them: the wave-36 brief recorded **913 / 2,544**; the SAME probe, run from a
      worktree detached at 29cb76e60, prints **912 / 2,543 over 17,620 defs**; and the tip today prints
-     **1,101 / 3,035 over 23,658 defs**, because api/lib grew from 804 to 908 files between those shas.
+     **1,101 / 3,035 over 23,679 defs**, because api/lib grew from 804 to 910 files between those shas.
+     **THE DENOMINATOR AND THE COLLISION COUNT DO NOT MOVE TOGETHER, which is the whole reason this is
+     dated rather than trusted:** re-derived twice in one afternoon, at bbc50effa and then after a rebase
+     at 25ed0f263, the defs total went 23,658 to 23,679 and the collision figure did NOT move off
+     1,101 / 3,035. A stable reading across two shas is not evidence that the number is stable; it is one
+     sample of a quantity that already moved by 189 groups over six weeks.
      That 29cb76e60 run is also how the probe is known to BE the census's walker rather than a lookalike
      — at that sha it reproduces six independent header facts exactly: 17,620 defs, 3 within-group
      buckets over 6 defs at the same three sites and the same lines, capabilities.ex visible?/2 =
@@ -11271,7 +11276,7 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
      sha and its normaliser or it is not quoted at all.
   3. **"all benign bodiless declaration heads" is FALSE — and the SPLIT ITSELF moved.** The wave-36 brief
      said 2 of the 3 were not benign; derived at 29cb76e60, only **ONE** of the three WAS benign, which
-     is the opposite reading. Re-derived at bbc50effa on 2026-09-16 the within-group collisions are
+     is the opposite reading. Re-derived at 25ed0f263 on 2026-09-16 the within-group collisions are
      **5 buckets over 10 defs**, and the split is **2 benign / 3 non-benign**:
      * **BENIGN** — a bodiless declaration head paired with its own last clause:
        `plugins/capabilities.ex` visible?/2 (header at line 166, last clause at line 177, its `@spec`
