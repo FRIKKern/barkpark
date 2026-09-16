@@ -157,9 +157,55 @@ mute "C2 …and never names a file it is not enforcing" "$o" "$F"
 # C3 — push:main. No PR diff exists, so nothing is diff-scoped: the format job
 #      prints the standing debt and succeeds. Main is where the debt is VISIBLE,
 #      never where it is enforced.
-decide success ""
-[ "$rc" = 0 ] && ok "C3 push:main (no PR diff) is neutral — the gate does not red on standing debt" \
-              || no "C3 expected exit 0, got $rc"
+#
+#      THIS CASE USED TO BE `decide success ""` — byte-identical to C2, one
+#      `decide` call with the same arguments. It therefore measured the
+#      AGGREGATOR a second time and said nothing whatever about the push arm,
+#      which the aggregator never sees: the reader is what runs on a push, and
+#      the reader was not invoked. A green with no subject. The task this
+#      harness serves is "a permanently red gate teaches every reader to dismiss
+#      it" — and its mirror image is a permanently SILENT green, which teaches
+#      the same dismissal by making main's debt invisible. So C3 now runs THE
+#      READER on the push shape (guard says unformatted, changed-file EMPTY) and
+#      requires both halves: exit 0, and the debt named, counted and labelled.
+PUSH_LOG="$TMP/push-verdict.log"
+PUSH_R="$TMP/push-root"; mkdir -p "$PUSH_R"
+printf '** (Mix) mix format failed due to --check-formatted.\nThe following files are not formatted:\n\n  * %s\n  * test/barkpark/content/errors_envelope_table_test.exs\n' \
+  "lib/barkpark/content/papers/block_ops.ex" > "$PUSH_LOG"
+PUSH_CHANGED="$TMP/push-changed.txt"; : > "$PUSH_CHANGED"
+push_out="$(FORMAT_DIFF_SCOPE_ROOT="$PUSH_R" bash "$SCOPE" \
+  --verdict-log "$PUSH_LOG" --guard-rc 1 --changed "$PUSH_CHANGED" 2>&1)"; push_rc=$?
+[ "$push_rc" = 0 ] && ok "C3 push:main (no PR diff) is neutral — the gate does not red on standing debt" \
+                   || no "C3 expected exit 0, got $push_rc: $push_out"
+says "C3 …and it NAMES the debt — main green must never mean main silent" "$push_out" "block_ops.ex"
+says "C3 …and it SIZES it"                                               "$push_out" "2 file(s) are unformatted"
+says "C3 …and it says why nothing is enforced here"                      "$push_out" "no PR diff on this event"
+mute "C3 …and it makes no accusation against a diff that does not exist" "$push_out" "UNFORMATTED IN THIS DIFF"
+
+# C3b — the mutation that makes C3 a real catch. A reader that exits 0 without
+#       printing the offenders passes the exit-code half and fails the
+#       visibility half; if it passed BOTH, C3's new assertions measure nothing.
+PUSH_MUT="$TMP/scope-silent.sh"
+# grep -vF on the offender-printing line: the only place the reader echoes the
+# file list on the push arm. FIXED-STRING, because the sed program inside it
+# ('s/^/   - /') is not a pattern this harness wants re-interpreted — the first
+# draft of this mutation used `sed` and died of "bad flag in substitute
+# command", left $PUSH_MUT EMPTY, and an empty script exits 0 printing nothing,
+# so the check below PASSED while measuring nothing. Hence C3a.
+grep -vF "sed 's/^/   - /'" "$SCOPE" > "$PUSH_MUT"
+if [ -s "$PUSH_MUT" ] && [ "$(wc -l < "$PUSH_MUT")" -lt "$(wc -l < "$SCOPE")" ]; then
+  ok "C3a the silencing mutation APPLIED (non-empty, and the offender-print line is gone)"
+else
+  no "C3a the silencing mutation did NOT apply — C3b below would be vacuous"
+fi
+mut_out="$(FORMAT_DIFF_SCOPE_ROOT="$PUSH_R" bash "$PUSH_MUT" \
+  --verdict-log "$PUSH_LOG" --guard-rc 1 --changed "$PUSH_CHANGED" 2>&1)"; mut_rc=$?
+if [ "$mut_rc" = 0 ] && printf '%s' "$mut_out" | grep -q 'no PR diff on this event' \
+   && ! printf '%s' "$mut_out" | grep -q 'block_ops.ex'; then
+  ok "C3b a silent-but-green push arm is REACHABLE, so C3's name assertion is a real catch"
+else
+  no "C3b the mutant exited $mut_rc and did not go silent-while-green — C3's visibility half is unproven"
+fi
 
 # C4 — the format job SKIPPED. Legitimate only when the dispatcher said this
 #      path set was untouched; on a compile=true diff a skip means it never ran.

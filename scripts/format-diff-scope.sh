@@ -240,8 +240,20 @@ ck "the SAME drift in files this diff never touched is NEUTRAL" 0 "INHERITED fro
 ck "…and the inherited files are still PRINTED, never hidden" 0 "block_ops.ex" "" "$rc" "$out"
 
 # 3. push:main — no PR diff at all. Neutral, and it SAYS why.
+#
+#    GREEN IS HALF THE CONTRACT ON THIS ARM. The other half is that main stays
+#    the place the debt is VISIBLE: a push arm that exits 0 in SILENCE satisfies
+#    every assertion about the exit code and destroys the only reason the arm is
+#    allowed to be neutral. Until 2026-09-16 this case asserted the exit code,
+#    the "no PR diff" sentence, and the absence of the red sentence — and a
+#    reader that printed nothing at all would have passed all three. The three
+#    assertions below are the visibility half: the file, the count, and the
+#    words a reader uses to recognise what main is carrying.
 run --verdict-log "$tmp/v119.log" --guard-rc 1 --changed "$tmp/changed-empty.txt"
 ck "no PR diff (push to main) is NEUTRAL and says so in words" 0 "no PR diff on this event" "UNFORMATTED IN THIS DIFF" "$rc" "$out"
+ck "…and the push arm still NAMES the debt — green must never mean silent" 0 "block_ops.ex" "" "$rc" "$out"
+ck "…and it states the FULL count, so the debt has a size" 0 "2 file(s) are unformatted" "" "$rc" "$out"
+ck "…and it calls it the standing debt, with an owner" 0 "standing" "" "$rc" "$out"
 
 # 4. the 1.18 output shape still parses — a formatter downgrade must not neuter it.
 run --verdict-log "$tmp/v118.log" --guard-rc 1 --changed "$tmp/changed-touches.txt"
