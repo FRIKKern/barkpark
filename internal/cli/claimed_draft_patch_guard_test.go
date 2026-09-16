@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,6 +59,12 @@ type claimedPatchHarness struct {
 	docStatus  int    // status the published-row GET answers (0 -> 200)
 	docBody    string // body the published-row GET answers with (empty -> claimed)
 	mutateBody string
+	// recordBody, when set, receives the RAW body of every mutation the CLI
+	// sends. Recording the path alone proves a write happened; recording the
+	// body is what lets a test say which FIELDS went with it — the difference
+	// between "a patch was sent" and "a patch that could overwrite the claim
+	// was sent".
+	recordBody func(string)
 }
 
 // theClaimedDocBody is the published-row read as `bp doc get --perspective
@@ -94,6 +101,10 @@ func newClaimedPatchHarness(t *testing.T) *claimedPatchHarness {
 			}
 			_, _ = w.Write([]byte(body))
 		default:
+			if h.recordBody != nil {
+				raw, _ := io.ReadAll(r.Body)
+				h.recordBody(string(raw))
+			}
 			w.WriteHeader(http.StatusOK)
 			body := h.mutateBody
 			if body == "" {
@@ -388,4 +399,137 @@ func TestExtractClaimedDraftPatchFlag(t *testing.T) {
 	if len(kept) != 3 {
 		t.Errorf("the inline form was stripped from the tail: %v", kept)
 	}
+}
+
+// ── THE ROW'S OWN THREE CASES (task-bff844cc812f0fe4, criterion 3)
+//
+// The reproduction that filed this row ran three rows, not two, and the third
+// is the one that says what the trap is ABOUT. A draft twin is unpublishable
+// because it does not carry the published row's claim BLOCK — not because the
+// operator is a stranger to the claim. So a row claimed by ANOTHER lane
+// (l2core-ssl) and a row claimed by THE ACTOR THEMSELF (l6-docs) are the same
+// trap, and the guard must refuse both, naming whichever worker it read. The
+// UNCLAIMED control is the third: it is what proves the claim block is the
+// cause, because it patches and publishes on the first attempt.
+//
+// Re-measured live on guerrilla 2026-09-16 by cli-r20-w51 against a row it
+// created itself (task-6b973b4578afa660, since cleaned up): with the twin in
+// place, `bp doc patch task drafts.<id> --edit-claimed-draft` answered "DRAFT
+// updated … rev: bcd2ac2…" and the following publish answered `claim: stale
+// draft: the published row carries claim state (worker "probe-w51-holder",
+// epoch 1) this draft does not`. Both halves of the title's assertion hold.
+//
+// REVERT-RED: drop the guardClaimedDraftPatch call from run.go and both
+// claimed arms send their mutation and exit 0.
+func TestTheRowsThreeCases(t *testing.T) {
+	// The identifiers are the row's own, kept verbatim so the cases stay
+	// traceable to the reproduction that filed it.
+	const (
+		otherLaneWorker = "l2core-ssl" // the row claimed by a DIFFERENT lane
+		actorWorker     = "l6-docs"    // the row claimed by THE ACTOR
+	)
+
+	claimedBody := func(worker string) string {
+		return `{"result":{"_id":"` + theClaimedRow + `","_type":"task","_draft":false,"_rev":"r1",` +
+			`"title":"PROBE","lifecycle_status":"open",` +
+			`"claim":{"worker":"` + worker + `","epoch":2,"ts_iso":"2026-09-16T09:24:53.504043Z"}}}`
+	}
+
+	cases := []struct {
+		name        string
+		body        string
+		wantRefused bool
+		wantWorker  string
+	}{
+		{"claimed by another lane", claimedBody(otherLaneWorker), true, otherLaneWorker},
+		{"claimed by the actor themself", claimedBody(actorWorker), true, actorWorker},
+		{"the UNCLAIMED control", theUnclaimedDocBody, false, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newClaimedPatchHarness(t)
+			h.docBody = tc.body
+
+			code, _, stderr := h.runPatchWith(globals{yes: true},
+				"task", "drafts."+theClaimedRow, "--set", "description=evidence")
+
+			sent := h.sent("POST " + claimedMutatePath)
+			if tc.wantRefused {
+				if code == exitOK || sent {
+					t.Errorf("exit = %d, mutation sent = %v — a claimed row's twin must be refused BEFORE the write, whoever holds it:\n%s",
+						code, sent, stderr)
+				}
+				if !strings.Contains(stderr, tc.wantWorker) {
+					t.Errorf("the refusal does not name the holder %q — it named someone else or nobody:\n%s", tc.wantWorker, stderr)
+				}
+				// The guard must not be keyed on WHO holds the claim: being the
+				// claimant yourself does not make the draft publishable, so the
+				// way out is the same sequence in both claimed cases.
+				if !strings.Contains(stderr, "bp doc discard-draft task "+theClaimedRow) {
+					t.Errorf("the refusal omits the sequence that lands the edit:\n%s", stderr)
+				}
+				return
+			}
+			if code != exitOK || !sent {
+				t.Errorf("exit = %d, mutation sent = %v — the unclaimed control must patch exactly as before:\n%s", code, sent, stderr)
+			}
+			if strings.Contains(stderr, "refusing to patch") {
+				t.Errorf("the control was gated, so it proves nothing:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// ── NO CLAIM IS OBLITERATED BY THE FIX (task-bff844cc812f0fe4, criterion 4)
+//
+// The claim lives server-side, so the byte-for-byte proof that an enrichment
+// leaves it untouched is an api-side assertion and belongs with the api row
+// (task-922e616cb9b99243). What IS provable from here, and is the half this
+// guard owns, is that the CLI never puts the claim in play: on the refusal
+// path it issues no mutation at all, and on the remedy it prescribes — the
+// bare-id patch — the request body it sends carries the edited field and no
+// `claim` key, so there is nothing in the wire format that could overwrite it.
+//
+// Measured against the same live row on 2026-09-16: `bp doc discard-draft task
+// <id>` then `bp doc patch task <id> --set description=…` changed the
+// description while `jq -S .claim` before and after diffed EMPTY.
+//
+// REVERT-RED: have guardClaimedDraftPatch return (exitOK, false) on
+// publishedClaimHeld and the first arm sees the mutation on the wire.
+func TestTheEnrichmentPathNeverPutsTheClaimOnTheWire(t *testing.T) {
+	t.Run("the refusal issues no mutation at all", func(t *testing.T) {
+		h := newClaimedPatchHarness(t)
+
+		_, _, _ = h.runPatchWith(globals{yes: true}, "task", "drafts."+theClaimedRow, "--set", "description=evidence")
+
+		for _, got := range h.seen {
+			if strings.HasPrefix(got, "POST ") {
+				t.Errorf("the guard issued %q — a refusal that has already written cannot protect a claim; requests seen: %v", got, h.seen)
+			}
+		}
+	})
+
+	t.Run("the prescribed bare-id patch sends no claim field", func(t *testing.T) {
+		h := newClaimedPatchHarness(t)
+		var bodies []string
+		h.recordBody = func(b string) { bodies = append(bodies, b) }
+
+		code, _, stderr := h.runPatchWith(globals{yes: true}, "task", theClaimedRow, "--set", "description=evidence")
+
+		if code != exitOK {
+			t.Fatalf("exit = %d — the remedy the refusal prints must itself run, stderr:\n%s", code, stderr)
+		}
+		if len(bodies) == 0 {
+			t.Fatal("the bare-id patch sent no body at all; there is nothing to inspect")
+		}
+		for _, b := range bodies {
+			if !strings.Contains(b, `"description"`) {
+				t.Errorf("the request does not carry the edited field, so this arm is measuring nothing: %s", b)
+			}
+			if strings.Contains(b, `"claim"`) {
+				t.Errorf("the enrichment request carries a claim key — that is the byte that could obliterate a live lease: %s", b)
+			}
+		}
+	})
 }
