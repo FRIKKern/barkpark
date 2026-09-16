@@ -1826,6 +1826,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:merge_gated, merge_gated)
         |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
+        |> Params.put_opt(:ack_gate, Params.stamp_ack_gate(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
         |> Params.put_opt(:session, session_id(conn, params))
 
