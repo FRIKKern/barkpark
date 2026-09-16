@@ -59,6 +59,32 @@ defmodule BarkparkWeb.Components.Fields.ArrayFieldTest do
     end
   end
 
+  describe "array_field/1 — nested findings (Gyldendal parity E1.11)" do
+    test "a row's subfield error and a row-level warning render inside that row" do
+      field = %Field{
+        name: "banners",
+        type: "arrayOf",
+        of: %Field{
+          name: "item",
+          type: "composite",
+          fields: [%Field{name: "title", type: "string"}]
+        }
+      }
+
+      html =
+        render_component(&ArrayField.array_field/1, %{
+          field: field,
+          value: [%{"title" => "ok"}, %{"title" => ""}],
+          errors: %{1 => %{"title" => ["Required"]}},
+          warnings: %{0 => ["Maks 4 bilder anbefalt."]}
+        })
+
+      assert html =~ ~r/data-row-index="1".*data-error-for="title">Required</s
+      refute html =~ ~r/data-row-index="0"[^\n]*?data-error-for="title"/
+      assert html =~ ~s(data-warning-for-row="0">Maks 4 bilder anbefalt.<)
+    end
+  end
+
   describe "array_field/1 — render" do
     test "ordered:true renders up/down buttons with phx-click events" do
       field = %Field{

@@ -1,0 +1,284 @@
+package taskboard
+
+import (
+	"context"
+	"net/url"
+	"sync"
+	"time"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
+)
+
+// corpus.go is the board's INCREMENTAL RE-LIST.
+//
+// THE DEFECT (task-1ca34359dc0805df, re-measured on today's tree 2026-09-15
+// against guerrilla, 200x50 pty, instrumented byte counters):
+//
+//	/v1/tasks  n=22  bytes=193,989,243  in 60 IDLE seconds, no keys pressed
+//
+// The corpus GET is a cursor walk to EXHAUSTION over ~10 pages of ~10 MB each
+// — ~97 MB, ~25 seconds — and on a ledger a six-lead campaign is writing to,
+// the 5s minRelistEvery floor is hit continuously, so the board simply runs
+// that walk back to back forever. Two full walks fit in one minute; hence 194
+// MB. The keyset detector (events.go) is doing its job perfectly. The problem
+// is what a "yes, something moved" costs: re-downloading all ~9,000 tasks,
+// nearly every one of which has not been touched in weeks.
+//
+// THE OBSERVATION THAT MAKES IT CHEAP. The walk is ordered desc:updated_at —
+// the cursor token is literally {"k":"updated_at",…}. So the rows that changed
+// since the last snapshot are exactly the PREFIX of the walk. Let W be the
+// greatest updated_at in the corpus we already hold. Every row the server
+// wrote after we took that corpus carries updated_at > W (a write re-stamps
+// it), so:
+//
+//	walk from the head until a row with updated_at <= W appears
+//	⟹ every changed-or-new row is in hand, and every row beyond is
+//	  byte-identical to the copy we are already holding.
+//
+// That turns the re-list from "all 9,000 rows" into "the handful that moved",
+// and the page size can shrink with it (headPageLimit) because the boundary
+// lands inside the first page on a board that is merely busy rather than
+// stampeding.
+//
+// WHAT IT DELIBERATELY DOES NOT DO. It does not apply events to rows (charter
+// decision #4 is untouched: events still say only "something moved", the
+// SNAPSHOT still says what is true). It does not invent an updated_since
+// filter the server does not offer — every request here is the same
+// /v1/tasks?limit=&cursor= route the full walk uses, asked for less of.
+//
+// THE ONE THING THE PREFIX CANNOT SEE is a row that DISAPPEARS without a
+// write: a hard delete, or a twin collapse that changes which row the query
+// projects. Nothing re-stamps updated_at on the survivor, so the vanished row
+// would live on in the retained tail. fullResyncEvery bounds that: one honest
+// exhaustive walk on a timer, and on the first fetch of every process. Any
+// condition the incremental walk cannot discharge — no base, a base that was
+// never exhaustive, a server without the cursor, more changed rows than
+// maxHeadPages covers — falls straight back to the full walk, which is exactly
+// the behaviour that shipped before this file.
+
+const (
+	// headPageLimit is the page size of the INCREMENTAL walk. It is small on
+	// purpose: the walk stops at the first row at-or-below the watermark, so the
+	// page size is the real unit of waste. Live rows measured ~10 KB each on
+	// guerrilla (10.5 MB / 1000 rows), so 50 rows is a ~500 KB ceiling on
+	// noticing a change instead of ~97 MB.
+	headPageLimit      = 50
+	headPageLimitToken = "50"
+	headFetchPath      = "/v1/tasks?limit=" + headPageLimitToken
+
+	// maxHeadPages bounds the incremental walk. Past this the changed set is so
+	// large that paging it 50 at a time is no longer the cheap option, and the
+	// walk hands over to the full one rather than degenerating into many small
+	// requests. 20 x 50 = 1000 changed rows — the full walk's own page size.
+	maxHeadPages = 20
+
+	// fullResyncEvery is how often the board pays for an honest exhaustive walk
+	// even when the incremental one could have answered. It is the ONLY thing
+	// that can retire a row which vanished without a write (see the note above),
+	// so it is a correctness floor, not a tuning knob. Ten minutes is ~1/120th
+	// of the re-list rate the board ran at before.
+	fullResyncEvery = 10 * time.Minute
+)
+
+// corpusBase is the corpus a previous walk left behind, plus the watermark the
+// incremental walk measures against. A zero value means "no base": the next
+// fetch is a full walk.
+type corpusBase struct {
+	tasks   []Task
+	details DetailIndex
+	// watermark is the greatest UpdatedAt in tasks. Zero disables the
+	// incremental path — a corpus whose rows carry no updated_at (an older
+	// envelope) cannot be prefix-diffed, and guessing one would be the silent
+	// staleness this whole file exists to avoid.
+	watermark time.Time
+	// exhaustive records whether the walk that produced tasks reached the END of
+	// the cursor. An incremental walk on top of a NON-exhaustive base would
+	// inherit its hole and then call the result complete, so it is refused.
+	exhaustive bool
+	// lastFull is when the base last came from a full exhaustive walk.
+	lastFull time.Time
+}
+
+// corpusCache holds the base between fetches. It is a package-level singleton
+// because the fetch seam (FetchSnapshotFull) takes only a client — the TUI is
+// the one long-lived caller and the one that benefits; every one-shot CLI verb
+// (`bp task frontier`, `lint`, `next`, `cmux dispatch`) starts with an empty
+// cache and therefore does exactly the full walk it did before.
+type corpusCache struct {
+	mu   sync.Mutex
+	base corpusBase
+}
+
+func (cc *corpusCache) snapshot() corpusBase {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.base
+}
+
+func (cc *corpusCache) store(b corpusBase) {
+	cc.mu.Lock()
+	cc.base = b
+	cc.mu.Unlock()
+}
+
+// watermarkOf is the greatest non-zero UpdatedAt across tasks. A corpus in
+// which NO row carries an updated_at returns the zero time, which the caller
+// reads as "no incremental path available".
+func watermarkOf(tasks []Task) time.Time {
+	var w time.Time
+	for _, t := range tasks {
+		if t.UpdatedAt.After(w) {
+			w = t.UpdatedAt
+		}
+	}
+	return w
+}
+
+// fetchTaskCorpus is the corpus GET the board's snapshot path calls. It walks
+// the changed PREFIX when it safely can and the whole cursor when it cannot,
+// and it reports exhaustiveness with the same meaning fetchTaskPages always
+// did: true only when the returned corpus is the whole world.
+func fetchTaskCorpus(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
+	base := cc.snapshot()
+	if incrementalUsable(base, now) {
+		tasks, details, ok, err := fetchTaskHead(ctx, c, base)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if ok {
+			cc.store(corpusBase{
+				tasks:      tasks,
+				details:    details,
+				watermark:  watermarkOf(tasks),
+				exhaustive: true,
+				lastFull:   base.lastFull,
+			})
+			return tasks, details, true, nil
+		}
+		// ok=false is never an error — it is "the incremental walk cannot
+		// honestly answer this one". Fall through to the full walk.
+	}
+	tasks, details, exhaustive, err := fetchTaskPages(ctx, c, listFetchPath)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if exhaustive {
+		cc.store(corpusBase{
+			tasks:      tasks,
+			details:    details,
+			watermark:  watermarkOf(tasks),
+			exhaustive: true,
+			lastFull:   now,
+		})
+	} else {
+		// A short walk must not become a base: the next incremental walk would
+		// stack a prefix on top of a hole and call the result complete.
+		cc.store(corpusBase{})
+	}
+	return tasks, details, exhaustive, nil
+}
+
+// incrementalUsable is the precondition, stated in one place so every refusal
+// is visible: a base that came from a complete walk, carries a real watermark,
+// and is not yet due for its periodic honest re-read.
+func incrementalUsable(base corpusBase, now time.Time) bool {
+	if !base.exhaustive || len(base.tasks) == 0 || base.watermark.IsZero() {
+		return false
+	}
+	if base.lastFull.IsZero() || now.Sub(base.lastFull) >= fullResyncEvery {
+		return false
+	}
+	return true
+}
+
+// fetchTaskHead walks the desc:updated_at head until it reaches a row the base
+// already accounts for, then merges the fresh prefix over the base.
+//
+// The second return is CAN-I-ANSWER, not success: false means the caller should
+// do the full walk (a pre-cursor server, a changed set past maxHeadPages, a row
+// with no updated_at at the boundary). An error is reserved for a genuinely
+// failed read, which the caller propagates exactly as before.
+func fetchTaskHead(ctx context.Context, c *apiclient.Client, base corpusBase) ([]Task, DetailIndex, bool, error) {
+	var (
+		fresh        []Task
+		freshDetails = DetailIndex{}
+		cursor       string
+	)
+	for page := 0; page < maxHeadPages; page++ {
+		body, err := getJSONCtx(ctx, c, headFetchPath+"&cursor="+url.QueryEscape(cursor))
+		if err != nil {
+			return nil, nil, false, err
+		}
+		tasks, idx, err := decodeTaskListFull(body)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		reached := false
+		for _, t := range tasks {
+			// A row with no updated_at cannot be ordered against the watermark.
+			// Refusing here (rather than guessing) is what keeps the walk from
+			// stopping early on a row it cannot place.
+			if t.UpdatedAt.IsZero() {
+				return nil, nil, false, nil
+			}
+			if !t.UpdatedAt.After(base.watermark) {
+				// This row — and by desc:updated_at ordering every row after it —
+				// is unchanged since the base was taken.
+				reached = true
+				break
+			}
+			fresh = append(fresh, t)
+			if d, ok := idx[t.DocID]; ok {
+				freshDetails[t.DocID] = d
+			}
+		}
+		if reached {
+			return mergeCorpus(fresh, freshDetails, base), freshDetails, true, nil
+		}
+		next, capable := decodeNextCursor(body)
+		if !capable {
+			// Pre-cursor server: it cannot page, so it cannot be walked
+			// incrementally either. The full walk says so honestly.
+			return nil, nil, false, nil
+		}
+		if next == "" {
+			// The walk consumed the WHOLE corpus without ever reaching the
+			// watermark — every row is newer than the base. That is a complete,
+			// exhaustive corpus in its own right, so return it as one.
+			return fresh, freshDetails, true, nil
+		}
+		cursor = next
+	}
+	// More changed rows than the head walk is sized for. Hand over.
+	return nil, nil, false, nil
+}
+
+// mergeCorpus lays the fresh prefix over the retained base: fresh rows first in
+// walk order, then every base row the prefix did not replace, in the order the
+// base already held them. Because both halves are desc:updated_at and every
+// fresh row is strictly newer than every retained one, the seam preserves the
+// route's own ordering exactly as the full walk would have produced it.
+//
+// It also folds the base's DetailIndex forward for the retained rows, so a
+// detail pane opened on an untouched task is as deep as it was — the saving is
+// in what is re-DOWNLOADED, never in what the board can show.
+func mergeCorpus(fresh []Task, freshDetails DetailIndex, base corpusBase) []Task {
+	replaced := make(map[string]bool, len(fresh))
+	for _, t := range fresh {
+		replaced[t.DocID] = true
+	}
+	out := make([]Task, 0, len(base.tasks)+len(fresh))
+	out = append(out, fresh...)
+	for _, t := range base.tasks {
+		if replaced[t.DocID] {
+			continue
+		}
+		out = append(out, t)
+	}
+	for id, d := range base.details {
+		if _, ok := freshDetails[id]; !ok {
+			freshDetails[id] = d
+		}
+	}
+	return out
+}

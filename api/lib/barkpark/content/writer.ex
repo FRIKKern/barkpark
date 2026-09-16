@@ -72,9 +72,22 @@ defmodule Barkpark.Content.Writer do
 
   def validate_task_kind(_type, _attrs), do: :ok
 
-  @doc "Validate document content against its schema. Returns {:ok, content} or {:error, errors_map}."
-  def validate_document(type, title, content, dataset) do
-    case Content.get_schema(type, dataset) do
+  @doc """
+  Validate document content against its schema. Returns {:ok, content} or
+  {:error, errors_map}.
+
+  `opts` may carry the write's `workspace_id` / `project_id`: the schema is
+  then read IN THAT SCOPE, which is what inlines a workspace-owned named
+  object type (E3.6 `kind: "object"`) into the composite whose subfield rules
+  the walker checks. An unscoped read never inlines a tenant's object type
+  (the tenancy guard in `Schema.resolve_object_type/3`), so before this
+  (Gyldendal parity E1.11) a `required` inside `seo` was invisible to the
+  write door.
+  """
+  def validate_document(type, title, content, dataset, opts \\ []) do
+    scope = Keyword.take(opts, [:workspace_id, :project_id])
+
+    case Content.get_schema(type, dataset, scope) do
       {:ok, schema} -> Barkpark.Content.Validation.validate(content, title, schema)
       _ -> {:ok, content}
     end
@@ -134,11 +147,24 @@ defmodule Barkpark.Content.Writer do
 
   def check_document_schema(_type, _attrs, _dataset), do: :ok
 
+  # The scope `WriteScope.put_scope_attrs/2` stamped on the attrs (string or
+  # atom keys), as the keyword `Content.get_schema/3` reads — server-resolved,
+  # never client-supplied, since the stamp already stripped the client's keys.
+  defp stamped_scope(attrs) when is_map(attrs) do
+    [
+      workspace_id: Map.get(attrs, "workspace_id") || Map.get(attrs, :workspace_id),
+      project_id: Map.get(attrs, "project_id") || Map.get(attrs, :project_id)
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  defp stamped_scope(_attrs), do: []
+
   defp do_check_document_schema(type, attrs, dataset, enforce?) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     title = Map.get(attrs, "title") || Map.get(attrs, :title)
 
-    case validate_document(type, title, content, dataset) do
+    case validate_document(type, title, content, dataset, stamped_scope(attrs)) do
       {:ok, _content} ->
         :ok
 

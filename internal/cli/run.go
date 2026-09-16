@@ -633,6 +633,12 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// minutes. Silent on every envelope without a `lease` object, so no
 		// other verb's receipt changes (tasks_lease.go).
 		emitClaimLease(out, respBody)
+		// A row that left `in_progress` WITHOUT being closed keeps its claim,
+		// and until that lease lapses it is invisible to BOTH `bp task pulse`
+		// and `bp task ready`. Shape-keyed on the response document, so the
+		// `stage` that makes the state AND a later `task get` on it both say
+		// so; silent on every other shape (tasks_stranded_claim.go).
+		emitStrandedClaim(out, respBody)
 		// A ruling the row ALREADY carries (content.disposition_reason), shouted
 		// at claim time so a dispatcher cannot miss it. Verb-keyed (claim/next),
 		// stderr in every output mode, silent on a row with no ruling

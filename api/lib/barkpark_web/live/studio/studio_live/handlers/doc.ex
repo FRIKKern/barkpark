@@ -31,7 +31,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
             end
 
           schema ->
-            Barkpark.Content.Validation.check(content, title, schema)
+            # The tree reading (E1.11): nested errors gate the publish just
+            # like top-level ones, nested warnings only nag.
+            Barkpark.Content.Validation.check_tree(content, title, schema)
         end
 
       socket = assign(socket, validation_warnings: warns)

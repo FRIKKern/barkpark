@@ -1789,6 +1789,38 @@ const (
 	siteRefusedReadDeployment
 	siteRefusedPoll
 	siteRefusedWaitLive
+
+	// The READ plane's kinds (cch-w71 remainder, D866). `bp cloud site settings`,
+	// the two `get site` readers (`status` and `open`) and the ERROR arm of `bp
+	// cloud domain status` were the last four call sites still handing every
+	// refusal to the bare `cloudFail`. Lower stakes than a deploy, the SAME
+	// flatten: a 403 the caller's PAT cannot fix, a 404 that is not their site and
+	// a 500 the plane crashed on all printed "failed" and exited 1, so a script
+	// gating on one of these reads could not tell "not found" from "forbidden"
+	// from "the server is down".
+	//
+	// THE EXIT TABLE IS DERIVED FROM THE LIVE ROUTE ARMS, not invented here
+	// (cloud/lib/barkpark_cloud/web/router.ex, module BarkparkCloud.Web.Router):
+	//
+	//	PATCH /v1/sites/:id ........ 401 (require_user_or_pat/2), 403 forbidden
+	//	    (require_ability/2) plus the body's own deploy_ability_required /
+	//	    rebind_ability_required grants, 404 (with_team_site/3 — teamless caller
+	//	    OR site miss), 422 nothing_to_update / invalid_settings, 500 crash slug
+	//	    and the rebind arm's relayed 502 read_token_mint_failed.
+	//	GET /v1/sites/:id .......... 401, 404, 500. NO 403 arm (require_user/2 asks
+	//	    for no ability) and NO 409 — both INERT here, deliberately not
+	//	    special-cased.
+	//	GET /v1/barkparks/:id/domain-status ... 401, 404 (wrong team / absent /
+	//	    malformed id are deliberately indistinguishable), 500. DomainStatus's
+	//	    probe suite is TOTAL over failure — a stuck domain is a 200 with
+	//	    pending/failed rungs, never a 5xx — so 5xx here is the crash slug only.
+	//
+	// siteRefusedRead covers BOTH `status` and `open`: one client call
+	// (GetSpawnSite), one label, one sentence. Splitting them would be the second
+	// dialect this type exists to prevent.
+	siteRefusedSettings
+	siteRefusedRead
+	siteRefusedDomainStatus
 )
 
 // what is the cloudFail fallthrough label — byte-unchanged from the strings these
@@ -1818,6 +1850,12 @@ func (k siteRefusalKind) what() string {
 		return "poll deployment"
 	case siteRefusedWaitLive:
 		return "poll for a live deployment"
+	case siteRefusedSettings:
+		return "update site settings"
+	case siteRefusedRead:
+		return "get site"
+	case siteRefusedDomainStatus:
+		return "domain status"
 	default:
 		return "roll site back"
 	}
@@ -1842,6 +1880,12 @@ func (k siteRefusalKind) noun() string {
 		return "the deploy poll for"
 	case siteRefusedWaitLive:
 		return "the live-deploy watch on"
+	case siteRefusedSettings:
+		return "the settings update for"
+	case siteRefusedRead:
+		return "the read of site"
+	case siteRefusedDomainStatus:
+		return "the domain-status read for instance"
 	default:
 		return "the rollback of"
 	}
@@ -1863,6 +1907,12 @@ func (k siteRefusalKind) verb() string {
 		return "upload an artifact for"
 	case siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
 		return "read the deploys of"
+	case siteRefusedSettings:
+		return "change the settings of"
+	case siteRefusedRead:
+		return "read"
+	case siteRefusedDomainStatus:
+		return "read the domains of"
 	default:
 		return "roll back"
 	}
@@ -1891,6 +1941,12 @@ func (k siteRefusalKind) nothingClause() string {
 		return "The deploy itself is untouched — this lost sight of a build that is still running on the box."
 	case siteRefusedWaitLive:
 		return "The deploy itself is untouched — the re-queued rebuild is still queued."
+	case siteRefusedSettings:
+		return "No setting was changed — the site still has the values it had before this call."
+	case siteRefusedRead:
+		return "Nothing was changed — this verb only reads."
+	case siteRefusedDomainStatus:
+		return "Nothing was changed — this verb only reads; the domains themselves are untouched."
 	default:
 		return "Nothing was flipped."
 	}
@@ -1913,7 +1969,13 @@ func (k siteRefusalKind) nothingClause() string {
 func (k siteRefusalKind) nothingTail() string {
 	switch k {
 	case siteRefusedDeploy, siteRefusedMint, siteRefusedArtifact,
-		siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
+		siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive,
+		// The read plane joins for the same reason the deploy plane did: its
+		// routes' codes (nothing_to_update, invalid_settings, a relayed
+		// read_token_mint_failed) have no dedicated arm, so the relay arm is the
+		// COMMON path and without this tail the most frequent refusals would be
+		// exactly the ones that never say what state the site is now in.
+		siteRefusedSettings, siteRefusedRead, siteRefusedDomainStatus:
 		return " " + k.nothingClause()
 	}
 	return ""
@@ -2096,6 +2158,15 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 			// deployment id, so a 404 on them can only be with_team_site/3's — it is
 			// about the site (or the login's team), never a deployment.
 			return fmt.Sprintf("no such site %q (or it is not in your team). %s", ref, kind.nothingClause())
+		case siteRefusedSettings, siteRefusedRead:
+			return fmt.Sprintf("no such site %q (or it is not in your team). %s", ref, kind.nothingClause())
+		case siteRefusedDomainStatus:
+			// The domain-status route answers a wrong-team, an absent and a
+			// malformed id with the SAME bare 404 — deliberately, so no existence
+			// leaks — and it is about the INSTANCE, never a site. A site-voiced
+			// sentence here sends the reader hunting the wrong object.
+			return fmt.Sprintf("no such instance %q (or it is not in your team) — the control plane answers a wrong-team, an absent and a malformed id identically, so this never says which. %s",
+				ref, kind.nothingClause())
 		}
 		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
 	case "instance_not_live":
@@ -2127,7 +2198,16 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 		// at a site slug they never typed.
 		return fmt.Sprintf("the instance named to host site %q is not in your team (or no longer exists) — list your fleet with `bp cloud status` and re-run with a valid --instance. %s",
 			ref, kind.nothingClause())
-	case "forbidden":
+	case "forbidden", "deploy_ability_required", "rebind_ability_required":
+		// The two named grants are PATCH /v1/sites/:id's own 403 arms: turning
+		// prebuilt on, and repointing the content binding, each MINT authority a
+		// bare `write` PAT must not hold. They land here rather than in the relay
+		// arm so the sentence names the act, and the plane's own detail — which
+		// says exactly which credential does work — is relayed whole.
+		if kind == siteRefusedDomainStatus {
+			return fmt.Sprintf("your Cloud login is not allowed to read the domains of instance %q — %s %s",
+				ref, siteRefusalDetail(detail, "it needs access to the team that owns the instance."), kind.nothingClause())
+		}
 		return fmt.Sprintf("your Cloud login is not allowed to %s site %q — %s %s",
 			kind.verb(), ref, siteRefusalDetail(detail, "it needs the `write` ability on the team that owns the site."), kind.nothingClause())
 	case "server_error":
@@ -2158,6 +2238,18 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		case siteRefusedReadDeployment, siteRefusedPoll, siteRefusedWaitLive:
 			return fmt.Sprintf("the control plane errored while reading the deploys of %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedSettings:
+			// A PATCH that crashed partway is the one read-plane refusal where the
+			// write MAY have landed: update_site_settings/2 runs before the render.
+			// Say so rather than promising nothing changed.
+			return fmt.Sprintf("the control plane errored while updating the settings of %q: %s The update may or may not have landed — re-read it with `bp cloud site status %s` before retrying.",
+				ref, siteRefusalDetail(detail, "it gave no reason."), ref)
+		case siteRefusedRead:
+			return fmt.Sprintf("the control plane errored while reading site %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		case siteRefusedDomainStatus:
+			return fmt.Sprintf("the control plane errored while reading the domains of %q: %s %s",
 				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		default:
 			return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
@@ -2238,7 +2330,7 @@ func runCloudSiteSettings(out *writer, g globals, args []string) int {
 
 	site, serr := cfg.CloudClient().UpdateSpawnSiteSettings(cloudCtx(), id, patch)
 	if serr != nil {
-		return cloudFail(out, "update site settings", serr)
+		return siteRefusalFail(out, siteRefusedSettings, ref, serr)
 	}
 
 	if out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
@@ -2305,7 +2397,7 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	}
 	site, serr := cfg.CloudClient().GetSpawnSite(cloudCtx(), id)
 	if serr != nil {
-		return cloudFail(out, "get site", serr)
+		return siteRefusalFail(out, siteRefusedRead, ref, serr)
 	}
 
 	// The current deployment: embedded in the site row when present, else fetched
@@ -2457,7 +2549,7 @@ func runCloudSiteOpen(out *writer, g globals, args []string) int {
 	}
 	site, serr := cfg.CloudClient().GetSpawnSite(cloudCtx(), id)
 	if serr != nil {
-		return cloudFail(out, "get site", serr)
+		return siteRefusalFail(out, siteRefusedRead, ref, serr)
 	}
 	url := spawnSiteURL(site)
 	if url == "" {
