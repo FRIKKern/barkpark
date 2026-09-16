@@ -51,7 +51,7 @@ var uuidLike = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 // through too, so the two spellings cannot drift into two behaviours. There is
 // deliberately no switch here: a `case` arm added back would be a verb only one
 // noun answers, which is the defect the matrix retired.
-func runSites(out *writer, args []string) int {
+func runSites(out *writer, g globals, args []string) int {
 	if len(args) == 0 {
 		return runSitesList(out, nil)
 	}
@@ -66,7 +66,7 @@ func runSites(out *writer, args []string) int {
 			}
 		}
 	}
-	return dispatchSiteVerb(out, globals{}, siteSpellingFleet, args[0], args[1:])
+	return dispatchSiteVerb(out, g, siteSpellingFleet, args[0], args[1:])
 }
 
 // runSitesList renders `bp sites` — the fleet of hosted sites under the user's
