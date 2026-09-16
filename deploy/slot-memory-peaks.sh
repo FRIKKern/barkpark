@@ -94,8 +94,33 @@ max_of() {
 # show_prop <unit> <property> — one systemctl property, empty on any failure.
 # A unit that does not exist is not an error here: a box that has never run the
 # green slot must still produce a census.
+#
+# NO PIPE, DELIBERATELY. This read
+#
+#     { systemctl show "$1" -p "$2" 2>/dev/null || true; } | sed -n "s/^$2=//p" | head -n1
+#
+# until 2026-09-16, and `head -n1` is a TRUNCATING reader: it closes the pipe
+# after the first line, the producer takes SIGPIPE, and under this script's
+# `set -o pipefail` the pipeline's status becomes 141 — a `set -e` abort that
+# has nothing to do with the property being read. `scripts/pipefail-sigpipe-scan.sh`
+# flags exactly that shape at HIGH confidence, and it was the site that broke
+# the ratchet (113 -> 114).
+#
+# The remedy removes the pipe instead of masking its status: capture once, match
+# in the shell. The EXTRACTED VALUE IS UNCHANGED and that is the whole point —
+# the first line whose prefix is `<property>=`, with that prefix stripped, and
+# the empty string when systemctl fails, does not know the unit, or does not
+# report the property. ARM 10 of --self-test pins each of those behaviours.
 show_prop() {
-  { systemctl show "$1" -p "$2" 2>/dev/null || true; } | sed -n "s/^$2=//p" | head -n1
+  local raw line
+  raw=$(systemctl show "$1" -p "$2" 2>/dev/null) || raw=''
+  [ -n "$raw" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      "$2="*) printf '%s\n' "${line#"$2"=}"; return 0 ;;
+    esac
+  done <<<"$raw"
+  return 0
 }
 
 state_lookup() {
@@ -327,6 +352,45 @@ cmd_selftest() {
   local rc=0
   BARKPARK_SLOT_PEAKS_STATE="$STATE_FILE" bash "$self" --report >/dev/null 2>&1 || rc=$?
   check '--report with no state exits non-zero instead of printing nothing' '1' "$rc"
+
+  # --- ARM 10: show_prop's EXTRACTION, pinned behaviour-by-behaviour --------
+  # show_prop lost its `| sed | head -n1` pipeline on 2026-09-16 (the head was a
+  # truncating reader: SIGPIPE -> 141 under pipefail). A fix that silenced the
+  # scanner by changing WHAT the function returns would be worse than the red,
+  # so each of the four behaviours the old pipeline had is asserted directly,
+  # against the fake systemctl, and then shown non-vacuous by a mutation.
+  rm -f "$STATE_FILE"
+  selftest_set_unit 'barkpark-slot@green.service' active 767557632 1397293875 INV-A
+  check 'show_prop strips the property prefix and returns the bare value' \
+    'INV-A' "$( PATH="$FAKEDIR:$PATH"; show_prop 'barkpark-slot@green.service' InvocationID )"
+  check 'show_prop returns empty for a property the unit does not report' \
+    '' "$( PATH="$FAKEDIR:$PATH"; show_prop 'barkpark-slot@green.service' NoSuchProperty )"
+  check 'show_prop returns empty (not an error) when systemctl does not know the unit' \
+    '' "$( PATH="$FAKEDIR:$PATH"; show_prop 'barkpark-slot@nosuch.service' ActiveState )"
+
+  # A value that itself contains `=`, and a property reported TWICE: the old
+  # `sed | head -n1` kept the first line whole after the first `=`; so must this.
+  {
+    printf 'ActiveState=active\n'
+    printf 'InvocationID=first=WITH=EQUALS\n'
+    printf 'InvocationID=second\n'
+  } >"$BARKPARK_FAKE_SYSTEMD_DIR/barkpark-slot@multi.service.props"
+  check 'show_prop keeps a value containing `=` intact and takes only the FIRST match' \
+    'first=WITH=EQUALS' "$( PATH="$FAKEDIR:$PATH"; show_prop 'barkpark-slot@multi.service' InvocationID )"
+
+  # The mutation: drop the prefix strip. If the four checks above were vacuous
+  # this would still read back clean; it must not.
+  local spmutant="$root/show-prop-mutant.sh"
+  sed 's|\${line#"\$2"=}|${line}|' "$self" >"$spmutant"
+  local sp_mutated
+  sp_mutated=$(grep -c 'printf .* "\${line}"; return 0' "$spmutant" || true)
+  check 'the show_prop mutation actually applied (the prefix-strip was found)' '1' "$sp_mutated"
+  rm -f "$STATE_FILE"
+  PATH="$FAKEDIR:$PATH" BARKPARK_SLOT_PEAKS_STATE="$STATE_FILE" \
+    BARKPARK_SLOT_PEAKS_UNITS='barkpark-slot@green.service' \
+    bash "$spmutant" --sample >/dev/null 2>&1
+  check 'dropping the prefix strip CORRUPTS the extracted value (ARM 10 is non-vacuous)' \
+    'InvocationID=INV-A' "$(selftest_col 'barkpark-slot@green.service' 5)"
 
   # --- ARM 9: the published count is READ BACK ------------------------------
   # deploy/README.md publishes this engine's check count in prose. Direction
