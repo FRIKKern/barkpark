@@ -5098,14 +5098,21 @@ whose output is quoted. Where verification contradicted the wave's own direction
 - **D258 — FOUR NAMED COHORTS PLUS A RESIDUAL THAT MUST BE ZERO.** `classify(%{status: _other}), do: nil`
   (`:221`) is a catch-all over a CHECK-less varchar — `pg_constraint … contype='c'` on `deployments` returns
   **0 rows** on prod, confirmed independently twice. Today the hole is empty: `select distinct status` returns
-  exactly `deferred | failed | live`, zero non-terminal, zero `cancelled`, all-time over 31,070 rows. So "four
+  exactly `deferred | failed | live`, zero non-terminal, zero `cancelled`, all-time over 31,070 rows
+  [**AMENDED 2026-09-16, D614:** that zero and that 31,070 are a WAVE-15 READING, not a standing property, and
+  the denominator had already drifted to 31,137 by D290 one wave later. Neither is re-derivable from this
+  lane; D614(a) carries the re-derivation SQL and D614(d) states what a zero population does and does not
+  license — in short, it licenses no alarm, because the paths are alive and have only never qualified]. So "four
   numbers that SUM" is honest *today* — and latent forever. In-flight is bounded and self-healing (sweep-line
   peak **19** over 7 days of real `[inserted_at, updated_at)` intervals, Little's Law **0.678** over the
   trailing 24h, 22 live samples never above 1, ceilinged by
   `@default_deployment_stale_after_seconds 15 * 60` and by the partial unique index
   `deployments_active_site_env_index`, hit live as a real `Ecto.ConstraintError`). **`cancelled` is the real
   danger**: it is TERMINAL, it has two live producers (`auto_deploy_worker.refuse/1` at `:171`, tested at
-  `auto_deploy_worker_test.exs:248`, and `Registry.cancel_preview/2` at `registry.ex:5750`), and a subtractive
+  `auto_deploy_worker_test.exs:248`, and `Registry.cancel_preview/2` at `registry.ex:5750`)
+  [**AMENDED 2026-09-16, D614(c):** THREE, not two — a build box filing `status: "cancelled"` on
+  `POST /v1/{builder,agent}/deployments/:id/transition` is the third, and it rides the request body so a
+  literal grep misses it. All three line numbers here have rotted; D614(c) re-anchors them by content], and a subtractive
   `live` would score a deliberate refusal to deploy as a SUCCESS, permanently. **RULING: emit `live`,
   `in_flight` and `cancelled` as named cohorts and a `residual` a test asserts is zero — proven by MUTATION
   (insert a row in each of `queued`/`building`/`pushing`/`cancelled` and assert `live` does NOT move), never by
@@ -5650,9 +5657,14 @@ AND deployed (D274).
   built nine waves later, never inherited it.
 
 - **D290 — `cancelled` HAS NEVER EXISTED, CONFIRMED AT THE DATABASE THREE WAYS, SO WAVE 16's COHORT IS A BUCKET
-  OVER AN EMPTY POPULATION.** 0 of 31,137 rows all-time, both spellings, since 2026-07-14. The lifetime status
+  OVER AN EMPTY POPULATION.** 0 of 31,137 rows all-time, both spellings, since 2026-07-14
+  [**AMENDED 2026-09-16, D614:** a reading taken during wave 16, not a standing property — D258 one wave
+  earlier read the same zero over 31,070. Not re-derivable from this lane; the SQL, the control that
+  distinguishes a real zero from a broken read, and the licence question are in D614]. The lifetime status
   vocabulary is exactly three values: failed 18,622 / live 10,391 / deferred 2,124. Two producers exist
-  (`registry.ex:5750`, `auto_deploy_worker.ex:188`) and neither has ever fired. Consequences: `deploy_ledger_test.exs:1251`'s
+  (`registry.ex:5750`, `auto_deploy_worker.ex:188`) and neither has ever fired
+  [**AMENDED 2026-09-16, D614(c):** three producers, and all three anchors here have rotted — re-anchored by
+  content in D614(c). "Neither has ever fired" is the same dated reading, not a property]. Consequences: `deploy_ledger_test.exs:1251`'s
   `assert census.cancelled == 0` is vacuous BY CONSTRUCTION (its fixture inserts no cancelled row);
   `dr-w16-s5`'s criterion *"`cancelled` renders when non-nil — paste both renders"* is **an arm that can never
   fire on prod data**, and is RE-SCOPED to "render when non-nil, proved on a synthetic envelope, with the
@@ -14398,3 +14410,100 @@ comfortable zero.
 epic, and it is outside the deploy fence. Routed to the lead, not edited here. And the five rotted seed anchors
 above are REPORTED, not rewritten, per rule 5: each needs a human to decide whether the code moved or the
 finding died.
+
+### D614 — 2026-09-16 — THE CANCELLED POPULATION IS ZERO *AS AT A DATE*, NOT AS A PROPERTY. IT LICENSES NO ALARM, NO DASHBOARD AND NO GATE, BECAUSE THE PATHS ARE ALIVE AND HAVE ONLY NEVER QUALIFIED.
+
+Closes `dr-w16-bl-cancelled-rows-rationale-is-wrong` c2. D258 and D290 both state the zero; neither states a
+date beside it, a command that re-derives it, or what it permits. A bare zero in a charter reads five months
+later as a current fact — and this epic has already paid for that once (D607). This entry fixes the shape.
+
+**(a) THE OBSERVATION, WITH ITS DATE AND ITS DENOMINATOR — AND THE DENOMINATOR HAS ALREADY MOVED.**
+`status = 'cancelled'` on `deployments`: **0 rows, all-time.** Two readings are on this file's record and they
+do not share a denominator:
+
+| Reading | Recorded in | Denominator | Vocabulary at the time |
+|---|---|---|---|
+| 0 cancelled | D258 (wave 15) | 31,070 all-time rows | `deferred \| failed \| live` |
+| 0 cancelled, both spellings, since 2026-07-14 | D290 (wave 16) | 31,137 all-time rows | failed 18,622 / live 10,391 / deferred 2,124 |
+
+**The numerator held and the denominator drifted 67 rows between two waves of the same epic.** That is the
+whole argument in one row of a table: the zero is a reading of a growing table at an instant, and a number
+quoted without the instant it was read at cannot be checked by anyone later.
+
+**(b) NEITHER READING IS RE-DERIVABLE FROM THIS LANE, AND THAT IS STATED RATHER THAN PAPERED OVER.** Both came
+from a live read of `cloud-db-1`; reaching it needs ssh or a prod DB credential, both owner-only, and no agent
+on the deploy or console lane has one (`$ORCH/BLOCKED-ON-USER.md`, and the refusal is on this row's own c2
+attempt log, 2026-09-16T10:09:55Z). **Nothing below was re-run for this entry.** What this entry adds is the
+command, so the next reader is not stuck where three waves have been:
+
+```sql
+-- THE NUMBER. Numerator, denominator, and the instant, in one row.
+SELECT count(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+       count(*)                                     AS all_time,
+       min(inserted_at)                             AS oldest_row,
+       max(inserted_at)                             AS newest_row,
+       now()                                        AS taken_at
+  FROM deployments;
+
+-- THE CONTROL, and it is not optional. A zero and a broken read are the same
+-- output. This must print the live vocabulary with non-zero counts; an empty
+-- result set means the read never reached the table, NOT that the table is empty.
+SELECT status, count(*) FROM deployments GROUP BY 1 ORDER BY 2 DESC;
+
+-- THE TWO QUALIFYING POPULATIONS (see (d)). Either going non-zero makes the
+-- cancelled population reachable with NO code change.
+SELECT count(*) FROM deployments WHERE environment = 'preview';          -- cancel_preview/2's world
+SELECT count(*) FROM deployments d
+  JOIN sites s ON s.current_deployment_id = d.id
+ WHERE d.source = 'prebuilt';                                            -- refuse/1's qualifying sites
+```
+
+Record the answer here the way (a) does — number, denominator, `taken_at` — or do not record it.
+
+**(c) THE PRODUCERS, RE-ANCHORED BY CONTENT. THERE ARE THREE, NOT TWO, AND NONE OF THEM IS A PERSON.**
+Verified against `origin/main` at `f42843f4e`. Every line number D258 and D290 carry has rotted; cite the
+symbol (D613 rule 1), and note that both Elixir producers are `defp` — neither is callable from outside:
+
+| Producer | Address today | How to re-find it |
+|---|---|---|
+| `refuse/1` — prebuilt-overwrite guard | `cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex` `defp refuse` | `git grep -n 'defp refuse' -- cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex` |
+| its test | `cloud/test/barkpark_cloud/sites/auto_deploy_worker_test.exs` | `git grep -n 'mints a USER-VISIBLE cancelled row'` |
+| `cancel_preview/2` — preview supersede + branch teardown | `cloud/lib/barkpark_cloud/registry.ex` `defp cancel_preview` | `git grep -n 'defp cancel_preview' -- cloud/lib/barkpark_cloud/registry.ex` |
+| a build box filing the terminal itself | `POST /v1/{builder,agent}/deployments/:id/transition` | `git grep -n 'deployments/:id/transition' -- cloud/lib/barkpark_cloud/web/router.ex` |
+
+The third rides the REQUEST BODY, which is why a literal grep for `cancelled` under `cloud/lib` misses it —
+and why `cloud/test/barkpark_cloud/cancelled_producer_census_test.exs` ARM A enumerates two files and says so.
+Three one-time migrations also `SET status='cancelled'`; those are history, not live producers.
+
+**THE ABSENCE CLAIM, WITH ITS CONTROL.** *There is no human cancel path anywhere in `cloud/lib`* — probed
+`phx-click="cancel…`, `handle_event("cancel…`, `cancel_deploy`, `cancel_deployment`, `def cancel(`: zero hits.
+That is worth nothing on its own (an absence is never caught by inspection), so: the `phx-click`/`handle_event`
+controls ALSO return zero — `cloud/` has no LiveView at all — which means those probes measured nothing and
+are **withdrawn**. The probe that carries a live control is the router: `cloud/lib/barkpark_cloud/web/router.ex`
+has **105** `post ` routes and does contain the string `cancelled`, so the file is being read; searching it for
+a cancel route returns exactly one, `POST /v1/billing/cancel` (owner-gated subscription cancel, at
+period-end), which does not touch the `deployments` table. **One human cancel affordance exists in the whole
+control plane and it cancels a SUBSCRIPTION.**
+
+**(d) WHAT A ZERO POPULATION DOES NOT LICENSE — the sentence a future reader needs.** A zero population does
+**not** mean the code is dead. It means the code has never QUALIFIED. All three producers are live and
+reachable; `refuse/1` has no qualifying site today (its guard is the LIVE RELEASE's provenance,
+`Deployment.prebuilt?/1` i.e. `source == "prebuilt"` — *not* the `prebuilt_enabled` opt-in, which a site can
+carry while still serving a box build), and `cancel_preview/2` fires only on `environment == "preview"`, an
+environment with 2 rows all-time. **Add one preview site, or let one prebuilt-release site take a content
+publish, and the population becomes non-zero with no code change at all.** Therefore:
+
+- **Do not scope an alarm, a dashboard tile, a threshold or a merge gate against this population.** It would
+  be vacuous the day it ships and would silently come alive later — *worse than either alone*, because it
+  accrues a green track record over an empty set and then starts firing with no change to blame.
+- **Do not delete the cancelled cohort from the census on the grounds that it is always zero.** D258 named the
+  cohort precisely because the danger is a subtractive `live` scoring a refusal as a success.
+- **Do not write a test that asserts the population is zero.** That is a ratchet with two failure directions
+  and the world getting better reds it. The guard that IS correct is the one that shipped:
+  `cancelled_producer_census_test.exs` reds on a NEW un-enumerated producer and on a revert of the corrected
+  framing — it governs the SOURCE, which this lane can read, not the POPULATION, which it cannot.
+
+**THE RULE, GENERALLY.** A number this repo cannot re-run is a dated observation. It travels with four things
+or it does not get written: **the number, the denominator, the instant it was read at, and the command that
+re-derives it.** D607 bought this convention by example; D614 buys it for the cancelled population and states
+the licence question — *what does this number permit?* — as the second half nobody had written down.
