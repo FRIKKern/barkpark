@@ -334,7 +334,7 @@ func whoamiCLIFreshness() onbCLICheck {
 		// against origin/main for internal/cli, which is a real reading and
 		// gets the real vocabulary. Only an unstamped or unresolvable build
 		// falls through to UNREPORTED. See cli_staleness.go.
-		if r, ok := devBuildCommitFreshness(); ok {
+		if r, ok := buildCommitFreshness(); ok {
 			return r
 		}
 		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
@@ -351,6 +351,13 @@ func whoamiCLIFreshness() onbCLICheck {
 		c.UpToDate = onbBool(false)
 		c.Detail = "a newer CLI is available (cached — run `bp doctor --onboarding` to re-check) — run `bp upgrade`"
 		return c
+	}
+	// THE RELEASE COMPARISON ONLY PROVES `cliVersion == newest cli-v* TAG`.
+	// It says nothing about whether that tag carries the CLI code, and when
+	// nobody cuts a tag it never will. Before printing a green nobody earned,
+	// take the one contrary reading available locally. See cli_staleness.go.
+	if r, ok := channelStaleness(cache.Latest); ok {
+		return r
 	}
 	c.Status = onbCLIUpToDate
 	c.UpToDate = onbBool(true)
@@ -414,7 +421,7 @@ func onboardingCLIFreshness() onbCLICheck {
 		// against origin/main for internal/cli, which is a real reading and
 		// gets the real vocabulary. Only an unstamped or unresolvable build
 		// falls through to UNREPORTED. See cli_staleness.go.
-		if r, ok := devBuildCommitFreshness(); ok {
+		if r, ok := buildCommitFreshness(); ok {
 			return r
 		}
 		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
@@ -438,6 +445,11 @@ func onboardingCLIFreshness() onbCLICheck {
 		c.UpToDate = onbBool(false)
 		c.Detail = "a newer CLI is available — run `bp upgrade`"
 		return c
+	}
+	// Same guard as whoamiCLIFreshness's, for the same reason: matching the
+	// newest tag is not carrying the code. See cli_staleness.go.
+	if r, ok := channelStaleness(latest); ok {
+		return r
 	}
 	c.Status = onbCLIUpToDate
 	c.UpToDate = onbBool(true)
