@@ -51,14 +51,37 @@
 # refused under D118. The peak this script persists is the input that decision
 # would need, and it is the reason the input has to be persisted at all.
 #
+# WHERE A BOUND MAY LAND — AND THE GUARD THAT SAYS SO OUT LOUD
+# -----------------------------------------------------------
+# D118 states the prohibition (never the serving slot) and names the permitted
+# home (the per-build transient units). Charter D611 is its CONSTRUCTIVE half,
+# and `--placement-check` is that half made mechanical: it reads
+# `systemctl show`'s own output and RED-exits (40) the moment a finite
+# `MemoryMax` / `MemoryHigh` / `MemorySwapMax` appears on a serving slot unit or
+# on the slot slice, while a bound on a `bp-site-build-*.service` is reported
+# and permitted. Prose that says "forbidden" cannot catch the commit that does
+# it; this can.
+#
+# It is a PLACEMENT check, not a VALUE check. It never asserts what the build
+# unit's numbers should be, because nothing on this box can read them yet
+# (D611: `systemd-run --collect` reaps the transient unit at exit, so a finished
+# build's `MemorySwapPeak` is destroyed before any sampler can fold it). A guard
+# that invented a value it cannot measure would be the thing this epic files
+# rows about.
+#
 # USAGE
 #     bash deploy/slot-memory-peaks.sh --sample      # fold live counters into the state
 #     bash deploy/slot-memory-peaks.sh --report      # print the persisted census
+#     bash deploy/slot-memory-peaks.sh --placement-check [FILE|-]
+#                                                    # verdict D118's placement rule; FILE is a
+#                                                    #   `systemctl show` capture (offline/CI), `-`
+#                                                    #   is stdin, absent reads the live box
 #     bash deploy/slot-memory-peaks.sh --self-test   # offline proof (fake systemctl)
 #
 # Environment (dev + self-test knobs only; a box uses the defaults):
 #     BARKPARK_SLOT_PEAKS_STATE   state file path (default /opt/barkpark/.slots/memory-peaks.tsv)
 #     BARKPARK_SLOT_PEAKS_UNITS   space-separated units to sample
+#     BARKPARK_SLOT_UNIT_FILE     serving-slot unit FILE to static-check (default: the one beside this script)
 set -euo pipefail
 
 STATE_FILE="${BARKPARK_SLOT_PEAKS_STATE:-/opt/barkpark/.slots/memory-peaks.tsv}"
@@ -184,6 +207,150 @@ cmd_report() {
   fi
   printf 'unit\tactive\tpeak_alltime\tswap_peak_alltime\tinvocation\tpeak_this_invocation\tswap_peak_this_invocation\tsamples\n'
   cat "$STATE_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# PLACEMENT CHECK — D118's prohibition and D611's permission, mechanised.
+#
+# The input is `systemctl show`'s OWN output shape, not a convenience format:
+# one property block per unit, blocks separated by a blank line, each carrying
+# an `Id=`. Taking the real shape is deliberate — a fixture that encodes a shape
+# the system never emits produces a verdict about nothing.
+# ---------------------------------------------------------------------------
+PLACEMENT_UNITS='barkpark-slot@blue.service barkpark-slot@green.service system-barkpark\x2dslot.slice'
+# Exit codes, typed so a caller can tell a VERDICT from a BROKEN INSTRUMENT.
+PLACEMENT_RC_FORBIDDEN=40   # a finite bound sits on a serving slot / the slot slice
+PLACEMENT_RC_NO_INPUT=41    # the capture is unreadable or carries no unit block
+PLACEMENT_RC_NO_SYSTEMD=42  # asked to read a live box that has no systemctl
+
+# unbounded_value <raw> — systemd renders "no bound" as `infinity`, and an
+# unsupported/unset property as the u64 max or `[not set]`. All three mean NO
+# BOUND IS IN FORCE. Anything else is a number someone chose.
+unbounded_value() {
+  case "$1" in
+    '' | infinity | '[not set]' | "$U64_MAX") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# placement_role <unit-id> — serving | build | other. The serving set is the
+# blue/green slot units and their parent slice; the build set is the transient
+# units DeployRunner mints (`bp-site-build-<slug>-<tag>-<ts>.service`).
+# EVERYTHING else is reported and never judged: `barkpark-site@.service` carries
+# MemoryMax=512M by design and this guard must not red a box for it.
+placement_role() {
+  case "$1" in
+    bp-site-build-*) printf 'build' ;;
+    barkpark-slot@*.service | *barkpark*slot.slice) printf 'serving' ;;
+    *) printf 'other' ;;
+  esac
+}
+
+# placement_verdict <capture-file> — the whole ruling, printed one line per unit.
+placement_verdict() {
+  local capture="$1" seen=0 forbidden=0
+  local id='' mmax='' mhigh='' mswap=''
+
+  flush_unit() {
+    [ -n "$id" ] || return 0
+    seen=$((seen + 1))
+    local role bound_names='' verdict
+    role=$(placement_role "$id")
+    unbounded_value "$mmax"  || bound_names="${bound_names}MemoryMax=$mmax "
+    unbounded_value "$mhigh" || bound_names="${bound_names}MemoryHigh=$mhigh "
+    unbounded_value "$mswap" || bound_names="${bound_names}MemorySwapMax=$mswap "
+    bound_names="${bound_names% }"
+
+    case "$role" in
+      serving)
+        if [ -n "$bound_names" ]; then
+          verdict="FORBIDDEN  $id  [$bound_names] — D118: the serving BEAM is this box's designated global-OOM victim; a cgroup bound makes it die SOONER, at a boundary. Move the bound to the per-build transient unit (D611)."
+          forbidden=$((forbidden + 1))
+        else
+          verdict="ok         $id  unbounded (MemoryMax/MemoryHigh/MemorySwapMax) — D118 satisfied"
+        fi
+        ;;
+      build)
+        if [ -n "$bound_names" ]; then
+          verdict="ok         $id  bounded [$bound_names] — the sanctioned home (D118/D611)"
+        else
+          verdict="note       $id  no memory bound in force — permitted here, and the swap half is unbounded by default (cgroup v2 memory.swap.max=max)"
+        fi
+        ;;
+      *)
+        verdict="skip       $id  not a serving slot and not a build unit — not judged"
+        ;;
+    esac
+    printf '%s\n' "$verdict"
+    id=''; mmax=''; mhigh=''; mswap=''
+  }
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      Id=*)            flush_unit; id="${line#Id=}" ;;
+      MemoryMax=*)     mmax="${line#MemoryMax=}" ;;
+      MemoryHigh=*)    mhigh="${line#MemoryHigh=}" ;;
+      MemorySwapMax=*) mswap="${line#MemorySwapMax=}" ;;
+      *) : ;;
+    esac
+  done <"$capture"
+  flush_unit
+
+  if [ "$seen" -eq 0 ]; then
+    log "slot-memory-peaks: the capture carries no \`Id=\` block — a systemctl show with no Id is not a census"
+    return "$PLACEMENT_RC_NO_INPUT"
+  fi
+  printf '\n%d units read, %d forbidden placements\n' "$seen" "$forbidden"
+  [ "$forbidden" -eq 0 ] || return "$PLACEMENT_RC_FORBIDDEN"
+  return 0
+}
+
+# placement_unit_file_check — the STATIC half. The live check above can only see
+# a box; this sees the commit. The shipped serving-slot unit file must carry no
+# `Memory*=` directive at all, so adding one reds here before it ever reaches a
+# host. Silent (and never red) when the file is absent — a box may ship the
+# engine without the unit tree.
+placement_unit_file_check() {
+  local f hits
+  f="${BARKPARK_SLOT_UNIT_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)/systemd/barkpark-slot@.service}"
+  [ -f "$f" ] || { printf '0' ; return 0; }
+  hits=$(grep -cE '^[[:space:]]*Memory(Max|High|SwapMax)=' "$f" || true)
+  printf '%s' "$hits"
+}
+
+cmd_placement_check() {
+  local src="${1:-}" capture rc=0
+  capture=$(mktemp "${TMPDIR:-/tmp}/slot-placement.XXXXXX")
+  # shellcheck disable=SC2064  # $capture must expand now, not at trap time.
+  trap "rm -f '$capture'" RETURN
+
+  if [ "$src" = '-' ]; then
+    cat >"$capture"
+  elif [ -n "$src" ]; then
+    [ -f "$src" ] || { log "slot-memory-peaks: no such capture '$src'"; return "$PLACEMENT_RC_NO_INPUT"; }
+    cat "$src" >"$capture"
+  else
+    command -v systemctl >/dev/null 2>&1 || {
+      log "slot-memory-peaks: no systemctl on this host — pass a \`systemctl show\` capture (FILE or -) instead of greening a box nobody read"
+      return "$PLACEMENT_RC_NO_SYSTEMD"
+    }
+    local unit
+    for unit in $PLACEMENT_UNITS $(systemctl list-units --no-legend --plain 'bp-site-build-*.service' 2>/dev/null | awk '{print $1}'); do
+      systemctl show "$unit" -p Id -p MemoryMax -p MemoryHigh -p MemorySwapMax 2>/dev/null >>"$capture" || true
+      printf '\n' >>"$capture"
+    done
+  fi
+
+  printf 'D118/D611 placement check — a memory bound belongs on the per-build unit, never on the serving slot\n\n'
+  placement_verdict "$capture" || rc=$?
+
+  local file_hits
+  file_hits=$(placement_unit_file_check)
+  if [ "$file_hits" != '0' ]; then
+    log "slot-memory-peaks: the shipped serving-slot unit file carries $file_hits memory directive(s) — D118 forbids them there"
+    rc="$PLACEMENT_RC_FORBIDDEN"
+  fi
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -354,6 +521,8 @@ cmd_selftest() {
   check '--report with no state exits non-zero instead of printing nothing' '1' "$rc"
 
   # --- ARM 10: show_prop's EXTRACTION, pinned behaviour-by-behaviour --------
+  # (Numbering note: this arm landed as ARM 10 in #18562 and its label is left
+  # byte-identical here rather than renumbered by a merge; there is no ARM 9.)
   # show_prop lost its `| sed | head -n1` pipeline on 2026-09-16 (the head was a
   # truncating reader: SIGPIPE -> 141 under pipefail). A fix that silenced the
   # scanner by changing WHAT the function returns would be worse than the red,
@@ -392,7 +561,144 @@ cmd_selftest() {
   check 'dropping the prefix strip CORRUPTS the extracted value (ARM 10 is non-vacuous)' \
     'InvocationID=INV-A' "$(selftest_col 'barkpark-slot@green.service' 5)"
 
-  # --- ARM 9: the published count is READ BACK ------------------------------
+  # --- ARMS 11-20: THE PLACEMENT CHECK (D118's prohibition, D611's permission) --
+  # Fixtures are `systemctl show`'s OWN block shape, because a fixture in a shape
+  # the system never emits produces a verdict about nothing.
+  local cap="$root/capture.txt" prc
+
+  placement_run() {
+    # placement_run <engine> — run --placement-check over $cap with NO unit file
+    # in scope (the static arm gets its own dedicated checks below), and echo the
+    # rc. Output is kept for the assertions that read the verdict text.
+    local rc=0
+    BARKPARK_SLOT_UNIT_FILE="$root/absent.service" \
+      bash "$1" --placement-check "$cap" >"$root/placement.out" 2>"$root/placement.err" || rc=$?
+    printf '%s' "$rc"
+  }
+
+  # ARM 11 — a CLEAN box: slots unbounded, the build unit bounded. Quiet.
+  cat >"$cap" <<'CAP'
+Id=barkpark-slot@green.service
+MemoryMax=infinity
+MemoryHigh=infinity
+MemorySwapMax=infinity
+
+Id=system-barkpark\x2dslot.slice
+MemoryMax=infinity
+MemoryHigh=infinity
+MemorySwapMax=infinity
+
+Id=bp-site-build-jarl-abc123-1757900000000.service
+MemoryMax=1572864000
+MemoryHigh=infinity
+MemorySwapMax=infinity
+CAP
+  prc=$(placement_run "$self")
+  check 'a clean box (slots unbounded, build unit bounded) exits 0' '0' "$prc"
+  check 'the bounded BUILD unit is reported as the sanctioned home, not a violation' \
+    '1' "$(grep -c 'bp-site-build-jarl-abc123.*sanctioned home' "$root/placement.out" || true)"
+
+  # ARM 12 — THE RED. A finite MemorySwapMax on the SERVING slot: the exact
+  # setting D118 forbids and the exact one the sibling row asked for.
+  cat >"$cap" <<'CAP'
+Id=barkpark-slot@green.service
+MemoryMax=infinity
+MemoryHigh=infinity
+MemorySwapMax=1468006400
+CAP
+  prc=$(placement_run "$self")
+  check 'MemorySwapMax on the SERVING slot exits 40 (FORBIDDEN)' '40' "$prc"
+  check 'the forbidden line NAMES the property and the unit' \
+    '1' "$(grep -c 'FORBIDDEN.*barkpark-slot@green.*MemorySwapMax=1468006400' "$root/placement.out" || true)"
+
+  # ARM 13 — the PARENT SLICE is serving too. The header's own placement
+  # arithmetic proposes the slice as the home if a slot bound is ever unparked;
+  # until D118 is lifted, a bound there is the same violation.
+  cat >"$cap" <<'CAP'
+Id=system-barkpark\x2dslot.slice
+MemoryMax=1468006400
+MemoryHigh=infinity
+MemorySwapMax=infinity
+CAP
+  check 'a bound on the slot SLICE is forbidden too, not just on the unit' '40' "$(placement_run "$self")"
+
+  # ARM 14 — THE QUIET ARM. The IDENTICAL number, on a build unit, must not red.
+  # Placement is the whole ruling: same value, different cgroup, opposite verdict.
+  cat >"$cap" <<'CAP'
+Id=bp-site-build-jarl-abc123-1757900000000.service
+MemoryMax=infinity
+MemoryHigh=infinity
+MemorySwapMax=1468006400
+CAP
+  check 'the SAME MemorySwapMax on a per-build unit exits 0 (placement is the ruling)' \
+    '0' "$(placement_run "$self")"
+
+  # ARM 15 — the second quiet arm: a legitimate bound on a unit this rule does
+  # not govern. `barkpark-site@.service` ships MemoryMax=512M by design; a guard
+  # that reddened the box for it would be uninstalled within a day.
+  cat >"$cap" <<'CAP'
+Id=barkpark-site@jarl.service
+MemoryMax=536870912
+MemoryHigh=infinity
+MemorySwapMax=infinity
+CAP
+  prc=$(placement_run "$self")
+  check 'a bound on a NON-slot, NON-build unit is not judged (exit 0)' '0' "$prc"
+  check 'that unit is reported as skipped, not silently dropped' \
+    '1' "$(grep -c 'skip .*barkpark-site@jarl.service' "$root/placement.out" || true)"
+
+  # ARM 16 — THE MUTATION. Arm 12 must be able to fail. Break the classifier so
+  # a serving slot reads as a build unit and assert the red DISAPPEARS.
+  local pmutant="$root/placement-mutant.sh"
+  sed "s|^    barkpark-slot@\*.service .*|    barkpark-slot@*.service \| *barkpark*slot.slice) printf 'build' ;;|" "$self" >"$pmutant"
+  # Counted as a DIFF, not as a grep for the replacement text: this file also
+  # contains that text (in the sed above), so a grep over the mutant would count
+  # the self-test's own source and read 2 for a mutation that changed nothing.
+  check 'the placement mutation applied (exactly one line differs from the engine)' \
+    '1' "$(diff "$self" "$pmutant" | grep -c '^>' || true)"
+  cat >"$cap" <<'CAP'
+Id=barkpark-slot@green.service
+MemoryMax=infinity
+MemoryHigh=infinity
+MemorySwapMax=1468006400
+CAP
+  check 'misclassifying the serving slot LOSES the red (arm 12 is non-vacuous)' \
+    '0' "$(placement_run "$pmutant")"
+
+  # ARM 17 — an empty capture is a BROKEN INSTRUMENT, not a green box.
+  : >"$cap"
+  check 'a capture with no Id= block exits 41, never 0' '41' "$(placement_run "$self")"
+
+  # ARM 18/19 — the STATIC half: the check sees the COMMIT, not just the box.
+  cat >"$cap" <<'CAP'
+Id=barkpark-slot@green.service
+MemoryMax=infinity
+MemoryHigh=infinity
+MemorySwapMax=infinity
+CAP
+  local dirty="$root/dirty-slot.service"
+  printf '[Service]\nExecStart=/bin/true\nMemorySwapMax=1400M\n' >"$dirty"
+  prc=0
+  BARKPARK_SLOT_UNIT_FILE="$dirty" bash "$self" --placement-check "$cap" >/dev/null 2>&1 || prc=$?
+  check 'a Memory directive ADDED to the shipped slot unit file reds (exit 40) even when the box is clean' \
+    '40' "$prc"
+  local cleanf="$root/clean-slot.service"
+  printf '[Service]\nExecStart=/bin/true\nRestart=always\n' >"$cleanf"
+  prc=0
+  BARKPARK_SLOT_UNIT_FILE="$cleanf" bash "$self" --placement-check "$cap" >/dev/null 2>&1 || prc=$?
+  check 'a slot unit file with no Memory directive stays quiet (exit 0)' '0' "$prc"
+
+  # ARM 20 — the assertion about THIS REPO, read from the shipped file itself.
+  local shipped
+  shipped="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)/systemd/barkpark-slot@.service"
+  if [ ! -f "$shipped" ]; then
+    printf 'skip shipped slot-unit assertion: no %s\n' "$shipped"
+  else
+    check 'the SHIPPED barkpark-slot@.service carries ZERO memory directives (D118, in the tree)' \
+      '0' "$(BARKPARK_SLOT_UNIT_FILE="$shipped" placement_unit_file_check)"
+  fi
+
+  # --- ARM 21: the published count is READ BACK -----------------------------
   # deploy/README.md publishes this engine's check count in prose. Direction
   # matters and is the same as the site engines': the README number is the
   # ASSERTED value and the RUN is the truth, so this guard only ever READS the
@@ -424,12 +730,13 @@ cmd_selftest() {
 case "${1:---report}" in
   --sample)    cmd_sample ;;
   --report)    cmd_report ;;
+  --placement-check) shift; cmd_placement_check "${1:-}" ;;
   --self-test) cmd_selftest ;;
   -h | --help)
     sed -n '/^# USAGE/,/^# *BARKPARK_SLOT_PEAKS_UNITS/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     ;;
   *)
-    log "slot-memory-peaks: unknown argument '$1' (--sample | --report | --self-test)"
+    log "slot-memory-peaks: unknown argument '$1' (--sample | --report | --placement-check | --self-test)"
     exit 2
     ;;
 esac

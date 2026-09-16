@@ -19,11 +19,15 @@
 #          PLAN_MODE=build (npm on this box), PLAN_MODE=prebuilt (bytes built
 #          ELSEWHERE and uploaded — BUILD is skipped, STAGE still runs) or
 #          PLAN_MODE=staged (the release dir is already there — re-gate it).
-#   BUILD  npm ci && npm run build in the site source dir, wrapped in
-#          `systemd-run --scope -p MemoryMax=1500M -p CPUQuota=150%` and a
-#          SCRUBBED env — only the injected BARKPARK_* build vars, NOTHING
-#          inherited.  Vite gives process.env precedence over .env, so an ambient
-#          BARKPARK_TOKEN/URL silently shadows the per-site token (live-proven
+#   BUILD  npm ci && npm run build in the site source dir.  The resource cap is
+#          NOT taken here: the inner `systemd-run --scope` was retired
+#          (stw6-deployrunner-reattach) and the OUTER transient unit DeployRunner
+#          mints — `bp-site-build-<slug>-<tag>-<ms>.service`, MemoryMax=1500M
+#          CPUQuota=150% — carries it, which is also the only place charter D118
+#          permits a memory bound to sit (D611).  The env IS scrubbed — only the
+#          injected BARKPARK_* build vars, NOTHING inherited.  Vite gives
+#          process.env precedence over .env, so an ambient BARKPARK_TOKEN/URL
+#          silently shadows the per-site token (live-proven
 #          failure mode) — hence the scrub.
 #   STAGE  copy ONLY dist/ (12-16K) into releases/<build_id>/; node_modules
 #          (~148M) stays in the ephemeral build sandbox.  In PREBUILT mode the
