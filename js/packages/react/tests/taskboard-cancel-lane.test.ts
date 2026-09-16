@@ -123,3 +123,99 @@ describe('task-board cancel lane', () => {
     expect(got[got.length - 1]).toBe(CANCEL)
   })
 })
+
+/* ── the off-ladder fallback (task-1618e7d0b0d96fb6) ────────────────────────── */
+//
+// Giving `cancel` its own lane (PR #17985) removed the last LIFECYCLE status that
+// could reach `BOARD_ROLES.includes(role) ? role : 'open'`, so the fallback's own
+// behaviour — "a status the ladder does not know still renders, and homes in the
+// open lane" — went unmeasured on every surface at once. Go covers it
+// (TestTaskBoardOffLadderStatusHomesInOpen, internal/pdrender/taskblocks_test.go);
+// this is the react arm.
+//
+// The subject is DERIVED, never typed: a literal off-ladder status would go
+// vacuous the day the manifest adopts that word, and the arm would keep passing
+// while measuring a known rung. `offLadderStatus` is grown until the manifest's
+// own statuses map disowns it, so it is off-ladder BY CONSTRUCTION.
+//
+// The preconditions are deliberately NOT lane-existence checks. A lane-existence
+// precondition is destroyed by exactly the mutations these arms exist to catch
+// (drop the row -> no open lane; widen the fallback -> no ready lane), so it
+// would fire FIRST and the board-level assertion would never be reached. Both
+// preconditions below survive both mutations; the assertion that reds is the one
+// about the board.
+
+/** A status the ladder does not know — a predicate, not a pinned word. */
+const offLadderStatus = (() => {
+  let s = 'off-ladder'
+  while (s in manifest.statuses) s += '-x'
+  return s
+})()
+
+/** The markup of one board lane: from its class to the start of the next lane.
+ * `''` when that lane did not render — a containment assertion against it then
+ * reports the ROW that is missing, not a null slice. */
+function laneSlice(html: string, role: string): string {
+  const at = html.indexOf(`bp-board__col--${role}`)
+  if (at === -1) return ''
+  const rest = html.slice(at)
+  const next = rest.indexOf('<div class="bp-board__col ', 1)
+  return next === -1 ? rest : rest.slice(0, next)
+}
+
+describe('task-board off-ladder fallback', () => {
+  it('renders an off-ladder status VISIBLE, in the open lane — and widens no further', () => {
+    // PRECONDITION 1: the subject really is off the ladder. Without it the whole
+    // case could be measuring a known rung and still pass.
+    expect(
+      Object.keys(manifest.statuses),
+      `"${offLadderStatus}" is a MANIFEST status — this arm would measure a known rung`,
+    ).not.toContain(offLadderStatus)
+
+    const html = board([
+      { title: 'row-ready', status: statusFor('ready') },
+      { title: 'row-offladder', status: offLadderStatus },
+      { title: 'row-cancelled', status: statusFor(CANCEL) },
+    ])
+
+    // PRECONDITION 2: a board rendered with lanes at all. Nothing-measured and
+    // all-clear look identical against an empty string.
+    expect(html, 'no board rendered — the arms below would measure nothing').toContain(
+      'bp-board__col--',
+    )
+
+    // LOUD: never dropped, and homed in `open`.
+    expect(html, 'the off-ladder row VANISHED from the board').toContain('row-offladder')
+    expect(
+      laneSlice(html, 'open'),
+      'the off-ladder row did not home in the open lane — the fail-open fallback is gone',
+    ).toContain('row-offladder')
+
+    // QUIET: the fallback did NOT widen. Every KNOWN rung keeps its own lane, so
+    // `open` gained exactly the one unknown row and nothing else.
+    const openLane = laneSlice(html, 'open')
+    expect(openLane, 'a READY row was swept into the fallback — the fallback widened').not.toContain(
+      'row-ready',
+    )
+    expect(
+      openLane,
+      'a CANCELLED row was swept into the fallback — phantom claimable work',
+    ).not.toContain('row-cancelled')
+    expect(laneSlice(html, 'ready'), 'the ready row left its own lane').toContain('row-ready')
+    expect(laneSlice(html, CANCEL), 'the cancelled row left its own lane').toContain('row-cancelled')
+  })
+
+  it('paints the off-ladder row with the dim `unknown` glyph, not the open circle', () => {
+    // The LANE is `open`; the GLYPH is the row's own resolved role (boardCol reads
+    // roleOf per row). Both halves matter: homing it in open must not disguise it
+    // as a real open rung.
+    const html = board([{ title: 'row-offladder', status: offLadderStatus }])
+    const openGlyph = manifest.roles.find((r) => r.role === 'open')!.glyph
+
+    expect(html, 'the off-ladder row VANISHED from the board').toContain('row-offladder')
+    expect(
+      html,
+      'the off-ladder row paints the OPEN glyph — it reads as real, claimable backlog',
+    ).not.toContain(`>${openGlyph}<`)
+  })
+})
