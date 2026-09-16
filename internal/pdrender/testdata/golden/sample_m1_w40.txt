@@ -26,6 +26,7 @@ Knut Hamsun · 2026-06-08 · Terminal desk
 │ figure │ registry recursion │ high    
 └────────┴────────────────────┴─────────
                                         
+                                        
 ╭──────────────────────────────────────╮
 │ The figure's single child block is   │
 │ composed through the full registry,  │
@@ -34,6 +35,7 @@ Knut Hamsun · 2026-06-08 · Terminal desk
 │ A nested paragraph rendered through  │
 │ the registry.                        │
 ╰──────────────────────────────────────╯
+                                        
                                         
 ╭──────────────────────────────────────╮
 │ Second figure body.                  │

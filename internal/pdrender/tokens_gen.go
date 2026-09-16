@@ -50,6 +50,53 @@ const (
 	GenReadingBodySize      = 18
 )
 
+// Generated terminal space ladder (design/tokens.json space.air /
+// space.section / space.rule). The web surface paints these as PIXELS; a
+// terminal has one vertical unit, the ROW, and space.air.beat (22px) is ≈ one
+// row — so the six-rung web air ladder collapses to TWO honest terminal
+// values. Nothing below spells a per-kind row count: GenAirRatios carries the
+// source ratios verbatim, GenAirRowSplit carries the documented collapse
+// threshold (design/emit.mjs AIR_ROW_SPLIT), and pdrender.AirRows (air.go)
+// applies one to the other. A hand-written six-step table is exactly the fake
+// precision this arm exists to refuse.
+var GenAirRatios = map[string]float64{
+	"code":      1.1,
+	"table":     1.36,
+	"asciicast": 1.45,
+	"callout":   1.55,
+	"stats":     1.64,
+	"figure":    1.82,
+}
+
+// GenAirOrder is the emission order (lightest opening → heaviest), matching
+// AIR_STEPS in design/emit.mjs.
+var GenAirOrder = []string{"code", "table", "asciicast", "callout", "stats", "figure"}
+
+// GenRuleGlyph is the terminal's rendering of the TWO weights a paper draws
+// horizontal lines at (space.section.rule = 2px structural, space.rule.hairline
+// = 1px everything else). A terminal cannot vary a line's thickness, so the
+// weight becomes the GLYPH: heavy for a section boundary, light for a table
+// underline, a divider, a heading rule. Derived from the px values, not typed:
+// a weight of 2px or more is the structural one.
+var GenRuleGlyph = map[string]string{
+	"hairline": "─",
+	"section":  "━",
+}
+
+// GenAirRowSplit is the collapse threshold (a ratio at or above it earns a
+// SECOND blank row). GenAirRowsDefault is the air a block that is not on the
+// ladder opens with. GenSectionGapRows is space.section.beat (4.18 air beats ≈
+// 92px, the benchmark artifact's section margin) rounded to whole rows: the air
+// that says one section ENDED, the half of the boundary device the rule glyph
+// completes. GenSectionHeadGapRows is space.section.gap (the artifact's 16px
+// .sec-head padding-top) in rows: the air between the rule and the words.
+const (
+	GenAirRowSplit        = 1.6
+	GenAirRowsDefault     = 1
+	GenSectionGapRows     = 4
+	GenSectionHeadGapRows = 1
+)
+
 // Generated categorical viz palettes (design/tokens.json color.pdrenderChart /
 // color.pdrenderHeatmap → hex). NOT status roles — theme-invariant categorical
 // data-viz values (the presence / matchQuality passthrough precedent, D21).
