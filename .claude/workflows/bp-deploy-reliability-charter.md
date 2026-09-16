@@ -14145,3 +14145,59 @@ beside the two properties already there, and that file is outside the deploy fen
 Nothing above was measured on guerrilla or any other host: this entry contains **no new host reading**, and every
 number in it is either read from this repo at `origin/main` (the table in (b), the 35-check count) or quoted
 with its source and its date from an earlier wave's ledger (the ~9 MB, the 0 MB, the 2,160 MB, the 200/200).
+
+- **D612 — D225's "GREEN ON THE MERGE COMMIT" IS UNSATISFIABLE FOR ONE CONTEXT, NOT FOR LACK OF A READER; AND
+  THE 25-ROW COHORT NO LONGER EXISTS, SO NOTHING WAS REWRITTEN.** `dr-w14-bl-merge-commit-criterion-wording`
+  ordered 25 criteria reworded before the D225 sweep stamped them. Both halves of its premise were re-measured
+  before any write, and both moved.
+
+  **(a) `gh pr view --json statusCheckRollup` DOES report the HEAD commit — CONFIRMED, 4/4 samples.** Measured
+  2026-09-16 on the four most recent merged PRs. The rollup's length equals the *headRefOid*'s `check-runs`
+  `total_count` EXACTLY, and never the merge commit's:
+
+  | PR | rollup | head check-runs | merge check-runs | `PR references an active task` on HEAD | on MERGE |
+  |---|---|---|---|---|---|
+  | #17070 | 55 | 55 | 121 | 1 | 0 |
+  | #17068 | 55 | 55 | 69 | 1 | 0 |
+  | #17066 | 57 | 57 | 69 | 2 | 0 |
+  | #17064 | 57 | 57 | 77 | 2 | 0 |
+
+  The last two columns are each other's control: the same `grep -cx 'PR references an active task'` returns
+  non-zero on every HEAD, so a `0` on a merge sha is a real absence and not a broken reader.
+
+  **(b) BUT "no tool this epic uses can report the merge commit's checks" is FALSE.** The merge commit carries
+  MORE check-runs than the head (121 vs 55 on #17070), and `gh api repos/<r>/commits/<mergeSha>/check-runs`
+  reads them. This repo already ships a reader that takes an arbitrary sha: `scripts/merge-check.sh --classify
+  <sha>` calls `mc_rollup`, which paginates `commits/$REAL/check-runs` with a `total_count` completeness
+  assertion. The live path passes `REAL=$(git rev-parse refs/remotes/origin/$BR)` — a BRANCH HEAD — so
+  merge-check.sh *asks about the head by choice of argument, not by limitation of its reader*. Hand it a merge
+  sha and it answers about the merge sha.
+
+  **(c) THE REAL DEFECT IS NARROWER AND SHARPER: ONE OF THE FOUR REQUIRED CONTEXTS NEVER RENDERS ON A MERGE
+  COMMIT.** On merge sha `f7610ed6a`, `Cloud gate`, `Console gate` and `Elixir gate` are each `completed/success`
+  — three of four are readable AND green. `PR references an active task` is ABSENT, because
+  `.github/workflows/pr-task-gate.yml` is `pull_request`-triggered and a squash merge is a `push`. So
+  "all FOUR required contexts green on the merge commit" is false forever — **a missing EVENT, not a missing
+  READER**. Corroborated independently: `dr-bl-w19-console-gate-red-on-a-merged-main-commit` c3 already records
+  "PR references an active task is ABSENT on 52/52 merge shas".
+
+  **(d) THE COHORT IS NOT 25 AND IS SPENT.** Denominator: ALL 9,413 rows via `bp task ls --all` (complete — no
+  truncation warning; `--limit 500` fills exactly and is NOT complete). 8,799 carry `acceptance_criteria`;
+  253 criteria across 248 rows mention "merge commit"; **52 criteria on 52 distinct rows** carry the specific
+  *green-on-the-merge-commit* shape. Of those 52: **46 are `done` with `met:true` — already stamped**, 5 are
+  `cancelled`, and **1 is `open`+unmet**. The event D225 wanted to prevent already happened, and the two sibling
+  orders that carried this same instruction (`dr-w14-bl-ledger-sweep-fifty-four` c2,
+  `dr-w10-bl-epic-ledger-stamp-repair` c3) were CANCELLED as premise-expired on 2026-08-23: *"the 54-row cohort
+  no longer exists."*
+
+  **(e) THE ONE LIVE ROW IS ALREADY CORRECT, SO ZERO ROWS WERE PATCHED.** The single `open`+unmet row,
+  `cch-bl-cloudflare-identity-echo-no-surface` c5 (claim.worker `null`), already reads *"the FOUR live required
+  contexts … green on the PR HEAD — **never on the merge commit**"*. The fix this row ordered is already in the
+  only row that could still receive it. Rewriting the other 51 would edit `done`/`cancelled` rows' work digest
+  for no gain and would 409 their holders' closes.
+
+  **RULING: the satisfiable wording is "the four required contexts are green on the PR HEAD at merge time
+  (newest run per name `completed/success`), and the merge sha is an ancestor of origin/main" — NOT "no
+  FAILURE/CANCELLED/TIMED_OUT anywhere in the rollup", which is stricter than the rule this repo merges on
+  (per-name latest-`completed_at` wins, so a superseded red is irrelevant) and would refuse merges the gate
+  permits. No rows rewritten; the identification and this note are the deliverable.**
