@@ -202,6 +202,13 @@ type model struct {
 	paperTheme          pdrender.Theme
 	paperProfile        pdrender.Profile
 	selectedPaperBlocks []pdrender.Block
+	// paperDocs is the paper pane's reference cache, shared by the three
+	// resolvers and — because it is a POINTER — surviving the value-receiver
+	// copies View()/buildPaperContent are made on. Without it every frame of a
+	// paper re-fetched every referenced type. Cleared by refreshDocViews (the
+	// funnel every mutation and every DataStoreRefreshMsg runs through) and by
+	// applyScope. See paper_cache.go.
+	paperDocs *paperDocCache
 }
 
 func initialModel(ds *DataStore) model {
@@ -218,6 +225,7 @@ func initialModel(ds *DataStore) model {
 		paperTheme:    theme,
 		paperProfile:  detectPaperProfile(),
 		paperRegistry: pdrender.DefaultRegistry(theme),
+		paperDocs:     newPaperDocCache(ds),
 	}
 	m.rebuildPanes()
 	return m
