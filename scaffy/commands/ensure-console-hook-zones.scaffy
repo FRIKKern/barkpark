@@ -1,4 +1,4 @@
-COMMAND "Ensure console hook zones" DESCRIPTION "Idempotently plant the three named scaffy:zone marker comments across the Cloud console SPA pair -- cloud/priv/static/app.js (#7 discover hotspot: 81 commits / 60 MOSTLY_ADD in 12 months) and its co-accreting node harness cloud/priv/static/__app.test.mjs (#14: 56 commits, 55 of the 82 app.js commits touch it) -- the cloud subsystem's ONLY mechanically append-shaped seams. The console vein is vertical (a cloud feature = router route + Registry fn + SPA edits: 54/70 registry commits co-touch the router, 46/82 app.js commits co-touch app.css), but router/registry/css adds are all contextual-bespoke; what EVERY SPA feature repeats mechanically is this trio: a pure helper in the IIFE, its entry in the __bpTestHook export map, and its test group in the harness. One zone per seam: new-helper declarations (position-free -- the hook call runs at eval tail), new hook-map entries (order-free object keys, house trailing-comma style), new test groups (registration order is NOT semantics-free under node:test -- a test() registered above a top-level await is drained before the later top-level consts initialise and TDZ-crashes, so the tests zone is planted at the file TAIL, below every top-level await). Each zone comment states IN WORDS the contract that makes an append below it safe by construction -- the ensure-router-zones idiom, JS spelling. No variables: fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-07-2026-21-00-00" DOMAIN "barkpark" TAGS "cloud-console", "scaffold" CONCEPT "console-hook-zones" VARIANT "js" DIRECTION "add" VARIABLES
+COMMAND "Ensure console hook zones" DESCRIPTION "Idempotently plant the three named scaffy:zone marker comments across the Cloud console SPA pair -- cloud/priv/static/app.js (#7 discover hotspot: 81 commits / 60 MOSTLY_ADD in 12 months) and its co-accreting node harness cloud/priv/static/__app.test.mjs (#14: 56 commits, 55 of the 82 app.js commits touch it) -- the cloud subsystem's ONLY mechanically append-shaped seams. The console vein is vertical (a cloud feature = router route + Registry fn + SPA edits: 54/70 registry commits co-touch the router, 46/82 app.js commits co-touch app.css), but router/registry/css adds are all contextual-bespoke; what EVERY SPA feature repeats mechanically is this trio: a pure helper in the IIFE, its entry in the __bpTestHook export map, and its test group in the harness. One zone per seam: new-helper declarations (position-free -- the hook call runs at eval tail), new hook-map entries (order-free object keys, house trailing-comma style), new test groups (registration order is NOT semantics-free under node:test -- a test() registered above a top-level await is drained before the later top-level consts initialise and TDZ-crashes, so the tests zone is planted at the file TAIL, below every top-level await). Each zone comment states IN WORDS the contract that makes an append below it safe by construction -- the ensure-router-zones idiom, JS spelling. No variables: fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-09-2026-10-30-00" DOMAIN "barkpark" TAGS "cloud-console", "scaffold" CONCEPT "console-hook-zones" VARIANT "js" DIRECTION "add" VARIABLES
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHY THIS COMMAND EXISTS — the measured anatomy of the cloud console pair
@@ -158,6 +158,15 @@ ASLONG FILE DONT CONTAIN "scaffy:zone console-hook-map"
 # node 22 crashed the same probe too, so this is a drain race, not a runtime
 # semantic difference. Below the last top-level await there is no remaining
 # drain point, so a tail group always sees a fully-initialised module.
+#
+# AND THE POSITION IS MACHINE-CHECKED, not merely described. The payload below
+# mirrors the guard by name: `scripts/console-tdz-order-check.mjs` compares the
+# planted MARK line against the file's LAST depth-0 `await` and fails under the
+# separately-named assertion `ZONE ANCHOR ORDER` when the mark is not below it —
+# reporting the CAUSE with the crossing count still 0, and refusing to certify
+# at all when two `MARK:zone-console-tests` lines make the anchor ambiguous.
+# The closing POSTCONDITIONS run that same guard against the planted file, so a
+# plant that lands the zone in the wrong place fails the RUN, not a later PR.
 IN "cloud/priv/static/__app.test.mjs"
 ### Plant the console-tests zone at the tail of the harness, below every top-level await
 INSERT AFTER LAST
@@ -175,6 +184,14 @@ WITH
 // throws ReferenceError (TDZ) on any fixture declared further down. Keep this
 // anchor BELOW the file's LAST top-level `await` (measured cch-w61-s1: node 20
 // and node 22 both crash a group planted above it).
+// THAT RULE IS ENFORCED BY A PROGRAM, NOT BY THIS PARAGRAPH. Until cchi-w61 it
+// was prose only, and prose cannot red: `scripts/console-tdz-order-check.mjs`
+// now measures this MARK line's number against the line of the file's LAST
+// depth-0 `await` and fails by name (`ZONE ANCHOR ORDER`) when the mark is not
+// below it. It reds on the CAUSE -- an anchor out of position, with the
+// crossing count still 0 -- rather than waiting for the first generated group
+// that happens to read a late binding. It runs on every PR in
+// console-harness.yml's deliberately unfiltered `path-escape` job.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 ::: console-tests zone :::
 MARK "zone-console-tests"
@@ -183,11 +200,18 @@ ASLONG FILE DONT CONTAIN "scaffy:zone console-tests"
 # ─────────────────────────────────────────────────────────────────────────────
 # POSTCONDITIONS
 # ─────────────────────────────────────────────────────────────────────────────
-# All three zones present, and the pair still passes its OWN enforced gate —
-# the same `node --test` console-harness.yml runs in CI, here LOCAL (zero
-# deps, ~250ms): green proves the planted comments broke neither the SPA's
-# vm evaluation nor the harness module.
+# All three zones present, the console-tests zone landed BELOW the harness's
+# last depth-0 `await` (the ZONE ANCHOR ORDER assertion of
+# scripts/console-tdz-order-check.mjs — the machine half of the OP 3 payload's
+# prose, which reds on the CAUSE while the crossing count is still 0 and also
+# refuses an AMBIGUOUS double plant), and the pair still passes its OWN
+# enforced gate — the same `node --test` console-harness.yml runs in CI, here
+# LOCAL (zero deps, ~250ms): green proves the planted comments broke neither
+# the SPA's vm evaluation nor the harness module. The order is deliberate:
+# structural position first, so a misplanted zone is named as a position fault
+# rather than surfacing later as a TDZ crash in somebody else's test group.
 ASSERT FILE "cloud/priv/static/app.js" CONTAINS "MARK:zone-console-helpers"
 ASSERT FILE "cloud/priv/static/app.js" CONTAINS "MARK:zone-console-hook-map"
 ASSERT FILE "cloud/priv/static/__app.test.mjs" CONTAINS "MARK:zone-console-tests"
+ASSERT CMD "node scripts/console-tdz-order-check.mjs cloud/priv/static/__app.test.mjs"
 ASSERT CMD "sh scripts/console-harness.sh"

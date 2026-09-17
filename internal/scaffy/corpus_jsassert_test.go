@@ -229,8 +229,19 @@ func TestCorpusJSAssertClassification(t *testing.T) {
 	// remove-docs-card:101 -> scripts/docs-anchors-check.sh,
 	// add-block-type:731 -> scripts/pd-parity-completeness.sh,
 	// remove-docs-card:100 -> scripts/check-doc-budgets.sh.
-	if totalJS != 11 || totalSelfPriming != 3 || totalExempt != 0 || totalDelegated != 7 {
-		t.Errorf("JS-assert census drift: got %d JS-touching / %d self-priming / %d direct-node exempt / %d delegated, want 11 / 3 / 0 / 7",
+	// exempt 0 -> 1 on 2026-09-17 (task-e4289e4c30bb6eff):
+	// ensure-console-hook-zones gained
+	// `ASSERT CMD "node scripts/console-tdz-order-check.mjs
+	// cloud/priv/static/__app.test.mjs"` — the ZONE ANCHOR ORDER guard that
+	// makes OP 3's position prose machine-checked. It runs `node` DIRECTLY on
+	// a committed .mjs with zero workspace deps (node:fs only, by that
+	// script's own header), names no JS token, and delegates to no shell
+	// script, so classifyAssert reads classNodeExempt and the exemption is
+	// EARNED, not inherited: no `pnpm install` can prime anything it needs.
+	// This term is also the reversion detector for that template edit — drop
+	// the assert and this reads 0 against a want of 1.
+	if totalJS != 11 || totalSelfPriming != 3 || totalExempt != 1 || totalDelegated != 7 {
+		t.Errorf("JS-assert census drift: got %d JS-touching / %d self-priming / %d direct-node exempt / %d delegated, want 11 / 3 / 1 / 7",
 			totalJS, totalSelfPriming, totalExempt, totalDelegated)
 	}
 }
