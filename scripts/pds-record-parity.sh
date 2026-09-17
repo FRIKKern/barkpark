@@ -227,6 +227,8 @@
 #   bash scripts/pds-record-parity.sh
 #   bash scripts/pds-record-parity.sh --axis a
 #   bash scripts/pds-record-parity.sh --axis d            # script citations vs charter
+#   bash scripts/pds-record-parity.sh --axis f            # harness thaw ledger (PDS-D759)
+#   bash scripts/pds-record-parity.sh --axis f --charter <copy>  # the PLANTED CONTROL
 #   bash scripts/pds-record-parity.sh --axis d --citation-root <dir>  # fixture tree
 #   bash scripts/pds-record-parity.sh --limit 400 --grace-hours 6
 #   bash scripts/pds-record-parity.sh --commits-file <file>  # axis A corpus, verbatim
@@ -344,7 +346,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$AXIS" in a|b|d|both) : ;; *) echo "pds-record-parity: --axis must be a|b|d|both, got '${AXIS}'" >&2; usage ;; esac
+case "$AXIS" in a|b|d|f|both) : ;; *) echo "pds-record-parity: --axis must be a|b|d|f|both, got '${AXIS}'" >&2; usage ;; esac
 case "$LIMIT" in ''|*[!0-9]*|0) echo "pds-record-parity: --limit must be a positive integer, got '${LIMIT}'" >&2; usage ;; esac
 case "$GRACE_HOURS" in ''|*[!0-9]*) echo "pds-record-parity: --grace-hours must be a non-negative integer, got '${GRACE_HOURS}'" >&2; usage ;; esac
 case "$RETRIES" in ''|*[!0-9]*|0) echo "pds-record-parity: PDS_RECORD_PARITY_RETRIES must be a positive integer, got '${RETRIES}'" >&2; usage ;; esac
@@ -1617,9 +1619,135 @@ axis_b() {
   return 0
 }
 
+# ── AXIS F — THE HARNESS THAW LEDGER (PDS-D759) ───────────────────────────────
+#
+# THE LAW, POINTED AT THE FREEZE. Axis A rules that a commit may not cite an
+# authority that does not exist. Axis F is its mirror image: a commit may not
+# MOVE the frozen harness without leaving an authority behind. Every commit that
+# changes `scripts/pds-pull-proof.sh` is a THAW, sanctioned or not, and the
+# charter must be able to answer, after the fact, "which PDS-D records this
+# thaw, and what post-merge blob OID did it produce?".
+#
+# THE JOIN KEY IS THE POST-MERGE BLOB OID AND NOTHING ELSE. It is read with
+# `git rev-parse <sha>:scripts/pds-pull-proof.sh` and NEVER with `shasum`
+# (PDS-D154). A PR number was measured as a join key and REJECTED: the charter
+# cites PR numbers for a dozen reasons that have nothing to do with a freeze,
+# so a PR-number join resolves commits the charter never recorded as thaws
+# (measured on origin/main: PR-number join 9/25, blob join 3/25 — the extra six
+# were all coincidental mentions). A 40-hex blob OID in this charter can only
+# ever have got there as a freeze record.
+#
+# HOW THIS DOES NOT REOPEN PDS-D732. D732 rules the freeze identity is READ,
+# never TYPED, because a hand-typed hash manufactures a false THAWED verdict the
+# day a sanctioned thaw lands. A recorded OID here is `FREEZE_BLOB_HISTORICAL`
+# in D732's own taxonomy — a HISTORICAL record OF ONE THAW, never a statement of
+# the current freeze, which stays DERIVED at run time by
+# `scripts/pds-climb-preflight.sh:128`. This arm reads the charter's OIDs as a
+# LEDGER OF THE PAST and never compares any of them to origin/main's live blob;
+# that comparison is the preflight's job and this arm does not do it.
+#
+# THE WINDOW IS DERIVED, NOT ENUMERATED. The anchor is the OLDEST harness-moving
+# commit whose blob the charter records. A commit older than that predates the
+# charter's freeze doctrine and is EXEMPT; the exemption's mechanical test is
+# `git merge-base --is-ancestor <sha> <anchor>` and it is printed, not implied.
+# An enumeration of exempt shas would be a snapshot; this is a rule.
+axis_f_harness_path() { printf '%s\n' "scripts/pds-pull-proof.sh"; }
+
+axis_f() {
+  local hp charter anchor anchor_blob sha blob n_total n_window n_resolved n_unrec
+  hp="$(axis_f_harness_path)"
+  charter="$CHARTER"
+  echo
+  echo "axis F — THE HARNESS THAW LEDGER (does every thaw of ${hp} name a ${D_PREFIX}?)"
+
+  if [ ! -f "$charter" ]; then
+    echo "  UNCHECKED: no charter at ${charter}." >&2; raise 2; return 0
+  fi
+  if ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    echo "  UNCHECKED: not a git checkout." >&2; raise 2; return 0
+  fi
+
+  local base="origin/main"
+  git rev-parse --verify --quiet "$base" >/dev/null 2>&1 || base="HEAD"
+
+  local commits; commits="$(git log --format=%H "$base" -- "$hp")"
+  if [ -z "$commits" ]; then
+    echo "  UNCHECKED: no commit in this checkout has ever touched ${hp}." >&2; raise 2; return 0
+  fi
+  n_total="$(printf '%s\n' "$commits" | wc -l | tr -d ' ')"
+
+  # THE CONTROL THAT MAKES AN EMPTY READ INADMISSIBLE. Before any per-commit
+  # grep is believed, prove the grep can fire on this charter at all. A charter
+  # that answers 0 to everything reads exactly like a perfectly-recorded one.
+  local ctl; ctl="$(grep -c -- "${D_PREFIX}" "$charter" 2>/dev/null || true)"
+  case "$ctl" in ''|0)
+    echo "  UNCHECKED: the control grep for '${D_PREFIX}' found 0 hits in ${charter}." >&2
+    echo "             Every per-commit 0 below would be an artifact of the lens." >&2
+    raise 2; return 0 ;;
+  esac
+  echo "  control grep .......... ${ctl} '${D_PREFIX}' hit(s) in ${charter} — the lens fires"
+
+  # WINDOW ANCHOR: the oldest harness-moving commit the charter records.
+  anchor=""; anchor_blob=""
+  while IFS= read -r sha; do
+    blob="$(git rev-parse --verify --quiet "${sha}:${hp}" 2>/dev/null || true)"
+    [ -n "$blob" ] || continue
+    if grep -q -- "$blob" "$charter"; then anchor="$sha"; anchor_blob="$blob"; fi
+  done <<< "$commits"
+  if [ -z "$anchor" ]; then
+    echo "  UNCHECKED: the charter records NO harness blob at all, so there is no window" >&2
+    echo "             anchor to derive and nothing here could be scored." >&2
+    raise 2; return 0
+  fi
+  echo "  window anchor ......... $(git rev-parse --short=9 "$anchor") (oldest charter-recorded thaw, blob ${anchor_blob})"
+  echo "  exemption test ........ git merge-base --is-ancestor <sha> $(git rev-parse --short=9 "$anchor")  → EXEMPT (pre-doctrine)"
+
+  local unrec; unrec="$(mktemp)"
+  n_window=0; n_resolved=0
+  while IFS= read -r sha; do
+    [ "$sha" = "$anchor" ] && continue
+    git merge-base --is-ancestor "$sha" "$anchor" 2>/dev/null && continue   # out of window: EXEMPT
+    blob="$(git rev-parse --verify --quiet "${sha}:${hp}" 2>/dev/null || true)"
+    if [ -z "$blob" ]; then
+      echo "  UNCHECKED: ${hp} has no blob at ${sha}; the walk cannot be scored." >&2
+      raise 2; rm -f "$unrec"; return 0
+    fi
+    n_window=$((n_window + 1))
+    if grep -q -- "$blob" "$charter"; then
+      n_resolved=$((n_resolved + 1))
+    else
+      printf '%s\t%s\t%s\t%s\n' "$(git rev-parse --short=9 "$sha")" "$blob" \
+        "$(git log -1 --format=%cs "$sha")" "$(git log -1 --format=%s "$sha" | cut -c1-72)" >> "$unrec"
+    fi
+  done <<< "$commits"
+
+  n_unrec="$(wc -l < "$unrec" | tr -d ' ')"
+  # TWO NUMBERS, NEVER ONE VERDICT.
+  echo "  harness-moving commits, all history .... ${n_total}"
+  echo "  harness-moving commits IN WINDOW ....... ${n_window}  (anchor itself excluded; older ones EXEMPT)"
+  echo "  ...of those, resolving to a ${D_PREFIX} record .. ${n_resolved}"
+  echo "  ...unrecorded .......................... ${n_unrec}"
+
+  if [ "$n_unrec" -gt 0 ]; then
+    echo "  DIVERGENT — these thaws moved ${hp} and no ${D_PREFIX} records the blob they produced:" >&2
+    while IFS=$'\t' read -r s b d t; do
+      echo "    ${s}  ${d}  blob ${b}" >&2
+      echo "        ${t}" >&2
+    done < "$unrec"
+    echo "    Record each under a ${D_PREFIX} minted through --allocate-d, as a HISTORICAL" >&2
+    echo "    thaw record (PDS-D732: never as a statement of the current freeze)." >&2
+    raise 1
+  else
+    echo "  PARITY — every in-window thaw names the ${D_PREFIX} that records its blob."
+  fi
+  rm -f "$unrec"
+  return 0
+}
+
 case "$AXIS" in a|both) axis_a ;; esac
 case "$AXIS" in b|both) axis_b ;; esac
 case "$AXIS" in d|both) axis_d ;; esac
+case "$AXIS" in f|both) axis_f ;; esac
 
 echo
 case "$WORST" in
