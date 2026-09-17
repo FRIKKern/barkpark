@@ -400,8 +400,8 @@ pds-threshold-move-guard.sh	PRICE	CPU=0.81+0.74=1.55s LOCAL meter=bash-times-bui
 pds-threshold-move-guard_test.sh	PRICE	CPU=4.53+5.65=10.18s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=57.42 arm=none key=06b024fbb9c7 2026-09-13 (no arguments, rc=0) -- RE-TAKEN BY `--measure`, never hand-typed (PDS-D656): 3 trials gave 9.84/10.18/9.60s CPU at load1 55.90-58.10, observed band 9.60-10.18 s, a 6.0% spread, HIGH END QUOTED per the rule of this column. THE HOST WAS NOT QUIET -- load1 ran 55.9-58.1 on 10 cpus across all three trials, so this band is a LOADED-HOST band and is NOT poolable with the pds-live-hetzner-placement-group_test.sh band above, which was taken at load1 4.63-5.94. NOT VACUOUS: the same binary run un-metered prints 15 ok lines and `pds-threshold-move-guard_test: PASS`, including the two arms the task exists for -- a silent cap move REFUSED at exit 1 and THE SAME HEAD TREE passing at exit 0 once the PR body states both values with a reason -- plus the real-history replay of c3b0421cb (PR #9601) itself. The cost is mostly git: 12 commits in a throwaway repo plus two revisions of 18 watched paths per arm. WHY IT IS NOT THROUGH: it is wired into the pds-harnesses job of .github/workflows/shell-harnesses.yml, which is not a required context, so the arms RUN and do not BLOCK; no ExUnit case under api/test executes it, which is the only thing between this row and THROUGH.
 pds-artifact-retention.sh	PRICE	CPU=0.01+0.03=0.05s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=28.02 arm=none key=427fb9b623ef 2026-09-16 (no arguments = the DRY RUN, rc=0; 3 trials gave 0.05/0.04/0.04s CPU at load1 27.86-28.02, observed band 0.04-0.05 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.05 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THE PRICED ARM REMOVES NOTHING, and that is the arm a gate would run: with no flag it walks $PDS_ARTIFACT_ROOT (default /tmp), prints `0 kept · 0 removable (0 MB) · 0 refused` and `Nothing was removed. Re-run: pds-artifact-retention.sh --apply`; only `--apply` unlinks, so the dry run reads the tree and writes nothing. NOT VACUOUS: its can-fail arms live in the derived harness pds-artifact-retention.test.sh below, hermetic by construction (every arm builds its own mktemp -d root and plants its own parked full-export store, reaching no network and reading no credential) and green at `35 pass(es), 0 failure(s)`. Landed by #18544 with no ledger row; this row is the main-red repair.
 pds-artifact-retention.test.sh	PRICE	CPU=1.16+1.94=3.09s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=24.49 arm=none key=1f73c6852c47 2026-09-16 (no arguments, rc=0; 3 trials gave 2.94/2.94/3.09s CPU at load1 24.49-27.86, observed band 2.94-3.09 s, a 5.1 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 3.09 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THIS IS A DERIVED HARNESS (the *_test.sh rule), landed by #18544 at 983d3d0ac with no ledger row, which is half of what reddened main. NOT VACUOUS: `--measure` discards subject output, so the arm evidence comes from a SEPARATE un-metered run — rc=0, `35 pass(es), 0 failure(s)`. Hermetic per its own header: nothing here touches a real /tmp path, no export is fired, no network is reached, no credential is read.
-pds-charter-anchors-check.sh	PRICE	CPU=0.08+0.06=0.14s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.01 arm=none key=49e35c300aab 2026-09-16 (no arguments = the default charter .claude/workflows/bp-pds-charter.md, rc=0; 3 trials gave 0.14/0.12/0.13s CPU at load1=23.01, observed band 0.12-0.14 s, HIGH END QUOTED). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.14 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. IT READS ONE FILE AND WRITES NONE: the charter path is argv[1] with the repo default at scripts/pds-charter-anchors-check.sh:42, and the run prints `RESULT: PASS — every charter content anchor resolves uniquely.` NOT VACUOUS, and the green descends from arms that can fail: the derived harness below pairs each RED arm (one mutation, must red) with a QUIET arm (must stay green) and carries a REVERT arm that reproduces the pre-fix charter text verbatim, so the check is proven to catch the exact regression it was written for. Landed by #18539 at e01c3c22e with no ledger row; this row is the main-red repair.
-pds-charter-anchors-check_test.sh	PRICE	CPU=0.32+0.48=0.81s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.01 arm=none key=efb09f1436d5 2026-09-16 (no arguments, rc=0; 3 trials gave 0.81/0.77/0.77s CPU at load1=23.01, observed band 0.77-0.81 s, a 5.2 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.81 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. DERIVED HARNESS (the *_test.sh rule), landed by #18539 with no ledger row. NOT VACUOUS: a SEPARATE un-metered run exits 0 and prints `14 passed, 0 failed` then `RESULT: PASS`, over arms that are paired RED/QUIET by construction.
+pds-charter-anchors-check.sh	PRICE	CPU=0.08+0.06=0.14s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.01 arm=none key=49e35c300aab 2026-09-16 (no arguments = the default charter .claude/workflows/bp-pds-charter.md, rc=0; 3 trials gave 0.14/0.12/0.13s CPU at load1=23.01, observed band 0.12-0.14 s, HIGH END QUOTED). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.14 s keeps no door shut. Nothing REQUIRED runs it, and REQUIRED is now the whole of the claim: .github/workflows/shell-harnesses.yml DOES run this file (the `pds-charter-anchors ...` steps, dispatched by the pre-existing `scripts/pds-*.sh` path entry that workflow already carried), and that workflow carries NONE of the four required contexts on main -- riding a workflow is not riding a required name, and that distinction is the one this whole column turns on. It has no ExUnit rider under api/test, and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THE PREVIOUS WORDING HERE DENIED THAT ANY WORKFLOW FILE NAMED IT, and that denial was FALSE from 7cb2c6894 (PR #18769) onward with nothing anywhere reddening -- which is why the denial is no longer WRITTEN at all: workflow_claim_errors DERIVES it against $SCAN_ROOT/.github/workflows on every run, so restoring the old sentence to this row REDS the census by name. IT READS ONE FILE AND WRITES NONE: the charter path is argv[1] with the repo default at scripts/pds-charter-anchors-check.sh:42, and the run prints `RESULT: PASS — every charter content anchor resolves uniquely.` NOT VACUOUS, and the green descends from arms that can fail: the derived harness below pairs each RED arm (one mutation, must red) with a QUIET arm (must stay green) and carries a REVERT arm that reproduces the pre-fix charter text verbatim, so the check is proven to catch the exact regression it was written for. Landed by #18539 at e01c3c22e with no ledger row; this row is the main-red repair.
+pds-charter-anchors-check_test.sh	PRICE	CPU=0.32+0.48=0.81s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.01 arm=none key=efb09f1436d5 2026-09-16 (no arguments, rc=0; 3 trials gave 0.81/0.77/0.77s CPU at load1=23.01, observed band 0.77-0.81 s, a 5.2 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.81 s keeps no door shut. Nothing REQUIRED runs it, and REQUIRED is now the whole of the claim: .github/workflows/shell-harnesses.yml DOES run this file (the `pds-charter-anchors ...` steps, dispatched by the pre-existing `scripts/pds-*.sh` path entry that workflow already carried), and that workflow carries NONE of the four required contexts on main -- riding a workflow is not riding a required name, and that distinction is the one this whole column turns on. It has no ExUnit rider under api/test, and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THE PREVIOUS WORDING HERE DENIED THAT ANY WORKFLOW FILE NAMED IT, and that denial was FALSE from 7cb2c6894 (PR #18769) onward with nothing anywhere reddening -- which is why the denial is no longer WRITTEN at all: workflow_claim_errors DERIVES it against $SCAN_ROOT/.github/workflows on every run, so restoring the old sentence to this row REDS the census by name. DERIVED HARNESS (the *_test.sh rule), landed by #18539 with no ledger row. NOT VACUOUS: a SEPARATE un-metered run exits 0 and prints `14 passed, 0 failed` then `RESULT: PASS`, over arms that are paired RED/QUIET by construction.
 pds-citation-precedes-merge.sh	PRICE	CPU=0.13+0.16=0.29s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=21.89 arm=none key=0f6661a42e91 2026-09-16 (no arguments = HEAD against origin/main, rc=0; 3 trials gave 0.28/0.28/0.29s CPU at load1=21.89, observed band 0.28-0.29 s, a 3.6 percent spread, HIGH END QUOTED). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.29 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. ITS ORACLE IS A GIT REF, NOT A CREDENTIAL, which is why this is PRICE and not ENVIRONMENT: it resolves the charter AT THE BASE REF (`BASE="origin/main"`, scripts/pds-citation-precedes-merge.sh:120) through git grep and cat-file, contacts no server and reads no token. A checkout with no origin/main does not lie about it — the harness pins that arm as `charter absent on base -> UNCHECKED`. Landed by #18542 at fa307f490 with no ledger row; this row is the main-red repair.
 pds-citation-precedes-merge_test.sh	PRICE	CPU=1.33+2.04=3.37s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=21.89 arm=none key=7178470fb6f2 2026-09-16 (no arguments, rc=0; 3 trials gave 3.37/3.31/3.30s CPU at load1 20.05-21.89, observed band 3.30-3.37 s, a 2.1 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 3.37 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. DERIVED HARNESS (the *_test.sh rule), landed by #18542 with no ledger row. NOT VACUOUS: a SEPARATE un-metered run exits 0 and prints `SELFTEST PASS — 10/10`, the last arm being `charter absent on base -> UNCHECKED`. Hermetic per its own header: every case builds a THROWAWAY GIT REPO with its own fixture charter, so the real charter is never read and the verdict cannot move when an unrelated PR lands.
 pds-roster-callee-churn.exs	PRICE	CPU=7.16+1.89=9.05s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.81 arm=none key=9c86920c7d60 2026-09-16 (no arguments, rc=0; 3 trials gave 7.97/8.43/9.05s CPU at load1 5.61-5.83, observed band 7.97-9.05 s, a 13.6 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, AND THE ROW SAYS SO RATHER THAN LETTING THE LABEL IMPLY THE OTHER ONE: 9 s keeps no door shut, and nothing runs this instrument — no rider binds it and no workflow names it. IT IS A ONE-SHOT PRICING HARNESS, NOT A RATCHET, AND THAT IS WHY IT IS NOT WIRED: it answers ONE settled question — what a callee-inclusive roster fingerprint would have cost over the 95 api/lib commits that settled def_fp — and the answer is committed in scripts/pds-elixir-receipt-census.exs ROSTER-VERDICT-FRESH block and in its printed sentence. Re-running it on a PR would re-derive a constant. NOT VACUOUS, AND ITS GREEN DESCENDS FROM AN ARM THAT CAN FAIL: it carries its own CONTROL and halts 1 unless the def granularity re-derives the price PDS-D558 settled (2 fires over the window, one of them fbc6b80a1, one of them unrelated). BOTH REFUSALS ARE PROVEN BY RUN, NOT ASSERTED: `--count 999999` exits 2 with `the window is 1798 commits, not 999999`, and `--tip fbc6b80a1~1 --count 95` — the same window slid back so the repair leaves it — prints `CONTROL ... NOT REPRODUCED` and exits 1. Unmodified, exit 0 and `CONTROL ... REPRODUCED`. A first draft of this row claimed `--count 94` refuses; it does NOT (94 is a real window and the control still reproduces over it), and the claim was withdrawn by run rather than left standing. IT NEEDS THE REPOSITORY GIT HISTORY, not merely a checkout: it reads 95 commits of api/lib through rev-list, ls-tree and cat-file, so from a `git archive` root it cannot run at all — a second reason the wiring question is not live.'
@@ -1465,6 +1465,78 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# THE WIRED-CLAIM PREDICATE — the one sentence this ledger kept writing by hand
+# ---------------------------------------------------------------------------
+# Six disposition rows carry the clause below, and on 2026-09-16 exactly TWO of
+# them were FALSE: merge 7cb2c6894 (PR #18769) wired pds-charter-anchors-check.sh
+# and pds-charter-anchors-check_test.sh into .github/workflows/shell-harnesses.yml,
+# and the rows went on saying they appeared in no workflow file. The sentence was
+# stale within hours of the merge that falsified it, and nothing anywhere reddened.
+#
+# That is this file's OWN thesis turned against it. The header above says the
+# reason this census exists is that gate-coverage prose is "hand-copied,
+# re-hand-copied, and stale by the time the next wave read it" — and then the
+# disposition column restated, by hand, a claim about which scripts CI runs. A
+# hand-maintained list of what is wired is an ENUMERATION: a snapshot of one
+# morning, silently wrong on any later one. The fix is not to correct the
+# snapshot; it is to stop keeping one. This function makes the clause a
+# PREDICATE the run re-derives from `.github/workflows` every time.
+#
+# SCOPE, STATED SO IT IS NOT OVER-READ. The clause has two conjuncts — "appears
+# in no .github/workflows file" AND "has no ExUnit rider under api/test". Only
+# the first is derived here. The second already is: leg A computes it, and a row
+# whose door opened moves band and reds through the orphan check. This adds the
+# half that had no deriver at all.
+#
+# A COMMENT MENTION COUNTS, ON PURPOSE. The clause says "appears in", not "is
+# executed by", so a basename named only in a workflow COMMENT falsifies it and
+# this check says so. The conservative direction is the safe one: the error names
+# the file, and a reader who disagrees rewrites the row's prose rather than
+# silently keeping a sentence that is not true as written.
+#
+# FAIL-CLOSED, like every other verdict in this file: a root with no
+# .github/workflows directory cannot answer the question, so a row carrying the
+# clause there is UNCHECKED and reds. An unverifiable claim about gate coverage
+# is exactly the prose this census replaced.
+PDS_DOOR_WORKFLOW_CLAIM='appears in no .github/workflows file'
+
+workflow_claim_errors() {
+  # $1 = disposition ledger text, $2 = the root to resolve .github/workflows
+  # under. Prints zero or more error lines.
+  local root="$2" wfdir cands b pat hits
+  wfdir="$root/.github/workflows"
+
+  # Candidates first, into a variable — never a here-doc nested inside the
+  # `$( … )` of another here-doc. RETIRED- rows are invisible to the live path
+  # everywhere else in this file and are invisible here too.
+  cands="$(awk -F'\t' -v c="$PDS_DOOR_WORKFLOW_CLAIM" '
+    $2 ~ /^RETIRED-/ { next }
+    index($3, c) { print $1 }
+  ' <<EOF
+$1
+EOF
+)"
+
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    if [ ! -d "$wfdir" ]; then
+      printf '  %s: WIRED-CLAIM UNCHECKED — the row asserts it "%s", and %s does not exist, so nothing here can confirm or refute it. Fail-closed: an unverifiable claim about gate coverage is the prose this census replaced.\n' \
+        "$b" "$PDS_DOOR_WORKFLOW_CLAIM" "$wfdir"
+      continue
+    fi
+    # The basename is matched as a WHOLE token: `pds-x.sh` must not be reported
+    # for a hit on `pds-x.sh.bak`. Only `.` is regex-special in a basename.
+    pat="$(printf '%s' "$b" | sed 's/[.]/\\./g')(\$|[^A-Za-z0-9._-])"
+    hits="$(grep -rlE -e "$pat" "$wfdir" 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "${f##*/}"; done)"
+    [ -n "$hits" ] || continue
+    printf '  %s: STALE WIRED-CLAIM — the row says it "%s", and it DOES appear in: %s. Rewrite the row to say what is true now (being in a workflow is not the same as being under a REQUIRED context — .github/workflows/shell-harnesses.yml carries none of main'"'"'s four required names), or delete the clause. This is DERIVED every run, so it cannot go stale the way the sentence did.\n' \
+      "$b" "$PDS_DOOR_WORKFLOW_CLAIM" "${hits% }"
+  done <<EOF
+$cands
+EOF
+}
+
+# ---------------------------------------------------------------------------
 # the census
 # ---------------------------------------------------------------------------
 run_census() {
@@ -1759,6 +1831,19 @@ $re"
     errors=$((errors + 1))
   done <<EOF
 $(retired_evidence_errors "$PDS_DOOR_DISPOSITIONS")
+EOF
+
+  # ---- the wired-claim predicate (see workflow_claim_errors) --------------
+  # Derived every run against $SCAN_ROOT/.github/workflows, never restated. The
+  # sentence this replaces was false for hours and nothing reddened.
+  local wce
+  while IFS= read -r wce; do
+    [ -n "$wce" ] || continue
+    error_lines="$error_lines
+$wce"
+    errors=$((errors + 1))
+  done <<EOF
+$(workflow_claim_errors "$PDS_DOOR_DISPOSITIONS" "$SCAN_ROOT")
 EOF
 
   # ---- the partition, computed BEFORE the block prints ---------------------
@@ -2609,6 +2694,16 @@ EOF
   mkdir -p "$croot/scripts" "$croot/api/test/barkpark"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$croot/scripts/pds-fx-through.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$croot/scripts/pds-fx-shut.sh"
+  # A .github/workflows tree for the WIRED-CLAIM predicate. fx-wired.yml NAMES
+  # pds-fx-shut.sh (so a row claiming no workflow names it must red); fx-bak.yml
+  # names only `pds-fx-through.sh.bak`, a DIFFERENT file whose name merely
+  # CONTAINS the through-instrument's — the token boundary the predicate holds,
+  # and the reason the control arm below is not vacuous.
+  mkdir -p "$croot/.github/workflows"
+  printf 'jobs:\n  fx:\n    steps:\n      - run: bash scripts/pds-fx-shut.sh\n' \
+    >"$croot/.github/workflows/fx-wired.yml"
+  printf 'jobs:\n  fx:\n    steps:\n      - run: bash scripts/pds-fx-through.sh.bak\n' \
+    >"$croot/.github/workflows/fx-bak.yml"
   cat >"$croot/api/test/barkpark/census_door_test.exs" <<'EOF'
 defmodule CensusDoorTest do
   use ExUnit.Case, async: false
@@ -2701,6 +2796,60 @@ EOF
   census_run "$(printf '%s\npds-fx-through.sh\tRETIRED-ENVIRONMENT\t ' "$d_ok")" "$p_ok"
   census_arm "A RETIRED ROW WHOSE EVIDENCE IS WHITESPACE-ONLY REDS TOO" 1 \
     'RETIRED row with EMPTY evidence'
+
+  # ---- THE WIRED-CLAIM PREDICATE (the sentence that was false for hours) ---
+  # ARM. A live row asserting the clause for an instrument fx-wired.yml NAMES.
+  # This is the exact shape pds-charter-anchors-check.sh carried on origin/main
+  # from 7cb2c6894 onward, and nothing in the repo reddened on it. Delete the
+  # workflow_claim_errors block from run_census and THIS arm goes green.
+  census_run "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: nothing required runs it - it appears in no .github/workflows file and has no ExUnit rider.')" "$p_ok"
+  census_arm "WIRED-CLAIM FIRES: a row claiming no workflow names it, for a script a workflow DOES name, REDS" 1 \
+    'STALE WIRED-CLAIM' 'fx-wired.yml' 'pds-fx-shut.sh'
+
+  # CONTROL, AND IT IS NOT VACUOUS IN TWO DIRECTIONS AT ONCE. The clause is
+  # carried by a row for pds-fx-through.sh, which NO workflow names -- and
+  # fx-bak.yml names `pds-fx-through.sh.bak`, whose name CONTAINS it. A plain
+  # substring grep reds here; the whole-token pattern must stay quiet. So this
+  # arm proves the predicate discriminates rather than just firing.
+  census_run "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: a credential it will never have.\npds-fx-through.sh\tRETIRED-PRICE\tsuperseded: it appears in no .github/workflows file, and the .bak beside it is a different file.')" "$p_ok"
+  census_arm "WIRED-CLAIM CONTROL: the clause on a genuinely-unwired name stays QUIET (and .bak is not a match)" 0 \
+    'ERRORS                  : 0'
+
+  # RETIRED ROWS ARE INVISIBLE HERE TOO, like everywhere else in this file --
+  # the control above already carries the clause on a RETIRED- row, so the live
+  # arm and the retired arm are the same run read twice. This one is the LIVE
+  # counterpart of that same row, and it REDS: same text, same basename, the
+  # only difference is the class prefix.
+  census_run "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: it appears in no .github/workflows file\npds-fx-through.sh\tPRICE\tCPU=0.01+0.01=0.02s LOCAL meter=x load1=1.00 2026-08-04 (fixture)')" "$p_ok"
+  census_arm "WIRED-CLAIM ON A LIVE ROW REDS WHERE THE RETIRED ONE DID NOT" 1 \
+    'STALE WIRED-CLAIM' 'pds-fx-shut.sh'
+
+  # FAIL-CLOSED. A root with no .github/workflows cannot answer the question, so
+  # the clause there is UNCHECKED, not "probably still true". Called directly:
+  # census_run is pinned to $croot, which now HAS the directory.
+  local wc_closed
+  wc_closed="$(workflow_claim_errors "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: it appears in no .github/workflows file')" "$tmp/no-such-root")"
+  case "$wc_closed" in
+    *'WIRED-CLAIM UNCHECKED'*)
+      echo "  PASS  WIRED-CLAIM FAIL-CLOSED: no .github/workflows dir is UNCHECKED, never a silent pass"
+      pass=$((pass + 1)) ;;
+    *)
+      echo "  FAIL  WIRED-CLAIM FAIL-CLOSED: expected UNCHECKED, got [$wc_closed]"
+      fail=$((fail + 1)) ;;
+  esac
+
+  # ...AND ITS OWN CONTROL: a row with NO clause over that same missing root is
+  # silent. Without this, the arm above would also pass if the function shouted
+  # at every row it was handed.
+  local wc_quiet
+  wc_quiet="$(workflow_claim_errors "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: needs a credential it will never have.')" "$tmp/no-such-root")"
+  if [ -z "$wc_quiet" ]; then
+    echo "  PASS  WIRED-CLAIM FAIL-CLOSED CONTROL: a row NOT carrying the clause is silent on the same missing root"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  WIRED-CLAIM FAIL-CLOSED CONTROL: expected silence, got [$wc_quiet]"
+    fail=$((fail + 1))
+  fi
 
   # TWO LIVE ROWS FOR ONE BASENAME — the first silently wins.
   census_run "$(printf 'pds-fx-shut.sh\tNOT-YET-BUILT\tfixture: the contradictory row above the true one.\n%s' "$d_ok")" "$p_ok"
