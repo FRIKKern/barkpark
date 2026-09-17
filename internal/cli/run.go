@@ -457,6 +457,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		writeClaimedDraft, tail = extractClaimedDraftMutationFlag(tail)
 	}
 
+	// `bp task stage --keep-rerun`: the SEVENTH additive, opt-in flag the
+	// manifest never declares, stripped here for the same reason as the ones
+	// above — it must never reach splitArgs. See tasks_stage_rerun_guard.go for
+	// what it opts into (superseding a disposition_reason while KEEPING the
+	// disposition_rerun already on the row); the guard itself runs below, beside
+	// the other write gates.
+	var stageKeepRerun bool
+	if stageKeepRerunFlagApplies(cmd) {
+		stageKeepRerun, tail = extractStageKeepRerunFlag(tail)
+	}
+
 	// `bp task ls --match <substring>`: the THIRD additive, opt-in flag the
 	// manifest never declares, stripped here for the same reason as the two
 	// above — GET /v1/tasks accepts no substring filter (its filter container is
@@ -657,6 +668,19 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// wording, and is the backstop underneath both if a call site is ever
 	// dropped. Still before the send: the refusal arrives BEFORE the write.
 	if code, refused := guardClaimedDraftMutation(out, g, ctx, m, cmd, req, writeClaimedDraft || editClaimedDraft || restoreOntoClaimed); refused {
+		return code
+	}
+
+	// Orphaned-rerun pre-flight (tasks_stage_rerun_guard.go): `bp task stage
+	// --note <different> --supersede` on a row carrying a content.disposition_rerun
+	// replaces the reason and leaves the PROBE byte-identical, so the row then
+	// presents a green, symbol-specific check for a claim it no longer makes —
+	// 136 such rows measured across the ledger, 125 minted by this exact call
+	// shape (task-5509618e1868d9f2). None of the gates above can see it: they are
+	// keyed on drafts and claims, and this one is keyed on two OPTIONAL FLAGS
+	// that were never bound to each other. Gated here, immediately before the
+	// send, so the refusal arrives BEFORE the write rather than one audit later.
+	if code, refused := guardStageRerunOrphan(out, g, ctx, m, cmd, tail, stageKeepRerun); refused {
 		return code
 	}
 
