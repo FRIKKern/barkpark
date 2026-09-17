@@ -235,14 +235,28 @@ describe('source scope — no read-path module consumes envelope syncTags', () =
     // CONTROL: the caller-supplied door is present and is what feeds next.tags.
     expect(lines.some((l) => l.includes('opts.syncTags'))).toBe(true)
 
-    // THE PIN: every syncTags code line names either the caller option or the
-    // local it becomes. A line that read tags off a fetched envelope (`res.`,
-    // `json.`, `body.`, `envelope.`, `await`) would not match and reds here.
+    // THE PIN, half one: every syncTags code line names either the caller
+    // option or the local it becomes.
     for (const l of lines) {
       expect(
         /opts\.syncTags|knownSyncTags|syncTags\?:/.test(l),
         `unexpected syncTags code line in server/core.ts: ${l}`,
       ).toBe(true)
+    }
+
+    // THE PIN, half two — the allowlist above CANNOT stand alone. `syncTags?:`
+    // is a TYPE-ANNOTATION token and may sit anywhere on a line, including on an
+    // inline cast wrapped around a fetched body. A real leak written as
+    //   const leaked = (json as unknown as { syncTags?: string[] }).syncTags
+    // satisfies the allowlist and would pass. Measured: that mutation was GREEN
+    // against half one alone, while the same leak without the cast reddened it.
+    // So deny, independently, any syncTags code line that names a response at
+    // all — which is what the prose above this arm always claimed it did.
+    for (const l of lines) {
+      expect(
+        /\b(res|response|json|body|envelope|await)\b/.test(l),
+        `syncTags code line reads from a response in server/core.ts: ${l}`,
+      ).toBe(false)
     }
   })
 })
