@@ -1660,6 +1660,31 @@ defmodule BarkparkCloud.Accounts do
   end
 
   @doc """
+  Does `password` match `user`'s stored hash?
+
+  The REAUTHENTICATION primitive, extracted for irreversible self-service acts
+  that are not themselves a password change — today that is `DELETE /v1/account`.
+  A live session token is proof the browser was authenticated once; it is not
+  proof the person at the keyboard right now is the account holder, and account
+  erasure is the one write on the plane an operator cannot undo.
+
+  Timing-equalised on the miss (`Bcrypt.no_user_verify/0`) exactly as
+  `update_user_password/4` is, so a wrong password and a user with no usable hash
+  (an OAuth-only account) cost the same and neither is distinguishable from the
+  success path by a stopwatch. An OAuth-only account therefore cannot erase
+  itself through this door — it has no password to present — and that is a
+  deliberate refusal, recorded in `BarkparkCloud.Accounts.Erasure`'s moduledoc,
+  not an oversight.
+  """
+  @spec valid_password?(User.t(), String.t()) :: boolean()
+  def valid_password?(%User{hashed_password: hash}, password)
+      when is_binary(hash) and is_binary(password) do
+    Bcrypt.verify_pass(password, hash)
+  end
+
+  def valid_password?(%User{}, _password), do: Bcrypt.no_user_verify()
+
+  @doc """
   Change `user`'s password after verifying `current_password` (timing-safe via
   the same Bcrypt path as login). On success, in ONE transaction: writes the new
   hash AND revokes every OTHER session the user holds — the "change password ⇒

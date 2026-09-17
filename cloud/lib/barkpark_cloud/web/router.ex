@@ -52,6 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
+      DELETE  /v1/account                 user  ERASE the account (password reconfirm; 409 sole_owner)
       PUT     /v1/account/password         user  change password ⇒ sign out everywhere
       GET     /v1/me/security-events       user  the caller's OWN security trail (password/2FA/session/email), newest first
       GET     /v1/subscription     user      {subscription | nil} — current plan
@@ -143,6 +144,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
       PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      DELETE  /v1/teams/:id owner    ERASE the team (409 instances_present while it owns a box or site)
       GET     /v1/teams/:id/tokens admin  list every PAT minted against the team (holder named; no secrets)
       DELETE  /v1/teams/:id/tokens/:token_id admin  revoke a team member's PAT (foreign id → 404)
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
@@ -305,7 +307,7 @@ defmodule BarkparkCloud.Web.Router do
     Webhooks
   }
 
-  alias BarkparkCloud.Accounts.{Authz, Team, TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.Accounts.{Authz, Erasure, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
@@ -2263,6 +2265,55 @@ defmodule BarkparkCloud.Web.Router do
       record_user_security_event(conn, "sessions_revoked_everywhere", %{revoked: n})
 
       json(conn, 200, %{revoked: n})
+    end
+  end
+
+  # DELETE /v1/account {password} → 200 {ok: true} | 401 invalid_password |
+  # 409 {error: "sole_owner", teams: [slug]}.
+  #
+  # HARD ACCOUNT ERASURE, self-serve. Session-gated like its /v1/account
+  # siblings, and REAUTHENTICATED with the account password on top: a live token
+  # proves the browser was authenticated once, not that the person at the
+  # keyboard is the account holder, and this is the one write an operator cannot
+  # undo. A wrong password and an OAuth-only account (no usable hash) are the
+  # same 401 at the same cost — `Accounts.valid_password?/2` burns a hash on both
+  # misses.
+  #
+  # THE 409 IS A REFUSAL WITH A ROUTE OUT. `team_memberships` cascades, so
+  # erasing the last owner of a live team would leave it with instances, a
+  # subscription and members and nobody able to administer, pay for, or delete
+  # it. The response names the team slugs; the holder promotes another owner
+  # (PATCH /v1/teams/:id/members/:user_id) or erases the team first
+  # (DELETE /v1/teams/:id). Being one of several owners never blocks.
+  #
+  # NO SECURITY-EVENT ROW, deliberately, and for the same reason the team arm
+  # writes no audit row: `user_security_events.user_id` cascades, so the row
+  # would be destroyed by the delete that produced it. What DOES survive is the
+  # team-side audit trail with `actor_user_id` NULLED (`ON DELETE SET NULL`) —
+  # the person is removed from the team's history, the team's history is not.
+  delete "/v1/account" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+      password = to_string(conn.body_params["password"])
+
+      if Accounts.valid_password?(user, password) do
+        case Erasure.delete_user(user) do
+          {:ok, :erased} ->
+            json(conn, 200, %{ok: true, status: "erased"})
+
+          {:error, {:sole_owner, slugs}} ->
+            json(conn, 409, %{error: "sole_owner", teams: slugs})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+        end
+      else
+        json(conn, 401, %{error: "invalid_password"})
+      end
     end
   end
 
@@ -6882,6 +6933,45 @@ defmodule BarkparkCloud.Web.Router do
   get "/v1/teams/:id/members" do
     with_team_role(conn, "member", fn conn, team ->
       json(conn, 200, %{members: Enum.map(Accounts.list_team_members(team), &member_json/1)})
+    end)
+  end
+
+  # DELETE /v1/teams/:id → 200 {ok: true} | 409 {error: "instances_present", …}.
+  #
+  # HARD TEAM ERASURE. Owner-only (`with_team_role(conn, "owner", …)`, the
+  # `:delete_team` capability Authz has reserved since day one and nothing
+  # implemented). A non-member gets the same 404 as a nonexistent team.
+  #
+  # THE 409 IS THE POINT, not an edge case. `barkparks.team_id` is
+  # `ON DELETE CASCADE`, so deleting a team with instances would drop every
+  # instance ROW while the billed Hetzner/Azure server it names keeps running —
+  # and the row is the only thing that still says what to tear down. The route
+  # refuses while the team owns any instance or site and hands back the counts
+  # (`{barkparks: N, sites: M}`) so the console can say what is in the way rather
+  # than "something went wrong". The owner decommissions the fleet first
+  # (DELETE /v1/barkparks/:id runs the real deprovision path) and comes back.
+  #
+  # NO AUDIT ROW, deliberately. `audit_events.team_id` is NOT NULL and cascades:
+  # a `team.deleted` row would be written and then destroyed by the same
+  # transaction's cascade, which is a lie shaped like a record. The erasure is
+  # attested by the response and by the team's absence, not by a row that cannot
+  # outlive its subject.
+  delete "/v1/teams/:id" do
+    with_team_role(conn, "owner", fn conn, team ->
+      case Erasure.delete_team(team) do
+        {:ok, :erased} ->
+          json(conn, 200, %{ok: true, status: "erased"})
+
+        {:error, {:instances_present, blockers}} ->
+          json(conn, 409, %{
+            error: "instances_present",
+            barkparks: blockers.barkparks,
+            sites: blockers.sites
+          })
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+      end
     end)
   end
 

@@ -243,6 +243,7 @@ import { scanControls } from "./__preview__/member-authority-sweep.mjs";
 // (2n) below re-reads the PIN against it so the two cannot drift apart.
 import {
   A_USER, A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, A_USER_OR_PAT, A_ABILITY, H_TEAM_ROLE,
+  H_TEAM_ROLE_OWNER,
   INLINE_COND_ROUTES, INLINE_COND_EXCLUDED,
   ROUTE_TIERS, ELEVATED, fenceFor, overlayGapReport, routeKey,
 } from "./__route_fence.mjs";
@@ -302,7 +303,8 @@ const AUTHZ = (FIXTURE_MODE ? null : process.argv[5]) || path.join(here, "../../
 // than assuming accounts.ex. A module-qualified context_fn whose module is
 // absent here is a FAILURE, not a skip — otherwise naming an unmapped module
 // would be the way to buy silence from the check.
-const CONTEXT_SOURCES = { Accounts: ACCOUNTS, Authz: AUTHZ };
+const ERASURE = path.join(here, "..", "..", "lib", "barkpark_cloud", "accounts", "erasure.ex");
+const CONTEXT_SOURCES = { Accounts: ACCOUNTS, Authz: AUTHZ, Erasure: ERASURE };
 const MODULE_QUALIFIED = /^([A-Z][A-Za-z0-9_]*)\.(.+)$/;
 // Report against a stable repo-relative label so the output reads the same from
 // any cwd; a mutant copy passed as argv[2] keeps its own path.
@@ -617,6 +619,8 @@ const PIN = [
   // ── team membership — every write behind assignableRoles(ctx.role)
   { fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
   { fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canChangeMemberRole", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "RANK-RELATIVE below the router — the same admin is refused on a peer and allowed on a member. RE-PINNED off assignableRoles by the (2k) arm below: the crown (cch-w42-s3) shipped canChangeMemberRole(actorRole, targetRole, isSelf), which mirrors update_member_role_as/4 including its self? bypass and its ABSENT owner escape hatch. The old pin named the tier question, arity 1 over the ACTOR, in front of a relation — and every other arm in this file scored that PREDICATED" },
+  { fn: "runEraseTeam", verb: "DELETE", route: "/v1/teams/:*", elevated: true, predicate: "teamDangerZoneHtml", auth_fn: H_TEAM_ROLE_OWNER, context_fn: "Erasure.delete_team/2", note: "TEAM ERASURE. The OWNER rung of with_team_role — the only route on it — so the affordance is owner-only client-side too: teamDangerZoneHtml returns \"\" for any ctx.role but \"owner\", and membersContext's fail-closed floor means an unresolved authority renders nothing rather than a destroy button. The SECOND refusal (409 instances_present) is deliberately NOT a client predicate: the count is the server's, measured under a lock, and a console that hid the button on a stale cache would hide it from an owner who had just decommissioned" },
+  { fn: "runEraseAccount", verb: "DELETE", route: "/v1/account", elevated: false, predicate: null, auth_fn: A_USER, context_fn: "Erasure.delete_user/2", note: "ACCOUNT ERASURE, self-scope — the session IS the authority, exactly like its /v1/account siblings, so there is no role band to mirror and an unconditional affordance is the honest one. What the route adds on top is REAUTHENTICATION (the account password, in the confirm modal's body slot), which is an identity proof, not an authority tier: a member and an owner pass or fail it identically" },
   { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "canRemoveMember", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "RANK-RELATIVE below the router, with an owner escape hatch the PATCH path lacks. RE-PINNED off assignableRoles by the (2k) arm below: canRemoveMember(actorRole, targetRole, isSelf) mirrors remove_member_as/3, hatch included. A SEPARATE predicate from the PATCH row on purpose — the two laws disagree on owner-vs-owner, so one boolean cannot state both" },
   { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
@@ -1654,7 +1658,7 @@ if (unresolved.length) {
 // 39 -> 40, and `unpredicated` does NOT move — the only way a new elevated
 // affordance is allowed to land. RE-DERIVED by RUNNING this census on this tree
 // and reading the `found` line it PRINTED (82/41/40/1), never by arithmetic.
-const EXPECT = { total: 82, elevated: 41, predicated: 40, unpredicated: 1 };
+const EXPECT = { total: 84, elevated: 42, predicated: 41, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
