@@ -35,14 +35,29 @@ each instance's self-reported version and `git_commit`. Nothing may branch on
 `autoupdate_paused`, serial rollout), so a client-probed version check would
 red correct configurations.
 
-**`min_cli` is advisory, never a refusal.** Every published `bp` release is
-tagged `v0.2.x`, strictly below the literal floor `1.0.0`, so a blocking gate
-keyed on today's value would refuse **100% of released clients** — the inert
-guard's mirror-image failure, and equally invisible. `internal/cli`
-`minCLICheck` therefore reports: a named, actionable stderr notice on
+**`min_cli` is advisory, never a refusal.** This paragraph used to justify that
+with: "every published `bp` release is tagged `v0.2.x`, strictly below the
+literal floor `1.0.0`, so a blocking gate keyed on today's value would refuse
+100% of released clients." **RETRACTED 2026-09-17 — that is false**, and it
+conflated two tag series in one repo. `v0.2.x` is the **server** series (the
+number `/status.json` reports as `0.2.26.929`); the CLI ships from `cli-v*`
+tags and `cli-release.yml` does `VERSION=${TAG#cli-v}`, so a released `bp`
+carries `1.21.0`. All **27** published CLI releases run `1.1.0`…`1.21.0`, none
+below `1.0.0` — verify with
+`git tag -l 'cli-v*' | sed 's/cli-v//' | awk -F. '$1<1' | wc -l` (0). The floor
+is **satisfied by every client ever shipped**, which is why the guard has never
+fired; it was inert for the opposite of the recorded reason.
+
+It stays advisory on the grounds that survive: a `dev` build carries no release
+identity, and a floor never once exercised must not debut as a refusal.
+`internal/cli` `minCLICheck` reports: a named, actionable stderr notice on
 `bp capabilities` when this binary is under the floor, silence when it is at or
 above, and `UNKNOWN` (never a green) for a `dev` build or a manifest that omits
-the key.
+the key. Since 2026-09-17 the same reading also gates the `bp whoami` /
+`bp doctor --onboarding` freshness leg (`serverFloorStaleness`), which withholds
+`up_to_date: true` whenever the server declares this client under its floor —
+the only staleness signal that reaches an already-installed binary with no
+checkout.
 
 **The field cannot simply be deleted.** Go's `manifest.Parse` uses
 `DisallowUnknownFields`, so dropping `MinCLI` from the struct would fail every
