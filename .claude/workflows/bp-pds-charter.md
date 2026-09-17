@@ -16357,3 +16357,74 @@ name unrelated code.
   scripts/` is EMPTY — reds by construction, the same false red PDS-D758(vii) recorded and declined
   to fix from outside its fence. `shell-harnesses.yml` is not one of main's four required contexts,
   so it cannot block; widening check 1.2 to name its own files remains the standing ask.
+
+- **PDS-D760 — THE CITED-FILE SET IS A PREDICATE, AND IS NOW CHECKED AS ONE: 11 OF 15 CITED PATHS
+  CANNOT DISPATCH THEIR OWN CHECK (2026-09-17).** This closes the residue PDS-D758(vi) named and
+  accepted, in the shape PDS-D758(vi) prescribed for it — "a parity check of the
+  `shell-harnesses.yml` paths list against the charter's own anchor set". It is arm E of
+  `scripts/pds-charter-anchors-check.sh`@`TRIGGER_GAP_CEILING="${PDS_ANCHOR_TRIGGER_GAP_CEILING:-11}"`.
+
+  **(i) THE RULE.** Every path an anchor CITES must be able to DISPATCH the job that checks the
+  anchor. An anchor on a file that cannot trigger its own checker rots in SILENCE on the PR that
+  rots it, and reds later on an unrelated PDS PR that could neither have caused it nor repair it
+  from its own fence. That is not a hypothetical: PDS-D758(i) measured main red 15.1% of a 30-hour
+  window on arm A alone, and the row that produced this decision was filed because #18949's rollup
+  was reddened by a rot #18949 did not cause.
+
+  **(ii) BOTH HALVES, BECAUSE GITHUB NEEDS BOTH.** The workflow-level `on.pull_request.paths` /
+  `on.push.paths` lists decide whether the workflow DISPATCHES; the `pds-harnesses <path>` roster
+  rows in the `changes` job decide whether the job is SELECTED once it has. A path in one and not
+  the other starts a run in which the job is skipped — the exact disagreement `shell-harnesses.yml`
+  already records against `scripts/pds-secret-scan.sh`. Arm E requires a match in BOTH and prints
+  which half each uncovered path missed, so the two lists cannot drift apart unnoticed.
+
+  **(iii) THE MEASUREMENT IS BROADER THAN PDS-D758(vi) ASSUMED — 11 UNCOVERED PATHS, NOT 5.**
+  PDS-D758(vi) scoped the remedy to "those five `api/lib/barkpark/tasks/*.ex` files". Re-measured
+  by arm E over every distinct cited path on `d2a4ecc02`, the set is larger, and two of the extra
+  rows are the interesting ones:
+
+  | cited path | in workflow paths | in roster |
+  |---|---|---|
+  | `api/lib/barkpark/tasks/board.ex` | no | no |
+  | `api/lib/barkpark/tasks/queue.ex` | no | no |
+  | `api/lib/barkpark/tasks/stage.ex` | no | no |
+  | `api/lib/barkpark/tasks/twin_collapse.ex` | no | no |
+  | `api/lib/barkpark/tasks/twin_resolver.ex` | no | no |
+  | `internal/cli/tasks_next_cmd.go` | no | no |
+  | `internal/taskboard/board.go` | no | no |
+  | `internal/taskboard/detail_data.go` | no | no |
+  | `internal/taskboard/paper.go` | no | no |
+  | `docs/contracts/canonical-impl-markers.md` | no | no |
+  | `scripts/pds-rerun-symbol-coverage.py` | no | no |
+
+  The four `internal/**` Go citations were never considered: the TUI lane can rot a charter anchor
+  exactly as the api lane can, and nothing in PDS-D758 looked there.
+  `scripts/pds-rerun-symbol-coverage.py` is the sharper one — it sits in `scripts/`, in a lane that
+  believes itself covered, and is missed by `scripts/pds-*.sh` ON ITS EXTENSION ALONE. An
+  enumeration written by hand would not have found it; that is the argument for the predicate, made
+  by the predicate on its first run.
+
+  **(iv) A RATCHET, NOT A HARD RED, AND THE REASON IS FENCE, NOT TASTE.** All 11 uncovered paths are
+  repaired in `.github/**`, which is the gates fence. A hard red here would pin a permanent red on
+  main that no PDS PR is permitted to fix — the precise pathology this decision exists to end,
+  reproduced one level up. The ceiling bounds the gap, names every uncovered path so the gates
+  repair has a worklist, and reds the moment a NEW anchor is pointed at a file that cannot trigger
+  the check. When the gates hunk lands the count falls and the checker prints its LOWER-THE-CEILING
+  line.
+
+  **(v) THE PRECONDITION IS SCORED FIRST, AND LOUDLY.** If `shell-harnesses.yml` is missing, or
+  either extracted set parses EMPTY, arm E reds as UNCHECKED rather than printing `0 uncovered`. A
+  parse that silently stopped matching would otherwise report PERFECT coverage — the most
+  reassuring possible output from a blind instrument. Three self-test arms hold that door, one per
+  way of going blind, because a single fixture can never break two parses at once and one passing
+  cannot vouch for the other.
+
+  **(vi) WHAT IS NOT DONE HERE.** The `.github/workflows/shell-harnesses.yml` hunk itself — adding
+  the 11 paths above to both `paths:` lists (which must stay set-equal) and a `pds-harnesses` roster
+  row for each. It is handed to the gates lane with this decision, as PDS-D758(vi) handed its
+  narrower version. Until it lands the count stays 11 and arm E is a bound, not a cure. Also
+  unchanged, and for the same reason PDS-D758(vii) recorded: this PR touches `scripts/`, so
+  `tooling/pds/rerun-adjudicate.test.mjs` check 1.2 reds by construction (measured: 276 checks, 1
+  failed, that one). It rides `research-coverage-suite.yml`, which is not one of main's four
+  required contexts and cannot block. Widening check 1.2 to name its own files remains the standing
+  ask, now recorded twice.
