@@ -308,10 +308,11 @@ defmodule BarkparkCloud.Accounts do
   Add `user` to `team` as `role`, AUTHORIZED by `actor`.
 
   The escalation-safe sibling of `add_member/3`: it refuses unless `actor` is a
-  team admin who OUTRANKS the granted role (anti-escalation, delegated to
-  `Authz.can_grant?/3`). This closes the privilege-escalation hole at the
-  context, so even a route that forgets to gate cannot mint a higher role than
-  the caller holds. The raw `add_member/3` stays for the signup transaction,
+  team admin and the granted role does not rank STRICTLY ABOVE the actor's own
+  (anti-escalation, delegated to `Authz.can_grant?/3`, whose comparison is `>`
+  — equal rank IS permitted, so an admin may mint another admin). This closes
+  the privilege-escalation hole at the context, so even a route that forgets to
+  gate cannot mint a role HIGHER than the caller holds. The raw `add_member/3` stays for the signup transaction,
   which legitimately grants `"owner"` with no acting user.
 
   Returns `{:ok, membership} | {:error, :forbidden} | {:error, changeset}`.

@@ -144,10 +144,10 @@ defmodule BarkparkCloud.Accounts.AuthzTest do
   ## can_grant?/3 — anti-escalation
 
   describe "can_grant?/3" do
-    test "admin may grant member but NOT admin or owner (no escalation past own rank)" do
+    test "admin may grant member and admin but NOT owner (ceiling is STRICTLY above own rank)" do
       {admin, team} = member("admin")
       assert Authz.can_grant?(admin, team, "member") == :ok
-      # admin granting admin would be at-rank — Coolify forbids promoting to >= self.
+      # At-rank. See the PINS CURRENT BEHAVIOUR arm below for why this is :ok.
       assert Authz.can_grant?(admin, team, "admin") == :ok
       assert Authz.can_grant?(admin, team, "owner") == {:error, :forbidden}
     end
@@ -167,6 +167,45 @@ defmodule BarkparkCloud.Accounts.AuthzTest do
       team = team_fixture()
       stranger = user_fixture()
       assert Authz.can_grant?(stranger, team, "member") == {:error, :forbidden}
+    end
+
+    ## PINS CURRENT BEHAVIOUR — not endorsed behaviour.
+    ##
+    ## `can_grant?/3` compares `rank(target_role) > actor_rank`. A strict `>`
+    ## PERMITS equal rank, so an admin may mint another admin and an owner may
+    ## mint another owner. Whether that SHOULD be allowed is an open policy
+    ## question for an owner — Coolify's own guard is the stricter `>=` form,
+    ## and the @doc on can_grant?/3 once claimed the stricter rule while the
+    ## code shipped the looser one (task-292729c36147a851).
+    ##
+    ## THIS ARM IS A TRIPWIRE, NOT A RULING. If the comparison is deliberately
+    ## flipped to `>=`, this test is the thing to UPDATE — flip the two
+    ## equal-rank expectations to {:error, :forbidden} and fix the @doc on
+    ## `can_grant?/3` and on `Accounts.add_member_as/4` in the same commit. Do
+    ## NOT delete it or route around it: it exists so the doc and the code can
+    ## never drift apart silently again.
+    test "PINS CURRENT BEHAVIOUR: equal rank is PERMITTED (strict >), strictly higher is not" do
+      {admin, team} = member("admin")
+
+      # Equal rank, the case the doc used to deny: admin (2) granting admin (2).
+      assert Authz.rank("admin") == Authz.rank(Authz.role(admin, team))
+      assert Authz.can_grant?(admin, team, "admin") == :ok
+
+      # Strictly above: admin (2) granting owner (3). Denied, in both encodings.
+      assert Authz.rank("owner") > Authz.rank(Authz.role(admin, team))
+      assert Authz.can_grant?(admin, team, "owner") == {:error, :forbidden}
+
+      # The same equal-rank permission at the top of the ladder: an owner (3)
+      # may mint another owner (3). The @doc's "an owner can grant
+      # admin/member" enumeration silently omitted this.
+      {owner, team2} = member("owner")
+      assert Authz.rank("owner") == Authz.rank(Authz.role(owner, team2))
+      assert Authz.can_grant?(owner, team2, "owner") == :ok
+
+      # And the context wrapper agrees — add_member_as/4's @doc describes this
+      # same ceiling, so an admin actually CAN add a second admin end to end.
+      newcomer = user_fixture()
+      assert {:ok, %{role: "admin"}} = Accounts.add_member_as(admin, team, newcomer, "admin")
     end
   end
 
