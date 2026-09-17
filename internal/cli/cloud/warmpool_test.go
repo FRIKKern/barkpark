@@ -2305,3 +2305,217 @@ func TestGoLive_NarratesMailRelayEnabled(t *testing.T) {
 		t.Errorf("the relay password leaked into the narration:\n%s", joined)
 	}
 }
+
+// ── provision-installs-site-plane: the chain's OWN three-state verdict ────────
+
+// sitePlaneState renders a *bool verdict for a failure message without losing the
+// distinction the whole record turns on: a nil and a false must never print the
+// same, or a test failure reads as "absent" when it means "never looked".
+func sitePlaneState(v *bool) string {
+	if v == nil {
+		return "nil (UNMEASURED)"
+	}
+	if *v {
+		return "true (installed)"
+	}
+	return "false (ran and failed)"
+}
+
+// TestProvision_SitePlaneVerdictIsThreeState is the ARM THAT REDS ON REVERSION.
+//
+// Step 7c is non-fatal by design, so before LiveServer.SitePlaneInstalled the only
+// trace of a degraded plane was an os.Stderr line in the provisioning worker's
+// journal — unreadable by the caller, unassertable upstream, and indistinguishable
+// from a box whose plane was never attempted at all. This pins all three states of
+// the go-live chain's own verdict, on the SAME law internal/agent/site_plane.go
+// keeps: nil is UNMEASURED and `false` is a verdict only a box that was actually
+// asked may produce.
+//
+// FAILURE DIRECTION. Deleting the field, or collapsing the skip path's nil into a
+// `false`, reds this. Keeping the field but never setting it reds the installed
+// and degraded arms.
+func TestProvision_SitePlaneVerdictIsThreeState(t *testing.T) {
+	t.Run("installed — the step ran and exited zero", func(t *testing.T) {
+		spec := agentSpec()
+		wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+
+		live, err := wp.Provision(context.Background(), spec)
+		if err != nil {
+			t.Fatalf("Provision: %v", err)
+		}
+		// Not vacuous: the step really ran, so a true here is a measurement.
+		if !slices.Contains(runner.titles, sitePlaneStepTitle) {
+			t.Fatalf("site-plane step never ran, so `true` would be unearned; titles:\n%s",
+				strings.Join(runner.titles, "\n"))
+		}
+		if live.SitePlaneInstalled == nil || !*live.SitePlaneInstalled {
+			t.Errorf("a site-plane install that ran and succeeded must record true; got %s",
+				sitePlaneState(live.SitePlaneInstalled))
+		}
+	})
+
+	t.Run("degraded — the step ran and came back non-zero", func(t *testing.T) {
+		spec := agentSpec()
+		wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+		runner.stepErr = map[string]error{sitePlaneStepTitle: fmt.Errorf("nixpacks install failed (fake)")}
+
+		// The degrade path writes to os.Stderr; swallow it so the failure of THIS
+		// test is readable. Drained concurrently — a darwin pipe holds 512 bytes.
+		r, w, _ := os.Pipe()
+		origStderr := os.Stderr
+		os.Stderr = w
+		done := make(chan struct{})
+		go func() { io.Copy(io.Discard, r); close(done) }()
+
+		live, err := wp.Provision(context.Background(), spec)
+
+		w.Close()
+		os.Stderr = origStderr
+		<-done
+
+		if err != nil {
+			t.Fatalf("a failed site-plane install must NOT fail the go-live, got err: %v", err)
+		}
+		if !slices.Contains(runner.titles, sitePlaneStepTitle) {
+			t.Fatalf("site-plane step never ran, so its failure path was never exercised; titles:\n%s",
+				strings.Join(runner.titles, "\n"))
+		}
+		if live.SitePlaneInstalled == nil {
+			t.Fatalf("a site-plane install that RAN AND FAILED is a verdict about the box, " +
+				"not an unmeasured one; got nil")
+		}
+		if *live.SitePlaneInstalled {
+			t.Errorf("a failed site-plane install must record false; got %s",
+				sitePlaneState(live.SitePlaneInstalled))
+		}
+	})
+
+	t.Run("unmeasured — the step was never attempted", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			spec GoLiveSpec
+		}{
+			{"neither", acmeSpec()},
+			{"token only", func() GoLiveSpec { s := agentSpec(); s.ControlURL = ""; return s }()},
+			{"control-url only", func() GoLiveSpec { s := agentSpec(); s.AgentToken = ""; return s }()},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(tc.spec.healthTarget()))
+				live, err := wp.Provision(context.Background(), tc.spec)
+				if err != nil {
+					t.Fatalf("Provision: %v", err)
+				}
+				// The precondition, asserted rather than assumed: nil is only the
+				// right answer because the step genuinely did not run.
+				if slices.Contains(runner.titles, sitePlaneStepTitle) {
+					t.Fatalf("site-plane step ran for an unclaimed box, so nil would be a LIE; titles:\n%s",
+						strings.Join(runner.titles, "\n"))
+				}
+				if live.SitePlaneInstalled != nil {
+					t.Errorf("a box whose plane was never attempted must stay UNMEASURED — "+
+						"`false` there would report a plane-less box nobody looked at; got %s",
+						sitePlaneState(live.SitePlaneInstalled))
+				}
+			})
+		}
+	})
+}
+
+// TestProvision_SitePlaneDegradeNarratesToProgress proves the degrade reaches the
+// hook the OPERATOR is watching, not only the worker journal. wp.Progress is what
+// the provisioner POSTs to the control plane → SSE → the /new progress screen; a
+// person staring at that screen could not previously tell that the box they were
+// waiting on would never drain a site deploy.
+//
+// FAILURE DIRECTION. Dropping the wp.progress call reds this. It asserts only on
+// the DEGRADE path: a green install must stay silent (the sibling arm below).
+func TestProvision_SitePlaneDegradeNarratesToProgress(t *testing.T) {
+	spec := agentSpec()
+	wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+	runner.stepErr = map[string]error{sitePlaneStepTitle: fmt.Errorf("apt timed out (fake)")}
+
+	var narrated []string
+	wp.Progress = func(step, status, detail string) {
+		narrated = append(narrated, step+"/"+status+"/"+detail)
+	}
+
+	r, w, _ := os.Pipe()
+	origStderr := os.Stderr
+	os.Stderr = w
+	done := make(chan struct{})
+	go func() { io.Copy(io.Discard, r); close(done) }()
+
+	if _, err := wp.Provision(context.Background(), spec); err != nil {
+		w.Close()
+		os.Stderr = origStderr
+		<-done
+		t.Fatalf("a failed site-plane install must NOT fail the go-live, got err: %v", err)
+	}
+
+	w.Close()
+	os.Stderr = origStderr
+	<-done
+
+	if !slices.Contains(runner.titles, sitePlaneStepTitle) {
+		t.Fatalf("site-plane step never ran, so the degrade path was never exercised; titles:\n%s",
+			strings.Join(runner.titles, "\n"))
+	}
+	var hit bool
+	for _, n := range narrated {
+		if strings.Contains(n, "Site-hosting plane degraded") {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Errorf("a degraded site plane must be narrated on the operator's progress hook; got:\n%s",
+			strings.Join(narrated, "\n"))
+	}
+}
+
+// TestProvision_SitePlaneGreenDoesNotNarrateDegrade is the QUIET ARM: it holds the
+// behaviour that must NOT change. A healthy install narrates the "Installing…"
+// line it always did and nothing else, the go-live stays green, and the box still
+// registers — so the verdict field and the degrade narration above cannot have
+// bought their visibility by making a good provision noisier or redder.
+//
+// It passes identically before and after this change; that is the point.
+func TestProvision_SitePlaneGreenDoesNotNarrateDegrade(t *testing.T) {
+	spec := agentSpec()
+	wp, _, _, runner, reg := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+
+	var narrated []string
+	wp.Progress = func(step, status, detail string) {
+		narrated = append(narrated, step+"/"+status+"/"+detail)
+	}
+
+	live, err := wp.Provision(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if !slices.Contains(runner.titles, sitePlaneStepTitle) {
+		t.Fatalf("site-plane step never ran, so this arm measured nothing; titles:\n%s",
+			strings.Join(runner.titles, "\n"))
+	}
+	if live.FQDN != "acme.barkpark.cloud" {
+		t.Errorf("go-live must still return the LiveServer; got %+v", live)
+	}
+	if !reg.Has("acme.barkpark.cloud") {
+		t.Errorf("box not registered; registry=%+v", reg.Registered())
+	}
+	for _, n := range narrated {
+		if strings.Contains(n, "degraded") {
+			t.Errorf("a healthy site-plane install must not narrate a degrade; got %q", n)
+		}
+	}
+	// The narration it ALWAYS emitted is still emitted — this arm is not passing
+	// because the hook went silent altogether.
+	var announced bool
+	for _, n := range narrated {
+		if strings.Contains(n, "Installing the site-hosting plane") {
+			announced = true
+		}
+	}
+	if !announced {
+		t.Errorf("the pre-existing site-plane narration disappeared; got:\n%s", strings.Join(narrated, "\n"))
+	}
+}
