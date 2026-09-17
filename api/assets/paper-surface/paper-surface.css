@@ -2337,3 +2337,5 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 }
 .bp-paper-surface .bp-pregate--warning { color: var(--bp-tone-warning-fg); }
 .bp-paper-surface .bp-pregate--tucked { margin-top: -0.9rem; }
+
+/* probe: r20d-s6 red arm — delete me */
