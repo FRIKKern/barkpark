@@ -76,11 +76,19 @@ func normalizeSecretName(name string) string {
 	return strings.ToUpper(repl.Replace(strings.TrimSpace(name)))
 }
 
-// secretRouteName returns the secret name a request writes, and whether the
-// request is a secret WRITE at all. Keyed on the method and the path shape
-// (`…/secrets/<name>`), never on a command id.
+// secretRouteName returns the secret name a request STORES A VALUE under, and
+// whether the request is such a write at all. Keyed on the path shape
+// (`…/secrets/<name>`) plus a non-empty body, never on a command id and never
+// on a method literal: the body is what distinguishes the write that lands a
+// value (`secret set` / `scoped-set`, whose body is `{"value":…}`) from the
+// bodyless reads and the bodyless `secret rm` — DELETING an inert row is a
+// perfectly sensible thing to do and must never be refused.
 func secretRouteName(req *manifestRequest) (string, bool) {
-	if req == nil || !strings.EqualFold(req.method, "PUT") {
+	if req == nil || len(req.body) == 0 {
+		return "", false
+	}
+	switch strings.ToUpper(strings.TrimSpace(req.method)) {
+	case "GET", "HEAD", "":
 		return "", false
 	}
 	u, err := url.Parse(req.url)
