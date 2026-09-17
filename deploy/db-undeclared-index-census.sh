@@ -341,7 +341,13 @@ ROWS
   #     so a broken search cannot read as "clean".
   cp "$operative" "$tmp/planted.sh"
   printf '\nfoo() { psql -c "DROP INDEX tmp_dep_site_live"; }\n' >> "$tmp/planted.sh"
-  if grep -nEi "(${ddl})" "$tmp/planted.sh" | grep -qv '^[0-9]*:[[:space:]]*#'; then
+  #     Captured, not piped into a truncating reader: `grep -qv` closes the pipe
+  #     on its first match and the producer takes SIGPIPE, so under this script's
+  #     `set -uo pipefail` the pipeline's status is 141 and the `if` reads FALSE —
+  #     this control would report "broken" at exactly the moment the grep WORKED.
+  #     `grep -v` reads all input, so it cannot SIGPIPE; `|| true` absorbs no-match.
+  local planted; planted="$(grep -nEi "(${ddl})" "$tmp/planted.sh" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  if [ -n "$planted" ]; then
     ok "(h) RO-CONTROL: the readonly grep finds a planted write in a copy"
   else bad "(h) RO-CONTROL: the readonly grep is broken — it missed a planted write"; fi
 
@@ -373,10 +379,52 @@ ROWS
     ok "(k) a multi-line create index resolves to its explicit name, not the positional one"
   else bad "(k) a multi-line create index resolves to its explicit name, not the positional one"; fi
 
+  # (l) THE ARM FOR (h) ITSELF, BOTH WAYS — and it deliberately does NOT contain
+  #     a demonstration of the broken shape. (h) is a control, and a control that
+  #     inverts under load is worse than none: piping a file-sized producer into
+  #     a truncating quiet reader lets it close the pipe on its first match,
+  #     the producer takes SIGPIPE, `set -o pipefail` makes the pipeline 141, and
+  #     an `if` on it reads FALSE — reporting "the grep is broken" at exactly the
+  #     moment the grep WORKED. It is silent on small inputs and only appears as
+  #     the operative region grows, which is the direction this file grows.
+  #
+  #     A FIRST CUT OF THIS ARM CARRIED A COPY OF THE OLD PIPELINE so it could
+  #     show both verdicts side by side. That copy was itself a new high-
+  #     confidence finding for the repo's pipefail-SIGPIPE scan — the arm against
+  #     the defect reintroduced the defect, and the baseline went 101 -> 102. The
+  #     demonstration is therefore left to the scan, which already reds on the
+  #     site, and this arm asserts the two things the scan cannot:
+  #
+  #     REVERT half: the RO-CONTROL site is in the CAPTURE shape. Restoring the
+  #     piped shape reds here as well as on the scan.
+  #     QUIET half: the shipped shape answers correctly on the sizes this file
+  #     actually has, and on both true negatives.
+  local l_ddl l_small l_none l_cmt l_ok
+  l_ok=1
+  #     Checked on the OPERATIVE LINES, not on a prose range: this arm's own
+  #     commentary must never be able to satisfy or break it.
+  local l_piped l_captured
+  l_piped="$(grep -c 'planted\.sh" | grep -qv' "${BASH_SOURCE[0]}" || true)"
+  l_captured="$(grep -c 'if \[ -n "\$planted" \]; then' "${BASH_SOURCE[0]}" || true)"
+  [ "$l_piped" = 0 ]    || l_ok=0   # REVERT: the truncating reader is back at the site
+  [ "$l_captured" = 1 ] || l_ok=0   # and the capture shape is the one present
+  l_ddl="$(printf 'CREATE%sINDEX|DROP%sINDEX' ' ' ' ')"
+  l_hits() { local h; h="$(grep -nEi "(${l_ddl})" "$1" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+             if [ -n "$h" ]; then echo FOUND; else echo MISSED; fi; }
+  l_small="$tmp/arm_small.sh"; printf 'psql -c "DROP INDEX tmp_a";\n' > "$l_small"
+  [ "$(l_hits "$l_small")" = FOUND ]  || l_ok=0   # QUIET: a real hit at today's sizes
+  l_none="$tmp/arm_none.sh";  printf 'echo hello\n' > "$l_none"
+  [ "$(l_hits "$l_none")" = MISSED ]  || l_ok=0   # QUIET: a true negative
+  l_cmt="$tmp/arm_cmt.sh";    printf '  # DROP INDEX only in a comment\n' > "$l_cmt"
+  [ "$(l_hits "$l_cmt")" = MISSED ]   || l_ok=0   # QUIET: comment-only is not a hit
+  if [ "$l_ok" = 1 ]; then
+    ok "(l) ARM for (h): the site is in the capture shape, and that shape answers correctly on a hit, a true negative and a comment-only line"
+  else bad "(l) ARM for (h): the site is in the capture shape, and that shape answers correctly on a hit, a true negative and a comment-only line"; fi
+
   echo "=== $pass passed, $fail failed ==="
   rm -rf "$tmp"
   [ "$fail" = 0 ] || return 1
-  [ "$pass" -ge 11 ] || { echo "REFUSING: fewer arms ran than this selftest declares." >&2; return 1; }
+  [ "$pass" -ge 12 ] || { echo "REFUSING: fewer arms ran than this selftest declares." >&2; return 1; }
   return 0
 }
 
