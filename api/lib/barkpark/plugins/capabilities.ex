@@ -955,7 +955,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("doc_id", true, "string", "Document id.")
         ],
         flags: [
-          flag("limit", "int", "Max revisions to return (default 50, max 200)."),
+          flag("limit", "int", "Max revisions to return (max 200).", default: 50),
           flag(
             "offset",
             "int",
@@ -963,6 +963,13 @@ defmodule Barkpark.Plugins.Capabilities do
           )
         ],
         writes: false,
+        # Declaring `offset` alongside `limit` makes this walkable, so it must
+        # say so: CapabilitiesPaginationFlagTest reds a read that offers both
+        # and stays `paginated: false`, because `bp doc history --all` would
+        # then silently return page one. The `--all` walker asks in
+        # `?limit=`/`?offset=` windows, which is exactly what
+        # HistoryController.index/2 reads.
+        paginated: true,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
