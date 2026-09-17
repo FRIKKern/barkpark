@@ -214,37 +214,37 @@ defmodule BarkparkCloud.Usage do
     measured_at = telemetry_measured_at(telemetry)
 
     meters = %{
-        documents: instance_meter(Map.get(inputs, :documents), @src_documents),
-        datasets: instance_meter(Map.get(inputs, :datasets), @src_datasets),
-        webhooks: instance_meter(Map.get(inputs, :webhooks), @src_webhooks),
-        db_size: db_size_meter(telemetry, measured_at),
-        disk: disk_meter(telemetry, measured_at),
-        # Machine meters (OC23/OC26) — the host's capacity pressure off the same
-        # health beat. cpu/ram are percents with the physical 100/70/90 ceiling;
-        # req_per_s / p95_ms are rate/latency signals with warn+over thresholds
-        # but no quota bar. An unwired probe (-1) / absent signal → "unmetered",
-        # never a fake 0 (guard n >= 0). req_per_s / p95_ms stay unmetered until
-        # the instance runtime reports them — honest, not a zero.
-        cpu: telemetry_threshold_meter(telemetry, :cpu, @src_cpu, measured_at, 100, 70, 90),
-        ram: telemetry_threshold_meter(telemetry, :mem, @src_ram, measured_at, 100, 70, 90),
-        req_per_s:
-          telemetry_threshold_meter(
-            telemetry,
-            :req_per_s,
-            @src_req_per_s,
-            measured_at,
-            nil,
-            210,
-            270
-          ),
-        p95_ms:
-          telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
-        seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
-        instances: instances_meter(Map.get(inputs, :instances)),
-        # FLOW meters — always unmetered, whatever anyone passes. req/s is a
-        # RATE, not the billing request count — the flow meters stay dark here.
-        api_requests: meter(@unmetered, @src_not_metered, nil),
-        bandwidth: meter(@unmetered, @src_not_metered, nil)
+      documents: instance_meter(Map.get(inputs, :documents), @src_documents),
+      datasets: instance_meter(Map.get(inputs, :datasets), @src_datasets),
+      webhooks: instance_meter(Map.get(inputs, :webhooks), @src_webhooks),
+      db_size: db_size_meter(telemetry, measured_at),
+      disk: disk_meter(telemetry, measured_at),
+      # Machine meters (OC23/OC26) — the host's capacity pressure off the same
+      # health beat. cpu/ram are percents with the physical 100/70/90 ceiling;
+      # req_per_s / p95_ms are rate/latency signals with warn+over thresholds
+      # but no quota bar. An unwired probe (-1) / absent signal → "unmetered",
+      # never a fake 0 (guard n >= 0). req_per_s / p95_ms stay unmetered until
+      # the instance runtime reports them — honest, not a zero.
+      cpu: telemetry_threshold_meter(telemetry, :cpu, @src_cpu, measured_at, 100, 70, 90),
+      ram: telemetry_threshold_meter(telemetry, :mem, @src_ram, measured_at, 100, 70, 90),
+      req_per_s:
+        telemetry_threshold_meter(
+          telemetry,
+          :req_per_s,
+          @src_req_per_s,
+          measured_at,
+          nil,
+          210,
+          270
+        ),
+      p95_ms:
+        telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
+      seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
+      instances: instances_meter(Map.get(inputs, :instances)),
+      # FLOW meters — always unmetered, whatever anyone passes. req/s is a
+      # RATE, not the billing request count — the flow meters stay dark here.
+      api_requests: meter(@unmetered, @src_not_metered, nil),
+      bandwidth: meter(@unmetered, @src_not_metered, nil)
     }
 
     %{meters: attach_ring_context(meters, telemetry)}

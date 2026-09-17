@@ -53,7 +53,8 @@ defmodule BarkparkCloud.BeatRingCarriageCensusTest do
   end
 
   # Door 1: read off the raw beat payload by the normalizer.
-  defp decoded?(key, telemetry_src), do: String.contains?(telemetry_src, ~s|Map.get(payload, "#{key}")|)
+  defp decoded?(key, telemetry_src),
+    do: String.contains?(telemetry_src, ~s|Map.get(payload, "#{key}")|)
 
   # Door 2: present in the console envelope composer.
   defp composed?(key, usage_src), do: String.contains?(usage_src, ":#{key}")
