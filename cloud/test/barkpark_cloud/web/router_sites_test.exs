@@ -356,6 +356,51 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     end
   end
 
+  ## task-6e6b76f60997dad6 — :id accepts a team-scoped SLUG
+  ##
+  ## Every with_team_site route resolves through `Registry.get_team_site/2`, so
+  ## proving the wrapper on ONE verb proves it for the family (status, deploy,
+  ## delete, settings, promote, rollback). Before this, the CLI had to spend a
+  ## list-ALL `GET /v1/sites` (measured ~0.4 s) turning the slug the user typed
+  ## into a uuid the route would accept.
+
+  describe "GET /v1/sites/:id addressed by SLUG (task-6e6b76f60997dad6)" do
+    test "the team's own slug → 200, same row as the uuid" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "slug-route-x"})
+      token = login_token(user)
+
+      # REDS if get_team_site/2's slug fallback is removed: the route 404s.
+      conn = call(:get, "/v1/sites/slug-route-x", nil, token)
+      assert conn.status == 200
+      assert json_body(conn)["site"]["id"] == site.id
+
+      # Control: the uuid form still answers, and with the same row.
+      by_uuid = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert by_uuid.status == 200
+      assert json_body(by_uuid)["site"]["id"] == site.id
+    end
+
+    test "CONTROL: another team's slug → 404, not a cross-tenant read" do
+      {_o, other_team} = user_with_team()
+      other_bp = barkpark_fixture(other_team)
+      {:ok, _other_site} = Registry.create_site(other_bp, %{name: "S", slug: "foreign-slug"})
+
+      {user, _team} = user_with_team()
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites/foreign-slug", nil, token)
+      assert conn.status == 404
+    end
+
+    test "CONTROL: a slug nobody owns → 404, never a 500" do
+      {user, _team} = user_with_team()
+      conn = call(:get, "/v1/sites/no-such-slug-anywhere", nil, login_token(user))
+      assert conn.status == 404
+    end
+  end
+
   ## POST /v1/sites/:id/deploy — enqueue a Deployment (the build job)
 
   describe "POST /v1/sites/:id/deploy" do

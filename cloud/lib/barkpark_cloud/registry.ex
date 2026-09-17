@@ -7523,20 +7523,35 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Fetch a Site by id only if it belongs to `team` — the team-scoped read for the
-  user-facing API. Returns `nil` if the site exists but is owned by another
-  team (an existence leak protection: callers cannot distinguish "wrong team"
-  from "no such site").
+  Fetch a Site by id OR by team-scoped slug, only if it belongs to `team` — the
+  team-scoped read for the user-facing API. Returns `nil` if the site exists but
+  is owned by another team (an existence leak protection: callers cannot
+  distinguish "wrong team" from "no such site").
+
+  `ref` is a UUID or a slug. A non-UUID `ref` falls back to a `(team_id, slug)`
+  lookup, which the schema's unique index makes unambiguous — that pair names at
+  most one row, so the slug arm can never widen the tenancy fence the uuid arm
+  holds: BOTH arms filter on `team_id`, so a slug belonging to another team is
+  `nil` (→ 404) exactly like a foreign uuid.
+
+  This is what lets `POST /v1/sites/:id/rollback` (and every other
+  `with_team_site` route — status, deploy, delete, settings, promote) accept the
+  slug the user typed. Before it, the CLI had to resolve slug → uuid itself with
+  a list-ALL `GET /v1/sites` first, a measured ~0.4 s round trip (Apple M4,
+  N=10, live api.barkpark.cloud, 2026-09-16) paid by EVERY slug-addressed verb
+  before its real request was even issued.
   """
   @spec get_team_site(Team.t() | binary(), binary()) :: Site.t() | nil
-  def get_team_site(team, id) when is_binary(id) do
-    case uuid_or_nil(id) do
+  def get_team_site(team, ref) when is_binary(ref) do
+    tid = team_id(team)
+
+    case uuid_or_nil(ref) do
       nil ->
-        nil
+        Site
+        |> where([s], s.slug == ^ref and s.team_id == ^tid)
+        |> Repo.one()
 
       uuid ->
-        tid = team_id(team)
-
         Site
         |> where([s], s.id == ^uuid and s.team_id == ^tid)
         |> Repo.one()
