@@ -313,6 +313,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Sites
+  alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Auth
 
   # Recover the REAL client IP from X-Forwarded-For BEFORE anything reads
@@ -9658,6 +9659,16 @@ defmodule BarkparkCloud.Web.Router do
   # rebuild of content that may since have changed). Container sites keep the
   # promote route; rollback is the static verb.
   post "/v1/sites/:id/rollback" do
+    # THE STOPWATCH STARTS BEFORE AUTH (rollback-latency c0). A live rollback
+    # spends 1.4-3.4s server-side against a 25ms symlink flip, and the relay's own
+    # attribution (PR #18130) can only see the middle of that — it starts after
+    # the team-scoped site lookup and the box row read have already happened, and
+    # stops before the site-pointer write, the audit row, the console push and the
+    # render. Opening here puts BOTH ends of the route inside the sum, so the
+    # journal line can say "the route", "the relay" or "the box" rather than
+    # leaving two of the three unmeasured.
+    RollbackAttribution.open(conn.path_params["id"])
+
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       cond do
         # site-spawner W7 (charter D67): a NODE site rolls back the SAME way a
@@ -9677,7 +9688,13 @@ defmodule BarkparkCloud.Web.Router do
         true ->
           bp = Registry.get_barkpark(site.barkpark_id)
 
-          case Sites.Deploy.rollback(site, bp) do
+          # Everything above this mark is route work: auth, the team-scoped site
+          # read, the kind check, the box row read.
+          RollbackAttribution.deploy_begins()
+          outcome = Sites.Deploy.rollback(site, bp)
+          RollbackAttribution.deploy_ends()
+
+          case outcome do
             {:ok, result} ->
               case Accounts.record_audit(%{
                      team_id: site.team_id,
@@ -9696,13 +9713,20 @@ defmodule BarkparkCloud.Web.Router do
 
               push_event(site.team_id, "deployments")
 
-              json(conn, 200, %{
-                ok: true,
-                status: "rolled_back",
-                deployment_id: result.deployment_id,
-                previous_deployment_id: result.previous_deployment_id,
-                url: result.url
-              })
+              resp =
+                json(conn, 200, %{
+                  ok: true,
+                  status: "rolled_back",
+                  deployment_id: result.deployment_id,
+                  previous_deployment_id: result.previous_deployment_id,
+                  url: result.url
+                })
+
+              # AFTER the render, not before it: the audit write and the two
+              # console pushes above are route work a caller waits for, and
+              # closing early would hide exactly the seam this measures.
+              RollbackAttribution.close("rolled_back")
+              resp
 
             # A TYPED refusal (cch-w63-s3 / D763): the plane measured WHICH refusal
             # this is, so the wire carries that word instead of the flat
@@ -9711,10 +9735,14 @@ defmodule BarkparkCloud.Web.Router do
             # failure at all. The STATUS still comes from `Sites.Deploy`; this
             # route only relays it.
             {:error, status, detail, code} ->
-              json(conn, status, %{ok: false, error: code, detail: detail})
+              resp = json(conn, status, %{ok: false, error: code, detail: detail})
+              RollbackAttribution.close(code)
+              resp
 
             {:error, status, detail} ->
-              json(conn, status, %{ok: false, error: "rollback_failed", detail: detail})
+              resp = json(conn, status, %{ok: false, error: "rollback_failed", detail: detail})
+              RollbackAttribution.close("rollback_failed")
+              resp
           end
       end
     end)
