@@ -26,16 +26,22 @@ package cli
 // arm that could not fail would make the first arm's silence worth nothing.
 //
 // LIVE RE-MEASUREMENT, guerrilla 2026-09-17, on a scratch row this worker
-// created and cancelled (task-3fd6f9b9686ab0ae, claimed by cli-r21-w23-holder
-// epoch 1):
+// created and cancelled (task-c2411909ff7fc83b, claimed by
+// cli-r21-w23-holder, epoch 1):
 //
-//	$ bp task get <id> -o json | jq -Sc .doc.claim   > before
-//	$ bp doc patch task <id> --set description=… --yes
-//	$ bp task get <id> -o json | jq -Sc .doc.claim   > after
-//	$ diff before after   # EMPTY — worker, epoch and ts_iso byte-identical
+//	bp task get task-c2411909ff7fc83b -o json | jq -Sc .doc.claim   > before
+//	bp doc patch task task-c2411909ff7fc83b --set description=… --yes
+//	  -> published document changed: task-c2411909ff7fc83b
+//	     rev: fa54957f2e7a0bf76e0c5c92dcd5c9d1
+//	bp task get task-c2411909ff7fc83b -o json | jq -Sc .doc.claim   > after
+//	diff before after   # EMPTY
 //
-// and the description read back changed, so the byte-identity is not the
-// identity of a write that never landed.
+// EMPTY over the WHOLE block — worker, epoch, ts_iso, session, lease_expires_at
+// and the work_field_digests map, `description` digest included, which is the
+// sharpest form of the claim: the enrichment moved the description on the
+// published row and did not move one byte of the lease that governs it. The
+// readback showed the new description, so the identity is not the identity of
+// a write that never landed.
 
 import (
 	"bytes"
@@ -189,8 +195,11 @@ func (h *applyingHarness) runPatch(tail ...string) (int, string) {
 // REVERT-RED, both directions:
 //   - make the CLI send the claim (arm 2 does exactly this, by argv) and the
 //     stored claim bytes change — so the first arm's equality is falsifiable.
-//   - make guardClaimedDraftPatch return (exitOK, false) on publishedClaimHeld
-//     and arm 3 sees an applied mutation on the draft twin.
+//   - neutralise BOTH claimed-draft gates in run.go (guardClaimedDraftPatch and
+//     the broader guardClaimedDraftMutation — either one alone still holds the
+//     line, which is itself worth knowing) and arm 3 sees an applied mutation
+//     on the draft twin: "the guard let 1 mutation(s) through", description
+//     "before" -> "evidence appended". Run 2026-09-17.
 func TestEnrichingAClaimedRowLeavesItsClaimByteIdentical(t *testing.T) {
 	t.Run("the prescribed bare-id enrichment leaves the claim byte-identical", func(t *testing.T) {
 		h := newApplyingHarness(t)
