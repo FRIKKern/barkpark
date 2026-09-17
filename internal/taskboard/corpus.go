@@ -107,6 +107,20 @@ type corpusBase struct {
 type corpusCache struct {
 	mu   sync.Mutex
 	base corpusBase
+	// flight is the corpus read currently out, or nil. It is what makes two
+	// concurrent asks cost ONE walk — see fetchTaskCorpus.
+	flight *corpusFlight
+}
+
+// corpusFlight is one in-progress corpus read. Every caller that arrives while
+// it is out waits on done and reads the same answer instead of starting a
+// second walk of its own.
+type corpusFlight struct {
+	done       chan struct{}
+	tasks      []Task
+	details    DetailIndex
+	exhaustive bool
+	err        error
 }
 
 func (cc *corpusCache) snapshot() corpusBase {
@@ -138,7 +152,87 @@ func watermarkOf(tasks []Task) time.Time {
 // the changed PREFIX when it safely can and the whole cursor when it cannot,
 // and it reports exhaustiveness with the same meaning fetchTaskPages always
 // did: true only when the returned corpus is the whole world.
+// fetchTaskCorpus is the corpus GET, made SINGLE-FLIGHT: while one read is out,
+// every other caller on the same cache waits for it and reads its answer.
+//
+// THE SECOND DEFECT THIS FILE EXISTS FOR (measured 2026-09-17, guerrilla,
+// 200x50 pty, the wirelog.go byte counter):
+//
+//	/v1/tasks  n=36  bytes=204,631,877  in the FIRST 60 seconds from launch
+//
+// against ~99.9 MB for ONE exhaustive walk on the same ledger in the same
+// minute. The board pays the cold walk TWICE, concurrently, because the
+// no-overlap guard the tick path enforces (tickRefetchCmd's fetchInFlight) is
+// not reachable from Init: Init calls refetchCmd DIRECTLY on a value receiver,
+// so nothing records that a fetch is out, and the first events poll's delta
+// — which arrives long before a ~16 s walk finishes — starts a second full
+// walk beside the first. Worse, neither can serve as the other's base: the
+// incremental path needs a STORED exhaustive corpus, and the first walk has
+// not stored one yet, so the second is full too.
+//
+// The guard therefore belongs where the walk is, not where the tick is. It is
+// the cache, not the model, that knows a walk is out, and it is the only place
+// that catches the race for EVERY caller (Init, the tick path, the post-action
+// reconcile) rather than for the one that happens to hold a mutable Model.
+//
+// A waiter gets a COPY of the leader's slice and map: the two callers go on to
+// compose separate snapshots, and a shared backing array that one of them sorts
+// is a data race that a byte saving does not justify.
 func fetchTaskCorpus(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
+	cc.mu.Lock()
+	if f := cc.flight; f != nil {
+		cc.mu.Unlock()
+		select {
+		case <-f.done:
+			if f.err != nil {
+				return nil, nil, false, f.err
+			}
+			return copyTasks(f.tasks), copyDetails(f.details), f.exhaustive, nil
+		case <-ctx.Done():
+			// This caller's own budget ran out. The leader is untouched.
+			return nil, nil, false, ctx.Err()
+		}
+	}
+	f := &corpusFlight{done: make(chan struct{})}
+	cc.flight = f
+	cc.mu.Unlock()
+
+	f.tasks, f.details, f.exhaustive, f.err = fetchTaskCorpusWalk(ctx, c, cc, now)
+
+	cc.mu.Lock()
+	cc.flight = nil
+	cc.mu.Unlock()
+	close(f.done)
+	return f.tasks, f.details, f.exhaustive, f.err
+}
+
+// copyTasks / copyDetails hand a waiter its own containers. The Task values and
+// detail values themselves are treated as immutable once decoded — the board
+// replaces rows, it does not write through them.
+func copyTasks(in []Task) []Task {
+	if in == nil {
+		return nil
+	}
+	out := make([]Task, len(in))
+	copy(out, in)
+	return out
+}
+
+func copyDetails(in DetailIndex) DetailIndex {
+	if in == nil {
+		return nil
+	}
+	out := make(DetailIndex, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// fetchTaskCorpusWalk is the walk itself: the incremental prefix when it can
+// honestly answer, the exhaustive cursor when it cannot. It is what shipped as
+// fetchTaskCorpus before the single-flight wrapper above.
+func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
 	base := cc.snapshot()
 	if incrementalUsable(base, now) {
 		tasks, details, ok, err := fetchTaskHead(ctx, c, base)
