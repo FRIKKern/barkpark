@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
 // transport.go — the client's single IO seam. Every /v1/chat call the TUI makes
@@ -93,6 +94,12 @@ type Transport interface {
 	// scanListenFrames parser as Events, no fork — and blocks until ctx is
 	// cancelled or the transport's own reconnect/backoff gives up terminally.
 	FleetEvents(ctx context.Context, lastEventID string, onFrame func(event string, data []byte)) error
+	// JoinTasks reads the task rows the agent↔task join resolves against
+	// (task wsc-bl-agent-task-join). It rides taskboard.FetchSnapshot — the SAME
+	// two calls `bp tasks` makes, with the SAME decode — so the terminal has one
+	// task-wire projection, not a second one grown inside chat. Called at most
+	// once per process, lazily, when the agent-detail level first opens.
+	JoinTasks() ([]taskboard.Task, error)
 }
 
 // clientTransport implements Transport over the shared internal/apiclient chat
@@ -278,4 +285,15 @@ func stringField(fields map[string]any, key string) (*string, bool) {
 		return nil, false
 	}
 	return &s, true
+}
+
+// JoinTasks fetches the join's candidate rows through the shared taskboard
+// snapshot decoder. Errors pass through untouched: the shell degrades them to
+// "no task line" rather than painting client chrome into an agent's detail.
+func (t clientTransport) JoinTasks() ([]taskboard.Task, error) {
+	snap, err := taskboard.FetchSnapshot(t.c)
+	if err != nil {
+		return nil, err
+	}
+	return snap.Tasks, nil
 }
