@@ -1216,4 +1216,142 @@ defmodule BarkparkWeb.SearchChannelTest do
       refute_push "results", _payload, 500
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # THE ENVELOPE MUST DESCRIBE THE PAGE THAT WAS ACTUALLY SERVED
+  # (task-2fcfad0f92b49f6d).
+  #
+  # `build_reply/9` shares `HitEnvelope.build/5` with the HTTP routes but used
+  # to share only FOUR of its five arguments: the channel parsed and clamped an
+  # `"offset"` at `run_query/4`, threaded it into the retriever opts, and then
+  # built the envelope WITHOUT it — so `offset`, `nextOffset` and `hasMore` were
+  # all computed from `Keyword.get(opts, :offset) || 0`.
+  #
+  # CONSISTENCY WAS THE CAMOUFLAGE. All three fields derive from the same base,
+  # so they AGREED WITH EACH OTHER: `nextOffset == offset + length(documents)`
+  # held, and `hasMore` matched its own continuation, on every broken page. A
+  # self-consistency check passes throughout. So these assertions compare the
+  # envelope to the REQUEST — the offset the client asked for — which is the
+  # only comparison that can see it.
+  #
+  # `engine: "postgres"` deliberately: the channel's DEFAULT `indx` retriever
+  # ignores `offset` entirely (see the clamp_offset/1 comment), which MASKS the
+  # defect. The postgres retriever honours it, so the query genuinely skips.
+  # ---------------------------------------------------------------------------
+
+  describe "the reply envelope's pagination echo vs the requested offset" do
+    setup %{ws: ws, proj: proj, socket: socket} do
+      topic = "search:#{ws.slug}:#{proj.slug}:test"
+      {:ok, _reply, joined} = Phoenix.ChannelTest.join(socket, BarkparkWeb.SearchChannel, topic)
+
+      # FOUR published hits for one term, so a limit=1 page two/three/four are
+      # all distinguishable positions in a corpus of known size.
+      for i <- 1..4 do
+        id = "pagecho-#{i}"
+
+        {:ok, _} =
+          create_document_in!(
+            ws,
+            proj,
+            "post",
+            %{"doc_id" => id, "title" => "Pagecho hit #{i}"},
+            "test"
+          )
+
+        {:ok, _} =
+          Barkpark.Content.publish_document(id, "post", "test",
+            workspace_id: ws.id,
+            project_id: proj.id
+          )
+      end
+
+      %{joined: joined}
+    end
+
+    test "a WS page two reports the offset it was asked for", %{joined: joined} do
+      ref =
+        push(joined, "query", %{
+          "q" => "pagecho",
+          "seq" => 1,
+          "engine" => "postgres",
+          "types" => "post",
+          "limit" => 1,
+          "offset" => 2
+        })
+
+      assert_reply ref, :ok, reply, @reply_timeout
+
+      assert reply.count == 4, "fixture precondition: four published hits"
+      assert length(reply.documents) == 1, "fixture precondition: limit=1 serves one row"
+
+      # COMPARED TO THE REQUEST, not to the rest of the envelope.
+      assert reply.offset == 2,
+             "the envelope must echo the REQUESTED page start; got #{inspect(reply.offset)} " <>
+               "(0 means the offset never reached HitEnvelope.build/5)"
+
+      assert reply.nextOffset == 3,
+             "nextOffset must continue from the requested offset (2 + 1 row); " <>
+               "got #{inspect(reply.nextOffset)}"
+
+      assert reply.hasMore == true, "one row remains past offset 3 of 4"
+    end
+
+    test "hasMore does not over-report on the LAST WS page", %{joined: joined} do
+      ref =
+        push(joined, "query", %{
+          "q" => "pagecho",
+          "seq" => 2,
+          "engine" => "postgres",
+          "types" => "post",
+          "limit" => 1,
+          "offset" => 3
+        })
+
+      assert_reply ref, :ok, reply, @reply_timeout
+
+      assert reply.count == 4, "fixture precondition: four published hits"
+      assert length(reply.documents) == 1, "fixture precondition: limit=1 serves one row"
+
+      # hasMore FIRST, deliberately: it is the field whose over-report is the
+      # user-visible harm, and asserting it ahead of `offset` keeps this test
+      # measuring something the page-two test above does not.
+      refute reply.hasMore,
+             "offset 3 + 1 row exhausts a corpus of 4 — hasMore computed from an assumed 0 " <>
+               "claims pages that do not exist"
+
+      assert reply.offset == 3, "the envelope must echo the REQUESTED page start"
+
+      assert reply.nextOffset == nil,
+             "no continuation exists past the last page; got #{inspect(reply.nextOffset)}"
+    end
+
+    test "the P5 live-push keeps the requested offset too", %{ws: ws, proj: proj, joined: joined} do
+      ref =
+        push(joined, "query", %{
+          "q" => "pagecho",
+          "seq" => 3,
+          "engine" => "postgres",
+          "types" => "post",
+          "limit" => 1,
+          "offset" => 2
+        })
+
+      assert_reply ref, :ok, _initial, @reply_timeout
+
+      {:ok, _} =
+        create_document_in!(
+          ws,
+          proj,
+          "post",
+          %{"doc_id" => "pagecho-trigger", "title" => "Unrelated mutation"},
+          "test"
+        )
+
+      assert_push "results", pushed, @reply_timeout
+
+      assert pushed.offset == 2,
+             "the live re-run uses the SAME cached opts_base — its envelope must report the " <>
+               "same page start; got #{inspect(pushed.offset)}"
+    end
+  end
 end
