@@ -218,3 +218,4 @@ outputs (ledgers, indexes, charts, reports, batches, results, `nodes.json`) are
 gitignored — regenerate, never commit; the one exception is the tracked AUC ledger.
 Agent fan-out uses the `Workflow` tool. See each pass's `README` / `config.json`,
 and `SIGNALS.md` for the canonical root definitions.
+<!-- measurement control for task-519d5ea68ddca27f: touches no pdrender-wasm path, never merged -->
