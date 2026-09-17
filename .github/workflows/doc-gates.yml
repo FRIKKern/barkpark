@@ -124,6 +124,11 @@ on:
       # and the js/cloud globs, but the test itself matched nothing — the
       # design/mirror-fence.test.mjs shape, again.
       - "design/template-manifest-contract.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the AUTHORITY half — the emitted
+      # bp-graph palette is the SOLE source of concrete colour in bp-graph.js.
+      # Its four subjects already ride the globs above; the test itself matched
+      # nothing, the design/mirror-fence.test.mjs shape again.
+      - "design/graph-palette-authority.test.mjs"
       - "templates/barkpark.template.schema.json"
       - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
@@ -495,6 +500,11 @@ on:
       # and the js/cloud globs, but the test itself matched nothing — the
       # design/mirror-fence.test.mjs shape, again.
       - "design/template-manifest-contract.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the AUTHORITY half — the emitted
+      # bp-graph palette is the SOLE source of concrete colour in bp-graph.js.
+      # Its four subjects already ride the globs above; the test itself matched
+      # nothing, the design/mirror-fence.test.mjs shape again.
+      - "design/graph-palette-authority.test.mjs"
       - "templates/barkpark.template.schema.json"
       - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
@@ -1096,6 +1106,16 @@ jobs:
           # stay a list — AVAILABLE_TEMPLATES, a published TS union — gets the arm
           # that REDS when a starter tree exists and the list does not name it.
           node design/template-manifest-contract.test.mjs
+
+          # stw-backlog-theme-matrix c2 (partial): tokens.json calls
+          # color.graphCanvas.graph "the SOLE source for every concrete colour
+          # that renderer paints" — an assertion nothing enforced. A literal
+          # planted OUTSIDE the generated markers is byte-identical across all
+          # four mirrors and leaves every emit artifact in sync, so mirror-drift
+          # and emit --check both stay green while that colour stops tracking
+          # tokens.json; Canvas 2D never consumes var(), so no CSS gate sees it.
+          # Enrols by PREDICATE (every bp-graph.js the walk finds).
+          node design/graph-palette-authority.test.mjs
           # cloud-console-hardening wave-5 (D41): the emit --write attribution
           # fence's standing regression test. Drives the real emit.mjs CLI against
           # a throwaway copy of the tree and asserts the fence REFUSES an
