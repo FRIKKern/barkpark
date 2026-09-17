@@ -41,7 +41,13 @@ if ! command -v caddy >/dev/null 2>&1; then
   echo "  standing gate and needs no binary."
   exit 0
 fi
-echo "[handle_errors-behaviour] caddy: $(caddy version | head -1)"
+# `caddy version | head -1` is a SIGPIPE site: head closes the pipe at line 1,
+# caddy dies 141, and under `set -o pipefail` that 141 becomes the command's
+# status (scripts/pipefail-sigpipe-scan.sh ratchets on exactly this shape).
+# Take the first line with parameter expansion instead - no second process, no
+# pipe to close.
+caddy_ver="$(caddy version)"
+echo "[handle_errors-behaviour] caddy: ${caddy_ver%%$'\n'*}"
 
 RIG="$(mktemp -d "${TMPDIR:-/tmp}/bp-handle-errors-proof.XXXXXX")"
 PIDFILE="$RIG/caddy.pid"
@@ -100,8 +106,7 @@ EOF
 boot() { # $1 = config path
   caddy run --adapter caddyfile --config "$1" >"$RIG/caddy.log" 2>&1 &
   echo $! > "$PIDFILE"
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if port_open "$SITE_PORT"; then return 0; fi
     sleep 0.25
   done
@@ -114,8 +119,7 @@ halt() {
   kill "$(cat "$PIDFILE")" 2>/dev/null || true
   wait "$(cat "$PIDFILE")" 2>/dev/null || true
   rm -f "$PIDFILE"
-  local i
-  for i in $(seq 1 40); do
+  for _ in $(seq 1 40); do
     port_open "$SITE_PORT" || return 0
     sleep 0.25
   done
