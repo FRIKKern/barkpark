@@ -5607,17 +5607,171 @@ else
 fi
 
 # CLAUSE 2 — the doc side selects the roster and NOTHING else on a 700-line page
-# carrying several other tables. The count is asserted against the parse itself
-# so a selection that silently widened would have to widen visibly.
+# carrying several other tables, AND the roster's size is the DERIVED one rather
+# than a floor. Until 2026-09-17 this read `-ge 4`, which is the whole defect
+# dr-merge-gates-roster-prose-is-gated-by-nothing was filed for: a roster that
+# grew or lost a row passed unchallenged, so dr-w29-s8 had to repair the
+# sentence under the table BY HAND once `the weakest of the five` had outlived a
+# six-row table with nothing red.
+#
+# The expected size is a PREDICATE over the two sources, never a typed number: a
+# row belongs on this roster iff its gate emits the notice OR it is a required
+# context, so the roster is exactly `side A's gates ∪ the spec's contexts`. Both
+# directions of the membership are already reported by rc21_report (MISSING /
+# UNLISTED); asserting the SIZE is what makes the third case visible — a row
+# that is NEITHER an emitter nor required, which no derivation produces and no
+# other clause can see.
+rc21_expected_rows() { # <workflow-dir> <spec-json> -> |emitting gates ∪ required contexts|
+  { rc21_emitters "$1" | cut -f2
+    jq -r '.protection.required_status_checks.checks[].context' "$2"
+  } | sort -u | { grep -c . || true; } | tr -d ' '
+}
+rc21_roster_rows() { # <doc> -> row count
+  rc21_doc_roster "$1" | { grep -c . || true; } | tr -d ' '
+}
 RC21_ROSTER="$(rc21_doc_roster "$MERGE_GATES_DOC")"
-RC21_ROWS="$(printf '%s\n' "$RC21_ROSTER" | { grep -c . || true; } | tr -d ' ')"
-if [ "$RC21_ROWS" -ge 4 ] && ! grep -q 'Doc budgets' <<<"$RC21_ROSTER" \
+RC21_ROWS="$(rc21_roster_rows "$MERGE_GATES_DOC")"
+RC21_EXPECT_ROWS="$(rc21_expected_rows "$REPO_ROOT/.github/workflows" "$SPEC")"
+if [ "$RC21_EXPECT_ROWS" -gt 0 ] && [ "$RC21_ROWS" -eq "$RC21_EXPECT_ROWS" ] \
+   && ! grep -q 'Doc budgets' <<<"$RC21_ROSTER" \
    && ! grep -qE '^[0-9]+\b' <<<"$RC21_ROSTER"; then
-  ok "the page's roster parses to $RC21_ROWS gate rows and pulls in no row from any other table on the page"
+  ok "the page's roster parses to $RC21_ROWS gate rows — EXACTLY the $RC21_EXPECT_ROWS derived from the workflow sources and .github/required-checks.json, not a floor — and pulls in no row from any other table on the page"
 else
-  bad "the roster parse is wrong — it read $RC21_ROWS rows and they are not all gate rows:"
+  bad "the roster size is wrong — the page tables $RC21_ROWS rows against $RC21_EXPECT_ROWS derived (emitting gates ∪ required contexts), or they are not all gate rows:"
   printf '%s\n' "$RC21_ROSTER" | sed 's/^/       /' >&2
 fi
+
+# CLAUSE 2a — THE ARMS for that exactness, in both directions, on SCRATCH copies
+# of the page. Without them "asserts the exact count" is an assertion nobody has
+# ever watched fail, and a `-ge` could be reinstated silently.
+RC21_ROWS_CTL="$TMP/rc21-rows-control.md"
+cp "$MERGE_GATES_DOC" "$RC21_ROWS_CTL"
+if [ "$(rc21_roster_rows "$RC21_ROWS_CTL")" -eq "$RC21_EXPECT_ROWS" ]; then
+  ok "…control: a byte-identical COPY of the page still counts $RC21_EXPECT_ROWS rows, so the two arms below measure the mutation and not the scratch file"
+else
+  bad "a byte-identical copy of merge-gates.md counted differently — the row-count arms below would prove nothing"
+fi
+RC21_ROWS_ADD="$TMP/rc21-rows-added.md"
+awk '{ print }
+     /^\| `PR references an active task` \|/ { print "| `Planted ninth gate` | `.github/workflows/planted.yml` | no |" }' \
+  "$MERGE_GATES_DOC" > "$RC21_ROWS_ADD"
+RC21_ROWS_ADD_N="$(rc21_roster_rows "$RC21_ROWS_ADD")"
+if [ "$RC21_ROWS_ADD_N" -eq "$((RC21_EXPECT_ROWS + 1))" ] && [ "$RC21_ROWS_ADD_N" -ne "$RC21_EXPECT_ROWS" ]; then
+  ok "…and ADDING one roster row to a scratch page takes the count to $RC21_ROWS_ADD_N against $RC21_EXPECT_ROWS derived — the clause reds on a grown roster, which `-ge 4` could never do"
+else
+  bad "adding a roster row did not move the count off the derived figure (read $RC21_ROWS_ADD_N, derived $RC21_EXPECT_ROWS) — the exactness is not exact"
+fi
+RC21_ROWS_CUT="$TMP/rc21-rows-cut.md"
+grep -v '^| `Web gate` |' "$MERGE_GATES_DOC" > "$RC21_ROWS_CUT"
+RC21_ROWS_CUT_N="$(rc21_roster_rows "$RC21_ROWS_CUT")"
+if [ "$RC21_ROWS_CUT_N" -eq "$((RC21_EXPECT_ROWS - 1))" ]; then
+  ok "…and REMOVING one reds it in the other direction ($RC21_ROWS_CUT_N against $RC21_EXPECT_ROWS) — the old floor passed this page all the way down to four rows"
+else
+  bad "removing a roster row did not move the count (read $RC21_ROWS_CUT_N, derived $RC21_EXPECT_ROWS)"
+fi
+
+# CLAUSE 2b — THE PROSE UNDER THE TABLE, which is where the defect actually
+# shipped. The sentences below the roster do arithmetic on it in words, and
+# until now nothing read those words: dr-w29-s8 fixed one wrong sentence and the
+# CLASS stayed open. Each expected phrase here is BUILT from the same two
+# sources the table is derived from, so it is a predicate and not a snapshot —
+# the day a third non-required emitter lands, the sentence that silently became
+# wrong reds HERE instead of waiting for a reader to notice.
+#
+# Matching is done on a WHITESPACE-FLATTENED page: the phrases the page wraps
+# across a line break ("a red one of the\nfour cannot block a merge") are the
+# same claim, and a clause in a merge-blocking suite must not red on a re-flow.
+# The rewrap control below proves that rather than asserting it.
+rc21_flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+rc21_num_word() { # <n> -> the English word this page spells, digits past ten
+  case "$1" in
+    0) printf 'zero' ;; 1) printf 'one' ;;  2) printf 'two' ;;   3) printf 'three' ;;
+    4) printf 'four' ;; 5) printf 'five' ;; 6) printf 'six' ;;   7) printf 'seven' ;;
+    8) printf 'eight' ;; 9) printf 'nine' ;; 10) printf 'ten' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+# <workflow-dir> <spec-json> <doc> -> one PROSE line per count word that
+# disagrees with the derivation, or UNRESOLVED when a side came back empty.
+rc21_prose_report() {
+  local gates ctxs flat req_total req_emit nonreq_emit want
+  gates="$(rc21_emitters "$1" | cut -f2 | sort -u)"
+  ctxs="$(jq -r '.protection.required_status_checks.checks[].context' "$2" | sort -u)"
+  if [ -z "$gates" ] || [ -z "$ctxs" ]; then
+    printf 'UNRESOLVED\tthe prose clause derived an empty side (%s emitting gates, %s required contexts) — it cannot judge the page\n' \
+      "$(printf '%s\n' "$gates" | { grep -c . || true; } | tr -d ' ')" \
+      "$(printf '%s\n' "$ctxs" | { grep -c . || true; } | tr -d ' ')"
+    return
+  fi
+  req_total="$(printf '%s\n' "$ctxs" | { grep -c . || true; } | tr -d ' ')"
+  req_emit="$(comm -12 <(printf '%s\n' "$gates") <(printf '%s\n' "$ctxs") | { grep -c . || true; } | tr -d ' ')"
+  nonreq_emit="$(comm -23 <(printf '%s\n' "$gates") <(printf '%s\n' "$ctxs") | { grep -c . || true; } | tr -d ' ')"
+  flat="$(rc21_flat "$3")"
+  want="So $(rc21_num_word "$req_emit") of the $(rc21_num_word "$req_total") required contexts"
+  grep -qF -- "$want" <<<"$flat" \
+    || printf 'PROSE\t%s\tthe page does not carry this derived sentence: %s of %s required contexts emit the notice\n' "$want" "$req_emit" "$req_total"
+  want="a red one of the $(rc21_num_word "$nonreq_emit") cannot block a merge"
+  grep -qF -- "$want" <<<"$flat" \
+    || printf 'PROSE\t%s\tthe page does not carry this derived phrase: %s emitters are not required contexts\n' "$want" "$nonreq_emit"
+  want="takes the required set $req_total -> $((req_total + 1))"
+  grep -qF -- "$want" <<<"$flat" \
+    || printf 'PROSE\t%s\tthe page does not carry this derived transition off a required set of %s\n' "$want" "$req_total"
+}
+RC21_PROSE_OUT="$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
+if [ -z "$RC21_PROSE_OUT" ]; then
+  ok "…and the prose UNDER the roster spells the derived arithmetic, word for word — every count phrase beneath the table is rebuilt from the workflows and the spec and found on the page, so a new emitter cannot leave a true-looking sentence behind"
+else
+  bad "the prose under the roster disagrees with the table it describes — this is dr-w29-s8's defect, recurring:"
+  printf '%s\n' "$RC21_PROSE_OUT" | sed 's/^/       /' >&2
+fi
+
+# CLAUSE 2c — THE PROSE ARMS. A scratch page whose count WORD is edited must red
+# by naming the phrase it should have carried; a byte-identical copy must stay
+# silent; and the same page re-wrapped at 40 columns — a width it never uses —
+# must also stay silent, so the clause is proven to compare WORDS and not bytes.
+RC21_PROSE_CTL="$TMP/rc21-prose-control.md"
+cp "$MERGE_GATES_DOC" "$RC21_PROSE_CTL"
+if [ -z "$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_PROSE_CTL")" ]; then
+  ok "…control: a byte-identical COPY of the page stays silent, so the mutation arm below measures the reworded count and not the scratch file"
+else
+  bad "a byte-identical copy of merge-gates.md reddened the prose clause — its mutation arm would prove nothing"
+fi
+RC21_PROSE_WRAP="$TMP/rc21-prose-rewrap.md"
+fold -s -w 40 "$MERGE_GATES_DOC" > "$RC21_PROSE_WRAP"
+if [ -z "$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_PROSE_WRAP")" ]; then
+  ok "…and the SAME page folded at 40 columns still passes — the clause compares words, so re-flowing the page is free and cannot manufacture a red in a merge-blocking suite"
+else
+  bad "a pure re-wrap of merge-gates.md reddened the prose clause — it is a byte compare wearing a derivation's clothes:"
+  rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_PROSE_WRAP" | sed 's/^/       /' >&2
+fi
+RC21_PROSE_MUT="$TMP/rc21-prose-reworded.md"
+sed 's/^So three of the four required contexts/So two of the four required contexts/' \
+  "$MERGE_GATES_DOC" > "$RC21_PROSE_MUT"
+RC21_PROSE_MUT_OUT="$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_PROSE_MUT")"
+if [ "$(printf '%s\n' "$RC21_PROSE_MUT_OUT" | { grep -c '^PROSE' || true; } | tr -d ' ')" -eq 1 ] \
+   && grep -q 'required contexts' <<<"$RC21_PROSE_MUT_OUT"; then
+  ok "…and changing ONE count word on a scratch page (three -> two, table untouched) reds this clause BY THE PHRASE — exactly one PROSE line, naming the sentence the derivation says the page must carry"
+else
+  bad "editing a count word under the roster changed nothing — the prose is still gated by nothing, which is the state this clause exists to end:"
+  printf '%s\n' "$RC21_PROSE_MUT_OUT" | sed 's/^/       /' >&2
+fi
+# …and THE REFUSAL: a spec with no required contexts leaves one side empty, and
+# an empty side must refuse rather than agree with a page it never read.
+RC21_PROSE_EMPTY="$TMP/rc21-prose-empty-spec.json"
+jq '.protection.required_status_checks.checks = []' "$SPEC" > "$RC21_PROSE_EMPTY"
+case "$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$RC21_PROSE_EMPTY" "$MERGE_GATES_DOC")" in
+  UNRESOLVED*) ok "…and a spec with an empty required set makes the prose clause REFUSE (UNRESOLVED), never pass — it cannot go green having derived nothing" ;;
+  *) bad "the prose clause did not refuse on an empty required set — it can pass having compared nothing" ;;
+esac
+# …census, REPORTED not asserted, on clause 4's precedent: the spelled number
+# words living in the paragraph between the roster and the annotation quote. The
+# three above are checked; this figure makes a FOURTH one visible the day
+# somebody writes it, without a merge-blocking suite reding on a word.
+RC21_PROSE_WORDS="$(rc21_flat "$MERGE_GATES_DOC" \
+  | sed 's/.*| `PR references an active task` | — | yes |//; s/The annotation says it in its own words.*//' \
+  | grep -oE '\b(zero|one|two|three|four|five|six|seven|eight|nine|ten)\b' | sort | uniq -c \
+  | awk '{ printf "%s×%s ", $1, $2 }')"
+ok "…census: spelled number words in the paragraph beneath the roster: ${RC21_PROSE_WORDS:-none} (three count phrases are asserted above; a new one appearing here is a fact worth seeing, never a red)"
 
 # CLAUSE 3 — THE FALSE-POSITIVE CENSUS, direction one: the live page, unmodified.
 RC21_OUT="$(rc21_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
