@@ -131,19 +131,18 @@ mode_expand() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     [ -f "$f" ] || continue
-    local before after
-    before=$(cat "$f")
-    after="$before"
-    # Repeat to consume every segment of a multi-part token.
-    local pass
-    for pass in 1 2 3 4 5 6 7 8; do
-      local next
-      next=$(printf '%s' "$after" | sed -E "s|(PDS-D${SEG})/D?(${SEG})|\1/PDS-D\2|g")
-      [ "$next" = "$after" ] && break
-      after="$next"
-    done
-    if [ "$after" != "$before" ]; then
-      printf '%s\n' "$after" > "$f"
+    local before_sum after_sum
+    before_sum=$(cksum < "$f")
+    # Rewrite the file's BYTES in place. An earlier draft round-tripped through
+    # $(cat) and printf '%s\n', which strips every trailing newline and adds
+    # exactly one back: it silently added a newline to a JSON fixture and
+    # removed one from a record. A rewriter must change the citations and
+    # NOTHING else, so the substitution never leaves perl's buffer.
+    # `1 while s///g` re-runs until no compressed segment is left, because one
+    # token can carry many; the expanded form cannot re-match, so it terminates.
+    perl -0777 -i -pe '1 while s{(PDS-D[0-9]+[a-z]?)/D?([0-9]+[a-z]?)}{$1/PDS-D$2}g;' "$f"
+    after_sum=$(cksum < "$f")
+    if [ "$before_sum" != "$after_sum" ]; then
       changed=$((changed + 1))
       echo "expanded: $f"
     fi

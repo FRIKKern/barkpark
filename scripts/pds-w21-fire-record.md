@@ -141,3 +141,4 @@ refusal is a WIN. The merge freeze must HOLD until the climb completes — rung 
 re-checks live guerrilla at fire time (D275), so a mid-window merge fails the
 climb honestly. Nobody polls from the arm side; the LEAD collects via
 `scripts/pds-crown-launch.sh collect 5abf6afd` and seals per the round-2 task.
+
