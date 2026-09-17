@@ -1247,6 +1247,7 @@ cmd_selftest() {
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
   local state live_pid dead_pid out i reuse_log rc
   local unbooted_id unbooted_tag unbooted_home booted_id booted_tag
+  local pw_harness_envs pw_leg pw_body pw_list pw_lits pw_have pw_env pw_unnamed pw_legacy pw_stamps
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
@@ -2103,6 +2104,101 @@ MUTECHILD
   else
     bad "the banner makes a promise about the climb's outcome that one read cannot back"
   fi
+
+  # ── 10. the pre-warm warms the env the HARNESS runs (PDS-D755) ────────────
+  say ""
+  say "10 · the pre-warm warms every MIX_ENV the harness actually runs (PDS-D755)"
+
+  # The expected env set is DERIVED FROM THE HARNESS, never listed here. A
+  # hard-coded "dev" would go on passing if the harness moved to another env —
+  # which is exactly the class of bug this section exists to catch, one level up.
+  pw_harness_envs="$(grep -oE 'MIX_ENV=[a-z]+[[:space:]]+mix[[:space:]]' "$HARNESS" 2>/dev/null \
+                     | grep -oE 'MIX_ENV=[a-z]+' | cut -d= -f2 | sort -u | tr '\n' ' ')"
+  pw_harness_envs="${pw_harness_envs% }"
+
+  # PRECONDITION, not a control: an empty derivation would make every assertion
+  # below vacuously true. Print the key set before trusting an empty read.
+  if [ -n "$pw_harness_envs" ]; then
+    ok "the harness names at least one MIX_ENV (derived from $HARNESS: $pw_harness_envs)"
+  else
+    bad "derived NO MIX_ENV from $HARNESS — every check below would be vacuous; fix the derivation"
+  fi
+
+  # `pw_warmed_envs <file>` prints the envs a pre-warm body compiles, one per
+  # line. It reads compile invocations only, so a mere mention in a comment
+  # does not count as warming.
+  pw_warmed_envs() {
+    grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?[[:space:]]+mix[[:space:]]+compile' "$1" \
+      | grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?' | sed 's/MIX_ENV=//; s/"//g' | sort -u
+  }
+
+  # The child's pre-warm body, and the synchronous --prewarm-now leg, verbatim
+  # from this file. Both are compared against the SAME derived set, because a
+  # fix that lands in only one of them leaves the other warming the wrong tree.
+  sed -n '/^# ── PRE-WARM (PDS-D241/,/^fi$/p'  "$SCRIPT_DIR/$SELF" > "$scratch/pw-child.txt"
+  sed -n '/pre-warming synchronously/,/^  fi$/p' "$SCRIPT_DIR/$SELF" > "$scratch/pw-sync.txt"
+
+  for pw_leg in child sync; do
+    pw_body="$scratch/pw-$pw_leg.txt"
+    if [ ! -s "$pw_body" ]; then
+      bad "could not extract the $pw_leg pre-warm leg from $SELF — the anchor moved"
+      continue
+    fi
+    # A literal env, or the loop variable expanded from a literal list.
+    pw_list="$(grep -oE 'PREWARM_ENVS="[a-z ]+"|for pw_env in [a-z ]+;' "$pw_body" \
+               | sed 's/.*PREWARM_ENVS="//; s/for pw_env in //; s/[";]//g' | tr ' ' '\n' | sort -u)"
+    pw_lits="$(pw_warmed_envs "$pw_body" | grep -v '^\$' || true)"
+    pw_have="$(printf '%s\n%s\n' "$pw_list" "$pw_lits" | grep -v '^$' | sort -u)"
+    for pw_env in $pw_harness_envs; do
+      if printf '%s\n' "$pw_have" | grep -qx "$pw_env"; then
+        ok "the $pw_leg pre-warm leg warms MIX_ENV=$pw_env — the env the harness runs"
+      else
+        bad "the $pw_leg pre-warm leg does NOT warm MIX_ENV=$pw_env; it warms: $(printf '%s' "$pw_have" | tr '\n' ' ')"
+      fi
+    done
+  done
+
+  # …and every per-env stamp NAMES its env, so the transcript is
+  # self-describing rather than leaving a reader to assume which tree was
+  # warmed. The rule is "every stamp INSIDE the per-env loop", not a list of
+  # stamp prefixes — a list would stop matching the very stamp that dropped
+  # its env, and pass.
+  sed -n '/for pw_env in \$PREWARM_ENVS; do/,/^  done$/p' "$scratch/pw-child.txt" \
+    > "$scratch/pw-loop.txt"
+  pw_stamps="$(grep -cE '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" || true)"
+  if [ "${pw_stamps:-0}" -ge 3 ]; then
+    ok "the per-env pre-warm loop was found and carries $pw_stamps stamps"
+  else
+    bad "found only ${pw_stamps:-0} stamp(s) in the per-env pre-warm loop — the anchor moved and the naming check below is vacuous"
+  fi
+  pw_unnamed="$(grep -E '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" \
+                | grep -cv 'pw_env' || true)"
+  if [ "${pw_unnamed:-1}" -eq 0 ]; then
+    ok "every stamp inside the per-env pre-warm loop names its MIX_ENV"
+  else
+    bad "$pw_unnamed stamp(s) inside the per-env pre-warm loop do not name their MIX_ENV"
+  fi
+
+  # CONTROL — the predicate must DISCRIMINATE. Run the same extractor over the
+  # pre-PDS-D755 body (prod only). If this reports dev as warmed, the checks
+  # above are passing on their own shape and prove nothing about the fix.
+  cat > "$scratch/pw-legacy.txt" <<'LEGACYPW'
+if [ "$DO_PREWARM" = "1" ]; then
+  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
+    stamp "prewarm: OK — the window will not pay a cold compile"
+  fi
+fi
+LEGACYPW
+  pw_legacy="$(pw_warmed_envs "$scratch/pw-legacy.txt" | tr '\n' ' ')"
+  case " $pw_legacy " in
+    *" prod "*) ok "the extractor does read the legacy body (it sees prod: $pw_legacy)" ;;
+    *)          bad "the extractor cannot even read the legacy body — it measures nothing" ;;
+  esac
+  case " $pw_legacy " in
+    *" dev "*) bad "the extractor reports dev warmed by a prod-only body — it cannot detect this defect" ;;
+    *)         ok  "the extractor reports the prod-only body as NOT warming dev (the defect is detectable)" ;;
+  esac
 
   say ""
   rule
