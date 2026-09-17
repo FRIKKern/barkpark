@@ -72,6 +72,14 @@ p{opacity:.7;line-height:1.5;margin:.25rem 0}
 // deploy/caddy-handle-errors-scope-check.sh is the repo-wide predicate that
 // keeps every renderer on it). Do not drop the list back to a bare block.
 //
+// THE Content-Type HEADER IS LOAD-BEARING TOO, for the reason the reference
+// form states: Caddy's `respond` with a body and no Content-Type answers
+// `text/plain; charset=utf-8` (MEASURED on caddy 2.11.4 by
+// deploy/caddy-handle-errors-behaviour-proof.sh's ARM NO-CT), so the browser
+// paints the raw `<!doctype html>...` source instead of rendering the page. It
+// is a RENDERING fix only — the status stays an honest 503 + Retry-After. The
+// same predicate above reds any renderer that emits this block without it.
+//
 // Each structural line is prefixed with indent so the block nests cleanly inside
 // a site block. The body is a Caddyfile heredoc whose closing delimiter is
 // flush-left, so the HTML/CSS braces are emitted verbatim and never parsed as
@@ -80,6 +88,7 @@ func MaintenanceHandler(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent + "handle_errors 502 503 504 {\n")
 	sb.WriteString(indent + "\theader Retry-After \"15\"\n")
+	sb.WriteString(indent + "\theader Content-Type \"text/html; charset=utf-8\"\n")
 	// The block form of `respond` lets us set 503 AND supply a heredoc body — a
 	// heredoc opener (`<<TOKEN`) must be the last token on its line, so the
 	// status cannot follow it directly.

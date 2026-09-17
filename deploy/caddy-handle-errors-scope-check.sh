@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Repo-wide PREDICATE: no file may EMIT a handle_errors block with no status list.
+# Repo-wide PREDICATE over every maintenance-handler emission. TWO arms:
+#   1. no file may EMIT a handle_errors block with no status list;
+#   2. no file may EMIT a maintenance `respond 503` block with no Content-Type.
 #
 # WHY THIS IS A PREDICATE AND NOT A LIST. deploy/site-deploy.sh's regression pin
 # (search it for "A MISS ON A SPAWNED STATIC SITE IS A 404") asserts the
@@ -161,8 +163,125 @@ if [ "${#deliberate_hits[@]}" -gt 0 ]; then
   for h in "${deliberate_hits[@]}"; do echo "    DELIBERATE  $h"; done
 fi
 
+
+# ---------------------------------------------------------------------------
+# SECOND PREDICATE — THE Content-Type ARM (task-2ca3b45a2137aab4).
+#
+# The reference form calls it out in its own words (barkpark-maintenance.caddy
+# :19-20): "The Content-Type header is load-bearing and NOT decoration. respond
+# with a body and no Content-Type defaults the response to text/plain;
+# charset=utf-8". MEASURED on caddy 2.11.4 by ARM NO-CT in
+# deploy/caddy-handle-errors-behaviour-proof.sh — the browser then paints the
+# raw <!doctype html> source instead of rendering the branded page.
+#
+# It is the SAME SHAPE as the status-list incident and it went the same way: the
+# repair lived only in deploy/instance-deploy.sh, so a box provisioned by
+# `bp setup` or root deploy.sh and never touched by instance-deploy.sh served
+# the maintenance page as plain text indefinitely. So it gets a PREDICATE over
+# every tracked file, not a list of renderers anyone must remember.
+#
+# THE RULE: a non-prose line emitting `respond 503` must have a
+# `header Content-Type "text/html...` line within CT_LOOKBACK lines ABOVE it —
+# i.e. in the same handler block, and OUTSIDE the respond block (a header
+# directive nested inside `respond {` sets nothing on the response, which is why
+# this looks BACKWARD rather than for presence anywhere in the file).
+# ---------------------------------------------------------------------------
+RESPOND_RE='respond[[:space:]]+503'
+# `[^[:space:]]*` between the directive and the value, NOT `.?`: a Go renderer
+# writes the line as a quoted string literal, so the source bytes are
+# `header Content-Type \"text/html; charset=utf-8\"` — backslash AND quote.
+# `.?` matched the Caddyfile/shell form (one bare `"`) and MISSED the Go one,
+# which reported internal/caddyfile/caddyfile.go as a violation on a tree that
+# had just been fixed. Caught by running the quiet arm, not by reading this line.
+CT_RE='header[[:space:]]+Content-Type[[:space:]]+[^[:space:]]*text/html'
+# A backticked match is PROSE naming the shape, in any file — not just markdown.
+# This check's own failure messages say the words ("N maintenance `respond 503`
+# emission(s) with NO Content-Type"), and a predicate that reds on its own error
+# text is a predicate nobody can write a message for. The emission lines in every
+# real renderer (Caddyfile, shell heredoc, Go string literal) never carry a
+# backtick before the directive, so the rule separates the two populations
+# without naming a single file.
+PROSE_RESPOND_RE='`respond'
+DELIBERATE_CT_RE='handle-errors-scope-check: deliberate-no-content-type'
+CT_LOOKBACK=12
+
+content_type_arm() {
+  local f line n rest body ctx hits from
+  local ct_bad=() ct_ok=() ct_deliberate=()
+
+  # ONE `git grep` over the whole index, not a grep per tracked file: the
+  # status-list loop above already pays 12k process spawns and a second such
+  # walk doubled this script's wall time. Same corpus (tracked files), same
+  # per-line rules below. Output is `path:lineno:body`.
+  hits="$(git grep -nE "$RESPOND_RE" -- . 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      f="${line%%:*}"
+      rest="${line#*:}"
+      n="${rest%%:*}"
+      body="${rest#*:}"
+      [ -f "$f" ] || continue
+      is_scanned_file "$f" || continue
+      # Here-strings, not `printf | grep -q`: grep -q closes the pipe at the
+      # first match, the writer takes SIGPIPE (141), and `set -o pipefail` hands
+      # that 141 back as the test's status — a match reported as a NON-match
+      # under load. scripts/pipefail-sigpipe-scan.sh ratchets on that shape.
+      if grep -qE "$COMMENT_RE" <<< "$body"; then continue; fi
+      if grep -qF -- "$PROSE_RESPOND_RE" <<< "$body"; then continue; fi
+
+      from=$(( n > CT_LOOKBACK ? n - CT_LOOKBACK : 1 ))
+      # The marker may sit on the emission line itself OR on a comment line just
+      # above it (a Caddyfile heredoc cannot always carry a trailing comment), so
+      # it is looked for in the whole window, comments included.
+      ctx="$(sed -n "${from},${n}p" "$f")"
+      if grep -qF -- "$DELIBERATE_CT_RE" <<< "$ctx"; then
+        ct_deliberate+=("$f:$n")
+        continue
+      fi
+      # Comments stripped for the POSITIVE test only: a commented-out example of
+      # the fixed form must not satisfy the arm for a renderer below it.
+      ctx="$(sed -n "${from},${n}p" "$f" | grep -vE "$COMMENT_RE" || true)"
+      if [ -n "$ctx" ] && grep -qE "$CT_RE" <<< "$ctx"; then
+        ct_ok+=("$f:$n")
+      else
+        ct_bad+=("$f:$n")
+      fi
+    done <<< "$hits"
+  fi
+
+  # POSITIVE CONTROL, same reasoning as the one above: a scan that found nothing
+  # and a scan that is BROKEN print the same clean nothing.
+  if [ "${#ct_ok[@]}" -eq 0 ]; then
+    echo "[handle_errors-scope] FAIL (broken scan) — the Content-Type arm's positive control"
+    echo "  found ZERO compliant \`respond 503\` emissions anywhere. deploy/instance-deploy.sh and"
+    echo "  deploy/caddy/barkpark-maintenance.caddy are both known to carry one. A clean pass here"
+    echo "  would be a lie about the scan, not a fact about the repo."
+    exit 1
+  fi
+  echo "[handle_errors-scope] content-type control OK — ${#ct_ok[@]} compliant respond-503 emission(s):"
+  for s in "${ct_ok[@]}"; do echo "    CT-OK   $s"; done
+
+  if [ "${#ct_deliberate[@]}" -gt 0 ]; then
+    echo "[handle_errors-scope] ${#ct_deliberate[@]} marked-deliberate Content-Type-less emission(s) (negative arms, NOT skipped silently):"
+    for s in "${ct_deliberate[@]}"; do echo "    CT-DELIBERATE  $s"; done
+  fi
+
+  if [ "${#ct_bad[@]}" -gt 0 ]; then
+    echo "[handle_errors-scope] FAIL — ${#ct_bad[@]} maintenance \`respond 503\` emission(s) with NO Content-Type:"
+    for s in "${ct_bad[@]}"; do echo "    NO-CONTENT-TYPE *** VIOLATION ***  $s"; done
+    echo "  Caddy's \`respond\` with a body and no Content-Type answers text/plain; charset=utf-8,"
+    echo "  so the branded maintenance page arrives as raw markup the browser paints verbatim."
+    echo "  Emit \`header Content-Type \"text/html; charset=utf-8\"\` beside the Retry-After header,"
+    echo "  OUTSIDE the respond block. Reference: deploy/caddy/barkpark-maintenance.caddy"
+    exit 1
+  fi
+  echo "[handle_errors-scope] content-type arm OK — every emitted respond-503 maintenance block sets Content-Type."
+}
+
 if [ "${#bare_hits[@]}" -eq 0 ]; then
   echo "[handle_errors-scope] OK — no status-less handle_errors block is emitted anywhere."
+  content_type_arm
   exit 0
 fi
 
@@ -233,6 +352,7 @@ if [ "$hard" -gt 0 ]; then
   exit 1
 fi
 
+content_type_arm
 echo "[handle_errors-scope] OK — every bare emission is on the dated stand-down (expires"
 echo "  $STANDDOWN_EXPIRES, closed by $STANDDOWN_ROW). It is NOT quiet: the sites are named above."
 exit 0
