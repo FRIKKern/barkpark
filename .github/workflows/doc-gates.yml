@@ -173,6 +173,18 @@ on:
       # same shape: a ledger entry whose only other trigger, bp-graph-drift.yml, is
       # named "(advisory)".
       - "design/exemptions.json"
+      # task-d95c3e66b9177c8f: the design engagement's EXIT drift gate — the one
+      # thing in the repo that reads the archived agency handover and compares a
+      # canonical byte against the source it was copied from. Three globs, because
+      # the gate has three subjects and all three are already-existing files that
+      # would otherwise change without it running: the test itself (matched by no
+      # other glob here — doc-gates has no broad **/*.mjs trigger, which is how
+      # design/mirror-fence.test.mjs shipped unrun), and the agency handover, which
+      # is the gate's INPUT — an edit to the archive is exactly the silent
+      # re-baselining this gate exists to refuse. design/tokens.json and
+      # design/themes/** (the canonical side) already ride the globs above.
+      - "design/agency-provenance.test.mjs"
+      - "design/handover/ui-review-9/design/tokens.json"
       - "api/priv/static/assets/bp-graph.js"
       # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
       # Elixir consumer compile-time-reads it inside the cloud image build, which
@@ -549,6 +561,18 @@ on:
       # same shape: a ledger entry whose only other trigger, bp-graph-drift.yml, is
       # named "(advisory)".
       - "design/exemptions.json"
+      # task-d95c3e66b9177c8f: the design engagement's EXIT drift gate — the one
+      # thing in the repo that reads the archived agency handover and compares a
+      # canonical byte against the source it was copied from. Three globs, because
+      # the gate has three subjects and all three are already-existing files that
+      # would otherwise change without it running: the test itself (matched by no
+      # other glob here — doc-gates has no broad **/*.mjs trigger, which is how
+      # design/mirror-fence.test.mjs shipped unrun), and the agency handover, which
+      # is the gate's INPUT — an edit to the archive is exactly the silent
+      # re-baselining this gate exists to refuse. design/tokens.json and
+      # design/themes/** (the canonical side) already ride the globs above.
+      - "design/agency-provenance.test.mjs"
+      - "design/handover/ui-review-9/design/tokens.json"
       - "api/priv/static/assets/bp-graph.js"
       # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
       # Elixir consumer compile-time-reads it inside the cloud image build, which
@@ -1151,6 +1175,22 @@ jobs:
           # web arm runs in the web suite (this job is Node 20, which cannot
           # execute TypeScript) and the enrolment arm here reds if it is unhooked.
           node design/ladder-refusal-conformance.test.mjs
+
+          # task-d95c3e66b9177c8f (agency closeout): the EXIT drift gate. The
+          # design engagement is over and its package is archived at
+          # design/handover/ui-review-9/design/tokens.json, read by no gate at
+          # all. validate.mjs shape-gates cloudChrome and check.mjs Part F proves
+          # derive(theme) is self-consistent, so a retint of evergreen's accent or
+          # a revert of the fg4 legibility fix (light #76818f) is a GREEN PR under
+          # every existing gate while the provenance the exit package exists to
+          # preserve is gone. This compares the canonical bytes against the source
+          # they were copied from: five accent ramps through derive.mjs hslToHex,
+          # and every cloudChrome shell role. Both arms enrol by predicate and
+          # both carry controls that drive the same comparator over planted input.
+          # Proven able to fail on the real tree: retinting
+          # design/themes/evergreen.json modes.light.accent to "140 71.81% 29.22%"
+          # reds tests 1-2; walking cloudChrome.fg4.light to #8d96a5 reds 3-5.
+          node design/agency-provenance.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
