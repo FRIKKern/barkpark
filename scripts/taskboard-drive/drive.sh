@@ -156,11 +156,17 @@ TMX() { tmux -L "$SOCK" "$@"; }
 # truecolor branch for a "screen*" TERM, and terminal-features RGB keeps tmux
 # from downsampling the 38;2;r;g;b it stores and re-emits. Same bytes on every
 # host — the same reason -x/-y is pinned rather than inherited.
+# MEASURED: setting these through tmux's own options + `new-session -e` was NOT
+# enough on ubuntu-latest — the pane still came up Ascii. So the harness sets
+# them on the APP's command line with `env`, where nothing downstream can
+# reinterpret them, and terminal-features RGB only keeps tmux from downsampling
+# what it stores. BP_ENV is the launch prefix every new-session uses.
 pin_pane_color() {
   TMX set-option -g  default-terminal  screen-256color >/dev/null 2>&1 || true
   TMX set-option -ga terminal-features ",*:RGB"        >/dev/null 2>&1 || true
 }
-PANE_ENV=(-e COLORTERM=truecolor -e TERM_PROGRAM=tmux)
+PANE_ENV=(-e COLORTERM=truecolor -e TERM_PROGRAM=tmux -e TERM=screen-256color)
+BP_ENV="env TERM=screen-256color COLORTERM=truecolor TERM_PROGRAM=tmux"
 
 cleanup() {
   if [ "${BP_DRIVE_KEEP:-}" = "" ]; then
@@ -462,8 +468,8 @@ fi
 
 TMX kill-server 2>/dev/null || true
 pin_pane_color
-TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP tasks"
-TMX new-session -d "${PANE_ENV[@]}" -x 70 -y 24 -s "$NARROW" "$BP tasks"
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP_ENV $BP tasks"
+TMX new-session -d "${PANE_ENV[@]}" -x 70 -y 24 -s "$NARROW" "$BP_ENV $BP tasks"
 
 geo=$(TMX display -p -t "$WIDE" '#{window_width}x#{window_height}')
 if [ "$geo" = "130x40" ]; then ok "wide session geometry is 130x40 detached"; else bad "wide geometry: got $geo, want 130x40"; fi
@@ -863,7 +869,7 @@ else
 fi
 TMX kill-session -t "$WIDE"
 pin_pane_color
-TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP tasks"
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP_ENV $BP tasks"
 if wait_ready "$WIDE"; then
   HL=$(header_line "$WIDE")
   A2=$(arrow_col "$WIDE")
