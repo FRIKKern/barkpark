@@ -36,7 +36,7 @@ reply-body harness.
 
 ## Negative rail fixtures — the no-affordance path (wsc-bl-agent-detail-fixture-gaps)
 
-Three hand-written rails carry the REAL wire shapes that must expose **no**
+Two hand-written rails carry the REAL wire shapes that must expose **no**
 agent-detail affordance, so the rule is proven instead of code-traced. They are
 **not** generated mirrors — they are the shapes the Elixir folds actually write:
 
@@ -46,11 +46,13 @@ agent-detail affordance, so the rule is proven instead of code-traced. They are
 - `rail_background_no_workflow.json` — a background `agent` row with no workflow
   key, plus a background `local_workflow` row carrying the seeded-but-EMPTY
   envelope `seed_workflow_envelope/2` writes (`"workflow": []`, `"usage": null`).
-- `rail_codex_thin_workflow.json` — the harder negative: a codex entry that DOES
-  carry workflow nodes, so the strip paints and the phase level opens, but every
-  agent node is detail-less (no `promptPreview` / `lastToolName` /
-  `lastToolSummary` / `resultPreview`, `attempt` 0) — the `agentHasDetail` gate
-  must refuse the THIRD level.
+The harder negative — a codex entry that DOES carry workflow nodes but whose
+agent nodes are detail-less — is **not** a file here. It lives inline in
+`workflow_no_affordance_test.go` as `thinCodexRail`, because
+`api/test/barkpark/studio_chat_test.exs:2899` globs `*.json` in THIS directory
+and asserts every `workflow_agent` node carries `attempt == 1` — and `attempt > 0`
+is one of the five signals `agentHasDetail` reads. A committed mirror therefore
+can never hold a detail-less agent node.
 
 `workflow_no_affordance_test.go` drives them. Every negative arm is paired with a
 precondition (the fixture decoded to a non-empty rail with rows that would paint)

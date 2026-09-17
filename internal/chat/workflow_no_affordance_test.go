@@ -26,10 +26,15 @@ import (
 //     workflow key, and a background `local_workflow` row carrying the SEEDED
 //     BUT EMPTY envelope seed_workflow_envelope/2 writes (`"workflow": []`,
 //     `"usage": null`) — a well-formed envelope with nothing in it.
-//   - rail_codex_thin_workflow.json   — the harder negative: a codex entry that
-//     DOES carry workflow nodes, so the strip paints and the phase level opens,
-//     but every agent node is detail-less (no promptPreview / lastToolName /
-//     lastToolSummary / resultPreview, attempt 0) so the THIRD level must not.
+// The harder negative — a codex entry that DOES carry workflow nodes, so the
+// strip paints and the phase level opens, but whose agent nodes are detail-less
+// — lives INLINE below as thinCodexRail, NOT as a committed testdata file. It
+// cannot be one: api/test/barkpark/studio_chat_test.exs:2899 globs
+// "internal/chat/testdata/*.json" and asserts EVERY workflow_agent node in this
+// directory carries attempt == 1 (the D21/D25 no-fabricated-retry proof) — and
+// attempt > 0 is one of the five signals agentHasDetail reads, so a committed
+// mirror can NEVER hold a detail-less agent node. The shape is real wire either
+// way; only its storage moved.
 //
 // An absence is never caught by inspection, so every negative arm below is
 // paired with (a) a PRECONDITION that the path was actually reached and (b) a
@@ -39,6 +44,29 @@ var noAffordanceFixtures = []string{
 	"rail_codex_origin.json",
 	"rail_background_no_workflow.json",
 }
+
+// thinCodexRail is the detail-less workflow arm, held in Go source rather than
+// testdata for the reason stated above. Two workflow_agent nodes with NO
+// promptPreview / lastToolName / lastToolSummary / resultPreview and NO attempt
+// key — the "thin mid-persist frame" agentHasDetail's own doc comment names.
+const thinCodexRail = `{
+ "01JQ8TH3CODEXTHREADCCCC": {
+  "status": "running",
+  "seq": 3,
+  "row": {"task_type": "collab_agent_tool_call", "description": "Codex fleet - thin persist frame"},
+  "origin": "codex",
+  "usage": null,
+  "workflow": [
+   {"type": "workflow_phase", "index": 1, "title": "Survey"},
+   {"type": "workflow_agent", "index": 1, "label": "survey:rail", "phaseIndex": 1,
+    "phaseTitle": "Survey", "agentId": "cdx1a2b3c4d5e6f70", "agentType": "Explore",
+    "model": "gpt-5-codex", "state": "start", "startedAt": 1782767557221},
+   {"type": "workflow_agent", "index": 2, "label": "survey:keys", "phaseIndex": 1,
+    "phaseTitle": "Survey", "agentId": "cdx1a2b3c4d5e6f71", "agentType": "Explore",
+    "model": "gpt-5-codex", "state": "start", "startedAt": 1782767557231}
+  ]
+ }
+}`
 
 func railKeySet(entries map[string]railWireEntry) []string {
 	keys := make([]string, 0, len(entries))
@@ -55,8 +83,7 @@ func railKeySet(entries map[string]railWireEntry) []string {
 // filename or an unparseable fixture would make every "nothing rendered"
 // assertion below pass vacuously.
 func TestNoAffordanceFixturesAreReachable(t *testing.T) {
-	all := append(append([]string(nil), noAffordanceFixtures...), "rail_codex_thin_workflow.json")
-	for _, name := range all {
+	for _, name := range noAffordanceFixtures {
 		raw := loadRailFixture(t, name)
 		entries := decodeRailWire(raw)
 		if len(entries) == 0 {
@@ -188,7 +215,12 @@ func TestNoAffordanceFixturesCanProduceAnAffordance(t *testing.T) {
 // depth-1 Enter branch in keys.go and this test reds — the second Enter would
 // open an empty agent pane over rows with nothing to show.
 func TestThinCodexWorkflowOffersNoAgentDetail(t *testing.T) {
-	raw := loadRailFixture(t, "rail_codex_thin_workflow.json")
+	raw := json.RawMessage(thinCodexRail)
+	// PRECONDITION: the inline rail really decodes — a typo'd literal would make
+	// every "no affordance" assertion below pass for the wrong reason.
+	if n := len(decodeRailWire(raw)); n != 1 {
+		t.Fatalf("thin rail decoded %d entries, want 1 — the arm below would be vacuous", n)
+	}
 	wf := decodeWorkflow(raw)
 	if wf == nil {
 		t.Fatal("the thin fixture MUST still project a workflow — otherwise this test never reaches the agent gate")
@@ -236,13 +268,8 @@ func TestThinCodexWorkflowOffersNoAgentDetail(t *testing.T) {
 // open the third level. So the thin fixture is capable of an affordance — the
 // no-op is agentHasDetail's verdict, not an unreachable code path.
 func TestThinCodexWorkflowDrillsOnceOneAgentHasDetail(t *testing.T) {
-	path := filepath.Join("testdata", "rail_codex_thin_workflow.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
 	var rail map[string]map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &rail); err != nil {
+	if err := json.Unmarshal([]byte(thinCodexRail), &rail); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	for _, e := range rail {
