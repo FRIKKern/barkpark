@@ -20,6 +20,14 @@
     "STALE row for an on-PR workflow exactly as it reds on a MISSING row for an off-PR",
     "one. It did, which is how this row came out.",
     "",
+    "AND AGAIN, 2026-09-17: pipefail-sigpipe-scan.yml. Its row said a per-PR run would",
+    "re-scan the tree 'to re-derive an unchanged verdict'. The verdict was not unchanged.",
+    "Off the PR path it failed on FIFTEEN consecutive pushes to main (50 of its last 100",
+    "push runs red) with 'RATCHET BROKEN -- 104 finding(s) at confidence >= high, baseline",
+    "is 101': three new sites had landed through PRs that never ran it, and every red",
+    "named an author who had not written them. Back on the PR path, so the row is gone and",
+    "the guard reds on the stale row -- which is how it came out (task-4f360efc26a428f5).",
+    "",
     "THE POPULATION IS DERIVED, NEVER CURATED. A workflow belongs here iff it carries a",
     "`push:` arm and NO `pull_request:` arm -- i.e. it is off the PR path, so only the",
     "watcher can see its red. scripts/workflow-owner-check.sh recomputes that set from",
@@ -53,10 +61,6 @@
     "landed-mark.yml": {
       "owner": "gates",
       "why_off_pr": "records that a PR LANDED -- the event it reports does not exist until the merge commit does."
-    },
-    "pipefail-sigpipe-scan.yml": {
-      "owner": "gates",
-      "why_off_pr": "a whole-tree census of shell scripts; its subject is the tree, so a per-PR run re-scans ~700 files to re-derive an unchanged verdict."
     },
     "release-artifact.yml": {
       "owner": "cli",
