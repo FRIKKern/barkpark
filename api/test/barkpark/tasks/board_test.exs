@@ -300,9 +300,8 @@ defmodule Barkpark.Tasks.BoardTest do
 
       board = Board.snapshot(dataset: "production")
 
-      assert card = board.cards_by_id["twin-paired"],
-             "the published twin must be the row the board shows"
-
+      card = board.cards_by_id["twin-paired"]
+      assert card != nil, "the published twin must be the row the board shows"
       assert card.title == "Published twin"
 
       # The pair COLLAPSES to one card. `to_card/4` keys every card by the
@@ -322,9 +321,8 @@ defmodule Barkpark.Tasks.BoardTest do
       # `to_card/4` keys by the published id even for an unpaired draft, so the
       # key is the bare id; the point is that the ROW SURVIVES at all. A blanket
       # `drafts.` drop in canonical_twin/1 empties the board here.
-      assert card = board.cards_by_id["twin-solo"],
-             "an unpaired drafts. row must survive the collapse as itself"
-
+      card = board.cards_by_id["twin-solo"]
+      assert card != nil, "an unpaired drafts. row must survive the collapse as itself"
       assert card.title == "Solo draft"
     end
 
