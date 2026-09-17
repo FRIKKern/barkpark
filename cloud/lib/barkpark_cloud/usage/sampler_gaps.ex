@@ -6,11 +6,12 @@ defmodule BarkparkCloud.Usage.SamplerGaps do
   ## The mechanism this exists for
 
   `Oban.Plugins.Cron` (OSS, the one `cloud/config/config.exs` configures) is a
-  per-minute `Process.send_after(self(), :evaluate, interval_to_next_minute())`
-  loop inside a RUNNING node: on each evaluate it asks `Expression.now?/2` of
-  the wall clock it holds *right then* and inserts the matching jobs. It keeps
-  no cursor and never backfills. So a minute no node was up for is not a late
-  tick — it is a tick that never existed. `UsageSamplerWorker` runs
+  self-re-arming per-minute loop inside a RUNNING node — the PLUGIN's own clock,
+  in the dependency, not anything this app arms: on each evaluate it asks
+  `Expression.now?/2` of the wall clock it holds *right then* and inserts the
+  matching jobs, then schedules itself for the next minute boundary. It keeps no
+  cursor and never backfills. So a minute no node was up for is not a late tick
+  — it is a tick that never existed. `UsageSamplerWorker` runs
   `max_attempts: 1`, so the loss leaves **no row anywhere**: not `available`,
   not `retryable`, not `discarded`. The only trace is a hole in the
   `usage_samples` series, and a hole is indistinguishable by inspection from a
