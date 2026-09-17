@@ -127,6 +127,44 @@ SET_LINE = re.compile(r'^\s*set\s+([-+][^;#]*)')
 # `-e`. `sh` runs `sh -e {0}`. Only these opt OUT of errexit.
 SHELL_NO_E = ("bash {0}", "python", "pwsh", "powershell", "cmd")
 
+# ── THE SECOND SHAPE IN THIS FAMILY: THE UNREACHABLE REPORTER ───────────────
+# (task-1c8165ef0ada4fcd). There is no capture here at all, which is why the
+# rule above cannot see it:
+#
+#     bash scripts/check-doc-budgets.sh --selftest   # a TRIPWIRE. may exit 1.
+#     bash scripts/check-doc-budgets.sh              # <-- THE REPORTER
+#
+# Both bare, under `/usr/bin/bash -e {0}`. The tripwire's exit 1 kills the step
+# ON ITS OWN LINE, so the shipping gate below — the ONLY command that prints the
+# per-finding lines — never runs. The step's whole captured red is then the
+# tripwire's one constant sentence, which names nothing.
+#
+# That is not cosmetic: scripts/main-red-breaker.sh classifies a failing step by
+# whether its red NAMES what it found, and a constant sentence has no payload
+# slot. It routed `Doc budgets + anchors` to OPAQUE-RED / OWNERSHIP-UNDETERMINED
+# on every PR that inherited main's red (PR #19081, run 35253987928 — where the
+# breaker names this exact cause). An unattributable red is a red no lane can
+# act on, and the job is advisory, so nobody is forced to.
+#
+# THE PREDICATE, and it is a predicate and not a list: within ONE errexit-armed
+# run body, an UNPROTECTED `<interp> <script> --selftest` line followed LATER by
+# an UNPROTECTED line that is the SAME `<interp> <script>` with no flags. The
+# second is the reporter; the first can abort before it. No workflow, job, step
+# or script name appears here — a step added tomorrow is classified the first
+# time it is written.
+#
+# FIX: `st_rc=0; <cmd> --selftest || st_rc=$?` / `gate_rc=0; <cmd> || gate_rc=$?`
+# then adjudicate. Both run, the log carries both, and the step still fails when
+# either does. NOT `|| true` and NOT `continue-on-error` — those make a real
+# failure green, which is the one outcome these steps must still red on.
+PREFLIGHT = re.compile(
+    r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*'
+    r'(?P<cmd>(?:bash|sh|node|python3?)\s+"?[^\s"]+"?)'
+    r'\s+--selftest\s*$')
+BARE_CMD = re.compile(
+    r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*'
+    r'(?P<cmd>(?:bash|sh|node|python3?)\s+"?[^\s"]+"?)\s*$')
+
 
 def errexit_off(flagstr):
     """Does this `set` word turn errexit OFF (True) / ON (False) / neither (None)?"""
@@ -170,7 +208,9 @@ def protected(cmd):
 
 
 bad = []
+unreachable = []
 captures_seen = 0
+selftest_lines_seen = 0
 steps_seen = 0
 
 for path in files:
@@ -215,6 +255,37 @@ for path in files:
                 label += ' (name: "%s")' % step["name"]
 
             e_on = True       # the runner hands you `bash -e`. This is the premise.
+            # UNREACHABLE-REPORTER pass. Walked first and separately because it
+            # is about the RELATION between two lines, not about one line.
+            exec_lines = []
+            e2 = True
+            for lineno, line in enumerate(body.splitlines(), 1):
+                m2 = SET_LINE.match(line)
+                if m2:
+                    v2 = errexit_off(m2.group(1))
+                    if v2 is not None:
+                        e2 = not v2
+                st2 = line.strip()
+                if not st2 or st2.startswith("#"):
+                    continue
+                exec_lines.append((lineno, st2, e2))
+            for i, (ln_pre, txt_pre, e_pre) in enumerate(exec_lines):
+                mp = PREFLIGHT.match(txt_pre)
+                if not mp:
+                    continue
+                # Counted BEFORE the protection test: this is the COVERAGE
+                # denominator (did the scan reach any preflight at all?), not the
+                # finding count. Counting only unprotected ones would make a tree
+                # where every site is already FIXED look like a scan that never
+                # ran — the vacuous green this file exists to refuse.
+                selftest_lines_seen += 1
+                if not e_pre or protected(txt_pre):
+                    continue
+                for ln_rep, txt_rep, _e_rep in exec_lines[i + 1:]:
+                    mb = BARE_CMD.match(txt_rep)
+                    if mb and mb.group("cmd") == mp.group("cmd") and not protected(txt_rep):
+                        unreachable.append((label, ln_pre, txt_pre, ln_rep, txt_rep))
+                        break
             prev = ""
             for lineno, line in enumerate(body.splitlines(), 1):
                 m = SET_LINE.match(line)
@@ -230,6 +301,21 @@ for path in files:
                 if stripped and not stripped.startswith("#"):
                     prev = line
 
+if unreachable:
+    print("workflow-errexit-capture-check: %d UNREACHABLE REPORTER(s) — a tripwire that can "
+          "abort the step before the gate that names the findings" % len(unreachable))
+    print()
+    for label, ln_pre, txt_pre, ln_rep, txt_rep in unreachable:
+        print("  %s" % label)
+        print("      run-body line %d: %s" % (ln_pre, txt_pre))
+        print("      run-body line %d: %s   <-- THE REPORTER" % (ln_rep, txt_rep))
+        print("      -e kills the step on the first line, so the second never runs and its")
+        print("      per-finding lines never reach the log. main-red-breaker.sh then reads")
+        print("      this step as OPAQUE-RED / OWNERSHIP-UNDETERMINED.")
+        print("      FIX: `st_rc=0; <cmd> --selftest || st_rc=$?` then")
+        print("           `gate_rc=0; <cmd> || gate_rc=$?` then adjudicate both.")
+        print()
+
 if bad:
     print("workflow-errexit-capture-check: %d status capture(s) reached with errexit ARMED" % len(bad))
     print()
@@ -244,16 +330,25 @@ if bad:
     print("TERMINAL: exit 1")
     sys.exit(1)
 
-if captures_seen == 0:
+if unreachable:
+    print("scanned %d run-step(s), %d --selftest preflight(s)"
+          % (steps_seen, selftest_lines_seen))
+    print("TERMINAL: exit 1")
+    sys.exit(1)
+
+if captures_seen == 0 and selftest_lines_seen == 0:
     # THE COVERAGE FLOOR. This repo has dozens of status captures; finding zero
     # means the scan did not reach the tree, and reporting that as a pass is the
     # vacuous green this whole file exists to make impossible.
     sys.stderr.write("workflow-errexit-capture-check: scanned %d run-step(s) and found ZERO "
-                     "status captures — CANNOT MEASURE (rc 2)\n" % steps_seen)
+                     "status captures AND ZERO `--selftest` preflights — CANNOT MEASURE (rc 2)\n"
+                     % steps_seen)
     sys.exit(2)
 
 print("workflow-errexit-capture-check: OK — %d status capture(s) across %d run-step(s), "
-      "every one either under `set +e` or guarded by `||`" % (captures_seen, steps_seen))
+      "every one either under `set +e` or guarded by `||`; and no unreachable reporter "
+      "(%d `--selftest` preflight(s) walked, none of them shadowing a bare re-run of "
+      "the same command)" % (captures_seen, steps_seen, selftest_lines_seen))
 print("TERMINAL: exit 0")
 sys.exit(0)
 PY
@@ -457,6 +552,114 @@ S
     _no "B4 new shape at rc 4" "expected exit 4 with the TERMINAL line; got rc $n_rc: $n_out"
   fi
   unset SUT_DIR
+
+  # ── ARM GROUP C: THE UNREACHABLE REPORTER (task-1c8165ef0ada4fcd) ────────
+  # C1/C2 are the scan pair. C3/C4 are the BEHAVIOUR pair and they are the ones
+  # that matter: they run both step bodies under a REAL `bash -e` against a real
+  # two-mode script and read what actually reached stdout. A scan arm proves the
+  # regex matches; only C3/C4 prove the log gains the per-finding line.
+  cat > "$d/unreach.yml" <<'Y'
+name: unreach
+on: [push]
+jobs:
+  doc-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Doc byte budgets (fails this job)
+        run: |
+          bash scripts/check-doc-budgets.sh --selftest
+          bash scripts/check-doc-budgets.sh
+Y
+  out="$(run_check "$d/unreach.yml" 2>&1)"; rc=$?
+  if [ "$rc" = 1 ] && case "$out" in *"UNREACHABLE REPORTER"*"THE REPORTER"*) true;; *) false;; esac; then
+    _ok "C1 revert arm" "the shipped doc-gates s1 body reds (rc 1) and names the reporter line"
+  else
+    _no "C1 revert arm" "expected rc 1 naming the reporter, got rc $rc: $out"
+  fi
+
+  cat > "$d/unreach-fixed.yml" <<'Y'
+name: unreach-fixed
+on: [push]
+jobs:
+  doc-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Doc byte budgets (fails this job)
+        run: |
+          st_rc=0; bash scripts/check-doc-budgets.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-doc-budgets.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+      # A second step carrying a BARE preflight, so this fixture clears the
+      # scan-wide coverage floor. Without it the file holds zero captures and
+      # zero bare preflights, the checker correctly says CANNOT MEASURE, and a
+      # rc-0 assertion here would be reading a floor instead of a verdict.
+      - name: solo tripwire
+        run: |
+          bash scripts/docs-anchors-check.sh --selftest
+Y
+  out="$(run_check "$d/unreach-fixed.yml" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && _ok "C2 quiet arm" "the same two commands, both guarded by \`||\`, are clean (rc 0)" \
+                || _no "C2 quiet arm" "expected rc 0, got rc $rc: $out"
+
+  # C2b — THE QUIET ARM MUST NOT BE QUIET FOR THE WRONG REASON. A single
+  # `--selftest` step with no bare re-run below it (the many tripwire-only steps
+  # in this repo) must also pass, or C2 would be indistinguishable from a rule
+  # that fires on `--selftest` alone.
+  cat > "$d/unreach-solo.yml" <<'Y'
+name: unreach-solo
+on: [push]
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - name: tripwire only
+        run: |
+          bash scripts/check-doc-budgets.sh --selftest
+Y
+  out="$(run_check "$d/unreach-solo.yml" 2>&1)"; rc=$?
+  [ "$rc" = 0 ] && _ok "C2b solo tripwire" "a --selftest with no bare re-run below it is NOT a finding (rc 0)" \
+                || _no "C2b solo tripwire" "expected rc 0, got rc $rc: $out"
+
+  # C3/C4 — BEHAVIOUR, under a real `bash -e`. The stand-in is a two-mode script
+  # exactly like a doc gate: `--selftest` exits FAKE_ST, the bare run PRINTS THE
+  # FINDING and exits FAKE_GATE.
+  cat > "$d/gate.sh" <<'Y'
+if [ "${1:-}" = "--selftest" ]; then
+  echo "gate --selftest: FAILED — a constant sentence that names nothing"
+  exit "${FAKE_ST:-0}"
+fi
+echo "FAIL: docs/cards/js-sdk.md is 2605B, cap is 2400B"
+exit "${FAKE_GATE:-0}"
+Y
+  printf 'bash %s/gate.sh --selftest\nbash %s/gate.sh\n' "$d" "$d" > "$d/old-step.sh"
+  printf 'st_rc=0; bash %s/gate.sh --selftest || st_rc=$?\ngate_rc=0; bash %s/gate.sh || gate_rc=$?\necho "selftest exit=$st_rc  gate exit=$gate_rc"\nif [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi\n' "$d" "$d" > "$d/new-step.sh"
+
+  local o_out o_rc n_out n_rc
+  o_out="$(FAKE_ST=1 FAKE_GATE=1 bash -e "$d/old-step.sh" 2>&1)"; o_rc=$?
+  if [ "$o_rc" = 1 ] && ! printf '%s' "$o_out" | grep -q '^FAIL: docs/cards/js-sdk.md'; then
+    _ok "C3 old shape, tripwire red" "exits 1 and the gate's per-file FAIL line NEVER reaches stdout"
+  else
+    _no "C3 old shape, tripwire red" "expected exit 1 with no per-file FAIL line; got rc $o_rc: $o_out"
+  fi
+  n_out="$(FAKE_ST=1 FAKE_GATE=1 bash -e "$d/new-step.sh" 2>&1)"; n_rc=$?
+  if [ "$n_rc" = 1 ] && printf '%s' "$n_out" | grep -q '^FAIL: docs/cards/js-sdk.md'; then
+    _ok "C4 new shape, tripwire red" "still exits 1, AND the per-file FAIL line now reaches stdout"
+  else
+    _no "C4 new shape, tripwire red" "expected exit 1 WITH the per-file FAIL line; got rc $n_rc: $n_out"
+  fi
+  # C5 — THE FIX MUST NOT SWALLOW A REAL FAILURE. Fails if someone "fixes" a
+  # step with `|| true` or continue-on-error: a green gate + red tripwire, and a
+  # red gate + green tripwire, must both still red.
+  n_out="$(FAKE_ST=0 FAKE_GATE=1 bash -e "$d/new-step.sh" 2>&1)"; n_rc=$?
+  [ "$n_rc" = 1 ] && _ok "C5 gate-only red" "a clean tripwire + failing gate still exits 1" \
+                  || _no "C5 gate-only red" "expected exit 1, got rc $n_rc: $n_out"
+  n_out="$(FAKE_ST=1 FAKE_GATE=0 bash -e "$d/new-step.sh" 2>&1)"; n_rc=$?
+  [ "$n_rc" = 1 ] && _ok "C6 tripwire-only red" "a failing tripwire + clean gate still exits 1" \
+                  || _no "C6 tripwire-only red" "expected exit 1, got rc $n_rc: $n_out"
+  n_out="$(FAKE_ST=0 FAKE_GATE=0 bash -e "$d/new-step.sh" 2>&1)"; n_rc=$?
+  [ "$n_rc" = 0 ] && _ok "C7 all green" "both clean still exits 0 — the fix does not manufacture a red" \
+                  || _no "C7 all green" "expected exit 0, got rc $n_rc: $n_out"
 
   local total=$((_pass + _fail))
   if [ "$total" -lt 8 ]; then
