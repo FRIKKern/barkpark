@@ -78,6 +78,7 @@
 #   10 missing site dir       13 STAGE failed (no standalone/)
 #   14 HEALTH failed          15 gave up waiting for lock
 #   16 SWITCH failed          21 rollback: no_previous
+#   17 prebuilt node ABI mismatch (refused BEFORE STAGE; nothing was staged)
 #   22 rollback: not_supported  23 rollback: lock held (deploy running)
 #   24 rollback failed         25 teardown: route still live (disarm rejected)
 #
@@ -104,6 +105,59 @@
 #   CONTENT_REV        dataset revision read at build (baked as bp-content-rev).
 #   BARKPARK_CADDYFILE Caddyfile to arm/flip. Default /etc/caddy/Caddyfile
 #   BARKPARK_NODE_LINK stable node symlink. Default /usr/local/bin/barkpark-node
+#   PREBUILT_DIR       optional. A tree of ALREADY-BUILT node bytes (a Next
+#                      `output:'standalone'` release root: server.js at its top,
+#                      .next/static and public/ already folded in) that the box's
+#                      Elixir side extracted from an uploaded artifact and
+#                      validated (path/symlink/size/junk refusals live there —
+#                      this script never unpacks a tarball).  Set => PLAN_MODE=prebuilt:
+#                      NO npm runs on this box, and STAGE copies THIS tree
+#                      verbatim instead of $SITE_SRC/.next/standalone.
+#   PREBUILT_SHA256    required WITH PREBUILT_DIR.  The 64-hex digest the CP
+#                      verified for the uploaded artifact.  An IDENTITY record,
+#                      not a re-hash of the tree: recorded in
+#                      releases/<build_id>/.bp-prebuilt-sha256 and compared on a
+#                      retry, so "which bytes are staged" is answerable without
+#                      trusting dir-existence.
+#
+#   THE NODE ABI DECLARATION — WIRE SHAPE, STATED ONCE, HERE.
+#   A node release is not a directory of files: it is a PROCESS, and a traced
+#   node_modules can carry compiled native addons (.node) bound to a specific
+#   NODE_MODULE_VERSION and a specific libc.  Bytes built on node 22/glibc that
+#   boot on node 20/musl do not 404 — they abort at require() time.  The static
+#   engine has no such failure mode, which is why this half is NOT in the static
+#   sibling.  Caught only at HEALTH, it costs a full boot + gate AND leaves the
+#   release marked health-failed with no source on this box to rebuild from
+#   (purge_failed_release_node keeps a live/previous target's bytes), so the
+#   only way out is another upload.  So the UPLOADER declares the ABI it built
+#   against and this engine refuses a mismatch BEFORE STAGE.
+#
+#   The declaration is a file at the ROOT of the uploaded tree:
+#
+#       <PREBUILT_DIR>/.bp-node-abi
+#
+#   It is a KEY=VALUE text file, LF-separated, at most 16 lines.  Exactly two
+#   keys are read; any other line is ignored (forward compatibility — a packer
+#   that adds a key must not brick an older box):
+#
+#       node_major=<integer>        the node MAJOR the addons were built against
+#       libc=glibc|musl|unknown     the C library they were linked against
+#
+#   Both keys are REQUIRED.  A PREBUILT_DIR with no .bp-node-abi, or one whose
+#   node_major is not an integer, is REFUSED (exit 17) — an undeclared ABI is
+#   not a passing ABI, or every packer that forgets the file silently reopens
+#   the hole this exists to close.
+#
+#   MATCHING is deliberately asymmetric:
+#     * node_major MUST equal this box's node major.  A mismatch is exit 17.
+#     * libc mismatch is exit 17 ONLY when BOTH sides name a real libc.  Either
+#       side saying `unknown` is UNDECIDED, and an undecided libc does not
+#       refuse — the box's own probe is a heuristic (ldd), and a heuristic that
+#       cannot tell must not manufacture a refusal out of its own ignorance.
+#       The node_major half still binds, so the arm is never vacuous.
+#   BARKPARK_NODE_LIBC  override for the box's libc when the ldd probe cannot
+#                      tell (and the selftest's specimen driver).  glibc|musl|
+#                      unknown.  Default: probed.
 #   BARKPARK_SITE_BASEPATH  set to 1 for a site whose framework BAKES a basePath
 #                      of `/sites/<slug>` at build (multi-route Next apps — the
 #                      search-starter — whose links/RSC fetches are root-absolute
@@ -150,6 +204,31 @@ HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
 RETAIN="${BARKPARK_SITE_RETAIN:-5}"
 HEALTH_FAIL_MARK=".bp-health-failed"
+# Dropped inside a release dir STAGED FROM UPLOADED BYTES (PLAN_MODE=prebuilt),
+# carrying the digest the CP verified for that artifact.  SAME FILENAME AND SAME
+# MEANING as the static engine's (deploy/site-deploy.sh) — one name, one meaning,
+# across both runtime targets.  It is the only on-box record that these bytes did
+# not come from this box's source tree, and two decisions read its PRESENCE:
+# PLAN refuses to rebuild such a release from the provisioned template (that
+# rebuild passes HEALTH on genuine markers and boots the WRONG bytes), and
+# purge_failed_release_node refuses to delete it into one.
+PREBUILT_MARK=".bp-prebuilt-sha256"
+# The uploader's node ABI declaration, at the root of the uploaded tree AND (via
+# `cp -a`) inside the staged release, where it is the receipt of what the bytes
+# were built for.  Wire shape: the header block, stated once.
+NODE_ABI_MARK=".bp-node-abi"
+PREBUILT_DIR="${PREBUILT_DIR:-}"
+PREBUILT_SHA256="${PREBUILT_SHA256:-}"
+# Tri-state PLAN (mirrors the static engine's D88/D89 shape).  ALWAYS assigned
+# before it is read — this file runs under `set -u` and an unset PLAN_MODE would
+# abort the deploy with `unbound variable` on a path no test drives.
+PLAN_MODE=build
+# Narration + comparison values the prebuilt arm fills in.  Declared HERE, empty,
+# for the same reason PLAN_MODE is: `set -u` turns a read on an arm that did not
+# assign them into an aborted deploy, and the arms that read them are not the
+# arms that write them.
+PREBUILT_SHORT=""; PREBUILT_SIZE=""; PB_ABI_MAJOR=""; PB_ABI_LIBC=""
+STAGE_SRC=""; STAGE_WHAT=""
 # basePath mode (charter D6): a framework that bakes basePath=/sites/<slug> serves
 # EVERY route under that prefix, including on the raw node port — so Caddy must
 # NOT strip the prefix (arm a `handle`, not `handle_path`) and the health probe
@@ -815,6 +894,16 @@ purge_failed_release_node() { # <build_id>
     log "HEALTH: release $bid is a live/rollback target — keeping its bytes, marking it health-failed (a redeploy REBUILDS it)"
     return 0
   fi
+  # A PREBUILT release has NO source on this box.  Purging it drops the box into
+  # a state where a redeploy of the same build_id REBUILDS from the provisioned
+  # template: genuine markers, HEALTH green, WRONG bytes booted.  Keep the bytes
+  # and mark them instead — PLAN's prebuilt health-failed arm then fails closed
+  # and says the only real fix out loud: re-upload.
+  if [ -f "$RELEASES/$bid/$PREBUILT_MARK" ]; then
+    : > "$RELEASES/$bid/$HEALTH_FAIL_MARK" 2>/dev/null || true
+    log "HEALTH: release $bid was staged from UPLOADED prebuilt bytes — this box has no source to rebuild it from, so its bytes are KEPT and marked health-failed: re-upload required (a template rebuild would pass HEALTH on genuine markers and boot the WRONG bytes)"
+    return 0
+  fi
   rm -rf "${RELEASES:?}/$bid"
   log "HEALTH: purged releases/$bid — a redeploy of this build_id rebuilds from source instead of re-gating broken bytes"
 }
@@ -868,6 +957,43 @@ place_node() { # <src node binary>
     mv -f "$NODE_LINK.tmp.$$" "$NODE_LINK" 2>/dev/null || { rm -f "$NODE_LINK.tmp.$$"; return 1; }
   fi
   return 0
+}
+
+# ---- NODE ABI (prebuilt) ---------------------------------------------------
+# The BOX half of the ABI comparison.  Both probes answer on stdout and NEVER
+# fail the script: an unreadable box is `unknown`, and the matcher decides what
+# an unknown means (node_major unknown REFUSES — we cannot certify bytes against
+# a box we cannot name; libc unknown is undecided, see the header).
+box_node_major() {
+  local nb="" v=""
+  if [ -x "$NODE_LINK" ]; then nb="$NODE_LINK"; else nb="$(command -v node 2>/dev/null || true)"; fi
+  [ -n "$nb" ] || { printf 'unknown'; return 0; }
+  v="$("$nb" -v 2>/dev/null || true)"            # v22.11.0
+  case "$v" in
+    v[0-9]*) printf '%s' "${v#v}" | cut -d. -f1 ;;
+    *)       printf 'unknown' ;;
+  esac
+}
+# ldd is a heuristic, deliberately: there is no portable "what libc am I" call.
+# BARKPARK_NODE_LIBC overrides it for a box whose probe cannot tell.
+box_node_libc() {
+  local out=""
+  if [ -n "${BARKPARK_NODE_LIBC:-}" ]; then printf '%s' "$BARKPARK_NODE_LIBC"; return 0; fi
+  out="$(ldd --version 2>&1 || true)"
+  case "$out" in
+    *musl*)                printf 'musl'  ;;
+    *"GNU libc"*|*GLIBC*|*"GNU C Library"*) printf 'glibc' ;;
+    *)                     printf 'unknown' ;;
+  esac
+}
+# Read ONE key out of a .bp-node-abi declaration.  Last assignment wins, unknown
+# keys are ignored (forward compatibility), and the file is read at most 16 lines
+# deep so a hostile artifact cannot make this a memory event.  Deliberately NOT
+# `grep … | head -1`: a pipeline whose head exits early returns 141 under
+# pipefail and this engine sets pipefail at the top.
+abi_decl_value() { # <abi-file> <key> -> value or ""
+  [ -f "$1" ] || return 0
+  awk -v k="$2" 'NR<=16 { i=index($0,"="); if (i>0 && substr($0,1,i-1)==k) v=substr($0,i+1) } END { if (v!="") print v }' "$1" 2>/dev/null | tr -d '\r'
 }
 
 ensure_node_link() {
@@ -3556,7 +3682,12 @@ if [ "$MODE" = rollback ]; then
   read -r p_slot p_port p_build < "$ROOT/.previous"
   if [ -z "$p_build" ] || [ ! -d "$RELEASES/$p_build" ]; then log "previous release '$p_build' is gone (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21; fi
   if [ -f "$RELEASES/$p_build/$HEALTH_FAIL_MARK" ]; then
-    log "previous release '$p_build' is marked health-failed — refusing to serve it (no_previous)"; rb_mark "rollback refused: (no_previous)"; exit 21
+    if [ -f "$RELEASES/$p_build/$PREBUILT_MARK" ]; then
+      log "previous release '$p_build' FAILED its health gate and is marked broken — refusing to serve it (no_previous). It was staged from UPLOADED prebuilt bytes and this box has no source for it: RE-UPLOAD the artifact for build '$p_build' and redeploy."
+    else
+      log "previous release '$p_build' is marked health-failed — refusing to serve it (no_previous)"
+    fi
+    rb_mark "rollback refused: (no_previous)"; exit 21
   fi
   if [ "$p_slot" = "$cur_slot" ]; then log "rollback: previous slot == current ($cur_slot) — nothing to do"; rb_mark "ROLLED BACK: $SITE_SLUG now on slot $cur_slot ($(read_slot_build "$cur_slot"))"; rb_mark "TARGET_BUILD=$(read_slot_build "$cur_slot")"; exit 0; fi
 
@@ -3745,35 +3876,123 @@ TARGET_PORT="$(slot_port "$TARGET_SLOT")"
 # ---- PLAN ------------------------------------------------------------------
 # Live = the process on the ACTIVE Caddy-upstream slot serves this build_id.
 emit PLAN started
+RELDIR="$RELEASES/$BUILD_ID"
 if [ -n "$CUR_SLOT" ] && [ "$(read_slot_build "$CUR_SLOT")" = "$BUILD_ID" ] && slot_running "$CUR_SLOT"; then
+  # THE NO-OP IS DIGEST-AWARE FOR UPLOADED BYTES (the static engine's shape).
+  # build_id does NOT determine prebuilt bytes: the same id can be re-uploaded
+  # carrying a DIFFERENT artifact, and a blind no-op would report success over
+  # bytes nobody just uploaded while the box keeps serving the old ones.
+  if [ -n "$PREBUILT_DIR" ] && [ "$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)" != "$PREBUILT_SHA256" ]; then
+    DETAIL="build $BUILD_ID is already LIVE on slot $CUR_SLOT carrying prebuilt '$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || echo '<none>')', but this upload declares ${PREBUILT_SHA256:0:12} — refusing to report a no-op over bytes that are not the ones uploaded; mint a NEW deployment for this artifact and redeploy"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
   log "PLAN: build_id $BUILD_ID already live on slot $CUR_SLOT for '$SITE_SLUG' — nothing to do"
   emit PLAN noop "build $BUILD_ID is already live on slot $CUR_SLOT"
   for s in BUILD STAGE HEALTH SWITCH RETIRE; do emit "$s" skipped "build $BUILD_ID is already live"; done
   exit 0
 fi
-RELDIR="$RELEASES/$BUILD_ID"
-if [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+# PLAN is tri-state.  ORDER IS LOAD-BEARING (charter D88/D89, the static engine's
+# reasoning verbatim): the PREBUILT arm is tested FIRST, above the already-staged
+# arm and above the health-failed arm.  Below the already-staged gate, a
+# RE-UPLOAD of a build_id whose release dir happens to exist would exit 0 having
+# re-gated and flipped to the STALE tree — the box would boot bytes nobody
+# uploaded and report success.  "Rebuild from source" is not a move a prebuilt
+# site has, so neither arm below may claim this run.
+if [ -n "$PREBUILT_DIR" ]; then
+  PLAN_MODE=prebuilt
+  if ! printf '%s' "$PREBUILT_SHA256" | grep -qE '^[0-9a-f]{64}$'; then
+    DETAIL="PREBUILT_DIR is set but PREBUILT_SHA256 is '${PREBUILT_SHA256:-<missing>}' (want 64 lowercase hex) — refusing to stage bytes this box cannot name; the caller must pass the digest it verified for the artifact"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  if [ ! -d "$PREBUILT_DIR" ] || [ ! -f "$PREBUILT_DIR/server.js" ]; then
+    DETAIL="PREBUILT_DIR '$PREBUILT_DIR' is not a directory with a server.js at its top — a node release root IS the Next standalone tree (server.js, traced node_modules, .next/static, public); check the ingest step ran, named this dir, and that the artifact was packed from .next/standalone and not from the repo root"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+  fi
+  # ---- THE NODE ABI REFUSAL — BEFORE STAGE, NEVER AT HEALTH ----------------
+  # Wire shape: the header block.  This is the whole point of the node half of
+  # the prebuilt arm: a native-addon ABI mismatch does not 404, it aborts the
+  # process at require() time, and the price of finding that out at HEALTH is a
+  # wasted boot AND a release marked health-failed that this box has no source
+  # to rebuild from.  So: refuse here, with NOTHING staged and NO slot booted.
+  PB_ABI_FILE="$PREBUILT_DIR/$NODE_ABI_MARK"
+  if [ ! -f "$PB_ABI_FILE" ]; then
+    DETAIL="uploaded tree carries no $NODE_ABI_MARK — a node artifact must DECLARE the ABI its native addons were built against (node_major=<int> and libc=glibc|musl|unknown, one per line, at the root of the packed tree). An undeclared ABI is not a passing ABI: a mismatched .node addon aborts at require() and would be caught only after a wasted boot, on a release this box has no source to rebuild. Re-pack the artifact with the declaration"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  PB_ABI_MAJOR="$(abi_decl_value "$PB_ABI_FILE" node_major)"
+  PB_ABI_LIBC="$(abi_decl_value "$PB_ABI_FILE" libc)"
+  BOX_ABI_MAJOR="$(box_node_major)"
+  BOX_ABI_LIBC="$(box_node_libc)"
+  if ! printf '%s' "$PB_ABI_MAJOR" | grep -qE '^[0-9]{1,3}$'; then
+    DETAIL="$NODE_ABI_MARK declares node_major='${PB_ABI_MAJOR:-<missing>}' (want a bare integer, e.g. node_major=22) — refusing bytes whose target runtime this box cannot read; fix the packer's declaration"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  if ! printf '%s' "$BOX_ABI_MAJOR" | grep -qE '^[0-9]{1,3}$'; then
+    DETAIL="this box cannot name its own node major (probed '$BOX_ABI_MAJOR' via ${NODE_LINK} / PATH node) while the artifact declares node_major=$PB_ABI_MAJOR — refusing to certify uploaded native addons against a runtime nobody can name; install node (or fix BARKPARK_NODE_LINK) and redeploy"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  if [ "$PB_ABI_MAJOR" != "$BOX_ABI_MAJOR" ]; then
+    DETAIL="node ABI mismatch: the artifact declares node_major=$PB_ABI_MAJOR, this box runs node major $BOX_ABI_MAJOR — a traced node_modules carrying a native addon built for one NODE_MODULE_VERSION aborts at require() on the other, so NOTHING was staged and no slot was booted (refused BEFORE STAGE, deliberately: at HEALTH this would cost a boot and leave a health-failed release with no source on this box). Rebuild the artifact on node $BOX_ABI_MAJOR and re-upload"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  # libc: a refusal only when BOTH sides name a real libc.  An `unknown` on
+  # either side is UNDECIDED, and an undecided probe must not manufacture a
+  # refusal — the node_major half above already binds, so this is never vacuous.
+  if [ -n "$PB_ABI_LIBC" ] && [ "$PB_ABI_LIBC" != unknown ] && [ "$BOX_ABI_LIBC" != unknown ] && [ "$PB_ABI_LIBC" != "$BOX_ABI_LIBC" ]; then
+    DETAIL="node ABI mismatch: the artifact declares libc=$PB_ABI_LIBC, this box is $BOX_ABI_LIBC — a native addon linked against one C library does not load against the other, so NOTHING was staged and no slot was booted. Rebuild the artifact on a $BOX_ABI_LIBC host and re-upload"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  if [ -z "$PB_ABI_LIBC" ]; then
+    DETAIL="$NODE_ABI_MARK declares no libc= line — both keys are required (node_major and libc); a packer that omits one silently reopens the hole this refusal exists to close. Use libc=unknown only when the packer genuinely cannot tell"
+    log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
+  fi
+  PREBUILT_SHORT="${PREBUILT_SHA256:0:12}"
+  PREBUILT_SIZE="$(du -sh "$PREBUILT_DIR" 2>/dev/null | cut -f1 || echo '?')"
+  # RE-VERIFY on a retry instead of leaning on dir-existence: a dir that is there
+  # says NOTHING about WHICH bytes are in it.  Either way the tree is RE-STAGED.
+  if [ -f "$RELDIR/$PREBUILT_MARK" ]; then
+    staged_sha="$(cat "$RELDIR/$PREBUILT_MARK" 2>/dev/null || true)"
+    if [ "$staged_sha" = "$PREBUILT_SHA256" ]; then
+      log "PLAN: releases/$BUILD_ID already carries prebuilt $PREBUILT_SHORT — re-staging the uploaded bytes anyway (dir-existence is not a proof of which bytes are staged)"
+    else
+      log "PLAN: releases/$BUILD_ID carries prebuilt '${staged_sha:-<none>}' but this upload is $PREBUILT_SHORT — REPLACING the staged tree (never re-gating the stale one)"
+    fi
+  fi
+  log "PLAN: release $BUILD_ID ships UPLOADED prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT, node $PB_ABI_MAJOR/$PB_ABI_LIBC == box $BOX_ABI_MAJOR/$BOX_ABI_LIBC) — no build will run on this box"
+elif [ -f "$RELDIR/$PREBUILT_MARK" ] && [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+  # Prebuilt bytes that failed HEALTH, and no artifact on THIS run.  The arms
+  # below would rebuild from the provisioned template: genuine markers, HEALTH
+  # green, WRONG bytes booted.  Fail closed — the only real fix is another upload.
+  DETAIL="release $BUILD_ID was staged from UPLOADED prebuilt bytes and FAILED health — this box has no source for it, and a rebuild from the provisioned template would pass HEALTH on genuine markers and boot the WRONG bytes; RE-UPLOAD the artifact for this build_id and redeploy"
+  log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
+elif [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
   log "PLAN: release $BUILD_ID is marked health-failed — rebuilding from source"
-  SKIP_BUILD=0
+  PLAN_MODE=build
 elif [ -d "$RELDIR" ] && [ -f "$RELDIR/server.js" ]; then
   log "PLAN: release $BUILD_ID already staged — re-gating on slot $TARGET_SLOT, skipping BUILD/STAGE"
-  SKIP_BUILD=1
+  PLAN_MODE=staged
 else
-  SKIP_BUILD=0
+  PLAN_MODE=build
 fi
 log "PLAN: deploy '$SITE_SLUG' build $BUILD_ID onto slot $TARGET_SLOT :$TARGET_PORT (live now: ${CUR_SLOT:-none})"
-if [ "$SKIP_BUILD" = 1 ]; then
-  emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped"
-else
-  emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID for slot $TARGET_SLOT"
-fi
+case "$PLAN_MODE" in
+  staged)   emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped" ;;
+  prebuilt) emit PLAN ok "staging uploaded prebuilt bytes for build $BUILD_ID (sha256 $PREBUILT_SHORT) — BUILD will be skipped, STAGE will run" ;;
+  *)        emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID for slot $TARGET_SLOT" ;;
+esac
 
 # ---- BUILD -----------------------------------------------------------------
 # build_failure_reason() (the `BUILD failed` detail's producer) lives in
 # lib/site-deploy-common.sh, sourced above — ONE copy, shared with the static
 # engine, which is the only way a repair to it reaches BOTH runtime targets.
 
-if [ "$SKIP_BUILD" = 0 ]; then
+if [ "$PLAN_MODE" != staged ]; then
+ if [ "$PLAN_MODE" = prebuilt ]; then
+  # NO npm ON THIS BOX.  BUILD is `skipped`, not `ok`: nothing was built here,
+  # and a stage-watching orchestrator must be able to tell the two apart.
+  log "BUILD: skipped — release $BUILD_ID ships UPLOADED prebuilt bytes (sha256 $PREBUILT_SHORT); no build ran on this box"
+  emit BUILD skipped "prebuilt bytes ($PREBUILT_SIZE, sha256 $PREBUILT_SHORT) - no build ran on this box"
+ else
   emit BUILD started
   if [ ! -d "$SITE_SRC" ]; then
     DETAIL="no site source dir $SITE_SRC — expected a checked-out app there; check the deploy payload's repo+ref and that the clone/checkout step actually populated it"
@@ -3788,8 +4007,9 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # Identical contract to the static engine's (deploy/site-deploy.sh): the lock
   # taken above is PER-SLUG, so without this second, fleet-wide lock N sites
   # compile at once on 2 cores — and a `next build` is the heaviest of them.
-  # Keyed on SKIP_BUILD (this engine has NO PLAN_MODE; naming one would be an
-  # unbound expansion under the `set -u` at the top of this file). Taken after
+  # Reached only on the `build` arm of PLAN_MODE (a prebuilt deploy runs no npm
+  # at all and must never queue behind the fleet's compilers). PLAN_MODE is
+  # ALWAYS assigned at the Config block, so `set -u` cannot abort here. Taken after
   # BUILD started and after the two cheap validations; released right after
   # BUILD ok, BEFORE HEALTH boots the slot process — see below.
   if ! build_gate_acquire; then
@@ -3865,16 +4085,31 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # this contract must not rest on it. The self-test pins it against a harness
   # whose fake systemctl DOES spawn the slot as a direct child.
   build_gate_release
+ fi
 
   # ---- STAGE (D64) — three-piece standalone copy into an immutable release ----
+  # ONE staging path, TWO sources (charter D88/D89's shape on this runtime): a
+  # box build copies $SITE_SRC/.next/standalone plus the two pieces Next leaves
+  # out; a PREBUILT deploy copies the uploaded tree VERBATIM, because the packer
+  # already folded .next/static and public/ into it (there is no $SITE_SRC to
+  # take them from — that is the whole point of an off-box build).  The swap,
+  # the aside-recovery and every exit-13 arm below are SHARED, so a repair to
+  # the rollback-safety of STAGE reaches both arms or neither.
   emit STAGE started
-  if [ ! -d "$SITE_SRC/.next/standalone" ]; then
-    DETAIL="build produced no .next/standalone — expected a Next standalone bundle; check next.config has output:'standalone' and the build reached 'next build' (not just lint/typecheck)"
-    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
-  fi
-  if [ ! -f "$SITE_SRC/.next/standalone/server.js" ]; then
-    DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
-    log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+  if [ "$PLAN_MODE" = prebuilt ]; then
+    STAGE_SRC="$PREBUILT_DIR"
+    STAGE_WHAT="uploaded prebuilt bytes (sha256 $PREBUILT_SHORT)"
+  else
+    STAGE_SRC="$SITE_SRC/.next/standalone"
+    STAGE_WHAT="standalone + .next/static + public"
+    if [ ! -d "$SITE_SRC/.next/standalone" ]; then
+      DETAIL="build produced no .next/standalone — expected a Next standalone bundle; check next.config has output:'standalone' and the build reached 'next build' (not just lint/typecheck)"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
+    if [ ! -f "$SITE_SRC/.next/standalone/server.js" ]; then
+      DETAIL=".next/standalone has no server.js — expected the standalone entrypoint; check the Next build completed (a partial .next survives a failed build) and the app has at least one server route"
+      log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
+    fi
   fi
   # NEVER delete releases/<build_id> before the new bytes exist.  That dir can be
   # the LIVE release or the build .previous names as the warm-rollback target —
@@ -3919,15 +4154,16 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # cp/mv carry no forensic of their own — capture the exit code + a disk read (a
   # copy that fails on a real box almost always fails on a full mount) so each
   # detail names the next move instead of a bare "copy failed".
-  # 1) standalone dir IS the release root (server.js + traced node_modules).
-  cp -a "$SITE_SRC/.next/standalone/." "$RELDIR.partial/"; cp_rc=$?
+  # 1) the standalone dir (or the uploaded tree) IS the release root.
+  cp -a "$STAGE_SRC/." "$RELDIR.partial/"; cp_rc=$?
   if [ "$cp_rc" -ne 0 ]; then
     disk="$(disk_free "$RELEASES")"; rm -rf "$RELDIR.partial"
-    DETAIL="copy of .next/standalone into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
+    DETAIL="copy of $STAGE_SRC into releases/$BUILD_ID failed (cp exit $cp_rc; disk ${disk:-?}) — out of space or perms on the releases mount; check df and the dir ownership. The previously staged releases/$BUILD_ID (if any) is UNTOUCHED, so any rollback target it held is still there"
     log "STAGE: $DETAIL"; emit STAGE failed "$DETAIL"; exit 13
   fi
   # 2) .next/static -> <release>/.next/static (standalone omits it by design).
-  if [ -d "$SITE_SRC/.next/static" ]; then
+  #    Prebuilt: already inside the uploaded tree; $SITE_SRC may not even exist.
+  if [ "$PLAN_MODE" != prebuilt ] && [ -d "$SITE_SRC/.next/static" ]; then
     mkdir -p "$RELDIR.partial/.next/static"
     cp -a "$SITE_SRC/.next/static/." "$RELDIR.partial/.next/static/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
@@ -3937,7 +4173,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
     fi
   fi
   # 3) public/ -> <release>/public (static assets; optional).
-  if [ -d "$SITE_SRC/public" ]; then
+  if [ "$PLAN_MODE" != prebuilt ] && [ -d "$SITE_SRC/public" ]; then
     mkdir -p "$RELDIR.partial/public"
     cp -a "$SITE_SRC/public/." "$RELDIR.partial/public/"; cp_rc=$?
     if [ "$cp_rc" -ne 0 ]; then
@@ -3968,9 +4204,22 @@ if [ "$SKIP_BUILD" = 0 ]; then
   # the BUILDER last wrote .next/standalone (cp -a preserves source timestamps)
   # and RETIRE must not sort on the builder's clock.
   stamp_release_staged "$RELEASES" "$BUILD_ID"
+  # THE ONLY ON-BOX RECORD THAT THESE BYTES CAME FROM AN UPLOAD.  Written AFTER
+  # the swap landed, into the real release dir: a mark inside a .partial that was
+  # later discarded would name a release that does not exist, and a mark written
+  # before the swap would survive into the .aside as a claim about the OLD tree.
+  # No release dir can exist without it on this arm, so no reader can mistake
+  # uploaded bytes for locally built ones.
+  if [ "$PLAN_MODE" = prebuilt ]; then
+    printf '%s\n' "$PREBUILT_SHA256" > "$RELDIR/$PREBUILT_MARK"
+  fi
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
-  log "STAGE: standalone + .next/static + public -> releases/$BUILD_ID/ ($staged_size)"
-  emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
+  log "STAGE: $STAGE_WHAT -> releases/$BUILD_ID/ ($staged_size)"
+  if [ "$PLAN_MODE" = prebuilt ]; then
+    emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT, node abi $PB_ABI_MAJOR/$PB_ABI_LIBC)"
+  else
+    emit STAGE ok "standalone(+static+public) -> releases/$BUILD_ID ($staged_size)"
+  fi
 else
   emit BUILD skipped "release $BUILD_ID is already staged"
   emit STAGE skipped "release $BUILD_ID is already staged"
