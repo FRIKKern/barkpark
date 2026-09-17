@@ -8869,6 +8869,7 @@ section before this one) and its operative clause is wave 28's own plan line (`c
 PLANNED AROUND") — it cut `hzResDone` from **WAVE 28**, and this section supersedes it for wave 29.
 
 - **PDS-D397 — THE WISH'S AUTHORIZING CITATION WAS PHANTOM, AND THIS SECTION IS THE REPLACEMENT.**
+  *(Forwarding note, 2026-09-17, `pds-bl-charter-d399-duplicate-identifier`: this is the SECOND entry under this number. See the corrected census in the rider on PDS-D417 below. Cite this finding by its content anchor, NEVER by the bare number.)*
   The wish says "wave 28 explicitly named it as wave 29's spine." It did not. `grep -ni 'wave.29'`
   over all 6,489 charter lines at `origin/main` returns **exactly one** hit — D392's anchor clause at
   `:6337` — and wave 28's REVIEW entry (`:2579-2648`, 70 lines) does not contain the string
@@ -8881,6 +8882,7 @@ PLANNED AROUND") — it cut `hzResDone` from **WAVE 28**, and this section super
   the phantom citation is not repeated.
 
 - **PDS-D398 — THE SIZING STANDS AT 50; THE CLASS SPLIT IS AN ARTEFACT AND IS RETIRED.** Re-derived
+  *(Forwarding note, 2026-09-17, `pds-bl-charter-d399-duplicate-identifier`: this is the SECOND entry under this number. See the corrected census in the rider on PDS-D417 below. Cite this finding by its content anchor, NEVER by the bare number.)*
   independently by eight surveyors, one `go/ast` walk (`TOTAL=50 NON_LITERAL=2`) and three verifiers:
   **50** non-test call sites, **lb 21 / net 16 / dns 6 / storage 5 / backup 2**. D367's headline 51 is
   the definition line at `hetzner_net_cmd.go:56` (D384(a), confirmed). But D367's
@@ -8895,6 +8897,7 @@ PLANNED AROUND") — it cut `hzResDone` from **WAVE 28**, and this section super
   FILE (disjoint ownership) and paid by CLASS within the file.
 
 - **PDS-D399 — THE POST-READ ASSUMPTION HOLDS FOR 45 OF 50, AND WHERE IT FAILS IS NOT WHERE THE
+  *(Forwarding note, 2026-09-17, `pds-bl-charter-d399-duplicate-identifier`: this is the SECOND entry under this number. See the corrected census in the rider on PDS-D417 below. Cite this finding by its content anchor, NEVER by the bare number.)*
   DIRECTION GUESSED.** All 8 hcloud kinds share `getByIDOrName` and expose `GetByID`; Hetzner's
   published OpenAPI (`docs.hetzner.cloud/cloud.spec.json`, 3,453,181 bytes, HTTP 200) marks
   `applied_to`, `targets`, `services`, `subnets`, `routes` **present AND `required`** on the
@@ -8917,6 +8920,7 @@ PLANNED AROUND") — it cut `hzResDone` from **WAVE 28**, and this section super
   and need their own check; nothing here is L1 — no proof read a live `api.hetzner.cloud`.
 
 - **PDS-D400 — THE GONE-CHECK BINDS TO THE RESOLVED NUMERIC ID. RE-RUNNING THE USER'S TOKEN IS
+  *(Forwarding note, 2026-09-17, `pds-bl-charter-d399-duplicate-identifier`: this is the SECOND entry under this number. See the corrected census in the rider on PDS-D417 below. Cite this finding by its content anchor, NEVER by the bare number.)*
   UNSOUND, AND PROVEN SO.** `hzResolve` delegates to the SDK's `getByIDOrName`, which on a numeric
   token that 404s **falls through to a name-filtered LIST** ("to support resources that have a integer
   as Name", `client_helper.go:67-84`). Measured: delete volume id 42 while a DIFFERENT volume is
@@ -9293,6 +9297,20 @@ below was re-derived against `origin/main` at `885ace84a`.
   so a list-shaped post-read is forbidden. Separately: **`PDS-D399` is a DUPLICATED IDENTIFIER**
   (:6503 python3 `-I`; :6586 the post-read assumption). Any downstream citation of "D399" is ambiguous
   by construction; cite by line, and do not reuse the number.
+  *(Rider 2026-09-17, `pds-bl-charter-d399-duplicate-identifier` — **THE DUPLICATION IS FIVE NUMBERS,
+  NOT ONE, AND D417 UNDERSTATED IT BY 5x.** Measured on this file with a boundary-anchored census,
+  `grep -oE '^- \*\*PDS-D[0-9]+[^0-9a-z]' <charter> | sed 's/.$//' | sort | uniq -c | awk '$1>1'`:
+  **PDS-D397, PDS-D398, PDS-D399, PDS-D400 and PDS-D492 each carry TWO definitions.** D397-D400 is a
+  CONTIGUOUS RUN — two waves each minted the same four numbers, so D399 was never an isolated slip and
+  no single-number re-issue can fix it. Every one of the five second entries now carries a forwarding
+  note on the line under its head. **THE COUNTING TRAP, recorded so the next census does not repeat
+  it:** the naive `^- \*\*PDS-D[0-9]+` with no trailing boundary reports **26** duplicates, because
+  deliberate sub-entries (`PDS-D448a`, `PDS-D448b`, `PDS-D480a`, ...) share their parent's numeric
+  prefix and collapse onto it. 26 is WRONG and 5 is the number; a duplicate-identifier guard built on
+  the naive pattern would baseline against 21 non-defects. **Still owed by this row:** the cheap
+  mechanical guard, which must now baseline at 5 and must carry the trailing boundary. **PDS-D405's
+  arithmetic is NOT owed here** — PDS-D423 already reconciles it: the population is the SIX NAMED ROWS,
+  and "x3" reads as three redding ARMS on one row, stated there as an inference, not a measurement.)*
 
 - **PDS-D418 — `hzResDispositions` IS AN ENROLMENT GATE, NOT A PAYMENT GATE, AND THE `paid:` NOTE IS
   UNFALSIFIABLE.** Flipping one row's note from `hzUnpaidMutation` to
@@ -11124,6 +11142,7 @@ epic's own paperwork, and it is the reason every criterion in this wave derives 
 ### The decisions
 
 - **PDS-D492 — THE WORKFLOW FENCE IS LIFTED FOR EXACTLY ONE FILE, AND THE FENCE WAS NEVER CONTENDED.**
+  *(Forwarding note, 2026-09-17, `pds-bl-charter-d399-duplicate-identifier`: this is the SECOND entry under this number. See the corrected census in the rider on PDS-D417 below. Cite this finding by its content anchor, NEVER by the bare number.)*
   PDS-D312 records `.github/workflows/**` as a **self-imposed** PDS fence, and it explicitly notes
   `elixir.yml` carries **no** workflow-level `paths:` by design (D18/D31 skip-shim) — the exact property
   the gate needs. Measured, not assumed: **zero of the nine open PRs** (8500, 8471, 8465, 8406, 8405,
