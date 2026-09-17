@@ -14,16 +14,69 @@ defmodule Barkpark.CoupledArtifacts do
   sentence edited in `api/lib/barkpark/plugins/tasks.ex` moved one line of
   `docs/openapi.json`.)
 
-  ## THE RULE IS A PREDICATE, NOT A LIST
+  ## TWO RULES, BOTH PREDICATES, NEITHER A LIST
 
   Nothing here enumerates artifacts. A path is a COUPLED GENERATED ARTIFACT iff
-  some workflow step both
+  EITHER predicate holds.
+
+  **PREDICATE 1 — REGENERATE-THEN-DIFF.** Some workflow step both
 
     1. runs a PRODUCER command, and then
     2. diffs that path against the working tree (`git diff --exit-code` /
        `git diff --quiet`).
 
-  That is the gate's own definition of "generated", read off the gate. A file
+  **PREDICATE 2 — PIN COMPARISON.** Some workflow step runs a SCRIPT in this
+  repo, and that script
+
+    1. resolves a variable to a COMMITTED file (the file exists in the checkout)
+       and reads it as the expected value,
+    2. can WRITE that same file (`cp`/`mv`/`tee`/`>` onto it), and
+    3. accepts, and PRINTS beside `$0` as the cure, a long option in the
+       re-pin vocabulary (`--regen...` / `--re-pin...` / `--repin...` /
+       `--update-...`).
+
+  A guard of that shape never regenerates-and-diffs: it compares the tree
+  against the committed pin and hands you the affordance. Predicate 1 is
+  structurally blind to it, which is the whole of task-c5b0e402137a2d4f --
+  measured on PR #19098, where two inline sobelow waivers added to THIS file
+  reddened `api/scripts/sobelow-inline-overlap-check.sh` and the cure was
+  `--regen-bindings-pin` rewriting `api/.sobelow-annotation-bindings`. Predicate
+  2's producer is therefore `<script> <affordance>`, and it is
+  MACHINE-PROPOSED/regen-on-demand: `--check` runs the GUARD, never the regen,
+  because running the regen would silently bless a pairing nobody read.
+
+  ## WHAT NEITHER PREDICATE CATCHES (the stated blind spot)
+
+    * PREDICATE 1 catches an artifact a gate REGENERATES AND DIFFS in the
+      workflow YAML itself -- `docs/openapi.json`, the golden-parity fixtures.
+      It reads only `.github/workflows/*.yml`.
+    * PREDICATE 2 catches a committed PIN/baseline a workflow-invoked script
+      compares against and offers to re-pin -- `api/.sobelow-annotation-bindings`
+      via `--regen-bindings-pin`. It descends ONE level: workflow step -> the
+      `.sh` files that step names.
+    * NEITHER catches: (a) a coupling that lives entirely inside a gate whose
+      step runs a non-shell entry point (a mix task, a node script, a composite
+      action) -- the descent is `.sh`-only; (b) a script invoked INDIRECTLY, by
+      another script the workflow names, since there is no transitive descent;
+      (c) a pin whose cure the script does not print beside `$0`, or whose
+      option is spelled outside the re-pin vocabulary (`--bless`, `--accept`) --
+      predicate 2 keys on the AFFORDANCE VOCABULARY, and a new verb is a new
+      blind spot until the vocabulary grows; (c2) WHICH ARM of a multi-arm
+      script reds — the pin is attributed to the SCRIPT, not to the arm, so
+      `--check` runs the command the workflow step runs and, on a red, names
+      that script's cure. For a script carrying several orthogonal ratchets
+      (`sobelow-baseline-staleness-check.sh` has three) the red may belong to a
+      different arm than the pin, and its output, not the named cure, is the
+      thing to read; (d) a coupling enforced only by
+      review or by prose, with no executing step at all; (e) a pin file that is
+      absent from the checkout, since conjunct 1 requires the committed file to
+      EXIST -- a deleted pin reads as "no coupling", not as a violation.
+      `api/.sobelow-skips` is deliberately NOT swept in: it is read by both
+      sobelow scripts but neither WRITES it and neither prints a re-pin cure for
+      it, so conjuncts 2 and 3 are false. That absence is by predicate, not by
+      anyone remembering to exclude it.
+
+  A file
   that merely mentions the same string as a generated artifact, or that a
   workflow names only in an `on: paths:` trigger, is NOT swept in — it has no
   producer and no diff step, so the predicate is false for it. This is the
@@ -82,7 +135,9 @@ defmodule Barkpark.CoupledArtifacts do
   @diff_re ~r/git\s+diff\s+(--exit-code|--quiet)/
 
   @type coupling :: %{
+          kind: :regenerate_then_diff | :pin_comparison,
           artifacts: [String.t()],
+          guard: [String.t()],
           producer: [String.t()],
           producer_dir: String.t(),
           workflow: String.t(),
@@ -103,12 +158,25 @@ defmodule Barkpark.CoupledArtifacts do
   def derive(repo_root) do
     required = required_contexts(repo_root)
 
-    repo_root
-    |> Path.join(".github/workflows/*.yml")
-    |> Path.wildcard()
-    |> Enum.sort()
-    |> Enum.flat_map(&couplings_in_workflow(&1, repo_root, required))
-    |> Enum.sort_by(&{&1.workflow, &1.line})
+    workflows =
+      repo_root
+      |> Path.join(".github/workflows/*.yml")
+      |> Path.wildcard()
+      |> Enum.sort()
+
+    regen = Enum.flat_map(workflows, &couplings_in_workflow(&1, repo_root, required))
+
+    pinned =
+      workflows
+      |> Enum.flat_map(&pin_couplings_in_workflow(&1, repo_root, required))
+      # The same script is named by several steps in a job (a `--selftest` arm
+      # and the bare guard). They declare the SAME pin; keep the invocation with
+      # the FEWEST extra arguments, which is the guard that actually judges the
+      # tree. Deduped by (artifact, producer), never by remembering a step name.
+      |> Enum.sort_by(&{length(hd(&1.guard) |> String.split(" ")), &1.workflow, &1.line})
+      |> Enum.uniq_by(&{&1.artifacts, &1.producer})
+
+    Enum.sort_by(regen ++ pinned, &{&1.workflow, &1.line})
   end
 
   @doc """
@@ -179,12 +247,9 @@ defmodule Barkpark.CoupledArtifacts do
   # shapes we need (job key, `name:`, `needs:`, `- name:` steps, `run:` blocks)
   # are all unambiguous at fixed indents in GitHub's schema.
 
-  # sobelow_skip ["Traversal.FileModule"]
-  # `path` comes from Path.wildcard(".github/workflows/*.yml") under the repo
-  # root — an enumeration of the checkout, not an externally supplied name.
   defp couplings_in_workflow(path, repo_root, required) do
     rel = Path.relative_to(path, repo_root)
-    lines = path |> File.read!() |> String.split("\n")
+    lines = read_lines(path)
     jobs = parse_jobs(lines)
     gate_jobs = gate_closure(jobs, required)
 
@@ -223,6 +288,8 @@ defmodule Barkpark.CoupledArtifacts do
 
         [
           %{
+            kind: :regenerate_then_diff,
+            guard: [],
             artifacts: Enum.map(raw_paths, &resolve(dir, &1)),
             producer: producer,
             producer_dir: base,
@@ -453,6 +520,282 @@ defmodule Barkpark.CoupledArtifacts do
     end)
     |> then(fn {acc, pending} -> if pending, do: [pending | acc], else: acc end)
     |> Enum.reverse()
+  end
+
+  # ── PREDICATE 2: the pin comparison ───────────────────────────────────────
+  #
+  # A workflow step names a `.sh` in this repo. That script is a PIN GUARD iff it
+  # resolves a variable to a COMMITTED file, reads it as the expected value, can
+  # write it, and prints a re-pin option beside `$0` as the cure. Everything
+  # below is read off the script's own text; nothing here names a path.
+
+  # The affordance VOCABULARY. A verb outside it is a stated blind spot, not a
+  # silent one — see the moduledoc.
+  @repin_vocab ~r/^--(re-?gen|re-?pin|update)[a-z0-9-]*$/
+
+  defp pin_couplings_in_workflow(path, repo_root, required) do
+    rel = Path.relative_to(path, repo_root)
+    jobs = path |> read_lines() |> parse_jobs()
+    gate_jobs = gate_closure(jobs, required)
+
+    Enum.flat_map(jobs, fn job ->
+      dir = job_dir(job)
+
+      gates =
+        Enum.filter(required, fn ctx -> job.key in Map.get(gate_jobs, ctx, MapSet.new()) end)
+
+      Enum.flat_map(job.steps, fn step ->
+        step.body
+        |> run_block()
+        |> script_invocations(dir, repo_root)
+        |> Enum.flat_map(fn {script_rel, argv} ->
+          Enum.map(pin_declarations(repo_root, script_rel), fn decl ->
+            %{
+              kind: :pin_comparison,
+              artifacts: [decl.artifact],
+              producer: [String.trim("bash #{script_rel} #{decl.affordance}")],
+              guard: [String.trim(Enum.join(["bash", script_rel | argv], " "))],
+              producer_dir: ".",
+              workflow: rel,
+              job: job.key,
+              step: step.name,
+              line: step.line,
+              gates: gates,
+              required?: gates != []
+            }
+          end)
+        end)
+      end)
+    end)
+  end
+
+  # Every `*.sh` a run block names, with the arguments that follow it. Resolved
+  # against the job dir first, then the repo root — a step whose job carries a
+  # working-directory still names the script from one of those two places.
+  defp script_invocations(run, dir, repo_root) do
+    run
+    |> join_continuations()
+    |> Enum.flat_map(fn line ->
+      tokens = line |> String.trim() |> String.split(~r/\s+/, trim: true)
+
+      case Enum.split_while(tokens, &(not script_token?(&1))) do
+        {_, []} ->
+          []
+
+        {_, [tok | rest]} ->
+          case resolve_script(tok, dir, repo_root) do
+            nil -> []
+            script_rel -> [{script_rel, Enum.take_while(rest, &(not shell_break?(&1)))}]
+          end
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp script_token?(tok), do: String.ends_with?(unquote_scalar(tok), ".sh")
+
+  defp shell_break?(tok), do: tok in ["&&", "||", ";", "|", ">", ">>", "2>&1"]
+
+  defp resolve_script(tok, dir, repo_root) do
+    candidate =
+      tok
+      |> unquote_scalar()
+      |> String.replace("$GITHUB_WORKSPACE/", "")
+      |> String.replace("${GITHUB_WORKSPACE}/", "")
+
+    if String.contains?(candidate, "$") do
+      nil
+    else
+      [resolve(dir, candidate), normalize(candidate)]
+      |> Enum.uniq()
+      |> Enum.find(&File.regular?(Path.join(repo_root, &1)))
+    end
+  end
+
+  @doc """
+  The pin declarations a script makes: `%{artifact:, affordance:, var:}` per
+  committed file it guards.
+
+  Public so the mutation arms can prove the parser is NON-UNIFORM — it must
+  return `[]` for scripts of every other shape, or it is measuring nothing.
+  """
+  @spec pin_declarations(String.t(), String.t()) :: [
+          %{artifact: String.t(), affordance: String.t(), var: String.t()}
+        ]
+  def pin_declarations(repo_root, script_rel) do
+    abs = Path.join(repo_root, script_rel)
+
+    if File.regular?(abs) do
+      lines = read_lines(abs)
+      cures = cure_flags(lines)
+
+      if cures == [] do
+        []
+      else
+        vars = script_vars(lines, Path.dirname(script_rel))
+
+        for {var, value} <- Enum.sort(vars),
+            File.regular?(Path.join(repo_root, value)),
+            reads_var?(lines, var),
+            writes_var?(lines, var) do
+          flag = nearest_cure(cures, lines, var)
+          %{artifact: value, affordance: cure_invocation(lines, flag), var: var}
+        end
+      end
+    else
+      []
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  # Every caller passes a path this module derived itself: Path.wildcard over
+  # `.github/workflows/` under a caller-supplied checkout root, or a `*.sh`
+  # token read out of a workflow's own text. No request data reaches here.
+  defp read_lines(path), do: path |> File.read!() |> String.split("\n")
+
+  # A long option the script's own argument parser accepts AND prints beside
+  # `$0` as the cure. Both halves matter: a `case` arm alone is a flag nobody is
+  # told about, and a `$0` line alone can be prose about another tool.
+  defp cure_flags(lines) do
+    arms =
+      lines
+      |> Enum.flat_map(fn l ->
+        Regex.scan(~r/^\s*(--[a-z0-9-]+)[\s|)]/, l) |> Enum.map(&Enum.at(&1, 1))
+      end)
+      |> MapSet.new()
+
+    lines
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {l, i} ->
+      if String.contains?(l, "$0") do
+        ~r/--[a-z0-9-]+/
+        |> Regex.scan(l)
+        |> Enum.map(&hd/1)
+        |> Enum.filter(&(MapSet.member?(arms, &1) and Regex.match?(@repin_vocab, &1)))
+        |> Enum.map(&{&1, i})
+      else
+        []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # With more than one cure flag in a script, pair each pin with the cure whose
+  # printed line sits nearest a line mentioning that pin's variable. Derived by
+  # POSITION, never by matching the flag's name against the file's.
+  defp nearest_cure([{flag, _}], _lines, _var), do: flag
+
+  defp nearest_cure(cures, lines, var) do
+    mentions =
+      lines
+      |> Enum.with_index()
+      |> Enum.filter(fn {l, _} -> Regex.match?(var_re(var), l) end)
+      |> Enum.map(&elem(&1, 1))
+
+    {flag, _} =
+      Enum.min_by(cures, fn {_f, i} ->
+        Enum.min(Enum.map(mentions, &abs(&1 - i)), fn -> 1_000_000 end)
+      end)
+
+    flag
+  end
+
+  # The cure a script prints can carry arguments — `$0 --regen-tokens
+  # api/deps/sobelow`. Take the LITERAL ones (a `$tree` is the script's own
+  # variable and cannot be resolved from here); prefer the printed line that
+  # supplies them, so the producer is runnable rather than merely named.
+  defp cure_invocation(lines, flag) do
+    lines
+    |> Enum.filter(&(String.contains?(&1, "$0") and String.contains?(&1, flag)))
+    |> Enum.map(fn l ->
+      l
+      |> String.split(flag, parts: 2)
+      |> List.last()
+      |> String.split(~r/["#]/, parts: 2)
+      |> hd()
+      |> String.split(~r/\s+/, trim: true)
+      |> Enum.take_while(&(not String.contains?(&1, "$")))
+    end)
+    |> Enum.find([], &(&1 != []))
+    |> then(fn args -> String.trim(Enum.join([flag | args], " ")) end)
+  end
+
+  defp var_re(var), do: ~r/\$\{?#{Regex.escape(var)}\b/
+
+  @read_verbs ~w(diff cmp grep cat sed awk sort head tail wc comm)
+
+  defp reads_var?(lines, var) do
+    re = ~r/\b(#{Enum.join(@read_verbs, "|")})\b[^\n]*\$\{?#{Regex.escape(var)}\b/
+    Enum.any?(lines, &Regex.match?(re, &1))
+  end
+
+  defp writes_var?(lines, var) do
+    v = Regex.escape(var)
+    cp = ~r/\b(cp|mv|tee)\b[^\n]*\$\{?#{v}\}?"?\s*$/
+    redirect = ~r/>\s*"?\$\{?#{v}\b/
+    Enum.any?(lines, &(Regex.match?(cp, &1) or Regex.match?(redirect, &1)))
+  end
+
+  # Top-level `NAME=...` assignments, resolved as far as this file can resolve
+  # them. An RHS that still carries an unexpanded `$` is DROPPED: a half-resolved
+  # path would be matched against the filesystem and answer "no such file",
+  # which reads as "no coupling" — the failure this row exists to remove.
+  defp script_vars(lines, script_dir) do
+    Enum.reduce(lines, %{}, fn line, acc ->
+      case Regex.run(~r/^([A-Z][A-Z0-9_]*)=(.*)$/, line) do
+        [_, name, rhs] ->
+          case resolve_rhs(rhs, acc, script_dir) do
+            nil -> acc
+            value -> Map.put(acc, name, value)
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  @script_root_re ~r/^\$\(cd\s+--\s+"\$\(dirname\s+--\s+"\$\{BASH_SOURCE\[0\]\}"\)([^"]*)"\s*&&\s*pwd\)$/
+  @cd_pwd_re ~r/^\$\(cd\s+--\s+"([^"]+)"\s*&&\s*pwd\)$/
+  @default_re ~r/^\$\{[A-Z][A-Z0-9_]*:-(.*)\}$/
+
+  defp resolve_rhs(rhs, vars, script_dir) do
+    rhs = rhs |> String.trim() |> unquote_scalar()
+
+    cond do
+      m = Regex.run(@script_root_re, rhs) ->
+        normalize(Path.join(script_dir, Enum.at(m, 1)))
+
+      m = Regex.run(@cd_pwd_re, rhs) ->
+        m |> Enum.at(1) |> expand_vars(vars) |> finish_path()
+
+      m = Regex.run(@default_re, rhs) ->
+        m |> Enum.at(1) |> unquote_scalar() |> expand_vars(vars) |> finish_path()
+
+      true ->
+        rhs |> expand_vars(vars) |> finish_path()
+    end
+  end
+
+  defp expand_vars(nil, _vars), do: nil
+
+  defp expand_vars(text, vars) do
+    Enum.reduce(vars, text, fn {name, value}, acc ->
+      acc
+      |> String.replace("${#{name}}", value)
+      |> String.replace("$#{name}", value)
+    end)
+  end
+
+  defp finish_path(nil), do: nil
+
+  defp finish_path(text) do
+    cond do
+      String.contains?(text, "$") -> nil
+      text == "" or text == "." -> nil
+      String.contains?(text, " ") -> nil
+      true -> normalize(text)
+    end
   end
 
   # ── gate attribution ──────────────────────────────────────────────────────
