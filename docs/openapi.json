@@ -15500,9 +15500,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"
@@ -17665,9 +17674,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"
