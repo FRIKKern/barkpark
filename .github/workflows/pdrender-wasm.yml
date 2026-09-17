@@ -23,6 +23,15 @@ on:
     paths:
       - "cmd/pdrender-wasm/**"
       - "internal/pdrender/**"
+      # Every OTHER first-party package the blob links. This list is not a
+      # guess: `GOOS=js GOARCH=wasm go list -deps ./cmd/pdrender-wasm` grepped
+      # to github.com/FRIKKern/barkpark returns exactly three packages —
+      # cmd/pdrender-wasm, internal/pdrender, and internal/wasmimages — and
+      # the third was absent, so the image-budget code COMPILED INTO the blob
+      # (MaxEntries, Build) could change and this gate stayed silent. Re-run
+      # that go list when the entry grows an import; a package in the closure
+      # and not in this filter is the defect, every time.
+      - "internal/wasmimages/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
@@ -41,6 +50,15 @@ on:
     paths:
       - "cmd/pdrender-wasm/**"
       - "internal/pdrender/**"
+      # Every OTHER first-party package the blob links. This list is not a
+      # guess: `GOOS=js GOARCH=wasm go list -deps ./cmd/pdrender-wasm` grepped
+      # to github.com/FRIKKern/barkpark returns exactly three packages —
+      # cmd/pdrender-wasm, internal/pdrender, and internal/wasmimages — and
+      # the third was absent, so the image-budget code COMPILED INTO the blob
+      # (MaxEntries, Build) could change and this gate stayed silent. Re-run
+      # that go list when the entry grows an import; a package in the closure
+      # and not in this filter is the defect, every time.
+      - "internal/wasmimages/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
