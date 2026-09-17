@@ -9838,3 +9838,25 @@ because the fourth chip state would otherwise paint **calmer than reconnecting**
 board; D34 retires the `~36` HEAD figure for a measured **45**; D40 narrows the proposed sibling-class
 law to enforcement mechanisms, because stating it universally would force false evidence onto two
 slices. Six slices filed, four in round 1. Paper: `cloud-console-hardening-wave-2-2026-07-21`.
+
+## RETIRED AUTH SYMBOLS — the charter's own spelling, checked against source
+
+This charter cites auth wrappers by name in its prose. D896 made the router's
+wrapper SET a derivation instead of a list; this block closes the third surface,
+the one a human actually reads. A charter is a dated log, so a row written in
+2026-07 may keep the symbol that existed then — but only if it says here what
+replaced it, so the reader who greps and finds nothing is not left guessing
+which side is wrong.
+
+`cloud/test/barkpark_cloud/web/charter_auth_symbol_drift_test.exs` reds when
+this charter cites a `require_*` symbol that neither `auth.ex` nor `router.ex`
+defines and that this block does not declare — and it reds in the other
+direction too: a declared name that source defines again, or a replacement that
+is not itself live, fails. The block is not a skip list. It is a set of claims,
+every field checked against source.
+
+<!-- RETIRED-AUTH-SYMBOLS
+require_primary_team_admin -> require_current_team_admin  # renamed in #15871; the gate reads conn.assigns[:current_team], which resolve_team/2 fills from the x-barkpark-team header, so "primary" named a team it never enforced (D405)
+require_primary_team_owner -> require_current_team_owner  # renamed in #15871, same rename and the same reason
+require_team_member -> require_team_role  # never existed and is not to be written (D352): require_user/2 already implies membership, and a ranked check is Auth.require_team_role(conn, team_id, :member)
+-->
