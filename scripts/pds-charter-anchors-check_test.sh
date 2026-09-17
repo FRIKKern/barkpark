@@ -23,7 +23,7 @@
 # the unmodified tree: 3 of 5 runs red, the failing arm set varying run to run
 # (4/5/11, then 5/11). A here-string has no producer process to kill. Arming a
 # flaky harness is arming a broken one, so this had to be fixed in the same PR.
-# Baseline: 14 passed, 0 failed, 8 consecutive runs.
+# Baseline: 20 passed, 0 failed (14 before arm D added arms 15-20).
 
 # shellcheck disable=SC2016  # backticks inside single quotes are literal citation syntax, not expansions
 set -uo pipefail
@@ -40,6 +40,15 @@ bad()  { printf 'FAIL %s\n     %s\n' "$1" "$2"; fail=$((fail + 1)); }
 
 # run <fixture-file> [env...] -> sets $out and $rc
 run() { out="$(bash "$CHECK" "$1" 2>&1)"; rc=$?; }
+
+# run_d <fixture-file> <dupe-ceiling> <unclassified-ceiling> -> sets $out and $rc
+# Arm D's live ceilings are the CHARTER's (20 and 8), so a two-line fixture can
+# never cross them. Every arm-D fixture therefore names its own ceilings; the
+# fixture is what is under test, not the production baseline.
+run_d() {
+  out="$(PDS_ANCHOR_DUPE_CEILING="$2" PDS_ANCHOR_UNCLASSIFIED_CEILING="$3" bash "$CHECK" "$1" 2>&1)"
+  rc=$?
+}
 
 # A fixture with N bare legacy citations padded in, so arm B can be exercised
 # independently of arm A.
@@ -176,6 +185,60 @@ run "$TMP/shipped_d101.md"
 if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 7' <<<"$out"; then
   ok "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors"
 else bad "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors" "rc=$rc $out"; fi
+
+# ── ARM 15 (RED, arm D): the same number DEFINED TWICE in list form ──────────
+{ printf -- '- **PDS-D900 — FIRST DEFINITION.** x\n- **PDS-D900 — SECOND DEFINITION.** y\n'; pad_bare 15; } > "$TMP/dupe_list.md"
+run_d "$TMP/dupe_list.md" 0 0
+if [ "$rc" -ne 0 ] && grep -q 'PDS-D identifiers are defined twice' <<<"$out"; then
+  ok "ARM 15 RED — a duplicated D-number in LIST form reds (arm D)"
+else bad "ARM 15 RED — a duplicated D-number in LIST form reds (arm D)" "rc=$rc $out"; fi
+
+# ── ARM 16 (RED, arm D): the HEADING form — the lens the first draft missed ──
+# This arm is the whole reason arm D uses pds-record-parity.sh's definition
+# lens. A list-item-only pattern reads the `### PDS-D<n>` half as invisible and
+# reports a reassuring 0 duplicates on a charter that has one.
+{ printf -- '### PDS-D900 — FIRST DEFINITION, HEADING FORM.\n- **PDS-D900 — SECOND DEFINITION.** y\n'; pad_bare 15; } > "$TMP/dupe_head.md"
+run_d "$TMP/dupe_head.md" 0 0
+if [ "$rc" -ne 0 ] && grep -q 'PDS-D identifiers are defined twice' <<<"$out"; then
+  ok "ARM 16 RED — a duplicated D-number in HEADING form reds (arm D lens)"
+else bad "ARM 16 RED — a duplicated D-number in HEADING form reds (arm D lens)" "rc=$rc $out"; fi
+
+# ── ARM 17 (QUIET/CONTROL, arm D): two DISTINCT numbers, both forms, no red ──
+# Without this, arms 15 and 16 are satisfiable by a check that reds on any two
+# definitions at all.
+{ printf -- '### PDS-D900 — ONE DECISION.\n- **PDS-D901 — ANOTHER DECISION.** y\n'; pad_bare 15; } > "$TMP/dupe_none.md"
+run_d "$TMP/dupe_none.md" 0 0
+if [ "$rc" -eq 0 ] && grep -q 'duplicate D-numbers . 0' <<<"$out"; then
+  ok "ARM 17 CONTROL — two DISTINCT numbers in both forms stay green (arm D)"
+else bad "ARM 17 CONTROL — two DISTINCT numbers in both forms stay green (arm D)" "rc=$rc $out"; fi
+
+# ── ARM 18 (RED, arm D): a definition with no em-dash discriminator ──────────
+# The lens must not be able to go blind quietly: a definition written with the
+# wrong separator is invisible to the duplicate count, so it is COUNTED and
+# ratcheted instead of ignored.
+{ printf -- '- **PDS-D900 - WRONG SEPARATOR, A HYPHEN.** x\n'; pad_bare 15; } > "$TMP/undiscriminated.md"
+run_d "$TMP/undiscriminated.md" 0 0
+if [ "$rc" -ne 0 ] && grep -q 'definition-shaped lines carry no' <<<"$out"; then
+  ok "ARM 18 RED — a definition with no discriminator reds (arm D unclassified)"
+else bad "ARM 18 RED — a definition with no discriminator reds (arm D unclassified)" "rc=$rc $out"; fi
+
+# ── ARM 19 (RED, arm D): the definitions FLOOR is a precondition ─────────────
+# On the CANONICAL charter only. A floor above the true count stands in for the
+# pattern breaking: without it, a broken pattern prints `duplicate D-numbers . 0`
+# and reads as a pass.
+out="$(PDS_ANCHOR_DEF_FLOOR=99999 bash "$CHECK" "$REPO_ROOT/.claude/workflows/bp-pds-charter.md" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'below the floor of 99999' <<<"$out"; then
+  ok "ARM 19 RED — a definition count under the floor reds (arm D precondition)"
+else bad "ARM 19 RED — a definition count under the floor reds (arm D precondition)" "rc=$rc $out"; fi
+
+# ── ARM 20 (QUIET, arm D): the floor is SKIPPED off the canonical charter ────
+# Paired with arm 19: the floor must be scoped, or every fixture above reds on
+# it and arms 2-18 measure nothing.
+{ printf -- '- **PDS-D900 — ONE DECISION.** x\n'; pad_bare 15; } > "$TMP/floor_skip.md"
+out="$(PDS_ANCHOR_DEF_FLOOR=99999 bash "$CHECK" "$TMP/floor_skip.md" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'floor SKIPPED' <<<"$out"; then
+  ok "ARM 20 QUIET — the floor is skipped off the canonical charter"
+else bad "ARM 20 QUIET — the floor is skipped off the canonical charter" "rc=$rc $out"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

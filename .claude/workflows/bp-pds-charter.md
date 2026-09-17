@@ -15992,3 +15992,68 @@ name unrelated code.
 
   **PDS-D258 STANDS, UNAMENDED.** No pre-warm form runs `mix deps.get`, and a fresh `origin/main`
   worktree still has no `api/deps`. Both crown runbooks are corrected to match.
+
+## LATE ADJUDICATION — THE DUPLICATED DECISION NUMBERS, RE-CENSUSED AND GUARDED (decided 2026-09-17, task `pds-bl-charter-d399-duplicate-identifier`)
+
+- **PDS-D756 — THE DUPLICATE POPULATION IS TWENTY, NOT FIVE, AND EVERY STEP OF THE DIFFERENCE IS
+  THE LENS, NOT THE CHARTER (2026-09-17).** The row filed ONE duplicated identifier. The
+  wave-preceding census reported FIVE — PDS-D397, D398, D399, D400, D492 — and recorded a rider
+  specifying a guard baselined at that figure. Re-measured here the true count is **TWENTY**, and
+  the lens moved twice to get there:
+
+  | lens | definitions seen | duplicates reported |
+  |---|---|---|
+  | list-item only, `^- **PDS-D<n>` (the earlier census) | 590 | 5 |
+  | + the un-bulleted `**PDS-D<n>` form | 736 | 18 |
+  | + indented and `### PDS-D<n>` heading forms (this ruling) | 808 | 20 |
+
+  The thirteen found at step two are PDS-D145, D146, D493, D494, D495, D553, D554, D555, D556,
+  D570, D571, D572 and D573; the two found at step three are PDS-D664 and D665. **Step three was
+  not found by thinking harder — it was found by comparing the new lens against an INDEPENDENT
+  instrument.** `scripts/pds-record-parity.sh`'s `--axis d` already counted definitions with the
+  wider pattern and reported 754 distinct numbers where the draft arm saw 719. Two instruments
+  disagreeing about what a DEFINITION is was the whole signal, and the fix was to make arm D use
+  parity's lens verbatim so they cannot disagree again.
+
+  **THIS IS THE RIDER'S OWN WARNING, ONE LEVEL UP.** That rider correctly refused to baseline a
+  guard at TWENTY-SIX — a pattern with no trailing boundary folds D448a, D448b and D480a onto their
+  parent prefix and reads each as a duplicate of it — and it was right to refuse. But the narrow
+  form it chose instead was wrong in the opposite direction, and a guard shipped at 5 would have
+  gone GREEN on a charter carrying 18 and locked the wrong number in permanently. **Both errors are
+  the same error: a ceiling inherited from prose rather than re-derived by a run of the instrument
+  that will enforce it.** Arm D's header now says so in as many words, and adds the second half
+  this ruling paid for: cross-check the lens against an independent instrument before baselining.
+
+  **THE SHAPE IS SIX CONTIGUOUS BLOCKS, NOT TWENTY SLIPS.** D145–146, D397–400, D492–495,
+  D553–556, D570–573 and D664–665. Each block is one wave minting a range a previous wave had already minted,
+  which is why re-issuing any single number is cosmetic: the mechanism that produced them is
+  block-minting without a reservation read, and `tooling/pds/d-number-reservations.tsv` plus arm D
+  are what actually close it. **The historical entries are NOT edited** — the charter is
+  append-only memory and a duplicate that is recorded, counted and ratcheted is honest; a duplicate
+  silently renumbered under a later reader's hand is not.
+
+  **THE GUARD IS ARM D OF `scripts/pds-charter-anchors-check.sh`, NOT A NEW SCRIPT, AND THAT IS
+  DELIBERATE.** A new `scripts/pds-*.sh` owes the door census a disposition row, and a missing one
+  reddened the required Elixir gate for a whole fleet earlier in this campaign; folding the check
+  into the charter guard that is already wired and already run positionally costs zero new doors.
+  Arm D reports THREE numbers, because the counting lens is where this check goes wrong:
+  duplicates (ceiling 20), **unclassified** definition-shaped lines carrying no `— ` discriminator
+  (ceiling 8 — every one is a bold prose CITATION, `**PDS-D454 stands …**` and `**PDS-D648 IS
+  REFUTED …**` among them, and counting any of them as a definition manufactures a false
+  duplicate), and a **definitions floor** of 808 that is a PRECONDITION: the charter is
+  append-only, so a FALL in the definition
+  count means the pattern broke and every duplicate verdict above it is vacuous. Without that
+  floor, a broken pattern prints `duplicate D-numbers . 0` and reads as a pass.
+
+  **FIVE CONTROLS RAN, AND ONE OF THEM CAUGHT THE AUTHOR.** (i) Colliding a number defined exactly
+  once, in LIST form, takes duplicates 20 → 21 and reds. The FIRST attempt at that control collided
+  PDS-D700, which has ZERO definitions — it added a first definition, not a second, and the arm
+  correctly stayed quiet; a control that does not fire is worthless until you have checked it was
+  aimed at something. (ii) The same collision in HEADING form — the shape the narrow lens could not
+  see — also reds, which is the arm that would have been vacuous before step three. (iii)
+  Appending a definition with a hyphen separator instead of an em dash takes unclassified 8 → 9 and
+  reds, so the lens cannot go blind quietly. (iv) Raising the floor above the true count reds on
+  the precondition; the same red fired for real during authoring, when an escaping bug wrote a
+  literal backslash-u sequence into the regex and the definition count read 0 while the duplicate
+  count read a reassuring 0 beside it. (v) A legitimate new unique definition raises the count to
+  809 and PASSES, so the arm does not simply red on growth.
