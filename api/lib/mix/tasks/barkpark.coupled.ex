@@ -32,8 +32,26 @@ defmodule Mix.Tasks.Barkpark.Coupled do
   asserting that a human must read them, and committing those proposed values in
   the same commit, with the derivation quoted, is the OPPOSITE of hand-editing.
 
-  See `Barkpark.CoupledArtifacts` for the predicate, the three categories, and
-  why a file that merely shares a string with a generated artifact is NOT one.
+  ## TWO PREDICATES
+
+  A path is listed iff EITHER holds, and the table says which:
+
+    * `regenerate-then-diff` — a workflow step runs a producer and then diffs
+      the path (`docs/openapi.json`).
+    * `pin-comparison` — a workflow step runs a repo script that compares the
+      tree against a COMMITTED pin and prints a `--regen`/`--re-pin` affordance
+      (`api/.sobelow-annotation-bindings`, cured by
+      `api/scripts/sobelow-inline-overlap-check.sh --regen-bindings-pin`).
+
+  `--check` treats them differently ON PURPOSE. A regenerate-then-diff producer
+  is MACHINE-WRITTEN: run it, diff it. A pin producer is
+  MACHINE-PROPOSED/regen-on-demand — running it would rewrite the pin and bless
+  a pairing nobody read, so `--check` runs the GUARD instead and, if the guard
+  reds, NAMES the affordance for a human to run and read.
+
+  See `Barkpark.CoupledArtifacts` for both predicates, the three categories, why
+  a file that merely shares a string with a generated artifact is NOT one, and
+  the stated blind spot of what NEITHER predicate catches.
   """
 
   use Mix.Task
@@ -74,9 +92,9 @@ defmodule Mix.Tasks.Barkpark.Coupled do
 
     for c <- couplings do
       Mix.shell().info("""
-      #{if c.required?, do: "REQUIRED", else: "advisory"}  #{Enum.join(c.gates, ", ")}
+      #{if c.required?, do: "REQUIRED", else: "advisory"}  #{kind_label(c.kind)}  #{Enum.join(c.gates, ", ")}
         artifacts : #{Enum.join(c.artifacts, "\n                    ")}
-        producer  : #{Enum.join(c.producer, " && ")}   (run from #{c.producer_dir}/)
+        producer  : #{Enum.join(c.producer, " && ")}   (run from #{c.producer_dir}/)#{guard_line(c)}
         gate      : #{c.workflow}:#{c.line}  job #{c.job}
         step      : #{c.step}
       """)
@@ -85,26 +103,40 @@ defmodule Mix.Tasks.Barkpark.Coupled do
     Mix.shell().info("""
     #{length(couplings)} coupling(s) derived; #{Enum.count(couplings, & &1.required?)} behind a REQUIRED context.
 
+    #{Enum.count(couplings, &(&1.kind == :regenerate_then_diff))} by regenerate-then-diff, #{Enum.count(couplings, &(&1.kind == :pin_comparison))} by pin-comparison.
+
     NOT LISTED IS NOT A LIST. A path appears above iff some workflow step runs a
-    producer and then diffs that path. A file that merely contains the same
-    sentences as a generated artifact has no producer and no diff step, so it is
-    absent by the PREDICATE, not by anyone remembering to exclude it — and it
-    must be left alone: no hand-edit, no "regenerate for consistency".
+    producer and then diffs that path (predicate 1), or runs a repo script that
+    compares the tree against a committed pin and offers to re-pin it
+    (predicate 2). A file that merely contains the same sentences as a generated
+    artifact satisfies neither, so it is absent by the PREDICATE, not by anyone
+    remembering to exclude it — and it must be left alone: no hand-edit, no
+    "regenerate for consistency". What NEITHER predicate can see is written
+    down: `h Barkpark.CoupledArtifacts` — "WHAT NEITHER PREDICATE CATCHES".
     """)
   end
 
-  defp check(root, couplings) do
-    targets = Enum.filter(couplings, & &1.required?)
-    Mix.shell().info("coupled --check: #{length(targets)} required coupling(s)\n")
+  defp kind_label(:regenerate_then_diff), do: "regenerate-then-diff"
+  defp kind_label(:pin_comparison), do: "pin-comparison"
 
-    violations =
-      CoupledArtifacts.violations(targets, fn c ->
-        Enum.each(c.producer, &run_producer(root, &1, c.producer_dir))
-        # `add -N` first: a brand-new untracked artifact is invisible to
-        # `git diff`, which is how a drift check passes vacuously.
-        git(root, ["add", "-N", "--"] ++ c.artifacts)
-        dirty(root, c.artifacts)
-      end)
+  defp guard_line(%{kind: :pin_comparison, guard: [g | _]}),
+    do:
+      "\n    guard     : #{g}   (what --check runs; the producer above is YOURS to run and READ)"
+
+  defp guard_line(_), do: ""
+
+  defp check(root, couplings) do
+    # A pin guard is ~1s and never writes, so it is checked whether or not its
+    # context is required — the cost of asking is nil and the red is exact.
+    targets = Enum.filter(couplings, &(&1.required? or &1.kind == :pin_comparison))
+
+    Mix.shell().info(
+      "coupled --check: #{length(targets)} coupling(s) " <>
+        "(#{Enum.count(targets, &(&1.kind == :regenerate_then_diff))} regenerate-then-diff, " <>
+        "#{Enum.count(targets, &(&1.kind == :pin_comparison))} pin-comparison)\n"
+    )
+
+    violations = CoupledArtifacts.violations(targets, &dirty_artifacts(root, &1))
 
     if violations == [] do
       Mix.shell().info(
@@ -118,7 +150,7 @@ defmodule Mix.Tasks.Barkpark.Coupled do
         COUPLED ARTIFACT OUT OF DATE — it must move in THIS commit.
 
           artifact(s) : #{Enum.join(dirty, ", ")}
-          producer    : #{Enum.join(c.producer, " && ")}   (already run; output is in your tree)
+          producer    : #{Enum.join(c.producer, " && ")}   #{producer_note(c)}
           gate        : #{c.step}
                         #{c.workflow}:#{c.line} — #{Enum.join(c.gates, ", ")} (REQUIRED)
 
@@ -128,6 +160,7 @@ defmodule Mix.Tasks.Barkpark.Coupled do
         leaves main inconsistent between the two merges.
 
         NEXT, in order:
+          0. #{next_zero(c)}
           1. git diff --numstat #{Enum.join(dirty, " ")}
              one line moved = a RE-PIN; many = a BURIAL. Read the hunk either way.
           2. git add #{Enum.join(dirty, " ")} and commit it WITH the source change.
@@ -140,11 +173,40 @@ defmodule Mix.Tasks.Barkpark.Coupled do
     end
   end
 
+  # THE TWO ARMS. Predicate 1: run the producer, then diff. Predicate 2: run the
+  # GUARD and read its exit code — never the regen, which would rewrite the pin
+  # and bless a pairing nobody read.
+  defp dirty_artifacts(root, %{kind: :regenerate_then_diff} = c) do
+    Enum.each(c.producer, &run_producer(root, &1, c.producer_dir))
+    # `add -N` first: a brand-new untracked artifact is invisible to
+    # `git diff`, which is how a drift check passes vacuously.
+    git(root, ["add", "-N", "--"] ++ c.artifacts)
+    dirty(root, c.artifacts)
+  end
+
+  defp dirty_artifacts(root, %{kind: :pin_comparison} = c) do
+    [cmd | _] = c.guard
+    Mix.shell().info("  running guard (never the regen): #{cmd}")
+    [exe | args] = String.split(cmd, ~r/\s+/, trim: true)
+    {_out, status} = System.cmd(exe, args, cd: root, stderr_to_stdout: true, env: env())
+    if status == 0, do: [], else: c.artifacts
+  end
+
   defp run_producer(root, cmd, dir) do
     [exe | args] = String.split(cmd, ~r/\s+/, trim: true)
     Mix.shell().info("  running producer: #{cmd}")
     System.cmd(exe, args, cd: Path.join(root, dir), stderr_to_stdout: true, env: env())
   end
+
+  defp producer_note(%{kind: :pin_comparison}),
+    do: "(NOT run — a pin is regen-on-demand; run it yourself and READ the diff)"
+
+  defp producer_note(_), do: "(already run; output is in your tree)"
+
+  defp next_zero(%{kind: :pin_comparison} = c),
+    do: "run the producer above — #{Enum.join(c.producer, " && ")} — then:"
+
+  defp next_zero(_), do: "(the producer already ran; its output is in your tree)"
 
   defp env, do: [{"MIX_ENV", System.get_env("MIX_ENV") || "dev"}]
 

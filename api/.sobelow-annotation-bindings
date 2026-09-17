@@ -1,6 +1,6 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
 lib/barkpark/content/validation.ex	get_in_field
-lib/barkpark/coupled_artifacts.ex	couplings_in_workflow
+lib/barkpark/coupled_artifacts.ex	read_lines
 lib/barkpark/coupled_artifacts.ex	required_contexts
 lib/barkpark/epic_fleet/benchmark.ex	cleanup_temporary_file
 lib/barkpark/epic_fleet/benchmark.ex	select_attrs
