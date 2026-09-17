@@ -294,6 +294,34 @@ else
   ok "no push: trigger (the level schedule is the trigger)"
 fi
 
+# ── the recurrence arm (task-45b262463f23b289) ──────────────────────────────
+# §9 above asserts the COMMITTED transcript matches the tree. That assertion is
+# worthless on the PR that breaks it unless this venue actually RUNS on that PR.
+# What makes the transcript stale is adding or removing a workflow file, and
+# until 2026-09-17 the pull_request arm below watched only this watch's own
+# scripts — so the PR that added taskboard-drive.yml (#18824, head 91ff506c0)
+# drew 22 workflow runs and not one of them was this file. The drift surfaced
+# only on the schedule arm, where it stood red for 8 consecutive runs.
+#
+# This is the TRIGGER half of the §9 assertion and it is asserted separately
+# because the two fail independently: §9 can be perfectly correct and never be
+# asked. Reverting the `.github/workflows/**` registration reds here.
+PR_PATHS="$(awk '/^  pull_request:/{f=1; next} f && /^  [a-z]/{exit} f' "$WF")"
+if grep -qE '^\s*-\s*"?\.github/workflows/\*\*"?\s*$' <<<"$PR_PATHS"; then
+  ok "the pull_request arm watches .github/workflows/** — the PR that adds or removes a main-push workflow runs this harness and reds on its own drift"
+else
+  bad "the pull_request arm does NOT watch .github/workflows/**: a PR that adds a workflow makes the transcript stale and never runs the assertion that says so (measured: #18824, head 91ff506c0, 22 runs, zero main-gate-watch)"
+fi
+# THE CONTROL for that arm: widening it must not make this venue unfiltered.
+# An unfiltered pull_request arm would sample every name in this file onto every
+# PR head, and S4 PATHS-FILTERED — which keys on the PRESENCE of a paths: list,
+# not its breadth — would stop excluding them.
+if grep -qE '^    paths:' <<<"$PR_PATHS"; then
+  ok "CONTROL: the pull_request arm is still paths-filtered, so S4 still excludes every name in this file from the required set"
+else
+  bad "the pull_request arm lost its paths: filter — every name in this file would become a candidate for the required set"
+fi
+
 echo
 echo "── $PASS passed, $FAIL failed ──"
 [ "$FAIL" = "0" ] || exit 1
