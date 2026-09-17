@@ -150,6 +150,16 @@ jobs:
       - name: high-confidence ratchet (fails this job)
         run: bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt
 
+      # The number must carry what produced it. A bare integer is how an
+      # INHERITED number — 8, 15 or 16, all from the PRE-2026-09-12 detector —
+      # reached an acceptance criterion as "high <= 6" and stood for four days
+      # while the tree really read 101. The baseline file has said "put its
+      # printed count here, and update the date" in prose since 2026-09-09; a
+      # written finding does not fire by itself, so this step fires it.
+      # (task-bf9d623529d86a86)
+      - name: the banked number carries its command, date and sha (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --check-provenance scripts/pipefail-sigpipe-baseline.txt
+
       # Advisory: the whole inventory, so medium/low debt is visible in the log
       # rather than only in someone's memory. Never fails.
       - name: full inventory at every confidence (advisory, never fails)
