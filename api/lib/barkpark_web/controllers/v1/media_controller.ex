@@ -11,10 +11,9 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.Storage.{Access, Checkout, Relations}
+  alias Barkpark.Media.Storage.{Access, Checkout, MediaFile, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.WhereUsed
-  alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
   alias BarkparkWeb.MediaVisibilityCopy
@@ -792,14 +791,15 @@ defmodule BarkparkWeb.V1.MediaController do
   # door criterion 5 asks about: `ensure_viewable/3` would ask "may you view
   # this public asset?" about an asset that is not public.
   #
-  # `file_scope_opts/1` derives the tenant from the blob row — the SAME helper
+  # `MediaFile.scope_opts/1` (the CORE row-scope accessor, ex-`file_scope_opts/1`)
+  # derives the tenant from the blob row — the SAME helper
   # `AssetResponse.render/3` already uses for its internal resolution, so the
   # gate and the response cannot disagree about which document they mean. The
   # blob itself was already tenancy-confined by `Media.get_file/2` above, so
   # this narrows the doc lookup to that confinement rather than widening
   # anything.
   defp asset_doc(file, dataset) do
-    Media.asset_doc_for_file(file, dataset, PluginAssets.file_scope_opts(file))
+    Media.asset_doc_for_file(file, dataset, MediaFile.scope_opts(file))
   end
 
   defp conflict(conn, message) do

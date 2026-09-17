@@ -478,7 +478,7 @@ defmodule Barkpark.Media do
              @asset_type,
              attrs,
              dataset,
-             [source: :api] ++ Assets.file_scope_opts(file)
+             [source: :api] ++ MediaFile.scope_opts(file)
            ) do
         {:ok, updated} -> {:ok, updated}
         error -> error
