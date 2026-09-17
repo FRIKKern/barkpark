@@ -200,7 +200,15 @@ emit("notice_after_exit", ei != -1 and ni != -1 and ni > ei)
 # Companion cardinality. An empty/false answer is only meaningful if the body it
 # was computed from was actually read: a parser that stopped matching would
 # report a serene "0" forever.
-emit("decide_consumes_count", len(re.findall(r'^\s*decide\s+"', run, re.M)))
+# `decide_verdict` counts too (dr-w25-bl-security-gate-cannot-see-sobelow):
+# security.yml judges its one `continue-on-error` upstream on
+# `needs.<job>.outputs.verdict` rather than on `.result`, because
+# `continue-on-error` launders the result to `success` and does not touch the
+# outputs. It is a judgement call site like any other, and the equality below
+# would otherwise read it as an unjudged upstream — turning the gate's FIX into
+# this harness's red.
+emit("decide_consumes_count",
+     len(re.findall(r'^\s*decide(?:_verdict)?\s+"', run, re.M)))
 # …against the SIZE OF THE NEEDS SET, which is what the count must equal. A
 # bare constant floor could only catch a neutered reader; equality also catches
 # an upstream sitting in `needs` that nothing judges — the `blocking_not_in_needs`
@@ -467,7 +475,13 @@ OUT="$TMPROOT/step.out"
 run_gate() {
   local label="$1" script="$2" expect="$3" want="$4" rc
   shift 4
-  env -i PATH="$PATH" HOME="$HOME" "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
+  # V_SOBELOW defaults to the clean verdict — security.yml's aggregator judges
+  # its continue-on-error upstream on that channel, and an EMPTY verdict on a
+  # DISPATCHED job is CANNOT READ there, not a pass. `env` takes the LAST
+  # occurrence of a name, so a caller passing its own V_SOBELOW overrides this
+  # (the docs-only arms do exactly that, with the empty value a never-dispatched
+  # job really publishes).
+  env -i PATH="$PATH" HOME="$HOME" V_SOBELOW=MEASURED-CLEAN "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -ne "$want" ]; then
     no "$label -> exit $rc, wanted $want"
     sed 's/^/        /' "$OUT" >&2
@@ -567,7 +581,7 @@ run_gate "Console gate: RED — no reassuring notice on a failure" "$console_ste
 security_step="$TMPROOT/step-security.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/security.yml" security-gate "$security_step"
 run_gate "Security gate: docs-only, nothing dispatched" "$security_step" yes 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
 run_gate "Security gate: the scans really ran" "$security_step" no 0 \
   R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
 run_gate "Security gate: RED — no reassuring notice on a failure" "$security_step" no 1 \
@@ -608,7 +622,7 @@ run_gate "Console gate: api-only" "$console_step" yes 0 \
   R_ESCAPE=success O_CONSOLE=false
 body_says "Console gate" - "NOTHING CONSOLE RAN"
 run_gate "Security gate: docs-only" "$security_step" yes 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
 body_says "Security gate" - "NOTHING SECURITY RAN"
 echo
 
@@ -665,7 +679,13 @@ echo "case 7: the RED ::error:: names the job that refused, and no job that pass
 red_names() {
   local label="$1" script="$2" want_in="$3" want_out="$4" rc
   shift 4
-  env -i PATH="$PATH" HOME="$HOME" "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
+  # V_SOBELOW defaults to the clean verdict — security.yml's aggregator judges
+  # its continue-on-error upstream on that channel, and an EMPTY verdict on a
+  # DISPATCHED job is CANNOT READ there, not a pass. `env` takes the LAST
+  # occurrence of a name, so a caller passing its own V_SOBELOW overrides this
+  # (the docs-only arms do exactly that, with the empty value a never-dispatched
+  # job really publishes).
+  env -i PATH="$PATH" HOME="$HOME" V_SOBELOW=MEASURED-CLEAN "$@" bash --noprofile --norc "$script" >"$OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -ne 1 ]; then
     no "$label -> exit $rc, wanted 1 (this input must be RED)"
     sed 's/^/        /' "$OUT" >&2
@@ -728,6 +748,13 @@ red_names "Security gate: mix-audit failed" "$security_step" "mix-audit" "sobelo
   R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
 red_names "Security gate: sobelow-inline-overlap failed" "$security_step" "sobelow-inline-overlap" "mix-audit" \
   R_CHANGES=success R_SHAPE=success R_OVERLAP=failure R_FINGERPRINT=success R_AUDIT=success O_API=true
+# The verdict-judged upstream must reach the SAME named set. It reds through
+# `decide_verdict`, not `decide`, and a set built only from `decide` call sites
+# would name every other job and silently omit this one — which is the original
+# "something is wrong, never which" defect, reintroduced for exactly the job
+# that could not be seen at all before.
+red_names "Security gate: Sobelow found a NEW finding" "$security_step" "sobelow" "mix-audit" \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true V_SOBELOW=MEASURED-DEFECT
 
 # The OTHER `bad=1` sites, which a failure-only guard would leave unaccumulated:
 # a skip against a gate that is not 'false', and an EMPTY result. Both are reds
