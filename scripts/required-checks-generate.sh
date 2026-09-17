@@ -663,8 +663,26 @@ expand_matrix_name_legs() {
     case "$legsfile" in
       /*|*..*) die "MATRIX LEG SOURCE IS NOT REPO-RELATIVE: $file job '$job' declares \`$legsfile\` — the leg set must be a committed file inside the repo, so the index is derived from the tree under review and not from whatever the runner happens to have on disk." ;;
     esac
-    [ -f "$REPO_ROOT/$legsfile" ] \
-      || die "MATRIX LEG SOURCE IS MISSING: $file job '$job' declares its legs live in \`$legsfile\`, which does not exist. The template \`name: $tmpl\` therefore resolves to NOTHING and stays a catch-all — commit the leg file or take the declaration off."
+    # ANCHORED TO THE TREE UNDER REVIEW, not to this script's own checkout.
+    # `--workflows <dir>` is how every caller points the generator at a tree,
+    # and the mutation suite runs COPIES of this script out of a mktemp dir —
+    # where `$REPO_ROOT` is that temp dir and no leg file has ever existed. An
+    # anchor on $0 therefore turns "read the legs of the workflows you were
+    # given" into "read the legs of wherever the binary happens to live", and
+    # the whole suite reds with MATRIX LEG SOURCE IS MISSING. The workflow dir
+    # names its own root: `<root>/.github/workflows`.
+    local legsroot="" legspath=""
+    legsroot="$(cd "$WORKFLOW_DIR/../.." 2>/dev/null && pwd)" || legsroot=""
+    if [ -n "$legsroot" ] && [ -f "$legsroot/$legsfile" ]; then
+      legspath="$legsroot/$legsfile"
+    elif [ -f "$REPO_ROOT/$legsfile" ]; then
+      # A synthetic `--workflows` dir that is not inside a repo at all (the
+      # suite's own fixture trees): fall back to this checkout. Both anchors
+      # are committed files in a repo; neither can widen a regex.
+      legspath="$REPO_ROOT/$legsfile"
+    fi
+    [ -n "$legspath" ] \
+      || die "MATRIX LEG SOURCE IS MISSING: $file job '$job' declares its legs live in \`$legsfile\`, which exists under neither the workflow tree (\`${legsroot:-?}\`) nor this checkout (\`$REPO_ROOT\`). The template \`name: $tmpl\` therefore resolves to NOTHING and stays a catch-all — commit the leg file or take the declaration off."
     # jq is handed the filter as ONE argv element, so there is no shell here to
     # inject into; the charset guard is about keeping the declaration readable
     # and reviewable, not about escaping.
@@ -678,7 +696,7 @@ expand_matrix_name_legs() {
     # have looks, to a bare read, like 53 successfully-enumerated names. The
     # wrapper makes a non-string leg an ERROR instead of a string, which is the
     # only way "this filter resolved nothing" and "this filter resolved" differ.
-    names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"leg name \" + tojson + \" is not a string\") end) | .[]" "$REPO_ROOT/$legsfile" 2>&1)" \
+    names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"leg name \" + tojson + \" is not a string\") end) | .[]" "$legspath" 2>&1)" \
       || die "MATRIX LEG SOURCE DOES NOT RESOLVE: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, and jq refused it: $(head -1 <<<"$names"). A leg source that does not yield a list of strings resolves to no finite set, so \`name: $tmpl\` is still a catch-all."
     [ -n "$names" ] \
       || die "MATRIX LEG SOURCE IS EMPTY: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, which yielded ZERO names. An empty enumeration is not a finite resolution of \`name: $tmpl\` — it is a template with nothing behind it."
