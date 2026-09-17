@@ -283,6 +283,19 @@ on:
       # with no .go diff at all, and without this entry the very PR that
       # narrows the filter dispatches nothing.
       - ".github/workflows/doc-gates.yml"
+      # `bp make workflow` (internal/cli/make_workflow.go) emits the GitHub
+      # Actions builder TEMPLATE for a user's own repo, and
+      # internal/cli/make_workflow_test.go reads three trees from DISK to keep it
+      # honest: TestWorkflowPatValidityMatchesTheControlPlane reads
+      # user_token.ex's @pat_default_validity_days (the template PRINTS that
+      # number, so a drifted default makes the template lie), and
+      # TestWorkflowTemplateIsNotDuplicated WALKS both starter trees to enforce
+      # the template's single-owner rule. All three change with no .go diff, so
+      # without these entries the guards are unreachable on the very PR that
+      # breaks them — same #963->#969-class gap as the carve-outs above.
+      - "cloud/lib/barkpark_cloud/accounts/user_token.ex"
+      - "cloud/priv/templates/**"
+      - "js/packages/create-barkpark-app/templates/**"
   pull_request:
     # NO `paths:` KEY, EVER — see THE SKIP SHIM above. The path decision for a
     # pull_request is made by the `changes` job below, which derives it from the
