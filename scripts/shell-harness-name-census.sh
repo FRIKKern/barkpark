@@ -153,8 +153,11 @@ if [ -n "$COMPARE_FILE" ]; then
     echo "EQUAL: the workflow publishes exactly the $NA baselined check-run names."
     exit 0
   fi
-  [ -n "$ADDED" ]   && { echo "ADDED (workflow publishes, baseline does not):"; printf '  + %s\n' $ADDED; }
-  [ -n "$REMOVED" ] && { echo "REMOVED (baseline carries, workflow no longer publishes):"; printf '  - %s\n' $REMOVED; }
+  # One name per LINE, never `printf ... $VAR`: every one of these names
+  # contains spaces, and word-splitting them turns a two-name diff into a
+  # twelve-fragment one that nobody can read or grep.
+  [ -n "$ADDED" ]   && { echo "ADDED (workflow publishes, baseline does not):"; printf '%s\n' "$ADDED" | sed 's/^/  + /'; }
+  [ -n "$REMOVED" ] && { echo "REMOVED (baseline carries, workflow no longer publishes):"; printf '%s\n' "$REMOVED" | sed 's/^/  - /'; }
   echo "DIFFERENT: the published check-run name set MOVED. If the move is intended, update $COMPARE_FILE in this same commit and say in the PR body which pins named the removed check runs."
   exit 1
 fi
@@ -177,7 +180,7 @@ if [ -z "$ADDED" ] && [ -z "$REMOVED" ]; then
   echo "EQUAL: both refs publish the same $NA check-run names."
   exit 0
 fi
-[ -n "$ADDED" ]   && { echo "ADDED (present in '${REF:-<working tree>}', absent in '$COMPARE'):";  printf '  + %s\n' $ADDED; }
-[ -n "$REMOVED" ] && { echo "REMOVED (present in '$COMPARE', absent in '${REF:-<working tree>}'):"; printf '  - %s\n' $REMOVED; }
+[ -n "$ADDED" ]   && { echo "ADDED (present in '${REF:-<working tree>}', absent in '$COMPARE'):";  printf '%s\n' "$ADDED" | sed 's/^/  + /'; }
+[ -n "$REMOVED" ] && { echo "REMOVED (present in '$COMPARE', absent in '${REF:-<working tree>}'):"; printf '%s\n' "$REMOVED" | sed 's/^/  - /'; }
 echo "DIFFERENT: the published check-run name set MOVED."
 exit 1

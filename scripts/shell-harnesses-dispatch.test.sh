@@ -59,7 +59,7 @@ trap 'rm -rf "$TMP"' EXIT
 # then needs-ok/if-ok flags), outputs.txt (keys of jobs.changes.outputs),
 # body.sh (the dispatcher step with expressions substituted).
 if ! python3 - "$WORKFLOW" "$TMP" <<'PY'
-import sys, yaml
+import json, os, sys, yaml
 wf, out = sys.argv[1], sys.argv[2]
 with open(wf) as fh:
     doc = yaml.safe_load(fh)
@@ -72,18 +72,74 @@ with open(out + "/paths.txt", "w") as fh:
 jobs = doc["jobs"]
 if "changes" not in jobs:
     sys.stderr.write("no jobs.changes\n"); sys.exit(2)
+# THE GATED UNIT IS A MATRIX LEG, NOT A JOB (matrix collapse, 2026-09-17).
+# The 53 sibling jobs each gated by `if: needs.changes.outputs.<jid> == 'true'`
+# are now ONE `harness` job fanning out over the legs in
+# .github/shell-harness-legs.json. Clauses C and D are unchanged in what they
+# assert — every dispatched unit has a roster row and a declared output, and
+# nothing is dispatched that the roster does not name — but the unit they
+# iterate is now the leg slug. jobs.txt keeps its `<id> <needs-ok> <if-ok>`
+# shape so the arms below did not have to move.
+#
+# The `harness` job's OWN shape is checked here rather than per-leg, because it
+# is the single point where a whole collapse can go wrong:
+#   · it must `needs: [changes]`
+#   · it must be gated on `needs.changes.outputs.any == 'true'` and NOT on the
+#     matrix being non-empty — an empty `strategy.matrix` DELETES the job
+#     instead of skipping it, and a job that renders no check run at all is
+#     indistinguishable from a workflow that never started
+#   · it must carry an explicit `name:` template, or GitHub auto-suffixes every
+#     leg's check-run name with `(leg)` and renames 53 checks at once
+job_ids = sorted(k for k in jobs if k != "changes")
+if job_ids != ["harness"]:
+    sys.stderr.write("expected exactly one non-dispatcher job `harness`, got: %s\n" % ", ".join(job_ids))
+    sys.exit(2)
+h = jobs["harness"]
+hneeds = h.get("needs")
+if isinstance(hneeds, str):
+    hneeds = [hneeds]
+if not hneeds or "changes" not in hneeds:
+    sys.stderr.write("jobs.harness does not `needs: [changes]`\n"); sys.exit(2)
+if str(h.get("if", "")).strip() != "needs.changes.outputs.any == 'true'":
+    sys.stderr.write("jobs.harness must be gated on needs.changes.outputs.any == 'true' "
+                     "(an empty matrix deletes the job rather than skipping it); got %r\n"
+                     % h.get("if"))
+    sys.exit(2)
+if str(h.get("name", "")).strip() != "${{ matrix.leg.name }}":
+    sys.stderr.write("jobs.harness must carry name: ${{ matrix.leg.name }} — without an explicit "
+                     "name template GitHub renames every leg's check run; got %r\n" % h.get("name"))
+    sys.exit(2)
+if (h.get("strategy") or {}).get("fail-fast") is not False:
+    sys.stderr.write("jobs.harness must set strategy.fail-fast: false — a cancelled sibling "
+                     "harness reports nothing and reads as 'did not run'\n")
+    sys.exit(2)
+
+legs_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(wf))),
+                         "shell-harness-legs.json")
+try:
+    legs = json.load(open(legs_path))
+except Exception as exc:
+    sys.stderr.write("cannot read %s: %s\n" % (legs_path, exc)); sys.exit(2)
+if not isinstance(legs, list) or not legs:
+    sys.stderr.write("%s must be a non-empty list\n" % legs_path); sys.exit(2)
+slugs = [l["slug"] for l in legs]
+if len(set(slugs)) != len(slugs):
+    sys.stderr.write("duplicate leg slug in %s\n" % legs_path); sys.exit(2)
+for l in legs:
+    if not (l.get("arms") or []):
+        sys.stderr.write("leg %r carries ZERO arms — it would report a green over nothing\n"
+                         % l["slug"])
+        sys.exit(2)
 with open(out + "/jobs.txt", "w") as fh:
-    for jid, job in jobs.items():
-        if jid == "changes":
-            continue
-        needs = job.get("needs")
-        if isinstance(needs, str):
-            needs = [needs]
-        needs_ok = "1" if needs and "changes" in needs else "0"
-        want_if = "needs.changes.outputs.%s == 'true'" % jid
-        if_ok = "1" if str(job.get("if", "")).strip() == want_if else "0"
-        fh.write("%s %s %s\n" % (jid, needs_ok, if_ok))
+    for slug in slugs:
+        # Every leg is gated identically, by construction: the dispatcher emits
+        # the matrix from exactly these slugs' verdicts, so needs/if are 1/1 and
+        # what clauses C and D actually measure is the roster/outputs agreement.
+        fh.write("%s 1 1\n" % slug)
 outputs = jobs["changes"].get("outputs") or {}
+# `matrix` and `any` are the collapse's own plumbing, not harness gates; clause
+# D's "an output with no job" arm would otherwise read them as orphans.
+outputs = dict((k, v) for k, v in outputs.items() if k not in ("matrix", "any"))
 with open(out + "/outputs.txt", "w") as fh:
     for k, v in outputs.items():
         fh.write("%s %s\n" % (k, v))
@@ -117,7 +173,7 @@ awk '{ print $1 }' "$TMP/roster.txt" | awk '!seen[$0]++' >"$TMP/roster-jobs.txt"
 
 N_PATHS=$(wc -l <"$TMP/paths.txt" | tr -d ' ')
 N_JOBS=$(wc -l <"$TMP/jobs.txt" | tr -d ' ')
-echo "── shell-harnesses dispatcher: $N_PATHS workflow paths, $ROWS roster rows, $N_JOBS gated jobs ──"
+echo "── shell-harnesses dispatcher: $N_PATHS workflow paths, $ROWS roster rows, $N_JOBS dispatched legs ──"
 
 # ── A: SUBSET ────────────────────────────────────────────────────────────────
 missing_up=""
@@ -217,7 +273,7 @@ ungated=""
 while read -r jid needs_ok if_ok; do
   [ "$needs_ok" = 1 ] && [ "$if_ok" = 1 ] || ungated="$ungated $jid(needs=$needs_ok,if=$if_ok)"
 done <"$TMP/jobs.txt"
-if [ -z "$ungated" ]; then ok "C gating: all $N_JOBS jobs carry needs: [changes] + if: needs.changes.outputs.<id> == 'true'"
+if [ -z "$ungated" ]; then ok "C gating: the harness job needs [changes], is gated on outputs.any, names its legs explicitly, and all $N_JOBS legs are dispatched"
 else bad "C gating: jobs missing the gate:$ungated"; fi
 
 # ── D: OUTPUTS ───────────────────────────────────────────────────────────────
