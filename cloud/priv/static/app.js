@@ -12439,7 +12439,7 @@
     return { kind: "other", text: null };
   }
 
-  // THE ONE FUNNEL, made pure so all four cards are pinned at a single seam:
+  // THE ONE FUNNEL, made pure so EVERY operator card is pinned at a single seam:
   // given a response and the card's own renderer, decide whose sentence runs.
   // fault.text is STATIC author copy (never server data), so it is emitted raw
   // like the gate line above — apostrophes and dashes render verbatim.
@@ -12815,7 +12815,7 @@
       basis + table + operatorCensusTotalsHtml(data);
   }
 
-  // The page shell: five cards, each with its own body slot so one silent route
+  // The page shell: one body slot PER CARD, so one silent route
   // never blanks the others. Painted BEFORE the reads land, so the console has a
   // shape instantly and every card owns its loading line — the loading line is
   // the card's HONEST in-flight state, and it is why a card is never empty
@@ -12871,7 +12871,7 @@
   //   • answered, not an operator   → BOUNCE to #overview. Registering "operator"
   //     in VIEWS made init()'s validator accept the deep link for anybody, so the
   //     sidebar gate alone is no longer enough.
-  //   • answered, operator          → paint the shell and read the four routes.
+  //   • answered, operator          → paint the shell and read every operator route.
   //
   // D411'S FENCE, CARVED OUT DELIBERATELY. __app.test.mjs pinned the SOURCE TEXT
   // of the `if (!meCache)` arm — the checking line immediately followed by
@@ -12894,7 +12894,7 @@
           // loadMe's SUCCESS arm re-enters this loader itself; its failure arm
           // deliberately does not (app.js loadMe's else), so re-enter here ONLY
           // when the read did not land — otherwise the page would paint twice
-          // and issue the four operator reads twice.
+          // and issue every operator read twice.
           loadMe().then(function () { if (meState() !== "loaded") loadOperator(); });
         });
       }
@@ -12929,7 +12929,7 @@
     operatorRefresh();
   }
 
-  // Read all four routes in parallel; each paints its own card. noBounce is
+  // Read every operator route in parallel; each paints its own card. noBounce is
   // LOAD-BEARING on every one: these are platform-operator gated, so a session
   // that has lost the allowlist 403s (and an expired one 401s) — without it a
   // stale probe would clearSession() and log the operator out mid-page.
@@ -12948,7 +12948,7 @@
       var btn = slot.querySelector ? slot.querySelector("[data-digest-send]") : null;
       if (btn) btn.addEventListener("click", function () { operatorConfirmDigestSend(); });
     });
-    // The census rides the SAME funnel as the other four: operatorPaint owns the
+    // The census rides the SAME funnel as every other card: operatorPaint owns the
     // only GET call site the whole console has, so the window query is computed
     // here and handed in as a path rather than opening a fifth read seam with a
     // degrade story of its own. (Spelled without the call expression on purpose
@@ -30287,7 +30287,7 @@
       // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50). operatorRouteAllowed is
       // the fail-closed ROUTE gate — applyRoute itself is not exported and cannot
       // be pinned, so the predicate it consults is pinned instead (GR49). The rest
-      // are the four cards' pure derivations; the DOM mounts (loadOperator /
+      // are the operator cards' pure derivations; the DOM mounts (loadOperator /
       // operatorRefresh / operatorPaint / operatorConfirmBrake) are smoke-driven.
       operatorRouteAllowed: operatorRouteAllowed,
       operatorRowState: operatorRowState,

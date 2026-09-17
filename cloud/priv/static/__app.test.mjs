@@ -3263,7 +3263,7 @@ test("cch-bl: the IMPORTED citationScanFiles() equals the set the GATE actually 
 // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ───────────────────────
 // THE crown surface: the #operator view rendered honest over the real rollout
 // machinery. Pinned here: the fail-closed ROUTE gate (applyRoute is not
-// hook-exported, so the predicate it consults is), the four cards' pure
+// hook-exported, so the predicate it consults is), the operator cards' pure
 // derivations against the PROBE-VERIFIED wire bytes, and the four anti-drift
 // source guards GR49 asks for (one route literal, one action emitter, zero
 // /v1/admin/autoupdate, zero fleetStrip* consumption).
@@ -4045,13 +4045,159 @@ test("cch-w36-s4: operatorReadFault tells FOUR classes apart — a 403 is an aut
   assert.equal(older.text, null, "an older control plane's 404 defers too");
 });
 
-test("cch-w36-s4: operatorCardBody is the ONE funnel — all four cards speak the allowlist under a 403 and their own line under a 500", () => {
-  const cards = {
-    brake: (d) => hooks.operatorBrakeCardHtml(d),
-    canary: (d) => hooks.operatorCanaryCardHtml(d),
-    warm: (d) => hooks.operatorWarmPoolCardHtml(d),
-    digest: (d) => hooks.operatorDigestCardHtml(d && d.deliveries),
-  };
+// ── cch-r21-w22: THE OPERATOR CARD ROSTER IS DERIVED, NOT TYPED ─────────────
+// The operator console's own comments used to state the card and route count
+// as a typed numeral, one short of what operatorRefresh actually issues. The
+// census card landed after those sentences were written, so a reader auditing
+// the funnel would have concluded the census was covered when nothing in this
+// file said it was — and the funnel test below really did drive one renderer
+// fewer than the console paints, which is where the stale prose stopped being
+// cosmetic. (The superseded numeral is deliberately NOT quoted here: a
+// correction that repeats the old number answers every grep hunting it.)
+//
+// The remedy is not a corrected sentence. Nothing reds when a sentence rots, so
+// the count stops being typed at all: these helpers read the roster out of the
+// SHIPPED source, three independent ways, and the arm below asserts the three
+// agree. Every helper THROWS when it cannot locate its subject — an anchor that
+// stops matching is a FAILURE here, never a silent zero that greens.
+function operatorRefreshSrc(src) {
+  const s = src === undefined ? APP_SRC : src;
+  const start = s.indexOf("function operatorRefresh() {");
+  if (start < 0) throw new Error("operatorRefresh() not found in app.js — this derivation has no subject");
+  const end = s.indexOf("\n  function operatorPaint(", start);
+  if (end <= start) throw new Error("operatorRefresh()'s end anchor (operatorPaint's own definition) not found — this derivation has no subject");
+  return s.slice(start, end);
+}
+// (a) THE MARKUP. Every card body slot id the shipped file mentions anywhere.
+function operatorSlotIds(src) {
+  const s = src === undefined ? APP_SRC : src;
+  const ids = [...new Set(s.match(/op-[a-z]+-body/g) || [])].sort();
+  if (ids.length < 2) throw new Error("no operator card slot ids found in app.js — this derivation has no subject");
+  return ids;
+}
+// (b) THE READS. Every operatorPaint target inside operatorRefresh.
+function operatorPaintTargets(src) {
+  const t = [...operatorRefreshSrc(src).matchAll(/operatorPaint\("#(op-[a-z]+-body)"/g)].map((m) => m[1]);
+  if (!t.length) throw new Error("operatorRefresh() issues no operatorPaint call this parse can see");
+  return t;
+}
+// (c) THE RENDERERS. Every card-body function operatorRefresh hands to the funnel.
+function operatorCardHtmlNames(src) {
+  const n = [...operatorRefreshSrc(src).matchAll(/return (operator[A-Za-z]+CardHtml)\(/g)].map((m) => m[1]);
+  if (!n.length) throw new Error("operatorRefresh() names no card renderer this parse can see");
+  return n;
+}
+// (d) THE PROSE. A typed cardinal in front of "cards"/"routes"/"reads" inside
+// the operator console's own comment regions — the exact shape that rotted.
+// "one" is excluded (a singular "one card's read" is a description, not a
+// roster count) and the numeric alternative is capped at twelve so a status
+// code ("a 500 reads …") is not read as a count.
+const OPERATOR_TYPED_COUNT_RE =
+  /\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[2-9]|1[0-2])\s+(?:operator\s+)?(?:cards?|routes?|reads?)\b/i;
+const OPERATOR_PROSE_CUTS = [
+  ["  // cch-w36-s4 — THE REFUSAL HAS A VOICE", "  function operatorConfirmBrake("],
+  ["      // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50)", "      // The ARMING roster"],
+];
+function operatorTypedCounts(src) {
+  const s = src === undefined ? APP_SRC : src;
+  const hits = [];
+  for (const [a, b] of OPERATOR_PROSE_CUTS) {
+    const i = s.indexOf(a);
+    if (i < 0) throw new Error("operator prose anchor not found in app.js: " + a.trim() + " — this scan has no subject");
+    const j = s.indexOf(b, i);
+    if (j <= i) throw new Error("operator prose end anchor not found in app.js: " + b.trim() + " — this scan has no subject");
+    for (const line of s.slice(i, j).split("\n")) {
+      if (/^\s*\/\//.test(line) && OPERATOR_TYPED_COUNT_RE.test(line)) hits.push(line.trim());
+    }
+  }
+  return hits;
+}
+
+test("cch-r21-w22: the operator card roster is DERIVED three ways and they agree — and no comment types the count", () => {
+  const slots = operatorSlotIds();
+  const targets = operatorPaintTargets();
+  const renderers = operatorCardHtmlNames();
+
+  // ── THE FLOOR. A derivation that found nothing must not read as agreement.
+  assert.ok(slots.length >= 4, "the roster derivation must find real slots, not an empty set: " + slots.join(","));
+
+  // ── THE AGREEMENT. A slot nobody reads paints its loading line forever; a
+  // read with no slot is a silent no-op (operatorPaint returns early on a
+  // missing slot); a read with no renderer cannot compile.
+  assert.deepEqual([...targets].sort(), slots,
+    "every card slot is read by operatorRefresh, and every read has a slot");
+  assert.equal(renderers.length, targets.length, "one renderer per read");
+  assert.ok(slots.includes("op-census-body"),
+    "the census card is IN the roster this file derives — it is the card the old typed four excluded");
+
+  // ── THE PROSE. Zero typed counts, measured, not asserted by eye.
+  assert.deepEqual(operatorTypedCounts(), [],
+    "an operator comment states a card/route/read count as a typed numeral; say it without the number, or derive it");
+
+  // ── THE CONTROLS, RUN INSIDE THE MEASUREMENT. Each goes through
+  // replaceUnique (the file's own import) rather than a bare `.replace`: a bare
+  // string needle takes the first match anywhere and is SILENT when it drifts,
+  // which would make a control that proves nothing look exactly like one that
+  // passed. replaceUnique REFUSES a drifted or ambiguous needle instead. Each mutates a COPY of the
+  // shipped source and re-runs the SAME derivation, so CI's existing
+  // invocation of this suite wires them and there is no separate test anyone
+  // could filter out or stop. Without these, every assertion above is a claim
+  // that the parse agrees with itself.
+  //
+  // CONTROL 1 — drop the census read: the slot survives in the markup, the
+  // read does not, and the agreement must break.
+  const dropped = APP_SRC.replace(/\n    operatorPaint\("#op-census-body"[\s\S]*?\n    \}\);/, "\n");
+  assert.notEqual(dropped, APP_SRC, "control 1 must actually mutate the source");
+  assert.notDeepEqual([...operatorPaintTargets(dropped)].sort(), operatorSlotIds(dropped),
+    "CONTROL: dropping a card's read must break the slot/read agreement");
+
+  // CONTROL 2 — rename one renderer out of the funnel: the read count is
+  // unchanged, the renderer count drops, and one-renderer-per-read must fail.
+  const renamed = replaceUnique(APP_SRC, "return operatorCensusCardHtml(data);", "return operatorCensusCardHtmlX(data);",
+    { what: "control 2 (a renderer leaves the funnel)" });
+  assert.notEqual(renamed, APP_SRC, "control 2 must actually mutate the source");
+  assert.notEqual(operatorCardHtmlNames(renamed).length, operatorPaintTargets(renamed).length,
+    "CONTROL: a read whose renderer left the funnel must break one-renderer-per-read");
+
+  // CONTROL 3 — re-type a count into the prose: the scan must see it.
+  const retyped = replaceUnique(APP_SRC, "// THE ONE FUNNEL, made pure so EVERY operator card",
+    "// THE ONE FUNNEL, made pure so all THREE cards", { what: "control 3 (a count re-typed into the prose)" });
+  assert.notEqual(retyped, APP_SRC, "control 3 must actually mutate the source");
+  assert.ok(operatorTypedCounts(retyped).length > 0,
+    "CONTROL: a typed count re-introduced into the operator prose must be caught");
+
+  // CONTROL 4 — the anchors are load-bearing. A source that no longer carries
+  // operatorRefresh must THROW, not answer an empty roster.
+  const unanchored = replaceUnique(APP_SRC, "function operatorRefresh() {", "function operatorRefreshRenamed() {",
+    { what: "control 4 (the roster anchor goes missing)" });
+  assert.throws(() => operatorPaintTargets(unanchored),
+    /no subject/, "CONTROL: a lost anchor is a FAILURE, never a silent zero");
+  const unanchoredProse = replaceUnique(APP_SRC, OPERATOR_PROSE_CUTS[0][0], "// gone",
+    { what: "control 4b (the prose anchor goes missing)" });
+  assert.throws(() => operatorTypedCounts(unanchoredProse),
+    /no subject/, "CONTROL: a lost prose anchor is a FAILURE, never a silent zero");
+});
+
+test("cch-w36-s4: operatorCardBody is the ONE funnel — EVERY operator card speaks the allowlist under a 403 and its own line under a 500", () => {
+  // cch-r21-w22 — THE ROSTER IS DERIVED, NOT TYPED. This map used to name its
+  // cards by hand and was written before the census card existed, so the census
+  // was the one card whose 403 / 5xx / offline sentences nothing in this file
+  // ever drove: the funnel's own proof had a hole exactly where the prose said
+  // there was none. operatorCardHtmlNames() reads the renderers out of
+  // operatorRefresh's shipped source, so a card added tomorrow is covered the
+  // day it lands and a card removed stops being asserted. Every renderer here
+  // takes ONE argument and is called with the fault paths' data (null under a
+  // 5xx, never reached under a 403/offline), which is byte-identical to what
+  // operatorPaint hands it — digest's `data && data.deliveries` is null when
+  // data is null.
+  const names = operatorCardHtmlNames();
+  const cards = {};
+  for (const n of names) {
+    assert.equal(typeof hooks[n], "function", n + " must be hook-exported to be driven here");
+    cards[n] = (d) => hooks[n](d);
+  }
+  assert.equal(Object.keys(cards).length, operatorSlotIds().length,
+    "one renderer per card slot — the funnel is only proven for the cards it drives");
   const forbidden = { ok: false, status: 403, data: { error: "forbidden" } };
   const boom = { ok: false, status: 500, data: {} };
   const offline = { ok: false, status: 0, data: { error: "network_error" }, transport: "unreachable" };
@@ -4074,7 +4220,7 @@ test("cch-w36-s4: operatorCardBody is the ONE funnel — all four cards speak th
   // An OK read is byte-identical to the old ternary: the card's own render, its
   // own data — the funnel adds no arm to the success path.
   assert.equal(
-    hooks.operatorCardBody({ ok: true, status: 200, data: { ready: 2 } }, cards.warm),
+    hooks.operatorCardBody({ ok: true, status: 200, data: { ready: 2 } }, cards.operatorWarmPoolCardHtml),
     hooks.operatorWarmPoolCardHtml({ ready: 2 }),
   );
 
