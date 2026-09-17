@@ -12,6 +12,14 @@
 #                                           this harness can PROVE it owns, and
 #                                           with --apply remove exactly those.
 #                                           Refuses everything else, by name.
+#   scripts/pds-pull-proof.sh --selftest-conninfo
+#                                           OFFLINE two-arm control over the
+#                                           PDS_SCRATCH_DB reader: an unquoted
+#                                           hand-written scratch.env must still
+#                                           fail closed AND be named, and the
+#                                           quoted recipe must parse all four
+#                                           keys in SILENCE. No network, no
+#                                           target, no export.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -524,7 +532,49 @@ src_psql() { # sql — read-only. The SQL travels on ssh's STDIN (psql -f -) rat
 # port, a token or a conninfo — a harness that guesses them is proving something
 # about its guess.
 
+# ── the conninfo, READ THE SAME WAY EVERYWHERE ──────────────────────────────
+#
+# `PDS_SCRATCH_DB` is a libpq conninfo: `host=… port=… dbname=… user=…`. Two
+# pure helpers read it, and BOTH the warning in load_target and the abort in
+# step 0c go through them, so the two can never name different key sets.
+#
+# WHY THE WARNING EXISTS (pds-w6-scratch-env-quoting-trap). load_target sources
+# scratch.env with `. "$envf"`. A HAND-WRITTEN line
+#
+#     PDS_SCRATCH_DB=host=127.0.0.1 port=59999 dbname=nope user=nope
+#
+# is a shell assignment followed by three COMMAND WORDS: the variable gets
+# `host=127.0.0.1` and the rest is dropped at the first space. The generated
+# scratch.env is safe — pds-scratch-target.sh writes `export PDS_SCRATCH_DB="…"`
+# — so this only ever bites a fixture somebody typed. It already FAILS CLOSED
+# (step 0c aborts `env:scratch-db-unparsed` and refuses the ambient dev Repo),
+# and that is NOT traded away here: nothing below repairs, completes or guesses
+# at a half-parsed conninfo. The only change is that the operator is told WHICH
+# keys are missing, and that the cause is the missing quotes, at the moment the
+# value is read rather than several steps downstream.
+
+conninfo_part() { # key conninfo -> the value for that key ('' when absent)
+  local want="$1" kv
+  # Word-splitting $2 IS the parse: a libpq conninfo is space-separated.
+  # shellcheck disable=SC2086
+  for kv in $2; do
+    case "$kv" in
+      "$want"=*) printf '%s' "${kv#"$want"=}"; return 0 ;;
+    esac
+  done
+  printf ''
+}
+
+conninfo_missing_keys() { # conninfo -> the missing key names, space-separated
+  local k missing=""        # empty output = all four keys present
+  for k in host port dbname user; do
+    [ -n "$(conninfo_part "$k" "$1")" ] || missing="$missing $k"
+  done
+  printf '%s' "${missing# }"
+}
+
 TARGET_BASE=""; TARGET_TOKEN=""; TARGET_DB=""; TARGET_TREE=""; TARGET_MEDIA=""
+SCRATCH_DB_WARNED=""
 load_target() { # 0 = a booted target is loaded
   local envf="$BARKPARK_HOME/scratch.env"
   [ -f "$envf" ] || return 1
@@ -535,6 +585,18 @@ load_target() { # 0 = a booted target is loaded
   TARGET_DB="${PDS_SCRATCH_DB:-}"
   TARGET_TREE="${PDS_SCRATCH_TREE:-}"
   TARGET_MEDIA="${BARKPARK_MEDIA_DIR:-}"
+  # A non-empty conninfo missing any of the four keys is named HERE, once per
+  # distinct value, on stderr. TARGET_DB is left exactly as it was read.
+  local missing
+  if [ -n "$TARGET_DB" ]; then
+    missing="$(conninfo_missing_keys "$TARGET_DB")"
+    if [ -n "$missing" ] && [ "$SCRATCH_DB_WARNED" != "$TARGET_DB" ]; then
+      SCRATCH_DB_WARNED="$TARGET_DB"
+      printf 'WARN  %s/scratch.env: PDS_SCRATCH_DB parsed to fewer than four keys — missing: %s (value read: %s)\n' \
+        "$BARKPARK_HOME" "$missing" "$TARGET_DB" >&2
+      printf 'WARN  a HAND-WRITTEN scratch.env must QUOTE the value — export PDS_SCRATCH_DB="host=… port=… dbname=… user=…" — because sourcing an unquoted multi-field assignment keeps only the first field. Nothing is guessed from a short conninfo: step 0c still aborts rather than fall back to the ambient dev Repo.\n' >&2
+    fi
+  fi
   [ -n "$TARGET_BASE" ] && [ -n "$TARGET_TOKEN" ]
 }
 
@@ -1312,19 +1374,17 @@ step_0c() {
 
   # Parse libpq conninfo -> the four parts Ecto needs. Written by
   # pds-scratch-target.sh as: host=… port=… dbname=… user=…
-  local pg_host pg_port pg_db pg_user kv
-  pg_host=""; pg_port=""; pg_db=""; pg_user=""
-  for kv in $TARGET_DB; do
-    case "$kv" in
-      host=*)   pg_host="${kv#host=}" ;;
-      port=*)   pg_port="${kv#port=}" ;;
-      dbname=*) pg_db="${kv#dbname=}" ;;
-      user=*)   pg_user="${kv#user=}" ;;
-    esac
-  done
-  if [ -z "$pg_host" ] || [ -z "$pg_port" ] || [ -z "$pg_db" ] || [ -z "$pg_user" ]; then
+  # Same reader as load_target's warning (conninfo_part), so the abort below
+  # cannot disagree with the WARN line about which keys are missing.
+  local pg_host pg_port pg_db pg_user missing
+  pg_host="$(conninfo_part host "$TARGET_DB")"
+  pg_port="$(conninfo_part port "$TARGET_DB")"
+  pg_db="$(conninfo_part dbname "$TARGET_DB")"
+  pg_user="$(conninfo_part user "$TARGET_DB")"
+  missing="$(conninfo_missing_keys "$TARGET_DB")"
+  if [ -n "$missing" ]; then
     abort 0c "env:scratch-db-unparsed" \
-      "PDS_SCRATCH_DB did not parse into host/port/dbname/user ('$TARGET_DB'). Refusing to fall back to the ambient dev Repo."
+      "PDS_SCRATCH_DB did not parse into host/port/dbname/user — MISSING: $missing ('$TARGET_DB'). A hand-written scratch.env must QUOTE the value (export PDS_SCRATCH_DB=\"host=… port=… dbname=… user=…\"); sourcing an unquoted multi-field assignment keeps only the first field. Refusing to fall back to the ambient dev Repo."
     return 0
   fi
   info "scratch Repo    host=$pg_host port=$pg_port dbname=$pg_db user=$pg_user (from scratch.env, not from dev.exs)"
@@ -4087,6 +4147,103 @@ preflight() {
   resolve_source_token || die "no source token. Set PDS_SOURCE_TOKEN, or add $SOURCE_BASE to ~/.config/barkpark/config.json. (It is never printed by this script.)"
 }
 
+# ── THE CONNINFO READER'S OWN CONTROL (pds-w6-scratch-env-quoting-trap) ─────
+#
+# A warning that is present in the file is not a warning that FIRES. This runs
+# the SHIPPED load_target against two scratch.env fixtures it writes itself and
+# pins BOTH directions:
+#
+#   NEGATIVE — a hand-written UNQUOTED assignment. The value must still arrive
+#     truncated (nothing repairs it), the missing keys must be named exactly
+#     `port dbname user`, the WARN must reach stderr, and the step-0c
+#     classifier must still select the ABORT branch. Fail-closed is pinned as
+#     an assertion, not as a promise in a comment.
+#   POSITIVE — the QUOTED recipe. All four keys parse to their exact values and
+#     stderr is EMPTY. A warner that shouts on a correct fixture is noise, and
+#     it is this arm that makes the negative arm mean something.
+#
+# Offline and side-effect free: one mktemp directory, removed on the way out.
+cmd_selftest_conninfo() {
+  local tmpd arms=0 fails=0 err db missing
+  tmpd="$(mktemp -d)"
+
+  _sc_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _sc_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _sc_eq()  { # arm expected actual
+    if [ "$2" = "$3" ]; then _sc_ok "$1"; else _sc_bad "$1" "expected [$2], got [$3]"; fi
+  }
+
+  say "selftest: the PDS_SCRATCH_DB conninfo reader"
+  say ""
+  say "  NEGATIVE CONTROL — hand-written, UNQUOTED (the form that bites)"
+
+  mkdir -p "$tmpd/unquoted"
+  {
+    printf 'export PDS_SCRATCH_BASE=http://127.0.0.1:59999\n'
+    printf 'export PDS_SCRATCH_TOKEN=selftest-token\n'
+    printf 'PDS_SCRATCH_DB=host=127.0.0.1 port=59999 dbname=nope user=nope\n'
+  } > "$tmpd/unquoted/scratch.env"
+
+  db="$( BARKPARK_HOME="$tmpd/unquoted" ; load_target >/dev/null 2>&1 || true ; printf '%s' "$TARGET_DB" )"
+  _sc_eq "unquoted: the sourced value is TRUNCATED at the first space and NOT repaired" \
+    "host=127.0.0.1" "$db"
+
+  missing="$(conninfo_missing_keys "$db")"
+  _sc_eq "unquoted: the missing keys are named exactly" "port dbname user" "$missing"
+
+  err="$( BARKPARK_HOME="$tmpd/unquoted" ; load_target 2>&1 1>/dev/null || true )"
+  case "$err" in
+    *"missing: port dbname user"*) _sc_ok "unquoted: load_target WARNS on stderr and names the missing keys" ;;
+    *) _sc_bad "unquoted: load_target WARNS on stderr and names the missing keys" "stderr was [$err]" ;;
+  esac
+  case "$err" in
+    *'must QUOTE the value'*) _sc_ok "unquoted: the WARN names the CAUSE (the missing quotes)" ;;
+    *) _sc_bad "unquoted: the WARN names the CAUSE (the missing quotes)" "stderr was [$err]" ;;
+  esac
+
+  # FAIL-CLOSED, ASSERTED: step 0c aborts exactly when conninfo_missing_keys is
+  # non-empty, so a non-empty answer here IS the abort branch being selected.
+  if [ -n "$missing" ] && [ -z "$(conninfo_part port "$db")" ]; then
+    _sc_ok "unquoted: step 0c still takes env:scratch-db-unparsed (no port -> no ambient-Repo fallback)"
+  else
+    _sc_bad "unquoted: step 0c still takes env:scratch-db-unparsed" \
+      "missing=[$missing] port=[$(conninfo_part port "$db")] — the warning must not have bought a fallback"
+  fi
+
+  say ""
+  say "  POSITIVE CONTROL — the CORRECTED, QUOTED recipe"
+
+  mkdir -p "$tmpd/quoted"
+  {
+    printf 'export PDS_SCRATCH_BASE=http://127.0.0.1:59999\n'
+    printf 'export PDS_SCRATCH_TOKEN=selftest-token\n'
+    printf 'export PDS_SCRATCH_DB="host=127.0.0.1 port=59999 dbname=nope user=nope"\n'
+  } > "$tmpd/quoted/scratch.env"
+
+  db="$( BARKPARK_HOME="$tmpd/quoted" ; load_target >/dev/null 2>&1 || true ; printf '%s' "$TARGET_DB" )"
+  _sc_eq "quoted: host"   "127.0.0.1" "$(conninfo_part host "$db")"
+  _sc_eq "quoted: port"   "59999"     "$(conninfo_part port "$db")"
+  _sc_eq "quoted: dbname" "nope"      "$(conninfo_part dbname "$db")"
+  _sc_eq "quoted: user"   "nope"      "$(conninfo_part user "$db")"
+  _sc_eq "quoted: nothing is missing" "" "$(conninfo_missing_keys "$db")"
+
+  err="$( BARKPARK_HOME="$tmpd/quoted" ; load_target 2>&1 1>/dev/null || true )"
+  _sc_eq "quoted: load_target is SILENT (a warner that shouts on a good fixture is noise)" "" "$err"
+
+  # A PREDICATE, NOT AN ENUMERATION: one absent key is named on its own.
+  _sc_eq "one missing key is named alone" "user" \
+    "$(conninfo_missing_keys 'host=127.0.0.1 port=59999 dbname=nope')"
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
 main() {
   # ── --plan WINS WHEREVER IT APPEARS, and nothing trailing is ignored (PDS-D89)
   #
@@ -4134,12 +4291,17 @@ main() {
       cmd_sweep_artifacts "${2:-}"
       exit 0
       ;;
+    --selftest-conninfo)
+      [ $# -le 1 ] || die "--selftest-conninfo takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_conninfo
+      exit $?
+      ;;
     -h|--help|help)
       sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac
