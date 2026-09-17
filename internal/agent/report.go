@@ -229,6 +229,24 @@ type Report struct {
 	// quantity is a boolean and has no spare value to spend as a sentinel).
 	SiteDeploy *SiteDeployCapability `json:"site_deploy,omitempty"`
 
+	// SitePlane is "does this box carry the SITE-HOSTING PLANE" — docker +
+	// buildx, nixpacks, the isolated Go toolchain, git, and the
+	// barkpark-builder / barkpark-runtime units — measured LOCALLY on the box
+	// by the agent and carried to the control plane on the beat
+	// (jpf-bl-siteplane-verify-probe).
+	//
+	// It is the FACT SOURCE the verify executors could not have: both of them
+	// are HTTP-only against the instance origin, so neither can see a docker or
+	// a systemd unit. This field is how a plane fact becomes HTTPS-visible at
+	// all.
+	//
+	// IT IS A POINTER FOR SiteDeploy's REASON, and `omitempty` keeps the key off
+	// the wire when the probe is unwired or failed: a box whose agent predates
+	// this field must arrive as ABSENT, never as a plane-less verdict. The
+	// record's own seven facts are each three-state again inside it — see
+	// SitePlaneCapability.
+	SitePlane *SitePlaneCapability `json:"site_plane,omitempty"`
+
 	// HealthStatus rolls the health-gate up to the registry's enum
 	// (up/down/unknown): "up" iff the gate's OK is true, "down" when the gate
 	// ran and a check FAILED, "unknown" when no gate probe was wired
@@ -960,6 +978,12 @@ type ReportConfig struct {
 	// probe that could not ask must not answer "this box refuses deploys". Wire
 	// the production implementation with NewSiteDeployProbe(base, token, rootCAs).
 	SiteDeployProbe func() (*SiteDeployCapability, error)
+	// SitePlaneProbe returns the box's site-hosting-plane record. nil, or a
+	// non-nil error, leaves Report.SitePlane nil — UNMEASURED — and `omitempty`
+	// keeps the key off the wire. Wire the production implementation with
+	// NewSitePlaneProbe(); unlike the HTTP probes it needs no base URL and no
+	// token, because the plane is LOCAL to the box the agent runs on.
+	SitePlaneProbe func() (*SitePlaneCapability, error)
 	// SlotUnitsProbe returns the blue/green (and failed site) unit states plus
 	// how many the cap hid. nil → SlotUnits stays nil (UNMEASURED) and
 	// SlotUnitsTruncated stays -1; the two land as ONE unit like SwapProbe's
@@ -1094,6 +1118,18 @@ func gatherReport(cfg ReportConfig) Report {
 	if cfg.SiteDeployProbe != nil {
 		if cap, err := cfg.SiteDeployProbe(); err == nil {
 			r.SiteDeploy = cap
+		}
+	}
+
+	// Site-hosting plane. Guarded twice exactly like SiteDeploy above, and for
+	// the same reason: every other path leaves the field nil, which `omitempty`
+	// turns into an absent key. There is deliberately no else-branch writing a
+	// zero record — a `&SitePlaneCapability{}` would put a `site_plane` key on
+	// the wire whose seven nil facts invite a reader to treat the record as
+	// present, which is the fabricated-absence twin of a fabricated false.
+	if cfg.SitePlaneProbe != nil {
+		if plane, err := cfg.SitePlaneProbe(); err == nil {
+			r.SitePlane = plane
 		}
 	}
 

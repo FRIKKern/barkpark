@@ -184,6 +184,16 @@ func run(args []string) int {
 			// long while, and `false` would tell the control plane every one of those
 			// boxes REFUSES deploys.
 			SiteDeployProbe: agent.NewSiteDeployProbe(*healthURL, healthToken, nil),
+			// Does this box carry the SITE-HOSTING PLANE (docker+buildx, nixpacks,
+			// the isolated Go toolchain, git, and the builder/runtime units)?
+			// UNCONDITIONAL, unlike every HTTP probe above: the plane is LOCAL,
+			// so this needs neither *healthURL nor a token. warmpool.go's step
+			// 7c installs the plane NON-FATALLY — a failed install degrades into
+			// the provisioning worker's journal and the box then goes live with
+			// every site pointed at it stuck `queued` forever. Until this probe
+			// nothing on the beat could see that; the queue-age alarm only
+			// notices the consequence, hours downstream.
+			SitePlaneProbe: agent.NewSitePlaneProbe(),
 			// WHO is spending the box, beside the aggregates that can only
 			// say THAT it is being spent. One bounded `ps` per beat, no state.
 			// This is the detection half of the 2026-08-06 guerrilla runaway;
