@@ -193,9 +193,9 @@ export function embedChipLabel(block) {
 //
 // NOTHING IS VALIDATED ON THE WAY OUT. A target naming nothing must still SAVE: notes
 // get renamed, and a cross-dataset draft points at something that does not exist yet.
-// The reader already paints an unresolved fallback (walk.ex embed/2's
-// `paper-embed--unresolved` branch), so a validate-on-save would only make those
-// workflows impossible. CLEARING to "" is the one refusal, and it is not validation:
+// The reader already paints an unresolved-transclusion fallback for it (walk.ex
+// embed/2's unresolved branch), so a validate-on-save would only make those workflows
+// impossible. CLEARING to "" is the one refusal, and it is not validation:
 // a blank target leaves a chip with no identity and no route back to the note it
 // named — deleting the block is the affordance for "I do not want this".
 
@@ -221,7 +221,14 @@ const RETARGET_SPECS = {
     // An embed target resolves against PAPERS (Content.Papers @paper_type "paper"),
     // by title-or-alias.
     refType: "paper",
-    testId: "paper-embed-retarget",
+    // The word order is NOT cosmetic. canvas_reader_parity_gate_test.exs §3 forbids
+    // the reader's own transclusion class literal (chip_carry/0's `embed` sig)
+    // ANYWHERE in the canvas JS — a substring check over the whole concatenated
+    // blob — so the editor can never grow a second, hand-written producer for it.
+    // The obvious id would have contained that literal as a substring and reddened a
+    // REQUIRED gate for a test hook. Same family as the sheet's id, ordered so the
+    // forbidden substring cannot appear.
+    testId: "paper-retarget-embed",
     // A TITLE is not a doc id: seeding the picker with one would make it fetch a
     // document whose id is a title and render a bogus pill. The chip beside it already
     // says what this block transcludes, so the picker stays a pure "change it to…"

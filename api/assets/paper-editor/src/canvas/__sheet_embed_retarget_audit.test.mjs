@@ -332,7 +332,7 @@ try {
   // documents whose titles can never resolve.
   check("§2 the embed atom exposes EXACTLY ONE control and it is the PAPER-scoped picker", () => {
     const el = byTestId("paper-readonly-embed");
-    const picker = byTestId("paper-embed-retarget");
+    const picker = byTestId("paper-retarget-embed");
     assert.ok(
       picker,
       "the embed retarget picker did not mount — pd-ee-embed-retarget shipped it; " +
@@ -516,7 +516,7 @@ try {
     // fails here.
     for (const [label, atomTestId, pickerTestId] of [
       ["sheet", "paper-readonly-sheet", "paper-sheet-retarget"],
-      ["embed", "paper-readonly-embed", "paper-embed-retarget"],
+      ["embed", "paper-readonly-embed", "paper-retarget-embed"],
     ]) {
       const picker = byTestId(pickerTestId);
       assert.ok(picker, `precondition: the ${label} retarget picker is mounted`);
@@ -676,7 +676,7 @@ try {
   const NEW_EMBED_TARGET = "Q4 Retro";
   const NEW_EMBED_DOC_ID = "paper-7f2";
 
-  const embedPick = await drivePick("paper-embed-retarget", "retro");
+  const embedPick = await drivePick("paper-retarget-embed", "retro");
   const paperSearch = fetches.find(({ url }) => url.includes("q=retro"));
 
   // §5 retargeted the SHEET and nothing acked it, so this harness's `prevBlocks`
@@ -765,13 +765,13 @@ try {
     );
   });
 
-  const embedRepick = await drivePick("paper-embed-retarget", "retro");
+  const embedRepick = await drivePick("paper-retarget-embed", "retro");
   check("§5c re-picking the SAME paper emits ZERO ops", () => {
     assert.deepEqual(embedRepick, [], `a no-change re-pick emitted ${JSON.stringify(embedRepick)}`);
   });
 
   batches.length = 0;
-  const embedPickerEl = byTestId("paper-embed-retarget");
+  const embedPickerEl = byTestId("paper-retarget-embed");
   const embedRemove = embedPickerEl
     ? Array.from(embedPickerEl.querySelectorAll("button")).find((b) => b.textContent === "Remove")
     : null;
@@ -791,7 +791,7 @@ try {
   // FREE TEXT. Type a title the mocked search does NOT return and press Enter. The
   // commit must land anyway: an UNRESOLVED target is a supported state (notes get
   // renamed; a cross-dataset draft points at something not created yet), and the
-  // reader already paints `paper-embed--unresolved` for it. A validate-on-save would
+  // reader already paints its unresolved-transclusion fallback for it. A validate-on-save would
   // make those workflows impossible — so this check is the one that would red if a
   // resolution check were ever added on the way out.
   const TYPED_TARGET = "A Note Nobody Has Written Yet";
@@ -812,7 +812,7 @@ try {
     );
     canvas.flushPendingChanges();
   };
-  typeTarget("paper-embed-retarget", TYPED_TARGET);
+  typeTarget("paper-retarget-embed", TYPED_TARGET);
   const typedBatches = batches.slice();
 
   check("§5c a BARE TYPED title commits verbatim — an unresolved target still SAVES", () => {
@@ -891,7 +891,7 @@ try {
       check("§5b MOUNTED: data-picker-browse=false mounts no retarget picker on EITHER atom", () => {
         for (const [label, atomTestId, pickerTestId, value] of [
           ["sheet", "paper-readonly-sheet", "paper-sheet-retarget", SHEET_REF],
-          ["embed", "paper-readonly-embed", "paper-embed-retarget", EMBED_TARGET],
+          ["embed", "paper-readonly-embed", "paper-retarget-embed", EMBED_TARGET],
         ]) {
           const atom = locked.querySelector(`[data-test-id="${atomTestId}"]`);
           assert.ok(atom, `precondition: the ${label} atom mounted on the share-scoped canvas`);
