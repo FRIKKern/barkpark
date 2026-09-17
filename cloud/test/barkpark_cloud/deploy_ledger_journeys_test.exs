@@ -29,7 +29,7 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
        the deferred-only population reads 0 where the truth is 1.
     5. `superseding_live/2` back to `group_by: d.site_id` with `superseded?/2`
        looking up by `site_id` — dropping the environment from the D212 probe.
-       Reds `a later PREVIEW live row is NOT D212 benign supersession`: a
+       Reds `a later PREVIEW live row is NOT benign supersession`: a
        stranded production publish is credited as benignly superseded by a
        preview build that never touched `sites.current_deployment_id`.
 
@@ -649,7 +649,7 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
       assert side.deferred_only.settled.superseded == 0
     end
 
-    test "a later PREVIEW live row is NOT D212 benign supersession — the production site is still not serving" do
+    test "a later PREVIEW live row is NOT benign supersession — the production site is still not serving" do
       site = site_fixture()
 
       deployments!(site, [
