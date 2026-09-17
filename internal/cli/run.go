@@ -758,6 +758,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			return code
 		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
+		// A zero-row page under a filter is indistinguishable from a filter
+		// naming a field that does not exist; the probe establishes the
+		// denominator rather than letting the caller assume one
+		// (zero_row_denominator.go).
+		warnIfZeroRowsUnderFilter(out, cmd, req.url, respBody, func(bare string) ([]byte, bool) {
+			st, body, _, perr := doRequestCT("GET", bare, req.headers, nil)
+			if perr != nil || st < 200 || st >= 300 {
+				return nil, false
+			}
+			return body, true
+		})
 		emitMovementDoctrine(out, cmd)
 		emitHelpHints(out, respBody)
 		// The lease a claim/next/pulse just granted or renewed — one line
