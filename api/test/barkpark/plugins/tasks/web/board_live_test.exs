@@ -2717,6 +2717,57 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "the DRAFT marker on the live board (PDS-D749)" do
+    # NAMED FAILURE MODE: measured at origin/main, `grep -i draft` over this
+    # LiveView returned only twin-RESOLUTION code and ZERO display code (control:
+    # 28 `blocked` lines in the same file). An unpaired `drafts.<id>` row — the
+    # row of record for the whole mutate-created population — therefore painted
+    # as an ordinary card, indistinguishable from a published one.
+    #
+    # `Board`'s card now carries `:draft` (its DRAFT LABEL CONTRACT); these arms
+    # prove this reader PAINTS it. They are asymmetric under "delete the
+    # `:if={card[:draft]}` badge": the draft arm reds, the published arm stays
+    # quiet — that one reds instead on a badge painted unconditionally.
+    setup do
+      task("drafts.dl-solo", "Unpublished draft row", lifecycle: "open")
+      task("dl-pub", "An ordinary published row", lifecycle: "open")
+      task("drafts.dl-flight", "Draft in flight", lifecycle: "in_progress")
+      :ok
+    end
+
+    test "a drafts. card paints a visible DRAFT marker in the column grid", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="dl-solo"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      assert card =~ ~s(data-role="draft"), "the draft row painted no marker"
+      assert card =~ "DRAFT", "the marker must be READABLE text, not a bare hook attribute"
+    end
+
+    test "an ordinary published card paints NO marker", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="dl-pub"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      refute card =~ ~s(data-role="draft"),
+             "a published row must not be labelled a draft"
+    end
+
+    test "the deck phone paints the marker too", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      deck = deck |> String.split("</main>", parts: 2) |> hd()
+
+      [_, phone] = String.split(deck, ~s(data-doc-id="dl-flight"), parts: 2)
+
+      assert phone =~ ~s(data-role="draft"),
+             "the deck is the DEFAULT view — it must label a draft too"
+    end
+  end
+
   describe "peek roles fail open dim (tlv-s5)" do
     setup do
       t = task("pr-task", "The peeked task", lifecycle: "open")

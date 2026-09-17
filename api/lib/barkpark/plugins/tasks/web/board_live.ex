@@ -1892,6 +1892,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         flex: 1 1 auto; min-width: 0;
         font-weight: 500; font-size: 13px; line-height: 1.4; color: var(--text);
       }
+      /* PDS-D749 — the DRAFT marker. `drafts.<id>` is the only signal a row is
+         not published, and `Content.published_id/1` strips it off the card's
+         doc_id before anything paints; `Board`'s card carries the boolean
+         forward (see its DRAFT LABEL CONTRACT) and this is where it lands.
+         Amber like `blocked`: not an error, but "this is not the real row yet". */
+      .bp-draft {
+        flex: 0 0 auto; align-self: flex-start;
+        font-size: 9px; font-weight: 700; letter-spacing: 0.09em;
+        line-height: 1.6; text-transform: uppercase;
+        color: var(--warn); border: 1px solid var(--warn);
+        border-radius: 3px; padding: 0 4px; opacity: 0.85;
+      }
+      .bp-phone-title .bp-draft { vertical-align: middle; margin-right: 6px; }
       /* Freshness stamp — every card dates itself (relative, tabular) so
          relevance is readable at a glance without opening anything. */
       .bp-age {
@@ -2842,6 +2855,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               <%= glyph_text(card) %>
             </span>
             <span class="bp-title" data-role="card-title"><%= card.title %></span>
+            <span
+              :if={card[:draft]}
+              class="bp-draft"
+              data-role="draft"
+              title="Unpublished draft row — its stored id still carries the drafts. prefix"
+            >
+              DRAFT
+            </span>
             <span :if={card.updated_at} class="bp-age" data-role="age">
               <%= age_label(card.updated_at) %>
             </span>
@@ -3349,7 +3370,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </button>
         </header>
 
-        <h3 class="bp-phone-title" data-role="card-title"><%= card.title %></h3>
+        <h3 class="bp-phone-title" data-role="card-title">
+          <span
+            :if={card[:draft]}
+            class="bp-draft"
+            data-role="draft"
+            title="Unpublished draft row — its stored id still carries the drafts. prefix"
+          >
+            DRAFT
+          </span>
+          <%= card.title %>
+        </h3>
 
         <p :if={card[:description_excerpt]} class="bp-phone-desc" data-role="card-desc">
           <%= card.description_excerpt %>
