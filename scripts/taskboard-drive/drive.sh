@@ -139,6 +139,29 @@ FAIL=0
 
 TMX() { tmux -L "$SOCK" "$@"; }
 
+# PIN THE COLOR PROFILE THE WAY WE PIN THE GEOMETRY. The board resolves its
+# lipgloss profile from the PANE's environment (termenv ColorProfile: TERM +
+# COLORTERM + TERM_PROGRAM), and tmux hands a pane whatever `default-terminal`
+# says — plain "screen" when no ~/.tmux.conf sets otherwise. termenv maps a bare
+# "screen" to **Ascii**, so on such a host the board paints with NO SGR AT ALL
+# and every style-keyed assert here is silently unmeasurable — it compares two
+# unstyled rows and reports "no response" rather than "I could not see".
+#
+# MEASURED on ubuntu-latest (PR #18858's first advisory run): capture-pane -e
+# returned the header row with ZERO escape sequences, and G7 read {} responding
+# columns on a healthy gutter. Darwin hosts pass only because the developer's
+# tmux.conf happens to set a 256color default-terminal.
+#
+# So the harness pins it: COLORTERM=truecolor + TERM_PROGRAM=tmux take termenv's
+# truecolor branch for a "screen*" TERM, and terminal-features RGB keeps tmux
+# from downsampling the 38;2;r;g;b it stores and re-emits. Same bytes on every
+# host — the same reason -x/-y is pinned rather than inherited.
+pin_pane_color() {
+  TMX set-option -g  default-terminal  screen-256color >/dev/null 2>&1 || true
+  TMX set-option -ga terminal-features ",*:RGB"        >/dev/null 2>&1 || true
+}
+PANE_ENV=(-e COLORTERM=truecolor -e TERM_PROGRAM=tmux)
+
 cleanup() {
   if [ "${BP_DRIVE_KEEP:-}" = "" ]; then
     TMX kill-server 2>/dev/null || true
@@ -438,8 +461,9 @@ if [ -z "$BP" ]; then
 fi
 
 TMX kill-server 2>/dev/null || true
-TMX new-session -d -x 130 -y 40 -s "$WIDE" "$BP tasks"
-TMX new-session -d -x 70 -y 24 -s "$NARROW" "$BP tasks"
+pin_pane_color
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP tasks"
+TMX new-session -d "${PANE_ENV[@]}" -x 70 -y 24 -s "$NARROW" "$BP tasks"
 
 geo=$(TMX display -p -t "$WIDE" '#{window_width}x#{window_height}')
 if [ "$geo" = "130x40" ]; then ok "wide session geometry is 130x40 detached"; else bad "wide geometry: got $geo, want 130x40"; fi
@@ -603,6 +627,18 @@ fi
 hover "$WIDE" 10 12   # park off-gutter
 REST=$(snape "$WIDE" | sed -n "${HL}p")
 printf '%s\n' "$REST" >"$EVID/g5-hover-header-rest.txt"
+# PRECONDITION, LOUD AND NAMED. The divider hover accent is a STYLE, so a
+# capture carrying no SGR at all cannot answer G7 either way — it would report
+# an empty responding set, which reads exactly like "the hit-test responds
+# nowhere" and is in fact "this probe could not see". That is precisely how the
+# unstyled-pane defect hid: on a host whose tmux hands the pane a bare "screen"
+# TERM, termenv resolves Ascii and the board paints with zero escapes. An
+# absence is never caught by inspecting the result; assert the precondition.
+if grep -q $'\033\[' <<<"$REST"; then
+  ok "G7 precondition: the captured header row carries SGR — the pane is styled, so a hover-accent probe can see"
+else
+  bad "G7 precondition: the captured header row carries NO SGR — the pane is UNSTYLED (termenv resolved Ascii; check the pane's TERM/COLORTERM, pin_pane_color) and every style-keyed assert below is unmeasurable, not merely failing"
+fi
 RESPOND=""
 for c in $((A-2)) $((A-1)) "$A" $((A+1)) $((A+2)); do
   hover "$WIDE" 10 12
@@ -826,7 +862,8 @@ else
   bad "G6 prefs not rewritten on release ($RATIO_BEFORE -> $RATIO_AFTER)"
 fi
 TMX kill-session -t "$WIDE"
-TMX new-session -d -x 130 -y 40 -s "$WIDE" "$BP tasks"
+pin_pane_color
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP tasks"
 if wait_ready "$WIDE"; then
   HL=$(header_line "$WIDE")
   A2=$(arrow_col "$WIDE")
