@@ -34091,3 +34091,102 @@ test("accountEraseFailureCopy: 401 names the OAuth-only dead end; 409 names the 
   assert.doesNotMatch(hooks.accountEraseFailureCopy(409, { error: "something_else" }), /Promote another owner/);
   assert.match(hooks.accountEraseFailureCopy(500, {}), /try again/i);
 });
+
+// ── gr-backlog-d24 (f+g): ONE EMITTER, STATED AS A PREDICATE ─────────────────
+//
+// WHAT THE FIRST PASS MISSED. The sweep retired the SECOND family (.dep-*) and
+// its own prose then asserted "there are no hand-written pill class attributes
+// left" — while SEVEN call sites still opened their own
+// `<span class="status-pill status-pill--…">`: the overview all-clear chip, the
+// update badge, operatorPillHtml, siteBindingPill, webhookCardHtml's two
+// branches and siteStatusPill. Nothing measured the assertion, because arms
+// (a)-(e) all ask about the RETIRED family and none of them asks whether the
+// surviving one re-forked inside itself.
+//
+// WHY THIS IS A PREDICATE AND NOT A LIST. A hand-listed set of "the sites to
+// fix" is a snapshot: it is always shorter than the real set (the filing said
+// two; the rule found seven) and it goes stale the moment someone adds a chip.
+// The rule below names no site at all — EVERY `class="status-pill…` literal in
+// app.js must live inside statusMetaPill's own brace-matched body, so the
+// eighth hand-built chip reds on its first commit. The gate-side twin is
+// __css_check.mjs E13 arm (f), which runs the same rule at merge time.
+function d24StatusMetaPillBody(src) {
+  const at = src.indexOf("function statusMetaPill(");
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+  }
+  return null;
+}
+const D24_PILL_LITERAL = /class="status-pill/g;
+
+test("gr-backlog-d24 (f): every `status-pill` class literal in app.js lives inside statusMetaPill — the PREDICATE arm", () => {
+  const body = d24StatusMetaPillBody(APP_SRC);
+  // VACUOUS-GREEN GUARD FIRST: if the emitter cannot be read, or has stopped
+  // emitting the family, "0 outside" would be an artefact and not a finding.
+  assert.ok(body !== null, "statusMetaPill() could not be located in app.js");
+  const inside = (body.match(D24_PILL_LITERAL) || []).length;
+  assert.ok(inside > 0,
+    "statusMetaPill() emits no `class=\"status-pill` literal — the reference the " +
+    "count below subtracts is empty, so the whole arm would measure nothing");
+  const total = (APP_SRC.match(D24_PILL_LITERAL) || []).length;
+  assert.equal(total - inside, 0,
+    "a hand-built status chip is emitted outside statusMetaPill() — render it " +
+    "through statusMetaPill(meta, extraClass, attrs), or through statusPill / " +
+    "deployStatusPill which delegate to it");
+  // CONTROL, so the arm is not green by construction: the same reader over a
+  // source with ONE call site hand-built again MUST see it. replaceUnique
+  // refuses on nought hits and on more than one, so an unapplied mutation is a
+  // loud refusal rather than a quiet green.
+  const reverted = replaceUnique(
+    APP_SRC,
+    "function operatorPillHtml(role, label) {\n    return statusMetaPill({ role: role, label: label });\n  }",
+    "function operatorPillHtml(role, label) {\n" +
+      "    return '<span class=\"status-pill status-pill--' + esc(role) + '\">' +\n" +
+      "      '<span class=\"status-pill-label\">' + esc(label) + \"</span>\" +\n" +
+      "    \"</span>\";\n  }",
+    { what: "gr-backlog-d24 (f) control: hand-build operatorPillHtml again" });
+  const revBody = d24StatusMetaPillBody(reverted);
+  assert.equal(
+    (reverted.match(D24_PILL_LITERAL) || []).length - (revBody.match(D24_PILL_LITERAL) || []).length,
+    2, "the reader cannot see a restored hand-built pill — this arm would be green over a revert");
+});
+
+test("gr-backlog-d24 (g): the absorbed call sites still render the shared family, attributes and all", () => {
+  // The four absorbed renderers that are node-pinned. Present-in-file is not
+  // fires-when-it-should: these assert the RENDERED chip, not the source.
+  const badge = hooks.updatePanelHtml(
+    { version: "1.2.3", update_latest_release: "1.2.4", channel: "stable" }, "grant");
+  const bm = /<span class="(status-pill[^"]*)"([^>]*)>/.exec(badge);
+  assert.ok(bm, "the update panel renders no status-pill at all");
+  assert.match(bm[1], /^status-pill status-pill--[a-z]+ update-badge$/,
+    "the update badge lost its extra class on the way through the shared emitter");
+  assert.match(bm[2], /\sdata-update-state="[a-z-]+"/,
+    "the update badge lost its data-update-state attribute");
+  assert.match(badge, /<span class="status-pill-dot" aria-hidden="true"><\/span>/,
+    "the update badge lost the family's dot");
+
+  const site = hooks.siteStatusPill({});
+  assert.match(site, /^<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Not deployed<\/span><\/span>$/,
+    "a never-deployed site no longer reads as the neutral shared chip: " + site);
+
+  const wh = hooks.webhookCardHtml({ url: "https://x.test/h", events: ["doc.created"], active: true }, {}, "production");
+  assert.match(wh, /<span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Active<\/span><\/span>/,
+    "an active webhook no longer reads as the shared ok chip");
+  const whOff = hooks.webhookCardHtml({ url: "https://x.test/h", events: ["doc.created"], active: false }, {}, "production");
+  assert.match(whOff, /<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Disabled<\/span><\/span>/,
+    "a disabled webhook no longer reads as the shared neutral chip");
+
+  const chip = hooks.siteBindingChip({ workspace: "w", project: "p", dataset: "d", token: "present" });
+  // Not conditional: a chip that came back "" would make the two asserts below
+  // vacuous, so the non-empty case is asserted rather than assumed.
+  assert.notEqual(chip, "", "siteBindingChip rendered nothing — the arm below would measure nothing");
+  assert.match(chip, /^<span class="status-pill status-pill--[a-z]+" title="[^"]*">/,
+    "the binding chip lost its title attribute through the shared emitter: " + chip);
+  assert.match(chip, /<span class="status-pill-dot" aria-hidden="true"><\/span>/,
+    "the binding chip lost the family's dot");
+});

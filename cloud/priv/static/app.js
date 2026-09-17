@@ -7769,8 +7769,13 @@
     };
   }
 
-  // THE ONE EMITTER. Every status affordance in this file goes through it —
-  // there are no hand-written pill class attributes left. `meta` is a statusMeta
+  // THE ONE EMITTER. Every status affordance in this file goes through it, and
+  // that is now a CHECKED rule rather than a sentence: __css_check.mjs E13 arm
+  // (f) and __app.test.mjs `gr-backlog-d24 (f)` both brace-match THIS function's
+  // body and refuse any status-pill class attribute authored outside it. (The
+  // first sweep wrote the sentence while seven call sites still opened their own
+  // span; the predicate is what makes the eighth one red on its first commit.)
+  // `meta` is a statusMeta
   // (or `statusOf`'s shape, which is the same `{role,label,detail}` plus a
   // detail segment); `extraClass` rides after the role; `attrs` is a pre-escaped
   // attribute string for the callers that need a title / aria-label.
@@ -9293,9 +9298,8 @@
         // Nothing needs action. Stay honest when boxes are still in flight —
         // "all healthy" would be a lie while something is provisioning.
         var settled = sum["in-flight"] === 0;
-        queueHtml = '<div class="overview-ok"><span class="status-pill status-pill--ok">' +
-            '<span class="status-pill-dot" aria-hidden="true"></span>' +
-            '<span class="status-pill-label">' + (settled ? "All healthy" : "All clear") + "</span></span>" +
+        queueHtml = '<div class="overview-ok">' +
+          statusMetaPill({ role: "ok", label: settled ? "All healthy" : "All clear" }) +
           "<p>" + (settled
             ? "Every instance is up, current, and reporting in."
             : "Nothing needs your attention right now — " + sum["in-flight"] +
@@ -11978,11 +11982,8 @@
     var channel = bp.channel ? cap(String(bp.channel)) : "—";
     var policy = autoupdatePolicyLabel(bp);
 
-    var badgeHtml =
-      '<span class="status-pill status-pill--' + esc(b.role) + ' update-badge" data-update-state="' + esc(b.state) + '">' +
-        '<span class="status-pill-dot" aria-hidden="true"></span>' +
-        '<span class="status-pill-label">' + esc(b.label) + "</span>" +
-      "</span>";
+    var badgeHtml = statusMetaPill({ role: b.role, label: b.label }, "update-badge",
+      ' data-update-state="' + esc(b.state) + '"');
 
     // The verification clock, from the two columns the fleet list now also
     // states. It is a DIFFERENT clock from "Last checked" one line above
@@ -12395,13 +12396,10 @@
     return { role: "ok", text: "Arming: every instance reports one-click apply on." };
   }
 
-  // The console's state pill. Reuses the shared .status-pill grammar (the same
-  // dynamic head the fleet pill uses, already allowlisted in __css_check).
+  // The console's state pill — one more consumer of statusMetaPill, so the role
+  // ladder it paints is the family's and not its own.
   function operatorPillHtml(role, label) {
-    return '<span class="status-pill status-pill--' + esc(role) + '">' +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(label) + "</span>" +
-    "</span>";
+    return statusMetaPill({ role: role, label: label });
   }
 
   // cch-w36-s4 — THE REFUSAL HAS A VOICE, AND THE FUNNEL STOPS DESTROYING WHY.
@@ -13546,11 +13544,11 @@
       silent: pathState === "unknown" && token !== "present",
     };
   }
-  // The binding as a shared status pill. Role ∈ ok | danger | neutral.
+  // The binding as a shared status pill, emitted by statusMetaPill with the
+  // hover title riding in as an attrs string. Role ∈ ok | danger | neutral.
   function siteBindingPill(m) {
-    return '<span class="status-pill status-pill--' + esc(m.role) + '" title="' + esc(m.title) + '">' +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(m.label) + "</span></span>";
+    return statusMetaPill({ role: m.role, label: m.label }, "",
+      ' title="' + esc(m.title) + '"');
   }
   // The compact row chip — "" when the payload says nothing about a binding.
   function siteBindingChip(s) {
@@ -13738,9 +13736,9 @@
   function webhookCardHtml(wh, instance, dataset) {
     wh = wh || {};
     var active = !!wh.active;
-    var pill = active
-      ? '<span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Active</span></span>'
-      : '<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Disabled</span></span>';
+    var pill = statusMetaPill(active
+      ? { role: "ok", label: "Active" }
+      : { role: "neutral", label: "Disabled" });
     var toggleBtn = active
       ? '<button class="btn btn-sm" type="button" data-wh-toggle>Disable</button>'
       : '<button class="btn btn-sm" type="button" data-wh-toggle>Enable</button>';
@@ -15911,8 +15909,8 @@
   // reusing the shared .status-pill roles rather than a site-only pill
   // vocabulary. freshnessModel is the single source (status · trigger · when);
   // a NEVER-deployed site reads a neutral "Not deployed" (nil-honest — no
-  // invented green). Dynamic head `status-pill status-pill--` is ALLOW_PREFIXES-
-  // listed (E3); role ∈ ok|info|warn|danger|neutral, all real rules.
+  // invented green). The chip itself is emitted by statusMetaPill, so the role
+  // ∈ ok|info|warn|danger|neutral it names is the shared family's ladder.
   function siteStatusPill(s) {
     var m = freshnessModel(s);
     var role = "neutral", label = "Not deployed";
@@ -15923,10 +15921,7 @@
       else if (m.dot === "deploy") role = "info";
       else if (m.dot === "down") role = "danger";
     }
-    return '<span class="status-pill status-pill--' + esc(role) + '">' +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(label) + "</span>" +
-    "</span>";
+    return statusMetaPill({ role: role, label: label });
   }
 
   // E-01 (GR28): the global sites list on v4 density rows. Renders ONLY real

@@ -2737,6 +2737,29 @@ for (const b of badTokens) {
 // allowlist's prose. `css` is comment-stripped, so a selector that survives
 // only inside a comment does NOT count — which is what lets the retired
 // family's tombstone comment in app.css name `.dep-queued` without reviving it.
+// statusMetaPill()'s own body — the ONE sanctioned home of a `status-pill` class
+// literal in app.js. Brace-matched from the declaration rather than line-sliced,
+// so the arm that reads it cannot be fooled by the function growing or moving.
+// Returns null when the declaration is absent, which arm (f) treats as a FAILURE
+// and not as "nothing to check".
+function statusMetaPillBody(src) {
+  if (src == null) return null;
+  const at = src.indexOf("function statusMetaPill(");
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
 {
   const meta = deployStatusMetaTable(jsRaw);
 
@@ -2823,6 +2846,49 @@ for (const b of badTokens) {
         `Render the chip through deployStatusPill()/statusMetaPill() so there stays ` +
         `exactly one state grammar.`,
     );
+  }
+
+  // (f) ONE EMITTER, STATED AS A RULE AND NOT AS A LIST. Arm (e) retired the
+  //     SECOND family; this arm is what keeps the surviving one from re-forking
+  //     inside itself. The decision-24 prose claimed "there are no hand-written
+  //     pill class attributes left" while seven call sites still opened their own
+  //     `<span class="status-pill status-pill--…">` — the assertion was the false
+  //     part, and nothing measured it. The check is a PREDICATE, never an
+  //     enumeration of the sites that happened to exist on the day: EVERY
+  //     `class="status-pill…` literal in app.js must sit inside statusMetaPill's
+  //     own body. A new hand-built chip anywhere else reds here on its first
+  //     commit, with no skip list to go stale.
+  {
+    const body = statusMetaPillBody(jsRaw);
+    if (body === null) {
+      errors.push(
+        "E13 app.js  statusMetaPill() could not be located — this arm reads its body " +
+          "to decide which pill literals are the sanctioned ones, so a rename must " +
+          "come with an update to statusMetaPillBody() here, never a skipped check.",
+      );
+    } else {
+      const LIT = /class="status-pill/g;
+      const inside = (body.match(LIT) || []).length;
+      const total = (jsRaw.match(LIT) || []).length;
+      const outside = total - inside;
+      if (inside === 0) {
+        errors.push(
+          "E13 app.js  statusMetaPill()'s body emits no `class=\"status-pill` literal " +
+            "at all — the emitter this arm measures against no longer emits the family, " +
+            "so every count below would be vacuous.",
+        );
+      } else if (outside > 0) {
+        errors.push(
+          `E13 app.js  ${outside} \`class="status-pill…\` literal(s) are emitted OUTSIDE ` +
+            `statusMetaPill() — a hand-built status chip is a second grammar for the ` +
+            `same idea, which is exactly what decision 24 absorbed. Render it through ` +
+            `statusMetaPill(meta, extraClass, attrs) (or statusPill / deployStatusPill, ` +
+            `which delegate to it); \`extraClass\` carries an extra class and \`attrs\` a ` +
+            `pre-escaped title / data-* attribute string, so no call site needs its own ` +
+            `span.`,
+        );
+      }
+    }
   }
 }
 
