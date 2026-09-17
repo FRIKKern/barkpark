@@ -22,7 +22,16 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   alias BarkparkCloud.Cloudflare.Fake, as: CfFake
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Sites.FakeBoxRelay
+  alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Router
+
+  defmodule AttributionSink do
+    @moduledoc "Forwards a rollback attribution report to the test process."
+    def report(r) do
+      send(Process.get(:attribution_owner), {:attribution, r})
+      :ok
+    end
+  end
 
   @opts Router.init([])
   @password "correct-horse-battery"
@@ -2707,6 +2716,80 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert json_body(conn)["error"] == "content_binding_required"
       # No ghost row — the unbound node site was refused at the door.
       assert Registry.list_sites_for_team(team) == []
+    end
+
+    # ── the route's OWN time is measured (rollback-latency c0) ────────────────
+    #
+    # The relay's attribution line (PR #18130) starts AFTER auth, the team-scoped
+    # site read and the box row read, and stops BEFORE the site-pointer write, the
+    # audit row, the two console pushes and the render. Those two ends were simply
+    # not in anyone's sum, so a live 3.8s rollback could not be blamed on the route
+    # or acquitted of it. These arms prove the route now measures both.
+    test "a rollback reports the route's own work either side of the box call" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, _prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000001"}}
+      )
+
+      # The route runs IN THIS PROCESS under Plug.Test, and the accumulator is
+      # request-scoped, so redirecting the report here needs no global.
+      Process.put(:attribution_owner, self())
+      RollbackAttribution.redirect_reports_to(AttributionSink)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 200
+
+      assert_receive {:attribution, report}, 500
+
+      assert report.site_ref == site.id
+      assert report.outcome == "rolled_back"
+
+      for key <- [:total_ms, :route_pre_ms, :route_post_ms, :deploy_own_ms] do
+        assert is_integer(Map.fetch!(report, key)),
+               "#{key} is not measured on the route path: #{inspect(report)}"
+      end
+
+      # The stopwatch opened BEFORE auth and closed AFTER the render, so the whole
+      # request is inside it — the sum cannot exceed the wall clock it spans.
+      assert report.route_pre_ms + report.deploy_own_ms + report.route_post_ms <=
+               report.total_ms,
+             "the route's legs exceed the request's own span: #{inspect(report)}"
+    end
+
+    # THE CONTROL. A rollback the box REFUSED still spent route work, and the
+    # report must name the refusal rather than quietly reporting a success — a
+    # reporter wired only into the 200 branch would look green above and be blind
+    # to every failure, which is the half an operator actually greps for.
+    test "a REFUSED rollback still reports, and reports the refusal" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 422, %{"error" => "no previous release", "code" => "no_previous"}}
+      )
+
+      Process.put(:attribution_owner, self())
+      RollbackAttribution.redirect_reports_to(AttributionSink)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 422
+
+      assert_receive {:attribution, report}, 500
+      assert report.outcome == "no_previous"
+      assert is_integer(report.route_pre_ms)
     end
 
     test "a node site IS rollbackable → NOT 422 not_rollbackable (it flips the Caddy upstream to the previous slot)" do
