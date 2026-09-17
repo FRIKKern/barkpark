@@ -1,0 +1,16 @@
+{
+  "type": "notes",
+  "id": "notes-malformed-shapes",
+  "items": [
+    {
+      "label": "Control",
+      "lead": "Dict row.",
+      "text": "A well-formed {label, lead, text} item — the shape 2658 of 2665 corpus items use."
+    },
+    "PR #11556: his deleted testing disclosure stands again, word for word.",
+    [
+      { "type": "text", "text": "The isolated CI suite is the merge authority." },
+      { "type": "text", "text": " A broad local run executed 13,189 tests." }
+    ]
+  ]
+}

@@ -41,6 +41,61 @@ func itemMaps(m map[string]any, key string) []map[string]any {
 	return out
 }
 
+// noteItemMaps is itemMaps for the two widgets whose items are NOTE ROWS
+// (notes today). It keeps every object item verbatim and, unlike itemMaps,
+// does NOT drop the two MALFORMED item shapes the corpus census found — it
+// normalizes each to the canonical `{text: …}` row so its prose still reaches
+// the reader:
+//
+//   - a BARE STRING item ("PR #11556: his original description restored …") —
+//     the heggemsnes-act `hga-remedies` shape. The BPML printer already
+//     TOLERATES this losslessly (printer.ex `note_item(s) when is_binary(s)`),
+//     so reading it here is grammar-consistent, not a widening.
+//   - an INLINE-NODE LIST item ([{type:"text",text:"…"}]) — the ProseMirror
+//     shape. The printer REFUSES this (one typed UnprintableError) because it
+//     cannot round-trip it; a READER carries no round-trip obligation, and
+//     silently deleting prose a human authored is the worse failure, so the
+//     terminal folds it to plain text via the shared inlineNodesText (the same
+//     fold `inlineText` in inline.tsx and `flatten_inline_text/1` do).
+//
+// Items that carry no readable prose at all (a number, a bool, nil, an empty
+// list) still drop. THREE STATES, and which pairs differ:
+//
+//	absent      items missing / [] .......... one blank line (block is silent)
+//	malformed   string / inline-node list ... the prose renders — DIFFERS from
+//	                                          absent and from empty (before
+//	                                          this, all three were identical)
+//	empty       {label:"",lead:"",text:""} .. dropped row; alone → one blank
+//	                                          line, i.e. SAME as absent
+//
+// absent and empty deliberately stay indistinguishable: an author who wrote a
+// row with nothing in it said nothing, and painting chrome around nothing is a
+// louder lie than silence. It is `malformed` that must never read as `empty`,
+// because that is where a false "the author wrote nothing here" is manufactured
+// out of a shape mismatch.
+func noteItemMaps(m map[string]any, key string) []map[string]any {
+	raw := attrSlice(m, key)
+	if raw == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, el := range raw {
+		switch item := el.(type) {
+		case map[string]any:
+			out = append(out, item)
+		case string:
+			if item != "" {
+				out = append(out, map[string]any{"text": item})
+			}
+		case []any:
+			if text := inlineNodesText(item); text != "" {
+				out = append(out, map[string]any{"text": text})
+			}
+		}
+	}
+	return out
+}
+
 // ── notes ────────────────────────────────────────────────────────────────────
 // {items: [{label, lead, text}]}. A list of note "definition rows": each item is
 // fed to the singular noteRenderer as a synthesized `note` Block. By default the
@@ -53,7 +108,7 @@ func itemMaps(m map[string]any, key string) []map[string]any {
 type notesRenderer struct{}
 
 func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
-	items := itemMaps(b.Attrs, "items")
+	items := noteItemMaps(b.Attrs, "items")
 	if len(items) == 0 {
 		return []string{""}
 	}
