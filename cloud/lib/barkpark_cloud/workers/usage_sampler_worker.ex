@@ -51,9 +51,13 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorker do
     # read as a hole. `swept` is passed through because an empty checkable fleet
     # writes no rows on ANY tick — reporting then would be noise about a fleet
     # that does not exist, so `report/2` stops on it.
-    report_gaps(swept)
-
-    :ok
+    #
+    # The accounting is RETURNED, not merely logged: `config/test.exs` pins the
+    # primary Logger level to :warning, so a routine info line is invisible to a
+    # test — and a wiring arm that can only grep a log it cannot see is a green
+    # with no subject. Oban keeps a `{:ok, term}` return, so this is the same
+    # value in production and under `perform_job/2`.
+    {:ok, %{swept: swept, gaps: report_gaps(swept)}}
   end
 
   # Never let the reporter sink the sweep: the sampler's job is the samples, and
@@ -68,11 +72,11 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorker do
         "missed=#{length(result.missed)}"
     )
 
-    :ok
+    result
   rescue
     e ->
       Logger.error("UsageSamplerWorker: gap report failed: #{Exception.message(e)}")
-      :ok
+      %{reported: false, reason: :report_raised, expected: 0, missed: []}
   end
 
   # `record_sample/1` gathers (fail-soft per meter) + inserts. The rescue is the

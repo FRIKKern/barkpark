@@ -142,18 +142,22 @@ defmodule BarkparkCloud.Usage.SamplerGapsTest do
       assert {:ok, []} = SamplerGaps.missed(@window_start, @window_end)
     end
 
-    test "a sample that lands AFTER the next tick does not cover the earlier one" do
-      # The upper-bound arm. A sweep still running at the next tick is a LATE
-      # tick, a different and separately visible fault — it must not be allowed
-      # to launder an eaten one. Move the 23:52 row to 00:08 and BOTH 23:52 and
-      # 00:07 must now read as holes.
+    test "a sample from a LATER interval does not launder an earlier eaten tick" do
+      # The upper-bound arm, and the reason coverage is [T, next_tick) rather
+      # than "any sample at or after T". Drop the 23:37 row entirely; the next
+      # sample is 23:52:30, which belongs to the 23:52 interval. Under a naive
+      # at-or-after rule 23:37 would read as COVERED by that row and `missed`
+      # would come back [] — the hole would vanish into its successor.
       bp = instance_fixture()
       sample_at(bp, ~U[2019-03-04 23:22:01.000000Z])
-      sample_at(bp, ~U[2019-03-04 23:37:02.000000Z])
-      sample_at(bp, ~U[2019-03-05 00:08:00.000000Z])
+      sample_at(bp, ~U[2019-03-04 23:52:30.000000Z])
+      sample_at(bp, ~U[2019-03-05 00:07:03.000000Z])
 
       assert {:ok, missed} = SamplerGaps.missed(@window_start, @window_end)
-      assert Enum.map(missed, &{&1.hour, &1.minute}) == [{23, 52}, {0, 7}]
+      assert Enum.map(missed, &{&1.hour, &1.minute}) == [{23, 37}]
+
+      # Non-vacuity: the 23:52 row really is there and really does cover 23:52.
+      refute Enum.any?(missed, &(&1.minute == 52))
     end
 
     test "a sample for ANY instance covers the tick — this is a series question, not a per-box one" do

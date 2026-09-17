@@ -22,7 +22,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
   alias BarkparkCloud.Workers.UsageSamplerWorker
 
   import Ecto.Query
-  import ExUnit.CaptureLog
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   @admin_token "instance-admin-token-plaintext-XYZ"
 
@@ -90,7 +90,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     bp = live_instance(team)
     program_simple(137, 3)
 
-    assert tick() == :ok
+    assert {:ok, _} = tick()
 
     assert [sample] = samples_for(bp)
     meters = sample.envelope["meters"]
@@ -110,7 +110,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     bp = live_instance(team, %{url: nil, admin_token_encrypted: nil})
     Fake.program([])
 
-    assert tick() == :ok
+    assert {:ok, _} = tick()
 
     assert [sample] = samples_for(bp)
     meters = sample.envelope["meters"]
@@ -131,7 +131,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     suspended = live_instance(team, %{suspended: true})
     program_simple(1, 1)
 
-    assert tick() == :ok
+    assert {:ok, _} = tick()
 
     assert samples_for(hostless) == []
     assert samples_for(suspended) == []
@@ -143,7 +143,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     b = live_instance(team)
     program_simple(2, 0)
 
-    assert tick() == :ok
+    assert {:ok, _} = tick()
 
     assert [_] = samples_for(a)
     assert [_] = samples_for(b)
@@ -158,7 +158,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     down = live_instance(team, %{url: nil, admin_token_encrypted: nil})
     program_simple(9, 0)
 
-    assert tick() == :ok
+    assert {:ok, _} = tick()
 
     assert [healthy_sample] = samples_for(healthy)
     assert healthy_sample.envelope["meters"]["documents"]["value"] == 9
@@ -172,8 +172,8 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     bp = live_instance(team)
     program_simple(1, 1)
 
-    assert tick() == :ok
-    assert tick() == :ok
+    assert {:ok, _} = tick()
+    assert {:ok, _} = tick()
 
     assert length(samples_for(bp)) == 2
   end
@@ -190,11 +190,18 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
       _bp = live_instance(team)
       program_simple(1, 0)
 
-      log = capture_log(fn -> assert tick() == :ok end)
+      {{:ok, result}, log} = with_log(fn -> tick() end)
 
+      # The RETURNED accounting is the wiring proof: delete the report_gaps/1
+      # call and `perform/1` no longer carries a :gaps key at all.
+      assert result.swept == 1
+      assert %{reported: true, reason: nil} = result.gaps
+      assert result.gaps.missed != []
+      assert result.gaps.expected >= length(result.gaps.missed)
+
+      # And the loss is ATTRIBUTABLE from the log alone — no ssh, no uptime read.
       assert log =~ "usage_sampler_missed_tick"
       assert log =~ "cause=no_node_observed_the_cron_minute"
-      assert log =~ "usage_sampler_gaps swept=1 reported=true"
     end
 
     test "CONTROL — an empty checkable fleet sweeps silently" do
@@ -204,10 +211,14 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
       # proving the reporter RAN (the accounting line is emitted either way).
       _team = team_fixture()
 
-      log = capture_log(fn -> assert tick() == :ok end)
+      {{:ok, result}, log} = with_log(fn -> tick() end)
+
+      # The reporter RAN — it just refused to speak. Without this assertion the
+      # quiet below would be a green with no subject.
+      assert result.swept == 0
+      assert %{reported: false, reason: :no_checkable_instances, missed: []} = result.gaps
 
       refute log =~ "usage_sampler_missed_tick"
-      assert log =~ "usage_sampler_gaps swept=0 reported=false reason=no_checkable_instances"
     end
   end
 end
