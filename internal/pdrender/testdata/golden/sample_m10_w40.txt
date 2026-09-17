@@ -21,19 +21,17 @@ Flush the composed lines to the
 terminal.                               
 source: tui                             
                                         
-╭────────────────────────────────────╮  
-│ Info card                          │  
-│ The info tone tints the box        │  
-│ border.                            │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ Info card                            │
+│ The info tone tints the box border.  │
+╰──────────────────────────────────────╯
                                         
-╭────────────────────────────────────╮  
-│ OK card                            │  
-│ A success card carries the ok      │  
-│ tone.                              │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ OK card                              │
+│ A success card carries the ok tone.  │
+╰──────────────────────────────────────╯
                                         
-╭────────────────────────────────────╮  
-│ Warn card                          │  
-│ A warning card draws the eye.      │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ Warn card                            │
+│ A warning card draws the eye.        │
+╰──────────────────────────────────────╯
