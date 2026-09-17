@@ -34,13 +34,20 @@ migrations must be expand/contract (backward-compatible).
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
 `Retry-After` while the upstream is unreachable — blue/green keeps deploys
-seamless, this covers crashes/restarts outside deploys. Baked into the renderers
+seamless, this covers crashes/restarts outside deploys. The handler sets
+`Content-Type: text/html` explicitly: Caddy's `respond` defaults a body with no
+Content-Type to `text/plain`, which made the branded page arrive as raw markup
+the browser painted verbatim. That is a RENDERING fix only — the status was and
+stays an honest 503 + `Retry-After` on every path, `/assets/*.css` included, and
+a healthy upstream never reaches the handler (proved both ways by the harness's
+live-Caddy case). `instance-deploy.sh` also upgrades already-armed boxes in
+place, since the marker guard forbids a re-arm. Baked into the renderers
 (`internal/caddyfile/caddyfile.go`, `internal/cli/setup/caddy.go`,
 `internal/cli/setup/assets/deploy.sh`) so every provisioned instance gets it, and
 armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
 auto-reverting; port-flip-safe). Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 461 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 494 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. Each of the three check counts on this page is READ
