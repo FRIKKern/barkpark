@@ -222,6 +222,12 @@ normalize() {
 
 save_frame()      { snap "$1"  | normalize >"$EVID/$2"; }
 save_row()        { snap "$1"  | sed -n "$2p" >"$EVID/$3"; }
+# save_row's normalized twin. A raw row save is only byte-stable if the row
+# carries no churn — a CLAIMED row paints a live braille spinner, so saving one
+# raw makes two otherwise identical hermetic runs differ by one glyph (measured:
+# ⠧ vs ⠦ on the same assert). Any row save that can land on a claimed task goes
+# through normalize().
+save_row_norm()   { snap "$1"  | sed -n "$2p" | normalize >"$EVID/$3"; }
 save_row_styled() { snape "$1" | sed -n "$2p" >"$EVID/$3"; }
 
 # 1-based line number of the compose header row. The header sheds its
@@ -444,7 +450,7 @@ if [ "$MODE" = hermetic ]; then
   MK_DOWN=$(board_down_marker_line "$WIDE")
   MK_UP=$(board_up_marker_line "$WIDE")
   if [ -n "$MK_DOWN" ]; then
-    save_row "$WIDE" "$MK_DOWN" g9-marker-down-boot.txt
+    save_row_norm "$WIDE" "$MK_DOWN" g9-marker-down-boot.txt
     ok "G9 wide spine OVERFLOWS at 130x40: counted '$(snap "$WIDE" | sed -n "${MK_DOWN}p" | sed 's/│.*$//; s/^ *//; s/ *$//')' painted on board line $MK_DOWN"
   else
     bad "G9 no counted '↓ N more below' on the wide board — the fixture corpus no longer overflows the spine, so every marker assert below is measuring nothing"
@@ -473,7 +479,7 @@ if [ "$MODE" = hermetic ]; then
   if [ -n "$MK_DOWN" ] && [ -n "$TJ" ] && [ "$TJ" != "$T0" ]; then
     click "$WIDE" 8 "$MK_DOWN"
     MC=$(marker_line "$WIDE"); TC=$(row_ident "$WIDE" "$MC")
-    save_row "$WIDE" "$MC" g10-marker-click-selected-row.txt
+    save_row_norm "$WIDE" "$MC" g10-marker-click-selected-row.txt
     if [ "$TC" = "$TJ" ]; then
       ok "G10 click on the counted ↓ overflow marker (line $MK_DOWN) stepped the cursor EXACTLY one row: \"$T0\" -> \"$TC\", the same task one \`j\` selects (D119 wideBoardMarkerAt -> moveCursor)"
     else
@@ -501,7 +507,7 @@ if [ "$MODE" = hermetic ]; then
   MK_DOWN=$(board_down_marker_line "$WIDE")
   note "G9 walked $i rows down from the top before the window first slid"
   if [ -n "$MK_UP" ] && [ -n "$MK_DOWN" ]; then
-    save_row "$WIDE" "$MK_UP" g9-marker-up-scrolled.txt
+    save_row_norm "$WIDE" "$MK_UP" g9-marker-up-scrolled.txt
     ok "G9 both counted markers paint once the window has scrolled off the top (↑ line $MK_UP, ↓ line $MK_DOWN)"
   else
     bad "G9 scrolled window did not paint both counted markers (↑ '${MK_UP:-none}', ↓ '${MK_DOWN:-none}')"

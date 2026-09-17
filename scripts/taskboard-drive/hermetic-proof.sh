@@ -12,6 +12,14 @@
 # titles, ratio values, pass/fail counts — must be byte-equal, or the mode is
 # not hermetic and this script exits 1 with the diff on stdout.
 #
+# THE EVIDENCE FILES ARE DIFFED TOO (D130, task ttw22-fixture-overflow-
+# enrichment). They used not to be, and the gap was not theoretical: a row save
+# that landed on a CLAIMED task captured the live braille spinner raw, so two
+# runs differed by one glyph (⠧ vs ⠦) in an evidence file while the transcript
+# and the report stayed byte-identical and this proof said PASS. The committed
+# evidence is a judged artifact of the run; if it is not deterministic, neither
+# is the mode.
+#
 # USAGE
 #   bash scripts/taskboard-drive/hermetic-proof.sh
 set -u -o pipefail
@@ -39,6 +47,8 @@ run() {
   DRIVE_MODE=hermetic bash "$SCRIPT_DIR/drive.sh" >"$WORK/run$n.raw" 2>&1
   rc=$?
   cp "$SCRIPT_DIR/evidence-hermetic/report.md" "$WORK/report$n.raw" 2>/dev/null || true
+  mkdir -p "$WORK/evid$n"
+  cp "$SCRIPT_DIR"/evidence-hermetic/*.txt "$WORK/evid$n/" 2>/dev/null || true
   norm <"$WORK/run$n.raw" >"$WORK/run$n.txt"
   norm <"$WORK/report$n.raw" >"$WORK/report$n.txt" 2>/dev/null || true
   if [ "$rc" -ne 0 ]; then
@@ -68,4 +78,15 @@ else
   exit 1
 fi
 
-echo "hermetic-proof: PASS — two consecutive runs are byte-identical after timestamp/pid normalization"
+echo "=== evidence diff (raw, every committed .txt) ==="
+# A missing file on either side is a difference too, so diff the DIRECTORIES —
+# comparing only the files run 2 happens to have written would be blind to a
+# run that stopped producing one.
+if diff -r "$WORK/evid1" "$WORK/evid2"; then
+  echo "(empty — evidence files identical)"
+else
+  echo "FAIL: hermetic evidence files differ"
+  exit 1
+fi
+
+echo "hermetic-proof: PASS — two consecutive runs are byte-identical (transcript, report, evidence) after timestamp/pid normalization"
