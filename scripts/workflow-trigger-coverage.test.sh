@@ -127,6 +127,79 @@ i=0; while [ "$i" -lt 26 ]; do wf "$D" "live$i" "**/thing.sh"; i=$((i+1)); done
 check "leading **/ matches a nested file"     0 "$(run "$D")"
 
 echo ""
+echo "== 5. ARM C — a mirrored push/pull_request paths pair that DRIFTS =="
+# The subject of arm C. A workflow filtering BOTH arms by paths is a mirrored
+# pair; an entry present on one arm and absent from the other means that arm
+# silently stops firing for it while the workflow still reads as gated on both
+# sides. Proven in both directions, plus the two ways it must NOT fire.
+
+# <n-pr> says how many of the trailing args belong to the pull_request arm; the
+# rest go to push. Positional, never a delimited string: a first draft passed
+# both lists as comma-separated words and relied on word-splitting to break them
+# up, which emitted ONE path alternative reading "js/docs/** scripts/thing.sh"
+# and made three cases below fail for a reason that had nothing to do with the
+# subject. A fixture that lies is worse than no fixture.
+wf_pair() { # wf_pair <dir> <name> <n-pr> <path>...
+  local d="$1" name="$2" npr="$3"; shift 3
+  local i p
+  { echo "name: $name"; echo "on:"
+    echo "  pull_request:"; echo "    paths:"
+    i=0; for p in "$@"; do if [ "$i" -lt "$npr" ]; then echo "      - \"$p\""; fi; i=$((i+1)); done
+    echo "  push:"; echo "    branches: [main]"; echo "    paths:"
+    i=0; for p in "$@"; do if [ "$i" -ge "$npr" ]; then echo "      - \"$p\""; fi; i=$((i+1)); done
+    echo "jobs:"; echo "  a:"; echo "    runs-on: ubuntu-latest"
+    echo "    steps:"; echo "      - run: echo hi"
+  } > "$d/.github/workflows/$name.yml"
+}
+
+# ARM: push lost an entry the PR arm still declares. Every glob is LIVE, so
+# arm B has nothing to say — this is arm C failing alone, which also proves the
+# two arms are independent rather than one masking the other.
+D="$TMP/t8"; mk_tree "$D"
+i=0; while [ "$i" -lt 26 ]; do wf "$D" "live$i" "js/docs/**"; i=$((i+1)); done
+wf_pair "$D" "drifted" 2 "js/docs/**" "scripts/thing.sh" "js/docs/**"
+check "drifted mirrored pair -> exit 1"        1 "$(run "$D")"
+check "  ...names the workflow"                1 "$(grep -c 'drifted.yml' "$TMP/out.txt" | awk '{print ($1>0)?1:0}')"
+check "  ...names the arm that LOST the entry" 1 "$(grep -c 'on.push.paths is MISSING' "$TMP/out.txt" | awk '{print ($1>0)?1:0}')"
+check "  ...names the missing entry"           1 "$(grep -c 'scripts/thing.sh' "$TMP/out.txt" | awk '{print ($1>0)?1:0}')"
+check "  ...and arm B still reports OK"        1 "$(grep -c 'arm B): OK' "$TMP/out.txt" | awk '{print ($1>0)?1:0}')"
+
+# CONTROL 1 — the same pair, mirrored. Must stay quiet. Without this, a check
+# hard-wired to red on any two-armed workflow would pass the arm above.
+D="$TMP/t9"; mk_tree "$D"
+i=0; while [ "$i" -lt 26 ]; do wf "$D" "live$i" "js/docs/**"; i=$((i+1)); done
+wf_pair "$D" "mirrored" 2 "js/docs/**" "scripts/thing.sh" "scripts/thing.sh" "js/docs/**"
+check "mirrored pair (order differs) -> exit 0" 0 "$(run "$D")"
+check "  ...and arm C says what it checked"     1 "$(grep -cE 'arm C\): OK -- [0-9]+ mirrored' "$TMP/out.txt" | awk '{print ($1>0)?1:0}')"
+
+# CONTROL 2 — SETS, not lists: a duplicate entry is a no-op to GitHub. The real
+# corpus carries three of these in shell-harnesses.yml (253 pull_request entries
+# vs 252 push, identical sets). Comparing lists would call that drift.
+D="$TMP/t10"; mk_tree "$D"
+i=0; while [ "$i" -lt 26 ]; do wf "$D" "live$i" "js/docs/**"; i=$((i+1)); done
+wf_pair "$D" "duped" 3 "js/docs/**" "scripts/thing.sh" "scripts/thing.sh" "js/docs/**" "scripts/thing.sh"
+check "duplicate entry is NOT drift -> exit 0"  0 "$(run "$D")"
+
+# CONTROL 3 — a deliberately asymmetric workflow (paths on one arm, the other
+# unfiltered) is not a pair and must not be a finding. 11 workflows in the real
+# corpus are shaped this way on purpose.
+D="$TMP/t11"; mk_tree "$D"
+i=0; while [ "$i" -lt 26 ]; do wf "$D" "live$i" "js/docs/**"; i=$((i+1)); done
+{ echo "name: asym"; echo "on:"; echo "  pull_request:"; echo "    paths:"
+  echo "      - \"js/docs/**\""; echo "  push:"; echo "    branches: [main]"
+  echo "jobs:"; echo "  a:"; echo "    runs-on: ubuntu-latest"
+  echo "    steps:"; echo "      - run: echo hi"
+} > "$D/.github/workflows/asym.yml"
+check "unfiltered sibling arm is NOT drift -> 0" 0 "$(run "$D")"
+
+# NON-VACUITY on the subject count: a corpus with no two-armed workflow at all
+# must say NO SUBJECT, not OK — a gate over nothing is not a certification.
+D="$TMP/t12"; mk_tree "$D"
+i=0; while [ "$i" -lt 26 ]; do wf "$D" "live$i" "js/docs/**"; i=$((i+1)); done
+check "no mirrored pair at all -> exit 0"       0 "$(run "$D")"
+check "  ...and arm C says NO SUBJECT, not OK"  1 "$(grep -c 'arm C): NO SUBJECT' "$TMP/out.txt" | awk '{print ($1>0)?1:0}')"
+
+echo ""
 echo "---"
 echo "workflow-trigger-coverage: $pass passed, $fail failed"
 [ "$fail" = 0 ]
