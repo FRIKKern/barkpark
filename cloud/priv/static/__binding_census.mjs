@@ -79,9 +79,10 @@
 //   charter D528, when every documentary `line:` field the PIN then carried was
 //   deleted (nothing read them; every one of them was stale) and the
 //   inline-cond overlay's typed-and-printed router lines were replaced by a
-//   resolver over the live router source. Line numbers rot on any sibling shift — charter D41 /
-//   bp-honest-gates D5 — so the PIN is keyed on the function name, and a
-//   printed numeral is only ever this run's reading of the tree. cch-w47-rv
+//   resolver over the live router source. Line numbers rot on any sibling
+//   shift — charter D41 / bp-honest-gates D5 — so the PIN is keyed on the
+//   function name, and a printed numeral is only ever this run's reading of
+//   the tree. cch-w47-rv
 //   made that sentence a CHECK rather than a promise: (2h) below reads this
 //   file's own bytes and exits 2 on any typed `<file>:<digits>`. It had to —
 //   D528 left seven of them behind in `note:` prose, all seven already stale.)
@@ -324,7 +325,8 @@ const src = fs.readFileSync(APP, "utf8");
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
 // (`lineOf`, below) and looked up by KEY, so it is correct by construction. The
 // rows used to carry a documentary `line:` beside it; measured, every one of
-// them was stale (median drift 524, max 928, zero correct) and nothing read —
+// them was stale (median drift 524, max 928, zero correct) and nothing read
+// them —
 // setting one to 999999 left the report BYTE-IDENTICAL at rc 0. A number no
 // check can red and no reader can trust is not orientation, it is a second
 // answer that disagrees with the first. Deleted (charter D528).
