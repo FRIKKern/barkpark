@@ -34059,7 +34059,11 @@ test("teamEraseFailureCopy: the 409 counts come from the SERVER's numbers, singu
 });
 
 test("accountEraseFailureCopy: 401 names the OAuth-only dead end; 409 names the teams", () => {
-  assert.match(hooks.accountEraseFailureCopy(401, {}), /GitHub or Google/);
+  assert.match(hooks.accountEraseFailureCopy(401, { error: "invalid_password" }), /GitHub or Google/);
+  // CONTROL — a 401 that is NOT invalid_password (an expired session, say) must
+  // NOT be told their password did not match: that sends them to reset a
+  // password that was never the problem.
+  assert.doesNotMatch(hooks.accountEraseFailureCopy(401, { error: "unauthorized" }), /GitHub or Google/);
   const sole = hooks.accountEraseFailureCopy(409, { error: "sole_owner", teams: ["acme", "beta"] });
   assert.match(sole, /acme, beta/);
   assert.match(sole, /Promote another owner/);

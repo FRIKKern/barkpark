@@ -1487,7 +1487,10 @@
   // the route can actually make. `sole_owner` names the teams, because "you own
   // a team" without saying WHICH is a dead end on an account with several.
   function accountEraseFailureCopy(status, data) {
-    if (status === 401) {
+    // Branch on the CODE, not on 401 alone. A 401 from an expired session is
+    // not a wrong password, and telling that person their password did not
+    // match would send them to reset a password that was never the problem.
+    if (status === 401 && data && data.error === "invalid_password") {
       return "That password didn't match. If you sign in with GitHub or Google and have never set a password, " +
         "set one first \u2014 account deletion needs it.";
     }

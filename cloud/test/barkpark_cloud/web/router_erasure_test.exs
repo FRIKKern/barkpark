@@ -246,6 +246,7 @@ defmodule BarkparkCloud.Web.RouterErasureTest do
       assert_raise Postgrex.Error, ~r/append-only/, fn ->
         Repo.transaction(fn ->
           Repo.query!("SET LOCAL barkpark.erasure = 'on'")
+
           Repo.update_all(from(e in AuditEvent, where: e.team_id == ^team.id),
             set: [action: "member.added"]
           )
