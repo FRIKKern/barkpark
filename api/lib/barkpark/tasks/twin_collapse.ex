@@ -64,6 +64,7 @@ defmodule Barkpark.Tasks.TwinCollapse do
   """
   @spec collapse_key(struct()) :: {0 | 1, 0 | 1, String.t()}
   def collapse_key(%{status: status, doc_id: doc_id}) do
-    {if(status == "published", do: 0, else: 1), if(DraftId.draft?(doc_id), do: 1, else: 0), doc_id}
+    {if(status == "published", do: 0, else: 1), if(DraftId.draft?(doc_id), do: 1, else: 0),
+     doc_id}
   end
 end
