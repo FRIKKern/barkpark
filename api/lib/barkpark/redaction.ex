@@ -99,6 +99,7 @@ defmodule Barkpark.Redaction do
       )
     end)
   end
+
   @doc """
   Recursively replace the VALUES under built-in sensitive keys with
   `"[REDACTED]"`, walking maps and lists only.

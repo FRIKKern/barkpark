@@ -39,7 +39,12 @@ defmodule Barkpark.RedactionNoForkCensusTest do
 
   describe "secret-redaction has exactly one owner" do
     test "the scanner FINDS a planted specimen (so an empty result is evidence, not a failed read)" do
-      root = Path.join(System.tmp_dir!(), "redaction_fork_census_#{System.unique_integer([:positive])}")
+      root =
+        Path.join(
+          System.tmp_dir!(),
+          "redaction_fork_census_#{System.unique_integer([:positive])}"
+        )
+
       File.mkdir_p!(Path.join(root, "nested"))
 
       on_exit(fn -> File.rm_rf!(root) end)
@@ -54,7 +59,10 @@ defmodule Barkpark.RedactionNoForkCensusTest do
       end
       """)
 
-      assert [{"nested/planted_fork.ex", 6, "defp sensitive_key?(key), do: key in ~w(token password)"}] =
+      assert [
+               {"nested/planted_fork.ex", 6,
+                "defp sensitive_key?(key), do: key in ~w(token password)"}
+             ] =
                scan(root)
     end
 
