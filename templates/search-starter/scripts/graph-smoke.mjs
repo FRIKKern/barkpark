@@ -92,6 +92,7 @@
 //       must never be reported as a defect in somebody's diff, and must never be
 //       reported as a pass either.
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:net'
 import { createRequire } from 'node:module'
 import { cp, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -193,6 +194,28 @@ function run(cmd, args, opts) {
   })
 }
 
+/**
+ * Refuse to run if the site port is ALREADY SERVING.
+ *
+ * THIS GUARD IS THE HARNESS'S OWN SCAR, and it is not hypothetical: the first
+ * baseline run of this file printed 6/6 while `Failed to start server:
+ * EADDRINUSE` scrolled past in the same output. A leftover server from an
+ * earlier manual run answered `waitForHttp`, chromium drove THAT page, and
+ * every beat passed having measured a build nobody had just made. A green whose
+ * subject is a stale process is worse than a red.
+ *
+ * So the port is proven FREE before the build, and the failure is a
+ * CANNOT MEASURE (2), never a pass and never a finding in somebody's diff.
+ */
+function portIsFree(port, host = '127.0.0.1') {
+  return new Promise((res) => {
+    const probe = createServer()
+    probe.once('error', () => res(false))
+    probe.once('listening', () => probe.close(() => res(true)))
+    probe.listen(port, host)
+  })
+}
+
 /** Poll the site until it answers, or give up. A fixed sleep here is how a
  * harness reports a boot failure as a page-content failure. */
 async function waitForHttp(url, timeoutMs) {
@@ -228,6 +251,15 @@ async function main() {
 
   const apiOrigin = `http://127.0.0.1:${args.apiPort}`
   const siteOrigin = `http://127.0.0.1:${args.port}`
+  if (!(await portIsFree(args.port))) {
+    die(
+      2,
+      `CANNOT MEASURE — site port ${args.port} is already serving.\n` +
+        '  Something else would answer the browser and every beat below would be\n' +
+        `  about ITS page, not this build. Free the port (or pass --port N).`,
+    )
+  }
+
   const unknown = new Set()
   const stub = createStubServer({ onUnknown: (r) => unknown.add(r) })
   try {

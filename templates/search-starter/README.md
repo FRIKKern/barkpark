@@ -175,6 +175,32 @@ BARKPARK_SITE_BASE=/sites/<slug>/ npm run build
 node .next/standalone/server.js
 ```
 
+### The graph smoke — is the desktop graph real, and is the phone sent nothing?
+
+`scripts/graph-smoke.mjs` builds this starter against a stdlib-only fixture
+(`scripts/smoke-stub-api.mjs`), boots the **real** `.next/standalone/server.js`,
+and drives two headless chromium contexts:
+
+```sh
+BP_PLAYWRIGHT=<repo>/js/node_modules/playwright node scripts/graph-smoke.mjs
+```
+
+Six beats. `LAND` proves the built page actually loaded — without it every claim
+below could be satisfied by a blank page. `GDESK` is the desktop **control**:
+`/bp-graph.js` is fetched and `[data-bp-graph-mount]` is present. `GWIDTH` proves
+the two arms really were different viewports. `GPHONE` and `GMOUNT` prove a
+390x844 viewport is sent no renderer and mounts no subtree — **hidden is not
+undelivered**: `hidden md:block` stops paint, only `<DesktopOnly>` stops the
+~131 KB download.
+
+Exit `0` all beats pass, `1` a beat failed (that is the finding), `2` the gate
+could not run at all (no playwright, no chromium, build failed, port taken) —
+never reported as a pass. Playwright is deliberately **not** a dependency of this
+template: it is resolved from the runner, so scaffolding a site never downloads a
+browser.
+
+The Astro edition's twin is `templates/astro-search-starter/scripts/render-smoke.mjs`.
+
 ---
 
 **One command in, a premium search engine out.** No worries about the socket,
