@@ -91,6 +91,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -113,10 +114,10 @@ const stageKeepRerunFlag = "--keep-rerun"
 // verb's write seam.
 const stageRerunOrphanCode = "rerun_would_orphan"
 
-// stageKeepRerunBodyKey is what the flag becomes on the wire. The server reads
+// stageKeepRerunParam is what the flag becomes on the wire. The server reads
 // BOTH "keep_rerun" and "keep-rerun" (Params.stage_keep_rerun); the snake form
 // is sent because that is the spelling the door documents.
-const stageKeepRerunBodyKey = "keep_rerun"
+const stageKeepRerunParam = "keep_rerun"
 
 // extractStageKeepRerunFlag removes every bare occurrence of stageKeepRerunFlag
 // from tail and reports whether it was present. An inline `--keep-rerun=x` form
@@ -386,31 +387,26 @@ func guardStageRerunOrphan(out *writer, g globals, ctx manifest.Context, m *mani
 // it. The manifest route is a regression, not a fix. The fix is here: forward
 // what the strip took.
 //
-// It is stamped onto the RESOLVED BODY rather than pushed back into tail, for
+// It is stamped onto the RESOLVED URL rather than pushed back into tail, for
 // the reason the strip exists in the first place — tail goes through splitArgs,
-// which refuses any flag the manifest does not declare. Same seam
-// execTaskNextWithPolicy uses for the MCP execution_policy_override, and it
-// runs BEFORE the dry-run branch so `--dry-run` previews the byte the server
-// will read.
+// which refuses any flag the manifest does not declare. The query string is
+// also exactly where its declared sibling lands: `bp task stage --note X
+// --supersede` resolves to `?note=X&supersede=true`, positionals in the body,
+// every FLAG on the query, so `clear-rerun` rides the query and `keep_rerun`
+// now reaches the same Params.stage_keep_rerun read by the same route.
+// appendTaskStatusFilter's seam, and it runs BEFORE the dry-run branch so
+// `--dry-run` previews the URL the server will read.
 func stampStageKeepRerun(req *manifestRequest) error {
 	if req == nil {
 		return nil
 	}
-	body := map[string]any{}
-	if len(req.body) > 0 {
-		if err := json.Unmarshal(req.body, &body); err != nil {
-			return fmt.Errorf("decode task stage body: %w", err)
-		}
-	}
-	body[stageKeepRerunBodyKey] = true
-	encoded, err := json.Marshal(body)
+	u, err := url.Parse(req.url)
 	if err != nil {
-		return fmt.Errorf("encode %s: %w", stageKeepRerunFlag, err)
+		return fmt.Errorf("cannot apply %s to %q: %v", stageKeepRerunFlag, req.url, err)
 	}
-	req.body = encoded
-	if req.headers == nil {
-		req.headers = map[string]string{}
-	}
-	req.headers["Content-Type"] = "application/json"
+	q := u.Query()
+	q.Set(stageKeepRerunParam, "true")
+	u.RawQuery = q.Encode()
+	req.url = u.String()
 	return nil
 }
