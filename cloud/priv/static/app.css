@@ -4514,7 +4514,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   gap: 6px;
   margin-bottom: 14px;
 }
-.op-digest-send > .set-purpose { margin: 0; max-width: 62ch; }
+.op-digest-send > .set-purpose {
+  margin: 0;
+  /* off-ladder: design/tokens.json carries no measure ladder at all — its `type`
+     section holds only the chrome and reading SIZE ladders (`jq -r '.type|keys[]'
+     design/tokens.json` prints `_units`, `chrome`, `reading`; `grep -n 'ch"'
+     design/tokens.json` is empty). So there is no rung to tokenize a reading-measure
+     cap against. 62ch is the file's established measure for a prose column — the
+     same value is hand-stamped at `.dunning-body` and at the `.set-purpose` cap
+     under the settings pane (`grep -n '62ch' cloud/priv/static/app.css`) — and this
+     declaration stays on it rather than inventing a one-site rung. */
+  max-width: 62ch;
+}
 
 .wh-del-card {
   border: 1px solid var(--border);
@@ -4579,7 +4590,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    __css_check's E15 to police. */
 .wh-del-proof {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--muted-text);
   white-space: nowrap;
   overflow: hidden;
