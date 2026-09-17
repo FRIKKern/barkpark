@@ -85,6 +85,8 @@
 #         --count-only
 #         --fail-on-finding                        (exit 1 if anything is reported)
 #         --baseline FILE                          (ratchet: FILE's integer may only fall)
+#         --verify-against-origin-main              (measure a SNAPSHOT, never the checkout)
+#         --check-provenance FILE                   (the banked number carries cmd+date+sha)
 #         --selftest
 #
 # EXIT: 0 clean scan, findings or not · 1 findings and --fail-on-finding, or the
@@ -100,6 +102,8 @@ min_conf="low"
 count_only=0
 fail_on_finding=0
 selftest=0
+verify_origin=0
+provenance_file=""
 baseline_file=""
 targets=()
 
@@ -127,6 +131,15 @@ while [ $# -gt 0 ]; do
     selftest=1
     shift
     ;;
+  --verify-against-origin-main)
+    verify_origin=1
+    shift
+    ;;
+  --check-provenance)
+    [ $# -ge 2 ] || die "--check-provenance needs a baseline file"
+    provenance_file="$2"
+    shift 2
+    ;;
   --fail-on-finding)
     fail_on_finding=1
     shift
@@ -137,8 +150,8 @@ while [ $# -gt 0 ]; do
     shift 2
     ;;
   -h | --help)
-    # 2,94p — the whole header block; re-measure it when the header grows
-    sed -n '2,94p' "$0"
+    # 2,96p — the whole header block; re-measure it when the header grows
+    sed -n '2,96p' "$0"
     exit 0
     ;;
   -*) die "unknown option: $1" ;;
@@ -157,6 +170,164 @@ esac
 if [ "${#targets[@]}" -eq 0 ]; then
   ROOT="${PIPEFAIL_SCAN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
   targets=("$ROOT/scripts" "$ROOT/.github" "$ROOT/deploy")
+fi
+
+
+# ── --check-provenance: a banked number carries the command, the date and the sha
+#
+# task-bf9d623529d86a86 c2.  Every target proposed for this class must be a
+# DELTA against the post-2026-09-12 detector, carrying what produced it.  The
+# baseline file's own header has said so in prose since 2026-09-09 ("TO LOWER
+# IT: fix a site, re-run the command above, put its printed count here, and
+# update the date and composition in this header in the same commit") and the
+# rule was still broken: a small inherited number — 8, 15 or 16, all from the
+# PRE-widening detector — reached an acceptance criterion as "high <= 6" and
+# stood for four days, because prose does not fire.  A written finding does not
+# fire by itself; this is the same sentence, made callable.
+#
+# WHAT IT REQUIRES, of the text AFTER the file's LAST `RE-MEASURED` banner —
+# the block that must describe the number now enforced:
+#   1  the enforced integer, quoted as the scanner's own output line;
+#   2  the literal command that produces it, so the reader can re-run it;
+#   3  an ISO date;
+#   4  a commit sha (>= 9 hex), so the tree measured is NAMEABLE.
+# It does NOT try to check that the sha is real or that the number is right —
+# that is --verify-against-origin-main's job.  This one only refuses a number
+# that arrives with no way to check it at all, which is the shape every wrong
+# number in this class has had.
+check_provenance() {
+  local file="$1" want body missing=""
+  [ -r "$file" ] || {
+    printf 'CANNOT READ: %s (provenance)\n' "$file" >&2
+    return 2
+  }
+  want=""
+  while IFS= read -r bl || [ -n "$bl" ]; do
+    bl="${bl%%#*}"
+    bl="${bl//[[:space:]]/}"
+    [ -n "$bl" ] || continue
+    want="$bl"
+    break
+  done <"$file"
+  case "$want" in
+  '' | *[!0-9]*)
+    printf 'CANNOT READ: %s carries no integer baseline (read: %s)\n' "$file" "${want:-<nothing>}" >&2
+    return 2
+    ;;
+  esac
+
+  # the text after the LAST re-measurement banner.  `sed -n '/RE-MEASURED/,$p'`
+  # would start at the FIRST one; this keeps only the final block, which is the
+  # one that has to describe the number in force.
+  local last
+  last="$(grep -n 'RE-MEASURED' "$file" | tail -1)"
+  last="${last%%:*}"
+  if [ -z "$last" ]; then
+    # no re-measurement yet: the whole header is the block.
+    last=1
+  fi
+  body="$(sed -n "${last},\$p" "$file")"
+
+  grep -qE "pipefail-sigpipe-scan: $want finding" <<<"$body" ||
+    missing="$missing
+  - the scanner's own output line quoting $want (\"pipefail-sigpipe-scan: $want finding(s) …\")"
+  grep -qF 'bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only' <<<"$body" ||
+    missing="$missing
+  - the literal command: bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only"
+  grep -qE '20[0-9][0-9]-[01][0-9]-[0-3][0-9]' <<<"$body" ||
+    missing="$missing
+  - an ISO date (20YY-MM-DD) for the measurement"
+  grep -qE '(^|[^0-9a-f])[0-9a-f]{9,40}([^0-9a-z]|$)' <<<"$body" ||
+    missing="$missing
+  - a commit sha (>= 9 hex characters) naming the tree that was measured"
+
+  if [ -n "$missing" ]; then
+    printf '%s: PROVENANCE MISSING in %s — the banked number is %s, and its block does not carry:%s\n' \
+      "$PROG" "$file" "$want" "$missing" >&2
+    printf '%s: a bare number is not a measurement. Re-run\n' "$PROG" >&2
+    printf '%s:   bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main\n' "$PROG" >&2
+    printf '%s: and paste its command, date and sha into %s in the SAME commit that moves the number.\n' "$PROG" "$file" >&2
+    return 1
+  fi
+  printf '%s: provenance OK — %s banks %s with a command, a date and a sha in its last RE-MEASURED block\n' \
+    "$PROG" "$file" "$want"
+  return 0
+}
+
+if [ -n "$provenance_file" ]; then
+  check_provenance "$provenance_file"
+  exit $?
+fi
+
+# ── --verify-against-origin-main: measure a SNAPSHOT, never the checkout ──────
+#
+# task-bf9d623529d86a86 c0.  THE FAILURE THIS EXISTS FOR, measured and not
+# imagined: on 2026-09-16 this repo's main checkout was 38 commits behind and
+# read `high 107` against a banked 108.  That reads as harmless RATCHET LOOSE —
+# "progress not yet banked" — and it was nothing of the kind: it was a
+# measurement of the PRE-FIX tree, and banking 107 would have written a number
+# no tree on main ever had.  A stale checkout is the cheap fake green for this
+# whole class, and it is invisible in the output, because the output of a scan
+# over the wrong tree looks exactly like the output of a scan over the right one.
+#
+# So this mode never reads the working tree for its verdict.  It extracts
+# origin/main into a scratch directory with `git archive`, runs THAT snapshot's
+# OWN scanner over THAT snapshot's files, and compares against THAT snapshot's
+# baseline — three things from one tree, named by one sha.  It also prints what
+# the working tree says, unlabelled by any verdict, purely so a drift between
+# the two is visible rather than silently quotable.
+if [ "$verify_origin" -eq 1 ]; then
+  command -v git >/dev/null 2>&1 || die "--verify-against-origin-main needs git on PATH"
+  vroot="${PIPEFAIL_SCAN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
+  vsha="$(git -C "$vroot" rev-parse origin/main 2>/dev/null)" ||
+    die "cannot resolve origin/main in $vroot — run: git fetch origin main"
+  [ -n "$vsha" ] || die "origin/main resolved to nothing in $vroot"
+  vscratch="$(mktemp -d "${TMPDIR:-/tmp}/pfscan-origin.XXXXXX")" || die "mktemp failed"
+  trap 'rm -rf "$vscratch"' EXIT
+  git -C "$vroot" archive "$vsha" | tar -x -C "$vscratch" ||
+    die "git archive $vsha failed — nothing was measured"
+  [ -r "$vscratch/scripts/pipefail-sigpipe-scan.sh" ] ||
+    die "the origin/main snapshot has no scripts/pipefail-sigpipe-scan.sh — nothing was measured"
+  [ -r "$vscratch/scripts/pipefail-sigpipe-baseline.txt" ] ||
+    die "the origin/main snapshot has no scripts/pipefail-sigpipe-baseline.txt — nothing was measured"
+
+  vout="$(cd "$vscratch" && bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only)" ||
+    die "the snapshot scan did not complete — nothing was measured"
+  vn="$(sed -nE 's/.*: ([0-9]+) finding.*/\1/p' <<<"$vout")"
+  case "$vn" in '' | *[!0-9]*) die "could not read a count out of: $vout" ;; esac
+  vbank="$(tail -1 "$vscratch/scripts/pipefail-sigpipe-baseline.txt")"
+  vbank="${vbank//[[:space:]]/}"
+  case "$vbank" in '' | *[!0-9]*) die "the snapshot baseline's last line is not an integer: ${vbank:-<empty>}" ;; esac
+
+  wout="$(bash "${BASH_SOURCE[0]}" --min-confidence high --count-only)" || wout="(the working-tree scan failed)"
+  wn="$(sed -nE 's/.*: ([0-9]+) finding.*/\1/p' <<<"$wout")"
+
+  printf '%s: MEASURED ON A SNAPSHOT OF origin/main — never on this checkout.\n' "$PROG"
+  printf '  sha        %s\n' "$vsha"
+  printf '  command    (cd <snapshot> && bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only)\n'
+  printf '  scan       %s\n' "$vout"
+  printf '  baseline   %s   (tail -1 scripts/pipefail-sigpipe-baseline.txt OF THAT SNAPSHOT)\n' "$vbank"
+  printf '  date       %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '\n'
+  printf '  this checkout reads %s — NOT quotable, shown only so a drift is visible.\n' "${wn:-?}"
+  if [ -n "$wn" ] && [ "$wn" != "$vn" ]; then
+    printf '  THE TWO DISAGREE. The snapshot number is the measurement; this checkout is\n'
+    printf '  either ahead of, behind, or dirty against %s. Quote the snapshot.\n' "$vsha"
+  fi
+  printf '\n'
+  if [ "$vn" -gt "$vbank" ]; then
+    printf '%s: RATCHET BROKEN ON origin/main — %s finding(s), baseline %s. A NEW site is on main.\n' \
+      "$PROG" "$vn" "$vbank" >&2
+    exit 1
+  fi
+  if [ "$vn" -lt "$vbank" ]; then
+    printf '%s: RATCHET LOOSE ON origin/main — %s finding(s), baseline still says %s.\n' "$PROG" "$vn" "$vbank" >&2
+    printf '%s: bank it: put %s in scripts/pipefail-sigpipe-baseline.txt with the command, the date\n' "$PROG" "$vn" >&2
+    printf '%s: and %s in the SAME commit. Slack is where the next regression hides.\n' "$PROG" "$vsha" >&2
+    exit 0
+  fi
+  printf '%s: origin/main %s measures %s and banks %s — they agree.\n' "$PROG" "$vsha" "$vn" "$vbank"
+  exit 0
 fi
 
 # ── --selftest ──────────────────────────────────────────────────────────────
@@ -512,6 +683,151 @@ jobs:
         run: printf '%s' "$x" | grep -q foo
 YML
 
+  # ── the QUOTED REMOTE COMMAND arm (task-bf9d623529d86a86 c1) ──────────────
+  # A `run:` body says `set -euo pipefail`; a pipeline inside a quoted string
+  # that body hands to `ssh` is executed by a DIFFERENT shell on a DIFFERENT
+  # host, which sets nothing.  Attributing the outer `set` to that text is how
+  # cp-ops.yml:96,97,149,406 were banked into the enforced ratchet and then left
+  # alone as "wrong attribution, not a defect" — four findings that described
+  # the scanner's parser, not the tree.
+  #
+  # THESE ARMS KEY ON THE SHAPE, NOT ON A FILE AND A LINE.  An enumeration is a
+  # snapshot: a skip list of those four lines would pass this arm today and let
+  # a FIFTH remote site ship unreported while the count silently dropped.  The
+  # rule under test is the shell's own — a line that BEGINS inside an
+  # unterminated quoted run is a string literal to the shell that reads it —
+  # so (b) below plants the same hazard behind `docker exec … sh -c "…"`, a
+  # shape no line list for cp-ops.yml could ever cover.
+  #
+  # (a) IS THE MISS; (c) IS WHAT KEEPS IT FROM BEING VACUOUS.  A scanner that
+  # simply stopped reading `head` would pass (a) and (b) and fail (c).
+  yml remote-ssh-quoted-body MISS <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - name: the OUTER body arms pipefail; the inner text is a remote shell's
+        run: |
+          set -euo pipefail
+          $SSH "root@${CP_HOST}" "
+            KEY=/root/.ssh/key
+            ssh -i \"\$KEY\" root@${BOX_IP} '
+              docker ps -a --format \"{{.Names}}\" | head -10
+              systemctl list-units --all --no-pager --plain \"barkpark*\" | head -14
+            '
+          "
+YML
+
+  # (b) THE SAME DEFECT BEHIND A DIFFERENT DOOR — `sh -c "…"` under docker exec.
+  # No `ssh` anywhere; a file+line skip list keyed on cp-ops.yml sees nothing
+  # here, and the shape rule sees it for the same reason it saw (a).
+  yml remote-quoted-body-not-ssh MISS <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - run: |
+          set -euo pipefail
+          docker exec "$c" sh -c "
+            cat /var/log/app.log | head -300
+          "
+YML
+
+  # (c) THE DISCRIMINATION.  Byte-identical pipeline, same body, same pipefail —
+  # but OUTSIDE the quoted run, so THIS shell runs it and it is still a finding.
+  # If (a) and (b) passed because the scanner stopped seeing `head`, this reds.
+  yml remote-outer-command-still-reported HIT 8 <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    steps:
+      - run: |
+          set -euo pipefail
+          docker ps -a --format '{{.Names}}' | head -10
+          $SSH "root@${CP_HOST}" "echo one-line remote, quote closes here"
+YML
+
+  # (d) A COMMAND SUBSTITUTION RESTARTS QUOTING.  `x="$(producer | head -1)"` is
+  # code inside a double-quoted run, and suppressing it would silently delete the
+  # 98 findings the 2026-09-12 widening was written to catch.  This is the arm
+  # that reds if the cross-line tracker is made cruder — e.g. "skip every line
+  # after an odd quote count".
+  sayhigh quoted-substitution-is-still-code HIT <<'SH'
+c="$(docker ps -q --filter name=app | head -1)"
+SH
+
+  # (e) THE OVER-SUPPRESSION REGRESSION ARM.  A trailing comment carrying an
+  # apostrophe — `# the R1 main's roster` — is not an open quote: `#` at a word
+  # boundary ends the shell line.  Measured while building the tracker: without
+  # the comment rule that ONE line suppressed 11 real findings further down
+  # scripts/required-checks.test.sh and scripts/pdf-mvp0-journey-proof.sh, and
+  # the count fell from 101 to 86 while looking exactly like the fix working.
+  # The finding here sits AFTER the comment, so it only reports if the state
+  # recovered.
+  sayhigh apostrophe-in-trailing-comment-is-not-a-quote HIT <<'SH'
+jroster() { : ; }   # the R1 main's roster (the journey truth for R2-R5)
+c="$(git log --format=%H | head -1)"
+SH
+
+  # (f) …and the same shape for `${x#pat}` and `$#`, which contain a `#` that is
+  # NOT a comment.  A boundary rule keyed on the character alone would truncate
+  # both lines and lose the finding on the second.
+  sayhigh hash-in-expansion-is-not-a-comment HIT <<'SH'
+v="${PATH#/usr}"; n=$#
+c="$(git log --format=%H | head -1)"
+SH
+
+  # ── THE LIVE TREE, not only a copy of it (the fixture proves the matcher; the
+  # real file proves the fixture is the same shape as the tree).  cp-ops.yml
+  # must report ZERO at high — and the PRECONDITION is asserted first, because a
+  # zero over a file that no longer contains the shape measures nothing.
+  cpops="$sroot/.github/workflows/cp-ops.yml"
+  if [ ! -r "$cpops" ]; then
+    sno "live cp-ops.yml: NOT FOUND under $sroot — this arm measured nothing"
+  elif ! grep -q 'docker ps -a --format' "$cpops"; then
+    sno "live cp-ops.yml: the remote box-probe body is gone — this arm's subject no longer exists"
+  else
+    cpn="$(bash "${BASH_SOURCE[0]}" --min-confidence high --count-only "$cpops" 2>/dev/null | sed -E 's/.*: ([0-9]+) finding.*/\1/')"
+    if [ "$cpn" = "0" ]; then
+      sok "live cp-ops.yml: 0 high finding(s) — the four remote-ssh sites are no longer attributed to the outer run:"
+    else
+      sno "live cp-ops.yml: reported $cpn high finding(s); the remote-command attribution is back"
+    fi
+  fi
+
+  # ── --check-provenance, both directions (task-bf9d623529d86a86 c2) ────────
+  # The shipped baseline must pass, and the LAUNDERING SHAPE must fail: a file
+  # whose integer was edited while its block still describes the OLD number is
+  # exactly how an inherited number gets a paper trail it never earned.
+  if bash "${BASH_SOURCE[0]}" --check-provenance "$sroot/scripts/pipefail-sigpipe-baseline.txt" >/dev/null 2>&1; then
+    sok "provenance: the shipped baseline carries a command, a date and a sha for the number it banks"
+  else
+    sno "provenance: the shipped baseline does NOT carry a command, a date and a sha for its number"
+  fi
+  prov="$std/prov.txt"
+  {
+    printf '# ── RE-MEASURED 2026-09-17 on 1234567890abcdef ──\n'
+    printf '#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only\n'
+    printf '#     -> pipefail-sigpipe-scan: 97 finding(s) - high 97\n'
+    printf '11\n'
+  } >"$prov"
+  if bash "${BASH_SOURCE[0]}" --check-provenance "$prov" >/dev/null 2>&1; then
+    sno "provenance: a baseline whose integer (11) does not match its own quoted measurement (97) PASSED"
+  else
+    sok "provenance: an integer edited away from the number its block quotes is REFUSED"
+  fi
+  printf '97\n' >>"$prov"
+  # (the last line is what the ratchet reads; the FIRST integer is what
+  # provenance reads — keep them the same file and the same number.)
+  if bash "${BASH_SOURCE[0]}" --check-provenance "$std/prov-ok.txt" >/dev/null 2>&1; then
+    sno "provenance: a nonexistent file PASSED — an unreadable input must never be a pass"
+  else
+    sok "provenance: an unreadable baseline is refused, never silently passed"
+  fi
+
   # (8) THE RATCHET, both directions, on a fixture whose count is known.
   bl="$std/bl.txt"
   printf '# reason lives here\n1\n' >"$bl"
@@ -663,6 +979,137 @@ strip_quoted_keep_subst() {
     just_opened_dq=0
   done
   STRIPPED_SUBST="$out"
+}
+
+# ── track_quote — carry an OPEN quoted string ACROSS lines ──────────────────
+#
+# THE ATTRIBUTION BUG THIS CLOSES (task-bf9d623529d86a86).  strip_quoted and
+# strip_quoted_keep_subst are per-LINE: they start every line unquoted.  A quote
+# opened on one line and closed on another is therefore invisible, and every
+# line in between is read as code THIS shell runs.  The loudest instance is a
+# remote command:
+#
+#     $SSH "root@${CP_HOST}" "                 # ← opens a double quote
+#       ssh -i \"\$KEY\" root@${BOX_IP} '
+#         docker ps -a --format \"…\" | head -10   # ← a DIFFERENT shell, on a
+#       '                                           #   DIFFERENT host, runs this
+#     "                                        # ← closes it
+#
+# The `run:` body above it says `set -euo pipefail`, so the scanner reported the
+# inner `| head -10` as "bare command under set -e".  It is not: the outer shell
+# sees one `ssh` word plus a string literal, and the remote shell that actually
+# executes the text sets nothing at all.  Four such sites in cp-ops.yml
+# (96, 97, 149, 406 as of b569033e2e) were banked into the enforced ratchet on
+# that reading and then left alone as "wrong attribution, not a defect".
+#
+# THIS KEYS ON THE SHAPE, NOT ON A FILE+LINE LIST.  An enumeration is a snapshot:
+# a fifth remote-ssh site would ship unreported under a skip list while the count
+# silently dropped.  The rule here is the shell's own — a line that BEGINS inside
+# an unterminated quoted run is a string literal to this shell, whoever ends up
+# executing it — so it covers `ssh`, `docker exec`, `su -c`, `bash -c`, a heredoc
+# assembled by hand, and every remote runner not yet written.
+#
+# IT CAN ONLY MAKE US REPORT LESS, NEVER MORE — the same direction strip_quoted
+# errs in.  A site suppressed here is one this shell does not run; if the remote
+# shell arms pipefail, that is a finding about a REMOTE script, which this
+# scanner has never claimed to read.
+#
+# Answers in the globals QQ (the open quote char, "" when none) and QSTACK (the
+# `$( … )` nesting, D = the substitution opened inside a double quote, N = it did
+# not), because a command substitution RESTARTS quoting — `x="$(a | head -1)"` is
+# code, not a literal, and must keep being reported.  Both reset at every file and
+# at every `run:` block boundary: a workflow step is a fresh process, so an
+# unbalanced quote in step 1 says nothing about step 5.
+#
+# Unlike the strip functions this one honours BACKSLASH ESCAPES, because `\"` is
+# how a nested remote command quotes its own arguments and a tracker that let
+# `\"` close the string would fall out of the literal three characters in.
+QQ=""
+QSTACK=""
+# The characters that can change the state. Everything between two of them is
+# skipped in ONE parameter expansion instead of a loop turn per character: this
+# function runs over a large fraction of the lines in 442 files, and a per-char
+# `${s:i:1}` walk made the whole scan 4x slower on the tree it guards.
+PFS_INTERESTING='["'"'"'\\$)#]'
+track_quote() {
+  local s="$1" head ch prev=""
+  while [ -n "$s" ]; do
+    # Inside a single-quoted run NOTHING is special but the closing quote —
+    # no escapes, no substitutions, no comments.
+    if [ "$QQ" = "'" ]; then
+      case "$s" in
+      *"'"*)
+        s="${s#*\'}"
+        QQ=""
+        prev="'"
+        ;;
+      *) s="" ;;
+      esac
+      continue
+    fi
+    head="${s%%$PFS_INTERESTING*}"
+    [ "${#head}" -eq "${#s}" ] && break # nothing interesting left on this line
+    [ -n "$head" ] && prev="${head:${#head}-1:1}"
+    s="${s:${#head}}"
+    ch="${s:0:1}"
+    s="${s:1}"
+    case "$ch" in
+    '\')
+      # Outside single quotes a backslash escapes the next character — including
+      # at end of line, where it is a line continuation and escapes nothing.
+      # `\"` is how a nested remote command quotes its own arguments, and a
+      # tracker that let it close the string would fall out of the literal three
+      # characters in.
+      prev="${s:0:1}"
+      s="${s:1}"
+      ;;
+    '$')
+      if [ "${s:0:1}" = '(' ]; then
+        # a command substitution RESTARTS quoting, which is what real shell
+        # does: `x="$(a | head -1)"` is CODE and must keep being reported. D
+        # remembers that the substitution opened inside a double-quoted run.
+        case "$QQ" in '"') QSTACK="D$QSTACK" ;; *) QSTACK="N$QSTACK" ;; esac
+        QQ=""
+        s="${s:1}"
+        prev='('
+      else
+        prev='$'
+      fi
+      ;;
+    '"')
+      if [ "$QQ" = '"' ]; then QQ=""; else QQ='"'; fi
+      prev='"'
+      ;;
+    "'")
+      # ignored inside a double-quoted run, where it is an ordinary character.
+      [ -z "$QQ" ] && QQ="'"
+      prev="'"
+      ;;
+    ')')
+      if [ -z "$QQ" ] && [ -n "$QSTACK" ]; then
+        case "${QSTACK:0:1}" in 'D') QQ='"' ;; *) QQ="" ;; esac
+        QSTACK="${QSTACK:1}"
+      fi
+      prev=')'
+      ;;
+    '#')
+      # A `#` at a WORD BOUNDARY starts a comment and the rest of the line is
+      # not shell at all. Without this the apostrophe in a trailing
+      # `# the R1 main's roster` opens a single-quoted run that never closes and
+      # every later line in the file is suppressed as "inside a string".
+      # MEASURED while building this: that one comment silently dropped 11 real
+      # findings across required-checks.test.sh and pdf-mvp0-journey-proof.sh —
+      # an over-suppression that looks exactly like the fix working, which is
+      # why the arms below diff the WHOLE finding list and not just the count.
+      # `${x#pat}` and `$#` must NOT match, hence the test on the PRECEDING
+      # character rather than on `#` alone.
+      if [ -z "$QQ" ]; then
+        case "$prev" in '' | ' ' | '	' | ';' | '&' | '|' | '(') break ;; esac
+      fi
+      prev='#'
+      ;;
+    esac
+  done
 }
 
 # ── yaml_flatten — render a GitHub Actions workflow as the shell it really is ──
@@ -911,6 +1358,8 @@ for f in "${files[@]}"; do
   errexit=0
   lineno=0
   heredoc=""
+  QQ=""
+  QSTACK=""
   prev_pipe_line=0
   prev_pipe_text=""
   prev_pipe_conf=""
@@ -932,6 +1381,8 @@ for f in "${files[@]}"; do
         prev_pipe_line=0
         prev_pipe_text=""
         prev_pipe_conf=""
+        QQ=""
+        QSTACK=""
         [ -n "$line" ] || continue
         raw="$line"
         ;;
@@ -946,6 +1397,23 @@ for f in "${files[@]}"; do
       case "${line#"${line%%[![:space:]]*}"}" in "$heredoc") heredoc="" ;; esac
       continue
     fi
+    # ── a line CONTINUING an open quoted string is NOT this shell's code ──
+    # See track_quote above. It runs BEFORE the comment test on purpose: inside
+    # a quoted run a leading `#` is a literal `#`, not a comment, so skipping
+    # such a line without advancing the state would strand the tracker inside a
+    # string it has already left. It runs before the heredoc-OPEN test for the
+    # same reason — a `<<` inside a remote command string opens a heredoc for
+    # the REMOTE shell, never for this one.
+    if [ -n "$QQ" ]; then
+      # Only a matching quote char or a `$(` can change the state, so most lines
+      # of a multi-line awk/python/remote body skip the char loop entirely.
+      case "$line" in *"$QQ"* | *'$('*) track_quote "$line" ;; esac
+      prev_pipe_line=0
+      prev_pipe_text=""
+      prev_pipe_conf=""
+      continue
+    fi
+
     case "$line" in
     *'<<'*)
       hd="${line##*<<}"
@@ -964,6 +1432,18 @@ for f in "${files[@]}"; do
     # must not arm the scanner, and a `| grep -q` inside prose is not code.
     # Several scripts here carry paragraphs explaining this very defect.
     case "${line#"${line%%[![:space:]]*}"}" in '#'* | '') continue ;; esac
+
+    # Advance the cross-line quote state for this CODE line. A line with no
+    # quote character at all cannot open one, and can only matter when a `$( … )`
+    # is already open — so it costs one pattern test and nothing else.
+    # MEASURED on scripts/required-checks.test.sh (6k lines, the tree's worst
+    # case): 1.55s before this change, 2.12s after. An earlier cut tried to skip
+    # more by pre-counting quote characters with `${line//[^\"]/}`; that cost
+    # MORE than the tracker it was avoiding (3.03s) and was removed.
+    case "$line" in
+    *'"'* | *"'"*) track_quote "$line" ;;
+    *) [ -n "$QSTACK" ] && track_quote "$line" ;;
+    esac
 
     # ── (a) is pipefail in effect here? ────────────────────────────────────
     case "$line" in
@@ -1273,6 +1753,9 @@ if [ -n "$baseline_file" ]; then
       "$PROG" "$findings" "$min_conf" "$want" >&2
     printf '%s: this is not a failure, it is progress that has not been banked. Lower the number in\n' "$PROG" >&2
     printf '%s: %s to %d (and date the change) so the next regression cannot hide in the slack.\n' "$PROG" "$baseline_file" "$findings" >&2
+    printf '%s: BEFORE YOU BANK IT: a LOOSE ratchet is also what a STALE CHECKOUT looks like (this repo\n' "$PROG" >&2
+    printf '%s: read 107 against a banked 108 on 2026-09-16 while 38 commits behind). Measure a snapshot:\n' "$PROG" >&2
+    printf '%s:   bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main\n' "$PROG" >&2
   fi
 fi
 
