@@ -860,32 +860,25 @@ defmodule Barkpark.Plugins.Bulldocs do
   # and that table is created when the endpoint STARTS. Edge extraction is NOT
   # a request path: `mix barkpark.edges.backfill` boots in `:one_shot` mode
   # (`Barkpark.Application.child_specs/5`), which drops the endpoint on purpose
-  # so an operator one-shot cannot bind the live slot's port. Without this
-  # fallback the ETS read raised inside the resolver chain, the chain's
-  # per-plugin rescue swallowed it, and the sweep reported SUCCESS having
-  # projected only the non-bulldocs edges — measured on the dev corpus as
-  # 962 edges with an endpoint and 94 without, exit status 0 both times. A
-  # backfill that silently writes 10% of the graph is worse than one that dies.
+  # so an operator one-shot cannot bind the live slot's port. Without the
+  # `Barkpark.EndpointConfig` fallback the ETS read raised inside the resolver
+  # chain, the chain's per-plugin rescue swallowed it, and the sweep reported
+  # SUCCESS having projected only the non-bulldocs edges — measured on the dev
+  # corpus as 962 edges with an endpoint and 94 without, exit status 0 both
+  # times. A backfill that silently writes 10% of the graph is worse than one
+  # that dies.
   #
-  # Same shape and same reasoning as `Barkpark.Seeds.Clean.connect_url/0`
-  # (PR #18569): the fallback is not a second source of truth, because
-  # `BarkparkWeb.Endpoint` defines no `init/2`, so Phoenix seeds that ETS table
-  # verbatim from the merged `Application.get_env(:barkpark, BarkparkWeb.Endpoint)`
-  # keyword `config/runtime.exs` writes. The live table is still preferred
-  # whenever it exists, so a serving node's answer is byte-identical to before.
+  # ONE helper, not two: this and `Barkpark.Seeds.Clean.connect_url/0` carried
+  # byte-for-byte the same private "read endpoint config, fall back to
+  # `Application.get_env` when the ETS table is absent" shape. #18596 left them
+  # duplicated only because extracting meant editing `clean.ex` under an open
+  # sibling PR (#18569); both have landed, so the shape now lives once in
+  # `Barkpark.EndpointConfig`, which carries the full rationale.
   #
-  # `:ets.whereis/1` rather than `Process.whereis/1`: the ETS table is exactly
-  # what `url/0` needs, so probing it asks the question that decides.
-  defp own_public_host do
-    if :ets.whereis(BarkparkWeb.Endpoint) == :undefined do
-      :barkpark
-      |> Application.get_env(BarkparkWeb.Endpoint, [])
-      |> Keyword.get(:url, [])
-      |> Keyword.get(:host)
-    else
-      URI.parse(BarkparkWeb.Endpoint.url()).host
-    end
-  end
+  # HOST ONLY, and unchanged by the extraction: `Endpoint.url/0` is assembled
+  # from exactly the `:url` keyword list `public_host/0` reads, so a serving
+  # node answers the same string it answered before.
+  defp own_public_host, do: Barkpark.EndpointConfig.public_host()
 
   # The wikilink's edge target prefers the picker-stamped doc id (camelCase
   # "docId" on the wire; "doc_id" also accepted — mirroring the render-side

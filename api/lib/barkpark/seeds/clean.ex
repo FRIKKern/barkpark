@@ -247,21 +247,9 @@ defmodule Barkpark.Seeds.Clean do
   # `bin/barkpark start`, and it took the shown-once admin token with it.
   # Invisible to `mix test`: the test node always has the endpoint up.
   #
-  # The fallback is not a second source of truth. `BarkparkWeb.Endpoint`
-  # defines no `init/2`, so Phoenix seeds that ETS table verbatim from
-  # `Application.get_env(:barkpark, BarkparkWeb.Endpoint)` — the same merged
-  # keyword `config/runtime.exs` writes. The live table is still preferred
-  # whenever it exists, so a running node's answer is byte-identical to before.
-  #
-  # `:ets.whereis/1` rather than `Process.whereis/1`: the ETS table is exactly
-  # what `config/2` needs, so probing it asks the question that decides.
-  defp endpoint_config(key) do
-    if :ets.whereis(BarkparkWeb.Endpoint) == :undefined do
-      :barkpark
-      |> Application.get_env(BarkparkWeb.Endpoint, [])
-      |> Keyword.get(key)
-    else
-      BarkparkWeb.Endpoint.config(key)
-    end
-  end
+  # ONE helper, not two: `Barkpark.Plugins.Bulldocs.own_public_host/0` carried
+  # the identical shape for the `:one_shot` boot mode. The rationale — why the
+  # fallback is not a second source of truth, why `:ets.whereis/1` — now lives
+  # once, in `Barkpark.EndpointConfig`.
+  defp endpoint_config(key), do: Barkpark.EndpointConfig.get(key)
 end
