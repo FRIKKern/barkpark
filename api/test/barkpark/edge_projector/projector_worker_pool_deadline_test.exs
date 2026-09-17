@@ -104,8 +104,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPoolDeadlineTest do
       collect_all_documents/3        up to max_pages = 50   PER TYPE
                                      (projector_worker.ex:248; the 50 bound at
                                      :495-500, page_size 1000 at :482-489)
-      hydrate_edges_batch/1                             2   (tasks.ex:1977 and
-                                     :1989 — one task_edges query over every
+      hydrate_edges_batch/1                             2   (tasks.ex, in
+                                     `hydrate_edges_batch/1` — one task_edges query over every
                                      task PK + one Document id->doc_id map)
       bind_from_ids/3 -> typed_pks/3                    1   (projector.ex:345)
       rebuild_scope/3 transaction                       1   (projector.ex:188;
