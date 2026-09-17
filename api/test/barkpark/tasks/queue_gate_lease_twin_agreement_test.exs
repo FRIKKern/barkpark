@@ -235,9 +235,20 @@ defmodule Barkpark.Tasks.QueueGateLeaseTwinAgreementTest do
         assert elixir_lease_live?(doc),
                "fixture precondition: the Elixir arm must call #{ts_iso} LIVE"
 
-        assert {:ok, nil} =
-                 Tasks.claim("worker-newcomer", scope ++ [phase_id: phase_id, dataset: @dataset]),
-               "the ready queue handed out a row whose lease the Elixir arm calls live: #{ts_iso}"
+        handed_out =
+          Tasks.claim("worker-newcomer", scope ++ [phase_id: phase_id, dataset: @dataset])
+
+        # SHAPE BEFORE VALUE: an `{:error, _}` is not the queue refusing, it is the
+        # queue never having answered, and it must not read as a pass here.
+        assert match?({:ok, _}, handed_out),
+               "the queue errored instead of answering for #{ts_iso}: #{inspect(handed_out)}"
+
+        {:ok, row} = handed_out
+        handed_doc_id = row && row.doc_id
+
+        assert is_nil(handed_doc_id),
+               "the ready queue handed out a row whose lease the Elixir arm calls live: " <>
+                 "#{ts_iso} => #{handed_doc_id}"
       end
 
       # CONTROL — this queue, this scope, this fixture SHAPE can hand a row out,
