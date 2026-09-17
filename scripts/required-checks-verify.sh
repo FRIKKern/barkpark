@@ -819,6 +819,101 @@ census_check() {
   return 0
 }
 
+# ── the partial-accounting clause: the census's blind spot, closed STATICALLY ─
+# THE DEFECT THIS EXISTS FOR, and it is this file's own concession made
+# actionable. census_check above says so in its header: "SAMPLE-SCOPED BY
+# CONSTRUCTION … a workflow that did not run on that head renders no name, so an
+# unaccounted name can hide simply by not being sampled." MEASURED 2026-09-17
+# (task-49ec172e0fa91f9a): #18847 added the job `astro-starter-content-link` to
+# search-template-gates.yml at 04:53Z, beside four siblings that ALL carry
+# exclusion rows. Every required-checks-drift.yml run on main between 04:53Z and
+# 09:25Z read GREEN at the census clause — not because the ledger was complete,
+# but because no sampled head had rendered the new name yet. At 09:25Z a PR
+# head finally rendered it and the job has been red on main and on every PR
+# since. Four and a half hours of a red that already existed and could not be
+# seen.
+#
+# THE CLAUSE, and it is a PREDICATE, not a list. There is no allowlist here and
+# no skip list; both go stale silently, which is the fault one layer out. The
+# rule is: IF a workflow file already has at least one job whose `name:` carries
+# a status in the spec, THEN every non-templated job `name:` in that file must
+# carry one too. A file in the ledger stays complete.
+#
+# WHY THAT ANTECEDENT AND NOT "EVERY WORKFLOW". Measured on the same tree: 161
+# job-level `name:` declarations, 38 with no status. Making the whole set
+# fail-closed today would red on 31 workflows nobody has adjudicated, and a
+# gate that reds over inherited debt is the advisory-red problem this repo keeps
+# filing rows about. The antecedent picks out exactly the population where
+# SOMEONE ALREADY DID the adjudication — so a new unaccounted name there is a
+# REGRESSION of a decision, not undone work. After the seven rows this clause
+# shipped with, the population is 4 workflows and the finding count is 0.
+#
+# ITS CEILING, stated: it sees job-level `name:` only. A workflow whose names
+# are all unaccounted is invisible to it (that is the deliberate antecedent
+# above, not an oversight), and a matrix-templated name (`${{ … }}`) is skipped
+# because the rendered string is not derivable from the file. Those are
+# census_check's job, on the heads that render them. The two clauses are the two
+# halves: census reads what GitHub RENDERED, this reads what the tree DECLARES,
+# and the defect above lived in the gap between them.
+partial_accounting_check() {
+  local tmp rc=0 files n_acc n_files findings
+  tmp="$(mktemp -d)"
+  jq -r '(.protection.required_status_checks.checks[]?.context),
+         (.exclusions[]?.context)' "$SPEC" | sort -u > "$tmp/accounted"
+  n_acc="$(grep -c . < "$tmp/accounted" || true)"
+  # CONTROL 1: the accounted set must be non-empty. An unreadable spec would
+  # otherwise make every workflow "fully unaccounted", the antecedent would
+  # never fire, and this clause would report a silent green having compared
+  # nothing at all.
+  if [ "${n_acc:-0}" -lt 2 ]; then
+    rm -rf "$tmp"
+    blocked "partial-accounting: the spec yielded $n_acc accounted context(s) — with no accounted set the antecedent can never fire and a green here would mean nothing."
+  fi
+  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)"
+  n_files="$(printf '%s\n' "$files" | grep -c . || true)"
+  # CONTROL 2: there must be a workflow to read. Scanning ZERO files is a vacuous
+  # pass, not a green — the same refusal merge_truth_prose_check makes. The floor
+  # is 1, not 2, and that is measured rather than guessed: every --selftest probe
+  # that plants a fixture tree passes a `--workflows` dir holding exactly ONE
+  # file, so a floor of 2 turns all four of this clause's own probes into BLOCKED
+  # and the suite reds over its harness instead of over the clause.
+  if [ "${n_files:-0}" -lt 1 ]; then
+    rm -rf "$tmp"
+    blocked "partial-accounting: $WORKFLOWS_DIR yielded $n_files workflow file(s) — scanning zero is a vacuous pass, not a green."
+  fi
+  findings=0
+  local f base names acc_here miss_here
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    base="$(basename "$f")"
+    # Job-level `name:` is exactly four spaces of indent under `jobs:`. Step
+    # names sit deeper (six or more) and workflow-level `name:` at zero, so the
+    # indent IS the discriminator — no YAML parser, no new dependency.
+    names="$(awk '/^    name: /{ s=$0; sub(/^    name: /,"",s);
+                                 gsub(/^[ \t]+|[ \t]+$/,"",s);
+                                 gsub(/^"|"$|^'"'"'|'"'"'$/,"",s);
+                                 if (s !~ /\$\{\{/) print s }' "$f" | sort -u)"
+    [ -n "$names" ] || continue
+    printf '%s\n' "$names" > "$tmp/names"
+    acc_here="$(comm -12 "$tmp/names" "$tmp/accounted" | grep -c . || true)"
+    [ "${acc_here:-0}" -gt 0 ] || continue          # the antecedent: not in the ledger yet
+    miss_here="$(comm -23 "$tmp/names" "$tmp/accounted")"
+    [ -n "$miss_here" ] || continue
+    findings=$((findings+1)); rc=1
+    echo "FAIL: $base already has $acc_here job name(s) with a status in $SPEC, but these declare none:" >&2
+    printf '%s\n' "$miss_here" | sed 's/^/         unaccounted: /' >&2
+    echo "         A file in the ledger stays complete: someone adjudicated its siblings, so an unaccounted name here is a REGRESSION of that decision, not undone work." >&2
+    echo "         FIX: add a row to .exclusions saying WHAT the check is and WHY it does not gate (S2 advisory / S3 subsumed / S4 paths-filtered or structurally absent on a PR head / S6 leaf of an excluded aggregator / S7 by decision), or register it." >&2
+  done <<EOF
+$files
+EOF
+  rm -rf "$tmp"
+  if [ "$rc" -eq 0 ]; then
+    say "  ok     every partially-accounted workflow is FULLY accounted — $n_files workflow file(s) read against $n_acc accounted context(s), 0 finding(s)"
+  fi
+  return "$rc"
+}
+
 # ── the advisory-prose clause ────────────────────────────────────────────────
 # THE DEFECT THIS EXISTS FOR (cch-w32-s4). console-harness.yml told a builder,
 # in three separate comments, that `Console gate` "is ADVISORY today — the live
@@ -1776,6 +1871,8 @@ run_full() {
     say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
     merge_truth_prose_check || return 1
     local sha0="${HEAD_SHA:-$(recent_pr_head)}"
+  say "── partial-accounting clause (the tree's OWN declarations: a workflow in the ledger stays complete) ──"
+  partial_accounting_check || return 1
     say "── census clause (the OTHER subtraction: rendered names with no status) ──"
     census_check "$sha0" || return 1
     local drc0=0
@@ -1796,6 +1893,8 @@ run_full() {
   say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
   merge_truth_prose_check || rc=1
   local sha="${HEAD_SHA:-$(recent_pr_head)}"
+  say "── partial-accounting clause (the tree's OWN declarations: a workflow in the ledger stays complete) ──"
+  partial_accounting_check || rc=1
   say "── census clause (the OTHER subtraction: rendered names with no status) ──"
   census_check "$sha" || rc=1
   say "── deadlock detector ──"
@@ -1828,6 +1927,8 @@ run_ci() {
   deadlock_check "$sha" || drc=$?
   [ "$drc" -eq 3 ] || [ "$drc" -eq 4 ] || [ "$drc" -eq 0 ] || rc=1
 
+  say "── partial-accounting clause (the tree's OWN declarations: a workflow in the ledger stays complete) ──"
+  partial_accounting_check || rc=1
   say "── census clause (the OTHER subtraction: rendered names with no status) ──"
   census_check "$sha" || rc=1
 
@@ -1998,39 +2099,39 @@ JSON
     return 1
   }
 
-  probe "1/31 honest read-back passes" 0 \
+  probe "1/35 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks[0].context = "Elixir gat"' "$good_spec" > "$tmp/typo.json"
-  probe "2/31 a typo'd context reds (GitHub accepts it; we must not)" 1 \
+  probe "2/35 a typo'd context reds (GitHub accepts it; we must not)" 1 \
     --spec "$tmp/typo.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = null' "$good_rb" > "$tmp/nullapp.json"
-  probe "3/31 app_id:null where the spec pins an id is HARD" 1 \
+  probe "3/35 app_id:null where the spec pins an id is HARD" 1 \
     --spec "$good_spec" --readback "$tmp/nullapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = 8329' "$good_rb" > "$tmp/wrongapp.json"
-  probe "4/31 a wrong app_id reds" 1 \
+  probe "4/35 a wrong app_id reds" 1 \
     --spec "$good_spec" --readback "$tmp/wrongapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.enforce_admins.enabled = false' "$good_rb" > "$tmp/breakglass.json"
-  probe "5/31 a left-open break-glass (enforce_admins false) reds" 1 \
+  probe "5/35 a left-open break-glass (enforce_admins false) reds" 1 \
     --spec "$good_spec" --readback "$tmp/breakglass.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_linear_history.enabled = true' "$good_rb" > "$tmp/oob.json"
-  probe "6/31 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
+  probe "6/35 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
     --spec "$good_spec" --readback "$tmp/oob.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '. + {"required_deployments": {"enabled": true}}' "$good_rb" > "$tmp/extra.json"
-  probe "7/31 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
+  probe "7/35 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
     --spec "$good_spec" --readback "$tmp/extra.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.strict = true' "$good_rb" > "$tmp/strict.json"
-  probe "8/31 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
+  probe "8/35 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
     --spec "$good_spec" --readback "$tmp/strict.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' "$good_spec" > "$tmp/deadspec.json"
-  probe "9/31 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
+  probe "9/35 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
   # 10-12 ARE THE BLOCKED ARM, AND THEY ARE THE PROOF IN BOTH DIRECTIONS
@@ -2039,14 +2140,14 @@ JSON
   # keeps drift's code. Probes 10-12 feed an input that cannot be read at all and
   # must exit 5. Flip either expectation and this selftest reds, so neither
   # condition can quietly borrow the other's word.
-  probe "10/31 an unreadable protection read-back is BLOCKED — exit 5, not drift's 1 and never a skip" 5 \
+  probe "10/35 an unreadable protection read-back is BLOCKED — exit 5, not drift's 1 and never a skip" 5 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/31 an unreadable check-run feed is BLOCKED — exit 5 (this is the E2BIG shape that was filed as a protection breach on 2026-09-07)" 5 \
+  probe "11/35 an unreadable check-run feed is BLOCKED — exit 5 (this is the E2BIG shape that was filed as a protection breach on 2026-09-07)" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/31 an EMPTY check-run feed is BLOCKED — a producer that returned nothing is a refusal to be held on, not a verdict about the spec" 5 \
+  probe "12/35 an EMPTY check-run feed is BLOCKED — a producer that returned nothing is a refusal to be held on, not a verdict about the spec" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
 
   # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
@@ -2056,7 +2157,7 @@ JSON
   # 13 must be 4 and 14 must be 0, and reverting the clause makes 13 return 0.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/cancelledruns.json"
-  probe "13/31 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
+  probe "13/35 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --deadlock || rc=1
 
   # The mirror clause: cancellation on a NON-required check is none of our
@@ -2064,13 +2165,13 @@ JSON
   # checks are cancelled by concurrency groups all day.
   jq '(.check_runs[] | select(.name == "Boundary gate (advisory)") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/advcancelled.json"
-  probe "14/31 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
+  probe "14/35 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/advcancelled.json" --sha probe --deadlock || rc=1
 
   # The caller-scope clause above, proven rather than asserted: --ci must NOT
   # turn a cancelled run on an arbitrary sampled head into a red, while
   # --deadlock (13/15) still exits 4 on the identical input.
-  probe "15/31 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
+  probe "15/35 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --ci || rc=1
 
   # 16 pins the scope of the RE-RUN set from the other side. GitHub counts a
@@ -2081,7 +2182,7 @@ JSON
   # out and pinned the removal here, so re-adding it reds this probe.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "skipped"' \
     "$good_runs" > "$tmp/skippedruns.json"
-  probe "16/31 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
+  probe "16/35 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/skippedruns.json" --sha probe --deadlock || rc=1
 
   # 17 & 18 are the cch-w32-s4 clause, and they are ONE mutation proven from
@@ -2101,7 +2202,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "17/31 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
+  probe "17/35 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   # The mirror, and the whole point: the guard tracks the SPEC, not a frozen
@@ -2118,7 +2219,7 @@ YML
   jq '.required_status_checks.contexts = ["PR references an active task"]
       | .required_status_checks.checks = [{"context":"PR references an active task","app_id":15368}]' \
     "$good_rb" > "$tmp/noelixir_rb.json"
-  probe "18/31 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
+  probe "18/35 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
     --spec "$tmp/noelixir_spec.json" --readback "$tmp/noelixir_rb.json" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   # 19-22 are the cgsiw-s1 clause, the INVERSE of 17/18: a workflow claiming
@@ -2138,7 +2239,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "19/31 a workflow claiming BLOCKING authority for a context the spec does NOT require reds (the inverse of 17; nothing caught this before cgsiw-s1)" 1 \
+  probe "19/35 a workflow claiming BLOCKING authority for a context the spec does NOT require reds (the inverse of 17; nothing caught this before cgsiw-s1)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-block" || rc=1
 
   # The mirror, and the whole point: the subject set is the COMPLEMENT of the
@@ -2152,7 +2253,7 @@ YML
     "$good_rb" > "$tmp/widget_rb.json"
   jq '.check_runs += [{"name":"Widget gate (blocking)","conclusion":"success","started_at":"2026-07-28T01:00:00Z"}]' \
     "$good_runs" > "$tmp/widget_runs.json"
-  probe "20/31 the SAME claim in the SAME file goes GREEN once that context IS required (the clause reads the complement of the committed set, not a frozen string)" 0 \
+  probe "20/35 the SAME claim in the SAME file goes GREEN once that context IS required (the clause reads the complement of the committed set, not a frozen string)" 0 \
     --spec "$tmp/widget_spec.json" --readback "$tmp/widget_rb.json" --runs "$tmp/widget_runs.json" --sha probe --workflows "$tmp/wf-block" || rc=1
 
   # 21/23 establishes the escape hatch, and 22/23 is why it is an escape hatch
@@ -2171,7 +2272,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "21/31 the escape hatch WITH a reason greens the identical violation (a spec-authority advisory-ok comment carrying a real why)" 0 \
+  probe "21/35 the escape hatch WITH a reason greens the identical violation (a spec-authority advisory-ok comment carrying a real why)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-hatch" || rc=1
 
   mkdir -p "$tmp/wf-hatch-empty"
@@ -2186,7 +2287,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "22/31 the hatch with an EMPTY reason REDS — a bare token is a silencer, a reason is a decision somebody can review" 1 \
+  probe "22/35 the hatch with an EMPTY reason REDS — a bare token is a silencer, a reason is a decision somebody can review" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-hatch-empty" || rc=1
 
   # The hatch checked in the OTHER direction. An annotation saying "the spec
@@ -2195,7 +2296,7 @@ YML
   # it must red rather than exempt. Same fixture as 21, only the spec moves: the
   # identical annotated file is fine while the context is denied, and a failure
   # the moment it is required.
-  probe "23/31 an advisory-ok annotation on a context the spec REQUIRES reds (the hatch lying in the other direction)" 1 \
+  probe "23/35 an advisory-ok annotation on a context the spec REQUIRES reds (the hatch lying in the other direction)" 1 \
     --spec "$tmp/widget_spec.json" --readback "$tmp/widget_rb.json" --runs "$tmp/widget_runs.json" --sha probe --workflows "$tmp/wf-hatch" || rc=1
 
   # ── 24-27: the merge-truth clause, OUTSIDE .github/workflows (cch-w34) ─────
@@ -2218,7 +2319,7 @@ YML
   is `Elixir gate` and `PR references an active task`; doc-gates hosts the
   shell check but is NOT required.
 MD
-  probe "24/31 a charter TWO directories deep, named .md, calling a required context advisory REDS — the corpus the depth-1 workflow glob cannot reach" 1 \
+  probe "24/35 a charter TWO directories deep, named .md, calling a required context advisory REDS — the corpus the depth-1 workflow glob cannot reach" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
@@ -2229,7 +2330,7 @@ MD
   # probe exists to hold shut.
   sed -e '/D1 — the ASSERTION/,+1d' "$tmp/prose/nested/deeper/bp-fixture-charter.md" > "$tmp/prose/nested/deeper/x" \
     && mv "$tmp/prose/nested/deeper/x" "$tmp/prose/nested/deeper/bp-fixture-charter.md"
-  probe "25/31 …and with ONLY the claim removed the dated record, the quoted past reason and the proximity row all stay GREEN (assertion vs. record, told apart)" 0 \
+  probe "25/35 …and with ONLY the claim removed the dated record, the quoted past reason and the proximity row all stay GREEN (assertion vs. record, told apart)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
@@ -2240,14 +2341,14 @@ MD
   cat > "$tmp/prose-denied/charter.md" <<'MD'
 - **D1.** `Widget gate` is ADVISORY today, so a red one does not stop the merge.
 MD
-  probe "26/31 the SAME sentence about a context the committed spec does NOT require is green — the clause reads the spec, never a frozen name" 0 \
+  probe "26/35 the SAME sentence about a context the committed spec does NOT require is green — the clause reads the spec, never a frozen name" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-denied" || rc=1
 
   # Scanning nothing is the vacuous pass this whole file exists to refuse, and
   # the clause has to make that refusal for its OWN corpus too.
   mkdir -p "$tmp/prose-empty"
-  probe "27/31 a prose root with no readable text file is BLOCKED — scanning zero files is never a green, and it is a no-read, not a finding" 5 \
+  probe "27/35 a prose root with no readable text file is BLOCKED — scanning zero files is never a green, and it is a no-read, not a finding" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-empty" || rc=1
 
@@ -2259,10 +2360,10 @@ MD
   jq '.enforced = false' "$good_spec" > "$unapplied"
   local unprotected="$tmp/rb-unprotected.json"
   printf '%s\n' '{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection"}' > "$unprotected"
-  probe "28/31 --ci on an enforced=false spec against a PROTECTED branch REDS — the direction no amount of spec-reading can see" 1 \
+  probe "28/35 --ci on an enforced=false spec against a PROTECTED branch REDS — the direction no amount of spec-reading can see" 1 \
     --ci --spec "$unapplied" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
-  probe "29/31 …and --ci on the same spec against a genuinely unprotected branch still exits 0 — the fix is not \"always red here\"" 0 \
+  probe "29/35 …and --ci on the same spec against a genuinely unprotected branch still exits 0 — the fix is not \"always red here\"" 0 \
     --ci --spec "$unapplied" --readback "$unprotected" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
@@ -2274,12 +2375,61 @@ MD
   # honest input is a trap — both halves are asserted, not one.
   jq '.check_runs += [{"name":"Freshly landed gate nobody wrote down","conclusion":"success","started_at":"2026-09-06T01:00:00Z"}]' \
     "$good_runs" > "$tmp/runs-unaccounted.json"
-  probe "30/31 a rendered name with NO status in the spec REDS (planted: an unaccounted check run)" 1 \
+  probe "30/35 a rendered name with NO status in the spec REDS (planted: an unaccounted check run)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/runs-unaccounted.json" --sha probe || rc=1
 
   jq 'del(.exclusions)' "$good_spec" > "$tmp/spec-no-exclusions.json"
-  probe "31/31 …and removing the exclusion row for a name that DOES render reds the same way — the ledger is the only thing that accounts for it" 1 \
+  probe "31/35 …and removing the exclusion row for a name that DOES render reds the same way — the ledger is the only thing that accounts for it" 1 \
     --spec "$tmp/spec-no-exclusions.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
+
+  # ── 32-35: the partial-accounting clause, proven in BOTH directions ────────
+  # THE PAIR THAT DISCRIMINATES. 32 and 33 differ in ONE line of ONE fixture:
+  # whether the second job's name carries a status. A clause hard-wired to red
+  # passes 32 and fails 33; one hard-wired to green does the reverse. Neither
+  # alone measures anything — it is their disagreement that pins the rule.
+  # 34 and 35 are the QUIET controls, and they are what stop the obvious wrong
+  # fix ("red on every unaccounted job name") from passing 32: a workflow NOT in
+  # the ledger at all must stay silent (that is census_check's population, on
+  # the heads that render it), and a matrix-templated name must be skipped
+  # rather than compared against a string the file cannot produce.
+  jq '.exclusions += [
+        { "context": "Ledgered alpha", "reason": "S7 fixture row." },
+        { "context": "Ledgered beta",  "reason": "S7 fixture row." }
+      ]' "$good_spec" > "$tmp/spec-partial.json"
+
+  mkdir -p "$tmp/wf-partial"
+  cat > "$tmp/wf-partial/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  alpha:
+    name: Ledgered alpha
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+  gamma:
+    name: Unledgered gamma
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+  probe "32/35 a workflow with one LEDGERED job name and one that carries no status REDS — the #18847 shape, caught from the tree instead of waiting for a head to render it" 1 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-partial" || rc=1
+
+  mkdir -p "$tmp/wf-complete"
+  sed 's/name: Unledgered gamma/name: Ledgered beta/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-complete/widget.yml"
+  probe "33/35 …and the IDENTICAL file with that one name accounted is GREEN — one line apart, opposite verdicts" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-complete" || rc=1
+
+  mkdir -p "$tmp/wf-orphan"
+  sed 's/name: Ledgered alpha/name: Unledgered delta/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-orphan/widget.yml"
+  probe "34/35 a workflow where NOTHING is accounted stays QUIET — the antecedent is 'already in the ledger', not 'every job name in the tree' (31 workflows of inherited debt do not become this clause's red)" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-orphan" || rc=1
+
+  mkdir -p "$tmp/wf-matrix"
+  sed 's/name: Unledgered gamma/name: Gate (${{ matrix.v }})/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-matrix/widget.yml"
+  probe "35/35 a MATRIX-TEMPLATED name beside a ledgered one stays quiet — the rendered string is not derivable from the file, so it is census_check's to judge, not this clause's" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-matrix" || rc=1
 
   rm -rf "$tmp"
   echo
