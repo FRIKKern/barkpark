@@ -143,7 +143,14 @@ jobs:
             exit 1
           fi
 
-          /usr/bin/clang --version | head -1
+          # NO PIPE. `clang --version | head -1` is the pipefail/SIGPIPE shape
+          # scripts/pipefail-sigpipe-scan.sh hunts: this step runs under the
+          # runner's default `bash -e {0}` PLUS the `set -euo pipefail` above, so
+          # head closing the pipe makes clang die 141 and ABORTS the step on a
+          # perfectly good toolchain. Capture, then trim to the first line in the
+          # shell — a substitution with no pipeline has no producer to kill.
+          CLANG_VERSION="$(/usr/bin/clang --version 2>/dev/null || true)"
+          printf '%s\n' "${CLANG_VERSION%%$'\n'*}"
 
       - name: hermetic drive (18 asserts, fixture-served)
         run: DRIVE_MODE=hermetic bash scripts/taskboard-drive/drive.sh
