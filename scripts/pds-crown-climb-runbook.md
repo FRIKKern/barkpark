@@ -26,6 +26,12 @@ scripts/pds-crown-launch.sh collect             # classifies the transcript; rea
 `--prewarm-now` is **not optional** — see *PDS-D258* below. The default pre-warm compiles
 inside the detached child, where its failure is invisible until `collect`.
 
+The pre-warm compiles **`MIX_ENV=dev` first, then `MIX_ENV=prod`** (PDS-D755). `dev` is the
+env the harness actually runs (`MIX_ENV=dev mix run --no-start` in `pds-pull-proof.sh`), and
+mix envs do not share a `_build` tree — the pre-warm used to warm `prod` alone and stamp OK
+while the climb still paid its dev compile inside the window. Every pre-warm stamp now names
+its env, so the transcript says which tree was warmed.
+
 `arm` hands the poll loop to a child process that outlives the arming turn. `collect`
 classifies that child's transcript into exactly **six** states (PDS-D247):
 
@@ -237,8 +243,9 @@ harness is frozen. If a rung is wrong, the climb does not happen this wave.
 
 D225 above sends you to a worktree cut fresh at `origin/main`. **`api/deps` and `api/_build`
 are gitignored, so that worktree has neither.** The launcher's pre-warm runs
-`CC=/usr/bin/clang MIX_ENV=prod mix compile` and **never** runs `mix deps.get`, in either
-form — so it dies on dependencies it was never going to fetch.
+`CC=/usr/bin/clang MIX_ENV=dev mix compile` and then `CC=/usr/bin/clang MIX_ENV=prod mix
+compile` (PDS-D755), and **never** runs `mix deps.get`, in either form — so it dies on
+dependencies it was never going to fetch.
 
 Under the **default** pre-warm that death is silent. Measured twice against `origin/main`:
 
@@ -252,9 +259,10 @@ ARMED — the climb now outlives this turn.
 detached child dies seconds later, inside its own log:
 
 ```
-[..] prewarm: cd /private/tmp/pdsw16-envwt/api && CC=/usr/bin/clang MIX_ENV=prod mix compile
+[..] prewarm: envs=dev prod (dev first — the harness runs MIX_ENV=dev mix run; PDS-D755)
+[..] prewarm: MIX_ENV=dev — cd /private/tmp/pdsw16-envwt/api && CC=/usr/bin/clang MIX_ENV=dev mix compile
 ** (Mix) Can't continue due to errors on dependencies
-[..] prewarm: FAILED rc=1 — NOT firing.
+[..] prewarm: FAILED rc=1 MIX_ENV=dev — NOT firing.
 EXIT: 1
 ```
 
@@ -267,13 +275,17 @@ hours later, having spent the whole window on a process that was already dead.
 cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
 ```
 
-Both compiles, not one. The pre-warm only ever builds `MIX_ENV=prod`; the dev build is what
-`pds-scratch-target.sh up --verify` pays, as a >10-minute cold compile, once the climb is
-already running.
+`mix deps.get` is still yours to pay — the pre-warm has never run it (PDS-D258 stands). The
+two compiles are now paid by the pre-warm itself (PDS-D755), so running them here only makes
+the arm fast; skipping them moves the cost into the pre-warm, not into the window. A cold
+`_build/dev` was **measured at 428 s** on the campaign host (warm: 3 s for the harness's own
+`mix run --no-start`) — that is the cost the prod-only pre-warm used to leave inside the
+window, because `pds-scratch-target.sh up --verify` and the harness both read the dev tree.
 
-**Then arm with `--prewarm-now`, always.** It does *not* fix a cold tree by itself — it still
-only runs `mix compile` — but it moves the compile into the **arming shell**, where a failure
-`die`s loudly at `pds-crown-launch.sh:441-444` instead of vanishing into a detached child.
+**Then arm with `--prewarm-now`, always.** It does *not* fetch deps — it still only runs
+`mix compile`, once per env — but it moves both compiles into the **arming shell**, where a
+failure `die`s loudly (and names the failing `MIX_ENV`) instead of vanishing into a detached
+child.
 The default form is **forbidden for a fresh worktree** for exactly that reason. Check 5 of
 the preflight asserts all of this before you get there.
 
@@ -409,8 +421,10 @@ Two limits remain, and neither is closed by code:
    - check 4 red → wait for the in-flight deploy to land.
    - check 5 red or WARN → warm the tree you are about to arm from (PDS-D258):
      ```sh
-     cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
+     cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
      ```
+     (`CC` on the dev leg too — bare `cc` is the Claude CLI wrapper and `argon2_elixir`
+     fails to build under it. The pre-warm sets it for both envs, PDS-D755.)
      Fixing check 1 *creates* this red: a fresh `origin/main` worktree is cold by
      construction, and the two checks are satisfied together or not at all.
 3. Re-run the preflight until it is GO (or GO with a warning you have consciously taken

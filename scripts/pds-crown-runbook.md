@@ -34,6 +34,12 @@ scripts/pds-crown-launch.sh collect             # classifies the transcript; rea
 `--prewarm-now` is **not optional** — see §2(g), PDS-D258. The default pre-warm compiles
 inside the detached child, where its failure is invisible until `collect`.
 
+The pre-warm compiles **`MIX_ENV=dev` first, then `MIX_ENV=prod`** (PDS-D755), with
+`CC=/usr/bin/clang` on both legs. `dev` is the env the harness actually runs
+(`MIX_ENV=dev mix run --no-start` in `pds-pull-proof.sh`) and mix envs do not share a
+`_build` tree; the pre-warm used to warm `prod` alone and stamp OK while the climb still paid
+its dev compile inside the window. Every pre-warm stamp now names its env.
+
 `arm` hands the poll loop to a child process that outlives the arming turn. `collect`
 classifies that child's transcript into exactly **six** states (PDS-D247):
 
@@ -52,7 +58,7 @@ from anchored stamps in the transcript's own bytes rather than a substring (PDS-
 |---|---|---|
 | `FIRE — draw N` | the harness RAN | an export attempt **was spent** — re-arming is **not** free |
 | terminal `STAND-DOWN — ` | draws exhausted, never invoked | zero attempts — re-arming is free |
-| `prewarm: FAILED rc=` | died at the D241 pre-warm, before draw 1 | zero attempts — free, but fix the compile first |
+| `prewarm: FAILED rc=` | died at the D241 pre-warm, before draw 1 (the stamp names the failing `MIX_ENV`) | zero attempts — free, but fix that env's compile first |
 | none of the three | not written by this launcher, or truncated | **UNDIAGNOSED** — read `/tmp/pds-full-export/attempts`, assume nothing |
 
 A per-draw line carries `verdict=STAND-DOWN:mem<floor` on *every* refusal; that is a draw,
@@ -276,28 +282,32 @@ Listed last, it bites **first** — before every precondition above, because it 
 
 `api/deps` and `api/_build` are **gitignored**, so the fresh `origin/main` worktree the climb
 is required to run from (PDS-D225) has neither. The launcher's pre-warm runs
-`CC=/usr/bin/clang MIX_ENV=prod mix compile` and **never** `mix deps.get`, in either form.
+`CC=/usr/bin/clang MIX_ENV=dev mix compile` and then `CC=/usr/bin/clang MIX_ENV=prod mix
+compile` (PDS-D755), and **never** `mix deps.get`, in either form.
 
 Under the **default** pre-warm the death is silent. Measured twice against `origin/main`:
 `arm` prints its complete `ARMED — the climb now outlives this turn.` banner with a pid and
 `armed in 0s`, and **returns 0** — while the detached child dies seconds later in its own
 log with `** (Mix) Can't continue due to errors on dependencies` →
-`prewarm: FAILED rc=1 — NOT firing.` → `EXIT: 1`. **Zero draws**, and nothing in the arming
+`prewarm: FAILED rc=1 MIX_ENV=dev — NOT firing.` → `EXIT: 1`. **Zero draws**, and nothing in the arming
 turn says so. You discover it at `collect`, possibly hours of window later.
 
-Pay it in the arming worktree, before the arm — **both** compiles:
+`mix deps.get` is the half the pre-warm has never run, and it is why this bites. Pay it in
+the arming worktree, before the arm:
 
 ```sh
-cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
+cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
 ```
 
-The pre-warm only ever builds `MIX_ENV=prod`; the dev build is what
-`pds-scratch-target.sh up --verify` pays (§3) as a >10-minute cold compile once the climb is
-already running.
+The two compiles are now paid by the pre-warm as well (PDS-D755), so running them here only
+makes the arm fast. A cold `_build/dev` was **measured at 428 s** on the campaign host
+(warm: 3 s for the harness's own `mix run --no-start`) — that is what a prod-only pre-warm
+used to leave inside the window, since `pds-scratch-target.sh up --verify` (§3) and the
+harness both read the dev tree.
 
-Then arm with **`--prewarm-now`, always**. It does not fix a cold tree on its own — it still
-only runs `mix compile` — but it moves that compile into the **arming shell**, where a
-failure `die`s loudly at `pds-crown-launch.sh:441-444` instead of vanishing into a detached
+Then arm with **`--prewarm-now`, always**. It does not fetch deps — it still only runs
+`mix compile`, once per env — but it moves both compiles into the **arming shell**, where a
+failure `die`s loudly, naming the failing `MIX_ENV`, instead of vanishing into a detached
 child. The default form is **forbidden for a fresh worktree** for exactly that reason.
 
 `scripts/pds-climb-preflight.sh` check 5 asserts all of this, read-only, before you arm.
