@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# THRESHOLD DECISION — `--exit Low` STAYS (2026-09-17, api/r21w6).
+# The workflow runs `mix sobelow --skip --exit Low`. The recurring proposal to
+# relax it to `--exit Medium` is REFUSED, and this is the measurement behind
+# the refusal (Elixir 1.19.5/OTP28, api/ at the shrink to 24 baseline rows):
+#
+#   mix sobelow --format compact            -> 214 findings: 18 high, 10 medium, 186 low
+#   mix sobelow --skip --format compact     ->   0 findings
+#   mix sobelow --skip --exit Low           ->   exit 0
+#
+#   the 24 baseline rows, keyed file:line against that 214: 7 high, 0 medium, 17 low
+#
+# Two things follow. (1) `--exit Low` costs NOTHING today — with the baseline
+# applied the run is empty, so Low and Medium are the same verdict, and the
+# threshold is not what keeps the job advisory. (2) Dropping to Medium would
+# permanently blind the gate to 186 of the 214 findings this codebase carries:
+# Traversal.FileModule, DOS.StringToAtom and XSS.Raw are ALL reported at low
+# confidence, and those three families are exactly what the inline-annotation
+# migration exists to make reviewable. A gate that cannot see the class you are
+# curating is not a gate.
+#
+# The older note that "50 of the 51 gate-reddening findings are Low, so Medium
+# would leave one" was measured on 2026-07-27 and is STALE: zero findings red
+# the gate at either threshold now. Re-measure with the three commands above
+# before re-opening this; do not quote the integers, quote the commands.
+
 API_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 BASELINE="$API_DIR/.sobelow-skips"
 ARTIFACT_DIR=${1:-}

@@ -1,5 +1,8 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
 lib/barkpark/content/validation.ex	get_in_field
+lib/barkpark/epic_fleet/benchmark.ex	cleanup_temporary_file
+lib/barkpark/epic_fleet/benchmark.ex	select_attrs
+lib/barkpark/epic_fleet/benchmark.ex	write_json_file
 lib/barkpark/media/blobstore/local.ex	delete
 lib/barkpark/media/blobstore/local.ex	put_bytes
 lib/barkpark/media/blobstore/local.ex	put_file
@@ -18,6 +21,7 @@ lib/barkpark/plugins/github/health.ex	queue_snapshot
 lib/barkpark/plugins/github/health.ex	zero_queue
 lib/barkpark/plugins/grip.ex	register_schemas
 lib/barkpark/plugins/indx/persistence.ex	load
+lib/barkpark/plugins/indx/persistence.ex	save
 lib/barkpark/plugins/media.ex	load_schema!
 lib/barkpark/plugins/onixedit.ex	book_raw_with_subschemas
 lib/barkpark/plugins/onixedit/export.ex	to_file
@@ -26,6 +30,9 @@ lib/barkpark/plugins/onixedit/export/validator.ex	bounded_xmllint
 lib/barkpark/plugins/onixedit/export/validator.ex	run_xmllint
 lib/barkpark/plugins/onixedit/schemas/contributor.ex	definition_map
 lib/barkpark/plugins/onixedit/schemas/text_content.ex	definition_map
+lib/barkpark/plugins/registry/discovery.ex	manifest_names_for_module
+lib/barkpark/plugins/registry/discovery.ex	try_register_plugin_dir
+lib/barkpark/plugins/registry/discovery.ex	try_register_plugin_dir_in_whitelist
 lib/barkpark/plugins/scaffy.ex	register_schemas
 lib/barkpark/plugins/sheets.ex	register_schemas
 lib/barkpark/plugins/sheets/web/export_controller.ex	delimited

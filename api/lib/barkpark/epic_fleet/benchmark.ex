@@ -211,6 +211,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
   end
 
   @doc "Atomically replace a benchmark artifact with exact canonical JSON bytes."
+  # Artifact paths are operator-supplied benchmark output locations, not
+  # request data; the temporary name is derived here, not passed in.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec write_json_file(Path.t(), binary()) :: :ok | {:error, File.posix()}
   def write_json_file(path, json) when is_binary(path) and is_binary(json) do
     temporary_path =
@@ -944,6 +947,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp unwrap_attempt({:ok, %Attempt{} = attempt}), do: {:ok, attempt}
   defp unwrap_attempt({:error, reason}), do: {:error, reason}
 
+  # `fields` is a compile-time literal list of known column names supplied by
+  # this module's own callers, never user input, so the atom table is bounded.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp select_attrs(attrs, fields) do
     Map.new(fields, fn field ->
       {field, Map.get(attrs, field, Map.get(attrs, String.to_atom(field)))}
@@ -1007,6 +1013,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp exact_keys?(map, expected) when is_map(map),
     do: Map.keys(map) |> Enum.sort() == Enum.sort(expected)
 
+  # `path` is the temporary name minted by `write_json_file/2` above.
+  # sobelow_skip ["Traversal.FileModule"]
   defp cleanup_temporary_file(path, error) do
     _ = File.rm(path)
     error
