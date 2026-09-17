@@ -13,6 +13,60 @@ defmodule Barkpark.Quiz.Bridge do
   The bridge holds the quiz_id → room-pins index and does the DB read, so the
   Room stays pure/in-memory. Stale pins are harmless: `apply_question/2` no-ops
   on a dead room.
+
+  ## Binding lifetime: monitor-based cleanup (hq-bridge-binding-gc)
+
+  THE POLICY, and why it is this one rather than the three alternatives.
+
+  A `Barkpark.Quiz.Room` is mortal by design — it self-stops after a short
+  empty window (2 min) or a long idle one (60 min). The index entry it was
+  bound under is not: before this, every `quiz_id → %{pin => dataset}` pair
+  ever written stayed in this GenServer's heap for the life of the BEAM. Stale
+  pins were *behaviourally* harmless (`apply_question/2` no-ops on a dead pin)
+  and that is exactly why nothing ever noticed the growth.
+
+  **Chosen: monitor-based cleanup, with a periodic liveness sweep as the floor.**
+
+    1. `bind/3` resolves the pin to its live room pid (`Room.whereis/1`) and
+       monitors it. The `:DOWN` removes that pin from EVERY quiz_id it appears
+       under — immediate, precise, and it sees all three ways a room dies
+       (idle timer, supervisor shutdown, crash).
+    2. Every `@sweep_ms` the Bridge drops every indexed pin whose `whereis/1`
+       is `nil`. This is the FLOOR that makes "bounded" true rather than
+       mostly-true: a pin can be bound while no room is live (nothing forbids
+       it, and `Barkpark.Quiz.BridgeSandboxCascadeTest` does exactly that), and
+       such a pin has no process to monitor. The sweep does not care why an
+       entry has no room — only that it has none.
+
+  The index's size is therefore bounded by the number of LIVE rooms plus at
+  most one sweep interval of churn, instead of by the BEAM's uptime.
+
+  Rejected:
+
+    * *Explicit unbind* — needs every room death to run a callback, and a
+      crashed room runs none.
+    * *Bounded prune alone (LRU / prune-on-`document_changed`-miss)* — evicts
+      by age or by publish traffic, not by liveness: it can drop a binding
+      whose room is still hosting, and it never touches a quiz nobody
+      republishes. The sweep above keys on liveness, which is the actual
+      lifetime.
+    * *Accepted leak with a measured bound* — the bound is "every pin ever
+      bound, forever", which is not a bound.
+
+  **How it preserves rebind correctness across a reap.** The monitor deletes an
+  index entry; it never deletes room content, and it cannot make a rebind
+  worse, because the pre-GC entry was already inert. A re-ensured room starts
+  on `Room.default_question/0` either way — the last-applied question lives in
+  the (now dead) room process, never in this index. What restores it is the
+  rebind: `QuizHostLive.mount/3` re-calls `bind_quiz/3` for its `?quiz=` id, and
+  `bind/3` does `apply_now/3` FIRST, so the recreated room carries the quiz's
+  current question immediately — before any further publish — and is re-indexed
+  (and re-monitored) so later publishes still reach it. `test/barkpark/quiz/
+  bridge_test.exs` proves that reap → recreate → rebind round trip.
+
+  Cross-dataset safety: both paths remove one PIN at a time, per quiz_id. A
+  second pin bound to the same quiz in another dataset keeps its entry — one
+  room's death never unbinds another dataset's live room.
   """
   use GenServer
 
@@ -20,6 +74,11 @@ defmodule Barkpark.Quiz.Bridge do
 
   @pubsub Barkpark.PubSub
   @default_dataset "production"
+
+  # The liveness-sweep interval (see the moduledoc policy). Sized against the
+  # Room's own windows — it self-stops after 2 min empty / 60 min idle — so a
+  # retired room's index entry outlives it by well under one reap cycle.
+  @sweep_ms :timer.minutes(5)
 
   # TEST-ONLY SEAM. `test/barkpark/quiz/bridge_sandbox_cascade_test.exs` has to
   # observe the Bridge *while it holds the sandbox owner's connection*, and
@@ -42,6 +101,25 @@ defmodule Barkpark.Quiz.Bridge do
   def bind(pin, quiz_id, dataset \\ @default_dataset),
     do: GenServer.call(__MODULE__, {:bind, pin, quiz_id, dataset})
 
+  @doc """
+  The current binding index, `%{quiz_id => %{pin => dataset}}`.
+
+  Read-only introspection over state that is otherwise invisible — the GC
+  policy above is a claim about THIS map's size over time, and a claim nothing
+  can read is a claim nothing can test.
+  """
+  @spec bindings() :: %{optional(String.t()) => %{optional(String.t()) => String.t()}}
+  def bindings, do: GenServer.call(__MODULE__, :bindings)
+
+  @doc """
+  Run the liveness sweep NOW and return the resulting index.
+
+  The periodic sweep is the policy's floor; a floor nothing can trigger on
+  demand is a floor nothing can test inside a test's lifetime.
+  """
+  @spec sweep() :: %{optional(String.t()) => %{optional(String.t()) => String.t()}}
+  def sweep, do: GenServer.call(__MODULE__, :sweep)
+
   @impl true
   def init(opts) do
     dataset = Keyword.get(opts, :dataset, @default_dataset)
@@ -52,7 +130,8 @@ defmodule Barkpark.Quiz.Bridge do
     # alive. `datasets` starts EMPTY and tracks what we've actually subscribed —
     # bind/3 subscribes any not-yet-seen dataset on demand the same way.
     send(self(), {:subscribe, dataset})
-    {:ok, %{datasets: MapSet.new(), bindings: %{}}}
+    Process.send_after(self(), :sweep, @sweep_ms)
+    {:ok, %{datasets: MapSet.new(), bindings: %{}, rooms: %{}}}
   end
 
   @impl true
@@ -61,11 +140,32 @@ defmodule Barkpark.Quiz.Bridge do
     # topic so a room on a non-default dataset still gets live edits.
     state = ensure_subscribed(dataset, state)
     apply_now(pin, quiz_id, dataset)
+
     # Index pins BY pin → its own dataset (not one dataset per quiz_id): the same
     # quiz_id bound in two datasets must reload each pin from the dataset it bound,
     # never cross-inject one dataset's content into the other's room.
     pins = state.bindings |> Map.get(quiz_id, %{}) |> Map.put(pin, dataset)
+
+    # The index entry's LIFETIME is the room's (see the moduledoc policy). Bind
+    # to the LIVE room's monitor when there is one; when there is not, the entry
+    # is still indexed — callers may bind ahead of a room — and the periodic
+    # sweep is what retires it.
+    state =
+      case Quiz.Room.whereis(pin) do
+        nil -> state
+        room -> monitor_room(pin, room, state)
+      end
+
     {:reply, :ok, put_in(state.bindings[quiz_id], pins)}
+  end
+
+  def handle_call(:bindings, _from, state), do: {:reply, state.bindings, state}
+
+  # Synchronous sweep — the same work the timer does, for callers that must
+  # observe the result rather than wait out `@sweep_ms`.
+  def handle_call(:sweep, _from, state) do
+    state = sweep(state)
+    {:reply, state.bindings, state}
   end
 
   @impl true
@@ -85,7 +185,67 @@ defmodule Barkpark.Quiz.Bridge do
     {:noreply, state}
   end
 
+  # A bound room died (idle reap, shutdown, or crash) — retire its pin from the
+  # index. Matched by REF, not by pid: a pin can be re-ensured and re-bound
+  # before this message is drained, and dropping the NEW binding on the OLD
+  # room's :DOWN would silently unbind a live room.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case Enum.find(state.rooms, fn {_pin, {_pid, r}} -> r == ref end) do
+      nil -> {:noreply, state}
+      {pin, _} -> {:noreply, drop_pin(pin, state)}
+    end
+  end
+
+  def handle_info(:sweep, state) do
+    Process.send_after(self(), :sweep, @sweep_ms)
+    {:noreply, sweep(state)}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # Retire every indexed pin with no live room. Keys on LIVENESS, not on age or
+  # on publish traffic, so it cannot evict a room that is still hosting — and it
+  # catches the entries a monitor never could (a pin bound while no room was up).
+  defp sweep(state) do
+    state.bindings
+    |> Enum.flat_map(fn {_quiz_id, pins} -> Map.keys(pins) end)
+    |> Enum.uniq()
+    |> Enum.reject(&Quiz.Room.whereis/1)
+    |> Enum.reduce(state, &drop_pin/2)
+  end
+
+  # Monitor `pin`'s room exactly once. Re-binding the SAME live room reuses the
+  # existing monitor; a DIFFERENT pid under the same pin (reap then re-ensure)
+  # replaces it, flushing the old ref so its stale :DOWN cannot arrive later and
+  # delete the binding we just made.
+  defp monitor_room(pin, room, state) do
+    case Map.get(state.rooms, pin) do
+      {^room, _ref} ->
+        state
+
+      {_dead, old_ref} ->
+        Process.demonitor(old_ref, [:flush])
+        %{state | rooms: Map.put(state.rooms, pin, {room, Process.monitor(room)})}
+
+      nil ->
+        %{state | rooms: Map.put(state.rooms, pin, {room, Process.monitor(room)})}
+    end
+  end
+
+  # Remove ONE pin from every quiz_id it is indexed under, dropping quiz_ids that
+  # are left with no pins. Sibling pins — including the same quiz_id bound to a
+  # live room in another dataset — are untouched.
+  defp drop_pin(pin, state) do
+    bindings =
+      Enum.reduce(state.bindings, %{}, fn {quiz_id, pins}, acc ->
+        case Map.delete(pins, pin) do
+          rest when map_size(rest) == 0 -> acc
+          rest -> Map.put(acc, quiz_id, rest)
+        end
+      end)
+
+    %{state | bindings: bindings, rooms: Map.delete(state.rooms, pin)}
+  end
 
   # Subscribe to a dataset's mutation topic exactly once. If PubSub isn't up yet
   # (boot race — plugin workers precede the host PubSub child), reschedule and
