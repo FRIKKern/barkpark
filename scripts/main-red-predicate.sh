@@ -104,6 +104,17 @@ case " $* " in
     # This is web-fork-drift.yml's real shape and the only one that can tell
     # "newest verdict wins" apart from "any verdict behind the cancel wins".
     _OLDROW='{"conclusion":"'"${MRP_OLD:-failure}"'","headSha":"0123456789abcdef","createdAt":"2025-12-01T00:00:00Z","status":"completed"'"$_ID"'}'
+    # MRP_STALE_ONCE: serve a stale page ONCE (per workflow is not distinguishable
+    # here, so once per stub process tree via a marker file), then fresh. This is
+    # the only way to exercise the retry: a stateless stub can express "always
+    # stale" and "never stale" but not "stale then fixed", which is the actual
+    # shape of the live fault.
+    if [ -n "${MRP_STALE_ONCE:-}" ]; then
+      if [ ! -f "$MRP_STALE_ONCE" ]; then : > "$MRP_STALE_ONCE"
+        printf '[{"conclusion":"success","headSha":"0000000000000000","createdAt":"2026-01-01T00:00:00Z","status":"completed","databaseId":9}]\n'
+        exit 0
+      fi
+    fi
     case "${MRP_CANC:-}" in
       only) printf '[%s]\n' "$_CANCROW";;
       two)  printf '[%s,%s,%s]\n' "$_CANCROW" "$_VERDROW" "$_OLDROW";;
@@ -120,7 +131,8 @@ STUB
     local lbl="$1" feed="$2" conc="$3" fjob="$4" noid="$5" wrc="$6" need="$7" bad="${8:-}"
     out=$(PATH="$d/bin:$PATH" MRP_FEED="$feed" MRP_CONC="$conc" MRP_FJOB="$fjob" MRP_NOID="$noid" \
           MRP_CANC="${MRP_CANC_ARM:-}" MRP_OLD="${MRP_OLD_ARM:-}" \
-          MRP_AUTHTS="${MRP_AUTHTS_ARM:-}" MRP_TS="${MRP_TS_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
+          MRP_AUTHTS="${MRP_AUTHTS_ARM:-}" MRP_TS="${MRP_TS_ARM:-}" \
+          MRP_STALE_ONCE="${MRP_STALE_ONCE_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
     if [ "$rc" != "$wrc" ]; then _no "$lbl" "exit=$rc (want $wrc) | $(printf '%s\n' "$out" | tail -1)"; return; fi
     case "$out" in *"$need"*) : ;; *) _no "$lbl" "output lacks [$need]"; return;; esac
     if [ -n "$bad" ]; then case "$out" in *"$bad"*) _no "$lbl" "output CONTAINS the forbidden [$bad]"; return;; esac; fi
@@ -221,6 +233,13 @@ STUB
   MRP_AUTHTS_ARM=2026-01-01T00:10:00Z _arm "a seconds-scale race still reports" many failure "" "" 1 "RED ON MAIN"
   # ...and the stale row must NAME both timestamps, or the refusal is unactionable.
   MRP_AUTHTS_ARM=2026-09-17T08:37:00Z _arm "the stale row names both clocks" many failure "" "" 2 "authoritative REST newest is 2026-09-17T08:37:00Z"
+  # THE RETRY. A page that is stale ONCE and fresh on the re-read must yield a
+  # verdict, not a refusal — otherwise the control converts an intermittent API
+  # fault into permanent unread debt for a handful of workflows every sweep.
+  # Paired with the always-stale arm above: same control, opposite outcomes,
+  # and only the retry distinguishes them.
+  MRP_STALE_ONCE_ARM="$d/staleonce" MRP_AUTHTS_ARM=2026-09-17T08:37:00Z MRP_TS_ARM=2026-09-17T08:37:00Z \
+    _arm "a feed stale ONCE is re-read, not refused" many failure "" "" 1 "RED ON MAIN" "STALE FEED"
   # ── THE 2H AGE ARMS (c0's actual predicate) ────────────────────────────────
   # A bare red set cannot answer "red for more than 2 hours". These two arms are
   # the pair: the SAME failing run, only its age moves, must reach OPPOSITE
@@ -376,6 +395,7 @@ PYEOF
   # ASYMMETRIC ON PURPOSE: only the feed lagging the authority is a fault. The
   # authority lagging the feed is the harmless direction (our feed is ahead), and
   # is not flagged.
+  RETRIED=""
   AUTHROW=$(gh api "repos/$REPO/actions/workflows/$BASE/runs?branch=main&per_page=1" 2>/dev/null)
   AUTH_TS=$(printf '%s' "$AUTHROW" | jq -r '.workflow_runs[0].created_at // empty' 2>/dev/null)
   FEED_TS=$(printf '%s' "$WFEED" | jq -r 'sort_by(.createdAt)|reverse|.[0].createdAt // empty' 2>/dev/null)
@@ -385,10 +405,27 @@ PYEOF
     # minutes. `fromdateiso8601` is exact for the Z-suffixed stamps GitHub emits.
     LAG=$(jq -n --arg a "$AUTH_TS" --arg f "$FEED_TS" \
           '(($a|fromdateiso8601) - ($f|fromdateiso8601))|floor' 2>/dev/null)
+    # RETRY ONCE BEFORE GIVING UP. MEASURED 2026-09-17T08:50Z on the live repo:
+    # three workflows tripped this control in a SINGLE sweep — mobile.yml (13
+    # days of lag), required-checks-drift.yml (12 days), crown-reconcile.yml
+    # (4 hours). The fault is not a rare one-off, so refusing on first sight
+    # would park a handful of workflows in the unread bucket on most runs and
+    # bury the real debt under noise. The stale page is intermittent, so one
+    # fresh request usually clears it. If the SECOND read is also stale we stop
+    # and refuse — a retry loop that keeps asking until it likes the answer is
+    # how an instrument talks itself into a verdict.
+    if [ -n "$LAG" ] && [ "$LAG" -gt 3600 ] 2>/dev/null; then
+      WFEED=$(gh run list --repo "$REPO" --workflow="$BASE" --branch main --limit 50 \
+              --json conclusion,headSha,createdAt,status,databaseId 2>/dev/null)
+      FEED_TS=$(printf '%s' "$WFEED" | jq -r 'sort_by(.createdAt)|reverse|.[0].createdAt // empty' 2>/dev/null)
+      LAG=$(jq -n --arg a "$AUTH_TS" --arg f "${FEED_TS:-1970-01-01T00:00:00Z}" \
+            '(($a|fromdateiso8601) - ($f|fromdateiso8601))|floor' 2>/dev/null)
+      RETRIED=" (re-read once; still stale)"
+    fi
     if [ -n "$LAG" ] && [ "$LAG" -gt 3600 ] 2>/dev/null; then
       unseen=$((unseen+1))
       printf '%s\tSTALE FEED — no verdict taken: run-list newest is %s but the authoritative REST newest is %s (%ss of lag). A stale page is NOT a verdict.\n' \
-        "$BASE" "$FEED_TS" "$AUTH_TS" "$LAG" >> "$UNSEEN_LIST"
+        "$BASE" "$FEED_TS" "$AUTH_TS" "$LAG${RETRIED:-}" >> "$UNSEEN_LIST"
       continue
     fi
   fi

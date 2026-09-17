@@ -48,6 +48,7 @@ on:
     paths:
       - "scripts/main-red-owner.sh"
       - "scripts/main-red-predicate.sh"
+      - "scripts/main-red-window.sh"
       - ".github/workflows/main-red-owner.yml"
 
 permissions:
@@ -81,6 +82,20 @@ jobs:
       # before it can merge into a silence.
       - name: arms (hermetic, no network)
         run: bash scripts/main-red-owner.sh --selftest
+
+      # THE PREDICATE'S OWN ARMS WERE NEVER RUN BY ANYTHING (gates-r21-w6,
+      # 2026-09-17). main-red-predicate.sh carries 33 hermetic arms and this
+      # workflow — the only thing in the repo that executes the file at all —
+      # ran the OWNER's arms and never the predicate's. A vendored selftest that
+      # nothing invokes is the same rot the selftest was written to prevent, one
+      # layer out. It costs ~4 minutes and it is the file every main-red verdict
+      # in this repo is read off.
+      - name: predicate arms (hermetic, no network)
+        run: bash scripts/main-red-predicate.sh --selftest
+
+      # The 24 h window accumulator's arms. Fast (synthetic ledgers, no network).
+      - name: window arms (hermetic, no network)
+        run: bash scripts/main-red-window.sh --selftest
 
       # NEVER ON A PULL REQUEST. This step writes issues and reads ~110 GitHub
       # endpoints; a PR head is the wrong place for both, and a check name born
