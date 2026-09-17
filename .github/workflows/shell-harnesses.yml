@@ -213,6 +213,28 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # THE DEPLOY CHARTER'S ARBITER INPUTS (task-8f908f721d054032). Exactly the
+      # same three-file shape as the PDS rows above, for the SECOND charter the
+      # one arbiter now serves. `deploy/d-number-arbiter.sh --check-alloc` reads
+      # .claude/workflows/bp-deploy-reliability-charter.md AND
+      # deploy/d-number-reservations.tsv; the wrapper itself is the third input
+      # because it binds WHICH two (three variable bindings, no logic), so an
+      # edit there can flip the verdict without touching either data file.
+      # MEASURED, AND NARROWER THAN THE FILING SAID. The row that produced this
+      # (and D616's own "WHAT IS NOT DONE HERE") states the charter "appears in
+      # no workflow path filter anywhere". IT DOES NOT: doc-gates.yml matches it
+      # on BOTH `**/*.md` and `.claude/workflows/**`, on both the pull_request
+      # and push arms, and pr-task-gate.yml / task-lease-renew.yml are unfiltered
+      # entirely. Re-measured against origin/main's .github/workflows by
+      # translating each `paths:` list to a regex -- doc-gates fired there too.
+      # WHAT WAS ACTUALLY TRUE, and is the defect this fixes: no workflow ran the
+      # ARBITER, and shell-harnesses.yml -- the one workflow that owns
+      # scripts/pds-record-parity.sh -- did not trigger on the charter at all.
+      # A guard that does not watch the file it guards is not a guard; a charter
+      # watched only by the doc-budget lane is not watched by its own arbiter.
+      - ".claude/workflows/bp-deploy-reliability-charter.md"
+      - "deploy/d-number-reservations.tsv"
+      - "deploy/d-number-arbiter.sh"
       # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
       # PDS scripts against the charter, so ANY of them is an input: the PR that
       # produced this axis edited only scripts/pds-secret-scan.sh, which was not
@@ -797,6 +819,28 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # THE DEPLOY CHARTER'S ARBITER INPUTS (task-8f908f721d054032). Exactly the
+      # same three-file shape as the PDS rows above, for the SECOND charter the
+      # one arbiter now serves. `deploy/d-number-arbiter.sh --check-alloc` reads
+      # .claude/workflows/bp-deploy-reliability-charter.md AND
+      # deploy/d-number-reservations.tsv; the wrapper itself is the third input
+      # because it binds WHICH two (three variable bindings, no logic), so an
+      # edit there can flip the verdict without touching either data file.
+      # MEASURED, AND NARROWER THAN THE FILING SAID. The row that produced this
+      # (and D616's own "WHAT IS NOT DONE HERE") states the charter "appears in
+      # no workflow path filter anywhere". IT DOES NOT: doc-gates.yml matches it
+      # on BOTH `**/*.md` and `.claude/workflows/**`, on both the pull_request
+      # and push arms, and pr-task-gate.yml / task-lease-renew.yml are unfiltered
+      # entirely. Re-measured against origin/main's .github/workflows by
+      # translating each `paths:` list to a regex -- doc-gates fired there too.
+      # WHAT WAS ACTUALLY TRUE, and is the defect this fixes: no workflow ran the
+      # ARBITER, and shell-harnesses.yml -- the one workflow that owns
+      # scripts/pds-record-parity.sh -- did not trigger on the charter at all.
+      # A guard that does not watch the file it guards is not a guard; a charter
+      # watched only by the doc-budget lane is not watched by its own arbiter.
+      - ".claude/workflows/bp-deploy-reliability-charter.md"
+      - "deploy/d-number-reservations.tsv"
+      - "deploy/d-number-arbiter.sh"
       # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
       # PDS scripts against the charter, so ANY of them is an input: the PR that
       # produced this axis edited only scripts/pds-secret-scan.sh, which was not
@@ -1475,6 +1519,9 @@ jobs:
           pds-harnesses scripts/pds-record-parity.test.sh
           pds-harnesses .claude/workflows/bp-pds-charter.md
           pds-harnesses tooling/pds/d-number-reservations.tsv
+          pds-harnesses .claude/workflows/bp-deploy-reliability-charter.md
+          pds-harnesses deploy/d-number-reservations.tsv
+          pds-harnesses deploy/d-number-arbiter.sh
           pds-harnesses scripts/pds-*.sh
           pds-harnesses tooling/pds/**
           pds-harnesses scripts/pds-scratch-target.sh
@@ -2584,6 +2631,77 @@ jobs:
             esac
           done
           exit "$rc_total"
+      - name: "D allocation arbiter (deploy-reliability charter): --check-alloc over the merged tree"
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # THE NAMED TRIGGER (task-8f908f721d054032) for the wiring the arbiter's
+        # own landing PR routed rather than faked: D616 of the deploy-reliability
+        # charter says, in its own "WHAT IS NOT DONE HERE" section, that
+        # `--check-alloc` "is not yet wired to run on a PR that touches only this
+        # charter". That half is true and this step is the fix. The OTHER half of
+        # that sentence -- "this charter appears in no workflow path filter
+        # anywhere" -- is FALSE and is corrected in the `paths:` comment above:
+        # doc-gates.yml already matched it on `**/*.md`. What no filter carried
+        # was the charter as an input of THIS workflow, which owns the arbiter.
+        #
+        # WHY IT RIDES pds-harnesses AND NOT A NEW JOB. deploy/d-number-arbiter.sh
+        # is three variable bindings in front of scripts/pds-record-parity.sh --
+        # there is exactly ONE implementation, and this job already owns that
+        # script, its checkout depth and its jq precondition. A second job would
+        # be a second place for the same arm to drift.
+        #
+        # ONLY --check-alloc, FOR THE SAME REASON AS THE PDS STEP ABOVE. It is
+        # pure-tree (charter + ledger): no network, no gh, no token. The bare
+        # script declares itself a RED-BY-DESIGN REPORTER because AXIS B resolves
+        # task ids against the LIVE ledger. Never widen this to --axis b/both.
+        #
+        # EXIT 2 IS RED, NOT A PASS -- verbatim from the wrapper's own header:
+        #   0 PARITY / 1 DIVERGENT (a number minted without a reservation, NAMED
+        #   as UNRESERVED-MINT) / 2 UNCHECKED ("the arm could not look. NOT a
+        #   pass.") / 3 USAGE. Every non-zero fails the step and is NAMED below.
+        #
+        # THE POSITIVE CONTROL is the three counts printed first, derived HERE
+        # with the script's own definition lens. A verdict with no numbers beside
+        # it cannot be told from a verdict over an empty corpus, and the naive
+        # `\bD[0-9]+\b` lens is KNOWN WRONG on this charter (its prose cites
+        # PDS-D716 six times, which a loose lens reads as a high-water of 716).
+        run: |
+          set -uo pipefail
+
+          CHARTER=.claude/workflows/bp-deploy-reliability-charter.md
+          ALLOC=deploy/d-number-reservations.tsv
+          ARBITER=deploy/d-number-arbiter.sh
+
+          for f in "$CHARTER" "$ALLOC" "$ARBITER"; do
+            [ -f "$f" ] || { echo "RED: $f is missing from this tree -- the arbiter has nothing to compare" >&2; exit 1; }
+          done
+
+          # charter_defined_numbers() from scripts/pds-record-parity.sh, with the
+          # D prefix: bold-lead bullet UNION own-line heading. NOT "any D anywhere".
+          charter_hw=$( { grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*D[0-9]+' "$CHARTER" || true
+                          grep -oE '^#+[[:space:]]+D[0-9]+([[:space:]]|$)' "$CHARTER" || true
+                        } | grep -oE 'D[0-9]+' | sed 's/^D//' | sort -n -u | tail -1 )
+          ledger_hw=$(awk -F'\t' '$1 ~ /^D[0-9]+$/ { sub(/^D/, "", $1); print $1 }' "$ALLOC" | sort -n -u | tail -1)
+          res_count=$(awk -F'\t' '$1 ~ /^D[0-9]+$/ { print $1 }' "$ALLOC" | sort -u | wc -l | tr -d ' ')
+          seed=$(awk -F'\t' '$1 == "SEED" { print $2; exit }' "$ALLOC")
+
+          echo "-- the three counts this step compares (derived HERE, from this tree) --"
+          echo "  charter high-water:  D${charter_hw:-<none>}   (highest number DEFINED in $CHARTER)"
+          echo "  ledger  high-water:  D${ledger_hw:-<none, only the SEED row>}   (highest number RESERVED in $ALLOC)"
+          echo "  reservations:        ${res_count} number(s) reserved above the seed"
+          echo "  seed:                ${seed:-<none>}   (at or below it predates the arbiter, not scored)"
+          [ -n "${charter_hw:-}" ] || { echo "RED: the charter defines no D at all -- the lens is measuring itself, not the corpus" >&2; exit 1; }
+
+          echo "-- bash deploy/d-number-arbiter.sh --check-alloc --"
+          rc=0
+          bash deploy/d-number-arbiter.sh --check-alloc || rc=$?
+          case "$rc" in
+            0) echo "  rc=0 PARITY"; exit 0 ;;
+            1) echo "  rc=1 DIVERGENT -- RED. A D-number was minted by reading the charter instead of reserving it; it is NAMED as UNRESERVED-MINT above. Reserve it with: bash deploy/d-number-arbiter.sh --allocate-d 1 --for \"task-... <who>\"" >&2 ;;
+            2) echo "  rc=2 UNCHECKED -- RED, NOT A PASS. The arm could not look (missing charter, missing ledger, no SEED row)." >&2 ;;
+            3) echo "  rc=3 USAGE -- RED. This step invoked the arbiter wrongly." >&2 ;;
+            *) echo "  rc=$rc UNKNOWN -- RED." >&2 ;;
+          esac
+          exit 1
 
   ci-failure-issue-filer:
     needs: [changes]
