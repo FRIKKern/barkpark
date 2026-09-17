@@ -1,5 +1,6 @@
 agent-backup-state	NewBackupProbe
 audit-emit	emit
+bp-credential-server-pairing	resolveContextProv
 build-log-write-scrub	raw
 chat-stable-boundary	advance
 chat-stable-segments	advance
