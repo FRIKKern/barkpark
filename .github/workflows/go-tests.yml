@@ -244,6 +244,12 @@ on:
       # locks the Go struct's tags against it in serializer order, so an edit to
       # the producer's key set must dispatch the Go job (task-801c6c33769ca01d).
       - "cloud/lib/barkpark_cloud/sites/build_log_bytes.ex"
+      # registry/site.ex: internal/cli/cloud_site_prebuilt_nonstatic_predicate_test.go
+      # reads the control plane's OWN `@kinds ~w(...)` from DISK and enrols every
+      # non-static member as a site `bp cloud site deploy --prebuilt` must refuse.
+      # A kind added there is a kind the prebuilt guard will meet, so the edit
+      # that adds it must dispatch the Go job (ssw9-bl-node-prebuilt).
+      - "cloud/lib/barkpark_cloud/registry/site.ex"
       # Onramp corpus: internal/cli/movement_doctrine_test.go reads all ten of
       # these docs from DISK and asserts each carries the movement doctrine
       # verbatim; onramp_cmd_test.go additionally pins the ZED.md json stanza and
