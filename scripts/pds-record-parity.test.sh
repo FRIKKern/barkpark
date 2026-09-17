@@ -1089,6 +1089,126 @@ else
   echo "      hoisted out of that branch it UNCHECKS --axis b and --commits-file on every shallow checkout"
 fi
 
+# ── AXIS F — THE WINDOW BOUNDARY IS NOT READ OUT OF THE LEDGER IT GUARDS ──────
+#
+# THE DEFECT THESE FIXTURES EXIST TO REFUSE, STATED AS THE RUN THAT PASSED. The
+# first cut derived the window anchor from the charter: the OLDEST harness-moving
+# commit whose blob the charter recorded. So deleting that row did not make its
+# commit unrecorded — it promoted the next row to anchor, made the deleted commit
+# pre-doctrine and EXEMPT, shrank the window 20 -> 19 to match, and printed
+# PARITY rc 0. Deleting the four oldest in one pass took it 20 -> 16, rc 0 every
+# time. A guard whose expected value is read from the thing it guards cannot see
+# that thing being erased from the bottom.
+#
+# THE MID-ROW CONTROL ALREADY PASSED THROUGHOUT, WHICH IS WHY THIS NEEDED ITS OWN
+# FIXTURE. An arm that reds on a mid-row deletion and greens on an anchor-row
+# deletion looks exactly like a working arm from the mid-row fixture alone. Both
+# deletions are pinned below, and so is the count that must NOT move: under the
+# pinned floor the window stays 21 on EVERY deletion. A deletion that shrank the
+# window while still reporting some other row would be a different arm passing
+# for the wrong reason.
+
+CH_F=".claude/workflows/bp-pds-charter.md"
+FLOOR_F="1f15017bf3d51ac85c34d3e4f5aa2f903a0815a6"
+
+# THE STATIC HALF, which holds on any checkout including a shallow one: the floor
+# must be a LITERAL in the arm, and the window loop must key off the derived
+# boundary, never off the charter-read anchor. Position and provenance ARE the
+# behaviour here (the PACE-sleep and walk_truncation idioms above, same reason):
+# a future edit that pointed the loop back at $anchor would restore the defect
+# with every dynamic fixture below still green on a full checkout.
+CHECKS=$((CHECKS + 1))
+if grep -q "^AXIS_F_FLOOR_COMMIT_DEFAULT=\"${FLOOR_F}\"" "$ARM"; then
+  echo "ok    the axis-F window floor is a 40-hex literal in the arm, not a value read from the charter"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  AXIS_F_FLOOR_COMMIT_DEFAULT is missing or is no longer ${FLOOR_F}"
+  echo "      a boundary the charter can supply is a boundary a charter edit can move forward"
+fi
+
+CHECKS=$((CHECKS + 1))
+if [ "$(grep -c 'is-ancestor "\$sha" "\$boundary"' "$ARM")" = "1" ] &&
+   ! grep -q 'is-ancestor "\$sha" "\$anchor"' "$ARM"; then
+  echo "ok    axis F's window loop exempts against \$boundary, never against the charter-read \$anchor"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  axis F's exemption test must run against \$boundary — \$anchor is read out of the guarded charter"
+fi
+
+CHECKS=$((CHECKS + 1))
+if grep -q 'the charter records no harness blob at all; every in-window thaw below is unrecorded' "$ARM"; then
+  echo "ok    a charter recording NO harness blob now SCORES (every row unrecorded) instead of going UNCHECKED"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  an empty ledger must be scoreable now that the boundary no longer needs the charter to supply it"
+fi
+
+# A BOGUS FLOOR IS UNCHECKED, NOT A FALLBACK. This is the no-fallback rule as a
+# run: if the arm ever answered this by reverting to the charter-derived anchor
+# it would print PARITY here, which is precisely the silent hole. Holds on any
+# checkout, shallow included.
+CHECKS=$((CHECKS + 1))
+LAST_OUT="$(AXIS_F_FLOOR_COMMIT=0000000000000000000000000000000000000000 bash "$ARM" --axis f --charter "$CH_F" 2>&1)"
+AF_RC=$?
+if [ "$AF_RC" = "2" ]; then
+  echo "ok    an unreachable pinned floor is UNCHECKED (exit 2), never a fallback to the charter  (exit 2)"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  an unreachable pinned floor must exit 2; got ${AF_RC}"
+  printf '      | %s\n' "$LAST_OUT" | head -20
+fi
+says "will NOT fall back to deriving the boundary from the" "the refusal NAMES the fallback it is declining to make"
+says_not "PARITY" "an unreachable floor must never print PARITY"
+
+run 2 "axis F with a missing charter is UNCHECKED" -- --axis f --charter "$TMP/no-such-charter.md"
+says "UNCHECKED: no charter at" "the UNCHECKED names the missing charter"
+
+# THE DYNAMIC HALF needs the real history: the floor commit and the 25 harness-
+# moving commits. On a shallow checkout there is nothing here to measure, and a
+# harness that silently skipped would be the vacuous green this file exists to
+# refuse — so the skip is PRINTED and the reason is named.
+if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f "$CH_F" ]; then
+
+  run 0 "axis F is GREEN on this checkout's real charter" -- --axis f
+  says "window boundary ....... 1f15017bf" "the live boundary is the pinned floor, not the oldest ledger row"
+  says "IN WINDOW ....... 21" "the pinned floor puts the former anchor 58d1bd3a5 INSIDE the window"
+
+  # THE REGRESSION ARM. Delete the row that used to BE the anchor. Under the old
+  # derivation this printed `IN WINDOW 19 · unrecorded 0 · PARITY` rc 0.
+  sed '/e219e97ccf7f33797c86a2b84d998d599b6bda31/d' "$CH_F" > "$TMP/f-anchor.md"
+  run 1 "deleting the OLDEST ledger row REDS axis F (it used to print PARITY)" -- --axis f --charter "$TMP/f-anchor.md"
+  says "58d1bd3a5" "the red NAMES the commit whose record was deleted"
+  says "IN WINDOW ....... 21" "the window did NOT shrink to absorb the deletion — that shrink WAS the defect"
+  says "unrecorded .......................... 1" "exactly one row went missing and exactly one is reported"
+
+  # ITERATED. One row could be a special case; four rows in one pass is the shape
+  # of a charter split that drops the oldest block as historical noise.
+  sed -e '/e219e97ccf7f33797c86a2b84d998d599b6bda31/d' \
+      -e '/255c458ba2797321fcd2f2ac327bf87430a59d0e/d' \
+      -e '/7a703fd641f77b906dcbd40f004f7639cdc9b2ae/d' \
+      -e '/f99216471f9cd914064b9e6fc4bc3b6ee59a6da2/d' "$CH_F" > "$TMP/f-oldest4.md"
+  run 1 "deleting the FOUR oldest ledger rows in one pass REDS axis F" -- --axis f --charter "$TMP/f-oldest4.md"
+  says "unrecorded .......................... 4" "all four deletions are counted, not just the newest of them"
+  says "IN WINDOW ....... 21" "four deletions did not move the boundary either"
+  says "58d1bd3a5" "the oldest of the four is named"
+  says "13c379bcd" "the newest of the four is named"
+
+  # THE PRE-EXISTING CONTROL, RE-PINNED. The mid-row red must survive the change.
+  sed '/97d9cbb86afe6910d7a49bd712ca3348084f4fb0/d' "$CH_F" > "$TMP/f-mid.md"
+  run 1 "the mid-ledger control still REDS axis F" -- --axis f --charter "$TMP/f-mid.md"
+  says "4d5a84001" "the mid-row red still names its commit"
+
+  # THE QUIET SIDE OF THE SAME MUTATION SET. Without this, every red above is
+  # compatible with an arm that reds on any --charter that is not the default.
+  cp "$CH_F" "$TMP/f-verbatim.md"
+  run 0 "a verbatim COPY of the charter is still PARITY — the reds are about content, not about --charter" -- --axis f --charter "$TMP/f-verbatim.md"
+  says_not "DIVERGENT" "the copy does not red"
+else
+  CHECKS=$((CHECKS + 1))
+  echo "ok    axis F's history fixtures SKIPPED — ${FLOOR_F} is not in this checkout (shallow clone)"
+  echo "      the static and no-fallback checks above still ran; only the 25-commit walk is unmeasurable here"
+fi
+
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense
 run 3 "a --grace-hours that is not a number is a USAGE error" -- --grace-hours six
 
