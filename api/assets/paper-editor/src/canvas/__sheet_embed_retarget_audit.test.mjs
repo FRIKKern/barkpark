@@ -21,16 +21,32 @@
 // So: preservation is well proven, DISPLAY and EDITABILITY of the reference value
 // are not. This file mounts the real <bp-paper-canvas> and drives real events.
 //
+// WHAT CHANGED, 2026-09-17 (pd-ee-sheet-embed-retarget). §2 used to assert ZERO
+// controls and no mutable reference on BOTH atoms, and its own failure message said
+// to update it when a retarget picker was deliberately added. It has been: the sheet
+// atom now mounts the EXISTING <bp-reference-picker> (ref-type="sheet") and a
+// selection emits patch-block{ref, snapshot:null}. Asserting zero controls on the
+// sheet would now assert the ABSENCE of the shipped feature — a green on that would
+// mean the feature is gone. So the sheet half of §2 became an EXACT-SHAPE assertion
+// (exactly one control, and it is the reference picker; zero controls outside it, so
+// no cell editor crept in) and the embed half is UNCHANGED at zero. §5 is new: it
+// DRIVES the picker and measures the op.
+//
 // §1  PRECONDITION — both atoms mount and their chips CARRY the reference value.
 //     (Without this every assertion below could pass on an empty chip.)
-// §2  NO RETARGET AFFORDANCE — the sheet/embed node-views expose zero editable
-//     control and zero mutable attr. PROVEN NON-VACUOUS by a positive control:
-//     the SAME query finds the figure atom's caption control in the SAME document.
+// §2  THE AFFORDANCE IS EXACTLY ONE PICKER — the sheet node-view exposes the
+//     reference picker and NOTHING else; the embed node-view still exposes zero.
+//     PROVEN NON-VACUOUS by a positive control: the SAME query finds the figure
+//     atom's caption control in the SAME document.
 // §3  SELECT → DELETE → UNDO restores the block with its reference VERBATIM.
-// §3b POINTER parity — a real click on the chip mutates nothing and opens nothing.
-// §4  ROUND TRIP IS NOT EDITABILITY — the mounted doc's carried block is
-//     BYTE-identical (JSON.stringify, key order included) to the seed, and the
-//     canvas emits no path that could have changed it.
+// §3b POINTER parity — a real click on the CHIP mutates nothing and reveals nothing.
+// §4  ROUND TRIP — the mounted doc's carried block is BYTE-identical
+//     (JSON.stringify, key order included) to the seed until something drives the
+//     picker, and the sheet's cells are still not editable here.
+// §5  THE RETARGET, DRIVEN — a real picker selection emits exactly
+//     patch-block{ref:<new>, snapshot:null}; re-picking the SAME ref and clearing to
+//     "" each emit ZERO ops; and the picker is ABSENT under data-picker-browse=false,
+//     under a read-only editor, and on a template-locked block.
 //
 // Run: node src/canvas/__sheet_embed_retarget_audit.test.mjs   (or: npm test)
 
@@ -71,9 +87,33 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.CSS ||= { escape: (value) => String(value) };
 window.Element.prototype.scrollIntoView ||= function () {};
+globalThis.sessionStorage = window.sessionStorage;
 window.BP_PAPER_EDITOR_NO_INJECT = true;
 
+// The retarget affordance IS the existing <bp-reference-picker>, so this suite has to
+// upgrade the real Web Component and answer its real search fetch — otherwise the
+// element would sit inert and §5 would drive nothing. Same mock shape as
+// __reference_picker_mounted.test.mjs.
+const fetches = [];
+const fetchMock = async (url, options = {}) => {
+  fetches.push({ url: String(url), options });
+  if (options.method === "POST") return { ok: true, json: async () => ({}) };
+  return {
+    ok: true,
+    json: async () => ({
+      searchEventId: "search-event-1",
+      documents: [{ _id: "drafts.q4-forecast", title: "Q4 forecast", type: "sheet" }],
+    }),
+  };
+};
+globalThis.fetch = fetchMock;
+window.fetch = fetchMock;
+
+await import("../../../../priv/static/assets/bp-search-intel.js");
+globalThis.BpSearchIntel = window.BpSearchIntel;
+await import("../../../../priv/static/assets/bp-reference-picker.js");
 await import("./index.js");
+const { sheetRetargetAllowed } = await import("./embed-node.js");
 const { NodeSelection } = await import("@tiptap/pm/state");
 
 let failures = 0;
@@ -125,7 +165,14 @@ const blocks = [
 ];
 
 const canvas = document.createElement("bp-paper-canvas");
+canvas.setAttribute("data-dataset", "production");
+canvas.setAttribute("data-scope-prefix", "/w/default/p/default");
 canvas.blocks = blocks;
+// §5 measures the OP a retarget emits, so the batches have to be captured from the
+// moment the canvas exists — a listener added later could miss a mount-time batch and
+// read its own blindness as "zero ops".
+const batches = [];
+canvas.addEventListener("bp-canvas-ops", (event) => batches.push(event.detail.ops));
 document.body.appendChild(canvas);
 await new Promise((resolve) => setTimeout(resolve, 400));
 
@@ -158,7 +205,12 @@ try {
   check("§1 the sheet atom mounts and its chip CARRIES the ref (not the empty fallback)", () => {
     const el = byTestId("paper-readonly-sheet");
     assert.ok(el, "the sheet node-view did not mount — every assertion below is vacuous");
-    const text = el.textContent.trim();
+    // The CHIP, not the whole atom: since pd-ee-sheet-embed-retarget the atom also
+    // holds the reference picker, whose own pill/buttons carry text. This check is
+    // about what the chip SAYS the block resolves to, so it reads the chip.
+    const chipEl = el.querySelector(".bp-canvas-readonly-chip");
+    assert.ok(chipEl, "the sheet chip is missing — the block no longer says what it is");
+    const text = chipEl.textContent.trim();
     assert.equal(
       text,
       `Sheet · ${SHEET_REF} · 3×2`,
@@ -195,30 +247,75 @@ try {
     );
   });
 
-  for (const [label, testId] of [
-    ["sheet", "paper-readonly-sheet"],
-    ["embed", "paper-readonly-embed"],
-  ]) {
-    check(`§2 the ${label} atom exposes NO editable control (no retarget affordance)`, () => {
-      const el = byTestId(testId);
-      const controls = Array.from(el.querySelectorAll(CONTROL_SELECTOR));
-      assert.equal(
-        controls.length,
-        0,
-        `AUDIT STATE CHANGED: the ${label} atom now mounts ${controls.length} control(s) ` +
-          `(${controls.map((c) => c.tagName.toLowerCase()).join(", ")}). ` +
-          `pd-ee-sheet-embed-audit recorded ZERO. If a retarget picker was deliberately ` +
-          `added, update this check and close pd-ee-sheet-embed-retarget.`,
-      );
-      assert.equal(
-        el.getAttribute("contenteditable"),
-        "false",
-        `the ${label} atom is no longer contenteditable=false`,
-      );
-    });
-  }
+  // The SHEET atom's affordance is exact, not merely present: one reference picker,
+  // and nothing else. "Nothing else" is the half that still guards the audit finding —
+  // a cell editor, a rename input, or a second picker smuggled in beside it would all
+  // fail here, and so would the picker DISAPPEARING.
+  check("§2 the sheet atom exposes EXACTLY ONE control and it is the reference picker", () => {
+    const el = byTestId("paper-readonly-sheet");
+    const picker = byTestId("paper-sheet-retarget");
+    assert.ok(
+      picker,
+      "the sheet retarget picker did not mount — pd-ee-sheet-embed-retarget shipped it; " +
+        "its absence is the feature being gone, not the audit state being restored",
+    );
+    assert.equal(
+      picker.tagName.toLowerCase(),
+      "bp-reference-picker",
+      `the retarget control is a <${picker.tagName.toLowerCase()}>, not the EXISTING ` +
+        "<bp-reference-picker> the row required be reused",
+    );
+    assert.equal(
+      picker.getAttribute("ref-type"),
+      "sheet",
+      "the retarget picker is not scoped to sheet documents",
+    );
+    assert.ok(el.contains(picker), "the picker is not inside the sheet atom");
 
-  check("§2 neither atom's NODE carries a mutable ref/target attr for an editor to write", () => {
+    // Controls OUTSIDE the picker: the sheet's own chrome must contribute none. The
+    // picker's internal buttons/input are its own business and are excluded by the
+    // contains() filter, not by narrowing the selector.
+    const outside = Array.from(el.querySelectorAll(CONTROL_SELECTOR)).filter(
+      (c) => c !== picker && !picker.contains(c),
+    );
+    assert.equal(
+      outside.length,
+      0,
+      `the sheet atom mounts ${outside.length} control(s) outside the reference picker ` +
+        `(${outside.map((c) => c.tagName.toLowerCase()).join(", ")}) — only the REFERENCE ` +
+        "is authored here; the sheet's cells stay read-only",
+    );
+    assert.equal(
+      el.getAttribute("contenteditable"),
+      "false",
+      "the sheet atom is no longer contenteditable=false",
+    );
+  });
+
+  check("§2 the embed atom exposes NO editable control (no retarget affordance)", () => {
+    const el = byTestId("paper-readonly-embed");
+    const controls = Array.from(el.querySelectorAll(CONTROL_SELECTOR));
+    assert.equal(
+      controls.length,
+      0,
+      `AUDIT STATE CHANGED: the embed atom now mounts ${controls.length} control(s) ` +
+        `(${controls.map((c) => c.tagName.toLowerCase()).join(", ")}). ` +
+        `pd-ee-sheet-embed-audit recorded ZERO and pd-ee-sheet-embed-retarget scoped ` +
+        `itself to the SHEET only. If an embed retarget was deliberately added, update ` +
+        `this check and say which row shipped it.`,
+    );
+    assert.equal(
+      el.getAttribute("contenteditable"),
+      "false",
+      "the embed atom is no longer contenteditable=false",
+    );
+  });
+
+  // The attr SET is unchanged by the retarget work and is still worth pinning: the new
+  // ref is written INSIDE the verbatim-carried block (bpBlock), not as a new top-level
+  // attr, so the verbatim-carry contract and the id stamp are untouched. A `ref` attr
+  // appearing here would mean the block stopped riding verbatim.
+  check("§2 neither atom's NODE grew a top-level ref/target attr — the value still rides bpBlock", () => {
     for (const [label, nodeName, key] of [
       ["sheet", "bpSheet", "ref"],
       ["embed", "bpEmbed", "target"],
@@ -233,7 +330,8 @@ try {
       );
       assert.ok(
         !(key in node.attrs),
-        `the ${label} atom now carries a top-level \`${key}\` attr — the reference became mutable`,
+        `the ${label} atom now carries a top-level \`${key}\` attr — the value left the ` +
+          `verbatim-carried block, so bpBlock is no longer the whole block`,
       );
       // The value is reachable ONLY inside the verbatim-carried block.
       assert.ok(
@@ -296,11 +394,12 @@ try {
     ["sheet", "paper-readonly-sheet"],
     ["embed", "paper-readonly-embed"],
   ]) {
-    check(`§3b ${label}: a real click on the chip mutates nothing and opens no control`, () => {
+    check(`§3b ${label}: a real click on the chip mutates nothing and reveals nothing new`, () => {
       const el = byTestId(testId);
       const chip = el.querySelector(".bp-canvas-readonly-chip");
       assert.ok(chip, `precondition: the ${label} chip is in the DOM to be clicked`);
       const before = JSON.stringify(editor.getJSON());
+      const controlsBefore = el.querySelectorAll(CONTROL_SELECTOR).length;
 
       for (const type of ["mousedown", "mouseup", "click", "dblclick"]) {
         chip.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true }));
@@ -311,10 +410,14 @@ try {
         before,
         `clicking the ${label} chip changed the document — the read-only atom is not inert to a pointer`,
       );
+      // The CHIP is still inert. The count is asserted against what was there BEFORE
+      // the click (0 for embed, the picker's own chrome for sheet), so a hidden
+      // click-to-reveal surface is still caught, without this check having to
+      // re-hardcode the shipped affordance §2 already pins exactly.
       assert.equal(
         el.querySelectorAll(CONTROL_SELECTOR).length,
-        0,
-        `clicking the ${label} chip revealed a control — a click-to-reveal retarget affordance exists and §2 missed it`,
+        controlsBefore,
+        `clicking the ${label} chip revealed a control — a click-to-reveal affordance exists and §2 missed it`,
       );
     });
   }
@@ -342,19 +445,200 @@ try {
     }
   });
 
-  check("§4 byte-parity is not editability: the reference is unchanged AND unchangeable", () => {
-    // Both halves, in one assertion, so neither can be quoted as the other.
+  check("§4 preserved-until-touched: nothing has moved the reference, and only ONE thing can", () => {
+    // Both halves, in one assertion, so neither can be quoted as the other. Mount +
+    // select + delete + undo + a chip click have gone by and NOTHING moved the
+    // reference: the ONLY path that can is the picker, and §5 drives it.
     const sheet = nodeOfType("bpSheet");
     const embed = nodeOfType("bpEmbed");
     assert.equal(sheet.attrs.bpBlock.ref, SHEET_REF, "preserved");
     assert.equal(embed.attrs.bpBlock.target, EMBED_TARGET, "preserved");
     assert.equal(
-      byTestId("paper-readonly-sheet").querySelectorAll(CONTROL_SELECTOR).length +
-        byTestId("paper-readonly-embed").querySelectorAll(CONTROL_SELECTOR).length,
+      byTestId("paper-readonly-embed").querySelectorAll(CONTROL_SELECTOR).length,
       0,
-      "a retarget control appeared — preservation and editability are no longer the same verdict",
+      "the embed atom grew a control — an embed target is still not authored in the canvas",
+    );
+    const picker = byTestId("paper-sheet-retarget");
+    const sheetControls = Array.from(
+      byTestId("paper-readonly-sheet").querySelectorAll(CONTROL_SELECTOR),
+    ).filter((c) => c !== picker && !picker.contains(c));
+    assert.equal(
+      sheetControls.length,
+      0,
+      "a second edit surface appeared on the sheet atom beside the reference picker",
     );
   });
+  // ── §5 THE RETARGET, DRIVEN ─────────────────────────────────────────────────
+  //
+  // §2 says the affordance EXISTS. That is not the same claim as "it works": a picker
+  // that mounts and emits nothing would pass §2 and ship a dead control. So this
+  // section drives the REAL Web Component — Change → type → the mocked search result →
+  // mousedown — and measures the op batch the canvas actually emits.
+
+  const NEW_REF = "q4-forecast";
+
+  // Drive one full selection through the mounted picker. Returns the batches emitted
+  // between the call and the flush, so each drive is measured in isolation.
+  const drivePick = async () => {
+    batches.length = 0;
+    const picker = byTestId("paper-sheet-retarget");
+    // No picker → no drive. Returning [] lets the §5 checks below report the MISSING
+    // op as a failed assertion with a readable diff, instead of this helper throwing
+    // and taking every remaining section down with it (an uncaught TypeError here
+    // would hide §5b entirely).
+    if (!picker) return [];
+    const change = Array.from(picker.querySelectorAll("button")).find(
+      (b) => b.textContent === "Change",
+    );
+    if (change) change.click();
+    const input = picker.querySelector(".bp-ref-search-input");
+    assert.ok(input, "the picker offers its real typeahead input");
+    input.value = "q4";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const result = picker.querySelector(".bp-ref-dropdown-item");
+    assert.ok(result, "the mocked scoped search result renders as a picker option");
+    result.dispatchEvent(
+      new window.MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+    );
+    canvas.flushPendingChanges();
+    return batches.slice();
+  };
+
+  const firstPick = await drivePick();
+  const sheetSearch = fetches.find(({ url }) => url.includes("q=q4"));
+
+  check("§5 a real picker selection emits EXACTLY patch-block{ref, snapshot:null}", () => {
+    assert.deepEqual(firstPick, [
+      [
+        {
+          op: "patch-block",
+          id: "sh-1",
+          patch: { ref: NEW_REF, snapshot: null },
+        },
+      ],
+    ]);
+    // The snapshot key is PRESENT and null — not merely absent. patch.ex shallow-merges
+    // the patch, so an absent key would LEAVE the old sheet's cached cells under the
+    // new sheet's name; the explicit null is what clears them.
+    const patch = firstPick[0][0].patch;
+    assert.deepEqual(Object.keys(patch).sort(), ["ref", "snapshot"]);
+    assert.equal(patch.snapshot, null, "the stale snapshot is not explicitly cleared");
+  });
+
+  check("§5 the patch names the PAPER's block, never the sheet document", () => {
+    // The permission boundary, as an op-shape assertion: retargeting writes one key on
+    // one block of THIS paper. Nothing in the batch addresses the referenced sheet, so
+    // no read grant is being turned into a write anywhere.
+    const ops = firstPick[0];
+    assert.equal(ops.length, 1, "a retarget emitted more than one op");
+    assert.equal(ops[0].id, "sh-1", "the op is keyed by something other than the paper block");
+    assert.ok(
+      !JSON.stringify(ops[0]).includes("sheet-doc"),
+      "the op references a sheet document id",
+    );
+  });
+
+  check("§5 the browse fetch is the scoped, sheet-typed read the picker already does", () => {
+    assert.ok(sheetSearch, "the picker issued no search fetch");
+    assert.equal(
+      sheetSearch.url,
+      "/w/default/p/default/v1/data/search/production?q=q4&perspective=raw&limit=50&type=sheet",
+    );
+    assert.equal(
+      sheetSearch.options.credentials,
+      "same-origin",
+      "the browse does not ride the caller's own session — the server cannot scope it",
+    );
+  });
+
+  check("§5 the chip and the carried block both moved to the new ref", () => {
+    const node = nodeOfType("bpSheet");
+    assert.equal(node.attrs.bpBlock.ref, NEW_REF, "the carried block still names the old sheet");
+    assert.ok(
+      !("snapshot" in node.attrs.bpBlock),
+      "the OLD sheet's cached grid is still carried under the NEW ref — the stale-snapshot hazard",
+    );
+    assert.equal(
+      byTestId("paper-readonly-sheet")
+        .querySelector(".bp-canvas-readonly-chip")
+        .textContent.includes(NEW_REF),
+      true,
+      "the summary chip still names the OLD sheet after a retarget",
+    );
+  });
+
+  const secondPick = await drivePick();
+  check("§5 re-picking the SAME sheet emits ZERO ops", () => {
+    assert.deepEqual(secondPick, [], `a no-change re-pick emitted ${JSON.stringify(secondPick)}`);
+  });
+
+  batches.length = 0;
+  const pickerEl = byTestId("paper-sheet-retarget");
+  const removeBtn = pickerEl
+    ? Array.from(pickerEl.querySelectorAll("button")).find((b) => b.textContent === "Remove")
+    : null;
+  if (removeBtn) removeBtn.click();
+  canvas.flushPendingChanges();
+  const clearBatches = batches.slice();
+
+  check("§5 CLEARING the picker is a no-op — a retarget cannot blank a reference", () => {
+    // The picker's Remove emits bp-change with "". Blanking the ref would leave a chip
+    // with no identity and no route back to the sheet it named; deleting the block is
+    // the affordance for "I do not want this". So the commit refuses an empty value.
+    assert.deepEqual(clearBatches, [], `a clear emitted ${JSON.stringify(clearBatches)}`);
+    assert.equal(
+      nodeOfType("bpSheet").attrs.bpBlock.ref,
+      NEW_REF,
+      "a clear blanked the carried reference",
+    );
+  });
+
+  // ── §5b WHERE THE AFFORDANCE IS NOT OFFERED ─────────────────────────────────
+  //
+  // Four independent nos, asserted on the exported predicate the node-view calls, so
+  // each one is measured separately instead of being inferred from one mounted case.
+  // The mounted negative below proves the predicate is the one that actually decides.
+
+  check("§5b the predicate refuses embed, a read-only editor, a locked block, and a no-browse host", () => {
+    const yes = { bpType: "sheet", editor: { isEditable: true }, block: { ref: "a" }, scope: { pickerBrowse: true } };
+    assert.equal(sheetRetargetAllowed(yes), true, "precondition: the allowed case IS allowed");
+    assert.equal(sheetRetargetAllowed({ ...yes, bpType: "embed" }), false, "embed");
+    assert.equal(sheetRetargetAllowed({ ...yes, editor: { isEditable: false } }), false, "read-only editor");
+    assert.equal(sheetRetargetAllowed({ ...yes, block: { ref: "a", locked: true } }), false, "template-locked block");
+    assert.equal(sheetRetargetAllowed({ ...yes, scope: { pickerBrowse: false } }), false, "no browse grant");
+  });
+  // §5b MOUNTED: an item-share edit grant (data-picker-browse="false") authorizes THIS
+  // paper, not dataset discovery — so no browse UI is mounted at all. A second canvas,
+  // because the attribute is read once at node-view construction.
+  {
+    const locked = document.createElement("bp-paper-canvas");
+    locked.setAttribute("data-dataset", "production");
+    locked.setAttribute("data-picker-browse", "false");
+    locked.blocks = [
+      { id: "b-title", type: "heading", level: 1, role: "title", text: "Shared" },
+      { id: "sh-2", type: "sheet", ref: SHEET_REF, snapshot: { rows: [["a"]] } },
+    ];
+    document.body.appendChild(locked);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    try {
+      check("§5b MOUNTED: data-picker-browse=false mounts no retarget picker at all", () => {
+        const atom = locked.querySelector('[data-test-id="paper-readonly-sheet"]');
+        assert.ok(atom, "precondition: the sheet atom mounted on the share-scoped canvas");
+        assert.ok(
+          atom.textContent.includes(SHEET_REF),
+          "precondition: the chip still shows the ref (the value stays READABLE)",
+        );
+        assert.equal(
+          locked.querySelectorAll('[data-test-id="paper-sheet-retarget"]').length,
+          0,
+          "a browse UI mounted under an item-share edit grant",
+        );
+      });
+    } finally {
+      locked.remove();
+    }
+  }
 } finally {
   canvas.remove();
   window.close();
