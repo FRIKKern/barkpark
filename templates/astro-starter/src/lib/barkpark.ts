@@ -26,6 +26,7 @@
 
 import {
   createClient,
+  BarkparkNotFoundError,
   type BarkparkClient,
   type BarkparkDocument,
 } from '@barkpark/core'
@@ -136,23 +137,66 @@ function toFlagship(doc: BarkparkDocument | null): FlagshipDoc | null {
 /**
  * Fetch the one document this site features, proving the build-time round trip.
  *
- * A network / auth failure THROWS (the build fails — a broken content link must
- * never reach visitors; that is the whole health-gate premise). An empty but
- * reachable dataset returns `{ doc: null }` so the site still builds and renders
- * an honest empty state.
+ * FAIL-CLOSED SEMANTICS — identical to the next-starter's `fetchFlagshipDoc`
+ * (templates/next-starter/src/lib/barkpark.ts), which is the D72 precedent this
+ * mirrors. The two starters are the SAME adapter for two frameworks; they had
+ * opposite 404 policies until this was aligned.
+ *
+ *   - A reachable-but-EMPTY type (zero published documents) returns
+ *     `{ doc: null }`. Absence of DATA is a normal state — the site builds and
+ *     renders its honest empty article.
+ *   - A Branch-2 404 (the type is missing or private on this dataset) also
+ *     returns `{ doc: null }` rather than killing `astro build` with exit 1.
+ *     `@barkpark/core` deliberately does NOT swallow this itself — the list
+ *     executor rejects with `BarkparkNotFoundError` by DECISION
+ *     (site-spawner-backlog-core-list-404-swallow, wave-7 D72: a 404 on a list
+ *     is a misconfiguration signal the CALLER must see, and consumers guard
+ *     in-page). This IS that in-page guard. The misconfiguration is still
+ *     caught, one stage later and fail-closed: the build bakes an EMPTY
+ *     `bp-doc-id` marker and the deploy engine's HEALTH gate refuses to switch
+ *     the slot, so last-good keeps serving. A build that exits 1 instead
+ *     produces no artifact to inspect at all.
+ *   - EVERY OTHER error — network, auth (401/403), 5xx, an unreadable corpus —
+ *     THROWS, failing the build loudly. Widening the catch below to a bare
+ *     `catch { return { doc: null } }` would be a fail-open: an outage would
+ *     render as "this dataset is empty" and ship.
  */
 export async function fetchFlagshipDoc(
   bp: BarkparkClient,
   env: BpEnv,
 ): Promise<FlagshipResult> {
-  if (env.docId) {
-    const doc = await bp.doc(env.docType, env.docId)
+  try {
+    if (env.docId) {
+      const doc = await bp.doc(env.docType, env.docId)
+      return { doc: toFlagship(doc) }
+    }
+    const doc = await bp
+      .docs(env.docType)
+      .order('_updatedAt:desc')
+      .limit(1)
+      .findOne()
     return { doc: toFlagship(doc) }
+  } catch (err) {
+    if (err instanceof BarkparkNotFoundError) return { doc: null }
+    throw err
   }
-  const doc = await bp
-    .docs(env.docType)
-    .order('_updatedAt:desc')
-    .limit(1)
-    .findOne()
-  return { doc: toFlagship(doc) }
+}
+
+/**
+ * The deploy markers this result bakes into the built HTML.
+ *
+ * Extracted from `index.astro` so the EMPTY case is assertable without an Astro
+ * build: an honestly-empty site bakes `bp-doc-id=""`, which the deploy engine's
+ * HEALTH gate reads as "this build lost its content link" and refuses. That
+ * refusal is the intended fail-closed backstop for the 404 branch above, and it
+ * is the reason an empty marker must be produced rather than an exit-1 build.
+ */
+export function flagshipMarkers(result: FlagshipResult): {
+  docId: string
+  docTitle: string
+} {
+  return {
+    docId: result.doc?._id ?? '',
+    docTitle: result.doc?.title ?? '',
+  }
 }
