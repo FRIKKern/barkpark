@@ -18,7 +18,9 @@
 // ENROLMENT IS A PREDICATE, NOT A LIST: every file named bp-graph.js under the
 // repo (minus node_modules / .claude worktrees / _build) enrols itself, so a
 // fifth copy is covered the day it lands. An enumeration would go stale the
-// same way the template snapshots once did.
+// same way the template snapshots once did. That walk now lives in
+// design/bp-graph-copies.mjs so every gate with the same subjects shares ONE
+// rule — two enumerations that disagree are worse than one.
 //
 // Every scan here is paired with a CONTROL that fires on planted input, because
 // a colour regex that matches nothing would otherwise report a perfect green
@@ -26,9 +28,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findCopies } from "./bp-graph-copies.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -40,23 +43,6 @@ const END = "/* END GENERATED: bp-graph-palette */";
 // `rgba(MONO_LIGHT, 0.65)` helper call — which resolves THROUGH the generated
 // block — is not mistaken for a literal.
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?)\(\s*\d[^)]*\)/g;
-
-const SKIP_DIRS = new Set([
-  "node_modules", ".git", ".claude", "_build", "deps", "dist", ".next",
-  ".turbo", "priv/static/cache_manifest", "coverage",
-]);
-
-function findCopies(dir, out = []) {
-  for (const name of readdirSync(dir)) {
-    if (SKIP_DIRS.has(name)) continue;
-    const p = join(dir, name);
-    let st;
-    try { st = statSync(p); } catch { continue; }
-    if (st.isDirectory()) findCopies(p, out);
-    else if (name === "bp-graph.js") out.push(p);
-  }
-  return out;
-}
 
 // Split a bp-graph.js source into the generated palette region and everything
 // else. Returns null when the marker pair is absent or malformed.
