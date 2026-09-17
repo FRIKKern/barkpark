@@ -3550,6 +3550,56 @@ sentinel_roster_resolve() {
   return 0
 }
 
+# ── THE THIRD SCOPING TERM: dataset (PDS_SOURCE_DATASET MUST STAY UNSET) ─────
+#
+# `sentinel_scope_sql` below joins THREE terms and until now only two of them
+# had anything watching. `workspace_id` is CAPTURED by stamp_before rather than
+# assumed (PDS-D132); the `name NOT IN (...)` roster is DERIVED from the census
+# above and reds when the two copies disagree (PDS-D129). The third term is
+# `$SOURCE_DS`, i.e. `${PDS_SOURCE_DATASET:-production}` resolved at the top of
+# this file, and nothing checked it at all.
+#
+# It cannot be anything but `production` and leave step 6 interpretable, and the
+# reason lives in the application, not here:
+#
+#   api/lib/barkpark/plugins/bootstrap.ex  `register_schema/3`:
+#       dataset = schema.dataset || "production"
+#     Every plugin-declared row lands in `production` unless its own plugin
+#     names something else -- and none does. The string-literal declarations in
+#     api/lib/barkpark/plugins/ all read `dataset: "production"`, and the one
+#     non-literal (`tickets.ex`, `dataset: dataset`) defaults from
+#     `@dataset_default "production"`. The roster selftest re-derives BOTH of
+#     those rather than trusting this comment.
+#
+#   api/lib/barkpark/schema_bootstrap.ex   `init/1` calls
+#       Barkpark.Content.TagRegistry.register!("production")
+#     with the dataset as a LITERAL (PDS-D145), so the `tag` row's other writer
+#     does not run at all off production -- which is also why (c) in the `tag`
+#     exclusion note far above is worded the way it is.
+#
+# So exporting PDS_SOURCE_DATASET to anything else scopes the sentinel to a
+# dataset that holds none of the rows, and the UPDATE matches ZERO. There IS
+# already a `fail` for that further down ("the sentinel UPDATE matched ZERO
+# rows"), and it is true -- but it diagnoses the symptom. It says there is
+# nothing for the boot-time upsert to clobber; it does not say an environment
+# variable moved the scope off the only dataset the rows have ever lived in.
+# The refusal below is that diagnosis, taken BEFORE a row is written, in the
+# same place and for the same reason as the roster-drift refusal.
+#
+# QUIET on the real tree: PDS_SOURCE_DATASET unset resolves to `production`,
+# the predicate returns 0 and nothing is printed.
+SENTINEL_DATASET_REQUIRED="production"
+
+# dataset -> exit 0, no output, when it is the dataset the rows live in; exit 1
+# and the offending value otherwise. Takes the dataset as $1 instead of reading
+# $SOURCE_DS so the selftest can drive BOTH directions without exporting
+# anything into the process that is doing the measuring.
+sentinel_dataset_refusal() {
+  [ "${1-}" = "$SENTINEL_DATASET_REQUIRED" ] && return 0
+  printf 'PDS_SOURCE_DATASET=%s' "${1-}"
+  return 1
+}
+
 sentinel_scope_sql() { # workspace_id -> the WHERE clause selecting exactly those 34
   printf "workspace_id = '%s' AND dataset = '%s' AND name NOT IN (%s)" \
     "$1" "$SOURCE_DS" "$(sentinel_exclusion_sql_list)"
@@ -3786,6 +3836,14 @@ step_6() {
   # source-time means a census/harness disagreement reds the rung with the
   # target untouched, instead of after a sentinel has already gone into a set
   # nobody declared.
+  # THE DATASET TERM, BEFORE ANYTHING IS WRITTEN. Same placement and same
+  # reason as the roster check immediately below: a scope that selects none of
+  # the rows must red by NAME here, not as a bare zero-rows count after the
+  # fact.
+  if ! sentinel_dataset_refusal "$SOURCE_DS"; then
+    fail 6 "SENTINEL SCOPE OFF DATASET: this run resolved dataset '$SOURCE_DS' from PDS_SOURCE_DATASET, but every row this rung is about lives in '$SENTINEL_DATASET_REQUIRED'. \`Plugins.Bootstrap.register_schema/3\` writes plugin rows to \`schema.dataset || \"production\"\` and no plugin names anything else, and \`SchemaBootstrap.init/1\` passes the dataset to TagRegistry as the literal \"production\" (PDS-D145). The sentinel UPDATE would therefore match ZERO rows and both legs would be vacuous -- the zero-rows fail further down would report that truthfully and diagnose the wrong thing. NOTHING was written to the target. FIX: leave PDS_SOURCE_DATASET unset; it has no supported non-production value."
+    return 0
+  fi
   if ! sentinel_roster_resolve; then
     fail 6 "SENTINEL ROSTER DRIFT: $SENTINEL_EXCLUSION_SOURCE_REL declares PDS_SENTINEL_EXCLUSION = '$SENTINEL_ROSTER_DRIFT', this harness's fallback names '$SENTINEL_EXCLUSION_FALLBACK'. The two are the same roster and only one of them can be right, so the sentinel would scope to a set nobody declared and both legs would be uninterpretable (PDS-D129). NOTHING was written to the target. FIX: make them agree — the census is the edit site, the fallback follows it."
     return 0
@@ -4551,6 +4609,78 @@ cmd_selftest_roster() {
 
   printf "PDS_SENTINEL_EXCLUSION = tag me'tric\n" > "$tmpd/quoted.md"
   _sr_eq "a name carrying a quote is REFUSED, not escaped" "1|" "$(_sr_derive "$tmpd/quoted.md")"
+
+  say ""
+  say "  THE DATASET TERM — PDS_SOURCE_DATASET must stay unset"
+
+  # Same "<exit>|<stdout>" shape as _sr_derive, for the same reason: an arm has
+  # to tell "accepted" from "refused and said nothing about it".
+  _sr_ds() { local o; if o="$(sentinel_dataset_refusal "$1")"; then printf '0|%s' "$o"; else printf '1|%s' "$o"; fi; }
+
+  # The expression, not a retyped copy of it: each arm resolves
+  # ${PDS_SOURCE_DATASET:-production} itself, in a subshell whose environment it
+  # sets, so what is under test is the same default the top of this file uses.
+  _sr_eq "UNSET resolves to '$SENTINEL_DATASET_REQUIRED' and is accepted" \
+    "0|" "$(unset PDS_SOURCE_DATASET; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+  _sr_eq "exported EMPTY still resolves to '$SENTINEL_DATASET_REQUIRED' (:- not :=) and is accepted" \
+    "0|" "$(PDS_SOURCE_DATASET=; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+  _sr_eq "an explicit '$SENTINEL_DATASET_REQUIRED' is accepted" \
+    "0|" "$(PDS_SOURCE_DATASET=production; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+
+  # NEGATIVE CONTROL. Without this the three arms above prove only that the
+  # predicate can return zero.
+  _sr_eq "a non-production dataset is REFUSED (this is the red step 6 prints)" \
+    "1|PDS_SOURCE_DATASET=scratch" "$(PDS_SOURCE_DATASET=scratch; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+  _sr_eq "so is one that merely LOOKS like it" \
+    "1|PDS_SOURCE_DATASET=production-2" "$(PDS_SOURCE_DATASET=production-2; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+
+  # The live arm: what THIS process would actually scope to.
+  got="$(_sr_ds "$SOURCE_DS")"
+  case "$got" in
+    "0|") _sr_ok "this process's own SOURCE_DS is '$SOURCE_DS' — step 6 would scope to the dataset the rows live in" ;;
+    *)    _sr_bad "this process's own SOURCE_DS is usable" \
+            "it is '$SOURCE_DS'; step 6 would FAIL before writing a row. FIX: leave PDS_SOURCE_DATASET unset." ;;
+  esac
+
+  say ""
+  say "  THE PREMISE BEHIND THAT REFUSAL, re-derived from the application source"
+
+  # The refusal above is only correct while the rows really do all live in
+  # `production`. That is a fact about api/lib, not about this harness, so it is
+  # DERIVED here rather than asserted in the comment block. A future plugin that
+  # declares another dataset reds this arm and the roster needs re-deriving.
+  #
+  # BOUND, stated because a detector without one is a claim: the first arm sees
+  # STRING-LITERAL `dataset:` declarations only. The one declaration in the tree
+  # that is not a literal (tickets.ex `dataset: dataset`) is covered by the
+  # second arm, which reads its default. A third shape would be seen by neither.
+  local plugdir lits others attr_default
+  plugdir="$REPO_ROOT/api/lib/barkpark/plugins"
+  if [ -d "$plugdir" ]; then
+    lits="$(grep -rhoE 'dataset:[[:space:]]*"[^"]*"' "$plugdir" 2>/dev/null | sed 's/.*"\(.*\)"/\1/' | sort | uniq -c | sed 's/^ *//' | tr '\n' ';' || true)"
+    others="$(grep -rhoE 'dataset:[[:space:]]*"[^"]*"' "$plugdir" 2>/dev/null | sed 's/.*"\(.*\)"/\1/' | sort -u | grep -v "^$SENTINEL_DATASET_REQUIRED\$" | tr '\n' ' ' || true)"
+    if [ -z "$lits" ]; then
+      _sr_bad "every string-literal \`dataset:\` under api/lib/barkpark/plugins names '$SENTINEL_DATASET_REQUIRED'" \
+        "the grep found NO literal declaration at all — an empty key set is not evidence of agreement, it is evidence the probe stopped matching. The shape changed; re-derive it."
+    elif [ -z "$others" ]; then
+      _sr_ok "every string-literal \`dataset:\` under api/lib/barkpark/plugins names '$SENTINEL_DATASET_REQUIRED' [$lits]"
+    else
+      _sr_bad "every string-literal \`dataset:\` under api/lib/barkpark/plugins names '$SENTINEL_DATASET_REQUIRED'" \
+        "these do not: ${others}— the premise behind the dataset refusal no longer holds, and the sentinel roster in $SENTINEL_EXCLUSION_SOURCE_REL needs re-deriving against the new dataset."
+    fi
+
+    attr_default="$(sed -n 's/^[[:space:]]*@dataset_default[[:space:]]*"\([^"]*\)".*/\1/p' "$plugdir/tickets.ex" 2>/dev/null | head -n 1 || true)"
+    if [ -z "$attr_default" ]; then
+      _sr_bad "tickets.ex's non-literal \`dataset: dataset\` defaults to '$SENTINEL_DATASET_REQUIRED'" \
+        "no @dataset_default literal was found in $plugdir/tickets.ex — the one declaration the literal grep cannot see is now unaccounted for"
+    else
+      _sr_eq "tickets.ex's non-literal \`dataset: dataset\` defaults to '$SENTINEL_DATASET_REQUIRED'" \
+        "$SENTINEL_DATASET_REQUIRED" "$attr_default"
+    fi
+  else
+    _sr_bad "the plugin sources are readable" \
+      "$plugdir is not a directory from $REPO_ROOT — the premise behind the dataset refusal could not be re-derived this run"
+  fi
 
   say ""
   say "  THE CLAUSE — what the roster becomes in SQL"
