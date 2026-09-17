@@ -5657,7 +5657,7 @@ awk '{ print }
   "$MERGE_GATES_DOC" > "$RC21_ROWS_ADD"
 RC21_ROWS_ADD_N="$(rc21_roster_rows "$RC21_ROWS_ADD")"
 if [ "$RC21_ROWS_ADD_N" -eq "$((RC21_EXPECT_ROWS + 1))" ] && [ "$RC21_ROWS_ADD_N" -ne "$RC21_EXPECT_ROWS" ]; then
-  ok "…and ADDING one roster row to a scratch page takes the count to $RC21_ROWS_ADD_N against $RC21_EXPECT_ROWS derived — the clause reds on a grown roster, which `-ge 4` could never do"
+  ok "…and ADDING one roster row to a scratch page takes the count to $RC21_ROWS_ADD_N against $RC21_EXPECT_ROWS derived — the clause reds on a grown roster, which \`-ge 4\` could never do"
 else
   bad "adding a roster row did not move the count off the derived figure (read $RC21_ROWS_ADD_N, derived $RC21_EXPECT_ROWS) — the exactness is not exact"
 fi
