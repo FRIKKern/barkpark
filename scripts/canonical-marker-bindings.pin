@@ -13,6 +13,7 @@ connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
 console-authority-predicate	instanceAdminAuthority
 corpus-visible-schemas	visible_schemas
+criterion-shape-triage	ClassifyCriterion
 doc-backlinks	reverse_referencers
 draft-published-id	published_id
 engine-error-vocabulary	error_values
