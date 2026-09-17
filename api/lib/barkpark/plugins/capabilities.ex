@@ -18,6 +18,24 @@ defmodule Barkpark.Plugins.Capabilities do
   decisions in `docs/cli/m0-decisions.md` (Part C rules — esp. existence-hiding
   and the `scoped_admin` caveat).
 
+  ## THIS FILE HAS AN OUTPUT OUTSIDE api/ — IT MOVES IN YOUR COMMIT
+
+  Editing anything here (a description, a flag, a route) regenerates
+  `docs/openapi.json`, which lives OUTSIDE the api fence and is diffed inside
+  the REQUIRED `Elixir gate` (`.github/workflows/elixir.yml`, step "OpenAPI
+  drift check"). Regenerating it IS an allowed cross-fence edit for the lane
+  that caused it — a generated artifact is an OUTPUT of your change, and the
+  fence follows AUTHORSHIP, not directory — but ONLY `mix barkpark.openapi` may
+  write it; hand-editing it is itself the defect. Rebase onto `origin/main`
+  FIRST, then regenerate, then report `git diff --numstat docs/openapi.json`:
+  one line moved is a RE-PIN, many is a BURIAL.
+
+  `mix barkpark.coupled` prints the full derived coupling table and
+  `mix barkpark.coupled --check` reds before CI does. See
+  `Barkpark.CoupledArtifacts` for the predicate, the ruling, and why a file that
+  merely shares a string with a generated artifact (e.g.
+  `docs/cli/fixtures/full-manifest.json`) is NOT one and must be left alone.
+
   ## Auth-tier ladder
 
   The six closed tiers (`docs/cli/manifest.schema.json#/$defs/auth_tier`) split
