@@ -246,6 +246,48 @@ arrow_col() {
     'my $i=0; for my $ch (split //){ $i++; if (ord($ch)==0x2194){ print $i; exit } }'
 }
 
+# THE STYLED DIVIDER CELL of a captured header row: the ↔ affordance together
+# with the SGR state that applies to it. Compose paints the ENTIRE divider —
+# every gutter cell, every row — with ONE style (compose.go: dividerRestStyle,
+# swapped for dividerHoverStyle when m.wideDividerHover, dividerGrabbedStyle
+# while dragging), so this one cell is a complete and faithful readout of the
+# gutter hit-test's answer for the whole gutter.
+#
+# WHY G7 READS THIS AND NOT THE WHOLE HEADER ROW. The header row's TAIL is the
+# reading pane's preview heading, and that heading reverts from the hovered
+# board row's title to the cursor's title the instant the pointer leaves the
+# board. A whole-row diff therefore calls EVERY off-board column "responding",
+# accent or not: col boardW+2 sits inside the reader pane, carries no hover
+# accent SGR at all, and still differed from the off-gutter baseline — by the
+# heading alone ("Harbor lights epic" vs "Mulch the seedling beds") — so a
+# healthy 2-cell gutter measured as three responding columns. That is churn
+# coupling, the one thing this harness's evidence law forbids (it is why G1/G2/
+# G3/G4/G8 are banished to live mode). The fix is to narrow what the probe
+# MEASURES, never to widen paneGutter2 to satisfy it.
+#
+# Reads one styled row on stdin, prints "<active SGR><↔>", or NO-DIVIDER when
+# the row carries no affordance. It never exits early mid-pipe: a `grep -q`-
+# shaped SIGPIPE under this script's pipefail is exactly how a probe lies (see
+# snap_has above).
+divider_cell_styled() {
+  perl -CSD -Mutf8 -ne '
+    chomp;
+    my $s = $_;
+    my @st;
+    my $cell = "NO-DIVIDER";
+    while (length $s) {
+      if ($s =~ s/^\e\[([0-9;]*)m//) {
+        my $p = $1;
+        if ($p eq "" || $p eq "0") { @st = () } else { push @st, "\e[" . $p . "m" }
+        next;
+      }
+      $s =~ s/^(.)//s;
+      if (ord($1) == 0x2194) { $cell = join("", @st) . $1; last }
+    }
+    print $cell, "\n";
+  '
+}
+
 # 1-based line number of the ▎ selection marker
 marker_line() { snap "$1" | grep -n '▎' | head -1 | cut -d: -f1; }
 
@@ -543,6 +585,14 @@ fi
 # ── G5+G7: divider hover accent + exact 2-col gutter bounds ──────────────────
 # The ↔ affordance recolors and the gutter │ lights on hover; the responding
 # column set, probed from behavior, must be EXACTLY the 2 gutter cells.
+#
+# G7's per-column probe reads the STYLED DIVIDER CELL (divider_cell_styled),
+# not the whole header row — see that helper for why the whole-row form was a
+# churn-coupled probe that read a healthy 2-cell gutter as three. G5's restore
+# assert below DOES keep the whole-row comparison on purpose: "the accent
+# restored exactly" is a claim about the entire painted row, and both of its
+# captures are taken from the same parked pointer position, so no heading churn
+# separates them.
 A=$(arrow_col "$WIDE")
 if [ -n "$A" ]; then
   ok "header ↔ divider affordance located at col $A"
@@ -556,12 +606,13 @@ printf '%s\n' "$REST" >"$EVID/g5-hover-header-rest.txt"
 RESPOND=""
 for c in $((A-2)) $((A-1)) "$A" $((A+1)) $((A+2)); do
   hover "$WIDE" 10 12
-  base=$(snape "$WIDE" | sed -n "${HL}p")
+  base=$(snape "$WIDE" | sed -n "${HL}p" | divider_cell_styled)
   hover "$WIDE" "$c" 12
-  cur=$(snape "$WIDE" | sed -n "${HL}p")
+  currow=$(snape "$WIDE" | sed -n "${HL}p")
+  cur=$(printf '%s\n' "$currow" | divider_cell_styled)
   if [ "$cur" != "$base" ]; then
     RESPOND="$RESPOND $c"
-    printf '%s\n' "$cur" >"$EVID/g5-hover-header-col$c.txt"
+    printf '%s\n' "$currow" >"$EVID/g5-hover-header-col$c.txt"
   fi
 done
 hover "$WIDE" 10 12
@@ -573,13 +624,13 @@ GUTL=$A
 if [ "$NRESP" = "2" ]; then
   first=${RESPOND%% *}; second=${RESPOND##* }
   if [ "$second" = "$((first+1))" ]; then
-    ok "G7 divider hover bounds: exactly 2 contiguous cols respond ($RESPOND); neighbours $((first-1)) and $((second+1)) do not"
+    ok "G7 divider hover bounds: exactly 2 contiguous cols light the divider cell ($RESPOND); neighbours $((first-1)) and $((second+1)) do not"
     GUTL=$first
   else
-    bad "G7 hover-responding cols not contiguous: $RESPOND"
+    bad "G7 divider-cell-lighting cols not contiguous: $RESPOND"
   fi
 else
-  bad "G7 divider hover bounds: responding cols {$RESPOND} (want exactly 2)"
+  bad "G7 divider hover bounds: cols lighting the divider cell {$RESPOND} (want exactly 2)"
 fi
 if [ "$OFF" = "$REST" ]; then
   ok "G5 hover accent paints on gutter hover and restores exactly when the pointer leaves (styled header row diff)"
