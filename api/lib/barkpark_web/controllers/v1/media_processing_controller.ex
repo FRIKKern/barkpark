@@ -12,7 +12,8 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
   exactly as it is for a webhook.
 
   Everything DOWNSTREAM of that resolution is confined to what it produced, via
-  `Assets.file_scope_opts/1` — the same helper `Media.patch_asset_metadata/3`,
+  `MediaFile.scope_opts/1` (the CORE row-scope accessor, ex-`Assets.file_scope_opts/1`)
+  — the same helper `Media.patch_asset_metadata/3`,
   `V1.MediaController.asset_doc/2` and `AssetResponse.render/3` already use, so
   the lookup, the write-back and the rendered response cannot disagree about
   which tenant's document they mean.
@@ -23,7 +24,7 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
   alias Barkpark.Content
   alias Barkpark.Media
   alias Barkpark.Media.Delivery.{AssetResponse, Cdn, Events}
-  alias Barkpark.Plugins.Media.Assets
+  alias Barkpark.Media.Storage.MediaFile
   alias BarkparkWeb.ErrorResponse
 
   action_fallback BarkparkWeb.FallbackController
@@ -62,7 +63,7 @@ defmodule BarkparkWeb.V1.MediaProcessingController do
     # the tenant for the rest of the action.
     with {:ok, file} <- Media.get_file(id),
          :ok <- ensure_dataset(file, dataset),
-         scope = Assets.file_scope_opts(file),
+         scope = MediaFile.scope_opts(file),
          %{} = doc <- Media.asset_doc_for_file(file, dataset, scope) || {:error, :not_found} do
       doc = patch_callback(doc, file, params, status, scope)
 
