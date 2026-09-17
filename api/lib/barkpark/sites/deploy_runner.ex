@@ -3695,7 +3695,12 @@ defmodule Barkpark.Sites.DeployRunner do
   # holding the line.
   # Reachability: `dir` is `run_state_dir()`; every candidate is a `*.log` entry
   # inside it, never a caller-supplied path.
-  # sobelow_skip ["Traversal.FileModule"]
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own — every filesystem touch happens in `build_log_entries/1`,
+  # `active_log_paths/1`, `evict_build_log/2` and `prune_terminal_records/2`,
+  # each of which carries its own waiver. A waiver on this def suppressed
+  # nothing and read as a risk somebody had weighed here. If you add a direct
+  # `File.` call below, the waiver belongs with it — not back up here.
   defp prune_build_logs(dir) do
     caps = retention_caps()
     protected = active_log_paths(dir)

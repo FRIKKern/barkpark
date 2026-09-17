@@ -1842,7 +1842,9 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     # path, mirroring cleanup_stderr. Total and best-effort: a dead Repo at
     # teardown must never turn a normal stop into a crash — the token's short
     # TTL is the crash backstop.
-    # sobelow_skip ["Traversal.FileModule"]
+    # NO `sobelow_skip` HERE, DELIBERATELY: this clause makes no `File.` call of
+    # its own — the `File.rm` lives in `cleanup_mcp_file/1` below, which carries
+    # the real waiver. A waiver here suppressed nothing.
     defp cleanup_mcp(%{mcp_token: token} = state) when not is_nil(token) do
       safe_revoke(token)
       cleanup_mcp_file(state)

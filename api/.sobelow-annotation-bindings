@@ -62,7 +62,6 @@ lib/barkpark/sites/deploy_runner.ex	fresh_run_files
 lib/barkpark/sites/deploy_runner.ex	heal_unscrubbed_log
 lib/barkpark/sites/deploy_runner.ex	lock_triple_status
 lib/barkpark/sites/deploy_runner.ex	log_stat
-lib/barkpark/sites/deploy_runner.ex	prune_build_logs
 lib/barkpark/sites/deploy_runner.ex	prune_orphan_run_files
 lib/barkpark/sites/deploy_runner.ex	prune_run_state_dir
 lib/barkpark/sites/deploy_runner.ex	prune_terminal_records
@@ -95,7 +94,6 @@ lib/barkpark/studio_chat.ex	delete_session_attachments
 lib/barkpark/studio_chat.ex	read_attachment
 lib/barkpark/studio_chat.ex	store_attachment
 lib/barkpark/studio_chat/probe.ex	run
-lib/barkpark/studio_chat/provider/claude.ex	cleanup_mcp
 lib/barkpark/studio_chat/provider/claude.ex	cleanup_mcp_file
 lib/barkpark/studio_chat/provider/claude.ex	cleanup_stderr
 lib/barkpark/studio_chat/provider/claude.ex	init
