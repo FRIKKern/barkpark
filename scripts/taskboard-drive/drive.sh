@@ -445,7 +445,7 @@ if [ "$MODE" = hermetic ]; then
   MK_UP=$(board_up_marker_line "$WIDE")
   if [ -n "$MK_DOWN" ]; then
     save_row "$WIDE" "$MK_DOWN" g9-marker-down-boot.txt
-    ok "G9 wide spine OVERFLOWS at 130x40: counted '$(snap "$WIDE" | sed -n "${MK_DOWN}p" | sed 's/^ *//')' painted on board line $MK_DOWN"
+    ok "G9 wide spine OVERFLOWS at 130x40: counted '$(snap "$WIDE" | sed -n "${MK_DOWN}p" | sed 's/│.*$//; s/^ *//; s/ *$//')' painted on board line $MK_DOWN"
   else
     bad "G9 no counted '↓ N more below' on the wide board — the fixture corpus no longer overflows the spine, so every marker assert below is measuring nothing"
   fi
@@ -484,10 +484,22 @@ if [ "$MODE" = hermetic ]; then
   fi
 
   # ── G10b: scroll the window off the top, then click the UP marker == one `k` ─
-  i=0; while [ "$i" -lt 12 ]; do sgr "$WIDE" "j"; i=$((i+1)); done
-  sleep 0.6
+  # Walk DOWN from the top one row at a time until the window first slides —
+  # the instant the ↑ marker appears, top has just left 0 while the spine tail
+  # is still hidden, so BOTH counted markers are on screen. Walking to the
+  # condition is a PREDICATE; a hard-coded press count would be a guess that
+  # silently lands on the wrong window the moment the corpus or the pane
+  # geometry changes (and at the spine's bottom only the ↑ marker paints, so
+  # "press a lot" is not the same gesture at all).
+  cursor_home "$WIDE"
+  i=0
   MK_UP=$(board_up_marker_line "$WIDE")
+  while [ "$i" -lt 60 ] && [ -z "$MK_UP" ]; do
+    sgr "$WIDE" "j"; sleep 0.2; i=$((i+1))
+    MK_UP=$(board_up_marker_line "$WIDE")
+  done
   MK_DOWN=$(board_down_marker_line "$WIDE")
+  note "G9 walked $i rows down from the top before the window first slid"
   if [ -n "$MK_UP" ] && [ -n "$MK_DOWN" ]; then
     save_row "$WIDE" "$MK_UP" g9-marker-up-scrolled.txt
     ok "G9 both counted markers paint once the window has scrolled off the top (↑ line $MK_UP, ↓ line $MK_DOWN)"
