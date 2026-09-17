@@ -559,14 +559,26 @@ const PIN = [
   // ── sites
   { fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
 
-  // ── webhook catalog proxy — user-authed + team-scoped, member tier
-  { fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy: user-authed + team-scoped fail-closed" },
-  { fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  // ── webhook catalog proxy — TEAM ADMIN since task-8ccc571ab4d4e713 / #18480,
+  //    and these rows said "member tier" until cch-r21-w16. Every verb below now
+  //    carries `Auth.require_team_admin(conn, [])` AHEAD of
+  //    proxy_instance_webhook/2 in router.ex (grep the route literals there); the
+  //    proxy remains the team-scoped fail-closed layer behind it, which is why
+  //    context_fn keeps H_PROXY. The tier did not move here — the ROWS caught up
+  //    with a tier that moved under them. Only `webhook.list`/`webhook.show`
+  //    stayed member, and neither is a write, so neither has a row.
+  //
+  //    The console fence is ONE band read, in mountWebhooksTab, threaded to the
+  //    three pure builders (there are three DOM paint sites in this tab and three
+  //    independent reads could disagree inside one visible tab). `decide` names
+  //    the builder that OMITS each affordance on a determinate "refuse".
+  { fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: webhookCardHtml OMITS the whole action bar (Send test among it) unless authority !== \"refuse\"; D514 rules these OMITTED rather than disabled-and-explained, and one FORBIDDEN_ROLE_COPY.admin sentence replaces the bar" },
+  { fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the enable/disable toggle IS the update PUT. Its two doors are both gated — the action-bar button (webhookCardHtml) and the auto-disable banner's Re-enable (webhookBannerHtml, which takes the same threaded answer)" },
+  { fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: a CREDENTIAL verb (task-a0f4f8757ba28e76); the button is in the omitted action bar" },
+  { fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the Edit button is in the omitted action bar, so the modal has no door" },
+  { fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhooksTabShellHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the New webhook CTA has TWO doors and both are gated — the toolbar (webhooksTabShellHtml) and the empty-state (loadWebhooks, which reads the same captured answer). The TAB is not removed: webhook.list is member-tier by the router's own written ruling, so the dataset picker and Load stay live" },
+  { fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16: the Delete button is in the omitted action bar" },
+  { fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("mountWebhooksTab", "webhookCardHtml"), auth_fn: A_TADMIN, context_fn: H_PROXY, note: "cch-r21-w16 — FENCED TRANSITIVELY, stated rather than overclaimed. deliveryRowHtml still renders Replay unconditionally; what gates it is that the ONLY door to the delivery log is the card's Deliveries button, which webhookCardHtml omits on a refusal (and GET .../deliveries is itself team-admin, so a member could not name an event_id anyway). A direct fence on deliveryRowHtml would be a second read of the same answer for an affordance that cannot be reached" },
 
   { fn: "runVerifyNow", verb: "POST", route: "/v1/barkparks/:*/verify", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
 
@@ -1658,7 +1670,23 @@ if (unresolved.length) {
 // 39 -> 40, and `unpredicated` does NOT move — the only way a new elevated
 // affordance is allowed to land. RE-DERIVED by RUNNING this census on this tree
 // and reading the `found` line it PRINTED (82/41/40/1), never by arithmetic.
-const EXPECT = { total: 84, elevated: 42, predicated: 41, unpredicated: 1 };
+// cch-r21-w16 (task-e62943f720e80c70): NO ROW WAS ADDED AND NO TIER MOVED — the
+// seven instance-webhook `:mutate` rows CAUGHT UP with a tier that had already
+// moved under them. task-8ccc571ab4d4e713 / #18480 put
+// `Auth.require_team_admin(conn, [])` in front of create, update, delete,
+// rotate, deliveries, replay and test-send, while these rows still read
+// `elevated: false, predicate: null` under a comment calling them "member tier".
+// So the count moves by SEVEN in exactly two columns: elevated 42 -> 49,
+// predicated 41 -> 48. `total` does NOT move (84 rows before and after — no new
+// write call site), and `unpredicated` does NOT move: all seven arrived WITH a
+// fence in the same commit, which is the only way an elevated affordance is
+// allowed to sit here. The fence is one instanceAdminAuthority() read in
+// mountWebhooksTab threaded to webhooksTabShellHtml / webhookCardHtml /
+// webhookBannerHtml — and it is what (2i-4) refused on until this pin existed,
+// which is the arm working exactly as designed. RE-DERIVED by RUNNING this
+// census on this tree and reading the `found` line it PRINTED (84/49/48/1),
+// never by arithmetic over two branches' numbers.
+const EXPECT = { total: 84, elevated: 49, predicated: 48, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
