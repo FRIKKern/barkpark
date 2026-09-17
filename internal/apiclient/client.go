@@ -688,6 +688,28 @@ type Revision struct {
 	Title     string    `json:"title"`
 	Status    string    `json:"status"`
 	Timestamp time.Time `json:"timestamp"`
+
+	// ATTRIBUTION, DECODED THREE-STATE (flight recorder P3,
+	// task-b3045c0a79510f28). HistoryController.render_revision/1 has emitted
+	// actor_kind / actor_id / actor_label / actor_user_id (and `rev`) since the
+	// edit-on-the-link slice, and this struct DROPPED all five on the floor.
+	//
+	// The consequence was not "less detail": it was a manufactured measurement.
+	// Any caller reading a Revision could only ever conclude "no actor", which
+	// is indistinguishable from "the store recorded no actor" — an UNMEASURED
+	// dressed up as a measured absence.
+	//
+	// They are POINTERS on purpose. The store distinguishes a column it never
+	// wrote (JSON null -> nil here) from one it wrote empty ("" -> a non-nil
+	// pointer to ""), and that distinction IS the finding: null means nobody
+	// ever stamped this mutation, empty means something answered with nothing.
+	// Decoding into plain string would collapse the two and reintroduce the
+	// exact defect this field set exists to remove.
+	Rev         *string `json:"rev"`
+	ActorKind   *string `json:"actor_kind"`
+	ActorID     *string `json:"actor_id"`
+	ActorLabel  *string `json:"actor_label"`
+	ActorUserID *string `json:"actor_user_id"`
 }
 
 // History lists a document's revisions, newest first. docID is the BARE
