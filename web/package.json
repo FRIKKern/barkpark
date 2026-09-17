@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node ../scripts/node-test-floor.mjs --import ./__tests__/support/stub-server-only.mjs -- '__tests__/*.test.ts'"
+    "//test": "`--floor 69` is a COMMITTED literal, not a derived one. Every other assertion node-test-floor.mjs makes comes out of this same glob, so a PARTIAL DELETION -- 60 of the 69 spec files removed -- shrinks the expectation along with the tree and this script still exits 0 (measured: 'ran 63 tests from 9 files', exit 0). Sixty-nine cannot shrink without an edit to this line. Adding a spec reds with `raise the floor to 70`; bump it here. Same convention as .github/workflows/astro-search-finder-test.yml and search-starter-smoke.yml.",
+    "test": "node ../scripts/node-test-floor.mjs --floor 69 --import ./__tests__/support/stub-server-only.mjs -- '__tests__/*.test.ts'"
   },
   "dependencies": {
     "@barkpark/core": "file:../js/packages/core",
