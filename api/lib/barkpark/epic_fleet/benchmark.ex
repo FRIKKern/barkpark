@@ -4,6 +4,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
   import Ecto.Query, warn: false
 
   alias Barkpark.EpicFleet.{Attempt, CanonicalJSON, Experiment}
+  alias Barkpark.Redaction
   alias Barkpark.Repo
 
   @format "barkpark-epic-benchmark-v1"
@@ -38,18 +39,6 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @task_fence_keys ~w(doc_id worker_id claim_epoch work_digest)
   @trial_keys ~w(trial_id sensitivity_of assignments)
   @trial_assignment_keys ~w(assignment_id attribution usage vui)
-  @sensitive_exact ~w(
-    token api_token access_token refresh_token auth_token id_token session_token api_key apikey secret
-    client_secret webhook_secret secret_key password authorization cookie set_cookie private_key
-    signing_key bearer credential credentials dsn database_url database_uri connection_string
-  )
-  @sensitive_suffixes ~w(
-    _api_token _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
-    _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
-    _dsn _database_url _database_uri _connection_string
-  )
-  @sensitive_exact_compact Enum.map(@sensitive_exact, &String.replace(&1, "_", ""))
-  @sensitive_suffixes_compact Enum.map(@sensitive_suffixes, &String.replace(&1, "_", ""))
 
   @spec create_experiment(map()) ::
           {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
@@ -962,29 +951,13 @@ defmodule Barkpark.EpicFleet.Benchmark do
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
+  # Secret scrubbing is NOT owned here: `Barkpark.Redaction`
+  # (@canonical capability:secret-redaction) holds the table and the predicate.
+  # This module only chooses WHEN to scrub — never HOW.
   defp sanitize_map(term) do
     term
     |> CanonicalJSON.stringify_keys()
-    |> sanitize()
-  end
-
-  defp sanitize(map) when is_map(map) do
-    Map.new(map, fn {key, value} ->
-      if sensitive_key?(key), do: {key, "[REDACTED]"}, else: {key, sanitize(value)}
-    end)
-  end
-
-  defp sanitize(list) when is_list(list), do: Enum.map(list, &sanitize/1)
-  defp sanitize(value), do: value
-
-  defp sensitive_key?(key) do
-    normalized = key |> String.downcase() |> String.replace(~r/[^a-z0-9]+/u, "_")
-    compact = String.replace(normalized, "_", "")
-
-    normalized in @sensitive_exact or
-      Enum.any?(@sensitive_suffixes, &String.ends_with?(normalized, &1)) or
-      compact in @sensitive_exact_compact or
-      Enum.any?(@sensitive_suffixes_compact, &String.ends_with?(compact, &1))
+    |> Redaction.redact_sensitive()
   end
 
   defp valid_replacement_ancestry?(attempts) do
