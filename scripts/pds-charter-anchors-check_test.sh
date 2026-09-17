@@ -240,6 +240,114 @@ if [ "$rc" -eq 0 ] && grep -q 'floor SKIPPED' <<<"$out"; then
   ok "ARM 20 QUIET — the floor is skipped off the canonical charter"
 else bad "ARM 20 QUIET — the floor is skipped off the canonical charter" "rc=$rc $out"; fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# ARM E — the trigger-coverage ratchet (task-73fc9e5d14308997).
+#
+# Arm E asks whether a path an anchor CITES can DISPATCH the job that checks the
+# anchor. Every arm below runs against the REAL charter, because the anchors are
+# the subject; what varies is the WORKFLOW arm E is pointed at, via
+# PDS_ANCHOR_WORKFLOW. A fixture workflow is the only way to move coverage
+# without editing .github/, which is not this script's fence.
+CHARTER_REAL="$REPO_ROOT/.claude/workflows/bp-pds-charter.md"
+
+# run_e <workflow> <gap-ceiling> -> sets $out and $rc
+run_e() {
+  out="$(PDS_ANCHOR_WORKFLOW="$1" PDS_ANCHOR_TRIGGER_GAP_CEILING="$2" \
+        bash "$CHECK" "$CHARTER_REAL" 2>&1)"
+  rc=$?
+}
+
+# A fixture workflow arm E can parse: BOTH halves, independently settable.
+# <paths-glob> <roster-glob>
+mk_wf() {
+  printf 'on:\n  pull_request:\n    paths:\n      - "%s"\n  push:\n    branches: [main]\njobs:\n  changes:\n    steps:\n      - run: |\n          roster='"'"'\n          pds-harnesses %s\n'"'"'\n' "$1" "$2"
+}
+
+# ── ARM 21 (QUIET/CONTROL, arm E): total coverage stays GREEN ────────────────
+# Paired with arm 22. Without this, arm 22 is satisfiable by an arm E that reds
+# on every workflow it is ever shown — the "a control that fires on everything
+# proves nothing" failure. `**` in BOTH halves covers every cited path, so the
+# gap is 0 and the run must pass.
+mk_wf '**' '**' > "$TMP/wf_full.yml"
+run_e "$TMP/wf_full.yml" 11
+if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
+  ok "ARM 21 CONTROL — a workflow covering every cited path scores 0 and stays green (arm E)"
+else bad "ARM 21 CONTROL — a workflow covering every cited path scores 0 and stays green (arm E)" "rc=$rc $out"; fi
+
+# ── ARM 22 (RED, arm E): the ratchet fires when the gap EXCEEDS the ceiling ──
+# The REAL workflow, ceiling one below the measured gap. This is the arm that
+# fails if arm E's comparison is inverted, its ceiling deleted, or its verdict
+# demoted to a PROGRESS line.
+run_e "$REPO_ROOT/.github/workflows/shell-harnesses.yml" 0
+if [ "$rc" -ne 0 ] && grep -q 'cited path(s) cannot DISPATCH this check' <<<"$out"; then
+  ok "ARM 22 RED — a gap above the ceiling reds (arm E ratchet)"
+else bad "ARM 22 RED — a gap above the ceiling reds (arm E ratchet)" "rc=$rc $out"; fi
+
+# ── ARM 23 (RED, arm E): the gap is named, not just counted ─────────────────
+# A count alone gives the .github/ repair no worklist. board.ex is the path
+# whose three rots in one day produced this arm; it must appear BY NAME.
+if [ "$rc" -ne 0 ] && grep -q 'api/lib/barkpark/tasks/board.ex' <<<"$out"; then
+  ok "ARM 23 RED — the uncovered paths are named individually (arm E worklist)"
+else bad "ARM 23 RED — the uncovered paths are named individually (arm E worklist)" "rc=$rc $out"; fi
+
+# ── ARM 24 (RED, arm E): BOTH halves are required, not either ───────────────
+# THE LOAD-BEARING ARM. GitHub needs the workflow-level `paths:` to DISPATCH and
+# the roster row to SELECT the job; a path in one and not the other starts a run
+# in which the job is skipped. An arm E that checked only the workflow paths
+# would pass arms 21-23 unchanged and still be wrong. Here every path is in the
+# workflow half (`**`) and only `scripts/pds-*.sh` is in the roster, so the
+# uncovered rows must read `in workflow paths: yes` AND `roster: no`.
+mk_wf '**' 'scripts/pds-*.sh' > "$TMP/wf_half.yml"
+run_e "$TMP/wf_half.yml" 0
+if [ "$rc" -ne 0 ] && grep -q 'in workflow paths: yes  in pds-harnesses roster: no' <<<"$out"; then
+  ok "ARM 24 RED — a path in the workflow half but NOT the roster still counts as a gap (arm E AND)"
+else bad "ARM 24 RED — a path in the workflow half but NOT the roster still counts as a gap (arm E AND)" "rc=$rc $out"; fi
+
+# ── ARM 25 (RED, arm E): an EMPTY roster parse reds as UNCHECKED ────────────
+# An absence is never caught by inspection. If the roster pattern stops
+# matching, every path scores "uncovered" or the set scores empty — either way
+# arm E measured nothing, and it must say so rather than print a number.
+printf 'on:\n  pull_request:\n    paths:\n      - "**"\njobs: {}\n' > "$TMP/wf_noroster.yml"
+run_e "$TMP/wf_noroster.yml" 11
+if [ "$rc" -ne 0 ] && grep -q 'roster rows parsed EMPTY' <<<"$out"; then
+  ok "ARM 25 RED — an empty roster parse reds as UNCHECKED, not as coverage (arm E precondition)"
+else bad "ARM 25 RED — an empty roster parse reds as UNCHECKED, not as coverage (arm E precondition)" "rc=$rc $out"; fi
+
+# ── ARM 26 (RED, arm E): an EMPTY workflow-paths parse reds as UNCHECKED ────
+# The other half of the precondition, asserted separately: a single fixture can
+# never break both parses at once, so one passing cannot vouch for the other.
+printf 'on:\n  push:\n    branches: [main]\njobs:\n  changes:\n    steps:\n      - run: |\n          roster=\n          pds-harnesses scripts/pds-ledger-census.sh\n' > "$TMP/wf_nopaths.yml"
+run_e "$TMP/wf_nopaths.yml" 11
+if [ "$rc" -ne 0 ] && grep -q 'pull_request paths list parsed EMPTY' <<<"$out"; then
+  ok "ARM 26 RED — an empty workflow-paths parse reds as UNCHECKED (arm E precondition)"
+else bad "ARM 26 RED — an empty workflow-paths parse reds as UNCHECKED (arm E precondition)" "rc=$rc $out"; fi
+
+# ── ARM 27 (RED, arm E): a MISSING workflow reds as UNCHECKED ──────────────
+# The third way arm E can go blind, and the cheapest to hit: a rename in
+# .github/ leaves this script pointed at nothing.
+run_e "$REPO_ROOT/.github/workflows/this-workflow-does-not-exist.yml" 11
+if [ "$rc" -ne 0 ] && grep -q 'arm E is UNCHECKED — workflow not found' <<<"$out"; then
+  ok "ARM 27 RED — a missing workflow reds as UNCHECKED (arm E precondition)"
+else bad "ARM 27 RED — a missing workflow reds as UNCHECKED (arm E precondition)" "rc=$rc $out"; fi
+
+# ── ARM 28 (QUIET/CONTROL, arm E): `*` must NOT span a path separator ──────
+# Paired with arm 21, and it is why the globs are translated to regexes rather
+# than run through a bash `case`: `case` patterns are not pathname expansion, so
+# `*` there matches `/` and `scripts/pds-*.sh` would "cover" every .sh under a
+# nested directory. Over-matching UNDER-counts the gap, the unsafe direction for
+# a ratchet. `scripts/*` in both halves must therefore leave the nested
+# api/, internal/ and docs/ citations uncovered rather than absorbing them.
+# 10, NOT 11: `scripts/*` legitimately covers all five FLAT scripts/ citations,
+# including the .py one that `scripts/pds-*.sh` misses on its extension. The arm
+# asserts what the glob COVERS and what it does NOT in one number, so a
+# translation that neutered `*` entirely would score 15 here and one that let it
+# span `/` would score 5 — both fail this arm, in opposite directions.
+mk_wf 'scripts/*' 'scripts/*' > "$TMP/wf_star.yml"
+run_e "$TMP/wf_star.yml" 99
+if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 10 ' <<<"$out"; then
+  ok "ARM 28 CONTROL — a single \052 does not span \057, so nested paths stay uncovered (arm E glob)"
+else bad "ARM 28 CONTROL — a single \052 does not span \057, so nested paths stay uncovered (arm E glob)" "rc=$rc $out"; fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
 printf 'RESULT: PASS\n'
