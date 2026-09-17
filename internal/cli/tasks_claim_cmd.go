@@ -36,7 +36,18 @@ func runTaskClaim(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		// CLAIMING AND PROTECTING ARE ONE ACT (task-f79e39f4992749a5). The
 		// claim landed; now it has to reach the file the pulse loop reads, and
 		// the append has to be PROVEN by a readback. See recordHeldClaim.
-		return recordClaimInHeldFile(out, cmd, tail)
+		if held := recordClaimInHeldFile(out, cmd, tail); held != exitOK {
+			return held
+		}
+		// PRIMING RIDES THE SAME SUCCESS PATH as the held-file append, for the
+		// same reason: what the agent was holding when it claimed is only
+		// recoverable if it is written down AT the claim, not remembered after
+		// it. Opt-in (BARKPARK_PRIMING_DIR); see tasks_priming_manifest.go. A
+		// request whose doc id could not be resolved passes "" through on
+		// purpose — recordPrimingManifest is the one place that decides whether
+		// that is a loud failure (a priming dir IS configured) or a no-op.
+		pr, _ := claimRequestOf(cmd, tail)
+		return recordPrimingManifest(out, defaultPrimingEnv(), pr.docID, pr.workerID)
 	}
 	if rc != exitConflict {
 		return rc
