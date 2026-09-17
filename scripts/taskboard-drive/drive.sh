@@ -156,17 +156,30 @@ TMX() { tmux -L "$SOCK" "$@"; }
 # truecolor branch for a "screen*" TERM, and terminal-features RGB keeps tmux
 # from downsampling the 38;2;r;g;b it stores and re-emits. Same bytes on every
 # host — the same reason -x/-y is pinned rather than inherited.
-# MEASURED: setting these through tmux's own options + `new-session -e` was NOT
-# enough on ubuntu-latest — the pane still came up Ascii. So the harness sets
-# them on the APP's command line with `env`, where nothing downstream can
-# reinterpret them, and terminal-features RGB only keeps tmux from downsampling
-# what it stores. BP_ENV is the launch prefix every new-session uses.
+# MEASURED, in this order, on ubuntu-latest: tmux's own `default-terminal`
+# option plus `new-session -e` did NOT style the pane; forcing TERM/COLORTERM on
+# the app's command line did NOT either. The actual gate is `CI`:
+#
+#   termenv.go:28  func (o *Output) isTTY() bool {
+#   termenv.go:32    if len(o.environ.Getenv("CI")) > 0 { return false }
+#
+# and ColorProfile() returns Ascii the moment isTTY() is false — before TERM or
+# COLORTERM is read at all. Every GitHub runner exports CI=true, so the board
+# painted with zero SGR and every style-keyed assert here was unmeasurable.
+#
+# The pane genuinely IS a tty, so `env -u CI` is the honest correction, not a
+# workaround: it tells termenv the truth about the thing it is asking about.
+# TERM/COLORTERM/TERM_PROGRAM stay pinned so the profile is TrueColor rather
+# than whatever the host's tmux.conf happens to imply, and terminal-features RGB
+# keeps tmux from downsampling the 38;2;r;g;b it stores and re-emits — the same
+# captured bytes on every host. BP_ENV is the launch prefix every new-session
+# uses.
 pin_pane_color() {
   TMX set-option -g  default-terminal  screen-256color >/dev/null 2>&1 || true
   TMX set-option -ga terminal-features ",*:RGB"        >/dev/null 2>&1 || true
 }
 PANE_ENV=(-e COLORTERM=truecolor -e TERM_PROGRAM=tmux -e TERM=screen-256color)
-BP_ENV="env TERM=screen-256color COLORTERM=truecolor TERM_PROGRAM=tmux"
+BP_ENV="env -u CI TERM=screen-256color COLORTERM=truecolor TERM_PROGRAM=tmux"
 
 cleanup() {
   if [ "${BP_DRIVE_KEEP:-}" = "" ]; then
