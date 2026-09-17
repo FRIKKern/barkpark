@@ -16211,3 +16211,96 @@ name unrelated code.
   D-number mint does, via the reservation ledger) and ANY script — a false red by construction, on
   a gate nobody aimed at this. The floor therefore stays 809 and the checker prints its PROGRESS
   line instead; whoever widens check 1.2 to name its own files should raise it in the same change.
+
+- **PDS-D759 — EVERY THAW OF THE HARNESS LEAVES A BLOB RECORD, AND THE RECORD IS A HISTORICAL
+  LEDGER, NEVER A STATEMENT OF THE CURRENT FREEZE.** *Filed by r21 dw22 against
+  `pds-bl-charter-freeze-ledger`. Number minted through `bash scripts/pds-record-parity.sh
+  --allocate-d 1` (PDS-D725), reserved in the same commit as this block.*
+
+  **THE GAP, MEASURED, NOT ASSERTED.** `git log --format=%H origin/main -- scripts/pds-pull-proof.sh`
+  returns **25** commits. Joining each one's post-merge blob — `git rev-parse <sha>:scripts/pds-pull-proof.sh`,
+  never `shasum` (PDS-D154) — against this charter resolved **3**: `e219e97cc…` (PDS-D146) and the
+  pre/post pair `012e3232b…`/`97d9cbb86…` recorded by PDS-D745/D746. The control that makes those
+  zeroes admissible fired on the same file with the same grep: `grep -c PDS-D` = 1155 hits. The greps
+  work; the values were not there. So the charter could name the DECISION for a thaw (PDS-D741 for
+  #18078, PDS-D742/D743/D744 for #18113) and still not name the BLOB that decision produced — the
+  freeze value lived only in a PR body, which is not a record anyone can query.
+
+  **(i) THE RULE.** Every commit that changes `scripts/pds-pull-proof.sh` is a THAW, sanctioned or
+  not. A thaw is RECORDED when this charter carries the commit's post-merge blob OID, read with
+  `git rev-parse <sha>:scripts/pds-pull-proof.sh`. This is a standing rule over the class, not a
+  list of named thaws: the set is DERIVED at read time by the `git log` above and can never be read
+  off a paragraph.
+
+  **(ii) WHICH OF PDS-D732'S CATEGORIES A RECORDED OID FALLS INTO — THE TENSION, RESOLVED IN SO MANY
+  WORDS.** PDS-D732 rules that the freeze identity is READ, never TYPED, because a hand-typed hash
+  manufactures a false THAWED verdict the day a sanctioned thaw lands. An OID recorded under THIS
+  decision is **`FREEZE_BLOB_HISTORICAL`** in D732's own taxonomy: a historical record OF ONE THAW,
+  and it **may never be read as the current freeze**. The current freeze stays DERIVED at run time
+  from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` by `scripts/pds-climb-preflight.sh:128`,
+  which this decision does not touch and does not reopen. The two are distinguishable by their
+  cardinality alone: the ledger below grows by one row per thaw and never shrinks; the freeze is
+  exactly one value and is never written down.
+
+  **(iii) THE NAMED COMMAND.** `bash scripts/pds-record-parity.sh --axis f`. Given `origin/main` it
+  answers, for every harness-moving commit in the window, "which PDS-D records this thaw, and what
+  post-merge blob OID did it produce?", and it prints the two counts as **TWO SEPARATE NUMBERS** —
+  commits in window, and commits resolving to a PDS-D — never as one verdict. rc 1 when they differ,
+  naming each unrecorded commit by short sha, date, blob and subject.
+
+  **(iv) THE JOIN KEY IS THE BLOB OID AND NOTHING ELSE, BECAUSE THE ALTERNATIVE WAS MEASURED AND
+  REJECTED.** A PR-number join was tried first and resolves 9 of 25 against 3 of 25 for the blob
+  join — but the extra six are coincidental: this charter cites PR numbers for a dozen reasons that
+  have nothing to do with a freeze, so a PR-number join manufactures records that were never written.
+  A 40-hex blob OID in this file can only ever have got here as a freeze record.
+
+  **(v) THE WINDOW IS DERIVED AND THE EXEMPTION HAS A MECHANICAL TEST.** The anchor is the OLDEST
+  harness-moving commit whose blob this charter records — today `58d1bd3a5` (blob `e219e97cc…`,
+  PDS-D146's re-freeze). A harness-moving commit older than the anchor predates the freeze doctrine
+  and is **EXEMPT**; the exemption's test is `git merge-base --is-ancestor <sha> <anchor>` and
+  `--axis f` prints it rather than implying it. The anchor is not a literal in the script: it is
+  re-derived on every run, so recording an older thaw moves the window by itself. An enumeration of
+  exempt shas would be a snapshot; this is a predicate.
+
+  **(vi) NON-VACUITY IS PROVEN IN BOTH DIRECTIONS BY A PLANTED CONTROL, NOT BY A ZERO.** A run
+  reporting zero unrecorded commits proves nothing on its own — that is the shape this decision
+  exists to refuse. The arm therefore takes `--charter <path>`: point it at a copy of this file with
+  one ledger row deleted and that commit is NAMED in the output; point it at the real file and the
+  count is zero. Both arms are run and both are quoted in the landing PR. The arm additionally
+  refuses to score at all if `grep -c PDS-D` over the charter returns 0 — an empty read cannot pass
+  as a clean read.
+
+  **(vii) THE RETROACTIVE LEDGER — ALL 20 IN-WINDOW THAWS, DERIVED, NOT TYPED FROM MEMORY.** Each
+  row's blob was produced by `git rev-parse <sha>:scripts/pds-pull-proof.sh` at
+  `origin/main` = `f4c25e982`. Two rows (`4d5a84001`, `bb8e98f78`) were already recorded by
+  PDS-D745/D746 and are restated here so this table is the complete ledger rather than a delta.
+
+  | commit | merged | PR | post-merge blob OID |
+  |---|---|---|---|
+  | 1c2c75e7e | 2026-09-17 | #19023 | `49f54d35e5377f1be67bc765f56a90567ba4af99` |
+  | 1cbfc2446 | 2026-09-17 | #18973 | `f70fc145dfd1e337f93b5f20ddc25c67f39695cd` |
+  | 09f308ae9 | 2026-09-17 | #18939 | `886685a6df9f6c5d6eed1c00bb4d3635185c6137` |
+  | 2a0eea337 | 2026-09-17 | #18907 | `27efdcea537a42b2ad9ee8d062e68dfbf49409b4` |
+  | 6baaec44c | 2026-09-17 | #18886 | `b4812b9fcb9776f3bdb756fe05f39a8890eccc53` |
+  | 7d56df653 | 2026-09-13 | #18213 | `1225ca803f97ed1a76b157969d59cde9eb3afbdf` |
+  | b67d67f9e | 2026-09-13 | #18113 | `0ac6d5d98fd67ae13298abe48874af616d5e8f3d` |
+  | 36db8df8b | 2026-09-13 | #18078 | `9745ff1f793ba89962828cd631a7d4a0e34e53d3` |
+  | 1ca9b5749 | 2026-09-13 | #18026 | `f47c825200058dec2f34e141fca7ddd6347b0c38` |
+  | 4d5a84001 | 2026-09-11 | #17728 | `97d9cbb86afe6910d7a49bd712ca3348084f4fb0` |
+  | bb8e98f78 | 2026-09-11 | #17710 | `012e3232b8986dbe0bc516249363e7f3298c3b31` |
+  | f16ac8dc8 | 2026-09-11 | #17618 | `21a8f195dbd03eb42e901510cfeab0d766508ad8` |
+  | a2deecc1f | 2026-09-11 | #17562 | `9a7618d40fba58db949c29a29e56c9b0eef5ab9c` |
+  | f0bc9b158 | 2026-09-11 | #17565 | `2b0e869d87fea38089cf71b8987439c566db7715` |
+  | 0d4b5c7ae | 2026-09-11 | #17558 | `3e4163991bdec7eb9fe4642b08c0d5f08fa69a40` |
+  | b10f6cf58 | 2026-09-09 | #17099 | `48fff66cf6d52def5db3c8b90f6162731c6d2d53` |
+  | 6c8b8a82f | 2026-09-07 | #16689 | `1db61a45f2e1f4d460f5bc08f80fa410bd5bc648` |
+  | 13c379bcd | 2026-09-06 | #16272 | `f99216471f9cd914064b9e6fc4bc3b6ee59a6da2` |
+  | dfaccf0e5 | 2026-09-02 | #15268 | `7a703fd641f77b906dcbd40f004f7639cdc9b2ae` |
+  | 6e677d2b8 | 2026-09-01 | #14699 | `255c458ba2797321fcd2f2ac327bf87430a59d0e` |
+
+  **(viii) WHAT IS NOT DONE HERE.** `--axis f` is a REPORTER like its sibling axes and carries no
+  required check name. And this PR touches `scripts/`, so
+  `tooling/pds/rerun-adjudicate.test.mjs` check 1.2 — which asserts `git diff --stat origin/main --
+  scripts/` is EMPTY — reds by construction, the same false red PDS-D758(vii) recorded and declined
+  to fix from outside its fence. `shell-harnesses.yml` is not one of main's four required contexts,
+  so it cannot block; widening check 1.2 to name its own files remains the standing ask.

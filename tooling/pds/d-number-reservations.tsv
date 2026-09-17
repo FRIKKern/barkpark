@@ -39,3 +39,4 @@ PDS-D755	2026-09-17T07:36:46Z	pds-bl-w16-prewarm-warms-the-wrong-build-tree (r21
 PDS-D756	2026-09-17T13:44:49Z	pds-bl-charter-d399-duplicate-identifier (r21 dw14) — duplicate census re-lensed 5 to 20, arm D ratchet
 PDS-D757	2026-09-17T13:54:39Z	pds-bl-charter-anchors-stale-vs-frozen-blob (r21 dw14) — frozen-blob criterion ruled superseded, content anchors + live guard
 PDS-D758	2026-09-17T15:46:18Z	pds-bl-charter-api-anchor-rot-rate (r21 dw21) — 2 breaks / 30h priced by replaying arm A across main; cite the HOME not the construct; signal gap recorded
+PDS-D759	2026-09-17T16:45:49Z	pds-bl-charter-freeze-ledger (r21 dw22) — the harness thaw ledger: blob OID joins a thaw to its PDS-D
