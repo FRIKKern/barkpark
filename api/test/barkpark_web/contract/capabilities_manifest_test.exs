@@ -1652,7 +1652,12 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       # the attribute contract agents generate types from
       assert blocks["callout"] == ["id", "tone", "title"]
-      assert blocks["stat"] == ["label", "value", "denom"]
+      # `verdict` LAST, added on purpose by task-8bdef19b5acef8a8: BPML used to
+      # drop a stat's verdict on round-trip while the render leg painted
+      # `.bp-stat__v--loss`/`--peace` off it. This line is the tripwire that
+      # makes the grammar-digest move visible to a reviewer — a client
+      # regenerating types off the digest sees exactly this one new key.
+      assert blocks["stat"] == ["label", "value", "denom", "verdict"]
       assert blocks["paper"] == ["slug", "title"]
       # aliases ride the table — <strong> teaches nothing new
       assert inline["b"] == "strong"
