@@ -565,6 +565,25 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		req.url = stamped
 	}
 
+	// `--keep-rerun` back ONTO the wire (task-4d5a2dde8a02d057). The strip above
+	// keeps it away from splitArgs, which would refuse an undeclared flag; but
+	// since PR #18817 the SERVER refuses this same shape too (409
+	// rerun_would_orphan) and honours `keep_rerun` as one of its three ways
+	// through. A stripped-and-never-forwarded flag sent a BARE supersede, so the
+	// one flag an operator reaches for to get past the refusal was the one flag
+	// that could not reach the door that honours it. Stamped on the RESOLVED
+	// body — see stampStageKeepRerun for why not the manifest and not tail — and
+	// before the dry-run branch, so `--dry-run` previews what the server reads.
+	if stageKeepRerun {
+		if err := stampStageKeepRerun(req); err != nil {
+			if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
+				out.userErr("%v", err)
+				humanErrorCode(out, "usage")
+			}
+			return exitUsage
+		}
+	}
+
 	// Non-fatal notices from the writer-less build half (today: an unused
 	// redirected stdin). stderr, never stdout, so -o json stays one parseable
 	// document; before the dry-run branch, because --dry-run is exactly where a

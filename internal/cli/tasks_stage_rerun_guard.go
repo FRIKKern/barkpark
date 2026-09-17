@@ -91,6 +91,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -112,6 +113,11 @@ const stageKeepRerunFlag = "--keep-rerun"
 // codes reads one vocabulary whether the refusal came from here or from the
 // verb's write seam.
 const stageRerunOrphanCode = "rerun_would_orphan"
+
+// stageKeepRerunParam is what the flag becomes on the wire. The server reads
+// BOTH "keep_rerun" and "keep-rerun" (Params.stage_keep_rerun); the snake form
+// is sent because that is the spelling the door documents.
+const stageKeepRerunParam = "keep_rerun"
 
 // extractStageKeepRerunFlag removes every bare occurrence of stageKeepRerunFlag
 // from tail and reports whether it was present. An inline `--keep-rerun=x` form
@@ -354,4 +360,53 @@ func guardStageRerunOrphan(out *writer, g globals, ctx manifest.Context, m *mani
 			docID, why, docID, stageKeepRerunFlag)
 		return exitOK, false
 	}
+}
+
+// ── FORWARDING THE FLAG (task-4d5a2dde8a02d057) ──────────────────────────────
+//
+// The strip above exists so splitArgs never sees --keep-rerun. For as long as
+// the refusal lived only HERE that was the whole story: the flag opened a
+// client-side gate and had no business on the wire.
+//
+// PR #18817 changed the world. `POST /v1/tasks/:doc_id/stage` now refuses the
+// same shape itself — 409 rerun_would_orphan — and honours three overrides of
+// its own: `rerun` (re-bind), `clear_rerun` (subtract), `keep_rerun` (carry the
+// existing probe forward untouched). `clear-rerun` is DECLARED in the tasks
+// manifest, so bp picks it up from /v1/capabilities and buildBody puts it on the
+// wire with no Go change. `keep_rerun` is not declared, so after the strip the
+// request left here BARE and the server refused the very call the operator
+// reached for to get past the refusal.
+//
+// THE MANIFEST ROUTE WAS CONSIDERED AND REJECTED. Declaring `keep-rerun`
+// alongside `clear-rerun` in api/lib/barkpark/plugins/tasks.ex would put it on
+// the wire for free — and would flip stageKeepRerunFlagApplies to FALSE (it
+// stands down for any manifest that declares a flag of this name, so an
+// additive spelling can never shadow a real one). stageKeepRerun would then
+// always read false, guardStageRerunOrphan would refuse locally, and the flag
+// would be refused by the client before the server it was declared for ever saw
+// it. The manifest route is a regression, not a fix. The fix is here: forward
+// what the strip took.
+//
+// It is stamped onto the RESOLVED URL rather than pushed back into tail, for
+// the reason the strip exists in the first place — tail goes through splitArgs,
+// which refuses any flag the manifest does not declare. The query string is
+// also exactly where its declared sibling lands: `bp task stage --note X
+// --supersede` resolves to `?note=X&supersede=true`, positionals in the body,
+// every FLAG on the query, so `clear-rerun` rides the query and `keep_rerun`
+// now reaches the same Params.stage_keep_rerun read by the same route.
+// appendTaskStatusFilter's seam, and it runs BEFORE the dry-run branch so
+// `--dry-run` previews the URL the server will read.
+func stampStageKeepRerun(req *manifestRequest) error {
+	if req == nil {
+		return nil
+	}
+	u, err := url.Parse(req.url)
+	if err != nil {
+		return fmt.Errorf("cannot apply %s to %q: %v", stageKeepRerunFlag, req.url, err)
+	}
+	q := u.Query()
+	q.Set(stageKeepRerunParam, "true")
+	u.RawQuery = q.Encode()
+	req.url = u.String()
+	return nil
 }
