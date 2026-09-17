@@ -147,128 +147,209 @@ export function embedChipLabel(block) {
   return target ? `↪ ${target}` : "↪ (untitled)";
 }
 
-// ── pd-ee-sheet-embed-retarget: the sheet REFERENCE retarget affordance ───────
+// ── pd-ee-sheet-embed-retarget: the REFERENCE retarget affordance ─────────────
 //
-// A sheet block's `ref` is the ONE thing about it an author authors. Everything else
-// — the cells, the merges, the styles — is the Sheets plugin's surface and stays
-// read-only here (the read-only-atom contract above is unchanged for the cells). So
-// the atom gains EXACTLY one control: the EXISTING <bp-reference-picker> Web
-// Component, scoped by `ref-type` to sheet documents. There is no second picker and
-// no bespoke search — the same element the field control-atom mounts for
-// field-reference (see buildPickerNodeView in field-node.js), seeded and read the
-// same way, so a scope/permission change lands on both surfaces at once.
+// A read-only atom has exactly ONE thing about it an author authors: the REFERENCE.
+// For a `sheet` that is `ref` (a sheet document id); for an `embed` it is `target`
+// (the transcluded note's TITLE). Everything else — a sheet's cells, an embed's
+// transcluded prose — belongs to the referenced document and stays out of reach here
+// (the read-only-atom contract above is unchanged for all of it). So each atom gains
+// EXACTLY one control: the EXISTING <bp-reference-picker> Web Component, scoped by
+// `ref-type`. There is no second picker and no bespoke search — the same element the
+// field control-atom mounts for field-reference (see buildPickerNodeView in
+// field-node.js), so a scope/permission change lands on every surface at once.
 //
-// THE PERMISSION BOUNDARY. The picker browses `/v1/data/search/<dataset>?type=sheet`
-// with `credentials: "same-origin"` — the server decides what the acting member may
-// READ, and the client asserts nothing. Retargeting writes ONLY the paper's own
-// block; it issues no write to the sheet document and confers no grant on it. Where
-// the host denies dataset browse (`data-picker-browse="false"` — the item-share edit
-// grant, which authorizes this ONE paper, not discovery) no picker is mounted at
-// all, exactly as the field picker behaves. A template-locked block and a
-// non-editable editor likewise mount no control.
+// THE PERMISSION BOUNDARY. The picker browses `/v1/data/search/<dataset>` with
+// `credentials: "same-origin"` — the server decides what the acting member may READ,
+// and the client asserts nothing. Retargeting writes ONLY the paper's own block; it
+// issues no write to the referenced document and confers no grant on it. An embed's
+// target is resolved LATER, at VIEW render (Papers.resolve_embeds_in_blocks →
+// walk.ex embed/2 reads `pal.embeds[target]`), against the READER's own authority —
+// so picking a target can never widen anyone's read: a reader who cannot read the
+// target still lands on the unresolved fallback marker. Where the host denies dataset
+// browse (`data-picker-browse="false"` — the item-share edit grant, which authorizes
+// this ONE paper, not discovery) no picker is mounted at all, exactly as the field
+// picker behaves. A template-locked block and a non-editable editor likewise mount no
+// control.
 //
-// THE SNAPSHOT DECISION (the data hazard the row names). `snapshot` is a CACHED
-// projection of the OLD sheet. Carrying it under a new `ref` would render the old
-// sheet's cells beneath the new sheet's name — a silent lie — so a retarget CLEARS
-// it: the node drops the key and run-convert emits `snapshot: null` alongside the
-// new `ref`. Nothing is lost by clearing it: Barkpark.Content.Sheets'
-// hydrate_sheet_embed_snapshots runs PRE-WRITE on every document save (see
-// content/writer.ex) and re-projects the grid for the new ref in the SAME save; and
-// if the ref resolves to nothing, the reader's `Map.get(b, "snapshot") || %{}` in
-// PortableDoc.Render.Compose paints an empty grid rather than stale cells.
-const SHEET_RETARGET_REF_TYPE = "sheet";
-const SHEET_RETARGET_TEST_ID = "paper-sheet-retarget";
+// WHERE EMBED DIVERGES FROM SHEET — three seams, each load-bearing:
+//
+//  1. VALUE SPACE. The picker's `bp-change` detail.value is a canonical DOC ID
+//     (bp-reference-picker.js `_select`). A sheet's `ref` IS a doc id, so it is
+//     forwarded unchanged. An embed's `target` is a human TITLE — resolution runs
+//     through `Content.resolve_doc_by_title_or_alias`, the same authority a wikilink
+//     uses — so an id written there would resolve to NOTHING. The embed adapter
+//     therefore commits the picked document's TITLE, read off the pill the picker
+//     renders synchronously before it emits.
+//  2. FREE TEXT. `![[Some Note]]` is the shorthand authors already type, and the
+//     picker must not be a worse door than markdown: Enter in the typeahead commits
+//     the typed string verbatim as the target, resolved or not. A sheet ref has no
+//     such shorthand and takes picked ids only.
+//  3. THE SNAPSHOT CLEAR. A sheet carries `snapshot`, a cached projection of the OLD
+//     sheet, which a retarget must explicitly null or the old grid renders under the
+//     new name. An embed caches NOTHING — its transclusion is resolved fresh on every
+//     render — so its patch carries `target` alone. Mirroring the sheet's
+//     `snapshot: null` here would write a key the embed block does not own.
+//
+// NOTHING IS VALIDATED ON THE WAY OUT. A target naming nothing must still SAVE: notes
+// get renamed, and a cross-dataset draft points at something that does not exist yet.
+// The reader already paints an unresolved fallback (walk.ex embed/2's
+// `paper-embed--unresolved` branch), so a validate-on-save would only make those
+// workflows impossible. CLEARING to "" is the one refusal, and it is not validation:
+// a blank target leaves a chip with no identity and no route back to the note it
+// named — deleting the block is the affordance for "I do not want this".
 
-// The carried block with a NEW `ref` and the OLD ref's cached grid dropped. Pure —
-// it never mutates the block it is given (the node's attr object is shared with the
-// PM document; mutating it in place would edit history).
-export function sheetBlockRetargeted(block, nextRef) {
+// Per-bpType retarget descriptor. The node-view is ONE factory, so the two atoms'
+// differences live here as data rather than as branches in the mount path.
+const RETARGET_SPECS = {
+  sheet: {
+    // The carried block key this control authors.
+    key: "ref",
+    // The picker's `ref-type` — the document type its browse is scoped to.
+    refType: "sheet",
+    testId: "paper-sheet-retarget",
+    // A sheet's ref lives in the picker's OWN value space (a doc id), so the picker
+    // can be seeded with it and kept in sync with echoes/undo.
+    seedFromBlock: true,
+    // Keys the retarget must CLEAR because they cache the OLD reference.
+    clearKeys: ["snapshot"],
+    freeText: false,
+    fromPick: (detail) => coercePickerValue(detail),
+  },
+  embed: {
+    key: "target",
+    // An embed target resolves against PAPERS (Content.Papers @paper_type "paper"),
+    // by title-or-alias.
+    refType: "paper",
+    testId: "paper-embed-retarget",
+    // A TITLE is not a doc id: seeding the picker with one would make it fetch a
+    // document whose id is a title and render a bogus pill. The chip beside it already
+    // says what this block transcludes, so the picker stays a pure "change it to…"
+    // door.
+    seedFromBlock: false,
+    clearKeys: [],
+    freeText: true,
+    fromPick: (detail, picker) => pickerSelectedTitle(picker, coercePickerValue(detail)),
+  },
+};
+
+// The TITLE of the document the picker just selected. bp-reference-picker renders its
+// selected pill (`.ref-selected-title`) inside `_select` BEFORE it emits bp-change, so
+// the title is in the DOM by the time this runs. Falls back to the emitted value (the
+// doc id) when the pill is absent or still resolving — an unresolved target SAVES, so
+// a fallback is a worse target, never a dropped edit.
+function pickerSelectedTitle(picker, fallbackValue) {
+  const el = picker && picker.querySelector && picker.querySelector(".ref-selected-title");
+  const title = el ? String(el.textContent || "").trim() : "";
+  return title || fallbackValue;
+}
+
+// The carried block with a NEW reference and the OLD reference's cached keys dropped.
+// Pure — it never mutates the block it is given (the node's attr object is shared with
+// the PM document; mutating it in place would edit history).
+export function atomBlockRetargeted(block, spec, nextValue) {
   const next = { ...(block || {}) };
-  next.ref = nextRef;
-  delete next.snapshot;
+  next[spec.key] = nextValue;
+  for (const key of spec.clearKeys) delete next[key];
   return next;
 }
 
-// Does this atom offer a retarget control at all? Four independent nos: a non-sheet
-// atom, a read-only editor, a template-locked block, and a host that denies dataset
-// browse. Exported so a test can assert each no separately rather than inferring the
-// absence from one mounted case.
-export function sheetRetargetAllowed({ bpType, editor, block, scope }) {
-  if (bpType !== SHEET_RETARGET_REF_TYPE) return false;
+// Does this atom offer a retarget control at all? Four independent nos: an atom with
+// no retargetable reference, a read-only editor, a template-locked block, and a host
+// that denies dataset browse. Exported so a test can assert each no separately rather
+// than inferring the absence from one mounted case.
+export function atomRetargetAllowed({ bpType, editor, block, scope }) {
+  if (!Object.prototype.hasOwnProperty.call(RETARGET_SPECS, bpType)) return false;
   if (!editor || editor.isEditable !== true) return false;
   if (isBlockLocked(block)) return false;
   if (!scope || scope.pickerBrowse === false) return false;
   return true;
 }
 
-// Mount the retarget picker into a sheet atom's chrome and wire its commit. Returns
-// null when the affordance is not offered (see sheetRetargetAllowed), and otherwise
+// Mount the retarget picker into an atom's chrome and wire its commit. Returns null
+// when the affordance is not offered (see atomRetargetAllowed), and otherwise
 // { picker, paint, destroy } so the node-view can keep it in lockstep with echoes /
-// undo and tear its listener down.
-function mountSheetRetarget({ dom, node, editor, getPos, bpType }) {
+// undo and tear its listeners down.
+function mountAtomRetarget({ dom, node, editor, getPos, bpType }) {
   const block = (node && node.attrs && node.attrs.bpBlock) || {};
   const scope = canvasScope(editor);
-  if (!sheetRetargetAllowed({ bpType, editor, block, scope })) return null;
+  if (!atomRetargetAllowed({ bpType, editor, block, scope })) return null;
+  const spec = RETARGET_SPECS[bpType];
 
   // The EXISTING reference picker — same element, same attrs, same events as the
-  // field control-atom's picker branch. `ref-type` narrows the browse to sheets.
+  // field control-atom's picker branch. `ref-type` narrows the browse.
   const picker = document.createElement("bp-reference-picker");
   picker.className = "bp-canvas-readonly-retarget";
   picker.setAttribute("contenteditable", "false");
-  picker.setAttribute("data-test-id", SHEET_RETARGET_TEST_ID);
-  picker.setAttribute("ref-type", SHEET_RETARGET_REF_TYPE);
-  picker.setAttribute("value", block.ref == null ? "" : String(block.ref));
+  picker.setAttribute("data-test-id", spec.testId);
+  picker.setAttribute("ref-type", spec.refType);
+  const seed = spec.seedFromBlock ? block[spec.key] : "";
+  picker.setAttribute("value", seed == null ? "" : String(seed));
   if (scope.dataset) picker.setAttribute("dataset", scope.dataset);
   if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
   dom.appendChild(picker);
 
-  // Write the new ref back onto the carried block. setNodeMarkup changes ONLY the
-  // bpBlock attr (the node stays the same atom in the same place), so onUpdate ->
-  // run-convert emits ONE patch-block carrying { ref, snapshot }. Undebounced, like
-  // the field picker: a picker fires bp-change on a discrete selection, not per
-  // keystroke.
-  const commit = (nextRef) => {
+  // Write the new reference back onto the carried block. setNodeMarkup changes ONLY
+  // the bpBlock attr (the node stays the same atom in the same place), so onUpdate ->
+  // run-convert emits ONE patch-block. Undebounced, like the field picker: a picker
+  // fires on a discrete selection, not per keystroke.
+  const commit = (nextValue) => {
     if (!editor.isEditable) return;
     if (typeof getPos !== "function") return;
-    // A CLEAR is not a retarget. Blanking the ref would leave a chip with no
-    // identity and no way back to the sheet it named, so an empty selection is a
-    // no-op here; removing the block is the affordance for "I do not want this".
-    if (!nextRef) return;
+    // A CLEAR is not a retarget — see the note above. Unresolved is fine; blank is not.
+    if (!nextValue) return;
     const pos = getPos();
     if (pos == null) return;
     const cur = editor.state.doc.nodeAt(pos);
     if (!cur) return;
     const curBlock = (cur.attrs && cur.attrs.bpBlock) || {};
-    if (curBlock.ref === nextRef) return; // same sheet — emit nothing
+    if (curBlock[spec.key] === nextValue) return; // same target — emit nothing
     editor
       .chain()
       .command(({ tr }) => {
         tr.setNodeMarkup(pos, undefined, {
           ...cur.attrs,
-          bpBlock: sheetBlockRetargeted(curBlock, nextRef),
+          bpBlock: atomBlockRetargeted(curBlock, spec, nextValue),
         });
         return true;
       })
       .run();
   };
 
-  // LIFT the field picker's identity coercion: bp-change's detail.value IS the new
-  // reference (a doc id), forwarded unchanged.
-  const onChange = (e) => commit(coercePickerValue(e.detail));
+  const onChange = (e) => commit(spec.fromPick(e.detail, picker));
   picker.addEventListener("bp-change", onChange);
+
+  // FREE TEXT (embed only): Enter in the picker's typeahead commits what was typed,
+  // verbatim. The atom's own keydown handler ignores this (wireAtomAccessibility bails
+  // unless e.target IS the wrapper), but the event is stopped anyway so no ancestor
+  // reads a commit as an atom activation.
+  const onKeydown = (e) => {
+    if (e.key !== "Enter") return;
+    const input = e.target;
+    if (!input || !input.classList || !input.classList.contains("bp-ref-search-input")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    commit(String(input.value == null ? "" : input.value).trim());
+  };
+  if (spec.freeText) picker.addEventListener("keydown", onKeydown);
 
   return {
     picker,
     // Keep the seeded picker in sync with an EXTERNAL attr change (an echo, an undo).
     // The WC exposes a `value` property setter that re-renders its pill and does NOT
     // re-emit bp-change; only write when it differs so a mid-interaction picker is
-    // never re-rendered under the user.
+    // never re-rendered under the user. A picker that was never seeded from the block
+    // (embed: a title is not an id) has nothing to sync.
     paint: (b) => {
-      const v = b && b.ref;
+      if (!spec.seedFromBlock) return;
+      const v = b && b[spec.key];
       const str = v == null ? "" : String(v);
       if (picker.value !== str) picker.value = str;
     },
-    destroy: () => picker.removeEventListener("bp-change", onChange),
+    destroy: () => {
+      picker.removeEventListener("bp-change", onChange);
+      if (spec.freeText) picker.removeEventListener("keydown", onKeydown);
+    },
   };
 }
 
@@ -366,11 +447,11 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
           getPos,
         });
 
-        // pd-ee-sheet-embed-retarget: the sheet atom's ONE control — the existing
-        // reference picker, scoped to sheets. null for `embed` (an embed's target is
-        // not a document reference the picker can browse) and null wherever the
-        // affordance is not offered (see sheetRetargetAllowed).
-        const retarget = mountSheetRetarget({ dom, node, editor, getPos, bpType });
+        // pd-ee-sheet-embed-retarget: the atom's ONE control — the existing reference
+        // picker, scoped by ref-type to the documents this atom's reference names
+        // (sheet → sheets, embed → papers). null wherever the affordance is not
+        // offered (see atomRetargetAllowed).
+        const retarget = mountAtomRetarget({ dom, node, editor, getPos, bpType });
 
         return {
           dom,

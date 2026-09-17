@@ -29,8 +29,28 @@
 // sheet would now assert the ABSENCE of the shipped feature — a green on that would
 // mean the feature is gone. So the sheet half of §2 became an EXACT-SHAPE assertion
 // (exactly one control, and it is the reference picker; zero controls outside it, so
-// no cell editor crept in) and the embed half is UNCHANGED at zero. §5 is new: it
-// DRIVES the picker and measures the op.
+// no cell editor crept in). §5 is new: it DRIVES the picker and measures the op.
+//
+// WHAT CHANGED AGAIN, 2026-09-17 (pd-ee-embed-retarget, the sibling row). The EMBED
+// half has now shipped the same affordance, so the four assertions that recorded the
+// embed atom's ZERO controls are retired the same way and for the same reason — a
+// green on "the embed atom mounts no control" would now be a green on the feature
+// being gone. Retired, and what replaced each:
+//   * §2 "the embed atom exposes NO editable control" → EXACT-SHAPE: exactly one
+//     control, it is <bp-reference-picker>, and its ref-type is "paper".
+//   * §4 "preserved-until-touched" asserted the embed control count is 0 → it now
+//     asserts the embed atom holds the picker and NOTHING beside it, the same shape
+//     the sheet half of that check already used.
+//   * §5b's predicate check asserted `bpType:"embed"` is REFUSED → embed is now an
+//     ALLOWED case, and the refusal is asserted on a read-only atom kind that has no
+//     retargetable reference at all.
+//   * §5b MOUNTED (data-picker-browse=false) measured only the sheet picker → it now
+//     measures BOTH, on a canvas seeded with both atoms.
+// UNCHANGED, deliberately: §2's "neither atom's NODE grew a top-level ref/target
+// attr" still holds — an embed's target still rides INSIDE the verbatim-carried
+// bpBlock, exactly as before, so that assertion is still true and still load-bearing.
+// §5c is new: it drives the embed picker and measures the op, which is NOT the sheet's
+// op (see the key-set assertion there).
 //
 // §1  PRECONDITION — both atoms mount and their chips CARRY the reference value.
 //     (Without this every assertion below could pass on an empty chip.)
@@ -98,11 +118,18 @@ const fetches = [];
 const fetchMock = async (url, options = {}) => {
   fetches.push({ url: String(url), options });
   if (options.method === "POST") return { ok: true, json: async () => ({}) };
+  // The two atoms browse DIFFERENT types (a sheet ref names a sheet document; an
+  // embed target names a paper), so the mock answers by the `type=` the picker asked
+  // for. One shared answer would let the embed drive pass on a sheet-shaped hit and
+  // hide the whole value-space divergence this file now pins.
+  const paperSearch = String(url).includes("type=paper");
   return {
     ok: true,
     json: async () => ({
       searchEventId: "search-event-1",
-      documents: [{ _id: "drafts.q4-forecast", title: "Q4 forecast", type: "sheet" }],
+      documents: paperSearch
+        ? [{ _id: "drafts.paper-7f2", title: "Q4 Retro", type: "paper" }]
+        : [{ _id: "drafts.q4-forecast", title: "Q4 forecast", type: "sheet" }],
     }),
   };
 };
@@ -113,7 +140,7 @@ await import("../../../../priv/static/assets/bp-search-intel.js");
 globalThis.BpSearchIntel = window.BpSearchIntel;
 await import("../../../../priv/static/assets/bp-reference-picker.js");
 await import("./index.js");
-const { sheetRetargetAllowed } = await import("./embed-node.js");
+const { atomRetargetAllowed } = await import("./embed-node.js");
 const { NodeSelection } = await import("@tiptap/pm/state");
 
 let failures = 0;
@@ -221,7 +248,13 @@ try {
   check("§1 the embed atom mounts and its chip CARRIES the target (not '(untitled)')", () => {
     const el = byTestId("paper-readonly-embed");
     assert.ok(el, "the embed node-view did not mount — every assertion below is vacuous");
-    const text = el.textContent.trim();
+    // The CHIP, not the whole atom: since pd-ee-embed-retarget the atom also holds the
+    // reference picker, whose own input/buttons sit beside the chip. This check is
+    // about what the chip SAYS is transcluded, so it reads the chip — the same read
+    // the sheet half already does.
+    const chipEl = el.querySelector(".bp-canvas-readonly-chip");
+    assert.ok(chipEl, "the embed chip is missing — the block no longer says what it is");
+    const text = chipEl.textContent.trim();
     assert.equal(
       text,
       `↪ ${EMBED_TARGET}`,
@@ -292,17 +325,42 @@ try {
     );
   });
 
-  check("§2 the embed atom exposes NO editable control (no retarget affordance)", () => {
+  // The EMBED atom, same exact-shape rule (pd-ee-embed-retarget). The ref-type is the
+  // half that cannot be copied from the sheet: an embed's target resolves against
+  // PAPERS by title-or-alias (Content.Papers render_embed_target →
+  // resolve_doc_by_title_or_alias), so a picker scoped to any other type would browse
+  // documents whose titles can never resolve.
+  check("§2 the embed atom exposes EXACTLY ONE control and it is the PAPER-scoped picker", () => {
     const el = byTestId("paper-readonly-embed");
-    const controls = Array.from(el.querySelectorAll(CONTROL_SELECTOR));
+    const picker = byTestId("paper-embed-retarget");
+    assert.ok(
+      picker,
+      "the embed retarget picker did not mount — pd-ee-embed-retarget shipped it; " +
+        "its absence is the feature being gone, not the audit state being restored",
+    );
     assert.equal(
-      controls.length,
+      picker.tagName.toLowerCase(),
+      "bp-reference-picker",
+      `the retarget control is a <${picker.tagName.toLowerCase()}>, not the EXISTING ` +
+        "<bp-reference-picker> the row required be reused",
+    );
+    assert.equal(
+      picker.getAttribute("ref-type"),
+      "paper",
+      "the embed retarget picker is not scoped to PAPERS — an embed target resolves " +
+        "by paper title-or-alias, so any other scope browses unresolvable documents",
+    );
+    assert.ok(el.contains(picker), "the picker is not inside the embed atom");
+
+    const outside = Array.from(el.querySelectorAll(CONTROL_SELECTOR)).filter(
+      (c) => c !== picker && !picker.contains(c),
+    );
+    assert.equal(
+      outside.length,
       0,
-      `AUDIT STATE CHANGED: the embed atom now mounts ${controls.length} control(s) ` +
-        `(${controls.map((c) => c.tagName.toLowerCase()).join(", ")}). ` +
-        `pd-ee-sheet-embed-audit recorded ZERO and pd-ee-sheet-embed-retarget scoped ` +
-        `itself to the SHEET only. If an embed retarget was deliberately added, update ` +
-        `this check and say which row shipped it.`,
+      `the embed atom mounts ${outside.length} control(s) outside the reference picker ` +
+        `(${outside.map((c) => c.tagName.toLowerCase()).join(", ")}) — only the POINTER ` +
+        "is authored here; the transcluded note is edited in the target note",
     );
     assert.equal(
       el.getAttribute("contenteditable"),
@@ -453,20 +511,24 @@ try {
     const embed = nodeOfType("bpEmbed");
     assert.equal(sheet.attrs.bpBlock.ref, SHEET_REF, "preserved");
     assert.equal(embed.attrs.bpBlock.target, EMBED_TARGET, "preserved");
-    assert.equal(
-      byTestId("paper-readonly-embed").querySelectorAll(CONTROL_SELECTOR).length,
-      0,
-      "the embed atom grew a control — an embed target is still not authored in the canvas",
-    );
-    const picker = byTestId("paper-sheet-retarget");
-    const sheetControls = Array.from(
-      byTestId("paper-readonly-sheet").querySelectorAll(CONTROL_SELECTOR),
-    ).filter((c) => c !== picker && !picker.contains(c));
-    assert.equal(
-      sheetControls.length,
-      0,
-      "a second edit surface appeared on the sheet atom beside the reference picker",
-    );
+    // Both atoms now hold a picker, so "nothing moved it" is asserted the same way on
+    // each: exactly the picker, nothing beside it. A second edit surface on either atom
+    // fails here.
+    for (const [label, atomTestId, pickerTestId] of [
+      ["sheet", "paper-readonly-sheet", "paper-sheet-retarget"],
+      ["embed", "paper-readonly-embed", "paper-embed-retarget"],
+    ]) {
+      const picker = byTestId(pickerTestId);
+      assert.ok(picker, `precondition: the ${label} retarget picker is mounted`);
+      const beside = Array.from(byTestId(atomTestId).querySelectorAll(CONTROL_SELECTOR)).filter(
+        (c) => c !== picker && !picker.contains(c),
+      );
+      assert.equal(
+        beside.length,
+        0,
+        `a second edit surface appeared on the ${label} atom beside the reference picker`,
+      );
+    }
   });
   // ── §5 THE RETARGET, DRIVEN ─────────────────────────────────────────────────
   //
@@ -479,9 +541,9 @@ try {
 
   // Drive one full selection through the mounted picker. Returns the batches emitted
   // between the call and the flush, so each drive is measured in isolation.
-  const drivePick = async () => {
+  const drivePick = async (pickerTestId = "paper-sheet-retarget", term = "q4") => {
     batches.length = 0;
-    const picker = byTestId("paper-sheet-retarget");
+    const picker = byTestId(pickerTestId);
     // No picker → no drive. Returning [] lets the §5 checks below report the MISSING
     // op as a failed assertion with a readable diff, instead of this helper throwing
     // and taking every remaining section down with it (an uncaught TypeError here
@@ -493,7 +555,7 @@ try {
     if (change) change.click();
     const input = picker.querySelector(".bp-ref-search-input");
     assert.ok(input, "the picker offers its real typeahead input");
-    input.value = "q4";
+    input.value = term;
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 400));
     const result = picker.querySelector(".bp-ref-dropdown-item");
@@ -594,19 +656,203 @@ try {
     );
   });
 
+  // ── §5c THE EMBED RETARGET, DRIVEN (pd-ee-embed-retarget) ───────────────────
+  //
+  // The embed half, driven the same way — and deliberately NOT asserted by copying §5
+  // with the names swapped. Three things differ, and each one is a place a mirrored
+  // expectation would be FALSE:
+  //
+  //   * the committed value is the picked paper's TITLE, not the doc id the picker
+  //     emits. walk.ex embed/2 looks the target up in a map keyed by the raw target
+  //     string, built by Papers.resolve_embeds_in_blocks via resolve_doc_by_title_or_
+  //     alias — so an id written to `target` resolves to nothing, forever.
+  //   * the patch key set is exactly ["target"] — no `snapshot`. An embed caches no
+  //     projection, so there is nothing stale to clear and a null snapshot would write
+  //     a key the block does not own.
+  //   * a bare TYPED title commits verbatim, resolved or not. `![[Some Note]]` is the
+  //     shorthand authors already have; a picker that refuses a title the search does
+  //     not know would be a worse door than markdown.
+
+  const NEW_EMBED_TARGET = "Q4 Retro";
+  const NEW_EMBED_DOC_ID = "paper-7f2";
+
+  const embedPick = await drivePick("paper-embed-retarget", "retro");
+  const paperSearch = fetches.find(({ url }) => url.includes("q=retro"));
+
+  // §5 retargeted the SHEET and nothing acked it, so this harness's `prevBlocks`
+  // baseline still holds the sheet's ORIGINAL ref — every batch after §5 therefore
+  // re-carries the sheet's patch alongside whatever else changed. That is the canvas
+  // behaving correctly (an unacked op is re-sent), not the embed emitting two ops. So
+  // the embed's op is measured by picking the ops keyed to the EMBED block out of the
+  // batch — and the count of those is asserted, so a second embed op could not hide.
+  const embedOps = (batchList) =>
+    batchList.flat().filter((op) => op && op.id === "em-1");
+
+  check("§5c a real embed picker selection emits EXACTLY patch-block{target}", () => {
+    assert.equal(embedPick.length, 1, "a retarget emitted more than one batch");
+    assert.deepEqual(embedOps(embedPick), [
+      { op: "patch-block", id: "em-1", patch: { target: NEW_EMBED_TARGET } },
+    ]);
+    const patch = embedOps(embedPick)[0].patch;
+    assert.deepEqual(
+      Object.keys(patch).sort(),
+      ["target"],
+      "the embed patch carries a key beside `target` — most likely the sheet twin's " +
+        "`snapshot: null`, which an embed block does not own",
+    );
+    assert.ok(!("snapshot" in patch), "the embed patch mirrored the sheet's snapshot clear");
+  });
+
+  check("§5c the committed target is the paper's TITLE, not the doc id the picker emits", () => {
+    // THE DIVERGENCE, asserted in both directions: the title is present AND the id is
+    // absent. Asserting only the first would pass on a value that happened to contain
+    // both.
+    const node = nodeOfType("bpEmbed");
+    assert.equal(
+      node.attrs.bpBlock.target,
+      NEW_EMBED_TARGET,
+      "the carried target is not the picked paper's title",
+    );
+    assert.ok(
+      !JSON.stringify(embedPick).includes(NEW_EMBED_DOC_ID),
+      `the op carries the doc id ${NEW_EMBED_DOC_ID} — an embed target resolves by ` +
+        "TITLE, so an id there never resolves",
+    );
+  });
+
+  check("§5c the browse fetch is the scoped, PAPER-typed read the picker already does", () => {
+    assert.ok(paperSearch, "the embed picker issued no search fetch");
+    assert.equal(
+      paperSearch.url,
+      "/w/default/p/default/v1/data/search/production?q=retro&perspective=raw&limit=50&type=paper",
+    );
+    assert.equal(
+      paperSearch.options.credentials,
+      "same-origin",
+      "the browse does not ride the caller's own session — the server cannot scope it",
+    );
+  });
+
+  check("§5c the chip moved to the new target and the node grew no top-level attr", () => {
+    const node = nodeOfType("bpEmbed");
+    assert.deepEqual(
+      Object.keys(node.attrs).sort(),
+      ["bpBlock", "bpId", "bpType"],
+      "the retarget moved the target OUT of the verbatim-carried block",
+    );
+    assert.equal(
+      byTestId("paper-readonly-embed")
+        .querySelector(".bp-canvas-readonly-chip")
+        .textContent.trim(),
+      `↪ ${NEW_EMBED_TARGET}`,
+      "the summary chip still names the OLD target after a retarget",
+    );
+  });
+
+  const embedRepick = await drivePick("paper-embed-retarget", "retro");
+  check("§5c re-picking the SAME paper emits ZERO ops", () => {
+    assert.deepEqual(embedRepick, [], `a no-change re-pick emitted ${JSON.stringify(embedRepick)}`);
+  });
+
+  batches.length = 0;
+  const embedPickerEl = byTestId("paper-embed-retarget");
+  const embedRemove = embedPickerEl
+    ? Array.from(embedPickerEl.querySelectorAll("button")).find((b) => b.textContent === "Remove")
+    : null;
+  if (embedRemove) embedRemove.click();
+  canvas.flushPendingChanges();
+  const embedClear = batches.slice();
+
+  check("§5c CLEARING the embed picker is a no-op — a retarget cannot blank a target", () => {
+    assert.deepEqual(embedClear, [], `a clear emitted ${JSON.stringify(embedClear)}`);
+    assert.equal(
+      nodeOfType("bpEmbed").attrs.bpBlock.target,
+      NEW_EMBED_TARGET,
+      "a clear blanked the carried target",
+    );
+  });
+
+  // FREE TEXT. Type a title the mocked search does NOT return and press Enter. The
+  // commit must land anyway: an UNRESOLVED target is a supported state (notes get
+  // renamed; a cross-dataset draft points at something not created yet), and the
+  // reader already paints `paper-embed--unresolved` for it. A validate-on-save would
+  // make those workflows impossible — so this check is the one that would red if a
+  // resolution check were ever added on the way out.
+  const TYPED_TARGET = "A Note Nobody Has Written Yet";
+  batches.length = 0;
+  const typeTarget = (pickerTestId, typed) => {
+    const picker = byTestId(pickerTestId);
+    if (!picker) return;
+    const change = Array.from(picker.querySelectorAll("button")).find(
+      (b) => b.textContent === "Change",
+    );
+    if (change) change.click();
+    const input = picker.querySelector(".bp-ref-search-input");
+    assert.ok(input, "the picker offers its real typeahead input for free text");
+    input.value = typed;
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    input.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    canvas.flushPendingChanges();
+  };
+  typeTarget("paper-embed-retarget", TYPED_TARGET);
+  const typedBatches = batches.slice();
+
+  check("§5c a BARE TYPED title commits verbatim — an unresolved target still SAVES", () => {
+    assert.equal(typedBatches.length, 1, "a typed commit emitted more than one batch");
+    assert.deepEqual(embedOps(typedBatches), [
+      { op: "patch-block", id: "em-1", patch: { target: TYPED_TARGET } },
+    ]);
+    assert.equal(
+      nodeOfType("bpEmbed").attrs.bpBlock.target,
+      TYPED_TARGET,
+      "the typed title did not reach the carried block",
+    );
+  });
+
+  check("§5c the SHEET picker has no free-text door — ids are not typed by hand", () => {
+    // The negative twin of the check above, and the reason free text is a per-atom
+    // spec rather than a shared behaviour: a sheet `ref` is a doc id, and a hand-typed
+    // id is a dangling reference with no reader fallback that names it.
+    batches.length = 0;
+    typeTarget("paper-sheet-retarget", "not-a-real-sheet-id");
+    assert.deepEqual(
+      batches.slice(),
+      [],
+      "typing into the SHEET picker and pressing Enter committed a hand-typed ref",
+    );
+  });
+
   // ── §5b WHERE THE AFFORDANCE IS NOT OFFERED ─────────────────────────────────
   //
   // Four independent nos, asserted on the exported predicate the node-view calls, so
   // each one is measured separately instead of being inferred from one mounted case.
   // The mounted negative below proves the predicate is the one that actually decides.
 
-  check("§5b the predicate refuses embed, a read-only editor, a locked block, and a no-browse host", () => {
+  check("§5b the predicate allows BOTH atoms and refuses a read-only editor, a locked block, a no-browse host, and an atom with no reference", () => {
     const yes = { bpType: "sheet", editor: { isEditable: true }, block: { ref: "a" }, scope: { pickerBrowse: true } };
-    assert.equal(sheetRetargetAllowed(yes), true, "precondition: the allowed case IS allowed");
-    assert.equal(sheetRetargetAllowed({ ...yes, bpType: "embed" }), false, "embed");
-    assert.equal(sheetRetargetAllowed({ ...yes, editor: { isEditable: false } }), false, "read-only editor");
-    assert.equal(sheetRetargetAllowed({ ...yes, block: { ref: "a", locked: true } }), false, "template-locked block");
-    assert.equal(sheetRetargetAllowed({ ...yes, scope: { pickerBrowse: false } }), false, "no browse grant");
+    assert.equal(atomRetargetAllowed(yes), true, "precondition: the allowed sheet case IS allowed");
+    // pd-ee-embed-retarget: `embed` USED to be a refusal here. It is now an allowed
+    // case — asserting the refusal would assert the absence of the shipped feature.
+    assert.equal(
+      atomRetargetAllowed({ ...yes, bpType: "embed", block: { target: "A Note" } }),
+      true,
+      "embed is now an ALLOWED case (pd-ee-embed-retarget)",
+    );
+    // The refusal that replaces it: an atom kind with no retargetable reference. This
+    // is what keeps the predicate from becoming vacuously true for everything.
+    assert.equal(atomRetargetAllowed({ ...yes, bpType: "figure" }), false, "no retargetable reference");
+    for (const bpType of ["sheet", "embed"]) {
+      const base = { ...yes, bpType, block: bpType === "sheet" ? { ref: "a" } : { target: "A Note" } };
+      assert.equal(atomRetargetAllowed({ ...base, editor: { isEditable: false } }), false, `${bpType}: read-only editor`);
+      assert.equal(
+        atomRetargetAllowed({ ...base, block: { ...base.block, locked: true } }),
+        false,
+        `${bpType}: template-locked block`,
+      );
+      assert.equal(atomRetargetAllowed({ ...base, scope: { pickerBrowse: false } }), false, `${bpType}: no browse grant`);
+    }
   });
   // §5b MOUNTED: an item-share edit grant (data-picker-browse="false") authorizes THIS
   // paper, not dataset discovery — so no browse UI is mounted at all. A second canvas,
@@ -618,22 +864,31 @@ try {
     locked.blocks = [
       { id: "b-title", type: "heading", level: 1, role: "title", text: "Shared" },
       { id: "sh-2", type: "sheet", ref: SHEET_REF, snapshot: { rows: [["a"]] } },
+      // pd-ee-embed-retarget: the embed atom is seeded here too. Measuring only the
+      // sheet would leave the embed picker's browse grant unmeasured — the two mount
+      // through the same predicate, but a check that never looks cannot say so.
+      { id: "em-2", type: "embed", target: EMBED_TARGET },
     ];
     document.body.appendChild(locked);
     await new Promise((resolve) => setTimeout(resolve, 400));
     try {
-      check("§5b MOUNTED: data-picker-browse=false mounts no retarget picker at all", () => {
-        const atom = locked.querySelector('[data-test-id="paper-readonly-sheet"]');
-        assert.ok(atom, "precondition: the sheet atom mounted on the share-scoped canvas");
-        assert.ok(
-          atom.textContent.includes(SHEET_REF),
-          "precondition: the chip still shows the ref (the value stays READABLE)",
-        );
-        assert.equal(
-          locked.querySelectorAll('[data-test-id="paper-sheet-retarget"]').length,
-          0,
-          "a browse UI mounted under an item-share edit grant",
-        );
+      check("§5b MOUNTED: data-picker-browse=false mounts no retarget picker on EITHER atom", () => {
+        for (const [label, atomTestId, pickerTestId, value] of [
+          ["sheet", "paper-readonly-sheet", "paper-sheet-retarget", SHEET_REF],
+          ["embed", "paper-readonly-embed", "paper-embed-retarget", EMBED_TARGET],
+        ]) {
+          const atom = locked.querySelector(`[data-test-id="${atomTestId}"]`);
+          assert.ok(atom, `precondition: the ${label} atom mounted on the share-scoped canvas`);
+          assert.ok(
+            atom.textContent.includes(value),
+            `precondition: the ${label} chip still shows its reference (the value stays READABLE)`,
+          );
+          assert.equal(
+            locked.querySelectorAll(`[data-test-id="${pickerTestId}"]`).length,
+            0,
+            `a ${label} browse UI mounted under an item-share edit grant`,
+          );
+        }
       });
     } finally {
       locked.remove();
