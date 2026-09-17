@@ -1795,7 +1795,7 @@
    "doc_id": "pds-w5-citation-grep-honesty",
    "lifecycle_status": "open",
    "reopen_trigger": "",
-   "title": "Slash-compressed PDS citations under-report the harness to a naive grep \u2014 expand (PDS-D69/D70/D71) into separate prefixed forms"
+   "title": "Slash-compressed PDS citations under-report the harness to a naive grep \u2014 expand (PDS-D69/PDS-D70/PDS-D71) into separate prefixed forms"
   },
   {
    "_createdAt": "2026-07-20T01:18:16.618083Z",

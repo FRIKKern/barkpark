@@ -562,7 +562,7 @@ defmodule PDS.Census do
     phantom: 9,
     consumer: 4,
     emitted: 100,
-    # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
+    # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
     # their own), the capture edge and the variable-module-head edge. Engine and lens are
@@ -975,7 +975,7 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
-    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/D566).
+    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/PDS-D566).
     # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
     # it stays in `status_only_receipt` with this comment rather than being moved, because
     # the class's CURRENT prose is TRUE of it and the reason it is excluded is a limit of
@@ -1533,7 +1533,7 @@ defmodule PDS.Census do
   #             confident guesses, which is what dissolves the shadowed-bucket problem
   #             instead of trading one shadowed bucket for another.
   #
-  # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/D527).
+  # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/PDS-D527).
   #   8 rows  PROVEN / end-to-end            mutation-attested; the row carries the line
   #   7 rows  PROVEN / end-to-end-unmutated  ALREADY CONJUNCTIVE in the committed suite,
   #                                          BUT ITS FALSIFIER WAS NEVER EXERCISED — the
@@ -7020,7 +7020,7 @@ defmodule PDS.Census do
   defp report_response_carries_read(%{scope: :scoped_out}), do: :ok
 
   defp report_response_carries_read(h) do
-    p("RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT (PDS-D490/D469)")
+    p("RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT (PDS-D490/PDS-D469)")
     p(String.duplicate("-", 78))
 
     wrap(

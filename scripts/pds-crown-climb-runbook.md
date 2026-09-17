@@ -321,7 +321,7 @@ derivation is visible, not asserted.
   spend instead of paying it. The preflight honours the override so its warn path can be
   rehearsed, and says `REHEARSAL STORE` out loud whenever it is set.
 
-Raising `PDS_FULL_EXPORT_BUDGET` deliberately is the *one* sanctioned knob (PDS-D137/D156).
+Raising `PDS_FULL_EXPORT_BUDGET` deliberately is the *one* sanctioned knob (PDS-D137/PDS-D156).
 
 ## PDS-D223 — the parked bundle and the RETRY-REUSE TRAP
 

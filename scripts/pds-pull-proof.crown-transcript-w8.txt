@@ -752,7 +752,7 @@ STEP 5 — SERVED ASSET — EVERY imported asset serves 200 with a matching cont
   PASS   5    34 imported asset(s) resolved from the TARGET's own /v1/media/production and every one served HTTP 200 with content-length == the size stored in the target's database. Control: the size comparator FIRED on a truncated blob that still served HTTP 200, and a missing blob answered the typed 404 rather than a 500.
 
 ──────────────────────────────────────────────────────────────────────────────
-STEP 6 — CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)
+STEP 6 — CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)
 ──────────────────────────────────────────────────────────────────────────────
   The Bootstrap clobber fires only on BOOT. A convergence proof that does not
   restart the target measures nothing: it re-reads rows from a process that

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # pds-citation-expand.sh — the slash-compressed PDS-D citation instrument.
 #
-# THE DEFECT. A citation written `PDS-D69/D70/D71` carries the `PDS-D` prefix on
-# the FIRST number only. `git grep PDS-D70` therefore MISSES a site that
+# THE DEFECT. A citation that writes `PDS-D69` and then appends bare `/D70` and
+# `/D71` carries the `PDS-D` prefix on the FIRST number only. `git grep PDS-D70`
+# therefore MISSES a site that
 # genuinely cites D70. Every coverage grep over the charter silently
 # under-reports, and the under-report is invisible: a clean result and a blind
 # instrument look identical.
@@ -18,9 +19,15 @@
 #
 # THE SEGMENT ALPHABET. A D-number may carry a letter suffix (PDS-D220a,
 # PDS-D391b, PDS-D480a — all live on main). A predicate written [0-9]+ silently
-# TRUNCATES `PDS-D480/D480a` to `PDS-D480/D480` and MISSES `PDS-D391b/D336`
-# entirely: the same blindness this script exists to remove, wearing the
-# instrument's own clothes. Every segment below is [0-9]+[a-z]?.
+# TRUNCATES a trailing `/D480a` segment to `/D480`, and MISSES a token whose
+# PREFIX carries the suffix (`PDS-D391b` + `/D336`) entirely: the same blindness
+# this script exists to remove, wearing the instrument's own clothes. Every
+# segment below is [0-9]+[a-z]?.
+#
+# THIS FILE GETS NO EXCEPTION. It is inside the guard's own fence, so it holds
+# no compressed literal anywhere — the forms above are described rather than
+# written, and the selftest fixtures are built from parts. An instrument that
+# had to exempt itself would be the first thing to rot.
 
 set -euo pipefail
 
@@ -111,7 +118,8 @@ mode_count() {
 }
 
 # ── the expander ────────────────────────────────────────────────────────────
-# `PDS-D276/D277` -> `PDS-D276/PDS-D277`. The slash is kept, so the
+# A token that appends a bare `/D277` to `PDS-D276` becomes `PDS-D276/PDS-D277`.
+# The slash is kept, so the
 # "these rulings belong together" reading survives and the diff stays minimal;
 # only the prefix is restored. Applied repeatedly until no compressed form
 # remains, because one token can carry many segments.

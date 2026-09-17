@@ -94,7 +94,7 @@
 #     to it BY CONSTRUCTION. The A3b section measures that population and
 #     classifies it by bind-site provenance; it is PRINTED and never sets the
 #     exit code, because a widened redding relation over a population whose
-#     false-positive rate has not been measured is the failure PDS-D554/D566
+#     false-positive rate has not been measured is the failure PDS-D554/PDS-D566
 #     name. See the `Provenance` module header for the three classes and the
 #     direction of every error the walk can make.
 #
@@ -277,7 +277,7 @@ end
 #
 # IT IS PRINTED, NOT ARMED, AND THAT IS A DELIBERATE CHOICE, NOT AN OVERSIGHT.
 # Widening a redding relation over a population whose false-positive rate has
-# not been measured is the failure PDS-D554/D566 name and PDS-D560 caught in the
+# not been measured is the failure PDS-D554/PDS-D566 name and PDS-D560 caught in the
 # act. The exit code below is untouched by this section: `Report.exit_code/2`
 # still reds only on unparsed corpus (3) and off-allowlist A3 head-bound echoes
 # (4). Arming A3b is a SEPARATE decision that must be paid for with a hand-read
