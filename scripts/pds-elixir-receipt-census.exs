@@ -13254,6 +13254,70 @@ defmodule PDS.Census do
       ],
       proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-#{length(@roster)} — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
+    # THE PROSE SWEEP (pds-w42-bl-census-prose-outlives-its-code). Three cases, all
+    # `corpus: :repo`, because PROSE-NAMES-RESOLVE is scoped through `register_scope/1`
+    # exactly as the register and roster arms are — a mutant over the synthetic tree would
+    # be proven where the arm is switched OFF (PDS-D541). Each mutation edits a SENTENCE in
+    # this file and nothing under api/lib: the committed side of the comparison is the only
+    # side a selftest may touch, and the prose IS that side here.
+    #
+    # THE THREE ARE ONE PER FAILURE DIRECTION, not three spellings of one. A function that
+    # left its module, an arity that moved under a live name, and the sweep examining
+    # NOTHING — the last is the shape every count-free arm dies of, and no mutation of the
+    # first two kinds can reach it.
+    %{
+      name: "PROSE-NAME-FUNCTION-GONE",
+      corpus: :repo,
+      argv: [],
+      # The shape wave 42 found: a committed sentence naming a function by name, kept
+      # while the code moved. `Barkpark.Content.Writer.do_create_document/5` is cited in a
+      # comment; renaming the CITATION is the same divergence as renaming the def, seen
+      # from the side this file owns.
+      # THE ANCHOR AND ITS REPLACEMENT ARE BOTH SPLIT AT A MODULE BOUNDARY, and that is
+      # this arm measuring itself: a contiguous qualified name written here would be
+      # swept like any other, so the mutant's own payload would red the clean tree. Split
+      # after `Barkpark.Content.`, neither fragment carries a lowercase final segment and
+      # the pattern matches nothing — while the CONCATENATED value is the exact anchor.
+      mut:
+        {"`Barkpark.Content." <> "Writer.do_create_document/5`",
+         "`Barkpark.Content." <> "Writer.do_create_documents/5`"},
+      exit: 1,
+      expect: [
+        "FAIL  PROSE-NAMES-RESOLVE",
+        "do_create_documents/5",
+        "defines no such function"
+      ],
+      refute: ["PASS  PROSE-NAMES-RESOLVE"],
+      proves: "a committed sentence that names a function the corpus does not define reds BY NAME and BY LINE — the species that shipped inside the disclosure artifact for a full wave with every arm printing PASS"
+    },
+    %{
+      name: "PROSE-NAME-ARITY-MOVED",
+      corpus: :repo,
+      argv: [],
+      # The half a name-only check is blind to, and the reason the cited arity is read
+      # through `accepts?/2` rather than ignored: `Barkpark.Accounts.confirm_user/1` is
+      # real at arity 1 and at no other, so /4 names a function that does not exist while
+      # every name segment still resolves.
+      mut: {"`Barkpark." <> "Accounts.confirm_user/1`", "`Barkpark." <> "Accounts.confirm_user/4`"},
+      exit: 1,
+      expect: ["FAIL  PROSE-NAMES-RESOLVE", "confirm_user/4", "defined at arity 1"],
+      refute: ["PASS  PROSE-NAMES-RESOLVE"],
+      proves: "an arity that moved under a live module and a live function name reds too — the drift a module/function existence test cannot see by construction"
+    },
+    %{
+      name: "PROSE-NAMES-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-NOTHING SHAPE, pointed at this arm. A pattern that matches nothing makes
+      # every comparison unreachable, and an arm without this precondition then prints
+      # `0 drifted` over an EMPTY population at exit 0 — the vacuous green ROSTER-FRESH
+      # -NOT-VACUOUS exists to refuse, one table over.
+      mut: {"@prose_name_re ~r/\\b(?:Barkpark", "@prose_name_re ~r/\\bZZ-NO-SUCH-ROOT-ZZ(?:Barkpark"},
+      exit: 1,
+      expect: ["FAIL  PROSE-NAMES-RESOLVE", "VACUOUS", "NOT ONE name resolved"],
+      refute: ["PASS  PROSE-NAMES-RESOLVE"],
+      proves: "a sweep that resolves NOTHING refuses instead of certifying — the denominator is the arm, not decoration beside it"
+    },
     # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
     # is scoped to the real corpus by the same predicate the register and roster arms
     # use, so a mutant over the synthetic tree would be proven exactly where the arm is
@@ -16354,7 +16418,7 @@ defmodule PDS.Census do
   defp prose_class_tag(c), do: c
 
   defp prose_drift_sentence(%{class: {:arity_moved, live}, name: n, line: l}),
-    do: "#{n} at :#{l} — that function is defined at aritie(s) #{Enum.join(live, ", ")}, never the one written"
+    do: "#{n} at :#{l} — that function is defined at arity #{Enum.join(live, "/")} and at no other, never at the arity written"
 
   defp prose_drift_sentence(%{class: :function_absent, name: n, line: l}),
     do: "#{n} at :#{l} — the module is in the corpus and defines no such function"
