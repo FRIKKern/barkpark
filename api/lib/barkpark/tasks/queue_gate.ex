@@ -18,6 +18,7 @@ defmodule Barkpark.Tasks.QueueGate do
   @derived_states ["foreign_claimed" | @persisted_states]
   @allowed_fields ~w(version state reason evidence)
   @default_lease_ttl_seconds 2700
+  @ts_iso_shape ~S"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?Z$"
   @reason_max_bytes 500
   @evidence_max_bytes 1_000
 
@@ -114,6 +115,36 @@ defmodule Barkpark.Tasks.QueueGate do
   def claim_lease_live?(_content), do: true
 
   @doc """
+  The anchored shape a `claim.ts_iso` must have before the SQL lease arm will
+  COMPARE it — the shape guard in `executable_query/0`, and nothing else.
+
+  IT IS AN ECTO PARAMETER, NOT A LITERAL IN THE FRAGMENT STRING, AND THAT IS
+  THE WHOLE POINT. `Ecto.Query.fragment/1` counts EVERY `?` in its format
+  string as a bound placeholder and cannot tell one that is a regex quantifier
+  from one that is an argument slot. Inlining this pattern therefore put the
+  regex into a restricted dialect — no `?`, no `{n,m}` — enforced by nothing at
+  the edit site, and the failure it produced was a COMPILE error naming Ecto and
+  an argument count, three tokens away from the character that caused it:
+
+      (Ecto.Query.CompileError) fragment(...) expects extra arguments in the
+      same amount of question marks in string. It received 3 extra argument(s)
+      but expected 4
+
+  Bound as a parameter, no metacharacter here can ever collide with that count,
+  and the pattern is written in ordinary regex — `([.][0-9]+)?` included.
+
+  PRECISION: the inlined workaround was `[.0-9]*Z$`, which also admitted
+  `2026-07-26T18:00:00123Z` and multi-dot forms. Those now fail the shape guard,
+  which means they fall to `false` — NOT expired, i.e. still claim-held. That is
+  the same FAIL-CLOSED direction the rest of this predicate takes, and it is the
+  direction `lease_live?/1` already took for them: `DateTime.from_iso8601/1`
+  rejects both, so the Elixir arm called them LIVE while the loose SQL pattern
+  was willing to call them expired. The two arms now agree on these shapes.
+  """
+  @spec ts_iso_shape_pattern() :: String.t()
+  def ts_iso_shape_pattern, do: @ts_iso_shape
+
+  @doc """
   The claim lease TTL in seconds — `:task_lease_ttl_seconds`, default 2700.
 
   ONE reader for a number that had grown three private copies (this module,
@@ -181,12 +212,22 @@ defmodule Barkpark.Tasks.QueueGate do
       # The cutoff carries no trailing `Z` so a fractional stamp at the exact
       # boundary second sorts GREATER than it — erring toward LIVE by under a
       # second against a 2700-second lease.
+      #
+      # THE SHAPE GUARD IS A BOUND PARAMETER, NOT A LITERAL — see
+      # `ts_iso_shape_pattern/0`. Ecto counts EVERY `?` in a fragment format
+      # string as a placeholder and cannot tell a regex quantifier from an
+      # argument slot, so an inlined pattern may contain no `?` and no `{n,m}`.
+      # If you are about to tighten a pattern in ANY fragment here, bind it the
+      # same way; `queue_gate_fragment_placeholders_test.exs` counts the `?`
+      # against the argument list so you meet this in a test, not in a compiler
+      # error that names Ecto and an argument count.
       (fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content) or
          fragment(
-           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.0-9]*Z$' THEN ?->'claim'->>'ts_iso' < to_char((now() at time zone 'UTC') - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
+           "CASE WHEN ?->'claim'->>'ts_iso' ~ ? THEN ?->'claim'->>'ts_iso' < to_char((now() at time zone 'UTC') - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
            d.content,
+           ^ts_iso_shape_pattern(),
            d.content,
            ^lease_ttl_seconds()
          )) and
