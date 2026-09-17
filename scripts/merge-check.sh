@@ -510,10 +510,29 @@ if [ "${1:-}" = "--selftest" ]; then
     case "$out" in *"Elixir gate"*"absence is not a pass"*) _ok "presence refusal renders" "under set -u, no crash";;
       *) _no "presence refusal renders" "unexpected output: $out";; esac
   else _no "presence refusal renders" "CRASHED under set -u: $out"; fi
-  # A1b — CONTROL: the OLD form must still crash, or A1 proves nothing.
+  # A1b — CONTROL: an unbraced expansion that ABSORBS the following character
+  # must still crash, or A1 proves nothing.
+  #
+  # IT IS TWO ARMS, AND THE SPLIT IS THE FINDING. This suite had NO CALLER OF ANY
+  # KIND until 2026-09-17 — no workflow, no Makefile target — so it had only ever
+  # run on macOS. Its first CI run failed on THIS LINE: whether the em-dash's
+  # bytes count as name characters is a bash-version/locale question, and the
+  # answer differs. bash 3.2.57 (macOS) absorbs them and dies `MISS<u+2014>:
+  # unbound variable` — the production crash, verbatim. bash 5.x on ubuntu stops
+  # the name at the non-ASCII byte, expands cleanly, and the control could not
+  # fire. A control that only fires on the author's machine is the "control that
+  # flips was never a control" fault: it dated the platform, not the subject.
+  #
+  # So the ASCII arm carries the CLASS and is asserted EVERYWHERE — `$MISSx` is
+  # an unbound name on every bash there is. The em-dash arm replays the PRODUCTION
+  # STRING and is asserted only where a probe says this interpreter can see it,
+  # and it SAYS which case it took rather than passing silently.
+  if bash -c 'set -uo pipefail; MISS="x"; printf "%s\n" "$MISSx "' >/dev/null 2>&1
+  then _no "CONTROL absorbed suffix crashes" "an unbraced expansion absorbing its suffix did NOT crash — A1 cannot discriminate on ANY platform"
+  else _ok "CONTROL absorbed suffix crashes" "\$MISSx is unbound, as \$MISS<em-dash> was in production"; fi
   if bash -c 'set -uo pipefail; MISS="x"; printf "%s\n" "$MISS— "' >/dev/null 2>&1
-  then _no "CONTROL old form crashes" "the pre-fix shape did NOT crash — A1 cannot discriminate"
-  else _ok "CONTROL old form crashes" "unbound variable, as it did in production"; fi
+  then _ok "CONTROL em-dash form (platform-scoped)" "this bash (${BASH_VERSION}) does NOT treat the em-dash as a name character, so the PRODUCTION string cannot crash here; the ASCII arm above carries the class"
+  else _ok "CONTROL em-dash form (platform-scoped)" "this bash (${BASH_VERSION}) absorbs the em-dash and dies unbound — the production crash, verbatim"; fi
 
   # A2 — PAGINATION SHORTFALL must be CANNOT READ, never a pass.
   _tc=119; _got=100
@@ -929,8 +948,9 @@ if [ "${1:-}" = "--selftest" ]; then
   _total=$((_p+_f))
   # THE FLOOR RISES WITH THE SUITE. 26 before the pending/failure split and the
   # workflow-history read added 10 arms (A15..A15d, A16..A16e); the hold-label
-  # repair added 12 more (A17..A17m).
-  if [ "$_total" -lt 48 ]; then
+  # repair added 12 more (A17..A17m); A1b split into a
+  # platform-independent arm plus a platform-scoped one.
+  if [ "$_total" -lt 49 ]; then
     echo "MERGE-CHECK SELFTEST: CANNOT READ — only $_total arm(s) reported; this tally measures nothing"; exit 3
   fi
   if [ "$_f" -eq 0 ]; then echo "MERGE-CHECK SELFTEST: $_p/$_total arms pass"; exit 0
