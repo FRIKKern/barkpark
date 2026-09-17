@@ -37,7 +37,26 @@ import json, os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 MODE_FILE, LOG_FILE, BODY_FILE = sys.argv[1], sys.argv[2], sys.argv[3]
+STATE_FILE = sys.argv[4]
 TITLE = "CI failure: proof-workflow"
+
+# STATEFUL ARM. Every mode above answers from a fixed script, which cannot
+# express "the Nth consecutive firing" — the property the escalation is about.
+# The `sequence` mode instead keeps the repository's real state in a file the
+# server reads and writes: whether the issue exists, its title, its labels and
+# its comment COUNT. The subject then walks a planted run of firings against a
+# world that actually changes underneath it, and the counts asserted afterwards
+# are what the API received, not what the test arranged.
+def state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"open": False}
+
+def put_state(st):
+    with open(STATE_FILE, "w") as f:
+        json.dump(st, f)
 
 def mode():
     with open(MODE_FILE) as f:
@@ -62,6 +81,18 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self._record()
         m = mode()
+        if m == "sequence":
+            st = state()
+            if not st.get("open"):
+                return self._send(200, [])
+            return self._send(200, [{
+                "number": 42,
+                "title": st.get("title", TITLE),
+                "assignees": [{"login": a} for a in st.get("assignees", [])],
+                "comments": st.get("comments", 0),
+                "created_at": "2026-09-01T00:00:00Z",
+                "labels": [{"name": n} for n in st.get("labels", ["ci-failure"])],
+            }])
         if m == "list-500":
             return self._send(500, {"message": "Internal Server Error"})
         if m in ("issue-already-open", "assign-patch-rejected"):
@@ -100,6 +131,17 @@ class H(BaseHTTPRequestHandler):
         # issue edit with 200 and the updated issue.
         self._record()
         body = self._read_body()
+        if mode() == "sequence":
+            st = state()
+            if "labels" in body:
+                st["labels"] = list(body["labels"])
+            if "title" in body:
+                st["title"] = body["title"]
+            if "assignees" in body:
+                st["assignees"] = list(body["assignees"])
+            put_state(st)
+            return self._send(200, {"number": 42, "labels": [
+                {"name": n} for n in st.get("labels", [])]})
         if mode() == "assign-patch-rejected":
             return self._send(422, {"message": "Validation Failed",
                                     "errors": [{"field": "assignees"}]})
@@ -111,6 +153,24 @@ class H(BaseHTTPRequestHandler):
         m = mode()
         body = self._read_body()
         assignees = body.get("assignees") or []
+        if m == "sequence":
+            st = state()
+            if self.path.endswith("/comments"):
+                st["comments"] = st.get("comments", 0) + 1
+                put_state(st)
+                return self._send(201, {"id": 999})
+            # A create. The ESCALATION issue carries its own title/label and
+            # must NOT become the thing the dedupe lookup finds next firing.
+            if (body.get("title") or "").startswith("CI escalation:"):
+                st["escalations"] = st.get("escalations", 0) + 1
+                put_state(st)
+                return self._send(201, {"number": 4242, "assignees": []})
+            st.update({"open": True, "comments": 0, "title": body.get("title"),
+                       "labels": list(body.get("labels") or []),
+                       "assignees": list(assignees)})
+            put_state(st)
+            return self._send(201, {"number": 42, "assignees": [
+                {"login": a} for a in assignees]})
         if m == "create-422":
             return self._send(422, {"message": "Validation Failed"})
         if self.path.endswith("/comments"):
@@ -128,7 +188,8 @@ class H(BaseHTTPRequestHandler):
 HTTPServer(("127.0.0.1", 0), H).serve_forever()
 PY
 
-python3 "$work/fake-github.py" "$MODE_FILE" "$LOG_FILE" "$BODY_FILE" &
+STATE_FILE="$work/state.json"
+python3 "$work/fake-github.py" "$MODE_FILE" "$LOG_FILE" "$BODY_FILE" "$STATE_FILE" &
 SRV_PID=$!
 
 # Discover the assigned port from the socket the child is listening on.
@@ -376,6 +437,146 @@ if grep -q 'redaction disarmed' "$mut"; then
   if grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab' "$BODY_FILE"; then ok "redaction mutation: without redact() the token reaches the body (the case can fail)"; else bad "redaction mutation: the disarmed subject still masked — the case is vacuous"; fi
 else bad "redaction mutation: could not disarm redact() in the subject copy"; fi
 
+
+echo
+echo "--- ESCALATION: N repeats collapse into ONE escalation, then SILENCE (task-5753ff3072d00b67)"
+# WHY. Measured 2026-09-17 against the live repository: 18 open ci-failure
+# issues carry 2782 automated comments between them; #11714 (crown-reconcile)
+# alone carries 1283 in 31 days, and NONE of the 18 has a ledger row. The
+# append path is unbounded, so this arm plants a real run of firings against a
+# STATEFUL fake repository and counts what the API received.
+#
+# N is READ OUT OF THE SUBJECT, never retyped: a test that carries its own copy
+# of the threshold passes when the subject's copy changes.
+N="$(sed -n 's/^escalate_after=\([0-9][0-9]*\)$/\1/p' "$SCRIPT" | head -1)"
+if [ -n "$N" ] && [ "$N" -gt 0 ] 2>/dev/null; then
+  ok "escalation threshold read from the subject: escalate_after=$N (N > 0)"
+else
+  bad "escalation threshold: could not read a positive escalate_after= literal out of $SCRIPT (got '$N')"
+  N=3
+fi
+# UPPER BOUND, because this arm plants N+3 REAL firings against a real socket.
+# An escalate_after raised out of reach would not fail this suite, it would HANG
+# it — a disarm experiment with escalate_after=999999 planted a million firings
+# and had to be killed. A threshold nobody can sit through is itself the defect
+# (the spiral is back), so name it rather than run it.
+if [ "$N" -gt 25 ] 2>/dev/null; then
+  bad "escalation threshold: escalate_after=$N is too high to be an escalation — $N repeat notifications IS the spiral this bounds. Cap it at 25."
+  N=25
+fi
+
+# fire — one firing against the LIVE state file, appending to the shared logs.
+# `run` truncates them, which would erase the very history this arm counts.
+fire() {
+  ( eval "GITHUB_API_URL=\"$API\" \
+          GITHUB_SERVER_URL=https://github.test \
+          GITHUB_TOKEN=fake-token \
+          GITHUB_REPOSITORY=acme/widgets \
+          GITHUB_WORKFLOW=proof-workflow \
+          GITHUB_RUN_ID=555 \
+          GITHUB_JOB=audit \
+          GITHUB_EVENT_NAME=schedule \
+          $* bash \"$SCRIPT\"" ) >>"$work/seq.out" 2>>"$work/seq.err"
+  printf '%s\n' "$?" >>"$work/seq.codes"
+}
+
+# n_appends — "Still failing." comments the API actually received.
+n_appends() { jq -r 'select(.path | endswith("/comments")) | .body.body' "$BODY_FILE" 2>/dev/null | grep -c '^Still failing' || true; }
+n_esc_comments() { jq -r 'select(.path | endswith("/comments")) | .body.body' "$BODY_FILE" 2>/dev/null | grep -c 'no further automated comments' || true; }
+n_esc_issues() { jq -r 'select(.path | endswith("/issues")) | .body.title' "$BODY_FILE" 2>/dev/null | grep -c '^CI escalation:' || true; }
+n_parent_creates() { jq -r 'select(.path | endswith("/issues")) | .body.title' "$BODY_FILE" 2>/dev/null | grep -c '^CI failure: proof-workflow$' || true; }
+
+sequence() { # sequence <total firings> — replays a cold repository from scratch
+  printf 'sequence' >"$MODE_FILE"
+  printf '{"open":false}' >"$STATE_FILE"
+  : >"$LOG_FILE"; : >"$BODY_FILE"
+  : >"$work/seq.out"; : >"$work/seq.err"; : >"$work/seq.codes"
+  local i=0
+  while [ "$i" -lt "$1" ]; do fire; i=$((i+1)); done
+}
+
+# N+3 firings: 1 create, then the appends, then the escalation, then the
+# firings that must write NOTHING. This spans the N+2 point the row names and
+# keeps going, because "stops appending" is only observable AFTER it stops.
+total=$((N + 3))
+sequence "$total"
+echo "    planted $total consecutive failures on one key (escalate_after=$N)"
+if [ "$(n_parent_creates)" = 1 ]; then ok "escalation: the FIRST failure opened exactly one issue (D8 — the alert can still fire)"
+else bad "escalation: want 1 create of 'CI failure: proof-workflow', got $(n_parent_creates)"; fi
+if [ "$(n_appends)" = "$N" ]; then ok "escalation: exactly N=$N 'Still failing.' appends over $total firings"
+else bad "escalation: want $N appends, got $(n_appends) over $total firings"; fi
+if [ "$(n_esc_comments)" = 1 ]; then ok "escalation: exactly ONE escalation comment"
+else bad "escalation: want 1 escalation comment, got $(n_esc_comments)"; fi
+if [ "$(n_esc_issues)" = 1 ]; then ok "escalation: exactly ONE 'CI escalation:' issue opened per key"
+else bad "escalation: want 1 escalation issue, got $(n_esc_issues)"; fi
+if ! grep -q '[^0]' "$work/seq.codes"; then ok "escalation: every firing exited 0"
+else bad "escalation: a firing exited non-zero: $(tr '\n' ' ' <"$work/seq.codes") / $(grep '^::error' "$work/seq.err" | head -1)"; fi
+# The retitle: count, age and the latest run URL all land on the issue itself.
+#
+# CAPTURE, THEN MATCH — never `jq … | grep -q`. `grep -q` exits on its first hit,
+# jq takes SIGPIPE, and under `set -o pipefail` the pipeline returns 141, so a
+# TRUE assertion reads FALSE. It is a race on the pipe buffer, so it fails
+# intermittently and on the big payloads only: two of these arms failed exactly
+# that way on their first run. Every match below is a glob against a captured
+# string, which has no pipeline to poison.
+has() { # has <haystack> <needle>
+  case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac
+}
+esc_patch_title="$(jq -r 'select(.path == "/repos/acme/widgets/issues/42") | .body.title // empty' "$BODY_FILE" 2>/dev/null)"
+esc_patch_body="$(jq -r 'select(.path == "/repos/acme/widgets/issues/42") | .body.body // empty' "$BODY_FILE" 2>/dev/null)"
+esc_comment_body="$(jq -r 'select(.path | endswith("/comments")) | .body.body' "$BODY_FILE" 2>/dev/null)"
+seq_err="$(cat "$work/seq.err" 2>/dev/null)"
+if has "$esc_patch_title" "ESCALATED after $N repeats"; then
+  ok "escalation: the issue is retitled with the repeat count"
+else bad "escalation: the retitle does not carry the count: '$esc_patch_title'"; fi
+if has "$esc_patch_body" "first seen:" && has "$esc_patch_body" "actions/runs/555"; then
+  ok "escalation: the rewritten body carries the first-seen age and the latest run URL"
+else bad "escalation: the rewritten body is missing the age or the run URL"; fi
+if has "$esc_comment_body" "@acme"; then
+  ok "escalation: the escalation comment @-mentions the assignee"
+else bad "escalation: the escalation comment does not @-mention the assignee"; fi
+# NO SILENT SUCCESS. Barkpark's intake drops Bot senders (Intake.bot_sender?/1),
+# so the escalation issue mints no gh-<n> row. The comment must SAY that.
+if has "$esc_comment_body" "LEDGER: NOT ADOPTED"; then
+  ok "escalation: the comment states the ledger does NOT adopt it (bot-sender drop), rather than implying a mirror"
+else bad "escalation: the escalation comment does not disclose the ledger drop"; fi
+if has "$seq_err" "NO ledger row was created"; then
+  ok "escalation: the run log warns that no ledger row was created"
+else bad "escalation: no ::warning:: about the missing ledger row"; fi
+
+echo
+echo "--- ESCALATION: the alert can STILL fire after a key has escalated (D8)"
+# The escalated issue is closed (or the key is new): state goes cold and the
+# very next failure must open a fresh issue. An escalation that permanently
+# silences a key would be a worse defect than the spiral it replaces.
+: >"$BODY_FILE"; : >"$LOG_FILE"; : >"$work/seq.err"; : >"$work/seq.codes"
+printf '{"open":false}' >"$STATE_FILE"
+fire
+if [ "$(n_parent_creates)" = 1 ]; then ok "post-escalation: a first failure on a cold key opens an issue again"
+else bad "post-escalation: want 1 create, got $(n_parent_creates)"; fi
+if [ "$(n_appends)" = 0 ]; then ok "post-escalation: it is a create, not an append"
+else bad "post-escalation: it appended instead of creating"; fi
+
+echo
+echo "--- MUTATION: disarm the escalation arm → this suite must go RED"
+# Raising the threshold out of reach is the smallest disarm that leaves the
+# script otherwise identical. The counts above must then fail; if they do not,
+# they were measuring nothing.
+esc_mut="$work/subject-no-escalation.sh"
+sed 's/^escalate_after=[0-9][0-9]*$/escalate_after=999999/' "$SCRIPT" >"$esc_mut"
+if grep -q '^escalate_after=999999$' "$esc_mut"; then
+  SAVE_SCRIPT="$SCRIPT"; SCRIPT="$esc_mut"
+  sequence "$total"
+  SCRIPT="$SAVE_SCRIPT"
+  mut_appends="$(n_appends)"; mut_esc="$(n_esc_issues)"
+  if [ "$mut_appends" != "$N" ] && [ "$mut_esc" = 0 ]; then
+    ok "escalation mutation: disarmed, the subject appends $mut_appends times (not $N) and escalates 0 times — the arm can fail"
+  else
+    bad "escalation mutation: the disarmed subject still looks escalated (appends=$mut_appends escalations=$mut_esc) — the arm is VACUOUS"
+  fi
+else
+  bad "escalation mutation: could not raise escalate_after in the subject copy"
+fi
 
 echo
 echo "--- main-gate-watch reporter wiring (task-d1d19ca64ddd2f59) ---"
