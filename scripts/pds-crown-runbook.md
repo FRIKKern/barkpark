@@ -56,40 +56,38 @@ from anchored stamps in the transcript's own bytes rather than a substring (PDS-
 
 | stamp present | what it means | cost |
 |---|---|---|
-| `FIRE — draw N` | the harness RAN | an export attempt **was spent** — re-arming is **not** free |
-| terminal `STAND-DOWN — ` | draws exhausted, never invoked | zero attempts — re-arming is free |
+| `attempts: … verdict=SPENT` | the harness ran and its counter MOVED (or could not be read) | an export attempt **was spent** — re-arming is **not** free |
+| terminal `WINDOW-EXHAUSTED — ` | invoked ≥ 1×, every invocation a proven zero-spend refusal, draws then exhausted | zero attempts — re-arming is free |
+| `FIRE — draw N` with neither of those | pre-re-arm transcript, or killed before it stamped its readings | read as **spent** — `/tmp/pds-full-export/attempts` settles it |
+| terminal `STAND-DOWN — ` | draws exhausted, harness never invoked | zero attempts — re-arming is free |
 | `prewarm: FAILED rc=` | died at the D241 pre-warm, before draw 1 (the stamp names the failing `MIX_ENV`) | zero attempts — free, but fix that env's compile first |
-| none of the three | not written by this launcher, or truncated | **UNDIAGNOSED** — read `/tmp/pds-full-export/attempts`, assume nothing |
+| none of these | not written by this launcher, or truncated | **UNDIAGNOSED** — read `/tmp/pds-full-export/attempts`, assume nothing |
 
+That order is `collect`'s own: a spend stamp beats an exhaustion stamp beats a bare `FIRE`.
 A per-draw line carries `verdict=STAND-DOWN:mem<floor` on *every* refusal; that is a draw,
 not the verdict, and it is why the unanchored substring could call a spent attempt free.
 
-The `FIRE — draw N` row has one exception, and it is PDS-D262's third outcome below: if the
-harness refused on its *own* precondition (b) after the launcher handed off, it returned
-above the spend increment and the attempt was **not** spent. `/tmp/pds-full-export/attempts`
-settles it; the stamp alone does not.
+### The THIRD outcome, NARROWED — `WINDOW-EXHAUSTED` after zero-spend refusals (PDS-D262)
 
-### The THIRD outcome — the launcher is ONE-SHOT (PDS-D262)
+A climb is usually described as ending as **FIRE** or **STAND-DOWN**. There is still a third,
+but it is no longer FIRED-AND-REFUSED: one refusal used to end the poll, and since the re-arm
+landed it does not. `refire_verdict()` in the generated child reads the harness's attempts
+counter before and after each invocation and returns exactly one of `ZERO-SPEND-REFUSAL` ·
+`SPENT` · `SPENT-UNVERIFIED`. Only `ZERO-SPEND-REFUSAL` — `rc != 0` AND both readings numeric
+AND equal — re-enters the SAME poll loop. `rc = 0`, a moved counter and an unreadable counter
+all exit as before: a spent attempt is the one outcome that must never be retried, so an
+unverifiable counter is read as a spend.
 
-An armed climb is usually described as ending as **FIRE** or **STAND-DOWN**. There is a
-third. A draw clears the launcher's gate, the launcher hands off, and `pds-pull-proof.sh`
-then refuses on its own precondition (b) because the box moved in the seconds between the
-two reads. The launcher does not loop back:
+What is left is the narrowed third outcome: **the harness was invoked at least once, EVERY
+invocation was a proven zero-spend refusal, and the draw budget then ran out.** That is
+neither a stand-down (the harness ran) nor a spend (the counter never moved), so it carries
+its own terminal stamp `WINDOW-EXHAUSTED — ` and its own sentinel **6** — zero attempts spent,
+re-arming free. **Eliminate that case and sentinel 6 and the stamp become unreachable and
+this passage is false**; it describes nothing else.
 
-```sh
-"$HARNESS" --all        # pds-crown-launch.sh:362-366
-rc=$?
-stamp "harness returned rc=$rc after $draw draw(s)"
-sentinel "$rc"
-exit "$rc"              # ← unconditional; the poll loop is over
-```
-
-**FIRED-AND-REFUSED costs zero export attempts and the entire window.** `--max-draws 2160`
-collapses to one draw and the remaining hours of polling never happen.
-
-**Do not add a re-arm loop.** Re-firing on a refusal is how a marginal window becomes the
-pounce §2(f) forbids, and the one-shot shape is what prevents it. The sanctioned response is
-the same as for a stand-down: `arm` again, deliberately, after re-reading the preflight.
+The re-entry buys no budget. It consumes the draw it sat in, `MAX_DRAWS` and the loop
+condition are untouched, and every invocation stamps its before/after readings — so
+`--max-draws 2160` no longer collapses to one draw on a marginal fire.
 
 ### (i) The two env lines that must be in the SAME shell as `arm` (PDS-D251)
 

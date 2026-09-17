@@ -43,33 +43,35 @@ There is no seventh state — if you are about to write one down, you are guessi
 `KILLED`, `collect` also reports the stranded export lock; that is the lock a later actor
 must **not** `rmdir` blindly (PDS-D31, and see check 3's lock rule below).
 
-### PDS-D262 — the launcher is ONE-SHOT, so there is a THIRD outcome
+### PDS-D262, NARROWED — the THIRD outcome is `WINDOW-EXHAUSTED`, not FIRED-AND-REFUSED
 
 An armed climb is usually described as ending one of two ways: **FIRE** (a draw qualified,
 the harness ran) or **STAND-DOWN** (every draw refused, zero attempts spent, re-arming is
-free). There is a third, and it is the expensive one:
+free). There is still a third — but it is no longer the old FIRED-AND-REFUSED, where one
+marginal fire burned the whole window. That is fixed.
 
-**FIRED-AND-REFUSED.** A draw clears the launcher's gate, the launcher hands off — and then
-`pds-pull-proof.sh` itself refuses on its own precondition (b), because the box moved in the
-seconds between the two reads. The launcher does not loop back:
+**What changed.** `refire_verdict()` in the generated child reads the harness's attempts
+counter before and after each invocation and returns exactly one of:
 
-```sh
-"$HARNESS" --all        # pds-crown-launch.sh:362-366
-rc=$?
-stamp "harness returned rc=$rc after $draw draw(s)"
-sentinel "$rc"
-exit "$rc"              # ← the poll loop is over, whatever rc says
+```
+ZERO-SPEND-REFUSAL   rc != 0 AND both readings numeric AND EQUAL  -> re-enter the SAME poll loop
+SPENT                rc = 0, or the counter MOVED                  -> exit, exactly as before
+SPENT-UNVERIFIED     either reading missing or non-numeric         -> exit, exactly as before
 ```
 
-That `exit` is unconditional. A marginal fire costs **zero export attempts** — the harness
-refused above the spend increment — but it **burns the entire window**: `--max-draws 2160`
-becomes one draw, and the remaining six hours of polling never happen. The transcript shows
-a `FIRE` stamp with no export, which reads like a crash and is not one.
+Only the first shape continues. An unreadable counter is deliberately read as a **spend**:
+being wrong that way costs a window, being wrong the other way costs a real export attempt,
+and a spent attempt is the one outcome that must never be retried. The re-entry consumes the
+draw it sat in, so `MAX_DRAWS` and the loop condition are untouched and the window is never
+extended — which is how the re-arm stays inside the pounce law rather than becoming one.
 
-**Do not add a re-arm loop.** Re-firing on a refusal is how a marginal window becomes a
-pounce, and the launcher's one-shot shape is the thing preventing that. The sanctioned
-response is the same as for a stand-down: `arm` again, deliberately, from a shell where you
-have just re-read the preflight.
+**The narrowed third outcome is what is left: `WINDOW-EXHAUSTED`.** The harness was invoked
+at least once, **every** invocation was a proven zero-spend refusal, and the draw budget then
+ran out. Neither a stand-down (the harness ran) nor a spend (the counter never moved), it
+carries its own terminal stamp `WINDOW-EXHAUSTED — ` and its own sentinel **6**; zero export
+attempts were spent and re-arming is free. `collect` reads that stamp and says so by name.
+**If the exhausted-after-refusals case ever disappears, sentinel 6 and that stamp become
+unreachable and this section is simply wrong** — it now describes nothing else.
 
 ### The two env lines that must be in the SAME shell as `arm` (PDS-D251)
 
@@ -455,12 +457,14 @@ Two limits remain, and neither is closed by code:
    explicitly. Copy the printed run tag into the fire record either way — `last` is
    overwritten by the next `arm`.
 6. **Read the outcome with `collect`, never by eye.** It returns one of the six §0 states.
-   A `CRASHED` transcript is sub-diagnosed by the stamps in its own bytes: a `FIRE` stamp
-   means the harness ran and an export attempt **was** spent; a terminal `STAND-DOWN` or a
-   `prewarm: FAILED` stamp means it was never invoked and re-arming is free. A `FIRE` stamp
-   with **no** export in the harness output is PDS-D262's third outcome — the harness refused
-   above the spend increment, so the attempt is free but the window is gone; read
-   `/tmp/pds-full-export/attempts` before assuming either way. If it reds
+   A `CRASHED` transcript is sub-diagnosed by the stamps in its own bytes, in `collect`'s
+   own order: an `attempts: … verdict=SPENT` stamp means the counter moved (or could not be
+   read) and an export attempt **was** spent; a terminal `WINDOW-EXHAUSTED — ` stamp means
+   the harness was invoked but every invocation was a proven zero-spend refusal before the
+   draws ran out, so re-arming is free; a terminal `STAND-DOWN` or a `prewarm: FAILED` stamp
+   means it was never invoked at all. A bare `FIRE` stamp with neither counter stamp is a
+   pre-re-arm or truncated transcript: read it conservatively as spent and settle it against
+   `/tmp/pds-full-export/attempts`. If it reds
    for real: re-run the preflight **before** the retry (check 3 will WARN — that is the
    trap doing its job), delete the parked tar, raise the budget to the value check 2
    prints, then **`arm` again** — never a hand-run `--all`, which is the dialect this
