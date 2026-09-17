@@ -122,6 +122,10 @@
 #                                     did not surface as deploy_stalled
 #  111 WATCHDOG_WRONG_BUCKET        — named deploy_stalled but filed outside `attention`
 #  112 WATCHDOG_AGE_MISSING         — queued_deploy_age_seconds absent: the signal is blind
+#  113 WATCHDOG_HORIZON_DRIFT      — this script's horizon is no longer the number the CLIENT
+#                                     holds: rung 8 would sample the wrong window
+#  114 WATCHDOG_HORIZON_UNREADABLE — the client's constant could not be READ (moved, renamed,
+#                                     reformatted, file gone). Refuse; never green on nothing.
 #  115 TEARDOWN_BOX_SURVIVED        — the box is still there (BILLING)
 #  116 TEARDOWN_ROWS_SURVIVED       — site / deployment rows survived the teardown
 #  120 SELF_CHECK_FAILED            — a named red did NOT fire on input that must trigger it
@@ -167,6 +171,8 @@ E_MANUAL_STEP=105
 E_WD_NOT_STALLED=110
 E_WD_WRONG_BUCKET=111
 E_WD_AGE_MISSING=112
+E_WD_HORIZON_DRIFT=113
+E_WD_HORIZON_UNREADABLE=114
 E_TD_BOX=115
 E_TD_ROWS=116
 E_SELF_CHECK=120
@@ -204,6 +210,8 @@ codename() {
     110) printf 'WATCHDOG_NOT_STALLED' ;;
     111) printf 'WATCHDOG_WRONG_BUCKET' ;;
     112) printf 'WATCHDOG_AGE_MISSING' ;;
+    113) printf 'WATCHDOG_HORIZON_DRIFT' ;;
+    114) printf 'WATCHDOG_HORIZON_UNREADABLE' ;;
     115) printf 'TEARDOWN_BOX_SURVIVED' ;;
     116) printf 'TEARDOWN_ROWS_SURVIVED' ;;
     120) printf 'SELF_CHECK_FAILED' ;;
@@ -216,7 +224,7 @@ codename() {
 
 # The full typed set, for the structural wall in --self-check. Every entry here
 # MUST have a codename and every judge MUST be able to return one of them.
-ALL_CODES="0 2 30 31 32 33 34 40 41 50 51 60 61 70 71 72 80 81 82 90 91 100 101 102 105 110 111 112 115 116 120 121 122 123"
+ALL_CODES="0 2 30 31 32 33 34 40 41 50 51 60 61 70 71 72 80 81 82 90 91 100 101 102 105 110 111 112 113 114 115 116 120 121 122 123"
 
 # ---- Config (every default is printed by --plan) ------------------------------
 
@@ -225,7 +233,27 @@ ALL_CODES="0 2 30 31 32 33 34 40 41 50 51 60 61 70 71 72 80 81 82 90 91 100 101 
 # twinned server-side by `@default_queued_deploy_alarm_after_seconds 5 * 60` in
 # cloud/lib/barkpark_cloud/registry.ex. The rung asserts the SIGNAL, so the
 # number must match the implementation; if the implementation moves, this moves.
+#
+# THE THIRD SURFACE. `cloud/test/barkpark_cloud/deploy_stalled_horizon_mirror_test.exs`
+# locks the Go literal against the Elixir default and says so in its own
+# moduledoc: "a HAND-MAINTAINED MIRROR across TWO surfaces". This script is the
+# THIRD, and it was outside that lock — the one surface that PARAMETERISES rung
+# 8. A drift here is not a cosmetic mismatch: rung 8 samples for
+# STALL_HORIZON_S + STALL_GRACE_S and then judges the row against
+# STALL_HORIZON_S, so a stale number makes the rung answer a question about a
+# horizon the client does not hold. If the constant moved UP, rung 8 declares
+# WATCHDOG_NOT_STALLED on a client behaving perfectly (a false red on the
+# epic's definition-of-done run); if it moved DOWN, rung 8 passes a row it
+# never actually aged past. `judge_horizon_mirror` below READS the constant out
+# of the Go source instead of trusting this line.
 STALL_HORIZON_S="${STALL_HORIZON_S:-300}"
+
+# Where that constant lives, so the mirror is read rather than remembered. The
+# root is derived from this script's own location (deploy/..), so the lock works
+# from any cwd and from a worktree.
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)}"
+GO_STATUS_SRC="${GO_STATUS_SRC:-$REPO_ROOT/internal/cli/cloud_status_cmd.go}"
+GO_STALL_CONST="${GO_STALL_CONST:-queuedDeployStalledAfterSeconds}"
 
 # How long past the horizon the watchdog rung keeps sampling before it calls the
 # signal missing. The row must READ deploy_stalled, not merely become eligible.
@@ -422,6 +450,51 @@ judge_watchdog() {
   [ "$age" -ge "$horizon" ] || return "$E_WD_NOT_STALLED"
   [ "$status" = "deploy_stalled" ] || return "$E_WD_NOT_STALLED"
   [ "$bucket" = "attention" ] || return "$E_WD_WRONG_BUCKET"
+  return 0
+}
+
+# go_int_const <go-source-file> <const-name> — print the integer literal of a
+# top-level `const <name> = <int>` in a Go source file.
+#
+# It REFUSES rather than answers vacuously. The failure to fear when you read a
+# constant out of source by pattern is not a wrong number, it is a MISSING one:
+# a rename, a move or a reformat makes the pattern match nothing, and an
+# extractor that then prints "" would have its caller compare "" to "" and go
+# green having measured nothing. Every unreadable path returns the typed
+# WATCHDOG_HORIZON_UNREADABLE, and --self-check drives all of them.
+go_int_const() {
+  local file="$1" name="$2" line digits
+  [ -f "$file" ] || return "$E_WD_HORIZON_UNREADABLE"
+  # A whitespace-only read is "read EMPTY", not "the constant is absent".
+  [ -n "$(tr -d '[:space:]' < "$file" 2>/dev/null)" ] || return "$E_WD_HORIZON_UNREADABLE"
+  line="$(grep -E "^[[:space:]]*const[[:space:]]+${name}[[:space:]]*=[[:space:]]*[0-9]+" "$file" 2>/dev/null | head -n 1)"
+  [ -n "$line" ] || return "$E_WD_HORIZON_UNREADABLE"
+  digits="$(printf '%s' "$line" | sed -E 's/.*=[[:space:]]*([0-9]+).*/\1/')"
+  case "$digits" in
+    ''|*[!0-9]*) return "$E_WD_HORIZON_UNREADABLE" ;;
+  esac
+  printf '%s' "$digits"
+  return 0
+}
+
+# judge_horizon_mirror <script_horizon_s> <go-source-file> <const-name>
+#
+# THE MIRROR LOCK for rung 8. Asserts that the horizon this script judges with
+# is the same number the CLIENT fires deploy_stalled at — read out of the Go
+# source, not remembered from a comment. reds:
+#   WATCHDOG_HORIZON_DRIFT      the two numbers disagree
+#   WATCHDOG_HORIZON_UNREADABLE the constant could not be read, or the horizon
+#                               handed in is not a number at all
+judge_horizon_mirror() {
+  local horizon="$1" file="$2" name="$3" go rc=0
+  case "$horizon" in
+    ''|*[!0-9]*) return "$E_WD_HORIZON_UNREADABLE" ;;
+  esac
+  # Declared first and assigned second ON PURPOSE: `local go="$(…)"` would make
+  # the rc that of `local`, swallowing every refusal the extractor just made.
+  go="$(go_int_const "$file" "$name")" || rc=$?
+  [ "$rc" = 0 ] || return "$rc"
+  [ "$go" = "$horizon" ] || return "$E_WD_HORIZON_DRIFT"
   return 0
 }
 
@@ -749,7 +822,10 @@ if [ "$MODE" = "plan" ]; then
   say "        assert: queued_deploy_age_seconds is PRESENT (the signal is not blind),"
   say "                >= ${STALL_HORIZON_S}, the row's status is deploy_stalled and its bucket is attention"
   say "        reds: WATCHDOG_NOT_STALLED ($E_WD_NOT_STALLED) · WATCHDOG_WRONG_BUCKET ($E_WD_WRONG_BUCKET) · WATCHDOG_AGE_MISSING ($E_WD_AGE_MISSING)"
+  say "              WATCHDOG_HORIZON_DRIFT ($E_WD_HORIZON_DRIFT) · WATCHDOG_HORIZON_UNREADABLE ($E_WD_HORIZON_UNREADABLE)"
   say "        judge: judge_watchdog (fed by row_from_status over the status payload)"
+  say "        gate:  judge_horizon_mirror runs FIRST — the rung refuses to sample"
+  say "               a window whose horizon is not the client's own constant"
   say ""
   say "RUNG 9  TEARDOWN — CENSUS DELTA ZERO"
   say "        delete the site row, destroy the box, then re-read three surfaces:"
@@ -765,6 +841,9 @@ if [ "$MODE" = "plan" ]; then
   say "  · The watchdog horizon ${STALL_HORIZON_S}s is queuedDeployStalledAfterSeconds in"
   say "    internal/cli/cloud_status_cmd.go, twinned by"
   say "    @default_queued_deploy_alarm_after_seconds in cloud/.../registry.ex."
+  say "    That is a THREE-surface mirror and this script is the third. It is"
+  say "    LOCKED, not documented: judge_horizon_mirror READS the Go constant and"
+  say "    reds WATCHDOG_HORIZON_DRIFT ($E_WD_HORIZON_DRIFT) if this number is no longer it."
   say "  · KEEP=1 leaves the box running and SAYS SO. Default is destroy."
   rule
   say ""
@@ -982,6 +1061,46 @@ if [ "$MODE" = "self-check" ]; then
     printf '  %s✗%s no mktemp: the parser wall could not run\n' "$RED" "$OFF" >&2; SC_FAILED=1
   fi
 
+  # W4: THE HORIZON MIRROR. Every arm of the extractor and the judge, on
+  # fixtures we write — and then the two arms that matter, against the REAL
+  # repo source. The fixture arms prove the judge; only the real arms prove the
+  # LOCK, and the real refusal arm is what stops the real pass arm from being a
+  # green with no subject.
+  note "wall W4 — the watchdog horizon mirror (this script is the THIRD surface)"
+  MRW="$(mktemp -d 2>/dev/null || printf '')"
+  if [ -n "$MRW" ]; then
+    printf 'package cli\n\nconst queuedDeployStalledAfterSeconds = 300\n' > "$MRW/match.go"
+    printf 'package cli\n\nconst queuedDeployStalledAfterSeconds = 600\n' > "$MRW/drift.go"
+    printf 'package cli\n\nconst somethingElse = 300\n'                  > "$MRW/renamed.go"
+    printf '   \n\n'                                                      > "$MRW/empty.go"
+
+    expect_pass "the fixture constant IS this script's horizon" \
+      judge_horizon_mirror 300 "$MRW/match.go" queuedDeployStalledAfterSeconds
+    expect_code "$E_WD_HORIZON_DRIFT" "THE LOCK'S REASON: the client moved to 600s and this script still judges at 300s" \
+      judge_horizon_mirror 300 "$MRW/drift.go" queuedDeployStalledAfterSeconds
+    expect_code "$E_WD_HORIZON_UNREADABLE" "the constant was RENAMED — refuse, do not green on a pattern that matched nothing" \
+      judge_horizon_mirror 300 "$MRW/renamed.go" queuedDeployStalledAfterSeconds
+    expect_code "$E_WD_HORIZON_UNREADABLE" "the source read EMPTY — refuse to compare against nothing" \
+      judge_horizon_mirror 300 "$MRW/empty.go" queuedDeployStalledAfterSeconds
+    expect_code "$E_WD_HORIZON_UNREADABLE" "the source file is GONE" \
+      judge_horizon_mirror 300 "$MRW/no-such-file.go" queuedDeployStalledAfterSeconds
+    expect_code "$E_WD_HORIZON_UNREADABLE" "the horizon handed in is not a number" \
+      judge_horizon_mirror fiveish "$MRW/match.go" queuedDeployStalledAfterSeconds
+    rm -rf "$MRW"
+  else
+    printf '  %s✗%s no mktemp: the horizon mirror wall could not run\n' "$RED" "$OFF" >&2; SC_FAILED=1
+  fi
+
+  # THE REAL ARMS. Against internal/cli/cloud_status_cmd.go as it sits in this
+  # checkout. The refusal arm comes FIRST because it is the control: it proves
+  # the extractor can actually SEE into that file, so the pass arm below is
+  # evidence the constant was READ and matched — not evidence that nothing was
+  # looked at.
+  expect_code "$E_WD_HORIZON_UNREADABLE" "POSITIVE CONTROL: the REAL Go source refuses a constant name it does not contain" \
+    judge_horizon_mirror "$STALL_HORIZON_S" "$GO_STATUS_SRC" "${GO_STALL_CONST}NOPE"
+  expect_pass "THE LOCK: STALL_HORIZON_S (${STALL_HORIZON_S}s) IS ${GO_STALL_CONST} in $(printf '%s' "${GO_STATUS_SRC#"$REPO_ROOT/"}")" \
+    judge_horizon_mirror "$STALL_HORIZON_S" "$GO_STATUS_SRC" "$GO_STALL_CONST"
+
   say ""
   rule
   if [ "$SC_FAILED" != 0 ]; then
@@ -1175,6 +1294,23 @@ FX
     > "$WORKDIR/wd-otherbox.json"
   nc_expect "$E_WD_AGE_MISSING" "the payload carries only ANOTHER box's row — our row is absent, not healthy" \
     wd_case "$WORKDIR/wd-otherbox.json"
+
+  # C9b — THE HORIZON MIRROR, fixture-driven. Every control above hands
+  # judge_watchdog "$STALL_HORIZON_S" as ground truth. This one asks whether
+  # that number is still the client's, by writing Go sources to disk and
+  # driving them through the REAL extractor.
+  note "go-source fixtures -> go_int_const -> judge_horizon_mirror"
+  printf 'package cli\n\nconst queuedDeployStalledAfterSeconds = %s\n' "$STALL_HORIZON_S" > "$WORKDIR/mirror-match.go"
+  nc_expect 0 "CONTROL-OF-THE-CONTROL: the source says ${STALL_HORIZON_S} and so does this script" \
+    judge_horizon_mirror "$STALL_HORIZON_S" "$WORKDIR/mirror-match.go" queuedDeployStalledAfterSeconds
+
+  printf 'package cli\n\nconst queuedDeployStalledAfterSeconds = %s\n' "$((STALL_HORIZON_S * 2))" > "$WORKDIR/mirror-drift.go"
+  nc_expect "$E_WD_HORIZON_DRIFT" "the client doubled its horizon to $((STALL_HORIZON_S * 2))s; every watchdog control above would judge the WRONG window" \
+    judge_horizon_mirror "$STALL_HORIZON_S" "$WORKDIR/mirror-drift.go" queuedDeployStalledAfterSeconds
+
+  printf 'package cli\n\nconst queuedDeployStalledAfterSecondsRenamed = %s\n' "$STALL_HORIZON_S" > "$WORKDIR/mirror-renamed.go"
+  nc_expect "$E_WD_HORIZON_UNREADABLE" "the constant was renamed: the lock REFUSES rather than passing on a pattern that matched nothing" \
+    judge_horizon_mirror "$STALL_HORIZON_S" "$WORKDIR/mirror-renamed.go" queuedDeployStalledAfterSeconds
 
   # ---- C10..C13  webhook / claim / live, from JSON fixtures ------------------
   note "control-plane payload fixtures -> jget -> judge_webhook / judge_claim / judge_live"
@@ -1462,6 +1598,14 @@ pass 7 "$LIVE_URL serves $PUSHED_SHA (build $SERVED_BID) with $MANUAL_N manual s
 # ── RUNG 8 — THE WATCHDOG RUNG ───────────────────────────────────────────────
 say ""
 say "RUNG 8 — THE WATCHDOG RUNG (horizon ${STALL_HORIZON_S}s + ${STALL_GRACE_S}s grace)"
+# THE MIRROR GATE, before a single second is spent aging a row. Everything
+# below judges against STALL_HORIZON_S; if that is no longer the number the
+# client fires deploy_stalled at, this rung's verdict is about a horizon
+# nothing holds — and the money has already been spent by the time it prints.
+RC=0; judge_horizon_mirror "$STALL_HORIZON_S" "$GO_STATUS_SRC" "$GO_STALL_CONST" || RC=$?
+[ "$RC" = 0 ] || fail "$RC" "the watchdog horizon ${STALL_HORIZON_S}s is no longer ${GO_STALL_CONST} in ${GO_STATUS_SRC} — rung 8 would sample and judge a window the client does not hold, and its verdict would be about nothing" \
+  "the horizon is a THREE-surface mirror: this script, internal/cli/cloud_status_cmd.go, and registry.ex @default_queued_deploy_alarm_after_seconds (locked Go-vs-Elixir by cloud/test/barkpark_cloud/deploy_stalled_horizon_mirror_test.exs). Move all three, or set STALL_HORIZON_S explicitly if you mean to sample a different window"
+note "horizon mirror LOCKED: ${STALL_HORIZON_S}s == ${GO_STALL_CONST}"
 note "Mint a DELIBERATELY UNCLAIMABLE deployment: stop the box's builder, then enqueue."
 "$BP" cloud instance exec "$BOX_ID" -- systemctl stop barkpark-builder >/dev/null 2>&1 \
   || note "could not stop the builder through bp; the enqueue below uses a suspended site instead"
