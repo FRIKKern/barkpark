@@ -13716,15 +13716,22 @@
   // stamp (not castable), so a re-enabled row keeps the old stamp — without the
   // gate, Re-enable would "succeed" and the reconciled card would STILL shout
   // Auto-disabled next to an Active pill, forever.
-  function webhookBannerHtml(wh) {
+  // cch-r21-w16: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from webhookCardHtml (never read here). Absent it defaults to
+  // "grant", byte-identical to the shipped banner. Re-enable is a PUT through
+  // the update capability, which is `Auth.require_team_admin` on the proxy — so
+  // a DETERMINATE refusal omits the button and the banner keeps its sentence.
+  function webhookBannerHtml(wh, authority) {
     wh = wh || {};
+    authority = authority || "grant";
     if (!wh.auto_disabled_at || wh.active) return "";
     var reason = wh.disable_reason != null && String(wh.disable_reason) !== ""
       ? esc(wh.disable_reason)
       : "This endpoint was auto-disabled after repeated delivery failures.";
     return '<div class="notice notice-error wh-autodisable" role="alert">' +
       '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + "</span>" +
-      '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>' +
+      (authority === "refuse" ? "" :
+        '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>') +
       "</div>";
   }
 
@@ -13733,8 +13740,29 @@
   // every action. State is rendered from the ROW, so a reconciled response
   // repaints the true state (D55: pre-C6.5 instances degrade to their stale
   // stamps honestly rather than to an optimistic guess).
-  function webhookCardHtml(wh, instance, dataset) {
+  // cch-r21-w16 — THE ACTION BAR IS AUTHORITY-GATED, and it is the console
+  // telling the truth about the tiers as they stand, not a change to any tier.
+  // Six of this card's controls drive proxy verbs that are
+  // `Auth.require_team_admin` in router.ex — update (Edit and the enable/disable
+  // toggle share the one PUT), delete, rotate, test-send and the deliveries
+  // read; only `webhook.list` and `webhook.show` stayed member-tier. The card
+  // rendered all six for every role, so a plain member was offered a bar of
+  // buttons that each answered 403. D514's rule for a discretionary control a
+  // role cannot use is OMIT, not disable-and-explain (that is reserved for the
+  // two named rail verbs), so the bar is replaced by ONE sentence in the
+  // server's own words — FORBIDDEN_ROLE_COPY.admin, the same bytes the 403
+  // itself now renders through.
+  //
+  // `authority` is instanceAdminAuthority()'s three-valued answer, threaded from
+  // the mount path rather than read here, and only "refuse" — a DETERMINATE no —
+  // removes anything. "unknown" (/v1/me not answered) claims nothing and keeps
+  // the shipped card, matching instanceHeaderHtml and fleetSupportCardHtml.
+  // Absent the argument it defaults to "grant": byte-identical to the shipped
+  // card, which is what keeps every pure call site unmoved.
+  function webhookCardHtml(wh, instance, dataset, authority) {
     wh = wh || {};
+    authority = authority || "grant";
+    var mayMutate = authority !== "refuse";
     var active = !!wh.active;
     var pill = statusMetaPill(active
       ? { role: "ok", label: "Active" }
@@ -13760,9 +13788,9 @@
           webhookEventsHtml(wh) +
         "</div>" + pill +
       "</div>" +
-      webhookBannerHtml(wh) +
+      webhookBannerHtml(wh, authority) +
       (meta ? '<div class="wh-meta">' + meta + "</div>" : "") +
-      '<div class="wh-actions">' +
+      (mayMutate ? '<div class="wh-actions">' +
         '<button class="btn btn-sm" type="button" data-wh-edit>Edit</button>' +
         toggleBtn +
         '<button class="btn btn-sm" type="button" data-wh-rotate>Rotate secret</button>' +
@@ -13777,7 +13805,11 @@
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
         '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
         '<span class="wh-toggle-note" role="status" hidden></span>' +
-      "</div>" +
+      "</div>"
+      // `dim` only — no new class, so the app.css census (held elsewhere this
+      // round) does not move. The fleetSupportCardHtml refusal line is the
+      // precedent, byte-for-byte.
+      : '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>") +
       '<div class="wh-cli">' +
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
@@ -14007,11 +14039,21 @@
       // Nothing above matched, so this envelope named no instance fact. Route
       // the terminal sentence through the same 5xx/transport switch every other
       // crash path uses; a real 4xx answer keeps the instance-shaped copy.
-      // `err` may be a flat slug string, which friendly() reads off `error`.
+      // cch-r21-w16 — THE WHOLE ENVELOPE GOES THROUGH, and the rebuild that used
+      // to stand here is deleted rather than narrowed. It read `typeof err ===
+      // "string" ? { error: err } : resp`, written to hand friendly() a FLAT
+      // shape when `err` is a slug string — but `resp` ALREADY IS that flat
+      // shape in exactly that case (`resp.error` IS the slug), so the ternary
+      // could never change the `error` key it was reaching for. Its only effect
+      // was to DROP every sibling key beside the slug, and friendly() reads five
+      // of them: reason, required, scope (the forbidden evidence fence) and
+      // details/detail (the field ladder). GET .../deliveries is team-admin
+      // (router.ex, `webhook.deliveries`), so a refused member's
+      // {error:"forbidden", required:"admin", scope:"team"} landed here with its
+      // evidence already thrown away.
       // (One line on purpose: the census guard in __app.test.mjs reads the LINE
       // a blaming fallback sits on and demands faultCopy( on it.)
-      var flat = typeof err === "string" ? { error: err } : resp;
-      body = detail || faultCopy(respStatus, flat, "Something went wrong reaching this instance.");
+      body = detail || faultCopy(respStatus, resp, "Something went wrong reaching this instance.");
     }
     return '<div class="wh-error empty-state"><h2>' + esc(title) + "</h2><p>" + esc(body) + "</p>" +
       (retry ? '<p><button class="btn btn-sm btn-primary" type="button" data-wh-retry>Retry</button></p>' : "") +
@@ -14065,12 +14107,27 @@
     // Nothing above matched, so this envelope said nothing about the INPUT.
     // Route the terminal sentence through the same 5xx/transport switch every
     // other crash path uses: only a real 4xx answer keeps the check-the-details
-    // copy. `err` may be a flat slug string, which friendly() reads off `error`.
+    // copy.
+    //
+    // cch-r21-w16 — THE WHOLE ENVELOPE GOES THROUGH. A rebuild used to stand
+    // here, `typeof err === "string" ? { error: err } : data`, written so
+    // friendly() would see a FLAT shape when `err` is a slug string. It could
+    // never do that job: `data` ALREADY IS the flat shape in exactly that case
+    // — `data.error` IS the slug — so the ternary's only measurable effect was
+    // to DROP every sibling key beside it. friendly() reads FIVE such siblings
+    // (reason, required, scope for the forbidden-evidence fence; details and
+    // detail for the field ladder), and since every instance-webhook `:mutate`
+    // proxy moved to team admin, Auth.forbidden/2 answers a plain member with
+    // {error:"forbidden", required:"admin", scope:"team"} FLAT — so
+    // forbiddenEvidenceCopy() saw an empty envelope and the member read the
+    // generic "the refusal didn't say which role would allow it" about a
+    // refusal that said exactly that. The `{error:"network_error"}` shape the
+    // rebuild cited returns at the TOP of this function and never reaches this
+    // line at all; a quiet arm in __app.test.mjs pins that it still does.
     // (One line on purpose: the census guard in __app.test.mjs reads the LINE a
     // blaming fallback sits on and demands faultCopy( on it, so wrapping this
     // call would hide the fix from the guard that is supposed to catch it.)
-    var flat = typeof err === "string" ? { error: err } : data;
-    return faultCopy(status, flat, "Please check the details and try again.");
+    return faultCopy(status, data, "Please check the details and try again.");
   }
 
   // The proxy path for a webhook capability under a dataset. `suffix` is "" for
@@ -14080,7 +14137,14 @@
       "?dataset=" + encodeURIComponent(ds || "production");
   }
 
-  function webhooksTabShellHtml(bp, ds) {
+  // cch-r21-w16: `authority` threaded, defaulting to "grant" (byte-identical to
+  // the shipped shell). POST /v1/barkparks/:id/api/webhooks is
+  // `Auth.require_team_admin`, so a determinate refusal omits the CTA. The TAB
+  // itself stays: `webhook.list` is member-tier by the router's own written
+  // ruling, so a member can still SEE their team's box configuration — the
+  // dataset picker and Load are their controls and they keep working.
+  function webhooksTabShellHtml(bp, ds, authority) {
+    authority = authority || "grant";
     return '<div class="wh-toolbar">' +
       '<div class="wh-dataset">' +
         '<label class="wh-dataset-label" for="wh-dataset-input">Dataset</label>' +
@@ -14088,7 +14152,8 @@
           '" spellcheck="false" autocomplete="off" autocapitalize="off">' +
         '<button class="btn btn-sm" type="button" data-wh-load>Load</button>' +
       "</div>" +
-      '<button class="btn btn-primary btn-sm" type="button" data-wh-new>New webhook</button>' +
+      (authority === "refuse" ? "" :
+        '<button class="btn btn-primary btn-sm" type="button" data-wh-new>New webhook</button>') +
       "</div>" +
       '<div class="wh-list" aria-live="polite"><div class="loading">Loading webhooks&hellip;</div></div>';
   }
@@ -14127,7 +14192,14 @@
     if (!root && typeof document !== "undefined" && document.getElementById) root = document.getElementById("instance-tabpanel");
     if (!root) return;
     var ds = "production";
-    root.innerHTML = webhooksTabShellHtml(bp, ds);
+    // cch-r21-w16 — READ THE AUTHORITY ONCE, HERE, and let every builder in this
+    // tab render from that ONE answer. Three DOM sites paint webhook markup (this
+    // shell, loadWebhooks' list, renderWhCard's single-row repaint); three
+    // independent reads of instanceAdminAuthority() could disagree inside one
+    // visible tab if /v1/me landed between them, which is the defect the
+    // instanceDetailHtml precedent exists to avoid.
+    webhookTabAuthority = instanceAdminAuthority();
+    root.innerHTML = webhooksTabShellHtml(bp, ds, webhookTabAuthority);
     wireWebhooksToolbar(root, bp);
     loadWebhooks(root, bp, ds);
   }
@@ -14144,6 +14216,11 @@
     var neu = root.querySelector("[data-wh-new]");
     if (neu) neu.addEventListener("click", function () { openCreateWebhookModal(root, bp, currentWhDataset(root)); });
   }
+
+  // The tab's ONE authority answer, captured at mount (see mountWebhooksTab).
+  // "grant" until a mount says otherwise, so every pure/harness call path keeps
+  // the shipped behaviour.
+  var webhookTabAuthority = "grant";
 
   var webhookLoadSeq = 0;
   function loadWebhooks(root, bp, ds) {
@@ -14170,12 +14247,17 @@
         listBox.innerHTML = head +
           '<div class="empty-state wh-empty"><h2>No webhooks on ' + esc(ds) + "</h2>" +
           "<p>Deliver document mutation events to your own endpoints.</p>" +
-          '<p><button class="btn btn-sm btn-primary" type="button" data-wh-new>New webhook</button></p></div>';
+          (webhookTabAuthority === "refuse"
+            ? '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>"
+            : '<p><button class="btn btn-sm btn-primary" type="button" data-wh-new>New webhook</button></p>') +
+          "</div>";
         var neu = listBox.querySelector("[data-wh-new]");
         if (neu) neu.addEventListener("click", function () { openCreateWebhookModal(root, bp, ds); });
         return;
       }
-      listBox.innerHTML = head + whs.map(function (w) { return webhookCardHtml(w, cliInstance(bp), ds); }).join("");
+      listBox.innerHTML = head + whs.map(function (w) {
+        return webhookCardHtml(w, cliInstance(bp), ds, webhookTabAuthority);
+      }).join("");
       whs.forEach(function (w) { wireWebhookCard(listBox, bp, ds, w); });
     });
   }
@@ -14232,7 +14314,7 @@
     var card = findWhCard(listBox, wh.id);
     if (!card || !card.parentNode) return;
     var tmp = document.createElement("div");
-    tmp.innerHTML = webhookCardHtml(wh, cliInstance(bp), ds);
+    tmp.innerHTML = webhookCardHtml(wh, cliInstance(bp), ds, webhookTabAuthority);
     var fresh = tmp.firstChild;
     if (!fresh) return;
     card.parentNode.replaceChild(fresh, card);
