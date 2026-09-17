@@ -949,6 +949,72 @@ else
   says_not "PDS-D406" "the reverted pointer cannot see the reservation, so it cannot move past it"
 fi
 
+# ── THE SAME ARBITER OVER A SECOND CHARTER (--prefix) ───────────────────────
+#
+# The allocation arms were PDS-specific in exactly one token. The deploy
+# charter had the same defect and paid for it on 2026-09-16 (two PRs, both
+# correct readers, both minted D614), so that token is a parameter and there is
+# still ONE implementation. These arms hold the parameter honest in BOTH
+# directions: the non-default prefix must refuse an unreserved mint by NAME,
+# and the default must stay byte-identical to what every existing caller sees.
+echo
+echo "AXIS A — one arbiter, a second charter (--prefix)"
+
+PFX_CH="$TMP/deploy-charter.md"
+PFX_LED="$TMP/deploy-ledger.tsv"
+rm -f "$PFX_LED"
+# Both numbering styles this charter family uses, PLUS the trap: a CROSS-CHARTER
+# citation of a much higher number from the OTHER charter's namespace. The real
+# deploy charter cites PDS-D716 six times while its own high-water is 615; a
+# lens that counted citations as definitions would jump the pointer by a hundred.
+{
+  printf '## D613 — a decision, heading form.\n\nbody\n\n'
+  printf -- '- **D614** a decision, bold-lead bullet form.\n\n'
+  printf 'Prose that cites **PDS-D716** and PDS-D716 again, from the OTHER charter.\n'
+} > "$PFX_CH"
+
+PFX_HIGH="$(grep -oE 'D[0-9]+' "$PFX_CH" | sed 's/^D//' | sort -n | tail -1)"
+CHECKS=$((CHECKS + 1))
+if [ "$PFX_HIGH" = "716" ]; then
+  echo "ok    the fixture charter CITES 716 from the other namespace (the lens must not mint 717)"
+else
+  FAILURES=$((FAILURES + 1)); echo "FAIL  FIXTURE PRECONDITION: expected 716 to be the highest bare-D token, got ${PFX_HIGH}"
+fi
+
+run 0 "--prefix D seeds and mints from the DEFINED high-water of the second charter" \
+  -- --prefix D --charter "$PFX_CH" --alloc-ledger "$PFX_LED" --allocate-d 1 --for "deploy adoption"
+says "D615" "it mints 615 — one past the DEFINED 614, across BOTH numbering styles"
+says_not "D717" "the cross-charter PDS-D716 citation does not move the pointer"
+says_not "PDS-D615" "the reservation carries the REQUESTED prefix, not the default one"
+
+PFX_MINTED="$TMP/deploy-charter-minted.md"
+cp "$PFX_CH" "$PFX_MINTED"
+printf '\n## D615 — written into the charter after being reserved.\n' >> "$PFX_MINTED"
+run 0 "--prefix D --check-alloc greens when the number above the seed was reserved first" \
+  -- --prefix D --charter "$PFX_MINTED" --alloc-ledger "$PFX_LED" --check-alloc
+says "every charter number above the seed was reserved first" "the green says what it measured"
+
+printf -- '\n- **D620** minted by reading the charter, exactly as D614 was.\n' >> "$PFX_MINTED"
+run 1 "--prefix D --check-alloc REDS on a number minted without a reservation" \
+  -- --prefix D --charter "$PFX_MINTED" --alloc-ledger "$PFX_LED" --check-alloc
+says "UNRESERVED-MINT      D620" "the bypass is named, by number, in the REQUESTED namespace"
+says_not "UNRESERVED-MINT      D613" "a number at or below the SEED is not scored"
+
+# THE DEFAULT MUST NOT MOVE. Every existing PDS caller, fixture and CI arm calls
+# this script with no --prefix at all; if the parameter changed what they see,
+# the reuse would have cost more than a second arbiter.
+CHECKS=$((CHECKS + 1))
+if diff -q <(bash "$ARM" --print-defs --charter "$CH") <(bash "$ARM" --print-defs --charter "$CH" --prefix PDS-D) >/dev/null 2>&1; then
+  echo "ok    the default prefix IS PDS-D — omitting --prefix and passing it explicitly agree"
+else
+  FAILURES=$((FAILURES + 1)); echo "FAIL  the default prefix is not PDS-D — every existing caller's lens moved"
+fi
+
+run 3 "an empty --prefix is a USAGE error (it would match every bare integer)" \
+  -- --prefix "" --charter "$CH" --alloc-ledger "$PFX_LED" --check-alloc
+run 3 "a --prefix carrying a regex metacharacter is a USAGE error" \
+  -- --prefix 'D.*' --charter "$CH" --alloc-ledger "$PFX_LED" --check-alloc
+
 # ── the arm's own hygiene ───────────────────────────────────────────────────
 echo
 echo "HYGIENE"

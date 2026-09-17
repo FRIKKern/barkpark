@@ -233,6 +233,8 @@
 #   bash scripts/pds-record-parity.sh --fixture-dir <dir>   # hermetic, selftest
 #   bash scripts/pds-record-parity.sh --allocate-d <n> --for <label>  # MINT D numbers
 #   bash scripts/pds-record-parity.sh --check-alloc          # every mint was reserved
+#   bash scripts/pds-record-parity.sh --prefix D --charter <c> --alloc-ledger <l> --check-alloc
+#                                          # the SAME arbiter, a DIFFERENT charter (see D-PREFIX below)
 #   bash scripts/pds-record-parity.sh --print-defs [--charter <path>]  # the lens, alone
 #   bash scripts/pds-record-parity.sh --print-synthetic <a|d>          # the roster, alone
 
@@ -290,6 +292,23 @@ PRINT_SYNTHETIC=""       # --print-synthetic <a|d>: that axis's skip roster
 # THE RESERVATION LEDGER. The arbiter's whole substance: a durable record that
 # a number has been SPOKEN FOR, written BEFORE the charter is. See allocate_d.
 ALLOC_LEDGER="${PDS_D_ALLOC_LEDGER:-tooling/pds/d-number-reservations.tsv}"
+# ── THE D-PREFIX: ONE ARBITER, MANY CHARTERS ─────────────────────────────────
+# The allocation arms (--allocate-d / --check-alloc / --print-defs) are not
+# specific to the PDS charter: the defect they fix — two correct readers of one
+# unchanged document a minute apart minting the same number, because a document
+# is a lagging record of what has LANDED and cannot express what is IN FLIGHT —
+# belongs to every charter that numbers its decisions. It cost the DEPLOY
+# charter a collision on D614 on 2026-09-16 (#18700 kept it, #18701 rebased).
+#
+# So the token is a parameter, not a literal. `--prefix D --charter
+# .claude/workflows/bp-deploy-reliability-charter.md --alloc-ledger
+# deploy/d-number-reservations.tsv` runs THIS arbiter over THAT charter.
+# A SECOND copy of this logic is the outcome to avoid: two arbiters can drift,
+# and the lens in here has drifted once already (PDS-D679).
+#
+# The default is PDS-D, so every existing caller, fixture and CI arm is
+# byte-identical to before this parameter existed.
+D_PREFIX="${PDS_RECORD_PARITY_PREFIX:-PDS-D}"
 REPO="${PDS_RECORD_PARITY_REPO:-FRIKKern/barkpark}"
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
@@ -316,6 +335,7 @@ while [ $# -gt 0 ]; do
     --allocate-d)    ALLOCATE_D="${2:-}"; shift 2 ;;
     --for)           ALLOC_FOR="${2:-}"; shift 2 ;;
     --alloc-ledger)  ALLOC_LEDGER="${2:-}"; shift 2 ;;
+    --prefix)        D_PREFIX="${2:-}"; shift 2 ;;
     --check-alloc)   CHECK_ALLOC=1; shift ;;
     --print-defs)    PRINT_DEFS=1; shift ;;
     --print-synthetic) PRINT_SYNTHETIC="${2:-}"; shift 2 ;;
@@ -328,6 +348,14 @@ case "$AXIS" in a|b|d|both) : ;; *) echo "pds-record-parity: --axis must be a|b|
 case "$LIMIT" in ''|*[!0-9]*|0) echo "pds-record-parity: --limit must be a positive integer, got '${LIMIT}'" >&2; usage ;; esac
 case "$GRACE_HOURS" in ''|*[!0-9]*) echo "pds-record-parity: --grace-hours must be a non-negative integer, got '${GRACE_HOURS}'" >&2; usage ;; esac
 case "$RETRIES" in ''|*[!0-9]*|0) echo "pds-record-parity: PDS_RECORD_PARITY_RETRIES must be a positive integer, got '${RETRIES}'" >&2; usage ;; esac
+
+# The prefix is spliced into an ERE and into sed/awk patterns. Restrict it to
+# the shape a charter token actually has, so a metacharacter cannot silently
+# widen the lens into the "any D-number anywhere" scan this whole arm exists to
+# refuse. An empty prefix would match every bare integer; it is refused too.
+case "$D_PREFIX" in
+  '' | *[!A-Za-z0-9-]* ) echo "pds-record-parity: --prefix must be non-empty and only [A-Za-z0-9-], got '${D_PREFIX}'" >&2; usage ;;
+esac
 
 command -v jq >/dev/null 2>&1 || { echo "pds-record-parity: UNCHECKED: jq is not installed — the arm cannot read either the PR list or the ledger" >&2; exit 2; }
 
@@ -414,14 +442,14 @@ now_epoch() {
 charter_defined_numbers() {
   [ -f "$CHARTER" ] || return 1
   {
-    grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER"
-    grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER"
-  } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u
+    grep -oE "^[[:space:]]*([-*][[:space:]]+)?\*\*${D_PREFIX}[0-9]+" "$CHARTER"
+    grep -oE "^#+[[:space:]]+${D_PREFIX}[0-9]+([[:space:]]|$)" "$CHARTER"
+  } | grep -oE "${D_PREFIX}[0-9]+" | sed "s/^${D_PREFIX}//" | sort -n -u
 }
 
 alloc_ledger_numbers() { # every number this ledger has ever spoken for, seed excluded
   [ -f "$ALLOC_LEDGER" ] || return 0
-  awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
+  awk -F'\t' -v pfx="$D_PREFIX" '$1 ~ "^" pfx "[0-9]+$" { sub("^" pfx, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
 }
 
 alloc_seed() { # the high-water mark at adoption; empty if the ledger has none
@@ -458,7 +486,7 @@ allocate_d() { # allocate_d <count>
     rmdir "$lock" 2>/dev/null; return 2
   }
   high_charter="$(printf '%s\n' "$defs" | tail -1)"
-  [ -n "$high_charter" ] || { echo "pds-record-parity: UNCHECKED: ${CHARTER} defines no PDS-D at all" >&2; rmdir "$lock" 2>/dev/null; return 2; }
+  [ -n "$high_charter" ] || { echo "pds-record-parity: UNCHECKED: ${CHARTER} defines no ${D_PREFIX} at all" >&2; rmdir "$lock" 2>/dev/null; return 2; }
 
   # THE ARM UNDER MUTATION. Delete the next line and the pointer is `max(charter)
   # + 1` again — the pre-arbiter pointer that minted all eighteen pairs. The
@@ -474,7 +502,7 @@ allocate_d() { # allocate_d <count>
     # group creates the file first, so a test inside the group always sees it
     # existing and the header line is never written.
     local had_ledger=1; [ -f "$ALLOC_LEDGER" ] || had_ledger=0
-    { [ "$had_ledger" -eq 1 ] || printf '# PDS-D RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.\n# number\treserved_at\tfor\n'
+    { [ "$had_ledger" -eq 1 ] || printf '# %s RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.\n# number\treserved_at\tfor\n' "$D_PREFIX"
       printf 'SEED\t%s\t%s\thigh-water mark at adoption; numbers at or below it predate the arbiter\n' "$high_charter" "$now"
     } >> "$ALLOC_LEDGER" || { echo "pds-record-parity: UNCHECKED: cannot write ${ALLOC_LEDGER}" >&2; rmdir "$lock" 2>/dev/null; return 2; }
     seed="$high_charter"
@@ -483,9 +511,9 @@ allocate_d() { # allocate_d <count>
   local i=0 n
   while [ "$i" -lt "$count" ]; do
     n=$(( high + 1 + i ))
-    printf 'PDS-D%s\t%s\t%s\n' "$n" "$now" "${ALLOC_FOR:-(unattributed)}" >> "$ALLOC_LEDGER" || {
+    printf '%s%s\t%s\t%s\n' "$D_PREFIX" "$n" "$now" "${ALLOC_FOR:-(unattributed)}" >> "$ALLOC_LEDGER" || {
       echo "pds-record-parity: UNCHECKED: cannot append to ${ALLOC_LEDGER}" >&2; rmdir "$lock" 2>/dev/null; return 2; }
-    printf 'PDS-D%s\n' "$n"
+    printf '%s%s\n' "$D_PREFIX" "$n"
     i=$((i + 1))
   done
   rmdir "$lock" 2>/dev/null
@@ -511,12 +539,14 @@ check_alloc() {
   defs="$(charter_defined_numbers)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
   res="$(alloc_ledger_numbers)"
   echo "D-NUMBER ALLOCATION — every number minted since the seed was reserved first"
+  echo "  prefix:     ${D_PREFIX}"
+  echo "  charter:    ${CHARTER}"
   echo "  ledger:     ${ALLOC_LEDGER}"
   echo "  seed:       ${seed} (numbers at or below it predate the arbiter and are not scored)"
   echo "  reserved:   $(printf '%s\n' "$res" | grep -c '[0-9]') number(s)"
   # A ledger that reserves one number twice is the defect wearing the fix's
   # clothes, so it is scored before anything else.
-  dupres="$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
+  dupres="$(awk -F'\t' -v pfx="$D_PREFIX" '$1 ~ "^" pfx "[0-9]+$" { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
   if [ "${dupres:-0}" -gt 0 ]; then
     echo "  DIVERGENT: ${dupres} number(s) reserved MORE THAN ONCE — the arbiter minted a collision."
     raise 1
@@ -524,7 +554,7 @@ check_alloc() {
   for n in $defs; do
     [ "$n" -le "$seed" ] && continue
     if ! printf '%s\n' "$res" | grep -qx "$n"; then
-      echo "    UNRESERVED-MINT      PDS-D${n} — defined in the charter above the seed, never"
+      echo "    UNRESERVED-MINT      ${D_PREFIX}${n} — defined in the charter above the seed, never"
       echo "                         reserved. Somebody minted it by reading the charter, which"
       echo "                         is the pointer that produced all eighteen pairs."
       unreserved=$((unreserved + 1))
