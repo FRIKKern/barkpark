@@ -3,6 +3,7 @@ package taskboard
 import (
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1269,4 +1270,87 @@ func TestCollapseDraftTwinsIsNotAPrefixDrop(t *testing.T) {
 	if len(in) != 4 || in[0].DocID != draftsPrefix+"a" {
 		t.Fatalf("collapseDraftTwins mutated its input: %v", docIDs(in))
 	}
+}
+
+// ── The bareID join, pinned (task-a7c3a17984689b3d, PDS-D748/D749) ──────────
+//
+// `collapseDraftTwins` above governs the BOARD path. It does not govern
+// `Frontier`, `readySnapshotByBare` or `resolveNext`'s `byBare`, which index
+// the snapshot they are handed: `BuildBoard` collapses its own COPY of the
+// Snapshot value, so `bp task next --frontier`, `bp task frontier` and
+// `bp cmux dispatch` all reach `buildByBare` with both spellings still present.
+// These two tests pin what happens there.
+
+// TestBuildByBarePublishedWinsRegardlessOfMapOrder is the RED arm. It reds on
+// TWO mutations:
+//
+//   - revert the winning-spelling tie-break in buildByBare (back to the plain
+//     `m[bareID(t.DocID)] = t`) and the twin slot is decided by Go's randomized
+//     map iteration order — measured before the fix: the draft won 349 of 400
+//     builds, the published row 51. The repeat loop below is what turns that
+//     coin-flip into a certain failure rather than a flake.
+//   - make bareID the identity function and the pair stops colliding at all, so
+//     the index holds TWO entries for one task and the `len(m)` assertion reds.
+func TestBuildByBarePublishedWinsRegardlessOfMapOrder(t *testing.T) {
+	byID := map[string]Task{
+		"pair":                {DocID: "pair", Title: "published", Lifecycle: lifeInProgress},
+		draftsPrefix + "pair": {DocID: draftsPrefix + "pair", Title: "the draft twin", Lifecycle: lifeOpen},
+	}
+	// Go randomizes map iteration per range, so one build proves nothing: a
+	// single pass passed 51/400 times even with the bug. Repeat until the
+	// probability of a false green is negligible.
+	const builds = 400
+	for i := 0; i < builds; i++ {
+		m := buildByBare(byID)
+		if len(m) != 1 {
+			t.Fatalf("build %d: byBare holds %d entries for ONE twinned task, want 1 — both spellings must join on the same bare key", i, len(m))
+		}
+		got, ok := m["pair"]
+		if !ok {
+			t.Fatalf("build %d: byBare has no entry under the bare id %q, keys=%v", i, "pair", bareKeys(m))
+		}
+		if got.DocID != "pair" {
+			t.Fatalf("build %d of %d: byBare[%q] resolved to %q, want the bare-id row %q — the twin slot must be decided by the winning-spelling tier (TwinResolver.winning_spelling_tier/1), never by map iteration order",
+				i, builds, "pair", got.DocID, "pair")
+		}
+	}
+}
+
+// TestBuildByBareKeepsUnpairedDraftTwin is the QUIET arm: it passes with AND
+// without the tie-break, because an UNPAIRED `drafts.<id>` has no bare-id row
+// to lose the slot to. It reds only if someone "fixes" twins by dropping every
+// `drafts.`-prefixed row — the blanket exclusion PDS-D748 item 2 forbids,
+// because it hides the whole mutate-created population (112 of the 170
+// `drafts.` rows in the measured TUI cache).
+func TestBuildByBareKeepsUnpairedDraftTwin(t *testing.T) {
+	byID := map[string]Task{
+		draftsPrefix + "lonely": {DocID: draftsPrefix + "lonely", Title: "born through /v1/data/mutate"},
+		"control":               {DocID: "control", Title: "an ordinary published row"},
+	}
+	m := buildByBare(byID)
+	if len(m) != 2 {
+		t.Fatalf("byBare holds %d entries, want 2 — an unpaired draft is the row of record and keeps its slot; keys=%v", len(m), bareKeys(m))
+	}
+	got, ok := m["lonely"]
+	if !ok {
+		t.Fatalf("unpaired draft twin is missing from byBare under its bare key; keys=%v — this is NOT a blanket `drafts.` drop", bareKeys(m))
+	}
+	if got.DocID != draftsPrefix+"lonely" {
+		t.Fatalf("byBare[%q] = %q, want the draft spelling %q preserved verbatim", "lonely", got.DocID, draftsPrefix+"lonely")
+	}
+	if m["control"].DocID != "control" {
+		t.Fatalf("byBare[%q] = %q, want %q — an untwinned published row must be untouched", "control", m["control"].DocID, "control")
+	}
+}
+
+// bareKeys renders a byBare index's key set for a failure message. An absence
+// is never caught by reading an empty result: printing the keys is what tells a
+// "missing" verdict apart from a "looked under the wrong key" one.
+func bareKeys(m map[string]Task) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
 }

@@ -714,10 +714,35 @@ func collapseDraftTwins(tasks []Task) []Task {
 
 // buildByBare indexes tasks by their bareID (drafts.-prefix stripped) so a
 // drafts.* id joins a bare parent/event id and vice versa.
+//
+// THE TWIN SLOT IS DECIDED BY THE RULE, NOT BY MAP ORDER. When both spellings
+// of one id are in `byID`, they collide on a single bare key, and the plain
+// `m[bareID(t.DocID)] = t` this function used to be resolved that collision by
+// Go's RANDOMIZED map iteration order: measured on a twinned pair, the draft
+// won 349 of 400 builds and the published row the other 51 — the same
+// insertion-order hazard `Barkpark.Tasks.Board.canonical_twin/1`'s `hd/1`
+// fallback carries on the Elixir side. That is live, not hypothetical: the
+// TUI's own on-disk snapshot cache held 58 twinned pairs (1307 tasks, 170
+// `drafts.` rows) when this was measured, and `Frontier`/`readySnapshotByBare`
+// index the RAW snapshot — `BuildBoard`'s `collapseDraftTwins` runs on its own
+// copy and never reaches them, so `bp task next --frontier`, `bp task
+// frontier` and `bp cmux dispatch` all join over an uncollapsed corpus.
+//
+// The tie-break is the SAME winning-spelling tier the rest of this file
+// already applies (`collapseDraftTwins`) and the server spells in
+// `Barkpark.Tasks.TwinResolver.winning_spelling_tier/1`: a bare-id row holds
+// the slot whenever one exists, the `drafts.` twin otherwise. It is NOT a
+// blanket `drafts.`-prefix drop — an UNPAIRED `drafts.<id>` is the row of
+// record and keeps its slot untouched (PDS-D748 item 2), which is 112 of the
+// 170 `drafts.` rows in that same measured cache.
 func buildByBare(byID map[string]Task) map[string]Task {
 	m := make(map[string]Task, len(byID))
 	for _, t := range byID {
-		m[bareID(t.DocID)] = t
+		bare := bareID(t.DocID)
+		if prev, ok := m[bare]; ok && !strings.HasPrefix(prev.DocID, draftsPrefix) {
+			continue // a bare-id row already holds the slot; a draft twin never displaces it
+		}
+		m[bare] = t
 	}
 	return m
 }
