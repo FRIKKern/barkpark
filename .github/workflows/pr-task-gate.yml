@@ -119,7 +119,10 @@ on:
     # closing and reopening the PR. Both escape hatches are safe on `edited`: the
     # merge-base cutoff step has no `if:` and recomputes `enforced` fresh from
     # base.sha on every trigger, and the hotfix auto-file is keyed on the PR
-    # number via createIfNotExists, so re-firing cannot duplicate it.
+    # number and guarded by a published-set read before its createIfNotExists,
+    # so re-firing cannot duplicate it. That guard is the whole of
+    # task-067a69b6fa4bb3e0: `createIfNotExists` ALONE could duplicate it, once
+    # the record was published — see the write step for why.
     #
     # `labeled`/`unlabeled` are load-bearing for the SAME reason, and they are the
     # emergency exit's own re-fire: applying `hotfix!` to an already-red open PR
@@ -128,8 +131,8 @@ on:
     # `unlabeled` is the other half and is not symmetry for its own sake: removing
     # the label must RE-RED the PR, otherwise a bypass, once taken, is permanent
     # and invisible. Both are safe to re-fire on for the reasons above: the cutoff
-    # recomputes from base.sha every time, and the auto-file is createIfNotExists
-    # keyed on the PR number.
+    # recomputes from base.sha every time, and the auto-file is keyed on the PR
+    # number, read published-first and only then createIfNotExists.
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 permissions:
@@ -308,6 +311,52 @@ jobs:
             echo "::error title=Hotfix override not recorded::PR #${PR_NUMBER} is labelled 'hotfix!', but BARKPARK_TASK_TOKEN is not set, so the override task could not be filed. The hotfix lane is a RECORDED bypass, not a silent one — with no record it is refused. Provision the secret (see docs/ops/merge-gates.md), or remove the 'hotfix!' label and back the PR with a task." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+          . scripts/lib/bp-curl.sh
+          # PUBLISH-IDEMPOTENCE (task-067a69b6fa4bb3e0). THE DEFECT: the create
+          # below is `createIfNotExists`, and that verb resolves `existing` from
+          # `DraftId.draft_id(id)` ALONE (api/lib/barkpark/content/mutations.ex,
+          # the `apply_one(%{"createIfNotExists" => attrs}, …)` clause). Publishing
+          # DELETES the draft. So the moment anybody runs
+          # `bp doc publish task hotfix-pr-<N>` — which the override record is
+          # MEANT to receive, it is a durable audit row a human curates — the next
+          # re-fire of this step finds no draft, mints a fresh
+          # `drafts.hotfix-pr-<N>`, and this PR's single durable record becomes
+          # TWO rows: the curated published one and an unclaimed, `lifecycle_status:
+          # open` twin that walks straight back into `bp task ready`.
+          #
+          # WHAT IT DOES *NOT* BREAK, measured before choosing a design: the gate
+          # never READS the override record. `grep -n hotfix scripts/pr-task-gate.sh`
+          # is empty, and nothing else in .github/ or scripts/ mentions
+          # `hotfix-pr-`. So a twin cannot flip a verdict — there is no resolution
+          # logic to disagree with itself. What it corrupts is the audit trail the
+          # bypass is CONDITIONED on, which is the same thing this step's own
+          # error text calls "the durable record".
+          #
+          # THE DESIGN (option (a) of the row): make the write idempotent ACROSS
+          # publish, so the same override id resolves to ONE record whether or not
+          # it has been published. A bare-id GET on /v1/data/doc answers over the
+          # PUBLISHED set only (a draft needs the literal `drafts.` prefix —
+          # query_controller.ex show/2), which is exactly the question
+          # createIfNotExists cannot ask. 200 => the record is already filed and
+          # published, the bypass condition is SATISFIED, and issuing the create
+          # would do nothing but mint the twin. Option (b), forbidding publish, was
+          # rejected: this workflow cannot enforce it (anyone with the token can
+          # publish) and it would forbid the one thing that makes the record an
+          # audit artefact rather than a draft nobody sealed.
+          #
+          # FAIL-OPEN ON AN INDECISIVE READ, deliberately. 404 => no published
+          # twin, and createIfNotExists is correct exactly as it always was (noop
+          # on the draft, create on a fresh id). ANY other answer — 5xx, 000, an
+          # auth refusal — also falls through to the create, i.e. to today's
+          # behaviour. This step decides a REQUIRED context; a new read must never
+          # become a new way to red a PR that passes today.
+          doc_code="$(bp_curl_code -sS -m 20 -o /dev/null \
+            "${LEDGER_BASE%/}/v1/data/doc/production/task/hotfix-pr-${PR_NUMBER}" \
+            -H "Authorization: Bearer ${TASK_TOKEN}" 2>/dev/null || echo 000)"
+          if [ "$doc_code" = "200" ]; then
+            echo "::notice title=Hotfix lane::PR #${PR_NUMBER} passes under the 'hotfix!' lane; override task hotfix-pr-${PR_NUMBER} is ALREADY filed AND published on the ledger, so this run wrote nothing — a createIfNotExists against a published record mints a second, draft twin instead of resolving to it. The published record is the durable record." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           # Idempotent create keyed on the PR number, so re-runs don't duplicate.
           # jq --arg reads values as DATA — the attacker-controlled PR title
           # cannot inject shell or JSON.
@@ -322,7 +371,7 @@ jobs:
                 description: $desc }}]}')"
           # A ledger 429 is backpressure: scripts/lib/bp-curl.sh sleeps the
           # retry_after the response names (bounded) before the code lands here.
-          . scripts/lib/bp-curl.sh
+          # (bp-curl.sh is sourced above, ahead of the published-set read.)
           code="$(bp_curl_code -sS -m 20 -o /tmp/hotfix-file.json \
             -X POST "${LEDGER_BASE%/}/v1/data/mutate/production" \
             -H "Authorization: Bearer ${TASK_TOKEN}" \
