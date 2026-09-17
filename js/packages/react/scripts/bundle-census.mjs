@@ -451,6 +451,22 @@ function printEntry(e) {
     )
   }
 
+  // CONTROL, printed not assumed: a gzipped column derived by scaling raw bytes
+  // through the header ratio would sum to the gzipped total. A MEASURED one
+  // cannot — every file's excision leaves the others able to back-reference the
+  // shared literals it used to supply, so the parts always sum to LESS than the
+  // whole. A sum at or above the total means this column stopped being a
+  // measurement. The shortfall is the payload's shared-substring overlap.
+  if (gzCol) {
+    const gzSum = e.srcRows.reduce((s2, r) => s2 + r.gzipBytes, 0)
+    console.log(
+      `  SUB-ADDITIVE     : gz column sums to ${fmt(gzSum)} B vs ${fmt(e.gzipTotal)} B measured total ` +
+        `(${gzSum < e.gzipTotal ? 'OK' : 'BROKEN — this is a ratio, not a measurement'}; ` +
+        `${fmt(e.gzipTotal - gzSum)} B is cross-file gzip overlap)`,
+    )
+    console.log('-'.repeat(78))
+  }
+
   let shown = 0
   for (const r of rows.slice(0, topN)) {
     shown += r.bytes
