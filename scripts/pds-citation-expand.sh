@@ -140,7 +140,13 @@ mode_expand() {
     # NOTHING else, so the substitution never leaves perl's buffer.
     # `1 while s///g` re-runs until no compressed segment is left, because one
     # token can carry many; the expanded form cannot re-match, so it terminates.
-    perl -0777 -i -pe '1 while s{(PDS-D[0-9]+[a-z]?)/D?([0-9]+[a-z]?)}{$1/PDS-D$2}g;' "$f"
+    # The segment class comes from $SEG, never a second literal. An earlier
+    # draft hardcoded it here, so narrowing $SEG blinded --check while --expand
+    # kept working — the guard would have gone quiet with the corpus unfixed,
+    # and the selftest arm that exists to catch exactly that could not see it.
+    # One definition, two readers.
+    SEG_RE="$SEG" perl -0777 -i -pe \
+      'BEGIN{$re=qr/(PDS-D$ENV{SEG_RE})\/D?($ENV{SEG_RE})/} 1 while s{$re}{$1/PDS-D$2}g;' "$f"
     after_sum=$(cksum < "$f")
     if [ "$before_sum" != "$after_sum" ]; then
       changed=$((changed + 1))
