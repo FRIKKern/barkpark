@@ -20,6 +20,16 @@
 #                                           quoted recipe must parse all four
 #                                           keys in SILENCE. No network, no
 #                                           target, no export.
+#   scripts/pds-pull-proof.sh --selftest-citations
+#                                           OFFLINE two-arm control over this
+#                                           file's OWN decision citations: a
+#                                           slash-compressed citation carries
+#                                           the PDS-D prefix on the first
+#                                           number only, so the standard census
+#                                           grep silently misses every later
+#                                           one. Fixtures prove the detector
+#                                           fires and stays quiet; the last arm
+#                                           runs it on this script.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -48,7 +58,7 @@
 # draft row), and why step 4's clean scan is only ever reported next to a control
 # that FIRES.
 #
-# COST DISCIPLINE (PDS-D31/D44/D69). Two exports, at most, per run:
+# COST DISCIPLINE (PDS-D31/PDS-D44/PDS-D69). Two exports, at most, per run:
 #   · the DEV export of step 0a, re-used by step 1's pull;
 #   · exactly ONE full-fidelity export, shared by steps 3 and 4 and by nothing
 #     else. It is parked at a RUN-STABLE path with a .meta sidecar so the NEXT
@@ -141,7 +151,7 @@
 #   PDS_STEP6_GUARD_DEMO=0  skip step 6's guard-off control (same honesty)
 #   PDS_STEP1_GRAIN_DEMO=0  skip step 1's manifest-grain negative control — the
 #                        locally built mis-grained bundles that prove the
-#                        PDS-D61/D62 guard can REFUSE. On by default (it costs no
+#                        PDS-D61/PDS-D62 guard can REFUSE. On by default (it costs no
 #                        network, no export and no credentials); the pass then
 #                        says so, because the green is weaker without it.
 #   PDS_PROOF_LIB=1      load the rungs as a library without running any
@@ -226,7 +236,7 @@ ART_MARKER_NAME=".pds-proof-owner"
 ART_DIR_OWNED=""
 MAX_HOME_LEN=85
 
-# ── the ONE full-fidelity export (PDS-D69/D70/D71) ───────────────────────────
+# ── the ONE full-fidelity export (PDS-D69/PDS-D70/PDS-D71) ───────────────────
 #
 # ART_DIR is RUN_TAG-scoped: a bundle parked there is INVISIBLE to the next run,
 # which then spends a second attempt on a 3.8 GB box. So the one full export
@@ -935,7 +945,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
     "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
-    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/PDS-D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
     "source HTTP; for the target half, step 1's import" \
@@ -953,7 +963,7 @@ cmd_plan() {
     "step 1 imported blobs into the scratch target" \
     "RUNNABLE. Resolves from the TARGET's OWN /v1/media/:dataset (the flat /media index emits no originalUrl and ignores limit) and takes originalUrl and size VERBATIM per asset — originalUrl may be signed, so it is never rebuilt from a path. ASSERTS HTTP 200 AND content-length == the stored size for EVERY asset. FAILURE DEMO, run inline and reversed: one blob truncated to 100 bytes still serves 200 — only the stored size convicts it. SEPARATE ASSERTION: a missing blob answers the typed 404 'media blob missing', never a 500."
 
-  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)" \
+  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)" \
     "step 1's import, stamped" \
     "RUNNABLE. Reboot is \`bin/barkpark stop\` then \`up\` in the SAME BARKPARK_HOME — there is NO restart verb and teardown stops Postgres. ASSERTS the eight columns the boot-time schema upsert would otherwise revert (title, icon, visibility, owner_scoped, fields, cors_origins, desk_groups, list_preview) are byte-identical across the reboot, and the pull_provenance stamp survives. THEN — sequenced AFTER the convergence it demonstrates against — the guard is switched OFF by direct SQL (no CLI/HTTP surface exists) with the RETURNING value ASSERTED, because jsonb_set is a proven silent no-op when the parent path is absent, and the next boot must CLOBBER those columns. A demo that fails to clobber makes the convergence green uninterpretable and is reported as a FAIL."
 
@@ -1205,7 +1215,7 @@ step_0a() {
     info "last deploy run ${last_deploy:-none visible (auto-deploy may not be firing — see task-85eb87a30db908ec)}"
   fi
 
-  # The one budgeted export: DEV profile. Never :full here (PDS-D31/D44).
+  # The one budgeted export: DEV profile. Never :full here (PDS-D31/PDS-D44).
   art_dir_ensure
   local bundle hdr t0 t1 bytes elapsed fname
   bundle="$ART_DIR/dev-$SOURCE_WS-$SOURCE_DS.tar"
@@ -1517,7 +1527,7 @@ print(v)' "$d/manifest.json" 2>/dev/null)"
 
 # ── THE GRAIN VERDICT, AS ONE CALLABLE (PDS-D20) ─────────────────────────────
 #
-# The PDS-D61/D62 grain-hazard guard used to live INLINE in step_1, which is why
+# The PDS-D61/PDS-D62 grain-hazard guard used to live INLINE in step_1, which is why
 # it was the one asserting rung nobody could point a control at. It is the same
 # comparison, moved behind a name so a locally built bundle can be put through
 # the EXACT assertion the live bundle goes through. stdout and the exit code of
@@ -1625,7 +1635,7 @@ GRAIN_FIXTURES
   fi
   blk="$(grain_blocker no-dataset)"
   if [ "$blk" != "pds-w4-pull-dataset-flag" ]; then
-    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/D62). Nothing was exported and nothing was imported."
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/PDS-D62). Nothing was exported and nothing was imported."
     return 1
   fi
   info "  $n/$n classified as expected, and a workspace-grain manifest routes to ABORT $blk."
@@ -1770,7 +1780,7 @@ GRAIN_VERDICT
   info "manifest        profile='${m_profile:-$([ "$m_prc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' dataset='${m_ds:-$([ "$m_drc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' (asked for profile=dev dataset=$SOURCE_DS)$m_note"
   if [ "$m_verdict" = "no-dataset" ]; then
     abort 1 "$(grain_blocker "$m_verdict")" \
-      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
+      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/PDS-D62). The bundle is on disk at $tar if you want to look."
     return 0
   fi
   if [ "$m_verdict" = "dataset-mismatch" ]; then
@@ -2133,7 +2143,7 @@ step_2() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════════════════════
-# THE ONE FULL EXPORT (PDS-D69/D70/D71) — acquired once, consumed twice
+# THE ONE FULL EXPORT (PDS-D69/PDS-D70/PDS-D71) — acquired once, consumed twice
 # ═════════════════════════════════════════════════════════════════════════════
 #
 # Steps 3 and 4 both need a FULL-fidelity bundle: step 3 for the ticket control
@@ -3402,7 +3412,7 @@ GUARDED_DIGEST_SQL="SELECT md5(string_agg(dataset || '|' || name || '|' || coale
 # aggregate and would read as a clean control firing (PDS-D130).
 GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_groups list_preview"
 
-# ── THE 34 (PDS-D127/D128) ───────────────────────────────────────────────────
+# ── THE 34 (PDS-D127/PDS-D128) ───────────────────────────────────────────────
 #
 # `schema_definitions` on a pulled target holds 36 rows in three CLASSES, and
 # only one of them behaves the way the guard is about:
@@ -3413,7 +3423,7 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 #                          BEFORE register_all_schemas/0 and outside BOOTSTRAP's
 #                          registry walk — but NOT outside the guard. It goes
 #                          through the SAME `Tenancy.pulled_schema_row/2`
-#                          predicate as the 34 — PDS-D125/D126, in
+#                          predicate as the 34 — PDS-D125/PDS-D126, in
 #                          `Content.TagRegistry.register_attrs!/2` — so it
 #                          SURVIVES stamped and REVERTS cleared, exactly like
 #                          them. It is excluded for SCOPING reasons, not for
@@ -3589,7 +3599,7 @@ reboot_target() { # 0 = the target answered HTTP again
 }
 
 step_6() {
-  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)"
+  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)"
 
   say "  The Bootstrap clobber fires only on BOOT. A convergence proof that does not"
   say "  restart the target measures nothing: it re-reads rows from a process that"
@@ -3670,7 +3680,7 @@ step_6() {
   # only legal alternate. It does NOT hide rows from /api/schemas
   # (`Schema.list_schemas` has no visibility predicate) but it DOES 404
   # anonymous document reads. THAT IS CONTAINED ONLY BECAUSE STEP 6 IS TERMINAL
-  # AMONG TARGET-READING RUNGS (PDS-D101/D116) — steps 2 and 5 run BEFORE it and
+  # AMONG TARGET-READING RUNGS (PDS-D101/PDS-D116) — steps 2 and 5 run BEFORE it and
   # `--all`'s own order is the only safe one. Re-ordering this rung earlier
   # silently poisons every later read; do not.
   #
@@ -4244,6 +4254,112 @@ cmd_selftest_conninfo() {
   return 1
 }
 
+# ── CITATION GREP HONESTY (pds-w5-citation-grep-honesty) ─────────────────────
+#
+# The census contract for this harness is a grep: `grep -oE 'PDS-D[0-9]+'`
+# over the source is how a reader finds every ruling a line is governed by.
+# A citation written the compressed way — one PDS-D number, then a bare `/D`
+# continuation for each sibling — satisfies a HUMAN reader and defeats that
+# grep, because the prefix appears on the FIRST number only. The census
+# reports the head and silently loses every sibling behind it. The loss is
+# invisible: nothing errors, the number is just quietly too low.
+#
+# (This comment deliberately does not spell an example out. The guard below
+# reads THIS FILE, so an illustration here would be a real finding — which is
+# itself the proof that the guard carries no exception list.)
+#
+# A PREDICATE, NOT AN ENUMERATION. The row that asked for this named two
+# sites; the file had fourteen. So the guard is a shape — any PDS-D number
+# followed by a bare /D number — and not a list of the places we happened to
+# look. A list goes stale the first time someone writes a fifteenth.
+#
+# DENOMINATOR, STATED: `grep -o` counts MATCHES, not LINES. Two compressed
+# citations on one line are two findings, and `grep -c` would call them one.
+# Every count this selftest prints is a match count.
+compressed_citations() {
+  # Each offending citation, one per line. Empty output == clean.
+  grep -oE 'PDS-D[0-9]+(/D[0-9]+)+' "$1" 2>/dev/null || true
+}
+
+# What the standard census actually sees in a file: the distinct rulings a
+# naive `grep -oE 'PDS-D[0-9]+'` can reach.
+census_identifiers() {
+  grep -oE 'PDS-D[0-9]+' "$1" 2>/dev/null | sort -u || true
+}
+
+cmd_selftest_citations() {
+  local tmpd arms=0 fails=0 found n_compressed n_seen bad
+  # THE DEFECT SHAPE, BUILT FROM PARTS — never written as a literal.
+  # A fixture that spelled the compressed form out as a literal would itself
+  # be a finding in this file, and the last arm below would have to carve an
+  # exception for its own test data. A guard with an exception list is a guard
+  # you have to trust; this one measures the whole file with none.
+  bad='/D'
+
+  _st_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _st_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _st_eq()  { if [ "$2" = "$3" ]; then _st_ok "$1"; else _st_bad "$1" "expected [$2], got [$3]"; fi; }
+
+  tmpd="$(mktemp -d)"
+
+  say "selftest: decision-citation grep honesty"
+  say ""
+  say "  NEGATIVE CONTROL — the compressed form (the shape that loses numbers)"
+
+  {
+    printf '# the ONE full-fidelity export (PDS-D69%s70%s71)\n' "$bad" "$bad"
+    printf '# THE 34 (PDS-D127%s128)\n' "$bad"
+  } > "$tmpd/compressed.txt"
+
+  found="$(compressed_citations "$tmpd/compressed.txt")"
+  n_compressed="$(printf '%s' "$found" | grep -c . || true)"
+  _st_eq "compressed: the detector FIRES, and names 2 citations (match count, not line count)" \
+    "2" "$n_compressed"
+
+  # THE ACTUAL DAMAGE, MEASURED: five rulings are cited, the census reaches two.
+  n_seen="$(census_identifiers "$tmpd/compressed.txt" | grep -c . || true)"
+  _st_eq "compressed: the standard census reaches only 2 of the 5 cited rulings" "2" "$n_seen"
+  case "$(census_identifiers "$tmpd/compressed.txt" | tr '\n' ' ')" in
+    *PDS-D70*) _st_bad "compressed: D70 is INVISIBLE to the census" "the fixture did not reproduce the defect, so the positive arm proves nothing" ;;
+    *)         _st_ok  "compressed: PDS-D70 is INVISIBLE to the census (this is the bug)" ;;
+  esac
+
+  say ""
+  say "  POSITIVE CONTROL — the expanded form (a guard that shouts here is noise)"
+
+  {
+    printf '# the ONE full-fidelity export (PDS-D69/PDS-D70/PDS-D71)\n'
+    printf '# THE 34 (PDS-D127/PDS-D128)\n'
+  } > "$tmpd/expanded.txt"
+  # The expanded fixture IS spelled out: it is the correct shape, so it is
+  # exactly what the last arm should find nothing wrong with.
+
+  _st_eq "expanded: the detector is SILENT" "" "$(compressed_citations "$tmpd/expanded.txt")"
+  n_seen="$(census_identifiers "$tmpd/expanded.txt" | grep -c . || true)"
+  _st_eq "expanded: the census now reaches all 5 cited rulings" "5" "$n_seen"
+
+  say ""
+  say "  THE SUBJECT — this harness's own source"
+
+  found="$(compressed_citations "$0")"
+  n_compressed="$(printf '%s' "$found" | grep -c . || true)"
+  if [ "$n_compressed" -eq 0 ]; then
+    _st_ok "$SELF cites every ruling in full-prefix form ($(census_identifiers "$0" | grep -c . || true) distinct rulings reachable by the census grep)"
+  else
+    _st_bad "$SELF cites every ruling in full-prefix form" \
+      "$n_compressed compressed citation(s) still present — the census under-reports this file: $(printf '%s' "$found" | tr '\n' ' ')"
+  fi
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
 main() {
   # ── --plan WINS WHEREVER IT APPEARS, and nothing trailing is ignored (PDS-D89)
   #
@@ -4296,12 +4412,17 @@ main() {
       cmd_selftest_conninfo
       exit $?
       ;;
+    --selftest-citations)
+      [ $# -le 1 ] || die "--selftest-citations takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_citations
+      exit $?
+      ;;
     -h|--help|help)
       sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--selftest-citations|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac
