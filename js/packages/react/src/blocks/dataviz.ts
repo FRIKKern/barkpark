@@ -7,7 +7,7 @@
 // never author-controlled inline colour. Empty/absent data → the honest
 // `bp-dataviz bp-dataviz--empty` box (the browser twin of pdrender's placeholder).
 
-import { type Block, escapeHtml, isMap, safeUrl } from '../inline'
+import { type Block, asList, escapeHtml, isMap, safeUrl } from '../inline'
 
 type Emit = (block: Block) => string
 
@@ -15,9 +15,6 @@ type Emit = (block: Block) => string
 
 function get(m: unknown, k: string): unknown {
   return isMap(m) ? m[k] : undefined
-}
-function asArr(v: unknown): unknown[] {
-  return Array.isArray(v) ? v : []
 }
 function numeric(v: unknown): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
@@ -36,20 +33,18 @@ function displayString(v: unknown): string {
   return ''
 }
 function numberList(v: unknown): number[] {
-  return asArr(v)
+  return asList(v)
     .map(numeric)
     .filter((n): n is number => n !== null)
 }
 function stringList(v: unknown): string[] {
-  return asArr(v).map(displayString)
+  return asList(v).map(displayString)
 }
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi)
 }
 function fmt(v: number): string {
-  if (Number.isInteger(v)) return String(v)
-  const r = Math.round(v * 10) / 10
-  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+  return Number.isInteger(v) ? String(v) : tick(v)
 }
 function fmt3(v: number): string {
   return v.toFixed(3)
@@ -143,7 +138,7 @@ function statHtml(block: unknown): string {
 }
 
 const stats: Emit = (block) => {
-  const items = asArr(get(block, 'items')).filter(isMap)
+  const items = asList(get(block, 'items')).filter(isMap)
   if (items.length === 0) return empty('stats')
   // Kilde law, aggregated: per-cell `source` (fallback `sourceDefault`) rolls
   // into ONE deduped footer — cells never stamp their own.
@@ -258,7 +253,7 @@ function duelRowHtml(r: unknown): string {
 const duel: Emit = (block) => {
   const legendA = displayString(get(block, 'legendA'))
   const legendB = displayString(get(block, 'legendB'))
-  const rows = asArr(get(block, 'rows'))
+  const rows = asList(get(block, 'rows'))
     .filter(isMap)
     .filter((r) => ['label', 'valueA', 'valueB'].some((k) => displayString(get(r, k)) !== ''))
   if (rows.length === 0 || legendA === '' || legendB === '') return empty('duel')
@@ -309,7 +304,7 @@ function lineageNodeHtml(n: unknown): string {
 }
 
 const lineage: Emit = (block) => {
-  const nodes = asArr(get(block, 'nodes'))
+  const nodes = asList(get(block, 'nodes'))
     .filter(isMap)
     .filter((n) =>
       ['overline', 'title', 'body', 'value'].some((k) => displayString(get(n, k)) !== ''),
@@ -360,8 +355,8 @@ function quantileBins(grid: number[][]): number[][] {
 }
 
 function normGrid(block: unknown): number[][] {
-  return asArr(get(block, 'cells'))
-    .map((row) => asArr(row).map((v) => numeric(v) ?? 0.0))
+  return asList(get(block, 'cells'))
+    .map((row) => asList(row).map((v) => numeric(v) ?? 0.0))
     .filter((row) => row.length > 0)
 }
 
@@ -618,7 +613,7 @@ function legendHtml(series: Series[]): string {
 }
 
 const chart: Emit = (block) => {
-  const series: Series[] = asArr(get(block, 'series'))
+  const series: Series[] = asList(get(block, 'series'))
     .map((s) => ({ label: displayString(get(s, 'label')), points: numberList(get(s, 'points')) }))
     .filter((s) => s.points.length > 0)
     .slice(0, 4)
@@ -670,7 +665,7 @@ function gaugeMode(block: unknown): 'share' | 'count' {
 
 // share_gauges/1: each row's value as a proportion of `max` (or the summed total).
 function shareGauges(block: unknown): Gauge[] {
-  const items = asArr(get(block, 'rows')).filter(isMap)
+  const items = asList(get(block, 'rows')).filter(isMap)
   if (items.length === 0) return []
   const sum = items.reduce((a, it) => a + (numeric(get(it, 'value')) ?? 0.0), 0)
   const max = numeric(get(block, 'max'))
@@ -704,7 +699,7 @@ function countGauges(block: unknown): 'epic' | Gauge[] {
   const raw = displayString(get(block, 'groupBy'))
   const groupBy = raw === '' ? 'status' : raw
   if (groupBy === 'epic') return 'epic'
-  const rows = asArr(get(block, 'snapshot')).filter(isMap)
+  const rows = asList(get(block, 'snapshot')).filter(isMap)
   if (rows.length === 0) return []
   const counts = new Map<string, number>()
   for (const r of rows) {
@@ -776,7 +771,7 @@ const gaugeList: Emit = (block) => {
 // a filled track), but denominated by the DATA MAX (never the sum — bars
 // are categorical counts, not shares) unless an explicit `max` is given.
 const barChart: Emit = (block) => {
-  const bars = asArr(get(block, 'bars')).filter(isMap)
+  const bars = asList(get(block, 'bars')).filter(isMap)
   if (bars.length === 0) return empty('bar-chart')
   const values = bars.map((b) => numeric(get(b, 'value')) ?? 0.0)
   const explicitMax = numeric(get(block, 'max'))
@@ -815,7 +810,7 @@ function effectiveCriteriaRows(rows: unknown[], detail: unknown): unknown[] {
 }
 
 const criteriaProgress: Emit = (block) => {
-  const rows = asArr(get(block, 'rows')).filter(isMap)
+  const rows = asList(get(block, 'rows')).filter(isMap)
   if (rows.length === 0) return empty('criteria-progress')
 
   const body = effectiveCriteriaRows(rows, get(block, 'detail'))
