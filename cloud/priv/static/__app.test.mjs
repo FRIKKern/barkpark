@@ -977,7 +977,17 @@ test("cch-w53-bl: init() actually calls bootEmailConfirm — the wiring tripwire
 //     literal spelling, so a rename or a reformat cannot make it vacuously
 //     green, and it throws by name if the call site disappears entirely.
 // Half 2 is the half that goes red on clean origin/main (3 args).
-const { route: previewRoute } = await import("./__preview__/scenarios.mjs");
+// The preview corpus module is bound ONCE here, at the FIRST top-level `await`.
+// Every later consumer reads this binding instead of issuing its own
+// `await import(...)`: a fresh depth-0 await mid-file is a new module
+// SUSPENSION POINT, and node:test may drain the tests registered above it
+// while it settles — which puts every `const` declared below it into the TDZ
+// for those tests (scripts/console-tdz-order-check.mjs is the guard that
+// catches exactly that). Keeping the count of depth-0 awaits unchanged is
+// what preserves the "declared above the second top-level await" invariant
+// the ME_OWNER / FORBIDDEN_GENERIC headers below depend on.
+const PREVIEW_SCENARIOS = await import("./__preview__/scenarios.mjs");
+const { route: previewRoute } = PREVIEW_SCENARIOS;
 const MOCK_JS_SRC = fs.readFileSync(new URL("./__preview__/mock.js", import.meta.url), "utf8");
 
 // Split the argument list of the FIRST call to `<needle>` in `src`, walking
@@ -7264,8 +7274,12 @@ test("vercelClaimHtml: UNDEPLOYED is unaffected — nothing to be unsure about",
 // scenario corpus: the control renders only when GET
 // /v1/barkparks/:id/bootstrap answers a `vercel` envelope, and THAT read is
 // itself require_team_admin, so a member's read 403s before the button is ever
-// composed and no committed fixture paints it for anyone (measured: zero
-// renders in all 132 scenarios). Here the band is an ARGUMENT, so the refusal
+// composed and no committed fixture paints it for anyone. That last clause used
+// to carry a typed denominator; it is now MEASURED on every run, over the whole
+// corpus as scenarios.mjs currently declares it, by the sweep arm named
+// "cch-r21-w22: the vercel deploy offer is corpus-unreachable" below — and if a
+// fixture ever mints a vercel envelope, that arm reds and this blind spot is
+// over. Here the band is an ARGUMENT, so the refusal
 // is a losable measurement rather than a consequence of a sibling read — which
 // is exactly why member-authority-sweep.mjs declares it as BLIND SPOT B6 and
 // points here instead of minting a fixture the server cannot serve a member.
@@ -12637,12 +12651,28 @@ test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; 
 // exported helper, and it emitted #github-disconnect with no authority input at
 // all while DELETE /v1/github/installation is team-admin-only.
 //
-// THE HONEST LIMIT: this card cannot paint its connected or its configured arm
-// in ANY of the 108 scenarios (scenarios.mjs declares no /v1/github handler, so
-// every actor falls to the catch-all and gets arm 3, "Not configured") or on the
-// live control plane (no ^GITHUB env). A corpus-level guard would therefore pass
-// on an EMPTY DOM. So the guard lives here, on a hand-built payload, where the
-// paired positive control below closes that vacuity at the seam itself.
+// RETRACTED 2026-09-17 (cch-r21-w22) — THE "HONEST LIMIT" WAS NOT ONE.
+// This block used to argue that the card cannot paint its connected or its
+// configured arm from any committed fixture, because scenarios.mjs declared no
+// handler for the installation read and every actor therefore fell to the
+// catch-all "Not configured" arm. Both halves are false against the corpus as
+// it stands: scenarios.mjs DOES answer that read (`grep -n
+// "/v1/github/installation" __preview__/scenarios.mjs`), and a sweep of the
+// whole corpus finds fixtures answering `connected: true` — including ones
+// whose actor is a plain member, which is exactly the authority arm the
+// argument said no fixture could reach.
+//
+// A guard declined because a sweep covers the corpus is void when the sweep
+// does not cover the corpus, so the corpus-level guard is owed and it is paid
+// below ("cch-r21-w22: the GitHub card's authority arm, driven off the CORPUS").
+// It drives the SHIPPED fixture bodies rather than a hand-built object, which
+// is the vacuity this block used to confess to and could not close.
+//
+// The seam-level test below STAYS. It is the only place the configured-but-
+// not-connected arm and the identical-bytes not-configured arm can be driven
+// against payloads the corpus does not happen to carry, and a hand-built
+// payload is the right instrument for an argument about a pure function.
+// What it may no longer do is stand in for corpus coverage.
 
 test("cch-w48-s3: the GitHub card omits Disconnect for a non-admin — and OFFERS it to an admin", () => {
   assert.equal(typeof hooks.githubCardHtml, "function", "githubCardHtml must be exported");
@@ -12698,6 +12728,133 @@ test("cch-w48-s3 (review): a late /v1/me re-enters loadGithub — the new fence 
     "the shipped roster seam must still be there");
   assert.ok(success.includes('if (currentView() === "providers") loadGithub();'),
     "…and the GitHub card is a separate mount that needs its own re-entry");
+});
+
+// ── cch-r21-w22: THE CORPUS DENOMINATOR IS DERIVED, AND THE OWED GUARD IS PAID ─
+// Two headers in this file declined a corpus-level guard on the strength of a
+// sweep, and each typed its own denominator. The denominators disagreed with
+// each other and both were behind the corpus, so neither sweep was the sweep it
+// claimed to be. Nothing reds when a typed denominator rots, which is why these
+// arms measure instead: every helper below derives the corpus size from
+// scenarios.mjs and THROWS when it cannot, so a corpus that stops loading is a
+// failure here, never a zero-length sweep reported as "no counterexample found".
+// NOT its own `await import(...)`: see PREVIEW_SCENARIOS above — a depth-0
+// await here would be a third module suspension point and would strand the
+// bindings declared below it (TDZ) for every test registered above.
+const CORPUS = PREVIEW_SCENARIOS;
+function corpusNames() {
+  const names = CORPUS.SCENARIO_NAMES;
+  if (!Array.isArray(names) || names.length < 2) {
+    throw new Error("scenarios.mjs exports no usable SCENARIO_NAMES — this sweep has no subject");
+  }
+  if (names.length !== Object.keys(CORPUS.SCENARIOS).length) {
+    throw new Error("SCENARIO_NAMES and SCENARIOS disagree on the corpus size — neither is a denominator");
+  }
+  return names;
+}
+// The classifier both sweeps share: does THIS response body paint the arm the
+// declining header said no fixture could reach?
+function githubPaintsAnAuthorityArm(body) {
+  return !!body && (body.connected === true || body.configured === true);
+}
+function vercelEnvelopePresent(body) {
+  const v = body && body.vercel;
+  return !!v && (v.configured === true || v.deployed === true || !!v.claim_url);
+}
+
+test("cch-r21-w22: no comment in this file types a scenario denominator the corpus can outgrow", () => {
+  const names = corpusNames();
+  const SRC = fs.readFileSync(new URL("./__app.test.mjs", import.meta.url), "utf8");
+  const typed = SRC.split("\n")
+    .map((l, i) => [i + 1, l])
+    .filter(([, l]) => /^\s*\/\//.test(l) && /\b\d+\s+scenarios\b/.test(l));
+  assert.deepEqual(typed.map(([, l]) => l.trim()), [],
+    "a comment states a scenario denominator as a typed numeral; derive it from SCENARIO_NAMES or name a SUBSET with its own derivation");
+
+  // CONTROL, INSIDE THE MEASUREMENT — the scan can say YES. Run on a COPY, so
+  // CI's existing invocation of this suite wires it and no separate test can be
+  // stopped or filtered out.
+  const planted = SRC.replace("// The classifier both sweeps share:",
+    "// measured across all " + (names.length - 1) + " scenarios\n// The classifier both sweeps share:");
+  assert.notEqual(planted, SRC, "the control must actually mutate the source");
+  assert.ok(planted.split("\n").some((l) => /^\s*\/\//.test(l) && /\b\d+\s+scenarios\b/.test(l)),
+    "CONTROL: a typed denominator planted in a comment must be caught by this scan");
+});
+
+test("cch-r21-w22: the vercel deploy offer is corpus-unreachable — MEASURED, not asserted", () => {
+  // cch-r16-w11's argument SURVIVES the corrected denominator, and this is what
+  // re-establishes it on every run rather than once, in prose, in the past.
+  const names = corpusNames();
+  let probes = 0;
+  const reachable = [];
+  for (const name of names) {
+    const data = (CORPUS.SCENARIOS[name] && CORPUS.SCENARIOS[name].data) || {};
+    const ids = (Array.isArray(data.barkparks) ? data.barkparks : []).map((b) => b && b.id).filter(Boolean);
+    // A scenario with no instance still gets one probe, so an empty fleet is
+    // swept rather than silently skipped.
+    for (const id of ids.length ? ids : ["b1"]) {
+      probes++;
+      const r = CORPUS.route(name, "GET", "/v1/barkparks/" + encodeURIComponent(id) + "/bootstrap", {});
+      if (vercelEnvelopePresent(r && r.body)) reachable.push(name + "/" + id);
+    }
+  }
+  // THE DENOMINATOR FLOOR. A sweep that probed nothing must not read as proof.
+  assert.ok(probes >= names.length,
+    "every scenario must contribute at least one bootstrap probe — probed " + probes + " over " + names.length + " scenarios");
+  assert.deepEqual(reachable, [],
+    "a committed fixture now paints the vercel deploy offer, so cch-r16-w11's blind spot is OVER and its guard belongs in the corpus: " + reachable.join(", "));
+
+  // CONTROL — the classifier can say YES. Without this, an empty `reachable`
+  // proves only that the predicate never returns true.
+  assert.equal(vercelEnvelopePresent({ vercel: { configured: true, deployed: false, claimed: false, claim_url: null } }), true,
+    "CONTROL: the reachability predicate must fire on a vercel envelope");
+  assert.equal(vercelEnvelopePresent({ vercel: {} }), false, "…and not on an empty one");
+});
+
+test("cch-r21-w22: the GitHub card's authority arm, driven off the CORPUS", () => {
+  // THE OWED GUARD. cch-w48-s3 declined a corpus-level guard on the grounds
+  // that no fixture paints this card's connected or configured arm. The corpus
+  // says otherwise, so the guard is paid here, on the SHIPPED fixture bodies.
+  const names = corpusNames();
+  const painted = [];
+  for (const name of names) {
+    const r = CORPUS.route(name, "GET", "/v1/github/installation", {});
+    if (r && r.status === 200 && githubPaintsAnAuthorityArm(r.body)) painted.push([name, r.body]);
+  }
+
+  // THE FLOOR, and the fact that voids the old decline: this set is NOT empty.
+  // If a future corpus edit empties it, THIS reds — a corpus-level guard that
+  // silently sweeps nothing is the exact failure the declining header feared,
+  // and it is now a red rather than a green.
+  assert.ok(painted.length > 0,
+    "no committed fixture paints the GitHub card's connected/configured arm — this guard would be sweeping an empty set");
+
+  for (const [name, body] of painted) {
+    // A MEMBER is offered nothing: not a disabled ghost, not a title=
+    // explanation, not a mount hook.
+    const member = hooks.githubCardHtml(body, false);
+    assert.ok(member.indexOf("github-disconnect") === -1, name + ": a member must see no Disconnect");
+    assert.ok(member.indexOf("Disconnect") === -1, name + ": not even the verb, drawn dead");
+    assert.ok(member.indexOf("disabled") === -1, name + ": no disabled ghost");
+    assert.ok(member.indexOf("title=") === -1, name + ": no title= explanation");
+    assert.ok(member.indexOf("installations/new") === -1, name + ": a member gets no install link");
+
+    // …and the READ survives for them: this is an authority fence, not a blackout.
+    if (body.connected === true && body.account_login) {
+      assert.ok(member.indexOf(body.account_login) !== -1 || member.indexOf("Connected") !== -1,
+        name + ": the member still sees the connection state");
+    }
+
+    // THE PAIRED POSITIVE CONTROL, per fixture. An admin is offered exactly one
+    // Disconnect on a connected body, so the omission above cannot pass because
+    // the card rendered nothing at all.
+    const admin = hooks.githubCardHtml(body, true);
+    if (body.connected === true) {
+      assert.equal(admin.split('id="github-disconnect"').length - 1, 1,
+        name + ": an admin is offered exactly one Disconnect");
+    }
+    assert.notEqual(admin, member, name + ": the two authority arms must differ on a painted fixture");
+  }
 });
 
 test("cch-w48-s3: the disconnect refusal renders friendly()'s sentence, never the slug `forbidden`", () => {

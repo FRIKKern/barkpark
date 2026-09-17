@@ -653,6 +653,35 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1495 — bumped 2026-09-17 from 1492 on console-r21-w22-scenario-denominators:
+      # +3 tests. Two headers in cloud/priv/static/__app.test.mjs declined a
+      # corpus-level guard on the strength of a sweep and each typed its own
+      # denominator; the two disagreed with each other and both were behind the
+      # corpus, so neither was the sweep it claimed to be. (1) A denominator
+      # scan over this file's own comments demands ZERO typed scenario counts,
+      # with a control planted in a COPY of the source inside the same test so
+      # CI's existing invocation wires it. (2) A vercel sweep re-establishes
+      # cch-r16-w11's blind spot BY MEASUREMENT over every scenario the corpus
+      # declares — its argument survives the corrected denominator — with a
+      # probe floor so a sweep that probed nothing cannot read as proof and a
+      # positive control on the predicate itself. (3) cch-w48-s3's argument does
+      # NOT survive: scenarios.mjs does answer GET /v1/github/installation and
+      # committed fixtures paint the connected arm, so the declined corpus-level
+      # guard is owed and is paid — the GitHub card's authority arms are now
+      # driven off the SHIPPED fixture bodies, with a non-empty floor so an
+      # emptied corpus reds instead of sweeping nothing. RE-MEASURED, never
+      # arithmetic: RE-MEASURED AGAIN after the rebase onto 1492 (the combined
+      # figure is decided by the instrument, never by adding 1492 + 3).
+      # `bash scripts/console-harness.sh` on the rebased branch printed
+      # `# tests 1495 / # pass 1495 / # fail 0`; with a typed denominator
+      # re-planted in a comment it printed `# tests 1495 / # pass 1494 /
+      # # fail 1`, and with githubCardHtml's canWrite ternary removed so a
+      # member is offered Disconnect it printed `# tests 1495 / # pass 1492 /
+      # # fail 3` (the new corpus guard, cch-w48-s3's seam arm and
+      # cch-w49-bl's member fence). `bash scripts/console-pins.sh --selftest` was run after the
+      # bump — it reads the step `name:` slot a grep from inside the shell step
+      # cannot see.
+      #
       # PIN 1492 — bumped 2026-09-17 from 1491 on console-r21-w22-operator-prose:
       # +1 test. The operator console's comments stated its card and route count
       # as a typed numeral, one short of what operatorRefresh issues, and the
@@ -862,7 +891,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1492-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1495-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -878,14 +907,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1492 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1492 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1495 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1495 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1492 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1492 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1492 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1495 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1495 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1495 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1492 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1495 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
