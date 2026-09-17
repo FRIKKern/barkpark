@@ -13270,7 +13270,8 @@ defmodule PDS.Census do
       corpus: :repo,
       argv: [],
       # The shape wave 42 found: a committed sentence naming a function by name, kept
-      # while the code moved. `Barkpark.Content.Writer.do_create_document/5` is cited in a
+      # while the code moved. `Writer.do_create_document/5` (qualified in full at the
+      # citation, spelled short HERE so this comment is not itself a second anchor) is cited in a
       # comment; renaming the CITATION is the same divergence as renaming the def, seen
       # from the side this file owns.
       # THE ANCHOR AND ITS REPLACEMENT ARE BOTH SPLIT AT A MODULE BOUNDARY, and that is
@@ -13295,10 +13296,14 @@ defmodule PDS.Census do
       corpus: :repo,
       argv: [],
       # The half a name-only check is blind to, and the reason the cited arity is read
-      # through `accepts?/2` rather than ignored: `Barkpark.Accounts.confirm_user/1` is
+      # through `accepts?/2` rather than ignored: `Accounts.confirm_user/1` (spelled short
+      # here for the same reason as the case above) is
       # real at arity 1 and at no other, so /4 names a function that does not exist while
       # every name segment still resolves.
-      mut: {"`Barkpark." <> "Accounts.confirm_user/1`", "`Barkpark." <> "Accounts.confirm_user/4`"},
+      # NO BACKTICKS IN THE ANCHOR: the citation at :4205 is written bare in a comment, and
+      # an anchor carrying punctuation the file does not have is a MUTATION ANCHOR GONE
+      # that reads, from the summary line, exactly like an arm that failed to fire.
+      mut: {"Barkpark." <> "Accounts.confirm_user/1", "Barkpark." <> "Accounts.confirm_user/4"},
       exit: 1,
       expect: ["FAIL  PROSE-NAMES-RESOLVE", "confirm_user/4", "defined at arity 1"],
       refute: ["PASS  PROSE-NAMES-RESOLVE"],
