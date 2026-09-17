@@ -2666,7 +2666,14 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # Same PR, second name: shell-harnesses.yml job `workflow-owner` landed after the
         # first push here and the census clause named it on the next settled head it sampled.
         # DERIVED the same way — scripts/required-checks-ack-derive.sh, one name at a time.
-        --expect-unrendered "workflow-owner-check.sh named-owner guard")
+        --expect-unrendered "workflow-owner-check.sh named-owner guard"
+        # taskboard-drive.yml job `hermetic-drive` is CREATED by the same PR as its
+        # .exclusions row (ttw22-hermetic-ci-gate, #18824): it postdates the frozen
+        # fixture pair and is paths-filtered, so the pair cannot render it and the
+        # generator reports it LOST. This is the SIXTH place, paid in the same commit.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
+        # this name as MISSING ACK_EX (and nothing else) on this tree.
+        --expect-unrendered "taskboard hermetic drive (ADVISORY)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
