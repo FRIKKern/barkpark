@@ -434,7 +434,8 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   published row is BYTE-IDENTICAL to what it was before: the shared
   `<type>.golden.json` component-parity fixtures and the JS twin emitter are
   untouched by this change. Painting the marker is the painters' half of the
-  row and does NOT ship here — see `Components.task_board_html/1`'s note.
+  row and does NOT ship here; `Components.task_board_html/1` carries the note on
+  why (its JS twin is byte-pinned, so both painters must land together).
   """
   def row_from_task(task) when is_map(task) do
     %{

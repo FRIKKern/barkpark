@@ -572,6 +572,16 @@ defmodule Barkpark.PortableDoc.Render.Components do
   (`web/lib/task-board-columns.ts`) so a populated `open` bucket is NEVER
   silently dropped — the omit-empty layout used to have no `open` column at all,
   so `open` tasks vanished from the Studio/View board (bug-taskboard-drops-open-tasks).
+
+  NOT PAINTED YET — the row's `draft` marker. Since task-b258d691989c7a99,
+  `TaskResolver.row_from_task/1` carries `"draft" => true` on a row whose doc_id
+  spells `drafts.`, so this painter can finally SEE which cards are draft-only
+  twins (PDS-D749: "a draft row must be VISIBLY LABELLED on EVERY reader that can
+  show one"). It deliberately does not paint it here: this emitter is pinned
+  byte-for-byte to its JS twin `js/packages/react/src/blocks/taskboard.ts`
+  (charter D14) by the shared `<type>.golden.json` component-parity fixtures, so
+  painting a badge on ONE side would split the twin. The badge lands on BOTH
+  painters in one PR — which is why the data half ships alone and quiet.
   """
   def task_board_html(block) when is_map(block) do
     rows = block |> get("snapshot") |> as_list()

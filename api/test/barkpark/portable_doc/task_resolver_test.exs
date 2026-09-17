@@ -326,7 +326,9 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
       # Floor: the table must actually exercise BOTH verdicts, or a projection
       # hardwired to one of them would pass vacuously.
       assert Enum.any?(@spellings, &DraftId.draft?/1), "no draft spelling in the table"
-      assert Enum.any?(@spellings, &(not DraftId.draft?(&1))), "no published spelling in the table"
+
+      assert Enum.any?(@spellings, &(not DraftId.draft?(&1))),
+             "no published spelling in the table"
 
       for id <- @spellings do
         row = TaskResolver.row_from_task(%{"title" => "t", "doc_id" => id})
@@ -365,15 +367,16 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
                ~w(criteria phase priority status title worker)
 
       # Same doc, draft spelling: the ONLY difference is the added marker.
-      draft = TaskResolver.row_from_task(%{
-        "title" => "t",
-        "doc_id" => "drafts.task-abc",
-        "lifecycle_status" => "in_progress",
-        "priority" => 2,
-        "assignee" => "opus",
-        "labels" => ["wave:5"],
-        "criteria_progress" => %{"met" => 1, "total" => 3}
-      })
+      draft =
+        TaskResolver.row_from_task(%{
+          "title" => "t",
+          "doc_id" => "drafts.task-abc",
+          "lifecycle_status" => "in_progress",
+          "priority" => 2,
+          "assignee" => "opus",
+          "labels" => ["wave:5"],
+          "criteria_progress" => %{"met" => 1, "total" => 3}
+        })
 
       assert Map.delete(draft, "draft") == published
       assert draft["draft"] == true
