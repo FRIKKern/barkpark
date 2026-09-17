@@ -31,6 +31,15 @@ $ bp add block-type --var BlockName=timeline
 
 The fast path *is* the standard path — standards become executable.
 
+**Catalog-first.** Check the catalog — `ls scaffy/commands/`, or `bp scaffy ls --remote` for
+the served corpus — before hand-editing a shape the repo has already scaffolded once, and
+prefer `bp scaffy run` to a hand edit. The measured case is
+[`/papers/scaffy-benchmark`](/papers/scaffy-benchmark): the catalog-first arm applied 3 of 3
+chores with the tool, the arm without the instruction 2 of 2 by hand with the tool already on
+disk. Adoption is not automatic, so builder prompts for a catalog chore carry the
+`bp scaffy run` line explicitly. (This doctrine used to live in `docs/cards/cli.md`; it moved
+here when that card went over its byte budget.)
+
 ## Papers
 
 - **Masterplan** — the full design case: [`/papers/scaffy-commands-as-content`](/papers/scaffy-commands-as-content)

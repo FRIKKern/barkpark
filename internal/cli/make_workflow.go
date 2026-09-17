@@ -42,8 +42,6 @@ import (
 // `--deployment <id>` loop collapses honestly into one motion, because the build
 // happens BETWEEN the two calls in the same job rather than in a shell bp did
 // not launch.
-//
-// @canonical capability:gh-actions-builder-template aka:make-workflow,prebuilt-workflow,deploy-workflow-template doc:docs/cards/cli.md
 
 // workflowDefaults are the knobs the emitted workflow exposes as job-level env.
 // They are env rather than baked literals so the same file works for a repo that
@@ -77,6 +75,7 @@ type workflowOptions struct {
 // Every `run:` block is self-contained shell that reads only job env — no
 // `${{ … }}` interpolation inside a script — which is what makes the steps
 // runnable outside GitHub, and therefore testable.
+// @canonical capability:gh-actions-builder-template aka:make-workflow,prebuilt-workflow,deploy-workflow-template doc:docs/cards/cli.md
 func renderDeployWorkflow(o workflowOptions) string {
 	dist := strings.TrimSpace(o.Dist)
 	if dist == "" {
