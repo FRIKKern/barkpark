@@ -230,12 +230,15 @@ if (exitCode !== 0) process.exit(exitCode)
 // SUCCEED is owned by the workflow's `Test` step, which runs each package
 // through its own script (turbo), with its own preconditions and its own
 // per-package project splits. Running every project through the ROOT config in
-// one process is a different, more permissive composition — @barkpark/nextjs,
-// for one, deliberately runs its two projects as SEPARATE commands (see its
-// package.json `test` and the emptiness note in js-tests.yml), so a root-config
-// run reports failures for it that its real gate does not have. Inheriting
-// those would make this check red on main from birth and it would be muted
-// within a week, which is how gates die. So: vitest's own exit code is
+// one process is a different, more permissive composition: a package whose own
+// `test` script runs several projects as SEPARATE commands can, when composed,
+// report failures its real gate does not have. @barkpark/nextjs was the live
+// case, until js/vitest.config.mts learned to expand a wrapper config into the
+// projects it declares instead of flattening them into one environment — the
+// CLASS remains, and the next package to adopt a split it does not express as
+// sub-config files will reproduce it. Inheriting those would make this check
+// red on main from birth and it would be muted within a week, which is how
+// gates die. So: vitest's own exit code is
 // DISCARDED here (it is exactly the "exit code is not evidence" trap, in the
 // other direction), and the verdict above — every declared project executed at
 // least `MIN` tests — is the whole contract.
