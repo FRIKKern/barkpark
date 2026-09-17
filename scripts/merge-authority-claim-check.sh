@@ -68,7 +68,11 @@
 #   * A DENIAL. Prose whose job is to say a context has NO authority ("but
 #     NEVER blocks the merge", "is not required", "advisory") is the CURE, not
 #     the disease. Reddening a correction is the fastest way to get a guard
-#     switched off — required-checks-verify.sh:608 learned that first.
+#     switched off — the comment block above BLOCKING_HEADER_UNRESOLVED_BASELINE
+#     in scripts/required-checks-verify.sh learned that first, and says so in
+#     those words (`grep -n "Reddening a correction" scripts/*.sh`). The line
+#     number that stood here pointed into `rendered_names`, which is about
+#     nothing of the kind: a citation is correct exactly once.
 #   * The repo's existing escape hatch, `spec-authority: advisory-ok — <reason>`
 #     anywhere in the same contiguous comment block. The reason text is
 #     MANDATORY and non-empty: a bare token is a silencer, a reason is a
