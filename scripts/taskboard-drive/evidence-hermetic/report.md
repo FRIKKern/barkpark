@@ -1,11 +1,11 @@
 # taskboard-drive report
 
-- date: 2026-09-17T03:17:48Z
+- date: 2026-09-17T03:20:34Z
 - mode: hermetic
 - tmux: tmux 3.4
 - host: Darwin arm64
 
-- PASS — hermetic fixture serving the live-pinned surface on 127.0.0.1:4839
+- PASS — hermetic fixture serving the live-pinned surface on 127.0.0.1:4840
 - PASS — wide session geometry is 130x40 detached
 - PASS — narrow session geometry is 70x24 detached
 - PASS — wide board painted task rows (configured server reachable)
