@@ -88,8 +88,10 @@ jobs:
 
           if ! command -v tmux >/dev/null 2>&1; then
             echo "tmux not present on this image — installing"
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq tmux
+            # Non-fatal on purpose: a failed install must fall through to the
+            # NAMED red below, never abort the step under `set -e` with no reason.
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq tmux || true
           fi
 
           if ! command -v tmux >/dev/null 2>&1; then
@@ -100,6 +102,7 @@ jobs:
           ver=$(tmux -V)              # e.g. "tmux 3.4", "tmux 3.2a", "tmux next-3.5"
           echo "tmux version string: ${ver}"
           num=${ver#tmux }
+          num=${num#next-}            # a dev build reports "tmux next-3.5"; it is NEWER, never older
           maj=${num%%.*}
           rest=${num#*.}
           min=$(printf '%s' "$rest" | sed 's/[^0-9].*$//')
@@ -127,8 +130,9 @@ jobs:
 
           if [ ! -x /usr/bin/clang ]; then
             echo "/usr/bin/clang absent on this image — installing clang"
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq clang
+            # Non-fatal on purpose — see the tmux guard above.
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq clang || true
           fi
 
           if [ ! -x /usr/bin/clang ]; then
