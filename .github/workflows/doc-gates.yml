@@ -117,6 +117,7 @@ on:
       # but the test itself matched nothing, so an edit that guts the gate would
       # never have run it (the design/mirror-fence.test.mjs shape).
       - "design/template-theme-contract.test.mjs"
+      - "design/preview-inventory.json"
       # stw-backlog-catalog-family: the CATALOG half of the same family — every
       # barkpark.template.json in the repo conforms to the manifest schema, and
       # every create-barkpark-app starter tree is enrolled in AVAILABLE_TEMPLATES
@@ -505,6 +506,7 @@ on:
       # but the test itself matched nothing, so an edit that guts the gate would
       # never have run it (the design/mirror-fence.test.mjs shape).
       - "design/template-theme-contract.test.mjs"
+      - "design/preview-inventory.json"
       # stw-backlog-catalog-family: the CATALOG half of the same family — every
       # barkpark.template.json in the repo conforms to the manifest schema, and
       # every create-barkpark-app starter tree is enrolled in AVAILABLE_TEMPLATES
