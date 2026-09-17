@@ -12882,11 +12882,17 @@ binary present — the ratchet exits **rc=0**, not 127. The cited mutation canno
 **A first attempt DID reproduce rc=127 and would have "confirmed" the claim; it was confounded, because
 the crude PATH strip had also lost `dirname` and `cut`.** That is how the false receipt was almost
 certainly manufactured, and it is the "bespoke checks lie" class landing inside the check written to
-catch a lie. The dependency is nonetheless REAL, at `pds-ledger-census.sh:348-353`
-(`command -v python3` → `exit 3` → `exec python3 -I -`), and the honest in-repo proof is
-`deploy/site-deploy.sh:758-768`, which hard-fails `exit 1` on a missing python3 under
-`BARKPARK_SELFTEST_REQUIRE_E2E=1` — a flag `deploy-harnesses.yml:63-66` sets on `ubuntu-latest`, with
-five consecutive green runs. (`reland-check.yml`'s python3 calls are `|| true`-guarded and prove nothing.)
+catch a lie. The dependency is nonetheless REAL, at `pds-ledger-census.sh:694-697`
+(`command -v python3` → `exit 3`) and `scripts/pds-ledger-census.sh`@`exec python3 -I - "$@"`, and the honest in-repo proof is
+`deploy/site-deploy.sh:1639-1648`, which hard-fails `exit 1` on a missing python3 under
+`BARKPARK_SELFTEST_REQUIRE_E2E=1` — a flag `.github/workflows/deploy-harnesses.yml:215` and `.github/workflows/deploy-harnesses.yml:232` set on `ubuntu-latest`, with
+five consecutive green runs. **ALL THREE ANCHORS IN THAT SENTENCE WERE STALE AND WERE RE-DERIVED BY GREP ON
+2026-09-17 (PDS-D752)**: `scripts/pds-ledger-census.sh:348-353` is a comment about the draft perspective,
+`deploy/site-deploy.sh:758-768` is `write_release_receipt`, and `.github/workflows/deploy-harnesses.yml:63-66`
+does not mention the flag. The RULINGS survive
+unchanged — exit 3 is the real code, site-deploy.sh really does hard-fail, the workflow really does set the
+flag — so this is the failure mode a correction is MOST exposed to: D647 was right about every fact and
+wrong about every address, and a published correction rots exactly like the claim it corrected. (`reland-check.yml`'s python3 calls are `|| true`-guarded and prove nothing.)
 
 ### PDS-D648 — WALL IS NOT A MEASURABLE PROPERTY OF A DOOR ON A SHARED HOST. THE PRICE COLUMN'S UNIT IS CPU = user + sys, LABELLED LOCAL.
 
@@ -15851,3 +15857,80 @@ name unrelated code.
   is correct**: its reason is a ruling ("pick it up") with no code claim, so nothing a rerun can run
   binds to it. That row is the specimen for `--clear-rerun`, and leaving it red rather than
   massaging the predicate is the point.
+
+- **PDS-D752 — THE LEDGER-CENSUS DOOR STAYS `PRICE`, AND THE ARGUMENT IS NO LONGER THE FIGURE — IT IS
+  THAT THE FIGURE HAS NEVER ONCE HELD. RULED 2026-09-17 on `pds-w44-bl-ledger-census-door-repriced`.**
+  The row asked for a quiet-host re-measure and then a ruling. **The quiet host was not available and
+  the measurement was taken anyway, LABELLED, because PDS-D648 already settled that a wave cannot
+  measure itself quiet — the wave IS the load.** Six lanes and ~30 workers were live; `load1` ran
+  **31.45 → 81.14 on 10 cores** across the trials. So the CPU figures below are a CEILING AT THAT LOAD
+  and are NOT a property of the instrument. **c0 of that row is a MISS and is recorded as one.** What
+  "quiet" would have to mean here is concrete and was not met: `load1 < cpus` (i.e. < 10) sustained
+  across the whole ~90 s run, with no concurrent campaign — measurable only OUT OF BAND, between waves.
+
+  **THE CHECK COUNT IS THE FINDING, NOT THE CPU.** The count is LOAD-INDEPENDENT, so it is the one
+  number this host can report honestly under a campaign, and it is the number that has been wrong every
+  single time anyone wrote it down:
+
+  | asserted | by | value |
+  |---|---|---|
+  | 2026-07-31 | PDS-D-era, wave 28 | 106 → 107 |
+  | PDS-D637 | the charter disposition that ruled it VIABLE | 107 |
+  | PDS-D647 | the re-price that killed D637 | 144 |
+  | 2026-08-05 | the door census PRICE row, by `--measure` | 173 |
+  | **2026-09-17, THIS RULING** | `bash scripts/pds-ledger-census_test.sh`, by run | **288** |
+
+  `SELFTEST PASS: 288 checks.` printed IDENTICALLY at `load1=31.45` and at `load1=49.77` — two trials,
+  two very different loads, one count — which is the control that makes 288 a staleness verdict on the
+  prior figures rather than a measurement artefact of mine. **The instrument has grown 2.7x since D637
+  priced it and 1.7x since the census last looked, and no required gate runs it, so nothing can
+  contradict any figure written about it.** That is the actual disposition-relevant fact: this door's
+  price column is UNANCHORED BY CONSTRUCTION, and every future number written into it will rot the same
+  way unless a gate starts running the thing.
+
+  **THE RULING: `PRICE` STANDS, and it is now the CONSERVATIVE reading rather than the pessimistic one.**
+  Every independent re-take of this door has moved the price **UP, never down** — 26.27 s (2026-08-05,
+  `--measure`, `load1≈7-9`) → 42.6-45.0 s (PDS-D647) → **63.62-65.07 s CPU (this ruling, `load1` 31-81)**.
+  A column whose error has been one-directional across three meters, three months and three authors must
+  not be read as "probably fine once the host is quiet". Even the LOWEST figure ever taken for this door,
+  26.27 s on a 10-core Apple-Silicon mac at `load1≈7`, is the SECOND-most-expensive tiering case on the
+  board, and **no pds door has ever been measured on `ubuntu-latest` at all** (PDS-D647) — where 2-4 vCPU
+  makes it materially worse. There is no reading of this evidence under which a THROUGH is defensible,
+  so the gate legs are NOT landed and are not proposed: **an `api/test/**` rider and an
+  `ELIXIR_TEST_ONLY_PATHS` entry must land TOGETHER or not at all** (leg A without leg B, or leg B
+  without leg A, is the one class no existing gate can see — `scripts/pds-door-census.sh`@`executed by no ExUnit case`), and under a
+  PRICE ruling the correct number of legs is zero.
+
+  **THE METER IS NAMED, AND IT IS DELIBERATELY NOT THE CENSUS'S OWN.** `/usr/bin/time -l` wrapped around
+  `bash -c 'bash scripts/pds-ledger-census_test.sh'` — an OS meter around a SHELL, never a figure taken
+  inside a BEAM parent (PDS-D633/D646). The census's standing row was taken by its own `--measure`
+  (bash's `times` builtin around `LC_ALL=C bash -c`); PDS-D633's PLACEMENT clause blesses BOTH forms, and
+  using the OTHER one is the point — **re-running a builder's own instrument in the builder's own file is
+  repetition, not verification.** The two meters agree on shape and the divergence in magnitude is
+  entirely accounted for by load and by the 173 → 288 growth in the workload itself.
+
+  **AND THE ROW'S OWN CITATIONS DID NOT SURVIVE CONTACT.** Re-deriving PDS-D647's "the dependency is
+  nonetheless REAL" sentence found **three of three anchors stale** — `scripts/pds-ledger-census.sh:348-353`
+  (really `scripts/pds-ledger-census.sh:694-697` plus `scripts/pds-ledger-census.sh`@`exec python3 -I - "$@"`),
+  `deploy/site-deploy.sh:758-768` (really `deploy/site-deploy.sh:1639-1648`) and
+  `.github/workflows/deploy-harnesses.yml:63-66` (really
+  `.github/workflows/deploy-harnesses.yml:215` and `.github/workflows/deploy-harnesses.yml:232`) — and the door census's own
+  ENVIRONMENT row for `pds-ledger-census.sh` carried two more (`scripts/pds-ledger-census.sh:1325`, really
+  `scripts/pds-ledger-census.sh:935`; `scripts/pds-ledger-census.sh:348-350`, really
+  `scripts/pds-ledger-census.sh:694-697`). Every
+  RULING held; every ADDRESS had moved. **A correction rots exactly like the claim it corrects**, and the
+  shape is the dangerous one: the reader who checks the number lands on unrelated prose and reads
+  UNVERIFIABLE where the truth was VERIFIABLE-AND-CORRECT. The python3 dependency was re-proven in BOTH
+  polarities by run — `--help` exits **0** with python3 on PATH and **3** without, on a PATH deliberately
+  stocked with `bash sed grep cat dirname pwd env printf` so the strip itself is not the confound that
+  manufactured the struck wave-43 rc=127 receipt.
+
+  **WHERE THE STRUCK RECEIPT STILL LIVES, AND WHY IT IS LEFT THERE.** The wave-43 rc=127 claim was
+  swept for. Its two IN-REPO copies were the live ones and are corrected above. The only other surviving
+  copy is the description of `pds-w43-bl-ledger-census-exunit-door` — "stripping it from PATH makes that
+  job rc=127" — and that row is **`cancelled`**. A terminal row is a historical record of what was
+  believed at the time, not a live instruction to anybody, and rewriting one launders the very error the
+  strike exists to document; the honest repair is the strike being findable FROM it, which PDS-D647 and
+  this ruling provide. **It is flagged, not edited.** The honest in-repo proof stands in its place:
+  `deploy/site-deploy.sh:1639-1648`, hard-failing `exit 1` on a missing python3 under
+  `BARKPARK_SELFTEST_REQUIRE_E2E=1`.
