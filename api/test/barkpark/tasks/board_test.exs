@@ -252,4 +252,97 @@ defmodule Barkpark.Tasks.BoardTest do
       assert [%{text: "VISIBLE-CRIT"}] = card.criteria_list
     end
   end
+
+  describe "snapshot/1 twin collapse (canonical_twin/1 — published wins, unpaired draft is the row of record)" do
+    # NAMED FAILURE MODE: `load_task_docs/1` groups the corpus by
+    # `Content.published_id/1` and hands each bucket to `canonical_twin/1`. Before
+    # the tie-break, that function was
+    #
+    #     Enum.find(twins, hd(twins), fn d -> d.status == "published" end)
+    #
+    # and the `hd(twins)` DEFAULT — reached whenever a bucket holds no published
+    # row — read Postgres STORAGE ORDER off an `ORDER BY`-less `Repo.all`.
+    #
+    # The two arms below pin the policy in BOTH directions and are deliberately
+    # asymmetric under mutation:
+    #
+    #   * "a PAIRED bucket yields the PUBLISHED row" is the RED arm — delete the
+    #     `d.status == "published"` preference so the bucket answers `hd(twins)`
+    #     and this assertion goes RED (the draft row is inserted FIRST, so it is
+    #     the head).
+    #   * "an UNPAIRED drafts. row resolves as itself" is the QUIET arm — it
+    #     passes straight through that same mutation (a one-member bucket has no
+    #     preference to express) and reds only on a BLANKET `drafts.` drop, which
+    #     is the OTHER way to get this wrong: it would make the whole
+    #     mutate-created population unreadable.
+    #
+    # Neither arm names a line number; the third arm pins the tie-break itself.
+
+    # Like `task!/3` but lets the caller choose the physical `status`, which is
+    # the whole subject here.
+    defp twin_task!(doc_id, title, status, content \\ %{}) do
+      Repo.insert!(%Document{
+        doc_id: doc_id,
+        type: "task",
+        dataset: "production",
+        status: status,
+        title: title,
+        rev: "rev-#{doc_id}",
+        content: Map.put(content, "lifecycle_status", content["lifecycle_status"] || "open")
+      })
+    end
+
+    test "a PAIRED bucket yields the PUBLISHED row, never the draft twin" do
+      # DRAFT FIRST on purpose: with the published preference deleted, `hd/1`
+      # takes this row and the assertions below flip.
+      twin_task!("drafts.twin-paired", "Draft twin", "draft")
+      twin_task!("twin-paired", "Published twin", "published")
+
+      board = Board.snapshot(dataset: "production")
+
+      card = board.cards_by_id["twin-paired"]
+      assert card != nil, "the published twin must be the row the board shows"
+      assert card.title == "Published twin"
+
+      # The pair COLLAPSES to one card. `to_card/4` keys every card by the
+      # PUBLISHED id, so the surviving row is identified by its TITLE, not by
+      # the key: "Draft twin" here would mean the draft won the slot.
+      assert map_size(board.cards_by_id) == 1,
+             "the pair must COLLAPSE — the draft twin is not a second card"
+    end
+
+    test "an UNPAIRED drafts. row IS the row of record and resolves as ITSELF" do
+      # No published twin exists for this id. The carve-out (TwinResolver rule 1
+      # with its premise absent) keeps it on the board as itself.
+      twin_task!("drafts.twin-solo", "Solo draft", "draft")
+
+      board = Board.snapshot(dataset: "production")
+
+      # `to_card/4` keys by the published id even for an unpaired draft, so the
+      # key is the bare id; the point is that the ROW SURVIVES at all. A blanket
+      # `drafts.` drop in canonical_twin/1 empties the board here.
+      card = board.cards_by_id["twin-solo"]
+      assert card != nil, "an unpaired drafts. row must survive the collapse as itself"
+      assert card.title == "Solo draft"
+    end
+
+    test "with NO published row the winner is the RULE, not the insertion order" do
+      # Two buckets, each holding only unpublished members, seeded in OPPOSITE
+      # orders. Rule 2 (bare id beats `drafts.`-prefixed) decides both, so the
+      # answer cannot depend on which row the storage hands back first.
+      twin_task!("drafts.order-a", "Draft A", "draft")
+      twin_task!("order-a", "Bare A", "draft")
+
+      twin_task!("order-b", "Bare B", "draft")
+      twin_task!("drafts.order-b", "Draft B", "draft")
+
+      board = Board.snapshot(dataset: "production")
+
+      assert board.cards_by_id["order-a"].title == "Bare A"
+      assert board.cards_by_id["order-b"].title == "Bare B"
+
+      assert map_size(board.cards_by_id) == 2,
+             "each bucket must collapse to exactly one card"
+    end
+  end
 end
