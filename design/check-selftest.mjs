@@ -107,7 +107,7 @@ const DECLARES_NO_SUMMARY = "gates no part-summary";
 // shrink: a gate that stops gating drops it, including a gate inside a Part whose
 // OTHER gate still answers for the Part. Growth is fine and prints a NOTE — a new
 // hooked Part earns its line without editing anything here.
-const OK_LINE_FLOOR = 17;
+const OK_LINE_FLOOR = 21;
 
 /** One run of the real gate. `faults` is the array of part ids to force. */
 function runGate(faults) {
