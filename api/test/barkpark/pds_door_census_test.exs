@@ -575,6 +575,27 @@ defmodule Barkpark.PdsDoorCensusTest do
              "that already failed for some other reason.\n#{out}"
   end
 
+  test "EVERY THROUGH price row is graded or explicitly stood down — no row is silently ungraded",
+       ctx do
+    out = ctx.check_out
+
+    # THE HOLE THIS PINS. Before the PRICE-UNGRADED ruling a THROUGH row with no
+    # `key=` was passed over without a word, so the freshness arm graded TWO
+    # rows of NINE while `ERRORS : 0` read as a verdict on all nine. The rule is
+    # now a PREDICATE and not a skip list: a row carries `arm=<argv> key=<12
+    # hex>` or `ungraded-until=<YYYY-MM-DD>` in the field after `load1=<n>`, and
+    # a row with neither reds. A NEW row pasted with neither reds on its first
+    # --check, which a list of known-unkeyed basenames could never do.
+    refute out =~ "PRICE-UNGRADED",
+           "a THROUGH price row is neither keyed nor stood down with a dated " <>
+             "`ungraded-until=`. Re-take it on a quiet host with `--measure <basename> " <>
+             "<its gated arm>`, or stand it down explicitly.\n#{out}"
+
+    assert ctx.check_rc == 0,
+           "the census reds on this tree, so the assertion above was made against a run that " <>
+             "already failed for some other reason.\n#{out}"
+  end
+
   test "the COUNTS block ACCOUNTS FOR every row of the column, zeroes included", ctx do
     out = ctx.check_out
 
