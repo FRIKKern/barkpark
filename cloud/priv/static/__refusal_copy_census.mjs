@@ -1046,7 +1046,27 @@ const PIN = [
   { key: "ARG|openSiteGithub|friendly|f69d8f71", verdict: "DELEGATED", copy: "Couldn't load your repositories." },
   { key: "ARG|submitSiteGithub|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|disconnectSiteGithub|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
-  { key: "ARG|resumeStudioLogin|friendly|ca861173", verdict: "DELEGATED", copy: "Try again from the instance page." },
+  // ── studioSigninOutcome — the "Log in with Barkpark Cloud" refusal sheet.
+  // Every sentence here is backed by an emitter in the studio-signin route
+  // (`post "/v1/auth/studio-signin"`, cloud/lib/barkpark_cloud/web/router.ex):
+  // `not_found` (the deliberate non-oracle: no such host AND not your team),
+  // `no_admin_token`, `suspended`, `not_live`, `instance_unreachable`, plus the
+  // 401 from Auth.require_user. The two 404 slugs are why the branch reads the
+  // SLUG and not the status — see studioSigninOutcome's own note. It replaces
+  // ARG|resumeStudioLogin|friendly|ca861173, whose call site is gone.
+  { key: "FN|studioSigninOutcome|1addabec", verdict: "AUTHORED", copy: "Instance not linked" },
+  { key: "FN|studioSigninOutcome|3de1ca26", verdict: "AUTHORED", copy: "isn't managed by this account." },
+  { key: "FN|studioSigninOutcome|ea757cd2", verdict: "AUTHORED", copy: "Can't open Studio yet" },
+  { key: "ARG|studioSigninOutcome|friendly|7c6265e0", verdict: "DELEGATED", copy: "No stored credentials for this instance." },
+  { key: "FN|studioSigninOutcome|348f9c97", verdict: "AUTHORED", copy: "Studio access to" },
+  { key: "FN|studioSigninOutcome|a86e71d3", verdict: "AUTHORED", copy: "is closed until the suspension is cleared." },
+  { key: "FN|studioSigninOutcome|966a3d35", verdict: "AUTHORED", copy: "Instance isn't live yet" },
+  { key: "FN|studioSigninOutcome|310ef575", verdict: "AUTHORED", copy: "has finished provisioning." },
+  { key: "ARG|studioSigninOutcome|friendly|6f310ee9", verdict: "DELEGATED", copy: "Try again once" },
+  { key: "FN|studioSigninOutcome|aad0405d", verdict: "AUTHORED", copy: "Couldn't reach the instance" },
+  { key: "ARG|studioSigninOutcome|friendly|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
+  { key: "FN|studioSigninOutcome|f61ae203", verdict: "AUTHORED", copy: "Couldn't open Studio" },
+  { key: "ARG|studioSigninOutcome|faultCopy|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
   { key: "ARG|submitLaunchFlow|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderLaunchPlan|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderBilling|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },

@@ -9347,18 +9347,167 @@ test("instance-login: a malformed deep link degrades to null, never throws", () 
   assert.equal(hooks.studioLoginHost("https://"), null);
 });
 
-test("instance-login: fleet match is host equality, never substring", () => {
-  const fleet = [
-    { id: "a", url: "https://alpha.barkpark.cloud" },
-    { id: "b", url: "https://guerrilla.barkpark.cloud/" },
-    { id: "c", url: null },
+// The client-side fleet match this block used to pin (studioLoginMatch) is GONE
+// on purpose — it answered "is this instance mine?" from a team-scoped list and
+// compared against the provisioning FQDN only, so it was wrong for a
+// non-selected team and wrong for every custom host. The question now belongs to
+// POST /v1/auth/studio-signin. What is pinned below is the console's half: it
+// asks that door, and it navigates on ONE answer and no other.
+
+test("instance-login: only a 200 carrying a url navigates — every other answer refuses", () => {
+  // The fail-OPEN table. A login path must never turn an answer it did not
+  // understand into a redirect, so each of these must produce a toast.
+  const refusals = [
+    { status: 401, data: { error: "unauthorized" } },
+    { status: 403, data: { error: "forbidden" } },
+    { status: 404, data: { error: "not_found" } },
+    { status: 404, data: { error: "no_admin_token" } },
+    { status: 409, data: { error: "suspended" } },
+    { status: 409, data: { error: "not_live" } },
+    { status: 500, data: { error: "decrypt_failed" } },
+    { status: 502, data: { error: "instance_unreachable" } },
+    { status: 0, data: { error: "network_error" }, transport: "offline" },
+    // The shapes a careless guard lets through: a 200 with no url at all, a
+    // 200 whose url is empty, and a 200 whose url is not a string.
+    { status: 200, data: {} },
+    { status: 200, data: { url: "" } },
+    { status: 200, data: { url: { toString: () => "https://evil.example" } } },
+    { status: 200, data: null },
+    undefined,
   ];
-  assert.equal(hooks.studioLoginMatch(fleet, "https://guerrilla.barkpark.cloud").id, "b");
-  // A lookalike host must NOT match the real one.
-  assert.equal(hooks.studioLoginMatch(fleet, "https://evil-guerrilla.barkpark.cloud"), null);
-  assert.equal(hooks.studioLoginMatch(fleet, "https://guerrilla.barkpark.cloud.evil.example"), null);
-  assert.equal(hooks.studioLoginMatch([], "https://guerrilla.barkpark.cloud"), null);
-  assert.equal(hooks.studioLoginMatch(fleet, "garbage"), null);
+  for (const r of refusals) {
+    const out = hooks.studioSigninOutcome(r, "guerrilla.barkpark.cloud");
+    assert.equal(out.go, undefined, "navigated on " + JSON.stringify(r));
+    assert.ok(out.toast && out.toast.title && out.toast.body,
+      "refusal with no sentence for " + JSON.stringify(r));
+  }
+  // The one shape that DOES navigate.
+  const ok = hooks.studioSigninOutcome(
+    { status: 200, data: { url: "https://guerrilla.barkpark.cloud/studio?t=x" } },
+    "guerrilla.barkpark.cloud");
+  assert.equal(ok.go, "https://guerrilla.barkpark.cloud/studio?t=x");
+  assert.equal(ok.toast, undefined);
+});
+
+test("instance-login: the two 404s say two different things, and the 401 says neither", () => {
+  const host = "guerrilla.barkpark.cloud";
+  const notFound = hooks.studioSigninOutcome({ status: 404, data: { error: "not_found" } }, host);
+  const noToken = hooks.studioSigninOutcome({ status: 404, data: { error: "no_admin_token" } }, host);
+  const expired = hooks.studioSigninOutcome({ status: 401, data: { error: "unauthorized" } }, host);
+
+  assert.match(notFound.toast.body, /isn't managed by this account/);
+  // Same STATUS, different FACT: a registered box with no stored credential must
+  // not be told it belongs to somebody else. This is the accountEraseFailureCopy
+  // failure shape (branching on status alone), pinned so it cannot come back.
+  assert.doesNotMatch(noToken.toast.body, /isn't managed by this account/);
+  assert.match(noToken.toast.body, /No stored credentials/);
+  assert.notEqual(noToken.toast.title, notFound.toast.title);
+  // And an expired session is a session sentence, not a "not yours" sentence.
+  assert.doesNotMatch(expired.toast.body, /isn't managed by this account/);
+  assert.match(expired.toast.body, /session has expired/);
+
+  // The remaining refusals each carry their own subject too.
+  const suspended = hooks.studioSigninOutcome({ status: 409, data: { error: "suspended" } }, host);
+  const notLive = hooks.studioSigninOutcome({ status: 409, data: { error: "not_live" } }, host);
+  const titles = [notFound, noToken, expired, suspended, notLive].map((o) => o.toast.title);
+  assert.equal(new Set(titles).size, titles.length, "two refusals share one title: " + titles.join(" | "));
+  assert.match(suspended.toast.body, /suspension/);
+  assert.match(notLive.toast.body, /provisioning|live/i);
+});
+
+test("instance-login CONTROL: deleting the 200-and-url guard makes every refusal navigate", () => {
+  const src = fs.readFileSync(APP_PATH, "utf8");
+  const GUARD =
+    '    if (r.status === 200 && typeof data.url === "string" && data.url) return { go: data.url };\n';
+  assert.ok(src.includes(GUARD),
+    "studioSigninOutcome's 200-and-url guard is gone from the shipped app.js — " +
+    "grep -n 'function studioSigninOutcome' cloud/priv/static/app.js");
+  // Remove the CONDITION, keep the return: what is under test is whether the
+  // condition is load-bearing, not whether the function still returns something.
+  const mutant = evalApp(
+    replaceUnique(src, GUARD, "    return { go: data.url };\n",
+      { what: "instance-login CONTROL: drop the 200-and-url guard" })
+  ).hooks.studioSigninOutcome;
+
+  const refusal = { status: 404, data: { error: "not_found" } };
+  assert.equal(hooks.studioSigninOutcome(refusal, "h.example").go, undefined);
+  // Without the guard a 404 hands back a `go` — undefined, but a `go` — so the
+  // shell's `if (outcome.go)` is no longer what stands between a refusal and a
+  // navigation. If this ever stops differing, the guard has stopped being the
+  // thing that holds and this control must be re-derived.
+  assert.ok("go" in mutant(refusal, "h.example"),
+    "the mutant no longer differs — the 200-and-url guard is not load-bearing any more");
+  const leaky = { status: 403, data: { url: "https://evil.example/steal" } };
+  assert.equal(hooks.studioSigninOutcome(leaky, "h.example").go, undefined,
+    "a 403 that happens to carry a url must NOT navigate");
+  assert.equal(mutant(leaky, "h.example").go, "https://evil.example/steal",
+    "the mutant no longer navigates on a refusal — the control proves nothing");
+});
+
+test("instance-login: the resume shell asks the host-keyed door and navigates only on its 200", async () => {
+  // Drives the REAL path — api() over a stubbed fetch, no injected transport —
+  // because the write call site has to be spelled `api("POST", "/v1/auth/…"` in
+  // the shipped source for the elevated-write binding census to see it at all.
+  const realFetch = sandbox.fetch;
+  const realLocation = sandbox.location;
+  const seen = [];
+  const navs = [];
+  sandbox.location = Object.assign({}, realLocation, { replace: (u) => navs.push(u) });
+  const answer = (status, body) => (url, init) => {
+    seen.push({ url: String(url), method: init.method, body: init.body });
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  try {
+    sandbox.fetch = answer(200, { url: "https://g.example/studio?t=1" });
+    await hooks.resumeStudioLogin("https://g.example");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].method, "POST");
+    assert.equal(seen[0].url, "/v1/auth/studio-signin");
+    // The door is handed the arriving origin and nothing else — no instance id
+    // (the console has none here) and no team (the whole point of the door).
+    assert.deepEqual(JSON.parse(seen[0].body), { host: "https://g.example" });
+    assert.deepEqual(navs, ["https://g.example/studio?t=1"]);
+
+    // A refusal must not navigate. The toast is a no-op in this sandbox (there
+    // is no #toast-stack), which is exactly why the SENTENCES are pinned on
+    // studioSigninOutcome above and only the NAVIGATION is measured here.
+    seen.length = 0;
+    sandbox.fetch = answer(404, { error: "not_found" });
+    await hooks.resumeStudioLogin("https://g.example");
+    assert.equal(seen.length, 1);
+    assert.equal(navs.length, 1, "a 404 navigated — the login path failed OPEN");
+
+    // A deep link that is not a URL asks nothing at all.
+    seen.length = 0;
+    sandbox.fetch = answer(200, { url: "https://g.example/studio?t=2" });
+    assert.equal(hooks.resumeStudioLogin("garbage"), undefined);
+    assert.equal(seen.length, 0);
+    assert.equal(navs.length, 1);
+  } finally {
+    sandbox.fetch = realFetch;
+    sandbox.location = realLocation;
+  }
+});
+
+test("instance-login: the resume path no longer reads the team-scoped fleet", () => {
+  const src = fs.readFileSync(APP_PATH, "utf8");
+  const start = src.indexOf("function resumeStudioLogin(");
+  assert.ok(start !== -1, "resumeStudioLogin is gone — grep -n 'function resumeStudioLogin' cloud/priv/static/app.js");
+  const body = src.slice(start, src.indexOf("\n  }\n", start));
+  // THE TWO HOLES, as a shape assertion over the shipped body: the fleet read
+  // (GET /v1/barkparks, current_team-scoped) and the client-side match are both
+  // absent, and the host-keyed door is what is asked instead.
+  assert.doesNotMatch(body, /ensureFleet/, "resumeStudioLogin still reads the team-scoped fleet");
+  assert.doesNotMatch(body, /studioLoginMatch/, "resumeStudioLogin still matches client-side");
+  assert.match(body, /\/v1\/auth\/studio-signin/);
+  // And studioLoginMatch is gone from the whole file, not merely from this path.
+  assert.equal(src.includes("function studioLoginMatch("), false,
+    "studioLoginMatch still exists — a dead client-side authorization match is a trap for the next reader");
 });
 
 // ══ Rollback endgame — criteria-proof the shipped promote UI ═════════════════

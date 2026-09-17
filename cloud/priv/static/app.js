@@ -18571,9 +18571,10 @@
   // An instance's /login page deep-links here carrying its own public origin:
   //   https://barkpark.cloud/#/instance-login?url=https%3A%2F%2Fguerrilla.barkpark.cloud
   // Same park/resume shape as invitations: logged out → park the origin +
-  // banner the login card; the first authed render() matches the origin
-  // against the user's OWN fleet and rides the existing studio-link mint —
-  // authorization never moves client-side, the deep link carries no secret.
+  // banner the login card; the first authed render() POSTs the origin to
+  // `/v1/auth/studio-signin`, which resolves the row by PUBLIC HOST and reads
+  // the membership row on that row's own team — authorization never moves
+  // client-side, and the deep link carries no secret.
   var STUDIO_LOGIN_KEY = "bpcloud.studioLogin";
   function studioLoginFromHash(hash) {
     var m = (hash != null ? hash : location.hash || "").match(/^#\/?instance-login\?url=([^&]+)/);
@@ -18595,15 +18596,92 @@
     if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return null;
     try { return new URL(u).host || null; } catch (e) { return null; }
   }
-  // Pure: which of MY instances is the deep link asking for? Host equality
-  // against each barkpark's public url — never a substring match.
-  function studioLoginMatch(fleet, instanceUrl) {
-    var want = studioLoginHost(instanceUrl);
-    if (!want || !Array.isArray(fleet)) return null;
-    for (var i = 0; i < fleet.length; i++) {
-      if (fleet[i] && studioLoginHost(fleet[i].url) === want) return fleet[i];
+  // PURE: what a `POST /v1/auth/studio-signin` answer MEANS. Exactly one of two
+  // shapes comes back:
+  //   {go: "<url>"}           — the ONLY shape resumeStudioLogin navigates on
+  //   {toast: {title, body}}  — every other answer, refusing in place
+  //
+  // THIS REPLACED A CLIENT-SIDE MATCH, and that is the point. resumeStudioLogin
+  // used to answer "is this instance mine?" HERE, against ensureFleet() — `GET
+  // /v1/barkparks` with no `scope=all`, which the router scopes to
+  // `current_team` — comparing the arriving origin against each row's `url`
+  // only. Two instances were unreachable through that door and both were real:
+  //   * an instance in a team the console is not currently PINNED to was simply
+  //     absent from the list, so a member of two teams got "Instance not
+  //     linked" for a box they own;
+  //   * an instance reached at its ATTACHED CUSTOM HOST never matched at all —
+  //     the instance deep-links the origin its own endpoint serves (`PHX_HOST`,
+  //     required to be the public DNS hostname, which on a custom-host install
+  //     IS the custom host), while the comparison only ever saw the
+  //     provisioning FQDN. The button was dead on every custom-host install.
+  // The control plane now answers both questions in one place, by public host
+  // (custom_host OR the url origin) and against the membership row on the
+  // RESOLVED row's team — never against the team this console happens to have
+  // pinned. Resolution stops being a client's guess.
+  //
+  // FAILS CLOSED BY CONSTRUCTION. `go` is produced by ONE branch and one only:
+  // status exactly 200 AND a non-empty STRING `url` in the body. A refusal, a
+  // 5xx, a network zero, a 200 whose body lost its url — every one of them
+  // falls through to a toast, so no answer this console can misread becomes a
+  // navigation. This is a LOGIN path; open is the wrong direction to fail.
+  //
+  // WHY THE SLUG IS READ, NOT THE STATUS ALONE. This door answers 404 with two
+  // different facts: `not_found` (no such host, OR a host owned by a team you
+  // are not in — one indistinguishable answer, deliberately, so the route is no
+  // existence oracle) and `no_admin_token` (YOUR registered box, with no stored
+  // credential to mint against). A `status === 404` branch would tell the owner
+  // of a registered instance that it "isn't managed by this account" — the same
+  // shape of confident-and-false sentence accountEraseFailureCopy had to be
+  // corrected for, where a 401 on an EXPIRED SESSION rendered as a wrong
+  // password.
+  function studioSigninOutcome(r, host) {
+    r = r || {};
+    var data = r.data || {};
+    var slug = data.error;
+    // The nested `{error: {code}}` envelope four route families send — unwrapped
+    // here for the same reason friendly() unwraps it: a truthy OBJECT compared
+    // against a slug string silently matches nothing and takes the wrong arm.
+    if (slug && typeof slug === "object") slug = slug.code;
+    var where = host ? String(host) : "the instance";
+
+    if (r.status === 200 && typeof data.url === "string" && data.url) return { go: data.url };
+
+    if (r.status === 401) {
+      return { toast: { title: "Signed out", body: SESSION_EXPIRED_COPY } };
     }
-    return null;
+    if (slug === "not_found") {
+      return {
+        toast: { title: "Instance not linked", body: where + " isn't managed by this account." }
+      };
+    }
+    if (slug === "no_admin_token") {
+      return {
+        toast: {
+          title: "Can't open Studio yet",
+          body: friendly(data, "No stored credentials for this instance.")
+        }
+      };
+    }
+    if (slug === "suspended") {
+      return {
+        toast: {
+          title: "Instance suspended",
+          body: "Studio access to " + where + " is closed until the suspension is cleared."
+        }
+      };
+    }
+    if (slug === "not_live") {
+      return { toast: { title: "Instance isn't live yet", body: friendly(data, "Try again once " + where + " has finished provisioning.") } };
+    }
+    if (slug === "instance_unreachable") {
+      return { toast: { title: "Couldn't reach the instance", body: friendly(data, "Try again from " + where + "/login.") } };
+    }
+    return {
+      toast: {
+        title: "Couldn't open Studio",
+        body: faultCopy(r.status || 0, data, "Try again from " + where + "/login.", r.transport)
+      }
+    };
   }
 
   // Pure: what the landing shows BEFORE any accept POST.
@@ -18962,31 +19040,33 @@
       esc(host) + ".</span> You'll be sent straight back once you're signed in.";
   }
 
-  // First authed render() after an instance-login landing: match the origin
-  // against MY fleet, mint through the existing studio-link route, and send
-  // the browser back. Failures degrade to a toast on the normal dashboard —
-  // the park is cleared up front so a broken link can't loop every render.
+  // First authed render() after an instance-login landing: hand the arriving
+  // PUBLIC HOST to the control plane and let it decide. One request, one
+  // decision, and the decision is made by the only party that can make it: the
+  // host resolves the row (custom_host OR the url origin) and the grant is read
+  // against that row's own team. No fleet list, no client-side match, no
+  // dependence on which team this console is pinned to.
+  //
+  // Failures degrade to a toast on the normal dashboard — the park is cleared up
+  // front so a broken link can't loop every render. The transport is the shared
+  // api() by NAME and not through any injected seam: the elevated-write binding
+  // census (`__binding_census.mjs`) finds this console's write call sites by
+  // reading `api("VERB", "<route>"` out of the shipped source, and a write
+  // routed through a local alias would be invisible to it. The unit harness
+  // drives the real path with a stubbed `fetch` instead.
   function resumeStudioLogin(instanceUrl) {
     clearParkedStudioLogin();
     var host = studioLoginHost(instanceUrl);
     if (!host) return;
-    ensureFleet().then(function (fleet) {
-      if (!fleet) {
-        toast({ kind: "error", title: "Couldn't reach your instances", body: "Try again from " + host + "/login." });
-        return;
+
+    return api("POST", "/v1/auth/studio-signin", { host: instanceUrl }).then(function (r) {
+      var outcome = studioSigninOutcome(r, host);
+      if (outcome.go) {
+        location.replace(outcome.go);
+        return outcome;
       }
-      var bp = studioLoginMatch(fleet, instanceUrl);
-      if (!bp) {
-        toast({ kind: "error", title: "Instance not linked", body: host + " isn't managed by this account." });
-        return;
-      }
-      api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/studio-link", {}).then(function (r) {
-        if (r.status === 200 && r.data && r.data.url) {
-          location.replace(r.data.url);
-        } else {
-          toast({ kind: "error", title: "Couldn't open Studio", body: friendly(r.data, "Try again from the instance page.") });
-        }
-      });
+      toast({ kind: "error", title: outcome.toast.title, body: outcome.toast.body });
+      return outcome;
     });
   }
 
@@ -29394,7 +29474,7 @@
       emailConfirmOutcome: emailConfirmOutcome, bootEmailConfirm: bootEmailConfirm,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
-      studioLoginMatch: studioLoginMatch,
+      studioSigninOutcome: studioSigninOutcome, resumeStudioLogin: resumeStudioLogin,
       // bp-login-ux W3 — shared two-factor challenge card (decision 39): the two
       // pure classifiers (login-response kind + challenge outcome), the card
       // markup, the error copy, and the mount seam (driven with a stubbed fetch,
