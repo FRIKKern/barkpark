@@ -16101,3 +16101,113 @@ name unrelated code.
   is the row owner's act, not a worker's, and a worker who edits the criterion they are measured by
   has removed the only thing that could have refuted them. The ruling is recorded; the wording is
   the owner's.
+
+- **PDS-D758 — THE api/ ANCHOR ROT RATE IS 2 BREAKS IN 30 HOURS, THE FIX IS "CITE THE HOME, NOT THE
+  CONSTRUCT", AND THE CITING LANE STILL GETS NO SIGNAL (2026-09-17).** PDS-D299 replaced line
+  anchors with content anchors. That bought ONE failure mode — an insert above the cited line — and
+  the charter then rotted twice more inside a single day, both times because the *thing the anchor
+  named* was refactored. This decision prices that, picks the remedy, and records the gap the remedy
+  does not close.
+
+  **(i) THE RATE, DERIVED BY REPLAYING THE CHECKER ACROSS MAIN, NOT BY COUNTING MEMORIES.** Arm A of
+  `scripts/pds-charter-anchors-check.sh`@`hits="$(grep -cF -- "$literal" "$path")"` was replayed at
+  every first-parent commit from `7a58567d3933b51028ebc25ae6c86e6f10e3024a` (2026-09-16 11:18:42
+  +0200 — the commit that introduced the `` `<path>`@`<literal>` `` form; before it there is nothing
+  for arm A to resolve) through `1a9e62943d` (2026-09-17 17:31:52 +0200). At each commit the charter
+  is read AS OF THAT COMMIT and every anchor resolved against the tree AS OF THAT COMMIT.
+
+  | quantity | value |
+  |---|---|
+  | window | 30h 13m |
+  | denominator — first-parent main commits | 327 |
+  | of those, commits touching `api/` | 64 |
+  | of those, commits touching `api/lib/` | 42 |
+  | BREAK events (an `api/` anchor went PASS → FAIL) | 2 |
+  | rate per `api/`-touching commit | 2/64 = 3.1% |
+  | rate per `api/lib/`-touching commit | 2/42 = 4.8% |
+  | commits that landed onto an already-red main | 61 of 327 = 18.7% |
+  | wall-clock main spent red on arm A | 4h 34m of 30h 13m = 15.1% |
+
+  The two breaks and their repairs, read off the commits rather than off the incident report:
+  `0cd1ed7ca6` (#18909, 11:19:28) killed the `board.ex` anchor whose literal was the storage-order
+  default `Enum.find(twins, hd(twins), ...)` (quoted without the joint form on purpose: it no longer
+  exists, and an anchor is a live predicate, not a history entry); `e026439296` (#18968, 15:01:54) re-pointed it at `defp canonical_twin(twins)
+  do`, still in `board.ex`; `a6af8515ab` (#18986, 16:38:55) killed that one AND the `fleet.ex`
+  anchor on the comment line `# canonical row (published wins), Board-style.`; `e718694fe1` (#19019, 17:30:28)
+  re-pointed both at `Tasks.TwinCollapse`. **CORRECTION TO THE INCIDENT NARRATIVE:** #18909 is
+  remembered as rotting a LINE anchor. It did not — the charter already carried a CONTENT anchor
+  there, and #18909 refactored the expression it named. So the two breaks are not "line rot, then
+  refactor rot"; they are the SAME failure mode twice, which strengthens the finding rather than
+  softening it.
+
+  **(ii) WHAT THIS METHOD CANNOT SEE, stated before the number is used.** (a) A commit that moves the
+  code and re-points the charter in the SAME commit never produces a FAIL row — structurally
+  invisible. That is not a hand-wave here: in this window **zero** first-parent commits touched both
+  `.claude/workflows/bp-pds-charter.md` and `api/`, so the blind spot is empirically EMPTY and 2 is
+  not an undercount from it. (b) Arm A sees only the joint form: 27 anchors against the 15
+  legacy `pds-pull-proof.sh:NNN` and 641 file-less `` `:NNN` `` citations the same charter still
+  carries, so the MEASURED corpus is 27 of 683 citations — 4.0%. The other 96% cannot rot loudly
+  because nothing resolves them at all. (c) An anchor added at commit N cannot rot at commit N-1;
+  the corpus grew 25 → 27 inside the window, so early history is measured against a smaller corpus.
+  (d) Only main's first parent is replayed: a PR that rotted an anchor and repaired it before merge
+  leaves no trace, and rot is attributed to the squash-merge commit, not to the authoring branch.
+  (e) Arms B, C, D and the MALFORMED joint arm are not replayed — this is an arm-A rate only.
+
+  **(iii) THE DIRECTION CHOSEN: anchor at the capability's HOME — its `defmodule` line or a PUBLIC
+  `def` — never at a call site, an expression inside a private function, or a comment.** This is
+  what #19019 did ad hoc; here it becomes the rule. A home is a single well-defined thing that rots
+  on exactly one event (the module is deleted or renamed); a construct rots on every refactor that
+  passes through it. Under this rule five of the six `api/` anchors on main today are compliant and
+  **one is a live exposure of exactly the shape that broke twice**:
+  `api/lib/barkpark/tasks/board.ex`@`Enum.group_by(fn d -> Content.published_id(d.doc_id) end)` is a
+  pipeline line inside `defp load_task_docs/1` — a call site, in the same file, in the same function
+  family, as both prior breaks. It is named here rather than silently re-pointed: re-wording what a
+  published decision cites is the owning row's act, and the anchor's prose still reads true today.
+
+  **(iv) WHY `@canonical capability:` WAS REJECTED — and it is the direction that looks best until
+  you read its contract.** Three reasons, each read from the source. (a) It does not exist for this
+  capability: `api/lib/barkpark/tasks/twin_collapse.ex` — the module created precisely so the rule
+  has one address — carries ZERO markers. Adopting it means the PDS lane ASKING the api lane to mint
+  one, which is the cross-fence coordination this whole finding says is unavailable. (b)
+  `docs/contracts/canonical-impl-markers.md`@`should be REMOVED once dedup eliminates its decoys.`
+  makes the marker MORTAL AT EXACTLY THE EVENT THAT CAUSES THE ROT. Both breaks were dedup
+  refactors. An anchor aimed at a stamp whose own contract instructs its deletion on the same commit
+  is a worse target than the code. (c) Even a surviving marker is still a `<path>`@`<literal>` pair: the
+  `fleet.ex` marker moved 206 → 207 across #18986 and held, but only because the FILE held. Move the
+  capability to a new module — which is what #18986 did — and the `path` half rots however stable
+  the literal is. It buys one more failure mode, not all of them: the same partial win as line →
+  content, which is the mistake this decision exists to stop repeating.
+
+  **(v) WHY A `--fix` THAT RE-RESOLVES BY SYMBOL WAS REJECTED.** No symbol heuristic recovers break
+  2: `defp canonical_twin(twins) do` in `board.ex` became `def canonical([_ | _] = twins), do:
+  Enum.min_by(twins, &collapse_key/1)` in `twin_collapse.ex` — different name, different arity
+  shape, different file, and the human repair also chose a `defmodule` line that is not a rename of
+  anything. Worse, the charter is the ADJUDICATION RECORD: a tool that silently re-points what a
+  decision cites converts a loud rot into a quiet re-aim at possibly the wrong code, which is the one
+  thing a citation corpus must never do. A rot must stay loud.
+
+  **(vi) THE SIGNAL, AND WHAT IS NOT DONE HERE.** The api lane still gets NO red when it breaks this.
+  `.github/workflows/shell-harnesses.yml` runs the live check in its `pds-harnesses` job, and its
+  twin `on.pull_request.paths` / `on.push.paths` lists carry
+  `.claude/workflows/bp-pds-charter.md`, `scripts/pds-*.sh` and `tooling/pds/**` — but NOT one of
+  the five `api/lib/barkpark/tasks/*.ex` files the charter cites. So #18909 and #18986 ran no
+  `pds-harnesses` job at all, and the break was discovered by the PDS lane hours later, twice. The
+  remedy is to add those five paths to BOTH lists (they must stay set-equal), which makes the job
+  RUN on the citing lane's PR without BLOCKING it — `shell-harnesses.yml` is not one of main's four
+  required contexts. **IT IS NOT APPLIED HERE: `.github/**` is the gates fence, not this lane's.**
+  The exact hunk is handed to gates with this decision. Be precise about what it buys and what it
+  does not: a hand-maintained path list is an ENUMERATION, and the cited-file set is a PREDICATE that
+  changes every time the charter adds an anchor. The 28th anchor citing a sixth `api/` file gets no
+  coverage and nothing reds — the same class of defect, one level up. That residue is accepted for
+  now and named here so it cannot be forgotten; closing it needs a parity check of the
+  `shell-harnesses.yml` paths list against the charter's own `api/` anchor set, in the shape of
+  `scripts/doc-gates-paths-parity-check.sh`.
+
+  **(vii) A NOTE PAID FOR BY THIS PR'S OWN CI.** The obvious housekeeping — raise
+  `PDS_ANCHOR_DEF_FLOOR` 809 → 810 so this definition locks the count in — was made and then
+  REVERTED, because `tooling/pds/rerun-adjudicate.test.mjs` check 1.2 asserts that `git diff --stat
+  origin/main -- scripts/` is EMPTY. That fence is scoped to a whole directory rather than to the
+  files the slice owns, so it reds any change that touches BOTH `tooling/pds/**` (which every
+  D-number mint does, via the reservation ledger) and ANY script — a false red by construction, on
+  a gate nobody aimed at this. The floor therefore stays 809 and the checker prints its PROGRESS
+  line instead; whoever widens check 1.2 to name its own files should raise it in the same change.
