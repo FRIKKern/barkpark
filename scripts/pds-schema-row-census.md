@@ -11,14 +11,20 @@ precisely the vacuous-green shape this epic exists to kill. This file writes it 
 from evidence, with the command that produced each number.
 
 **What this is NOT.** No engine code is changed here and no full-export attempt was
-spent. `scripts/pds-pull-proof.sh` is not touched — it is frozen and a sibling slice
-owns it. Nothing below re-measures the live box; every figure is either reproduced by a
+spent. Nothing below re-measures the live box; every figure is either reproduced by a
 command printed inline, or explicitly labelled **UNPROVEN HERE** and attributed to the
 charter decision that measured it.
 
 **Reproduced at** `origin/main` = `3be27f0fd1e4dcaeca2180c76b96a420ba064ea2` (fetched
 2026-07-20). Line numbers move; the sha is the anchor. Every command below runs from the
 repo root against that sha's working tree.
+
+> **Amendment, 2026-09-17.** The original slice left `scripts/pds-pull-proof.sh`
+> untouched (it was frozen, and a sibling slice owned it), so the roster existed TWICE:
+> as prose here and as a hand-typed `NOT IN` literal there. That is the drift shape this
+> file was written to warn about, reproduced by the file itself. §5 now carries a single
+> machine-readable `PDS_SENTINEL_EXCLUSION` declaration and the harness derives from it;
+> `scripts/pds-pull-proof.sh --selftest-roster` is the offline check that the two agree.
 
 ---
 
@@ -267,6 +273,31 @@ RETURNING id;
 Two scoping terms and one exclusion. The `workspace_id` term is why PDS-D132 requires
 `stamp_before` to *capture* the id (`ORDER BY id LIMIT 1`) rather than merely prove one
 exists. The exclusion is the roster this file derives.
+
+### The roster declaration — THIS FILE IS THE ONLY EDIT SITE
+
+The `NOT IN` list above is prose. The line below is the roster itself, and it is the one
+place in the repository a human changes it:
+
+```
+PDS_SENTINEL_EXCLUSION = tag metric
+```
+
+`scripts/pds-pull-proof.sh` READS that line at run time (`sentinel_exclusion_derive`) and
+builds its `NOT IN` clause, its scope banner and its `--selftest-roster` arms from what it
+finds there — it does not carry an authoritative copy. It keeps a fallback literal for the
+one case where this file is unreadable (a checkout without `scripts/`), and when both are
+readable and DISAGREE, step 6 FAILS before the sentinel is written rather than sentinelling
+a set nobody declared. So the two artefacts cannot drift silently in either direction:
+editing this line moves the harness, and editing the harness's fallback without this line
+reds the run. This is the same shape as the `@e3_dataset_keyed` derivation in step 2.
+
+Format, because the parser is deliberately narrow: exactly one line beginning
+`PDS_SENTINEL_EXCLUSION =`, then the row names separated by spaces. Names are SQL string
+literals, so a name containing a quote is not expressible and is refused rather than
+escaped. An unparseable line reads as *not derived*, never as *derived empty* — an empty
+derivation would otherwise mismatch the fallback and red a healthy run for a reason that
+has nothing to do with this file's contents.
 
 **Why scope is the fix rather than a detail of it.** A table-wide sentinel — the natural
 reading of "write a sentinel into the eight guarded columns on the pulled rows" — reds
