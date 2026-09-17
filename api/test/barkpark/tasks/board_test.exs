@@ -252,6 +252,7 @@ defmodule Barkpark.Tasks.BoardTest do
       assert [%{text: "VISIBLE-CRIT"}] = card.criteria_list
     end
   end
+
   describe "snapshot/1 twin collapse (canonical_twin/1 — published wins, unpaired draft is the row of record)" do
     # NAMED FAILURE MODE: `load_task_docs/1` groups the corpus by
     # `Content.published_id/1` and hands each bucket to `canonical_twin/1`. Before

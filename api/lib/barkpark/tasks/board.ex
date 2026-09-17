@@ -342,8 +342,8 @@ defmodule Barkpark.Tasks.Board do
   # database happens to hand back.
   defp canonical_twin(twins) do
     Enum.min_by(twins, fn d ->
-      {if(d.status == "published", do: 0, else: 1),
-       if(DraftId.draft?(d.doc_id), do: 1, else: 0), d.doc_id}
+      {if(d.status == "published", do: 0, else: 1), if(DraftId.draft?(d.doc_id), do: 1, else: 0),
+       d.doc_id}
     end)
   end
 
