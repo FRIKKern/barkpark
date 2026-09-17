@@ -73,6 +73,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/auth/studio-signin        user   instance-initiated Studio entry by public host → {url}
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
@@ -3815,6 +3816,103 @@ defmodule BarkparkCloud.Web.Router do
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # POST /v1/auth/studio-signin → 200 {url} — "Sign in with Barkpark Cloud",
+  # the INSTANCE-INITIATED twin of /v1/barkparks/:id/studio-link.
+  #
+  # WHAT IS TRUSTED, AND BY WHOM. The instance's login page trusts NOTHING new:
+  # the thing it finally consumes is a single-use 60s login ticket that the
+  # instance MINTED ITSELF, off its own admin token, at the control plane's
+  # server-side request — exactly the artefact studio-link already produces. No
+  # Cloud-signed assertion, no new verifying key on the box, no new fail-open
+  # surface. All of the trust sits HERE, on the control plane, which is the only
+  # party that can answer "is this browser a live Cloud session, and is that
+  # Cloud user a member of the team that owns this box".
+  #
+  # THE TWO REFUSALS THIS DOOR EXISTS FOR (the revocation half):
+  #
+  #   * a REVOKED Cloud session — `Auth.require_user/2` runs
+  #     `Accounts.verify_user_session_token/2`, which finds no live row once the
+  #     session is signed out / revoked, so the request is 401 before any lookup.
+  #   * a Cloud user REMOVED FROM THE TEAM — `Accounts.get_membership/2` is
+  #     checked against the RESOLVED ROW'S `team_id`, not against
+  #     `conn.assigns.current_team`. That distinction is the whole gate: the
+  #     current_team assign falls back to the user's PRIMARY team when no
+  #     `x-barkpark-team` header is sent, and this browser arrives from an
+  #     instance with no team context at all, so comparing against it would
+  #     compare against a team the caller chose. The membership row is the
+  #     authority and it is read per-request, so an ex-member's next attempt is
+  #     refused with no revocation list and no cache to invalidate.
+  #
+  # NO EXISTENCE ORACLE: an unregistered host, a typo'd host and a host owned by
+  # somebody else's team are the SAME 404 `not_found`, so this route cannot be
+  # walked to enumerate which names are Cloud-hosted or who owns them. (That is
+  # also why `Registry.get_barkpark_by_public_host/1` is deliberately not
+  # team-scoped — resolution is separated from authorization, and authorization
+  # is what answers.)
+  #
+  # FAILS CLOSED in every direction, including "the Cloud is unreachable": a
+  # control plane that does not answer mints no ticket, so the instance's own
+  # login form is simply what remains. There is no path here that hands back a
+  # session without a live membership row.
+  #
+  # The `barkpark.studio_link_minted` verb is reused deliberately — the audited
+  # FACT is identical (a redeemable Studio entry was minted for this box by this
+  # actor) and a second verb for the same fact would split the operator's
+  # register by entry point. `entry: "studio-signin"` distinguishes the door.
+  post "/v1/auth/studio-signin" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+      host = conn.body_params["host"]
+
+      with %Barkpark{} = bp <- Registry.get_barkpark_by_public_host(host || ""),
+           %{} <- Accounts.get_membership(bp.team_id, user.id),
+           team when not is_nil(team) <- Accounts.get_team(bp.team_id) do
+        case Registry.mint_studio_link(bp, user.email) do
+          {:ok, url} ->
+            audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
+              name: bp.name,
+              entry: "studio-signin"
+            })
+
+            json(conn, 200, %{url: url})
+
+          {:error, :suspended} ->
+            conn = audit_suspended_refusal(conn, team, bp, "studio-signin")
+
+            json(conn, 409, %{
+              error: "suspended",
+              detail:
+                "This instance is suspended. Studio access is closed until the " <>
+                  "suspension is cleared."
+            })
+
+          {:error, :not_live} ->
+            json(conn, 409, %{error: "not_live"})
+
+          {:error, :no_admin_token} ->
+            json(conn, 404, %{
+              error: "no_admin_token",
+              detail:
+                "No admin token is stored for this instance yet. It is captured at " <>
+                  "provision time — a pre-existing instance may need a re-provision."
+            })
+
+          {:error, :decrypt_failed} ->
+            json(conn, 500, %{error: "decrypt_failed"})
+
+          {:error, :instance_error} ->
+            json(conn, 502, %{error: "instance_unreachable"})
+        end
+      else
+        _ -> json(conn, 404, %{error: "not_found"})
+      end
     end
   end
 
