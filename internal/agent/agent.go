@@ -46,7 +46,7 @@ const (
 // never shells out), and ReportConfig's probes — so the entire cycle runs with
 // no live control plane and no real systemctl.
 type Agent struct {
-	// ControlURL is the control-plane origin (e.g. https://cloud.barkpark.dev).
+	// ControlURL is the control-plane origin (e.g. https://barkpark.cloud).
 	// Trailing slash is trimmed.
 	ControlURL string
 	// Token is the agent bearer token (cloud-9 mint_agent_token plaintext). Sent

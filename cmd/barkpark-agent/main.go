@@ -6,7 +6,7 @@
 // Usage:
 //
 //	barkpark-agent \
-//	  --control-url https://cloud.barkpark.dev \
+//	  --control-url https://barkpark.cloud \
 //	  --token-file  /etc/barkpark/agent.token \
 //	  --checkout    /opt/barkpark \
 //	  --health-url  https://this-server.example.com \
@@ -42,7 +42,7 @@ func main() {
 func run(args []string) int {
 	fs := flag.NewFlagSet("barkpark-agent", flag.ContinueOnError)
 	var (
-		controlURL = fs.String("control-url", "", "control-plane origin (required), e.g. https://cloud.barkpark.dev")
+		controlURL = fs.String("control-url", "", "control-plane origin (required), e.g. https://barkpark.cloud")
 		tokenFile  = fs.String("token-file", "", "path to the agent bearer token file (required)")
 		interval   = fs.Duration("interval", agent.DefaultInterval, "report+poll cadence")
 		once       = fs.Bool("once", false, "run a single report+poll cycle and exit")
