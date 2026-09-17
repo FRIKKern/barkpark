@@ -1665,6 +1665,13 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
     }
   }
 
+  // The one hook this part lacked until task-e33b3fc1a5fc921b. It goes through
+  // failH2, not the shared fail(), so the injected failure is counted by the
+  // SAME counter the ok line below is gated on — a hook that bypassed h2Failed
+  // would red the gate and still print this part's ok, which is precisely the
+  // false-reassurance shape --selftest exists to catch.
+  if (FAULT.has("H2")) failH2("  Part H2 FAIL: injected fault (--selftest)");
+
   if (h2Failed === 0)
     console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived; accepted-exposure record present and intact (${recordWords} words, option (b))`);
 }
