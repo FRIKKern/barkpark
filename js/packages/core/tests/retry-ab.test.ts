@@ -36,9 +36,39 @@
 // nothing but an abort, holding no information about what the server said. That
 // is verbatim the Go client's framing of the regression it measured: "the
 // caller got a context deadline instead of the answer".
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
-import { retry, defaultShouldRetry, type RetryPolicy } from '../src/retry'
+import {
+  retry,
+  defaultShouldRetry,
+  DEFAULT_READ_POLICY,
+  DEFAULT_WRITE_POLICY,
+  IDEMPOTENT_WRITE_POLICY,
+  RETRYABLE_SERVER_CODE,
+  MAX_RATE_LIMIT_BACKOFF_MS,
+  MIN_ATTEMPT_BUDGET_MS,
+  type RetryPolicy,
+} from '../src/retry'
+import {
+  RECORDED_AT,
+  RECORDED_IN_PR,
+  RECORDED_POLICY_INPUTS,
+  RECORDED_REPORT,
+  RECORDED_SICK_BOX_RESULT,
+  REARM_COMMAND,
+  RECORD_NUMBERS_IN,
+} from './retry-ab.recorded'
+import {
+  PAIRS,
+  BUDGET_MS,
+  BASE_MS,
+  MAX_BACKOFF_MS,
+  MAX_ATTEMPTS,
+  TTFB_MIN,
+  TTFB_MAX,
+  FAULT_RATE,
+} from './retry-ab-inputs'
 import {
   BarkparkAPIError,
   BarkparkNetworkError,
@@ -47,11 +77,6 @@ import {
 } from '../src/errors'
 
 const RUN = process.env.BARKPARK_RETRY_AB === '1'
-const PAIRS = 40
-/** The caller's whole-call budget, mirroring the Go client's 5s http.Client.Timeout. */
-const BUDGET_MS = 5_000
-const BASE_MS = 300
-const MAX_ATTEMPTS = 3
 
 /**
  * The policy this change replaced, reconstructed exactly: any >=5xx by status
@@ -97,7 +122,8 @@ function report(label: string, old_: Tally, neu: Tally): string {
 }
 
 /** The deterministic backoff the loop will have slept before `attempt`. */
-const backoffBefore = (attempt: number) => Math.min(BASE_MS * Math.pow(2, attempt - 2), 5_000)
+const backoffBefore = (attempt: number) =>
+  Math.min(BASE_MS * Math.pow(2, attempt - 2), MAX_BACKOFF_MS)
 
 /**
  * One command, on a clock the caller controls. `attemptMs` reports how long the
@@ -115,7 +141,7 @@ async function command(
   const policy: RetryPolicy = {
     maxAttempts: MAX_ATTEMPTS,
     baseMs: BASE_MS,
-    maxBackoffMs: 5_000,
+    maxBackoffMs: MAX_BACKOFF_MS,
     jitter: false,
     now: () => clock,
     onBeforeAttempt: (n) => {
@@ -225,10 +251,6 @@ describe.skipIf(!RUN)('A/B arm A — live box', () => {
 // ---------------------------------------------------------------------------
 
 describe.skipIf(!RUN)('A/B arm B — simulated sick-and-slow box', () => {
-  const TTFB_MIN = 350
-  const TTFB_MAX = 4_500
-  const FAULT_RATE = 0.45
-
   /** Seeded LCG, so both arms of a pair meet the IDENTICAL box. */
   function rng(seed: number) {
     let s = seed >>> 0
@@ -273,4 +295,151 @@ describe.skipIf(!RUN)('A/B arm B — simulated sick-and-slow box', () => {
     },
     10 * 60_000,
   )
+})
+
+// ---------------------------------------------------------------------------
+// THE PIN — NOT env-gated. This is the only part of this file CI runs.
+//
+// WHY. Both arms above are behind BARKPARK_RETRY_AB, so a green CI run never
+// re-runs them, and the numbers they produced lived nowhere but PR 16218's body
+// and a ledger stamp. Move a policy constant and the justification for the
+// narrowing silently becomes a statement about code that no longer ships, with
+// no signal anywhere.
+//
+// WHAT A GREEN HERE BUYS, precisely. It does NOT re-verify 27/40 vs 32/40 — no
+// measurement happens in an ordinary run, nothing is fetched, arm A is skipped
+// and no request reaches the live box. It buys exactly one claim: THE RECORDED
+// NUMBERS STILL DESCRIBE THE POLICY THAT SHIPS. That is a shelf-life check, not
+// a re-measurement.
+//
+// WHY IT IS NOT A CHANGE-DETECTOR. It compares VALUES, read through the
+// module's exported constants — not file text, not a hash. Renaming a local,
+// rewording a comment, reordering a function, or reformatting src/retry.ts
+// moves nothing it reads. Only an actual policy input moving fires it.
+//
+// WHY THE EXPECTATION CANNOT LAUNDER ITSELF. `retry-ab.recorded.ts` is a
+// hand-typed transcript that imports nothing; if it ever imported the live
+// constants it would agree with every future edit and this pin would be inert.
+// The second `it` below reads that file's SOURCE TEXT and fails on any import.
+// ---------------------------------------------------------------------------
+
+describe('recorded A/B measurement — shelf-life pin', () => {
+  /**
+   * The live policy inputs, serialized the same way the transcript records
+   * them. Object policies are written out field by field in a fixed order so a
+   * reordering of the literal is not mistaken for a change of value.
+   */
+  function livePolicyInputs(): Record<string, string> {
+    const policy = (p: RetryPolicy): string =>
+      JSON.stringify({
+        maxAttempts: p.maxAttempts,
+        baseMs: p.baseMs,
+        maxBackoffMs: p.maxBackoffMs,
+        jitter: p.jitter === true,
+      })
+    return {
+      DEFAULT_READ_POLICY: policy(DEFAULT_READ_POLICY),
+      DEFAULT_WRITE_POLICY: policy(DEFAULT_WRITE_POLICY),
+      IDEMPOTENT_WRITE_POLICY: policy(IDEMPOTENT_WRITE_POLICY),
+      RETRYABLE_SERVER_CODE: JSON.stringify(RETRYABLE_SERVER_CODE),
+      MAX_RATE_LIMIT_BACKOFF_MS: String(MAX_RATE_LIMIT_BACKOFF_MS),
+      MIN_ATTEMPT_BUDGET_MS: String(MIN_ATTEMPT_BUDGET_MS),
+      'harness.PAIRS': String(PAIRS),
+      'harness.BUDGET_MS': String(BUDGET_MS),
+      'harness.BASE_MS': String(BASE_MS),
+      'harness.MAX_BACKOFF_MS': String(MAX_BACKOFF_MS),
+      'harness.MAX_ATTEMPTS': String(MAX_ATTEMPTS),
+      'harness.TTFB_MIN': String(TTFB_MIN),
+      'harness.TTFB_MAX': String(TTFB_MAX),
+      'harness.FAULT_RATE': String(FAULT_RATE),
+    }
+  }
+
+  /** The red a stranger has to act on. It must say re-MEASURE, not re-EDIT. */
+  function staleMeasurementReport(drift: string[]): string {
+    return [
+      ``,
+      `THE POLICY MOVED AND ITS MEASUREMENT DID NOT.`,
+      ``,
+      `${drift.length} policy input(s) no longer match the A/B recorded on`,
+      `${RECORDED_AT} (PR ${RECORDED_IN_PR}). The recorded result —`,
+      `OLD ${RECORDED_SICK_BOX_RESULT.old} vs NEW ${RECORDED_SICK_BOX_RESULT.neu} on a sick-and-slow box — is the whole`,
+      `justification for narrowing this retry policy, and it now describes code`,
+      `that is not the code shipping.`,
+      ``,
+      ...drift.map((d) => `  ${d}`),
+      ``,
+      `THE FIX IS TO RE-MEASURE, NOT TO EDIT THE TRANSCRIPT TO MATCH.`,
+      `Editing ${RECORD_NUMBERS_IN} to agree with the new constants`,
+      `satisfies this test and destroys the only evidence the narrowing rests on.`,
+      ``,
+      `Re-run the harness:`,
+      ``,
+      `    ${REARM_COMMAND}`,
+      ``,
+      `Then copy the printed ARM A / ARM B blocks into RECORDED_REPORT, update`,
+      `RECORDED_POLICY_INPUTS and RECORDED_AT, all in:`,
+      ``,
+      `    ${RECORD_NUMBERS_IN}`,
+      ``,
+      `(Arm B is deterministic — seeded LCG on a virtual clock — so it reproduces`,
+      `exactly. Arm A talks to the live box and its numbers move with its health.)`,
+      ``,
+    ].join('\n')
+  }
+
+  it('the recorded numbers still describe the policy that ships', () => {
+    const live = livePolicyInputs()
+    const recorded = RECORDED_POLICY_INPUTS
+    const keys = [...new Set([...Object.keys(recorded), ...Object.keys(live)])].sort()
+
+    const drift = keys
+      .filter((k) => live[k] !== recorded[k])
+      .map((k) => `${k}: recorded ${recorded[k] ?? '(absent)'} -> now ${live[k] ?? '(absent)'}`)
+
+    expect(drift, staleMeasurementReport(drift)).toEqual([])
+
+    // The transcript must actually carry the number, or a future edit could
+    // empty it out and leave a green pin guarding nothing.
+    expect(RECORDED_REPORT).toContain(`${RECORDED_SICK_BOX_RESULT.old}`)
+    expect(RECORDED_REPORT).toContain(`${RECORDED_SICK_BOX_RESULT.neu}`)
+  })
+
+  it('the transcript cannot read its expectation out of the thing it guards', () => {
+    // A guard whose expected value is derived from the guarded source is inert:
+    // it agrees with every edit. The transcript is hand-typed and must stay
+    // that way, so this asserts on its SOURCE TEXT, which is the only place an
+    // import could hide.
+    const path = fileURLToPath(new URL('./retry-ab.recorded.ts', import.meta.url))
+    const source = readFileSync(path, 'utf8')
+    const imports = source
+      .split('\n')
+      .map((l, i) => [i + 1, l] as const)
+      .filter(([, l]) => /^\s*import[\s{*'"]/.test(l) || /^\s*export\s+.*\bfrom\b/.test(l))
+      .map(([n, l]) => `${n}: ${l.trim()}`)
+
+    expect(
+      imports,
+      `${RECORD_NUMBERS_IN} must import NOTHING — it is a hand-typed transcript of a\n` +
+        `measurement. An import of the live constants would make the pin above agree\n` +
+        `with any future edit, i.e. inert. Delete the import and type the value.`,
+    ).toEqual([])
+
+    // Positive control for the probe itself: the detector DOES see an import
+    // when one is present, so an empty result above means absence, not a dead
+    // regex. (An absence is never caught by inspection.)
+    const control = ["import { X } from './y'", "export * from './z'", 'const k = 1']
+    expect(
+      control.filter((l) => /^\s*import[\s{*'"]/.test(l) || /^\s*export\s+.*\bfrom\b/.test(l)),
+    ).toHaveLength(2)
+  })
+
+  it('an ordinary run does not touch the live box', () => {
+    // The prod-facing arm stays behind the env gate, unconditionally. This
+    // asserts the gate expression itself rather than trusting the comment: with
+    // BARKPARK_RETRY_AB unset (CI), RUN is false and arm A is skipped, so no
+    // request is issued to BARKPARK_API_URL / the default 89.167.28.206.
+    expect(RUN).toBe(process.env.BARKPARK_RETRY_AB === '1')
+    if (process.env.BARKPARK_RETRY_AB !== '1') expect(RUN).toBe(false)
+  })
 })
