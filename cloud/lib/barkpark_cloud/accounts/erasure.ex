@@ -62,7 +62,17 @@ defmodule BarkparkCloud.Accounts.Erasure do
   not claim to have done it. `list_orphaned_audit_actor_count/1` exists so a test
   can assert the trail SURVIVED rather than assume it.
 
-  ### `delete_user/2` — REFUSED
+  ### `delete_user/2` — REFUSED (second ground)
+
+  An account with no usable password hash — an OAuth-only account — cannot reach
+  this function through `DELETE /v1/account` at all: the route reauthenticates
+  with the account password before calling, and `Accounts.valid_password?/2`
+  returns false for such a user at the same cost as a wrong password. That is a
+  known, deliberate gap in self-serve coverage, not an oversight, and it is the
+  one erasure case that still needs a human: an OAuth-only holder must set a
+  password first, or ask an operator.
+
+  ### `delete_user/2` — REFUSED (primary ground)
 
   `{:error, {:sole_owner, slugs}}` when the user is the ONLY `owner` of any team
   that still exists. Deleting them would leave a team nobody can administer:
@@ -81,8 +91,17 @@ defmodule BarkparkCloud.Accounts.Erasure do
   `20260917100000` narrowed both trigger functions to fall through on
   `TG_OP = 'DELETE'` when the session GUC `barkpark.erasure` reads `'on'`;
   `SET LOCAL` inside the erasure transaction turns it on for that transaction and
-  that connection only, and UPDATE stays fatal unconditionally. `arm_erasure/0`
-  is the only caller of that `SET LOCAL` in the codebase.
+  that connection only. `arm_erasure/0` is the only caller of that `SET LOCAL`
+  in the codebase.
+
+  `audit_events` needed a second, narrower exception that the first test run
+  found: the anonymisation above is an `ON DELETE SET NULL`, which reaches the
+  trigger as an **UPDATE**, so an unconditional UPDATE raise aborted the account
+  erasure exactly as the DELETE raise had aborted the team one. The exception is
+  shaped to be that nilify and nothing else — flag on, `actor_user_id` going
+  non-NULL → NULL, every other column byte-identical. Rewriting an `action`, a
+  `metadata` or a `team_id` still raises under the flag, and
+  `user_security_events` keeps its unconditional UPDATE raise.
   """
 
   import Ecto.Query, warn: false

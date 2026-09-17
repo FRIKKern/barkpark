@@ -22,11 +22,24 @@ defmodule BarkparkCloud.Repo.Migrations.GuardAppendOnlyErasureBypass do
   #     to no other connection. `current_setting(..., true)` is the missing-ok
   #     form: an ordinary connection that never heard of the GUC reads NULL and
   #     falls straight through to the RAISE.
-  #   * UPDATE STAYS FATAL UNCONDITIONALLY. The flag is checked only on
-  #     TG_OP = 'DELETE'. Erasure removes a fact; it never rewrites one. An
-  #     append-only table whose rows could be EDITED under a flag would not be
-  #     append-only in any sense worth the name — a row that can be erased is
-  #     still honest about what it said while it existed.
+  #   * UPDATE STAYS FATAL, with ONE surgically-shaped exception that the FK
+  #     graph forces and that the first test run found. `audit_events` is the
+  #     table where an erased USER is ANONYMISED rather than deleted:
+  #     `actor_user_id` is `ON DELETE SET NULL`, so a user delete cascades as an
+  #     UPDATE, and an unconditional UPDATE raise aborts the account erasure just
+  #     as surely as the DELETE raise aborted the team one. The exception is
+  #     therefore not "UPDATE is allowed under the flag" — it is exactly the
+  #     nilify the FK itself performs:
+  #
+  #         the flag is on, AND
+  #         NEW.actor_user_id IS NULL, AND
+  #         OLD.actor_user_id IS NOT NULL, AND
+  #         every other column is byte-identical
+  #           (`to_jsonb(NEW) - 'actor_user_id' = to_jsonb(OLD) - 'actor_user_id'`)
+  #
+  #     Rewriting an `action`, a `metadata`, a `target_id` or a `team_id` still
+  #     raises, flag or no flag. `user_security_events` has no nilify FK, so its
+  #     UPDATE arm keeps the unconditional raise with no exception at all.
   #
   # Down-migration restores the unconditional raise verbatim.
 
@@ -35,9 +48,20 @@ defmodule BarkparkCloud.Repo.Migrations.GuardAppendOnlyErasureBypass do
     CREATE OR REPLACE FUNCTION audit_events_append_only()
     RETURNS trigger AS $$
     BEGIN
-      IF TG_OP = 'DELETE' AND current_setting('barkpark.erasure', true) = 'on' THEN
-        RETURN OLD;
+      IF current_setting('barkpark.erasure', true) = 'on' THEN
+        IF TG_OP = 'DELETE' THEN
+          RETURN OLD;
+        END IF;
+
+        -- The actor nilify the ON DELETE SET NULL FK performs, and nothing else.
+        IF TG_OP = 'UPDATE'
+           AND NEW.actor_user_id IS NULL
+           AND OLD.actor_user_id IS NOT NULL
+           AND (to_jsonb(NEW) - 'actor_user_id') = (to_jsonb(OLD) - 'actor_user_id') THEN
+          RETURN NEW;
+        END IF;
       END IF;
+
       RAISE EXCEPTION 'audit_events is append-only: % is not permitted', TG_OP;
     END;
     $$ LANGUAGE plpgsql;
