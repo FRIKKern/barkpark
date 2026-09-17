@@ -187,7 +187,21 @@ fi
 # this looks BACKWARD rather than for presence anywhere in the file).
 # ---------------------------------------------------------------------------
 RESPOND_RE='respond[[:space:]]+503'
-CT_RE='header[[:space:]]+Content-Type[[:space:]]+.?text/html'
+# `[^[:space:]]*` between the directive and the value, NOT `.?`: a Go renderer
+# writes the line as a quoted string literal, so the source bytes are
+# `header Content-Type \"text/html; charset=utf-8\"` — backslash AND quote.
+# `.?` matched the Caddyfile/shell form (one bare `"`) and MISSED the Go one,
+# which reported internal/caddyfile/caddyfile.go as a violation on a tree that
+# had just been fixed. Caught by running the quiet arm, not by reading this line.
+CT_RE='header[[:space:]]+Content-Type[[:space:]]+[^[:space:]]*text/html'
+# A backticked match is PROSE naming the shape, in any file — not just markdown.
+# This check's own failure messages say the words ("N maintenance `respond 503`
+# emission(s) with NO Content-Type"), and a predicate that reds on its own error
+# text is a predicate nobody can write a message for. The emission lines in every
+# real renderer (Caddyfile, shell heredoc, Go string literal) never carry a
+# backtick before the directive, so the rule separates the two populations
+# without naming a single file.
+PROSE_RESPOND_RE='`respond'
 DELIBERATE_CT_RE='handle-errors-scope-check: deliberate-no-content-type'
 CT_LOOKBACK=12
 
@@ -214,9 +228,7 @@ content_type_arm() {
       # that 141 back as the test's status — a match reported as a NON-match
       # under load. scripts/pipefail-sigpipe-scan.sh ratchets on that shape.
       if grep -qE "$COMMENT_RE" <<< "$body"; then continue; fi
-      case "$f" in
-        *.md) if grep -q '`respond' <<< "$body"; then continue; fi ;;
-      esac
+      if grep -qF -- "$PROSE_RESPOND_RE" <<< "$body"; then continue; fi
 
       from=$(( n > CT_LOOKBACK ? n - CT_LOOKBACK : 1 ))
       # The marker may sit on the emission line itself OR on a comment line just
