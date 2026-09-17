@@ -3591,9 +3591,10 @@ test("gr-p5: operatorWarmPoolCardHtml renders ONE number — no bar, no percenta
   assert.match(hooks.operatorWarmPoolCardHtml({}), /Warm pool unavailable/, "a shapeless answer is unreadable, not zero");
 });
 
-// ── card 4: fleet digest (GR40 — no send-now route, so no send-now button) ───
+// ── card 4: fleet digest (the send-now route EXISTS now — gr-backlog-operator-
+// digest-send built POST /v1/operator/digest/send, so GR40's cut is spent) ────
 
-test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO Send-now button", () => {
+test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and the Send-now button RIDES A REAL ROUTE", () => {
   const empty = hooks.operatorDigestCardHtml([]);
   // cch-w55-s3 called the empty card a QUERY ARTIFACT and pinned copy that said
   // so ("every send is recorded against that team, so those receipts never land
@@ -3624,10 +3625,62 @@ test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO
   assert.ok(rows.includes("ops@barkpark.cloud"), "the recipient renders");
   assert.ok(rows.includes("Sent") && rows.includes("Failed"), "both delivery outcomes render");
   assert.ok(rows.includes("smtp timeout"), "a failure carries its verbatim last_error");
+  // RE-KEYED, not deleted (gr-backlog-operator-digest-send). This arm used to
+  // assert the button's ABSENCE, and its reason was never "a button is wrong" —
+  // it was GR28: no route called deliver_fleet_digest, so the control could not
+  // do anything. POST /v1/operator/digest/send now exists and this console posts
+  // to it, so the same rule that forbade the button now REQUIRES it, and the arm
+  // flips rather than disappearing. It still pins the property that mattered:
+  // the button and the route are one fact, so the path is asserted beside it.
   for (const html of [empty, rows, hooks.operatorDigestCardHtml(null)]) {
-    assert.ok(!/Send (one )?now/i.test(html), "no send-now button — no route calls deliver_fleet_digest (GR40)");
+    assert.match(html, /Send one now/, "the send-now button rides every arm — a log that failed to READ says nothing about sending");
+    assert.match(html, /data-digest-send="fleet"/, "the button names the EXPLICIT scope the route requires (there is no default)");
   }
   assert.match(hooks.operatorDigestCardHtml(null), /Digest log unavailable/);
+});
+
+test("digest-send: operatorDigestSendResultText reports the SERVER's counts and never upgrades them", () => {
+  // The honest full send.
+  assert.equal(
+    hooks.operatorDigestSendResultText({
+      scope: "fleet", recipients: 3, accepted: 3, failed: 0,
+      status_meaning: "Accepted by the mail transport — NOT confirmed delivered to the recipient.",
+    }),
+    "Accepted for 3 of 3 recipients. Accepted by the mail transport — NOT confirmed delivered to the recipient.");
+
+  // A PARTIAL send must not read as a success: the failure count is in the
+  // sentence, not only in the log below it.
+  assert.match(
+    hooks.operatorDigestSendResultText({ recipients: 3, accepted: 1, failed: 2 }),
+    /Accepted for 1 of 3 recipients, 2 failed\./);
+
+  // THE COUNTED ZERO. The route answers 200 with recipients:0 when no team in
+  // scope has a member; rendering that as "sent" would be the exact fiction
+  // GR40 cut the button to avoid.
+  assert.match(
+    hooks.operatorDigestSendResultText({ recipients: 0, accepted: 0, failed: 0 }),
+    /Nothing was mailed/);
+  assert.ok(!/Accepted for/.test(hooks.operatorDigestSendResultText({ recipients: 0, accepted: 0, failed: 0 })),
+    "a zero-recipient run is never dressed as an acceptance");
+
+  // An unreadable answer says so rather than inventing a number.
+  for (const bad of [null, undefined, "ok", 7])
+    assert.match(hooks.operatorDigestSendResultText(bad), /can't say what happened/);
+
+  // The console NEVER writes its own delivery claim — the trailing sentence is
+  // the server's status_meaning, so a payload without one carries none.
+  assert.ok(!/delivered/.test(hooks.operatorDigestSendResultText({ recipients: 1, accepted: 1, failed: 0 })),
+    "no delivery vocabulary is invented client-side");
+});
+
+test("digest-send: the control names the audience and the explicit scope", () => {
+  const html = hooks.operatorDigestSendControlHtml();
+  assert.match(html, /data-digest-send="fleet"/);
+  assert.match(html, /Send one now/);
+  // The button's own caption says WHO it mails, so the consequence is readable
+  // before the confirm dialog opens rather than only inside it.
+  assert.match(html, /Mails every team that owns an instance/);
+  assert.match(html, /06:00 UTC daily send/);
 });
 
 test("gr-p5: operatorPageHtml composes the five cards, each with its own body slot", () => {

@@ -240,6 +240,11 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "revoke_unsupported",
              "role_too_high",
              "rollback_failed",
+             # gr-backlog-operator-digest-send — POST /v1/operator/digest/send's
+             # 422 when no audience is named. It is the route's DEFAULT arm, not
+             # an edge: there is no fleet-by-omission, so a bodyless or
+             # disagreeing body lands here rather than mailing everybody.
+             "scope_required",
              "secret_unreadable",
              "send_failed",
              "server_error",

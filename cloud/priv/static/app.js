@@ -12120,10 +12120,14 @@
   //      bar and no percentage: count_ready_warm_servers/0 merges ready+refreshing
   //      out of four real statuses and the target size lives in the off-box
   //      provisioner's env, so there IS no denominator to draw (GR50).
-  //   4. Fleet digest    — GET /v1/operator/deliveries. A send LOG only; there is
-  //      NO send-now button because no route calls deliver_fleet_digest (it is
-  //      cron-only, daily 06:00 UTC — GR40; gr-backlog-operator-digest-send is
-  //      the successor if one is ever wanted).
+  //   4. Fleet digest    — GET /v1/operator/deliveries, plus the SEND-NOW button
+  //      over POST /v1/operator/digest/send. GR40 cut this button because no
+  //      route called deliver_fleet_digest and GR28 forbids a button without a
+  //      route; gr-backlog-operator-digest-send built the route, so the button
+  //      is no longer fiction and renders. It is the ONE control in this console
+  //      that puts mail in real inboxes, so it asks first (danger confirm), it
+  //      names the fleet-wide audience in the question, and it reports the
+  //      server's OWN counts afterwards rather than a client-side "Sent!".
   //
   // Every card degrades honestly on its own: a card whose route doesn't answer
   // says so about ITSELF and never fakes a reading (the G-04 deliveries pattern).
@@ -12458,17 +12462,68 @@
   // 06:00 UTC claim STAYS — it matches `{"0 6 * * *",
   // BarkparkCloud.Workers.DailyDigestWorker}` at cloud/config/config.exs:334
   // exactly. Pinned in __app.test.mjs.
+  // ---- SEND ONE NOW (gr-backlog-operator-digest-send) -----------------------
+  //
+  // THE BUTTON GR40 CUT. It was cut for one reason and one only — no route
+  // called deliver_fleet_digest, and GR28 forbids rendering a control that
+  // cannot do anything. POST /v1/operator/digest/send now exists, so the reason
+  // is spent and the affordance is honest.
+  //
+  // THE SCOPE IS SENT EXPLICITLY, always. The route refuses a bodyless POST with
+  // 422 scope_required precisely so no client can mail the platform by accident,
+  // and this console is a client: it names {"scope":"fleet"} in the request the
+  // same way it names it in the confirm dialog, so the bytes and the question
+  // agree. There is no team picker here yet and therefore no team-scoped send
+  // from this console — the route supports one, this surface does not claim to.
+  var OPERATOR_DIGEST_SEND = "/v1/operator/digest/send";
+
+  // PURE, so the harness reads the exact sentence a human gets. It reports the
+  // SERVER's counts and NEVER upgrades them: `accepted` is the mail relay
+  // answering at the submission hop, which is not delivery, and the trailing
+  // clause is the server's own status_meaning rather than a second vocabulary
+  // invented here. A zero-recipient run is reported as a zero, not as a success.
+  function operatorDigestSendResultText(d) {
+    if (!d || typeof d !== "object") {
+      return "The send answered in a shape this console can't read, so it can't say what happened.";
+    }
+    var recipients = typeof d.recipients === "number" ? d.recipients : 0;
+    var accepted = typeof d.accepted === "number" ? d.accepted : 0;
+    var failed = typeof d.failed === "number" ? d.failed : 0;
+    if (recipients === 0) {
+      return "Nothing was mailed: no team in this scope has a member to send to.";
+    }
+    var line = "Accepted for " + accepted + " of " + recipients + " recipient" +
+      (recipients === 1 ? "" : "s");
+    if (failed > 0) line += ", " + failed + " failed";
+    line += ".";
+    if (d.status_meaning) line += " " + d.status_meaning;
+    return line;
+  }
+
+  function operatorDigestSendControlHtml() {
+    return '<div class="op-digest-send">' +
+      '<button class="btn" type="button" data-digest-send="fleet">Send one now</button>' +
+      '<p class="set-purpose">Mails every team that owns an instance — one digest per member, ' +
+      "now, over the same machinery as the 06:00 UTC daily send.</p>" +
+    "</div>";
+  }
+
   function operatorDigestCardHtml(list) {
+    // The button rides ABOVE the log on every arm, including the unreadable one:
+    // a log this card could not read says nothing about whether a send would
+    // work, and hiding the control on a failed READ would be the same fiction in
+    // the other direction.
+    var send = operatorDigestSendControlHtml();
     if (!Array.isArray(list)) {
-      return '<p class="set-empty">Digest log unavailable — the send log didn\'t answer. ' +
+      return send + '<p class="set-empty">Digest log unavailable — the send log didn\'t answer. ' +
         "That says nothing about the digest itself; this card just couldn't read it.</p>";
     }
     if (!list.length) {
-      return '<p class="set-empty">No digest send has been recorded yet. ' +
+      return send + '<p class="set-empty">No digest send has been recorded yet. ' +
         "The digest goes out daily at 06:00 UTC to each team's own members, and this log now carries every team's receipts, " +
         "so an empty list means nothing was recorded — not that the receipts are elsewhere.</p>";
     }
-    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+    return send + '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
 
   // 5. DEPLOY LEDGER CENSUS — GET /v1/operator/deploy-ledger/census?from=&to=
@@ -12683,7 +12738,7 @@
       card("op-warm-body", "Warm pool",
         "Pre-provisioned boxes a launch can claim instead of waiting for a cold provision.") +
       card("op-digest-body", "Fleet digest",
-        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.") +
+        "The fleet-digest send log, newest first, and the one control here that mails real people.") +
       card("op-census-body", "Deploy ledger",
         "Failure classes across every site over a pinned window, and the failure rate with its own denominator beside it.");
   }
@@ -12792,6 +12847,9 @@
     operatorPaint("#op-warm-body", OPERATOR_WARM_POOL, function (data) { return operatorWarmPoolCardHtml(data); });
     operatorPaint("#op-digest-body", OPERATOR_DELIVERIES, function (data) {
       return operatorDigestCardHtml(data && data.deliveries);
+    }, function (slot) {
+      var btn = slot.querySelector ? slot.querySelector("[data-digest-send]") : null;
+      if (btn) btn.addEventListener("click", function () { operatorConfirmDigestSend(); });
     });
     // The census rides the SAME funnel as the other four: operatorPaint owns the
     // only GET call site the whole console has, so the window query is computed
@@ -12845,6 +12903,46 @@
           ctl.fail(haltFault && haltFault.text ? haltFault.text : friendly(r.data, "Please try again."),
             "Try again", function () {
               operatorConfirmBrake("halt");
+            });
+        });
+      },
+    });
+  }
+
+  // THE ONE CONSOLE CONTROL THAT MAILS STRANGERS, so it asks first and the
+  // question names the consequence in the same words the button acts on: every
+  // team, one email per member, now. `tier: "danger"` is the same dialog the
+  // fleet brake uses — this is not more reversible than halting a rollout, it is
+  // LESS: a halted rollout resumes, a sent email does not unsend.
+  //
+  // The scope travels EXPLICITLY. The route has no default and 422s a bodyless
+  // POST, and this call site is why that refusal is cheap: naming the audience
+  // costs one key, and it means no retry, no double-click and no half-built
+  // client can widen the blast radius by omission.
+  function operatorConfirmDigestSend() {
+    openConfirmModal({
+      tier: "danger",
+      title: "Send a fleet digest now?",
+      consequence: "Every team that owns an instance is mailed immediately — one digest per member, " +
+        "from the platform's own address. This is the same send the 06:00 UTC cron does, " +
+        "not a preview, and it cannot be recalled.",
+      confirmLabel: "Send it now",
+      busyLabel: "Sending…",
+      onConfirm: function (ctl) {
+        ctl.busy();
+        api("POST", OPERATOR_DIGEST_SEND, { scope: "fleet" }, { noBounce: true }).then(function (r) {
+          if (r.ok) {
+            ctl.succeed();
+            // The server's OWN counts, never a client-side "Sent!". A run that
+            // mailed nobody says so here rather than reading as a success.
+            toast({ kind: "success", title: "Digest send accepted", body: operatorDigestSendResultText(r.data) });
+            operatorRefresh();
+            return;
+          }
+          var sendFault = operatorReadFault(r);
+          ctl.fail(sendFault && sendFault.text ? sendFault.text : friendly(r.data, "Please try again."),
+            "Try again", function () {
+              operatorConfirmDigestSend();
             });
         });
       },
@@ -29807,6 +29905,8 @@
       operatorCanaryCardHtml: operatorCanaryCardHtml,
       operatorWarmPoolCardHtml: operatorWarmPoolCardHtml,
       operatorDigestCardHtml: operatorDigestCardHtml,
+      operatorDigestSendControlHtml: operatorDigestSendControlHtml,
+      operatorDigestSendResultText: operatorDigestSendResultText,
       // dr-w1-s2's census, finally read. The window helpers are exported so the
       // harness can assert the URL the browser actually sends, and the rate /
       // class-row helpers so the REFUSAL arm ("not enough data (n=74)") is

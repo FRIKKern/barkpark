@@ -552,6 +552,7 @@ const PIN = [
   // ── them build their path from a constant (ruling (b)).
   { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
   { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
+  { fn: "operatorConfirmDigestSend", verb: "POST", route: "/v1/operator/digest/send", elevated: true, predicate: OPERATOR_BAND, fence: F_OPERATOR(), auth_fn: A_OPERATOR, context_fn: null, note: "same route fence as the brake above, and the same authority exactly — require_platform_operator. gr-backlog-operator-digest-send: the button lives inside the Operator page, which does not render at all unless operatorRouteAllowed(meCache), so a plain member never sees it; the ROUTE is what actually refuses, and it 401s/403s/fails-closed-on-an-unconfigured-allowlist under test. This is the console's only write that mails strangers, which is why it also asks through a danger confirm the brake's tier already established" },
 
   // ── sites
   { fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
@@ -639,6 +640,7 @@ const RESOLVERS = [
   { fn: "newSubmitAuth", verb: "POST", expr: "path", route: "/v1/auth/login|/v1/auth/register", why: "newAuthMode branch, same two routes" },
   { fn: "fleetRolloutAction", verb: "POST", expr: "path", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", why: "OPERATOR_AUTOUPDATE + (verb === 'halt' ? '/halt' : '/resume')" },
   { fn: "operatorConfirmBrake", verb: "POST", expr: 'OPERATOR_AUTOUPDATE + "/halt"', route: "/v1/operator/autoupdate/halt", why: "OPERATOR_AUTOUPDATE = '/v1/operator/autoupdate'" },
+  { fn: "operatorConfirmDigestSend", verb: "POST", expr: "OPERATOR_DIGEST_SEND", route: "/v1/operator/digest/send", why: "OPERATOR_DIGEST_SEND = '/v1/operator/digest/send' — the operator send-now write (gr-backlog-operator-digest-send). A bare const, so it only needs a row because the census resolves LITERAL paths: it is the console's only write that mails strangers, and an unresolved site here would have hidden exactly the class the two autoupdate rows above exist for" },
   { fn: "sendWebhookTest", verb: "POST", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/test-send", ds)', route: "/v1/barkparks/:*/api/webhooks/:*/test-send", why: "whPath/3 → /v1/barkparks/<id>/api/webhooks<suffix>?dataset=" },
   { fn: "toggleWebhook", verb: "PUT", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id), ds)', route: "/v1/barkparks/:*/api/webhooks/:*", why: "whPath/3" },
   { fn: "rotateWebhook", verb: "POST", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/rotate", ds)', route: "/v1/barkparks/:*/api/webhooks/:*/rotate", why: "whPath/3" },
@@ -1644,7 +1646,15 @@ if (unresolved.length) {
 // the REBASED tree and reading the `found` line it PRINTED, never by arithmetic
 // over two branches' numbers: this row was authored against 80/39/37/2 and the
 // base has since moved twice.
-const EXPECT = { total: 81, elevated: 40, predicated: 39, unpredicated: 1 };
+// gr-backlog-operator-digest-send: the console grew ONE new write call site —
+// operatorConfirmDigestSend's POST /v1/operator/digest/send, the Send-one-now
+// button GR40 cut and this row's route restored. Its tier is the operator band,
+// identical to the brake beside it (Auth.require_platform_operator), and it
+// arrived WITH its fence, so total 81 -> 82, elevated 40 -> 41, predicated
+// 39 -> 40, and `unpredicated` does NOT move — the only way a new elevated
+// affordance is allowed to land. RE-DERIVED by RUNNING this census on this tree
+// and reading the `found` line it PRINTED (82/41/40/1), never by arithmetic.
+const EXPECT = { total: 82, elevated: 41, predicated: 40, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

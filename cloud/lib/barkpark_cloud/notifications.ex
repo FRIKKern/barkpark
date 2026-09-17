@@ -567,10 +567,31 @@ defmodule BarkparkCloud.Notifications do
   deploys and how often it fails — an instance-count-shaped disclosure through
   the back door, in the same email whose per-instance list is partitioned
   precisely to prevent one. Half a rule is not a rule.
+
+  ## WHO ASKED FOR THIS RUN (gr-backlog-operator-digest-send)
+
+  `opts` carries the CAUSE onto the accounting row and nothing else: `:trigger`
+  (`"scheduled"`, the default and the 06:00Z cron tick, or `"operator"`) and
+  `:actor_user_id` (the operator's id, NULL on a scheduled run because there is
+  nobody — not because nobody was recorded). It changes no audience, no payload
+  and no branch; `DailyDigestWorker` keeps calling the /1 form and keeps writing
+  the word it always meant.
+
+  It is NOT a second send path and NOT a new producer (D14). The operator route
+  calls THIS function, so the recipient resolution, the per-team payload
+  tenancy, the transport seam and the `Delivery` receipt (with its
+  `content_sha256` / `content_subject` / `content_counts`, dr-w34/dr-w29) are the
+  same bytes on both causes. A manual send that recorded less than the cron send
+  would be a send nobody could prove.
   """
-  @spec deliver_fleet_digest([term()]) ::
+  @spec deliver_fleet_digest([term()], keyword()) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
-  def deliver_fleet_digest(barkparks) when is_list(barkparks) do
+  def deliver_fleet_digest(barkparks, opts \\ []) when is_list(barkparks) do
+    cause = %{
+      trigger: Keyword.get(opts, :trigger, "scheduled"),
+      actor_user_id: Keyword.get(opts, :actor_user_id)
+    }
+
     fleet = DigestEmail.summary(barkparks)
 
     # WHO gets what, resolved before anything is sent. Two reasons this is a
@@ -653,7 +674,8 @@ defmodule BarkparkCloud.Notifications do
             covered: 0,
             reason: "no_team_recipients",
             withheld: withheld
-          }
+          },
+          cause
         )
 
         {:ok, :no_admins}
@@ -690,7 +712,8 @@ defmodule BarkparkCloud.Notifications do
 
         account_fleet_digest(
           %{recipients: length(recipients), sent: sent},
-          %{instances: fleet.total, covered: covered, reason: reason}
+          %{instances: fleet.total, covered: covered, reason: reason},
+          cause
         )
 
         {:ok, %{sent: sent, recipients: recipients}}
@@ -1444,7 +1467,7 @@ defmodule BarkparkCloud.Notifications do
   # `safely/1` around each: accounting is a side path on a best-effort operator
   # email. It must never be able to break the send it is counting — and that
   # holds for the row too, so a DB failure loses the record, never the digest.
-  defp account_fleet_digest(measurements, metadata) do
+  defp account_fleet_digest(measurements, metadata, cause) do
     metadata = Map.put(metadata, :phase, :settled)
 
     safely(fn ->
@@ -1455,7 +1478,7 @@ defmodule BarkparkCloud.Notifications do
       )
     end)
 
-    safely(fn -> record_digest_run(measurements, metadata) end)
+    safely(fn -> record_digest_run(measurements, metadata, cause) end)
 
     safely(fn -> log_fleet_digest(measurements, metadata) end)
 
@@ -1470,7 +1493,7 @@ defmodule BarkparkCloud.Notifications do
   # funnel through `Withhold.record/4` carry the key, and the column is NULLABLE
   # precisely so its absence is not silently written as a zero — the same rule
   # the log line follows by omitting the key entirely.
-  defp record_digest_run(m, meta) do
+  defp record_digest_run(m, meta, cause) do
     %DigestRun{}
     |> DigestRun.changeset(%{
       event: "fleet_digest",
@@ -1480,7 +1503,13 @@ defmodule BarkparkCloud.Notifications do
       instances: meta.instances,
       covered: Map.get(meta, :covered, 0),
       reason: meta.reason,
-      withheld: Map.get(meta, :withheld)
+      withheld: Map.get(meta, :withheld),
+      # gr-backlog-operator-digest-send — the cause, on the ONE sink a container
+      # recreate cannot take with it. A `digest_runs` row that says `operator`
+      # without saying WHICH operator would leave "who mailed the fleet at
+      # 14:07?" unanswerable on the only durable record there is.
+      trigger: cause.trigger,
+      actor_user_id: cause.actor_user_id
     })
     |> Repo.insert()
     |> case do
