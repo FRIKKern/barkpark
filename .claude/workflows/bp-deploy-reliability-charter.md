@@ -133,8 +133,14 @@ deployments, 17,171 failed, **65.0% lifetime / 87.3% over 7d**. Four sites — `
 
 - **D17 — Any change to `public_read.ex` or the graph admission path is HUMAN-GATED with a NAMED
   independent reviewer, and co-merges its leak-still-closed mutation proof.** *Why:* site-spawner
-  **D106** rules exactly this by name for these two files, and states that the clamp shipped without
-  its companion fix was "a FALSE CLAIM". This epic inherits that precedent rather than re-litigating it.
+  charter **D106** (`.claude/workflows/bp-cloud-site-spawner-charter.md`, "WIDENS THE FENCE BY NAME for
+  the D83 clamp") rules exactly this by name for these two files, and states that the clamp shipped
+  without its companion fix was "a FALSE CLAIM". This epic inherits that precedent rather than
+  re-litigating it. *(Rider 2026-09-17, `dr-w35-bl-charter-d106-phantom`: the qualifier "site-spawner"
+  wraps to the END of the previous line, so a line-local `grep -n D106` over THIS file loses it and reads
+  this as an intra-charter citation. It never was one. The cited text is verified present and verbatim at
+  `bp-cloud-site-spawner-charter.md` D106 — both filenames IN by name, and "Shipped alone, the clamp is a
+  FALSE CLAIM". This charter has no D106 of its own and never had one; see the riders on D169 and D594.)*
 
 - **D18 — Respect cloud-console-hardening's live fences.** *Why:* cch wave 31 decided 2026-08-05 and
   is unmerged: its s1/s8 own `cloud/.../web/router.ex` and its s7 owns `registry.ex`. Regions are
@@ -3565,7 +3571,11 @@ Charter published as a docs-only PR, not pushed to main (D39, honest-gates).
 
 - **D169 — ERRATA WAVE 11 OWES ITSELF.** (a) The lead's provenance hazard — "origin/main's charter stops at
   D105, D106–D146 exist only on #9976/#10069" — is STALE: `b4ef025cf` carries **D105 through D160**, landed
-  by #10101, so those two PRs are redundant and should be CLOSED, not rebased. (b) D142's sub-claim of
+  by #10101, so those two PRs are redundant and should be CLOSED, not rebased. *(Rider 2026-09-17,
+  `dr-w35-bl-charter-d106-phantom`: "D105 through D160" is a RANGE, not a roll-call — D106 is not in it and
+  never was. `git log -S'**D106 —' -- .claude/workflows/bp-deploy-reliability-charter.md` returns ZERO
+  commits, so no D106 definition was ever written to this charter and none was lost in any rebase; D105
+  and D107 are adjacent entries from the same wave. The number was skipped at mint time, nothing more.)* (b) D142's sub-claim of
   "78 rows in 24 h carry a NULL rev" does not reproduce: **66**, split failed 49 / **deferred 14** / live 3 —
   and D142 has no `deferred` bucket at all, because that status postdates it. The daily series runs 1–122 and
   never equals 78; 78 was a true point reading quoted as a fleet constant. (c) The direction's "the fleet
@@ -13584,7 +13594,12 @@ verify recipes ride this PR under `tooling/grip/ledger/dr-w35-*` and
   ONLY the rest: w16 (D256–D273 + log), w18 (D302–D321 + log), w19 (D322–D336 + log), plus **#10173's
   61-line wave-11 REVIEWED log entry** — the seventh strand the wish omitted (its D161–D171 block is
   byte-identical to main :3137–3391 and is DROPPED) — plus the 22 additive ledger sidecars. Assembly is
-  proven: 13,351 lines, 591 unique D-defs (the only hole left is the pre-existing D106 phantom), zero
+  proven: 13,351 lines, 591 unique D-defs (the only hole left is the pre-existing D106 gap — *rider
+  2026-09-17, `dr-w35-bl-charter-d106-phantom`: ADJUDICATED, and "phantom" is withdrawn as the wrong word.
+  There is no phantom citation and no missing ruling: this charter's ONE D106 mention outside these riders
+  is the D17 cross-charter citation of the SITE-SPAWNER charter's D106, which resolves and says what it is
+  quoted as saying. D106 is simply a number this charter never minted, so the sequence gap is expected and
+  permanent — do not "restore" a definition, and do not renumber. Venue for this ruling: this charter*), zero
   duplicate definitions, all seven gained log entries exactly once, order-insensitive to whether the trio
   merged first (`final_S` ≡ `final_A` byte-identical). **Five prose sites become false at merge** (assembled
   coords :5436 :5438 :6307 :6559 :6940 — the "unmerged/stranded" sentences) and each gets the wave-35 union
