@@ -1004,10 +1004,15 @@ says_not "UNRESERVED-MINT      D613" "a number at or below the SEED is not score
 # this script with no --prefix at all; if the parameter changed what they see,
 # the reuse would have cost more than a second arbiter.
 CHECKS=$((CHECKS + 1))
-if diff -q <(bash "$ARM" --print-defs --charter "$CH") <(bash "$ARM" --print-defs --charter "$CH" --prefix PDS-D) >/dev/null 2>&1; then
-  echo "ok    the default prefix IS PDS-D — omitting --prefix and passing it explicitly agree"
+# Plain temp files, NOT process substitution: scripts/posix-vacuous-green-census.sh
+# refuses an unguarded `<(…)` in this tree, and it is right to — under `sh` the
+# construct is a syntax error and a harness that dies there can still exit 0.
+bash "$ARM" --print-defs --charter "$CH" > "$TMP/defs-default.txt" 2>/dev/null
+bash "$ARM" --print-defs --charter "$CH" --prefix PDS-D > "$TMP/defs-explicit.txt" 2>/dev/null
+if [ -s "$TMP/defs-default.txt" ] && diff -q "$TMP/defs-default.txt" "$TMP/defs-explicit.txt" >/dev/null 2>&1; then
+  echo "ok    the default prefix IS PDS-D — omitting --prefix and passing it explicitly agree ($(wc -l < "$TMP/defs-default.txt" | tr -d " ") defs)"
 else
-  FAILURES=$((FAILURES + 1)); echo "FAIL  the default prefix is not PDS-D — every existing caller's lens moved"
+  FAILURES=$((FAILURES + 1)); echo "FAIL  the default prefix is not PDS-D (or the lens read nothing) — every existing caller's lens moved"
 fi
 
 run 3 "an empty --prefix is a USAGE error (it would match every bare integer)" \
