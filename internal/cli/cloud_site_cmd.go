@@ -834,21 +834,94 @@ func prebuiltOptInRefusal(out *writer, ref, id string, site cloudclient.SpawnSit
 // server for — a deploy that burns a nonced mint and ships bytes no visitor can
 // be served.
 //
+// WHY IT IS A PREDICATE AND NOT A LIST (ssw9-bl-node-prebuilt). This guard used
+// to ask `siteIsNode`, i.e. "is this one of the runtimes I know are NOT static?"
+// — an enumeration of the OPEN side. `Barkpark.Registry.Site` today declares
+// `@kinds ~w(container static node)` and the CLI names `node`/`container`, so
+// the list is complete AT THIS COMMIT and completeness is the only thing holding
+// it up. Add a fourth kind server-side (or a runtime target that does not spell
+// "node" — `RuntimeTargetIsNode` matches on that substring) and this guard
+// returns false for it: the site mints a nonced row, packs its tree, and uploads
+// bytes nothing serves, in silence. The STATIC side is the CLOSED one — one kind
+// ("static") and one runtime target (`RuntimeTargetStatic`) — so the question
+// asked below is "did the control plane tell me this is the static
+// symlink-swap?" and everything else it NAMES is refused. An ABSENT kind and an
+// absent runtime target are still waved through: the control plane said nothing,
+// and refusing on no information is not the same as refusing on a fact.
+//
+// THE RULING OF RECORD (ssw9-bl-node-prebuilt, RULED by team-lead 2026-09-02,
+// recorded on the ledger row by lead-triage — written here because a ruling made
+// in a message is invisible to git grep):
+//
+//	HEALTH certifies the injection. Declare a node ABI.
+//
+// What that settles: on a node slot the markers HEALTH asserts are NOT resident
+// in the uploaded bytes. `write_slot_env` (deploy/site-deploy-node.sh) writes
+// BARKPARK_BUILD_ID into the slot EnvironmentFile, the unit loads it, and D71's
+// force-dynamic makes the served page echo `process.env` — so ANY bundle that
+// boots and echoes it passes the by-value marker assertion. HEALTH therefore
+// certifies that the injection arrived, never that these bytes are the ones the
+// deployment minted; the artifact digest is 100% load-bearing for that. The
+// ruling ACCEPTS that split rather than repairing it, and adds the ABI
+// declaration as the second half. Neither half is built: the node engine has no
+// prebuilt arm at all (`grep -c prebuilt deploy/site-deploy-node.sh` = 0, while
+// the static engine's PLAN_MODE=prebuilt path is ~20 sites), so the refusal
+// below remains the whole of the node prebuilt lane and the sentence it prints
+// is where an operator learns why.
+//
 // It refuses BEFORE the mint for the same reason its sibling does: a prebuilt
 // mint is nonced on purpose, so a row burned by learning late cannot be re-used
 // by re-running the command.
 //
-// A FAILED READ IS NOT A REFUSAL, and neither is an absent runtime_target.
-// siteIsNode already fails closed to static when the control plane says nothing,
-// and an unreadable row is handled by the opt-in preflight above, which has
-// already said the check did not run. This guard fires only on a DEFINITE node.
+// A FAILED READ IS NOT A REFUSAL. An unreadable row is handled by the opt-in
+// preflight above, which has already said the check did not run.
 func prebuiltStaticOnlyRefusal(out *writer, ref string, site cloudclient.SpawnSite, siteRead bool) int {
-	if !siteRead || !siteIsNode(site.Kind, site.RuntimeTarget) {
+	if !siteRead {
 		return exitOK
 	}
+	clause := prebuiltUnservableClause(site.Kind, site.RuntimeTarget)
+	if clause == "" {
+		return exitOK
+	}
+	why := "the box stages the uploaded tree and flips a symlink, so nothing would start a server for these bytes and nothing would serve them."
+	if siteIsNode(site.Kind, site.RuntimeTarget) {
+		why += " Node prebuilt is not merely unbuilt: a node slot reads bp-build-id out of the env this deploy injects at boot, so HEALTH would certify the injection rather than the uploaded bytes (RULED 2026-09-02: HEALTH certifies the injection; declare a node ABI)."
+	}
 	return useError(out, "failed", fmt.Sprintf(
-		"%s runs a long-running node/SSR process, and --prebuilt is static-only: the box stages the uploaded tree and flips a symlink, so nothing would start a server for these bytes and nothing would serve them. Build it on its box instead: bp cloud site deploy %s\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
-		hzCell(ref), hzCell(ref)), exitGeneric)
+		"%s %s, and --prebuilt is static-only: %s Build it on its box instead: bp cloud site deploy %s\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
+		hzCell(ref), clause, why, hzCell(ref)), exitGeneric)
+}
+
+// prebuiltUnservableClause is the predicate behind prebuiltStaticOnlyRefusal: it
+// names, in the refusal's own grammar, the thing the control plane SAID that
+// rules `--prebuilt` out — or "" when nothing it said does.
+//
+// Order matters only for the wording. The node arm is checked first so a node
+// site keeps the sentence it has always had ("runs a long-running node/SSR
+// process"); the two arms under it are the ones that catch a runtime this
+// binary has never heard of, and they quote the unrecognised value back so the
+// operator can see WHICH field refused them rather than reading a generic no.
+func prebuiltUnservableClause(kind, runtimeTarget string) string {
+	if siteIsNode(kind, runtimeTarget) {
+		return "runs a long-running node/SSR process"
+	}
+	if rt := strings.ToLower(strings.TrimSpace(runtimeTarget)); rt != "" && !prebuiltTargetIsStatic(rt) {
+		return fmt.Sprintf("declares runtime target %q, and this bp knows only one target the prebuilt lane can serve (%s)", sanitizeCell(rt), cloudclient.RuntimeTargetStatic)
+	}
+	if k := strings.ToLower(strings.TrimSpace(kind)); k != "" && k != "static" {
+		return fmt.Sprintf("declares kind %q, and the prebuilt lane serves only kind \"static\"", sanitizeCell(k))
+	}
+	return ""
+}
+
+// prebuiltTargetIsStatic is the CLOSED half of the runtime-target vocabulary:
+// `RuntimeTargetStatic` plus any value CONTAINING "static", mirroring
+// cloudclient.RuntimeTargetIsNode's substring tolerance so a control plane that
+// spells the field differently ("static_symlink_swap") is not refused for its
+// punctuation. Everything else — including every target that has not been
+// invented yet — is NOT static, which is the whole point.
+func prebuiltTargetIsStatic(rt string) bool {
+	return rt == cloudclient.RuntimeTargetStatic || strings.Contains(rt, "static")
 }
 
 // mintedSourceClause is the "no build started on the box" half of the mint
