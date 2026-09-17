@@ -341,6 +341,18 @@ jobs:
     # Advisory: fingerprint baselines drift across toolchains. Reconciliation
     # stays pinned to CI and produces a human-reviewed artifact, never a commit.
     continue-on-error: true
+    # ── THE CHANNEL THAT SURVIVES `continue-on-error` ────────────────────────
+    # `continue-on-error: true` destroys this job's RESULT for a consumer:
+    # `needs.sobelow.result` reads `success` even when the job concluded
+    # FAILURE (measured; see the aggregator header). It does NOT destroy this
+    # job's OUTPUTS. `outputs.verdict` is written by the `Publish` step at the
+    # bottom from `BP_STEP_VERDICT`, which scripts/run-instrument.sh combined
+    # worst-first across every channelled step — so the aggregator can judge
+    # Sobelow on a channel the laundering cannot reach. Before this block, a
+    # fresh Sobelow finding was visible on exactly ONE surface (this job's own
+    # red check run, which no aggregate reads and no protection requires).
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -469,7 +481,24 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         # absolute path: jobs with defaults.run.working-directory (api/) ran the
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
-        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+        # WRAPPED in run-instrument.sh, exactly as the two blocking Sobelow jobs
+        # below are: the breaker's 0/1/2 becomes MEASURED-CLEAN /
+        # MEASURED-DEFECT / REFUSED on $BP_STEP_VERDICT. An inherited-from-main
+        # red is breaker exit 0 and stays MEASURED-CLEAN, so this channel does
+        # NOT re-red the fleet on main's standing findings; a NEW finding is
+        # breaker exit 1 and travels.
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-sobelow -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when the Decide step above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. EMPTY is not MEASURED-CLEAN: it means the job never
+      # reached a channelled step, and `security-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
   # which IS this job's rendered check-run context and IS a committed exclusion
@@ -949,23 +978,46 @@ jobs:
     #   * It ASSERTS on every upstream result instead of echoing them.
     #     `if: always()` buys the right to decide; it does not decide.
     #
-    # ── WHY `sobelow` IS NOT IN `needs`, AND CANNOT BE ──────────────────────
+    # ── HOW `sobelow` IS JUDGED, AND WHY NOT ON ITS `result` ────────────────
     #
-    # `sobelow` is the one `continue-on-error: true` job in this file. MEASURED
-    # on a throwaway probe repo: a continue-on-error job that exits 1 CONCLUDES
-    # FAILURE and renders a RED check run, but `needs.<job>.result` reads
-    # `success` — byte-identical to a genuine pass. `failure` and `skipped` stay
-    # cleanly distinguishable; `success` is NOT decomposable, and no rewrite of
-    # `decide` below can recover the difference, because the information is
-    # destroyed before this job's shell starts.
+    # CORRECTED 2026-09-17 (dr-w25-bl-security-gate-cannot-see-sobelow). The
+    # block that stood here said `sobelow` "IS NOT IN `needs`, AND CANNOT BE",
+    # on this measurement, which still stands: a `continue-on-error: true` job
+    # that exits 1 CONCLUDES FAILURE and renders a RED check run, but
+    # `needs.<job>.result` reads `success` — byte-identical to a genuine pass.
+    # `failure` and `skipped` stay cleanly distinguishable; `success` is NOT
+    # decomposable.
     #
-    # So there is no honest "tolerate sobelow" branch to write: aggregating it
-    # would launder a failed Sobelow into a green required context ACCIDENTALLY
-    # and UNFALSIFIABLY. It is EXCLUDED from `needs` entirely — the red it
-    # already renders on its own check run is the only truthful signal it has.
-    # scripts/security-gate-shape.test.sh forces this shape, deriving the
-    # continue-on-error set FROM this file: when felix-w24-s7 flips Sobelow to
-    # blocking, that ratchet will require it to be ADDED here instead.
+    # The measurement is about `.result`. The CONCLUSION drawn from it — that no
+    # aggregation of this job is possible — was WIDER THAN THE MEASUREMENT, and
+    # it was false. `continue-on-error` launders a job's RESULT; it does not
+    # touch a job's OUTPUTS. `needs.sobelow.outputs.verdict` is written by the
+    # job's own last step from $BP_STEP_VERDICT and arrives here intact. That is
+    # the SAME channel the three blocking jobs already publish on; `sobelow` was
+    # simply the one member of the family never wired to it.
+    #
+    # WHAT THAT COST, for as long as the wider conclusion stood: a fresh Sobelow
+    # finding reddened exactly ONE surface — the `Sobelow static analysis …`
+    # check run, which is `continue-on-error`, is not in any aggregate, and is
+    # not a required context. No rollup anywhere could distinguish "Sobelow
+    # looked and found nothing" from "Sobelow was never in the picture".
+    #
+    # THE RULE NOW, enforced by scripts/security-gate-shape.test.sh: a
+    # continue-on-error job MAY be in `needs`, and ONLY on these terms —
+    #   (1) it declares `outputs.verdict`;
+    #   (2) the aggregator binds `needs.<job>.outputs.verdict` to a V_* env var;
+    #   (3) the aggregator NEVER passes that job's `.result` to `decide`.
+    # A continue-on-error job in `needs` that misses any of the three is the
+    # original laundering hazard and the ratchet reds on it by name. When
+    # felix-w24-s7 flips Sobelow to blocking, it simply moves into the normal
+    # `decide` roster and (3) stops applying to it.
+    #
+    # `decide_verdict` below is fail-closed on the one thing the result channel
+    # could never say: an EMPTY verdict on a DISPATCHED job means the job did
+    # not reach a channelled step, which is CANNOT READ, and a gate that cannot
+    # read must refuse rather than report clean (the rule
+    # scripts/bp-merge.sh:116-118 states for holds: "a merge path that fails
+    # OPEN on a hold is strictly worse than no hold at all").
     #
     # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
     # dispatcher output that gated that job was literally 'false'. Everything
@@ -973,7 +1025,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Security gate
     if: always()
-    needs: [changes, gate-shape, sobelow-inline-overlap, sobelow-baseline-fingerprint, mix-audit]
+    needs: [changes, gate-shape, sobelow, sobelow-inline-overlap, sobelow-baseline-fingerprint, mix-audit]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -993,6 +1045,10 @@ jobs:
           # the job never reached one of those steps (skipped, or it died
           # earlier) — which is NOT a claim that nothing refused, so this step
           # never reads an empty V_* as MEASURED.
+          # NO `R_SOBELOW`. Binding `needs.sobelow.result` is the laundering
+          # hazard itself: it would read `success` over a failed Sobelow, and
+          # the shape ratchet reds if it ever appears here.
+          V_SOBELOW: ${{ needs.sobelow.outputs.verdict }}
           V_OVERLAP: ${{ needs.sobelow-inline-overlap.outputs.verdict }}
           V_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.outputs.verdict }}
           V_AUDIT: ${{ needs.mix-audit.outputs.verdict }}
@@ -1078,15 +1134,74 @@ jobs:
             fi
           }
 
+          # ── decide_verdict <job> <verdict> <gate-value> ──────────────────
+          # The `decide` above judges a RESULT. This one judges a VERDICT, and
+          # it exists for exactly one shape: a `continue-on-error: true` job,
+          # whose result is laundered to `success` and therefore must never be
+          # read, but whose `outputs.verdict` survives intact.
+          #
+          # It is FAIL-CLOSED on the unreadable case, which is the whole point:
+          # an EMPTY verdict on a job whose gate said 'true' means the job never
+          # reached a channelled step — it died early, its wiring is broken, or
+          # somebody deleted the Publish step. That is CANNOT READ, and this
+          # gate refuses rather than reporting clean. An empty verdict is only
+          # accepted against a gate-value of exactly 'false', i.e. the job was
+          # legitimately never dispatched.
+          decide_verdict() {
+            local job="$1" v="$2" gate="$3"
+            case "$v" in
+              MEASURED-CLEAN)
+                echo "  ok      ${job}: MEASURED-CLEAN — it ran and found nothing new"
+                ;;
+              MEASURED-DEFECT)
+                echo "  FAIL    ${job}: MEASURED-DEFECT — it ran and found a defect this head"
+                echo "          introduced. Read that job's own log for the finding."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              REFUSED | UNKNOWN)
+                echo "  FAIL    ${job}: REFUSED — the instrument COULD NOT MEASURE and made NO"
+                echo "          claim in either direction. A refusal is not a pass."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                refusals="${refusals:+${refusals}, }${job}"
+                ;;
+              '')
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: not dispatched — the dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: EMPTY verdict with gate '${gate}'. The job was dispatched and"
+                  echo "          published no verdict, so it never reached a channelled step."
+                  echo "          CANNOT READ is not a pass: refusing to green over a hole."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                  refusals="${refusals:+${refusals}, }${job}"
+                fi
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised verdict '${v}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            if [ "$gate" != "NEVER" ]; then
+              case "$v" in
+                MEASURED-CLEAN | MEASURED-DEFECT) dispatched=$((dispatched + 1)) ;;
+                '') [ "$gate" = "false" ] && not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
           # ── the refusal ledger ───────────────────────────────────────────
           # Built BEFORE the verdict, so the `::error::` below can say WHICH
           # instruments refused. Derived from ${job}, never a hardcoded name.
-          # `sobelow` is absent on purpose: it is not in `needs` at all (see the
-          # job header above), so it has no verdict to publish and this ledger
-          # makes no claim about it — which is the same vocabulary, applied to
-          # itself.
+          # `sobelow` is NOT noted here: it publishes a verdict like the rest,
+          # but it is judged by `decide_verdict` below, which appends to
+          # `refusals` itself. Noting it twice would double-name it in the
+          # ::error:: line; the single-entry rule is that a job reaches this
+          # list through the SAME call that reds the gate.
           refusals=""
           note_verdict() {
             local job="$1" v="$2"
@@ -1109,6 +1224,8 @@ jobs:
           note_verdict "mix-audit"                    "${V_AUDIT:-}"
 
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          # Judged on the verdict channel, never on `.result` — see the header.
+          decide_verdict "sobelow"         "${V_SOBELOW:-}" "${O_API}"
           # The shape ratchet is unfiltered, so it may never skip either.
           decide "gate-shape"              "${R_SHAPE}"   "NEVER"
           decide "sobelow-inline-overlap"  "${R_OVERLAP}" "${O_API}"
