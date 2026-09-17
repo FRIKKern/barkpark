@@ -236,7 +236,7 @@ SELF="pds-door-census"
 # ---------------------------------------------------------------------------
 # PDS-D633 / PDS-D646 — the sentence that must ship in the output, not in prose
 # ---------------------------------------------------------------------------
-BLIND_SPOT='METER BLIND SPOT (PDS-D633/PDS-D646): `:erlang.statistics(:runtime)` is sound in-BEAM to <1%
+BLIND_SPOT='METER BLIND SPOT (PDS-D633/D646): `:erlang.statistics(:runtime)` is sound in-BEAM to <1%
   but BLIND to port children (a child burning 2.58 s reports 6 ms), and an OS meter wrapped
   around a BEAM that fans out to child BEAMs is blind to the whole fan-out. DO NOT QUOTE A
   RATIO: real/user reads 113x, 123x or 236x for the SAME fan-out because `real` counts
@@ -352,7 +352,7 @@ ERROR'
 # AND THE PDS-D692 CLAUSE MANDATING A WALL FIGURE BESIDE THE CPU PRICE IS
 # REFUSED HERE, IN WRITING, ON A MEASUREMENT (wave 49). D692 scopes its own
 # mandate to PORT-CHILD riders — a meter wrapped around a BEAM that fans out to
-# child BEAMs, where the CPU record genuinely goes blind (PDS-D633/PDS-D646, quoted
+# child BEAMs, where the CPU record genuinely goes blind (PDS-D633/D646, quoted
 # in the METER BLIND SPOT note above). Both rows below are plain bash harnesses
 # whose entire cost is direct-descendant CPU, and the `times` builtin is NOT
 # blind to those: measured this wave,

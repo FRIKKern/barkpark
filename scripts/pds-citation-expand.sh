@@ -24,6 +24,16 @@
 # this script exists to remove, wearing the instrument's own clothes. Every
 # segment below is [0-9]+[a-z]?.
 #
+# A CITATION ANOTHER LANE ASSERTS IS NOT THIS LANE'S TO REWRITE. Some compressed
+# tokens are not prose: they are part of a string a test in ANOTHER tree pins
+# verbatim, so expanding one here reds that lane's suite. They are found by a
+# PREDICATE, never a list -- for each compressed token still in scope, ask
+# whether that exact token is asserted in a test tree outside this fence. One
+# that is becomes BLOCKED: reported with the file that pins it, counted, and NOT
+# failed, because the repair is a coordinated change in two trees and this lane
+# cannot make half of it. Expanding such a token reds the pinning suite, which is
+# the whole reason the class exists rather than a quiet skip.
+#
 # A CAPTURE IS A RECORD, NOT A CITATION. A dated snapshot of the live board
 # (tooling/pds/fixtures/live-corpus-<date>.json and its kin) records what a row
 # ACTUALLY SAID on that date. Re-prefixing a citation inside one does not fix a
@@ -65,6 +75,15 @@ readonly COMPRESSED="PDS-D${SEG}(/D?${SEG})+"
 # Captured data, never authored citations. A path predicate, not a name list.
 readonly -a CAPTURED=(
   ':(exclude)*/fixtures/*'
+)
+
+# The test trees a cross-fence pin can live in. A path predicate over test
+# roots, not a list of known offenders.
+readonly -a PIN_TREES=(
+  'api/test'
+  'cloud/test'
+  'internal'
+  'js'
 )
 
 readonly -a FENCE=(
@@ -218,6 +237,37 @@ mode_check() {
     echo "residue outside this guard's fence: $out_files file(s), $out_matches compressed token(s) — routed, not reached into"
   fi
 
+  # THE CROSS-FENCE PIN, DERIVED. For each compressed token still in scope, ask
+  # whether that exact token is asserted in a test tree outside this fence. One
+  # that is cannot be expanded by this lane alone: the pinning suite would red.
+  local blocked_report="" live_hits="" line tok pinned_by
+  if [ -n "$hits" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      tok=$(printf '%s' "$line" | grep -oE "$COMPRESSED" | sed -n '1p' || true)
+      pinned_by=""
+      if [ -n "$tok" ]; then
+        pinned_by=$(git grep -lF "$tok" -- "${PIN_TREES[@]}" 2>/dev/null | tr '\n' ' ' || true)
+      fi
+      if [ -n "$pinned_by" ]; then
+        blocked_report="${blocked_report}  BLOCKED ${line%%:*} cites ${tok}, asserted verbatim by: ${pinned_by}
+"
+      else
+        live_hits="${live_hits}${line}
+"
+      fi
+    done <<CITATION_HITS
+$hits
+CITATION_HITS
+  fi
+
+  if [ -n "$blocked_report" ]; then
+    echo "cross-fence pinned citation(s) — NOT this lane's to expand alone; expanding one reds the pinning suite:"
+    printf '%s' "$blocked_report"
+  fi
+
+  hits="$(printf '%s' "$live_hits")"
+
   if [ -n "$hits" ]; then
     echo "FAIL: slash-compressed PDS-D citation(s) in scope — \`git grep PDS-D<n>\` cannot reach every number cited here"
     printf '%s\n' "$hits"
@@ -369,6 +419,30 @@ mode_selftest() {
   commit
   chk 1 "$(check_rc "$tmp" 'scripts/pds-authored.sh')" \
        "ARM 7c --check REDS on the same citation in an authored path (skip is path-scoped, not blanket)"
+
+  # ARM 8 — THE CROSS-FENCE PIN. A compressed token that a test OUTSIDE the
+  # fence asserts verbatim must NOT fail the guard (this lane cannot make half
+  # of a two-tree change) but must be REPORTED, never silently skipped.
+  mkdir -p "$tmp/api/test"
+  printf '# per %s90%s%s91 the door stays shut\n' "$P" "$S" "$D" > "$tmp/scripts/pds-pinned.sh"
+  printf 'assert out =~ "%s90%s%s91"\n' "$P" "$S" "$D" > "$tmp/api/test/pinned_test.exs"
+  commit
+  chk 0 "$(check_rc "$tmp" 'scripts/pds-pinned.sh')" \
+       "ARM 8  a cross-fence PINNED citation does not fail the guard"
+  local pin_out
+  pin_out=$( cd "$tmp" && "$SELF" --check 'scripts/pds-pinned.sh' 2>&1 || true )
+  rc=0; grep -q 'BLOCKED' <<<"$pin_out" || rc=1
+  chk 0 "$rc" "ARM 8b the guard PRINTS it as BLOCKED rather than skipping it silently"
+  rc=0; grep -q 'api/test/pinned_test.exs' <<<"$pin_out" || rc=1
+  chk 0 "$rc" "ARM 8c the report NAMES the file that pins it, so the repair is addressable"
+
+  # ARM 8d (NEGATIVE CONTROL) — the SAME token with no out-of-fence assertion
+  # must still RED. Without this, ARM 8 is satisfied by a guard that blocks
+  # everything, which is the failure mode a blocked class invites.
+  rm -f "$tmp/api/test/pinned_test.exs"
+  commit
+  chk 1 "$(check_rc "$tmp" 'scripts/pds-pinned.sh')" \
+       "ARM 8d the same citation UNPINNED still reds (blocked is derived, not blanket)"
 
   rm -rf "$tmp"
   echo
