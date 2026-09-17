@@ -74,6 +74,48 @@ func (f Flex) Measure(avail, tracks int) (cellW int, sideBySide bool) {
 	return
 }
 
+// StretchTracks turns Measure's uniform cellW into the PER-TRACK widths that make
+// a side-by-side row reach `avail` EXACTLY. Measure divides with integer division,
+// so tracks*cellW+(tracks-1)*Gutter can fall up to tracks-1 columns short of the
+// surface; that shortfall used to ride as a ragged right margin. The canonical
+// reader has no such margin: measured headless (18 cases = notes/cards/pipeline x
+// stream/section-grid-cell x 1280/700/390 px), the widget container's right gap is
+// 0.00 px in 18 of 18 and the LAST CHILD's right gap is 0.00 px in 15 of 15
+// measured cases — its tracks are `1fr`, which spends the remainder inside the
+// cells. StretchTracks is that spend: the first `remainder` tracks get one extra
+// column each, so the row totals `avail` and every track stays within one column
+// of its neighbours. avail below the packed width (a caller that mis-measured)
+// yields the uniform widths unchanged — it never shrinks a track.
+func (f Flex) StretchTracks(avail, tracks, cellW int) []int {
+	if tracks < 1 {
+		tracks = 1
+	}
+	rem := avail - (tracks*cellW + (tracks-1)*f.Gutter)
+	if rem < 0 {
+		rem = 0
+	}
+	widths := make([]int, tracks)
+	for i := range widths {
+		widths[i] = cellW
+		if i < rem {
+			widths[i]++
+		}
+	}
+	return widths
+}
+
+// padGroupRight right-pads every line of an already-rendered group to `w` display
+// columns (ANSI-aware via padRight). This is the STACKED half of the same
+// full-bleed model StretchTracks implements for the horizontal half: a stacked
+// widget occupies the full content width instead of ending at its longest line.
+func padGroupRight(lines []string, w int) []string {
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = padRight(ln, w)
+	}
+	return out
+}
+
 // spanWidth is a span-S cell's display width: S per-track cells plus the (S-1)
 // gutters those tracks subsume. The one place the section grid's span arithmetic
 // lives (was inlined at the grid caller); span<1 clamps to 1.
