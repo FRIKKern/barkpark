@@ -938,6 +938,13 @@ const PIN = [
   { key: "FN|operatorReadFault|a5b0ceb4", verdict: "UNREVIEWED", copy: "The request never reached the control plane, so there is no..." },
   { key: "ARG|operatorConfirmBrake|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|operatorConfirmBrake|ctl.fail|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  // gr-backlog-operator-digest-send — the send-now button's failure leg, the
+  // brake's twin two rows up and DELEGATED for the identical reason: the
+  // sentence a human reads comes from operatorReadFault(r) / friendly(r.data),
+  // i.e. the SERVER's own refusal, and "Please try again." is only the fallback
+  // when the response carried no cause at all. Nothing here authors a cause.
+  { key: "ARG|operatorConfirmDigestSend|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|operatorConfirmDigestSend|ctl.fail|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "FN|loadInstanceSites|00ee8a15", verdict: "UNREVIEWED", copy: "You don't have access to the sites on this instance." },
   { key: "FN|loadInstanceSites|1cf6149e", verdict: "UNREVIEWED", copy: "We couldn't read this instance's sites — try again in a mom..." },
   { key: "FN|siteCreateFailureCopy|3b49b7b9", verdict: "UNREVIEWED", copy: "It can read:" },
