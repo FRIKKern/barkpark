@@ -39,6 +39,18 @@
 
 set -euo pipefail
 
+# This script uses process substitution and bash arrays. A POSIX-mode shell
+# would run everything above the refusal before failing on the first `<(`, so
+# the guard sits here, ahead of any code that could act. Enforced by
+# scripts/posix-vacuous-green-census.sh.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "pds-citation-expand.sh: needs bash (this script uses process substitution); run: bash scripts/pds-citation-expand.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*) echo "pds-citation-expand.sh: refuses to run in POSIX mode" >&2; exit 2;;
+esac
+
 # ── the predicate ───────────────────────────────────────────────────────────
 # A compressed citation: a prefixed D-number followed by one or more segments
 # that are NOT re-prefixed. `PDS-D276/PDS-D277` (the expanded form) does not
