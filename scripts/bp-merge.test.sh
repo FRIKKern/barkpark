@@ -489,6 +489,10 @@ chmod +x "$BPM_TMP/verify.sh"
 GH_ARGV_LOG="$BPM_TMP/gh-argv.log"
 GH_MERGEABLE_STATE="clean"
 GH_MERGEABLE_RC=0
+# The label set main()'s PR-label hold arm reads. It defaults to a NON-hold
+# label rather than `[]`: an empty array would let a classifier that passes
+# everything look correct here, and every row below would be measuring nothing.
+GH_LABELS='["needs-review"]'
 gh() {
   printf '%s\n' "$*" >> "$GH_ARGV_LOG"
   case "$1" in
@@ -497,6 +501,7 @@ gh() {
         view)
           case "$*" in
             *"--json state"*) printf 'OPEN\n' ;;
+            *"--json labels"*) printf '%s\n' "$GH_LABELS" ;;
             *) printf '{"number":123,"url":"https://github.com/FRIKKern/barkpark/pull/123","headRefOid":"deadbeef","state":"OPEN","isDraft":false}\n' ;;
           esac ;;
         merge) printf 'Merged pull request #123 (stub)\n' ;;
@@ -539,6 +544,32 @@ if out_has "$DM_OUT" 'push --force-with-lease'; then
   pass=$((pass + 1)); echo "  ok   47a …and prints the rebase remedy, not just the verdict"
 else
   fail=$((fail + 1)); echo "  FAIL the dirty pre-flight refusal names no resolving command" >&2
+fi
+
+# 47b. THE WHOLE VERB, END TO END. Rows 77-83 drive preflight_label_hold
+# directly; this one drives main(), the entry point every lane actually calls,
+# and proves the arm is REACHED there and that the merge call is never spent.
+# #18497 merged through main() under a live `hold` label.
+GH_LABELS='["hold"]'
+drive_main clean
+if [ "$DM_RC" = "7" ] && [ "$DM_MERGE_CALLS" -eq 0 ] && out_has "$DM_OUT" 'REFUSED — PR-LABEL HOLD'; then
+  pass=$((pass + 1)); echo "  ok   47b main() itself refuses a 'hold'-labelled PR on exit 7, merge call never spent"
+else
+  fail=$((fail + 1))
+  echo "  FAIL main() did not refuse a held PR (rc=$DM_RC merge_calls=$DM_MERGE_CALLS)" >&2
+  printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
+fi
+# 47c. CONTROL, SAME PATH: with the hold removed the identical run MERGES. The
+# `gh pr edit --remove-label hold` door, exercised. Without this row 47b proves
+# only that main() can refuse, not that the LABEL is what refused it.
+GH_LABELS='["needs-review"]'
+drive_main clean
+if [ "$DM_RC" = "0" ] && [ "$DM_MERGE_CALLS" -ge 1 ]; then
+  pass=$((pass + 1)); echo "  ok   47c CONTROL: removing the label lets the SAME run merge (rc=$DM_RC, merge calls=$DM_MERGE_CALLS)"
+else
+  fail=$((fail + 1))
+  echo "  FAIL the unlabelled control did not merge (rc=$DM_RC merge_calls=$DM_MERGE_CALLS) — 47b may be refusing for another reason" >&2
+  printf '%s\n' "$DM_OUT" | sed 's/^/       /' >&2
 fi
 
 # 48. unknown: GitHub has not computed it. Re-read, then REFUSE — never merge.
@@ -1098,6 +1129,135 @@ if awk '/^  preflight_hold$/ {seen=1} /^  preflight$/ {print (seen ? "OK" : "LAT
 else
   fail=$((fail + 1)); echo "  FAIL preflight_hold is not called before preflight in main()" >&2
 fi
+
+echo
+echo "── PR-label hold pre-flight: real read_pr_labels + label_hold_classify, stubbed gh ──"
+
+# The PR-label hold is a DIFFERENT CLAIM from the main-red registry above, on a
+# different exit code (7/8 vs 5/6), and these rows drive the REAL functions.
+# #18497 carried `hold` from 2026-09-16T08:51:19Z and merged through this script
+# at 06:41Z on 09-17: nothing here read the PR's labels at all.
+PR_NUMBER=18497
+
+drive_label() { # raw-gh-output gh-rc -> LBL_RC, LBL_OUT
+  LBL_STUB_OUT="$1"; LBL_STUB_RC="$2"
+  gh() { printf '%s' "$LBL_STUB_OUT"; return "$LBL_STUB_RC"; }
+  LBL_RC=0
+  LBL_OUT="$( preflight_label_hold 2>&1 )" || LBL_RC=$?
+  unset -f gh
+}
+
+label_row() { # label want_rc needle...
+  local label="$1" want="$2"; shift 2
+  local bad="" n
+  [ "$LBL_RC" = "$want" ] || bad="exit $LBL_RC (wanted $want)"
+  for n in "$@"; do
+    hold_has "$LBL_OUT" "$n" || bad="$bad; missing '$n'"
+  done
+  if [ -z "$bad" ]; then
+    pass=$((pass + 1)); echo "  ok   $label (exit $LBL_RC)"
+  else
+    fail=$((fail + 1)); echo "  FAIL $label: $bad" >&2
+    printf '%s\n' "$LBL_OUT" | sed 's/^/       /' >&2
+  fi
+}
+
+# 76. THE REAL SHAPE. This is the byte-exact object `gh pr view 18705 --json
+# labels` emitted on 2026-09-17, run through the byte-exact jq program
+# read_pr_labels runs. A harness whose fixtures encode a shape the system never
+# emits gives a uniform verdict and measures nothing, so the fixture is the
+# SERVER'S object and the projection is the SCRIPT'S.
+LBL_GH_HELD='{"labels":[{"id":"LA_kwDOSAgT9M8AAAAC1x0Gkg","name":"hold","description":"Lane-settable merge hold: the orchestrator merge sweep skips this PR","color":"B60205"}]}'
+LBL_GH_CLEAR='{"labels":[]}'
+LBL_RAW_HELD="$(printf '%s' "$LBL_GH_HELD"  | jq -r '[.labels[].name]|@json')"
+LBL_RAW_CLEAR="$(printf '%s' "$LBL_GH_CLEAR" | jq -r '[.labels[].name]|@json')"
+if [ "$LBL_RAW_HELD" = '["hold"]' ] && [ "$LBL_RAW_CLEAR" = '[]' ]; then
+  pass=$((pass + 1)); echo "  ok   76 CONTROL: the live jq projection over a REAL gh object yields ${LBL_RAW_HELD} / ${LBL_RAW_CLEAR}"
+else
+  fail=$((fail + 1)); echo "  FAIL 76 the projection over a real gh object yielded [$LBL_RAW_HELD] / [$LBL_RAW_CLEAR]" >&2
+fi
+
+# 77. DIRECTION A — HELD refuses, on 7, and names the door.
+drive_label "$LBL_RAW_HELD" 0
+label_row "77 a PR carrying 'hold' is REFUSED on exit 7" 7 \
+  "REFUSED — PR-LABEL HOLD" "labels: [hold]" "--remove-label hold" "no override flag"
+
+# 78. DIRECTION B — the CONTROL. An unlabelled PR must PROCEED, or the arm is a
+# deadlock rather than a hold. Same function, same reader, opposite input.
+drive_label "$LBL_RAW_CLEAR" 0
+label_row "78 CONTROL an unlabelled PR proceeds" 0 "label pre-flight ok" "CLEAR" "(none)"
+
+# 79. EXACT MEMBERSHIP, NOT A SUBSTRING. merge-check's `*hold*` glob matched
+# `holdover`, `withhold` and `stakeholder`; those are not holds.
+drive_label '["holdover","withhold","stakeholder"]' 0
+label_row "79 hold-lookalike labels do NOT hold" 0 "label pre-flight ok" "CLEAR"
+
+# 80. A hold ALONGSIDE other labels is still a hold, and case does not excuse it.
+drive_label '["needs-review","Hold","area/gates"]' 0
+label_row "80 'Hold' among other labels still holds" 7 "REFUSED — PR-LABEL HOLD"
+
+# 81. CANNOT READ — gh itself failed. Exit 8, never folded into 0, never into 7.
+drive_label 'GraphQL: API rate limit already exceeded for user ID 32601161.' 1
+label_row "81 gh failing is CANNOT READ on 8, not 'no hold'" 8 \
+  "PR-LABEL HOLD CANNOT READ" "no claim that your PR is held, and none that it is clear"
+
+# 82. CANNOT READ — gh exited 0 and produced NOTHING. THE #18497 SHAPE: an empty
+# read must not render as an empty label set. The retired merge-check arm read
+# `join(",")`, which renders BOTH as "", and published "not held".
+drive_label '' 0
+label_row "82 an EMPTY read at exit 0 is CANNOT READ, not 'not held'" 8 \
+  "PR-LABEL HOLD CANNOT READ" "an empty read is not an empty label set"
+
+# 83. CANNOT READ — output that is not a JSON array of names.
+drive_label 'no pull requests found for branch "x"' 0
+label_row "83 an unparseable read is CANNOT READ" 8 "did not parse as a JSON array"
+
+# 84. CONTROL FOR 82: the retired join(",") reader really does collapse the two
+# cases, or row 82 pins nothing. Both inputs yield the SAME empty string, and the
+# retired glob then reports "not held" for both.
+_j_empty="$(printf '%s' '{"labels":[]}' | jq -r '[.labels[].name]|join(",")')"
+_j_none=""
+if [ "$_j_empty" = "$_j_none" ]; then
+  case "$_j_empty" in
+    *hold*) fail=$((fail + 1)); echo "  FAIL 84 CONTROL: the retired glob matched an empty string" >&2 ;;
+    *) pass=$((pass + 1)); echo "  ok   84 CONTROL the retired join(\",\") reader renders 'no labels' and 'no read' identically, and its glob calls both 'not held'" ;;
+  esac
+else
+  fail=$((fail + 1)); echo "  FAIL 84 CONTROL: join(\",\") did not collapse the two cases — row 82 pins nothing" >&2
+fi
+
+# 85. WIRED INTO main(), and FIRST — before preflight_hold and before the
+# pre-flight that spends API reads. A hold is the cheapest possible refusal and
+# must not be reached only after the expensive ones agree.
+if awk '/^  preflight_label_hold$/ {seen=1} /^  preflight_hold$/ {print (seen ? "OK" : "LATE"); exit}' \
+     "$ROOT/scripts/bp-merge.sh" | grep -q OK; then
+  pass=$((pass + 1)); echo "  ok   85 main() runs preflight_label_hold BEFORE preflight_hold"
+else
+  fail=$((fail + 1)); echo "  FAIL preflight_label_hold is not called before preflight_hold in main()" >&2
+fi
+
+# 86. THE TWO HOLDS STAY ON DIFFERENT CODES. Row 77 says 7 and row 60 says 5; if
+# a later edit folds them, an operator cannot tell which claim they answered.
+if [ "$(grep -c 'exit 7' "$ROOT/scripts/bp-merge.sh")" -ge 1 ] \
+   && [ "$(grep -c 'exit 8' "$ROOT/scripts/bp-merge.sh")" -ge 1 ] \
+   && [ "$(grep -c 'exit 5' "$ROOT/scripts/bp-merge.sh")" -ge 1 ] \
+   && [ "$(grep -c 'exit 6' "$ROOT/scripts/bp-merge.sh")" -ge 1 ]; then
+  pass=$((pass + 1)); echo "  ok   86 label hold (7/8) and main-red hold (5/6) are separate codes"
+else
+  fail=$((fail + 1)); echo "  FAIL the two hold claims no longer carry distinct exit codes" >&2
+fi
+
+# 87. AND THE EXIT-CODE DOC BLOCK MATCHES THE CODE. A documented contract that
+# drifts from the implementation is how a caller learns the wrong thing.
+_doc="$(bash "$ROOT/scripts/bp-merge.sh" --help 2>&1)"
+if hold_has "$_doc" "7 PR-LABEL HOLD" && hold_has "$_doc" "8 PR-LABEL HOLD CANNOT READ"; then
+  pass=$((pass + 1)); echo "  ok   87 --help documents exit 7 and exit 8"
+else
+  fail=$((fail + 1)); echo "  FAIL --help does not document the new exit codes" >&2
+fi
+
+unset -f drive_label label_row
+unset PR_NUMBER
 
 unset -f gh hold_has hold_row drive_hold drive_hold_ov
 rm -rf "$HOLD_TMP"
