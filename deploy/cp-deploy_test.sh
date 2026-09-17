@@ -262,6 +262,17 @@ case "${1:-}" in
     esac
     exit 0 ;;
   image)
+    # `docker image inspect cloud-control_plane:rollback` — the rollback path's
+    # fail-closed precondition (c). Drivable in BOTH directions: without this
+    # arm the catch-all below answers 0 and "the image is missing" could never
+    # be tested at all.
+    if [ "${2:-}" = "inspect" ]; then
+      if [ "${ROLLBACK_IMAGE_MISSING:-0}" = 1 ]; then
+        echo "Error response from daemon: No such image: cloud-control_plane:rollback" >&2
+        exit 1
+      fi
+      exit 0
+    fi
     [ "${2:-}" = "prune" ] || exit 0
     [ "${IMAGE_PRUNE_FAIL:-0}" = 1 ] && { echo "Error: image prune blew up" >&2; exit 1; }
     echo "Total reclaimed space: 21.4GB"
@@ -1022,12 +1033,16 @@ check "the script exits non-zero on a provisioner that did not come back" \
 # a slot older than a cloud/.env change silently serves the old env.
 echo
 echo "cp-deploy documented rollback recipe (gr-blk-cp-deploy-rollback-stale-env)"
-check "the recipe no longer teaches 'docker start it'" \
-  "! grep -q 'reload caddy,\$' '$SCRIPT'"
-check "the recipe recreates the container" \
+# These three used to pin the PROSE recipe that replaced the `docker start` one.
+# The recipe is now EXECUTABLE (do_rollback + --rollback), so they pin the code
+# instead: a comment can be followed wrong, and under pressure it will be.
+# Retargeted, not deleted — the property each asserted is unchanged.
+check "the retired 'reload caddy, docker start it' recipe is gone as an instruction" \
+  "[ \"\$(grep -c 'reload caddy, .docker start. it\\.' '$SCRIPT')\" = '0' ]"
+check "the rollback recreates the container" \
   "grep -q -- '--force-recreate' '$SCRIPT'"
-check "the recipe re-exports cloud/.env first (the same door the deploy uses)" \
-  "grep -q 'set -a; . cloud/.env; set +a          # the same export the deploy uses' '$SCRIPT'"
+check "the rollback re-exports cloud/.env first (the same door the deploy uses)" \
+  "[ \"\$(grep -c 'set -a' '$SCRIPT')\" -ge 2 ]"
 check "the recipe retags the rollback image (both slots are :latest in compose)" \
   "grep -q 'docker tag cloud-control_plane:rollback cloud-control_plane:latest' '$SCRIPT'"
 check "the script still saves that rollback tag before the pull" \
@@ -1183,14 +1198,227 @@ check "the ledger is line-bounded (a deploy-rate leak on a box whose disk fillin
 # window it opens does not contain the loss it exists to explain. The slot
 # decision line is the last point at which nothing has been built or booted.
 _start_ln="$(grep -n '^cutover_stamp deploy_start' "$SCRIPT" | head -1 | cut -d: -f1)"
-_build_ln="$(grep -n 'compose build\|compose up' "$SCRIPT" | head -1 | cut -d: -f1)"
+# The DEPLOY body's first container-replacing step. do_rollback() runs on a
+# path that exits before the deploy body ever starts, so its own `compose up`
+# is not inside the cutover window and must not be read as the window's first
+# step — blank that function out (line numbers preserved) before looking.
+_deploy_body="$(mktemp)"
+awk '/^do_rollback\(\) \{/{inrb=1} {print (inrb ? "" : $0)} /^\}/{inrb=0}' "$SCRIPT" > "$_deploy_body"
+_build_ln="$(grep -n 'compose build\|compose up' "$_deploy_body" | head -1 | cut -d: -f1)"
+rm -f "$_deploy_body"
 check "the window OPENS before the first container-replacing step" \
   "[ -n \"\$_start_ln\" ] && [ -n \"\$_build_ln\" ] && [ \"\$_start_ln\" -lt \"\$_build_ln\" ]"
 # ...and it must CLOSE on both exits. An abort still replaced containers.
 check "cutover_stamp deploy_aborted is inside abort_deploy(), not merely in the file" \
-  "awk '/^abort_deploy\(\) \{/,/^\}/' '$SCRIPT' | grep -q 'cutover_stamp deploy_aborted'"
+  "[ \"\$(awk '/^abort_deploy\(\) \{/,/^\}/' '$SCRIPT' | grep -c 'cutover_stamp deploy_aborted')\" -ge 1 ]"
 check "a stamp failure can never fail the deploy (the function always returns 0)" \
-  "awk '/^cutover_stamp\(\) \{/,/^\}/' '$SCRIPT' | grep -q '^  return 0$'"
+  "[ \"\$(awk '/^cutover_stamp\(\) \{/,/^\}/' '$SCRIPT' | grep -c '^  return 0\$')\" -ge 1 ]"
+
+# ============================================================================
+# ROLLBACK — RECREATE, NEVER `docker start` (gr-blk-cp-deploy-rollback-stale-env)
+# ============================================================================
+# What is under test: cp-deploy.sh --rollback / --rollback-preflight, the
+# EXECUTABLE replacement for a prose recipe that told an operator to
+# `docker start` the dormant slot. `docker start` resumes an existing container
+# object and replays the environment baked in when that container was CREATED,
+# so a slot older than a cloud/.env change comes back on stale configuration
+# with a 200 on every probe. There is no live box in this harness and there does
+# not need to be: what the rollback path DOES is observable from the command log
+# (a recreate, not a start), the Caddyfile, and the exit code.
+#
+# BOTH ARMS, deliberately. A rollback that refuses everything is not a fix
+# either — the happy case below must stay green, and it is the arm that reds if
+# a precondition is ever made too strict.
+echo
+echo "rollback path (gr-blk-cp-deploy-rollback-stale-env)"
+
+# run_rollback <flag> [VAR=VAL …] -> prints the exit code
+run_rollback() {
+  local flag="$1"; shift
+  env PATH="$FAKEBIN:$PATH" \
+      BARKPARK_APP_DIR="$APPDIR" \
+      BARKPARK_CADDYFILE="$CADDY" \
+      BARKPARK_DEPLOY_LOCK="$FTMP/deploy.lock" \
+      BARKPARK_PROVISIONER_UNIT="$FTMP/nonexistent-provisioner.service" \
+      BARKPARK_PROVISIONER_BIN="$FTMP/usr-local-bin-barkpark-provisioner" \
+      DOCKERLOG="$DOCKERLOG" GITLOG="$GITLOG" SYSCTLLOG="$SYSCTLLOG" DSTATE="$DSTATE" \
+      "$@" bash "$SCRIPT" "$flag" > "$FTMP/out.log" 2>&1
+  echo "$?"
+}
+
+# The state a rollback actually starts from: GREEN (:4101) is serving the bad
+# deploy, BLUE (:4100) is the dormant slot the deploy left stopped.
+setup_rollback() {
+  setup_flip localhost:4101 4100 4101
+  rm -f "$DSTATE/running.4100"
+  touch "$DSTATE/running.4101"
+}
+
+# ---- R1: the HAPPY rollback. green(:4101) -> blue(:4100), recreated.
+setup_rollback
+rc="$(run_rollback --rollback)"
+check "rollback: exit 0"                              "[ '$rc' = '0' ]"
+check "rollback: Caddy upstream moved back to :4100"  "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "rollback: Caddyfile still caddy-valid"         "caddy validate --config '$CADDY' >/dev/null 2>&1"
+check "rollback: the dormant blue slot is running again" "[ -f '$DSTATE/running.4100' ]"
+# THE FIX ITSELF. --force-recreate is the single flag that makes current
+# cloud/.env reach the container; without it compose reuses the existing
+# container and the rollback serves the env baked in at creation.
+check "rollback: recreated the slot with --force-recreate (NOT a reuse)" \
+  "grep -q 'compose.*up -d --force-recreate --no-build control_plane_blue' '$DOCKERLOG'"
+# THE DEFECT THE ROW NAMES. Not "the log does not obviously start a container"
+# — the literal command must be absent from everything the run issued.
+check "rollback: NEVER issued 'docker start' (the stale-env recipe this replaced)" \
+  "! grep -qE '^docker start( |\$)' '$DOCKERLOG'"
+# The second defect the original recipe carried: both slots are :latest, so a
+# recreate without the retag reinstalls the code being rolled back FROM.
+check "rollback: retagged the rollback image to :latest before recreating" \
+  "grep -q 'docker tag cloud-control_plane:rollback cloud-control_plane:latest' '$DOCKERLOG'"
+# ORDER, not merely presence. The prose recipe flipped Caddy FIRST, pointing the
+# public front at a port with nothing listening on it.
+# shellcheck disable=SC2034  # read back inside the check eval below
+rb_tag_ln="$(grep -n 'tag cloud-control_plane:rollback' "$DOCKERLOG" | head -1 | cut -d: -f1)"
+# shellcheck disable=SC2034  # read back inside the check eval below
+rb_up_ln="$(grep -n 'up -d --force-recreate' "$DOCKERLOG" | head -1 | cut -d: -f1)"
+check "rollback: the retag precedes the recreate (a recreate first would boot the NEW code)" \
+  "[ -n \"\$rb_tag_ln\" ] && [ -n \"\$rb_up_ln\" ] && [ \"\$rb_tag_ln\" -lt \"\$rb_up_ln\" ]"
+check "rollback: the slot was recreated and health-gated BEFORE caddy was reloaded" \
+  "grep -q 'rollback slot blue healthy' '$FTMP/out.log'"
+check "rollback: the unrelated :9100 upstream survived the rollback sed" "collateral_intact"
+check "rollback: it did NOT run the deploy (no git pull, no compose build)" \
+  "! grep -q 'git pull' '$GITLOG' && ! grep -q 'compose build' '$DOCKERLOG'"
+# The bad slot stays up on purpose — stopping it is a human decision, and a
+# rollback that tears down the evidence is a rollback nobody can diagnose.
+check "rollback: the slot being rolled back FROM is left running for inspection" \
+  "[ -f '$DSTATE/running.4101' ]"
+
+# ---- R2: cloud/.env absent -> REFUSE. This is the whole point: the recipe that
+# "works" here (docker start) is the one that serves stale env.
+setup_rollback
+rm -f "$APPDIR/cloud/.env"
+rc="$(run_rollback --rollback)"
+check "rollback/no-env: exit 21 (refused, not best-effort)"  "[ '$rc' = '21' ]"
+check "rollback/no-env: the refusal names cloud/.env"        "grep -q 'cloud/.env is missing or unreadable' '$FTMP/out.log'"
+check "rollback/no-env: the refusal warns against the docker start fallback" \
+  "grep -q \"Do NOT fall back to 'docker start'\" '$FTMP/out.log'"
+check "rollback/no-env: Caddy was NEVER touched"             "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "rollback/no-env: no container was recreated"          "! grep -q 'force-recreate' '$DOCKERLOG'"
+check "rollback/no-env: the image tag was NOT moved"         "! grep -q 'docker tag' '$DOCKERLOG'"
+
+# ---- R3: no rollback image -> REFUSE. Recreating now would reinstall the very
+# code being rolled back from, and report success.
+setup_rollback
+rc="$(run_rollback --rollback ROLLBACK_IMAGE_MISSING=1)"
+check "rollback/no-image: exit 22"                     "[ '$rc' = '22' ]"
+check "rollback/no-image: the refusal explains the :latest collision" \
+  "grep -q 'Both slots run cloud-control_plane:latest' '$FTMP/out.log'"
+check "rollback/no-image: Caddy untouched"             "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "rollback/no-image: nothing was recreated"       "! grep -q 'force-recreate' '$DOCKERLOG'"
+
+# ---- R4: the recreated slot never becomes healthy -> REFUSE, do not flip.
+# The prose recipe had no gate at all: it flipped Caddy onto the old port and
+# only then tried to bring the slot up.
+setup_rollback
+rc="$(run_rollback --rollback HEALTH_CODE=500)"
+check "rollback/unhealthy: exit 26"                    "[ '$rc' = '26' ]"
+check "rollback/unhealthy: Caddy still serves the slot that WAS serving" \
+  "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "rollback/unhealthy: the refusal says the front was not moved" \
+  "grep -q 'Caddy was NOT flipped' '$FTMP/out.log'"
+check "rollback/unhealthy: caddy was never reloaded"   "! grep -q 'reload caddy' '$SYSCTLLOG'"
+
+# ---- R5: --rollback-preflight is READ-ONLY and names the slot.
+setup_rollback
+rc="$(run_rollback --rollback-preflight)"
+check "preflight: exit 0"                              "[ '$rc' = '0' ]"
+check "preflight: names the dormant slot"              "grep -q '^ROLLBACK_SLOT=blue$' '$FTMP/out.log'"
+check "preflight: names its port"                      "grep -q '^ROLLBACK_PORT=4100$' '$FTMP/out.log'"
+check "preflight: names the live port"                 "grep -q '^LIVE_PORT=4101$' '$FTMP/out.log'"
+check "preflight: Caddy untouched"                     "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "preflight: no container touched"                "! grep -qE 'force-recreate|^docker start' '$DOCKERLOG'"
+check "preflight: no image retagged"                   "! grep -q 'docker tag' '$DOCKERLOG'"
+check "preflight: caddy never reloaded"                "! grep -q 'reload caddy' '$SYSCTLLOG'"
+
+# ---- R6: an unrecognised flag is refused rather than silently treated as the
+# provisioner-binary argument (which would run a FULL DEPLOY — the opposite of
+# what the operator typed).
+setup_rollback
+rc="$(run_rollback --rollbck)"
+check "typo'd flag: exit 2, not a deploy"              "[ '$rc' = '2' ]"
+check "typo'd flag: names the accepted flags"          "grep -q 'want --rollback or --rollback-preflight' '$FTMP/out.log'"
+check "typo'd flag: nothing was pulled"                "! grep -q 'git pull' '$GITLOG'"
+
+# ---- R7: DOCUMENTATION GUARD, as a predicate rather than a list of two files'
+# current wording. Every `docker start` mention that survives in the deploy lane
+# must be a PROHIBITION, not a recommendation: the retired recipe's whole
+# failure mode is that it read as helpful advice. The rule is "a `docker start`
+# line must carry, within one line either side, a word that negates or explains
+# it"; the match set is PRINTED, and a positive control below proves the scanner
+# can actually flag a bad line — an absence claim from a silent scanner is
+# worth nothing.
+rb_scan() {
+  awk '
+    { l[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (l[i] !~ /docker start/) continue
+        # DISTANCE IN CHARACTERS, not lines. A +-3 LINE window was fooled by
+        # deploy/README.md, whose pipeline table is one 900-character line per
+        # target: the neighbouring "Content instance" row contains "never" for
+        # an unrelated reason, and that exempted a `docker start` recommendation
+        # three rows away. Measured: with the retired README wording restored,
+        # the line-window scanner stayed silent. 200 characters either side of
+        # the occurrence itself is the same "same sentence" intent, and it holds
+        # for both wrapped comment prose and one-line table rows.
+        ctx = ""
+        for (j = i - 3; j <= i + 3; j++) if (j >= 1 && j <= NR) ctx = ctx "\n" l[j]
+        at = index(ctx, "docker start")
+        near = substr(ctx, (at > 200 ? at - 200 : 1), 400 + length("docker start"))
+        if (near ~ /[Nn]ever|NOT|not |[Dd]o not|refus|REFUS|stale|instead|rather than|replay|SILENT|used to|trap/) continue
+        printf "%s:%d: %s\n", FILENAME, i, l[i]
+      }
+    }' "$1"
+}
+RB_HITS="$FTMP/rb-doc-hits.txt"
+: > "$RB_HITS"
+for f in "$SCRIPT" "$HERE/README.md"; do rb_scan "$f" >> "$RB_HITS"; done
+echo "  docker-start recommendations found in the deploy lane:"
+if [ -s "$RB_HITS" ]; then sed 's/^/    /' "$RB_HITS"; else echo "    (none)"; fi
+check "no deploy-lane doc recommends 'docker start' for a control-plane rollback" \
+  "[ ! -s '$RB_HITS' ]"
+# POSITIVE CONTROL. The retired sentences, verbatim, in a fixture: if the
+# scanner cannot flag these it is flagging nothing and the check above is a
+# green with no subject.
+RB_CTRL="$FTMP/rb-control.md"
+{
+  printf 'stop old slot (kept for instant `docker start` rollback)\n'
+  printf 'Its container is kept stopped for instant manual rollback: flip the Caddyfile port back, reload caddy, `docker start` it.\n'
+} > "$RB_CTRL"
+RB_CTRL_HITS="$FTMP/rb-control-hits.txt"
+rb_scan "$RB_CTRL" > "$RB_CTRL_HITS"
+check "CONTROL: the scanner flags BOTH retired 'docker start' recipes (it is not blind)" \
+  "[ \"\$(grep -c . '$RB_CTRL_HITS')\" = 2 ]"
+
+# ---- R8: static — the executable path exists and the comment points at it
+# rather than re-stating a hand-typeable recipe.
+check "cp-deploy.sh accepts --rollback"                "grep -q -- '--rollback)           MODE=rollback' '$SCRIPT'"
+check "cp-deploy.sh accepts --rollback-preflight"      "grep -q -- '--rollback-preflight) MODE=rollback-preflight' '$SCRIPT'"
+check "the rollback recreates rather than starts (every occurrence, no head -1)" \
+  "[ \"\$(grep -c 'up -d --force-recreate --no-build' '$SCRIPT')\" -ge 1 ] && [ \"\$(grep -c 'docker start cloud' '$SCRIPT')\" = 0 ]"
+# grep -c, never grep -q: under `set -o pipefail` a -q that exits on its first
+# match SIGPIPEs the awk feeding it and the pipeline returns 141, which reads as
+# a FAIL on correct code. -c consumes the whole stream.
+rb_body_has() { [ "$(awk '/^do_rollback\(\) \{/,/^\}/' "$SCRIPT" | grep -c "$1")" -ge 1 ]; }
+check "the rollback sources cloud/.env before recreating" "rb_body_has 'APP/cloud/[.]env'"
+check "the rollback force-recreates inside the function (not merely somewhere in the file)" \
+  "rb_body_has '[-][-]force-recreate'"
+check "the rollback takes the same deploy lock as a deploy (no concurrent deploy+rollback)" \
+  "[ \"\$(grep -n 'flock -n 9' '$SCRIPT' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n 'rollback)           do_rollback 0' '$SCRIPT' | head -1 | cut -d: -f1)\" ]"
+check "deploy/README.md points operators at the script, not a hand-typed recipe" \
+  "grep -q 'cp-deploy.sh --rollback' '$HERE/README.md'"
+check "deploy/README.md still keeps the INSTANCE path (systemd re-reads EnvironmentFile on start)" \
+  "grep -q 'systemctl start' '$HERE/README.md'"
+cleanup_flip
 
 echo
 # NON-VACUITY FLOOR. Asserted BEFORE the verdict: `fails -eq 0` is satisfied
@@ -1198,7 +1426,7 @@ echo
 # bound, never an exact total — checks are added over time and an exact count
 # would red on every addition, which trains people to bump the number instead
 # of reading it.
-MIN_CHECKS=160
+MIN_CHECKS=195
 echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
 if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
   echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"
