@@ -28,26 +28,27 @@ fi
 cd "$ROOT"
 
 # ---------------------------------------------------------------------------
-# DATED STAND-DOWN. These sites are bare TODAY and the fix lives in a lane this
-# change is fenced out of (internal/** is the CLI lane, docs/** is the docs
-# lane). They are listed so this check can LAND without reddening every
-# concurrent deploy/** PR in the repo — not so it can pass by not looking: every
-# one of them is PRINTED on every run, and on 2026-09-24 the stand-down expires
-# and they go red like anything else. A violation that is NOT on this list reds
-# IMMEDIATELY, today, with no grace.
-# Closed by: task-d06e8a2a42f1ed2f
+# DATED STAND-DOWN — NOW EMPTY. It carried four sites that were bare when this
+# check landed (deploy.sh, internal/cli/setup/assets/deploy.sh,
+# internal/caddyfile/caddyfile.go, docs/ops/adding-a-domain.md) because their
+# fix lived in a lane that change was fenced out of. All four were FIXED by
+# task-859a0dbc8ab0583e — they emit the status-scoped form now, so the list is
+# empty rather than re-stood-down, and every one of them reds IMMEDIATELY if it
+# ever regresses. The machinery stays for the next such hand-off; a path added
+# here must carry a row id and a date, and nothing may sit on it past its
+# expiry.
 # ---------------------------------------------------------------------------
 STANDDOWN_EXPIRES="2026-09-24"
 STANDDOWN_ROW="task-d06e8a2a42f1ed2f"
-standdown_paths=(
-  "deploy.sh"                              # byte-identical twin of the asset below
-  "internal/cli/setup/assets/deploy.sh"    # bp setup provisioning path
-  "internal/caddyfile/caddyfile.go"        # MaintenanceHandler, feeds 4 call sites
-  "docs/ops/adding-a-domain.md"            # doc claims "verbatim:" of the scoped file
-)
+standdown_paths=()
 
 is_stood_down() {
   local p="$1" s
+  # bash 3.2 (the macOS default) expands "${arr[@]}" of an EMPTY array as an
+  # unbound variable under `set -u`. Answer "not stood down" before touching it.
+  if [ "${#standdown_paths[@]}" -eq 0 ]; then
+    return 1
+  fi
   for s in "${standdown_paths[@]}"; do
     [ "$p" = "$s" ] && return 0
   done
