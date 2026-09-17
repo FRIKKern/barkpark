@@ -86,7 +86,10 @@ export function extractSpecifiers(source: string): string[] {
     /@import\s+(?:url\()?\s*['"]([^'"]+)['"]/g,
   ]
   for (const re of patterns) {
-    for (const m of source.matchAll(re)) found.push(m[1])
+    for (const m of source.matchAll(re)) {
+      const spec = m[1]
+      if (spec) found.push(spec)
+    }
   }
   return found
 }
@@ -96,8 +99,10 @@ export function splitScoped(
   specifier: string,
 ): { pkg: string; subpath: string } | null {
   const m = /^(@barkpark\/[a-z0-9][a-z0-9-]*)(?:\/(.+))?$/.exec(specifier)
-  if (!m) return null
-  return { pkg: m[1], subpath: m[2] ? `./${m[2]}` : '.' }
+  const pkg = m?.[1]
+  if (!pkg) return null
+  const rest = m[2]
+  return { pkg, subpath: rest ? `./${rest}` : '.' }
 }
 
 /** Every workspace package keyed by its declared name — not by directory guess. */
