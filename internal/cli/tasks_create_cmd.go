@@ -752,6 +752,32 @@ func ensureTaskPortableBrief(body map[string]any) {
 	}
 	title, _ := body["title"].(string)
 	description, _ := body["description"].(string)
+	// THE ONE-PASS STRIP IS THE CANONICAL RULE, and this is the site that owns
+	// it (task-8ba550b59141bccb). strings.Replacer makes ONE non-overlapping
+	// left-to-right pass considering all three patterns at once. That is not a
+	// stylistic choice over three sequential ReplaceAll calls: a rescanning form
+	// destroys literal characters that only became ADJACENT when a delimiter was
+	// removed, so `foo_**_bar` strips to `foobar` instead of `foo__bar`, and a
+	// description that is ONLY that shape strips to "" and is replaced wholesale
+	// by the auto-stub below — not different prose, NO prose.
+	//
+	// THE MIRROR IS THE OTHER SITE. Barkpark.Tasks.BriefMirror.strip_markdown/1
+	// (api/lib/barkpark/tasks/brief_mirror.ex) declares it mirrors this line
+	// EXACTLY and today does not: it reduces String.replace/3 over @stripped,
+	// three passes each over the previous result. Re-measured on origin/main
+	// 3ce12ab02 by cli-r21-w22 on the real Elixir 1.19.5 runtime over the whole
+	// shared corpus: 19 of 1,313 inputs diverge, the mismatch set SET-EQUAL to
+	// the fixture's `divergent` column, and 10 of them land in the auto-stub
+	// class. The routed one-line remedy on the server side,
+	// `:binary.replace(text, @stripped, "", [:global])`, takes that to 0/1,313;
+	// a control mutation (a 4th token in @stripped) produced 761 mismatches the
+	// harness was not written against, so the run discriminates. The remedy is
+	// task-b641646addba4bdf's — api/ is another lane's fence.
+	//
+	// ENFORCED, not asserted: testdata/brief_strip_corpus.json is the shared
+	// fixture BOTH suites read, pinned here by TestComposerMatchesSharedStripCorpus
+	// and TestComposerStripsMarkdownInOneNonOverlappingPass. Rewriting this line
+	// as sequential ReplaceAll calls reds both on exactly the divergent rows.
 	description = strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(description))
 	// THE AUTO-STUB RULING (task-23c70e97c90809c6, ruling B: THE STUB STAYS).
 	// tooling/grip/ledger/brief-purpose-drift-2026-08-20.md counted 122 published
