@@ -111,15 +111,22 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
 
   # ── the canonical component inputs ───────────────────────────────────────────
   #
-  # task-board: a snapshot whose statuses land in the five board columns every
-  # emitter now draws (open · ready · progress · blocked · done); two `ready` rows
-  # pin the per-column ordering and a leading `open` row COVERS the open-inclusive
-  # parity that bug-taskboard-drops-open-tasks fixed — the Elixir View + Go
-  # pdrender both grew an `open` column so a populated `open` bucket is no longer
-  # dropped, matching the web reader's white-ladder set. `cancelled` is still
-  # avoided (the board folds it to a tally, never a column). Empty-column policy
-  # (web keep-empty vs View/TUI omit-empty) is a SUPERSET difference this
+  # task-board: a snapshot whose statuses land in the SIX board columns every
+  # emitter now draws (open · ready · progress · blocked · done · cancel); two
+  # `ready` rows pin the per-column ordering and a leading `open` row COVERS the
+  # open-inclusive parity that bug-taskboard-drops-open-tasks fixed — the Elixir
+  # View + Go pdrender both grew an `open` column so a populated `open` bucket is
+  # no longer dropped, matching the web reader's white-ladder set. `cancelled` is
+  # CARRIED, not avoided: since task-881952f8d8417f4b it renders in its OWN
+  # terminal lane (last, de-emphasised, with the manifest's ✕), so the row below
+  # generates a golden WITH a cancel column on all three mirrors. Empty-column
+  # policy (web keep-empty vs View/TUI omit-empty) is a SUPERSET difference this
   # ⊆-projection deliberately does not police.
+  #
+  # The tally-fold sentence that used to sit here was FALSE of this board and had
+  # been outlived by the very @task_board_input twenty lines below
+  # (task-c29e16374107fb10). It remains TRUE — of a DIFFERENT board — in
+  # api/lib/barkpark/tasks/board.ex, which really does keep a `cancelled_count`.
   @task_board_input %{
     "type" => "task-board",
     "snapshot" => [
