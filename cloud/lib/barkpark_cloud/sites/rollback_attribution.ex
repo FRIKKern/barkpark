@@ -182,8 +182,7 @@ defmodule BarkparkCloud.Sites.RollbackAttribution do
 
       # What the three seams above do not account for. A big number here means
       # this module is measuring the wrong boundaries, and saying so is the point.
-      unattributed_ms:
-        max(relay_ms - accept_ms - poll_wire_ms - sleep_ms, 0)
+      unattributed_ms: max(relay_ms - accept_ms - poll_wire_ms - sleep_ms, 0)
     }
   end
 
