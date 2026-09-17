@@ -15006,3 +15006,7 @@ read and would be a new class. Filed, not built, for the same fence reason.
   unblock it:** a gates-fenced slice adding the two fixture arms to the census's own probe suite, asserting the
   *classifier* never emits `ZOMBIED` for a run that is `DISPATCHED_PENDING` or `RERUN_DELETED`. That is a real
   and useful test; it is a test of the detector, not of a remediator, and the row should be re-cut to say so.
+
+## D619 — THROWAWAY RED-ARM CONTROL FOR task-8f908f721d054032. NEVER MERGED. (2026-09-17)
+
+An unreserved mint, on purpose, to prove `--check-alloc` REDS through CI rather than only on a laptop.
