@@ -8,8 +8,6 @@ import (
 
 // Criterion-shape triage lens.
 //
-// @canonical capability:criterion-shape-triage aka:criterion-lint,acceptance-criteria-rubric doc:docs/setup/TASK-SYSTEM.md
-//
 // MEASURED LIMIT, STATED UP FRONT: this is a TRIAGE LENS, never a verdict.
 // A 2026-08-24 hand sample of 80 criteria found 17.5% unverifiable while a
 // keyword scan condemned 70.2% as instrument-free; a 2026-09-17 re-sample of
@@ -60,6 +58,8 @@ var (
 )
 
 // ClassifyCriterion runs the triage lens over one criterion's text.
+//
+// @canonical capability:criterion-shape-triage aka:criterion-lint,acceptance-criteria-rubric doc:docs/setup/TASK-SYSTEM.md
 func ClassifyCriterion(text string) CriterionShape {
 	s := CriterionShape{
 		HasCommand:      reCommand.MatchString(text),
