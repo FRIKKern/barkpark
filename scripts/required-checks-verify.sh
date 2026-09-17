@@ -1418,7 +1418,22 @@ BLOCKING_PROSE_CLAIM='(^|[^A-Za-z])BLOCKING([^A-Za-z]|$)|blocks the merge|must b
 # somebody can review. And the annotation is checked in BOTH directions —
 # putting it on a context that IS required reds, because that is the same lie
 # advisory_prose_check catches, wearing a machine-readable hat.
-BLOCKING_HEADER_UNRESOLVED_BASELINE=0
+# THE BASELINE, AND WHY IT IS THREE AND NOT ZERO. It read 0 from the ratchet in
+# #16195 until the header window above was widened, and that 0 was VACUOUS: the
+# window closed on line 1's `name:` key, so the clause scanned no header prose
+# at all in any workflow whose comment block sits under that key. Widening it
+# surfaces four files; connectors.yml's was a real overclaim and is corrected in
+# the same change, leaving three whose prose is the CURE and not the disease —
+# exactly the D3 case this is a baseline for rather than a red-on-sight:
+#
+#   landed-open-report.yml    "can never be promoted into a merge gate"
+#   pr-meta.yml               "BLOCKING vs ADVISORY IS PRESERVED PER STEP"
+#   search-starter-smoke.yml  "it can never be a merge gate"
+#
+# A FOURTH reds. Re-derive the list with the clause itself — there is no
+# separate printer:
+#   bash scripts/required-checks-verify.sh --ci 2>&1 | sed -n '/file-header/,/^$/p'
+BLOCKING_HEADER_UNRESOLVED_BASELINE=3
 
 # A job `name:` template as an anchored ERE — `${{ … }}` holes punched out
 # BEFORE metacharacters are escaped, so literal parens stay literal. Same
@@ -1499,9 +1514,20 @@ blocking_authority_check() {
     {
       line = $0
 
+      # THE HEADER WINDOW IS THE WHOLE PREAMBLE, NOT THE LINES BEFORE THE FIRST
+      # YAML KEY. It used to close on the first non-blank non-comment line,
+      # which is `name: <workflow>` in every workflow this repo has ever
+      # written — so the block a human calls "the file header" started on the
+      # line AFTER the window shut, and this clause read an empty string for 63
+      # of 79 files. hdr_n was 0 because nothing was scanned, not because
+      # nothing claimed. Reproduce the old blind spot by restoring the
+      # `!~ /^[ \t]*$/` terminator: the count drops from 4 to 0 with no other
+      # edit. The window now runs to the first top-level `on:` / `jobs:` key
+      # (both spellings of the `on` key, which YAML 1.1 lets a writer quote),
+      # and still collects comment lines only.
       if (inhdr) {
         if (line ~ /^[ \t]*#/) { h = line; sub(/^[ \t]*#[ \t]?/, "", h); hdr = hdr " " h }
-        else if (line !~ /^[ \t]*$/) { inhdr = 0; if (hdr ~ BLOCK_PROSE) hdrhit = 1 }
+        else if (line ~ /^"?on"?:|^jobs:/) { inhdr = 0; if (hdr ~ BLOCK_PROSE) hdrhit = 1 }
       }
 
       if (line ~ /^jobs:[ \t]*$/) { emit_job(); injobs = 1; ncbuf = 0; next }

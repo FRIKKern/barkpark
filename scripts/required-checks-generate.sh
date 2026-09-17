@@ -1310,10 +1310,22 @@ EOF
   # appended beside it, and the emit put ONE CONTEXT ON BOTH LISTS at exit 0.
   # Reproduced by adding `continue-on-error: true` to an already-required job:
   # `{"both":["Cloud gate"]}`, nothing on stderr. Nothing downstream can notice
-  # it either — scripts/required-checks-verify.sh contains zero reads of
-  # `.exclusions`, so the spec would go on requiring a context this run just
-  # said must never gate a merge, with the sentence explaining why sitting in
-  # the same file.
+  # it either, and the reason is narrower than the one that stood here until
+  # 2026-09-17 ("required-checks-verify.sh contains zero reads of
+  # `.exclusions`", which was simply false — its census_check reads the array
+  # twice, on the live --full/--ci path). What is true is that every read is a
+  # UNION and never an intersection: census_check builds `required ∪
+  # exclusions` as one "accounted" set, so a context on BOTH lists is accounted
+  # twice over and passes, and the advisory-prose clause derives its subject set
+  # as a COMPLEMENT that deliberately never joins `.exclusions` at all (its own
+  # "THE SUBJECT SET IS A COMPLEMENT, NEVER AN `.exclusions` JOIN (D1)" block
+  # says why). No clause anywhere compares the two arrays for overlap — check
+  # with `grep -n exclusions scripts/required-checks-verify.sh` and read each
+  # hit. So the spec would go on requiring a context this run just said must
+  # never gate a merge, with the sentence explaining why sitting in the same
+  # file. THE FLAG'S JUSTIFICATION SURVIVES THE CORRECTION INTACT: it never
+  # rested on the absence of reads, only on the absence of a downstream
+  # refusal, and that absence is unchanged.
   #
   # This is a CONTRADICTION, not an absence, so `--expect-unrendered` (which
   # means "the sample could not see it") must not answer for it — and it points
@@ -1325,8 +1337,14 @@ EOF
   # a name an operator types and never a filter the derivation computes.
   #
   # It ships DORMANT: the committed spec's required × excluded intersection is
-  # `[]` today (4 required, 25 exclusions), so an unplanted regeneration is
-  # untouched by this block.
+  # `[]` today, so an unplanted regeneration is untouched by this block. Verify
+  # it rather than trusting the sentence — and note that the array sizes are
+  # deliberately NOT written down, because a count typed into a comment has no
+  # producer and goes stale in its own commit (the `25 exclusions` that stood
+  # here was 7x low by the time anyone read it):
+  #   jq '[.protection.required_status_checks.checks[].context] as $r
+  #       | [.exclusions[].context] | map(select(. as $c | $r|index($c)))' \
+  #     .github/required-checks.json
   local demoted_drop='[]'
   if [ -n "$committed_required" ]; then
     local derived_ex_now contra="" rxname rxacked rxack
