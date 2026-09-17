@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -68,12 +69,17 @@ var (
 	// name == "file"  → flag("file", …)
 	// type == "file"  → flag("<name>", "file", …)
 	fileFlagDecl = regexp.MustCompile(`flag\(\s*"file"|flag\(\s*"[^"]+",\s*"file"`)
+	// writes: true — the commands for which "a body from a file" is meaningful
+	// at all. Without this fact the selectivity control below is dominated by
+	// read verbs and passes for free; see checkSelectivity.
+	writesDecl = regexp.MustCompile(`writes:\s*true`)
 )
 
 type manifestCmdSource struct {
 	id          string
 	mutationOp  string
 	hasFileFlag bool
+	writes      bool
 }
 
 // parseCapabilityCommands splits capabilities.ex on its single command
@@ -97,6 +103,7 @@ func parseCapabilityCommands(t *testing.T) []manifestCmdSource {
 		c := manifestCmdSource{
 			id:          src[loc[2]:loc[3]],
 			hasFileFlag: fileFlagDecl.MatchString(block),
+			writes:      writesDecl.MatchString(block),
 		}
 		if m := mutationOpDecl.FindStringSubmatch(block); m != nil {
 			c.mutationOp = m[1]
@@ -119,6 +126,16 @@ func parseCapabilityCommands(t *testing.T) []manifestCmdSource {
 	if withOp == 0 {
 		t.Fatalf("parsed ZERO mutation_op declarations out of %s — every assertion "+
 			"about the create family would be vacuous", capabilitiesPath)
+	}
+	writes := 0
+	for _, c := range cmds {
+		if c.writes {
+			writes++
+		}
+	}
+	if writes == 0 {
+		t.Fatalf("parsed ZERO writes: true declarations out of %s — checkSelectivity's "+
+			"write population would be empty and its verdict vacuous", capabilitiesPath)
 	}
 	return cmds
 }
@@ -163,42 +180,111 @@ func TestCreateFamilyVerbsDeclareFileFlag(t *testing.T) {
 	}
 }
 
-// TestCreateFamilyGateIsSelective is the QUIET arm — the control that proves
-// the gate above is a predicate and not a blanket "every write needs --file".
+// ── checkSelectivity: the QUIET arm, as a predicate ────────────────────────
 //
-// Without it, a gate that required the flag of ALL 104 writes:true commands
-// would also pass the RED PROOF, and would have forced --file onto doc.patch,
-// whose parser rejects it. The arm asserts the selectivity in both directions:
-// a non-family write exists that lacks the flag, and the gate is silent on it.
-func TestCreateFamilyGateIsSelective(t *testing.T) {
-	cmds := parseCapabilityCommands(t)
-
-	var outsideWithoutFile []string
+// This control proves TestCreateFamilyVerbsDeclareFileFlag is a PREDICATE over
+// setCreateFamilyOps and not a blanket "every write needs --file". Without it,
+// a blanket rule would also pass that gate's RED PROOF.
+//
+// IT USED TO PIN doc.patch BY NAME, and that pin was WRONG — measured
+// 2026-09-17 by cli-r21-w26 (task scaffy-backlog-doc-patch-file-flag). Adding
+// the one line the api lane owes that row —
+//
+//	flag("file", "file", "Fields to change as a JSON object …")
+//
+// to doc.patch in capabilities.ex, and changing NOTHING else, turned this file
+// RED on main:
+//
+//	--- FAIL: TestCreateFamilyGateIsSelective
+//	    create_family_file_flag_test.go:199: doc.patch is not among the flagless
+//	    non-family commands [...] — if it gained a --file flag that is a real
+//	    decision, and this gate's documented specimen must move with it
+//
+// The pin's own error text asked for a real decision, and one had already been
+// made in the OTHER direction: PR #18616 built the run.go routing that sends a
+// --file object to a command's SetKey target, so a set_key command CAN take a
+// file body correctly. The pin was a review tripwire whose question is
+// discharged; left standing it is a cross-lane wall that reds a correct
+// one-line api change with a message about a "documented specimen".
+//
+// An enumeration is a snapshot; a predicate is a rule. The selectivity fact was
+// never "doc.patch specifically" — it is "some write outside the create family
+// declares no file flag, and the gate is silent on it". Naming a member of that
+// population froze one sample of it. The write filter is the sharpening the pin
+// was standing in for: the flagless-non-family population is dominated by READ
+// verbs (doc.get, doc.ls, search.query …), for which a body flag is meaningless,
+// so an unfiltered count would stay non-empty even if every WRITE outside the
+// family gained --file — the exact blanket rule this control exists to refuse.
+//
+// Returning an error rather than taking *testing.T is what makes the rule
+// testable against fixtures the live manifest does not yet contain.
+func checkSelectivity(cmds []manifestCmdSource) error {
+	var outsideWrites []string
 	for _, c := range cmds {
 		if c.mutationOp != "" && setCreateFamilyOps[c.mutationOp] {
 			continue
 		}
-		if !c.hasFileFlag {
-			outsideWithoutFile = append(outsideWithoutFile, c.id)
+		if c.writes && !c.hasFileFlag {
+			outsideWrites = append(outsideWrites, c.id)
 		}
 	}
-	if len(outsideWithoutFile) == 0 {
-		t.Fatalf("every command outside the create family declares --file, so the gate's " +
-			"selectivity is untested — it would pass identically as a blanket rule")
+	if len(outsideWrites) == 0 {
+		return fmt.Errorf("every WRITE outside the create family declares --file, so the gate's " +
+			"selectivity is untested — it would pass identically as a blanket \"every write needs " +
+			"--file\" rule, which is the thing this control refuses")
 	}
+	return nil
+}
 
-	// doc.patch is the named specimen: the W4 review's alleged third
-	// "recurrence", which is correctly flagless.
-	found := false
-	for _, id := range outsideWithoutFile {
-		if id == "doc.patch" {
-			found = true
-		}
+// TestCreateFamilyGateIsSelective runs the rule against the real manifest.
+func TestCreateFamilyGateIsSelective(t *testing.T) {
+	if err := checkSelectivity(parseCapabilityCommands(t)); err != nil {
+		t.Error(err)
 	}
-	if !found {
-		t.Errorf("doc.patch is not among the flagless non-family commands %v — if it gained a "+
-			"--file flag that is a real decision, and this gate's documented specimen must move with it",
-			outsideWithoutFile)
+}
+
+// TestSelectivityGateDoesNotPinDocPatch is the arm that REDS ON REVERSION.
+//
+// Its fixture is the manifest as it will look the day the api lane lands
+// doc.patch's file flag. Reinstating any by-name pin inside checkSelectivity
+// reds here — which is precisely the failure this change removes, caught in
+// THIS repo instead of in a cross-lane PR.
+func TestSelectivityGateDoesNotPinDocPatch(t *testing.T) {
+	afterAPILands := []manifestCmdSource{
+		{id: "doc.create", mutationOp: "create", writes: true, hasFileFlag: true},
+		{id: "doc.create-or-replace", mutationOp: "createOrReplace", writes: true, hasFileFlag: true},
+		// The change under test: doc.patch declares a file flag. It is NOT in
+		// setCreateFamilyOps, so it is a non-family write WITH the flag.
+		{id: "doc.patch", mutationOp: "patch", writes: true, hasFileFlag: true},
+		// …and some other non-family write still lacks one, which is the fact
+		// the control actually measures.
+		{id: "doc.publish", writes: true, hasFileFlag: false},
+		{id: "doc.get", writes: false, hasFileFlag: false},
+	}
+	if err := checkSelectivity(afterAPILands); err != nil {
+		t.Errorf("doc.patch gaining a --file flag must NOT red the selectivity control — "+
+			"PR #18616 built the SetKey routing that makes that declaration correct, and "+
+			"doc.publish still witnesses selectivity here. got: %v", err)
+	}
+}
+
+// TestSelectivityGateStillCatchesABlanketRule is the quiet control on the
+// control: proof that checkSelectivity is not simply inert after the de-pinning.
+// Reverting the write filter, or weakening the emptiness check, reds this.
+func TestSelectivityGateStillCatchesABlanketRule(t *testing.T) {
+	blanket := []manifestCmdSource{
+		{id: "doc.create", mutationOp: "create", writes: true, hasFileFlag: true},
+		{id: "doc.patch", mutationOp: "patch", writes: true, hasFileFlag: true},
+		{id: "doc.publish", writes: true, hasFileFlag: true},
+		// Reads without the flag: numerous, and deliberately NOT a witness.
+		// If the write filter is dropped these make the gate pass for free.
+		{id: "doc.get", writes: false, hasFileFlag: false},
+		{id: "doc.ls", writes: false, hasFileFlag: false},
+	}
+	if err := checkSelectivity(blanket); err == nil {
+		t.Error("a manifest in which EVERY write declares --file must fail the selectivity " +
+			"control; got nil, so the control measures nothing and read verbs are being " +
+			"counted as witnesses")
 	}
 }
 
