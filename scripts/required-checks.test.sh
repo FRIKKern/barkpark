@@ -6857,6 +6857,122 @@ else
     bad "the disarmed copy still refused (exit $RC26_RC) — clause (a) may be reding for an unrelated reason: $(grep -m2 FAIL <<<"$RC26_OUT")"
   fi
 fi
+
+# ── (g) THE HEADER WINDOW REACHES PROSE WRITTEN UNDER `name:` ────────────────
+# THE DEFECT THIS EXISTS FOR. The file-header arm of this clause used to close
+# its window on the first non-blank non-comment line. Every workflow in this
+# repo opens with `name: <workflow>`, so the window shut on line 1 and the block
+# a human calls the file header — the one starting on line 3 — was never read.
+# BLOCKING_HEADER_UNRESOLVED_BASELINE sat at 0 and the 0 was VACUOUS: 63 of 79
+# workflows contributed an empty header string, and connectors.yml's header
+# claimed merge authority the spec denies for a month under a comment that
+# excused it by citing a baseline it was never counted against.
+#
+# THE BASELINE IS THE REASON THESE ARMS USE A MUTANT. A fixture directory
+# contributes ONE header hit, and one is not greater than the committed
+# baseline, so the committed script is green on the violation fixture by
+# arithmetic rather than by judgement. Forcing the constant to 0 in a copy is a
+# FIXTURE PARAMETER, not a disarm — the disarm is arm (g2), which restores the
+# OLD window and must let the same fixture through.
+RC26_WF_HDR="$TMP/rc26-wf-hdr"          # header prose under `name:`
+RC26_WF_HDRQ="$TMP/rc26-wf-hdr-quiet"   # same shape, no authority claim
+RC26_WF_HDR1="$TMP/rc26-wf-hdr-first"   # header prose ABOVE `name:` (old form)
+mkdir -p "$RC26_WF_HDR" "$RC26_WF_HDRQ" "$RC26_WF_HDR1"
+cat > "$RC26_WF_HDR/widget.yml" <<'YML'
+name: Widget
+
+# This job BLOCKING the merge is a claim the committed spec denies, planted by
+# required-checks.test.sh §26(g) under the `name:` key on purpose.
+
+on: [pull_request]
+jobs:
+  widget:
+    name: Widget build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC26_WF_HDRQ/widget.yml" <<'YML'
+name: Widget
+
+# A header that discusses nothing about authority at all, planted by
+# required-checks.test.sh §26(g) as the control: the widened window must not
+# invent a hit out of ordinary preamble prose.
+
+on: [pull_request]
+jobs:
+  widget:
+    name: Widget build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+cat > "$RC26_WF_HDR1/widget.yml" <<'YML'
+# This job BLOCKING the merge is a claim the committed spec denies, planted by
+# required-checks.test.sh §26(g) ABOVE the `name:` key — the one shape the old
+# window could already read, kept so the widening is proved additive.
+name: Widget
+on: [pull_request]
+jobs:
+  widget:
+    name: Widget build
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+
+RC26_HDR_MUT="$REPO_ROOT/scripts/.rc26-mutant-verify.$$.hdr.sh"
+RC26_HDR_OLD="$REPO_ROOT/scripts/.rc26-mutant-verify.$$.hdrold.sh"
+sed -E "s%^BLOCKING_HEADER_UNRESOLVED_BASELINE=.*%BLOCKING_HEADER_UNRESOLVED_BASELINE=0 # HEADER BASELINE ZEROED%" \
+  "$VERIFY" > "$RC26_HDR_MUT"
+# The marker rides INSIDE the awk condition as a tautology, never as a trailing
+# `#` comment: awk would read the comment to end of line and swallow the `{ … }`
+# body, so the mutant would die of a syntax error that looks nothing like the
+# clause under test.
+sed -E 's%\(line ~ /\^"\?on"\?:\|\^jobs:/\)%(line !~ /^[ \\t]*$/ \&\& "OLD NARROW HEADER WINDOW" != "")%' \
+  "$RC26_HDR_MUT" > "$RC26_HDR_OLD"
+RC26_HDRN="$(grep -c 'HEADER BASELINE ZEROED' "$RC26_HDR_MUT" || true)"
+RC26_OLDN="$(grep -c 'OLD NARROW HEADER WINDOW' "$RC26_HDR_OLD" || true)"
+if [ "$RC26_HDRN" -ne 1 ]; then
+  bad "§26(g) could not zero BLOCKING_HEADER_UNRESOLVED_BASELINE (applied $RC26_HDRN times, not 1) — the constant moved and every arm below is vacuous"
+elif [ "$RC26_OLDN" -ne 1 ]; then
+  bad "§26(g) could not restore the OLD header window (applied $RC26_OLDN times, not 1) — the terminator moved, so the widening has no disarm and (g1) proves nothing"
+else
+  ok "§26(g) mutants build: one copy with the header baseline at 0 (a fixture parameter), one that ALSO restores the pre-widening window (the disarm)"
+
+  # (g1) ARMED. Header prose under `name:` is read, and reds BY NAME.
+  rc26_run "$RC26_HDR_MUT" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_HDR"
+  if [ "$RC26_RC" -eq 1 ] && grep -q "file-header blocking prose rose above the committed baseline" <<<"$RC26_OUT"; then
+    ok "(g1) a file header written UNDER the \`name:\` key that claims authority the spec denies reds by name (exit $RC26_RC)"
+  else
+    bad "(g1) the under-\`name:\` header claim was not caught (exit $RC26_RC): $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+
+  # (g2) THE DISARM — the REVERT arm. Same fixture, pre-widening window: silent.
+  rc26_run "$RC26_HDR_OLD" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_HDR"
+  if [ "$RC26_RC" -eq 0 ] && ! grep -q "file-header blocking prose" <<<"$RC26_OUT"; then
+    ok "(g2) …and with the OLD window restored the SAME fixture exits 0 in silence — the widening is mutation-proven to be what catches it, and that 0 is the blind spot this shipped with"
+  else
+    bad "(g2) the pre-widening copy still refused (exit $RC26_RC) — (g1) may be reding for an unrelated reason, so the widening is unproven: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+
+  # (g3) THE CONTROL that must stay quiet: a preamble with no authority claim.
+  rc26_run "$RC26_HDR_MUT" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_HDRQ"
+  if [ "$RC26_RC" -eq 0 ]; then
+    ok "(g3) a header carrying ordinary preamble prose and no authority claim stays SILENT at baseline 0 — the widened window reads more text without inventing hits"
+  else
+    bad "(g3) the widened window red on a header that claims nothing (exit $RC26_RC) — it is matching prose, not claims: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+
+  # (g4) THE CAPABILITY THAT ALREADY EXISTED, asserted so the widening is proved
+  #      ADDITIVE: a header ABOVE `name:` was readable before and still is.
+  rc26_run "$RC26_HDR_MUT" "$RC26_SPEC" "$TMP/rb.json" "$TMP/runs.json" "$RC26_WF_HDR1"
+  if [ "$RC26_RC" -eq 1 ] && grep -q "file-header blocking prose rose above the committed baseline" <<<"$RC26_OUT"; then
+    ok "(g4) a header written ABOVE \`name:\` — the only shape the old window could read — is still caught, so the widening added a shape rather than trading one for another"
+  else
+    bad "(g4) the widened window LOST the above-\`name:\` shape (exit $RC26_RC) — the change is a trade, not an addition: $(grep -m2 FAIL <<<"$RC26_OUT")"
+  fi
+fi
 rc26_cleanup
 
 # ═══ 27. the four generator PARSER forms this suite never planted ══════════
@@ -7113,7 +7229,12 @@ fi
 # committed row rode through while the derived exclusion was appended beside it,
 # and the emit put ONE CONTEXT ON BOTH LISTS at exit 0 — reproduced by adding
 # `continue-on-error: true` to an already-required job. Nothing downstream can
-# notice: required-checks-verify.sh contains zero reads of `.exclusions`.
+# notice — not because the verifier ignores the array (it reads it twice, in
+# census_check, on the live path) but because every read is a UNION: census_check
+# accounts `required ∪ exclusions`, so a name on both lists is accounted twice
+# and passes, and no clause anywhere compares the two arrays for overlap. The
+# sentence that stood here said "zero reads of `.exclusions`" and was false;
+# required-checks-generate.sh carries the same correction beside --expect-demoted.
 # The second job exists so selection is non-empty; without it the run refuses
 # with "selection produced ZERO contexts" and the clause proves nothing.
 RC27_BOTH="$RC27/both"; RC27_BOTHF="$RC27/both-fix"
