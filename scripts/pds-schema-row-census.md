@@ -255,6 +255,38 @@ The count arithmetic in §1 is unaffected either way (it comes from the transcri
 `rows=36` and the extracted 34, not from the public list), but the *completeness* of the
 `NOT IN` roster rests on this bound, which is exactly why §5's tripwire is load-bearing.
 
+### The "only extra" claim is probably FALSE — and the counter-evidence is committed (2026-09-17)
+
+The bound above says an authenticated roster was never taken. That is true of THIS slice,
+and it is not true of the repository. `tooling/grip/ledger/graph-visibility-ceiling-2026-08-05.md`
+§R1 records an authenticated `GET /v1/schemas/production` against guerrilla, with the
+recipe that produced it, and reports:
+
+> **39 schemas, 34 private.** "Public types are exactly: command, metric, paper, tag, task."
+
+Set that beside this file's taxonomy — 34 plugin-declared + `tag` + `metric` = **36** —
+and **three rows are unaccounted for**, every one of them necessarily
+`visibility = 'private'` and therefore invisible to the public diff that found `metric`.
+`metric` being the *sole* extra is not merely unproven; the one authenticated count in the
+repository contradicts it.
+
+Two cautions, because neither number is this file's own measurement:
+
+- **The dates differ and the reads differ.** The 36 is the pulled scratch target at the
+  wave-7 crown run; the 39 is guerrilla itself on 2026-08-05. Rows could have arrived
+  between, and a dataset or workspace scoping difference would also move the figure.
+- **The committed counts disagree with each other.** `legacy_controller.ex`'s
+  ANON-FIELD-DISCLOSURE comment says "guerrilla: 39 schemas, 31 of them private-declared"
+  against the ledger's 34 private. Same total, different private count, neither dated in
+  the code. At least one is stale.
+
+Neither caution rescues "only extra": both reads see more than 36. What is still missing,
+and what only a live authenticated read can supply, is the **NAMES** — no committed
+artefact lists guerrilla's private schema names, and the roster's completeness needs names,
+not a count. The recipe in that ledger is the command to run; it is deliberately NOT run
+here (this slice has no prod reach) and the result must be re-derived fresh, not inherited
+from an August count.
+
 ### What the STORE can never tell you about the writer (2026-09-17)
 
 Separate from the bound above, and cheaper to settle: *no schema read recovers who wrote
@@ -405,5 +437,5 @@ rather than inherited as folklore.
 | No plugin declares `"metric"` | **PROVEN** — `grep` in §4, exit 1 |
 | Per-class survive/revert behaviour on a real reboot | **UNPROVEN HERE** — measured by the wave-8 verify fleet, PDS-D127 |
 | The clause selects exactly 34 live | **UNPROVEN HERE** — verified live, PDS-D128 |
-| `metric` is the *only* extra row | **BOUNDED** — true of publicly-visible rows only (§4) |
+| `metric` is the *only* extra row | **CONTRADICTED** — the one committed authenticated count says 39, not 36 (§4). Names still unread. |
 | The table has 23 columns | **UNPROVEN HERE** — 22 reproduced; one-column gap open (§6) |
