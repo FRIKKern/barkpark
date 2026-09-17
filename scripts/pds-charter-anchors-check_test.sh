@@ -9,13 +9,21 @@
 #
 # Credential-free, target-free, no network. Usage: bash scripts/pds-charter-anchors-check_test.sh
 #
-# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
-# scripts/pds-charter-anchors-check_test.sh` step on the `PDS census / parity /
-# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml, and
-# .github/ is the gates lane's fence, not the deploy/PDS lane's. This exemption
-# is a HANDOFF, not a verdict: until that line lands, a revert of the charter
-# anchors is caught by running this file BY HAND, and by nothing else. Wiring
-# row: see the PR body. Baseline at authoring: 14 passed, 0 failed.
+# WIRED (task-4bbe6e0b761d58c5): this file, and the live checker beside it, both
+# run on the `PDS census / parity / scratch-target harnesses` job in
+# .github/workflows/shell-harnesses.yml. `scripts/pds-*.sh` is already a
+# workflow-level path AND a roster row for that job, so an edit to either half
+# — or to .claude/workflows/bp-pds-charter.md, also a row — dispatches the job.
+# A revert of the charter anchors is now caught by CI, not only by hand.
+#
+# NO `printf ... | grep -q` IN AN ARM, and it is load-bearing. Every arm used to
+# read `printf '%s' "$out" | grep -q 'X'`; under `set -o pipefail` grep -q exits
+# on the first match, printf takes SIGPIPE, and the pipeline returns 141 — so an
+# arm whose subject REDDED CORRECTLY reported FAIL. Measured before wiring on
+# the unmodified tree: 3 of 5 runs red, the failing arm set varying run to run
+# (4/5/11, then 5/11). A here-string has no producer process to kill. Arming a
+# flaky harness is arming a broken one, so this had to be fixed in the same PR.
+# Baseline: 14 passed, 0 failed, 8 consecutive runs.
 
 # shellcheck disable=SC2016  # backticks inside single quotes are literal citation syntax, not expansions
 set -uo pipefail
@@ -57,31 +65,31 @@ else bad "ARM 1 QUIET — the live charter passes" "$out"; fi
 # ── ARM 2 (RED): an anchor whose literal is no longer in the file ────────────
 { printf 'anchor: `%s`@`this string is not in the harness, 7f3a91`\n' "$HARNESS"; pad_bare 15; } > "$TMP/rotted.md"
 run "$TMP/rotted.md"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'ROTTED'; then ok "ARM 2 RED — a rotted anchor reds (ROTTED)"
+if [ "$rc" -ne 0 ] && grep -q 'ROTTED' <<<"$out"; then ok "ARM 2 RED — a rotted anchor reds (ROTTED)"
 else bad "ARM 2 RED — a rotted anchor reds (ROTTED)" "rc=$rc $out"; fi
 
 # ── ARM 3 (RED): an anchor matching more than one line is ambiguous ──────────
 { printf 'anchor: `%s`@`  return 1`\n' "$HARNESS"; pad_bare 15; } > "$TMP/ambig.md"
 run "$TMP/ambig.md"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'AMBIGUOUS'; then ok "ARM 3 RED — a multi-match anchor reds (AMBIGUOUS)"
+if [ "$rc" -ne 0 ] && grep -q 'AMBIGUOUS' <<<"$out"; then ok "ARM 3 RED — a multi-match anchor reds (AMBIGUOUS)"
 else bad "ARM 3 RED — a multi-match anchor reds (AMBIGUOUS)" "rc=$rc $out"; fi
 
 # ── ARM 4 (RED): a line-wrapped anchor must not silently vanish ──────────────
 { printf 'anchor: `%s`@`spent_now=$((spent\n + 1))`\n' "$HARNESS"; pad_bare 15; } > "$TMP/wrapped.md"
 run "$TMP/wrapped.md"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'MALFORMED'; then ok "ARM 4 RED — a wrapped anchor reds (MALFORMED)"
+if [ "$rc" -ne 0 ] && grep -q 'MALFORMED' <<<"$out"; then ok "ARM 4 RED — a wrapped anchor reds (MALFORMED)"
 else bad "ARM 4 RED — a wrapped anchor reds (MALFORMED)" "rc=$rc $out"; fi
 
 # ── ARM 5 (RED): a NEW bare line citation breaks the ratchet ─────────────────
 pad_bare 16 > "$TMP/overceiling.md"
 run "$TMP/overceiling.md"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'ceiling'; then ok "ARM 5 RED — a new bare pds-pull-proof.sh:NNN cite reds (arm B)"
+if [ "$rc" -ne 0 ] && grep -q 'ceiling' <<<"$out"; then ok "ARM 5 RED — a new bare pds-pull-proof.sh:NNN cite reds (arm B)"
 else bad "ARM 5 RED — a new bare pds-pull-proof.sh:NNN cite reds (arm B)" "rc=$rc $out"; fi
 
 # ── ARM 6 (QUIET): FEWER bare citations is progress, never a red ─────────────
 pad_bare 3 > "$TMP/underceiling.md"
 run "$TMP/underceiling.md"
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'PROGRESS'; then ok "ARM 6 QUIET — improvement prints PROGRESS and exits 0"
+if [ "$rc" -eq 0 ] && grep -q 'PROGRESS' <<<"$out"; then ok "ARM 6 QUIET — improvement prints PROGRESS and exits 0"
 else bad "ARM 6 QUIET — improvement prints PROGRESS and exits 0" "rc=$rc $out"; fi
 
 # ── ARM 7 (QUIET): a good anchor plus unrelated prose stays green ────────────
@@ -112,7 +120,7 @@ else bad "ARM 8 QUIET — the <path> placeholder is skipped, not chased" "$out";
 PRE
   pad_bare 15; } > "$TMP/reverted.md"
 run "$TMP/reverted.md"
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 0'; then
+if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 0' <<<"$out"; then
   ok "ARM 9 REVERT — the pre-fix text carries ZERO checkable anchors (the defect this PR removes)"
 else bad "ARM 9 REVERT — the pre-fix text carries ZERO checkable anchors" "rc=$rc $out"; fi
 
@@ -120,7 +128,7 @@ else bad "ARM 9 REVERT — the pre-fix text carries ZERO checkable anchors" "rc=
 { sed -n '/PDS-D92 — The headroom gate/,/aggregate quiet, not BEAM freshness/p' \
     "$REPO_ROOT/.claude/workflows/bp-pds-charter.md"; pad_bare 15; } > "$TMP/shipped.md"
 run "$TMP/shipped.md"
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 4'; then
+if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 4' <<<"$out"; then
   ok "ARM 10 CONTROL — the shipped D92/D93 text carries exactly 4 resolving anchors"
 else bad "ARM 10 CONTROL — the shipped D92/D93 text carries exactly 4 resolving anchors" "rc=$rc $out"; fi
 
@@ -130,14 +138,14 @@ else bad "ARM 10 CONTROL — the shipped D92/D93 text carries exactly 4 resolvin
 # cite, so arm B sees 0 and cannot be what reds here.
 { pad_fileless 642; } > "$TMP/fileless_over.md"
 run "$TMP/fileless_over.md"
-if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'file-less `:NNN` citation was added'; then
+if [ "$rc" -ne 0 ] && grep -q 'file-less `:NNN` citation was added' <<<"$out"; then
   ok "ARM 11 RED — a new file-less \`:NNN\` cite reds (arm C)"
 else bad "ARM 11 RED — a new file-less \`:NNN\` cite reds (arm C)" "rc=$rc $out"; fi
 
 # ── ARM 12 (QUIET): FEWER file-less citations is progress, never a red ───────
 { pad_fileless 3; pad_bare 15; } > "$TMP/fileless_under.md"
 run "$TMP/fileless_under.md"
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'file-less citations are down to 3'; then
+if [ "$rc" -eq 0 ] && grep -q 'file-less citations are down to 3' <<<"$out"; then
   ok "ARM 12 QUIET — improvement prints PROGRESS for arm C and exits 0"
 else bad "ARM 12 QUIET — improvement prints PROGRESS for arm C and exits 0" "rc=$rc $out"; fi
 
@@ -154,7 +162,7 @@ else bad "ARM 12 QUIET — improvement prints PROGRESS for arm C and exits 0" "r
 PRE
   pad_bare 15; } > "$TMP/reverted_d101.md"
 run "$TMP/reverted_d101.md"
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 0'; then
+if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 0' <<<"$out"; then
   ok "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable anchors"
 else bad "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable anchors" "rc=$rc $out"; fi
 
@@ -165,7 +173,7 @@ else bad "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable an
 { sed -n '/PDS-D101 — Anything touching rungs/,/arm C ratchets the file-less/p' \
     "$REPO_ROOT/.claude/workflows/bp-pds-charter.md"; pad_bare 14; } > "$TMP/shipped_d101.md"
 run "$TMP/shipped_d101.md"
-if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'anchors checked ..... 7'; then
+if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 7' <<<"$out"; then
   ok "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors"
 else bad "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors" "rc=$rc $out"; fi
 

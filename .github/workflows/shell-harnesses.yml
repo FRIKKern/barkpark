@@ -2416,6 +2416,35 @@ jobs:
         # shows up as a named stand-down, never as a quieter green.
         run: bash scripts/pds-threshold-move-guard_test.sh
 
+      - name: pds-charter-anchors 14-arm matrix (PDS-D299 content anchors)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # task-4bbe6e0b761d58c5. PR #18513 shipped the checker AND its 14-arm
+        # matrix and wired NEITHER into CI: `git grep -n pds-charter-anchors-check
+        # origin/main -- .github/` returned zero. A guard against citations that
+        # rot silently was itself rotting silently — present-in-file is not
+        # fires-when-it-should.
+        #
+        # NO NEW PATHS WERE NEEDED, and that is worth stating rather than
+        # assuming: `scripts/pds-*.sh` is already both an on.pull_request/push
+        # path and a roster row for THIS job, and both halves of this guard
+        # (…-check.sh, …-check_test.sh) match it, so an edit to either one
+        # dispatches this job today. Its other subject,
+        # .claude/workflows/bp-pds-charter.md, is likewise already a path and a
+        # row — which is exactly the edit the revert arms exist to catch.
+        run: bash scripts/pds-charter-anchors-check_test.sh
+
+      - name: pds-charter-anchors live check — the REAL charter, not a fixture
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # The step above runs the arms over tmpdir FIXTURES; every one of them
+        # would still pass with the shipped charter fully reverted, because a
+        # fixture is not the charter. THIS step is the one that reds when
+        # .claude/workflows/bp-pds-charter.md loses an anchor: it resolves all 20
+        # live `path`@`literal` anchors against the real files and holds the two
+        # ratchets (15 legacy bare cites, 641 file-less). Two steps, not one,
+        # because the matrix proves the checker WORKS and this proves the charter
+        # IS CLEAN, and neither substitutes for the other.
+        run: bash scripts/pds-charter-anchors-check.sh
+
       - name: personal-local cold-reader smoke — the --dry-run arm (no boot)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # ONLY `--dry-run`, AND THAT IS THE WHOLE DESIGN — never widen this to

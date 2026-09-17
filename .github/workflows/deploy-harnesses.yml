@@ -324,6 +324,29 @@ jobs:
       - name: systemd OnFailure handler harness
         run: bash deploy/systemd-onfailure_test.sh
 
+      # task-f35c835bf18712c8. deploy/slot-memory-peaks.sh shipped in PR #18488
+      # with 35 offline checks and NO caller of any kind: `git grep -n
+      # slot-memory-peaks origin/main -- .github/` returned zero, and the only
+      # repo-wide hits outside the script were two deploy/README.md lines. The
+      # script's subject is a monotonic max() fold that persists per-slot swap
+      # peaks across a restart, so a census cannot silently lose a restarted
+      # slot; its restart-survival arm is mutation-proven (revert the fold and
+      # that arm reds) and four control arms stay quiet. A mutation-proven arm
+      # nothing executes cannot red when the fold is reverted, which is the
+      # exact failure it was written to catch.
+      #
+      # NO PATH ENTRY WAS NEEDED: `deploy/**` is already the first entry of both
+      # the pull_request and push lists above, so any edit to the script — the
+      # fold included — triggers this workflow and therefore this step. The
+      # check count is not pinned here on purpose; the harness prints its own
+      # ("35 checks, 0 failures") and asserts its README figure itself, so a
+      # number in this comment could only go stale.
+      #
+      # spec-authority: advisory-ok — same as the sibling steps above. This reds
+      # `Deploy harnesses`, which is not in the required set and cannot be.
+      - name: Slot memory peaks — monotonic max() fold self-test
+        run: bash deploy/slot-memory-peaks.sh --self-test
+
   git-2-34-fetch:
     # task-6f18e71a351f8081 B. The control-plane box is Ubuntu 22.04 with the
     # distro git 2.34.1, which cannot speak protocol v2 to GitHub ("could not
