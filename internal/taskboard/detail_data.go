@@ -86,7 +86,9 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 // (corpus.go). One cache per fetcher — never a package global — so two boards,
 // or two tests, can never seed each other's corpus.
 func newSnapshotFetcher() func(*apiclient.Client) (Snapshot, DetailIndex, error) {
-	cc := &corpusCache{}
+	// live:true — this cache outlives one fetch, which is what licenses the brief
+	// prime projection and the rolling event tail (corpus.go primeView).
+	cc := &corpusCache{live: true}
 	return func(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		return fetchSnapshotWith(c, cc)
 	}
@@ -122,7 +124,7 @@ func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIn
 	}()
 	go func() {
 		defer wg.Done()
-		extras, primeErr = fetchPrime(ctx, c)
+		extras, primeErr = fetchPrime(ctx, c, cc.primeView())
 	}()
 	go func() {
 		defer wg.Done()
@@ -139,6 +141,11 @@ func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIn
 	if primeErr != nil {
 		return Snapshot{}, nil, primeErr
 	}
+	// Rebuild the event tail the brief projection trims. On a one-shot cache
+	// primeView() returned "", the body already carried the full tail, and this
+	// is an identity (nothing stored, nothing to merge with) — so those verbs
+	// stay byte-identical in BOTH directions, request and Snapshot.
+	extras.events = cc.mergeEventTail(extras.events)
 	if inflightErr != nil {
 		return Snapshot{}, nil, inflightErr
 	}

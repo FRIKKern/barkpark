@@ -3,6 +3,7 @@ package taskboard
 import (
 	"context"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
@@ -110,6 +111,12 @@ type corpusCache struct {
 	// flight is the corpus read currently out, or nil. It is what makes two
 	// concurrent asks cost ONE walk — see fetchTaskCorpus.
 	flight *corpusFlight
+	// live marks a cache that outlives one fetch — the board's, not a one-shot
+	// verb's. It is what makes the brief prime projection safe: see primeView.
+	live bool
+	// eventTail is the rolling union of every brief prime's `recent_events`,
+	// newest first, capped at primeEventTailDepth. Empty on a non-live cache.
+	eventTail []Event
 }
 
 // corpusFlight is one in-progress corpus read. Every caller that arrives while
@@ -121,6 +128,80 @@ type corpusFlight struct {
 	details    DetailIndex
 	exhaustive bool
 	err        error
+}
+
+// primeViewBrief is the value fetchPrime sends as `?view=`. It is a CONSTANT
+// rather than a bool so the query string is written once, in one place.
+const primeViewBrief = "brief"
+
+// primeEventTailDepth is how deep the rebuilt event tail is allowed to grow: the
+// same 100 the FULL prime arm returns at primeReadyLimit, so a live board that
+// has been up for a few ticks sees the tail it saw before the brief projection.
+const primeEventTailDepth = 100
+
+// primeView reports the `?view=` fetchPrime should ask for through THIS cache.
+//
+// The discriminator is the cache's own lifetime, which is already the exact
+// distinction this needs (detail_data.go): every one-shot verb — `bp task next`,
+// `bp task frontier`, `bp task lint`, `bp cmux dispatch`, the chat transport —
+// reaches the fetch with a BARE, per-call corpusCache and gets exactly one prime
+// body, so a 5-row event tail there would be a silent narrowing of
+// computeResumables with nothing to refill it. Those callers keep the full view
+// and stay byte-identical. The LIVE board (newSnapshotFetcher) carries its cache
+// across every re-list of one long-lived process, so it can take the 96.8% cut
+// and rebuild the tail from the 5 newest rows each tick.
+func (cc *corpusCache) primeView() string {
+	if cc == nil || !cc.live {
+		return ""
+	}
+	return primeViewBrief
+}
+
+// mergeEventTail folds one prime's `recent_events` into the cache's rolling tail
+// and returns the merged tail, newest first, capped at primeEventTailDepth.
+//
+// WHY A RING AND NOT JUST THE 5. The brief arm answers with the 5 newest task
+// mutations; the full arm answered with 100. Since a live board asks every few
+// seconds and each answer OVERLAPS the last, the union across ticks is the same
+// tail — it just takes a few ticks to fill after launch, which is stated here
+// rather than hidden: the first brief frame carries 5 events where the old full
+// frame carried 100, and computeResumables on that FIRST frame sees less.
+//
+// Dedup is by (mutation, doc_id, at). prime's rows carry no `id` (Tasks.Prime's
+// select is event/doc_id/at only), so the triple is the whole identity there is;
+// two genuinely distinct mutations sharing all three are indistinguishable ON THE
+// WIRE and collapsing them is the honest answer, not a loss.
+func (cc *corpusCache) mergeEventTail(fresh []Event) []Event {
+	// A one-shot cache does not merge AT ALL — not even a sort or a dedup. The
+	// full arm already handed it the whole tail, and an identity claim that
+	// quietly reorders is not an identity claim.
+	if cc == nil || !cc.live {
+		return fresh
+	}
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	merged := make([]Event, 0, len(cc.eventTail)+len(fresh))
+	seen := make(map[string]bool, len(cc.eventTail)+len(fresh))
+	add := func(evs []Event) {
+		for _, e := range evs {
+			k := e.Mutation + "\x00" + e.DocID + "\x00" + e.At.UTC().Format(time.RFC3339Nano)
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			merged = append(merged, e)
+		}
+	}
+	add(fresh)
+	add(cc.eventTail)
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].At.After(merged[j].At) })
+	if len(merged) > primeEventTailDepth {
+		merged = merged[:primeEventTailDepth]
+	}
+	cc.eventTail = merged
+	out := make([]Event, len(merged))
+	copy(out, merged)
+	return out
 }
 
 func (cc *corpusCache) snapshot() corpusBase {
