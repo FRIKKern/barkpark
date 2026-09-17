@@ -455,6 +455,7 @@ $DOMAIN {
 	reverse_proxy localhost:$APP_PORT
 	handle_errors 502 503 504 {
 		header Retry-After "15"
+		header Content-Type "text/html; charset=utf-8"
 		respond 503 {
 			body <<BARKPARK_MAINTENANCE
 <!doctype html>

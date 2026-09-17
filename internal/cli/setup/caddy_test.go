@@ -40,6 +40,9 @@ func TestRenderCaddyfile_AcmeGolden(t *testing.T) {
 		"reverse_proxy localhost:4000",
 		"handle_errors 502 503 504 {",
 		"Retry-After",
+		// Without this the branded 503 arrives as text/plain and the browser
+		// paints the raw markup (deploy/caddy/barkpark-maintenance.caddy:19).
+		"header Content-Type \"text/html; charset=utf-8\"",
 	} {
 		if !strings.Contains(got, sub) {
 			t.Errorf("rendered Caddyfile missing %q:\n%s", sub, got)

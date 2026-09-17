@@ -21,6 +21,12 @@
 # never "the scoped config simply serves less":
 #   CONTROL HIT  — an existing static file answers 200 under BOTH arms.
 #   CONTROL DEAD — a request to the proxied path answers 503 under BOTH arms.
+# Then TWO MORE arms for the second load-bearing line of the same block:
+#   ARM NO-CT  — the handler with NO `header Content-Type`: the 503 body arrives
+#                as `text/plain; charset=utf-8` and the browser paints the raw
+#                `<!doctype html>` source. This is the second incident.
+#   ARM CT     — the same handler WITH it: `text/html; charset=utf-8`.
+#                The STATUS is 503 under both, so it is a RENDERING fix only.
 #
 # Usage:  bash deploy/caddy-handle-errors-behaviour-proof.sh
 # Exit 0 = every expectation met. Exit 1 = a mismatch (printed) or a broken rig.
@@ -127,6 +133,38 @@ halt() {
 }
 
 status_of() { curl -s -o "$RIG/body.out" -w '%{http_code}' "http://127.0.0.1:$SITE_PORT$1"; }
+ctype_of() { curl -s -o /dev/null -w '%{content_type}' "http://127.0.0.1:$SITE_PORT$1"; }
+
+# ARM NO-CT renders the PRE-FIX shape on purpose — the same site block with the
+# Content-Type line removed — so the consequence is OBSERVED off a real Caddy
+# rather than quoted. The marker below is what keeps
+# deploy/caddy-handle-errors-scope-check.sh's Content-Type arm from counting this
+# deliberate negative as a violation; it is PRINTED as DELIBERATE on every run of
+# that check, so a marker used to launder a real renderer is visible in the same
+# output as the violations it is pretending not to be.
+render_no_ct() {
+	cat <<EOF
+{
+	auto_https off
+	admin off
+}
+http://127.0.0.1:$SITE_PORT {
+	handle_path /sites/demo/* {
+		root * $RIG/root
+		file_server
+	}
+	reverse_proxy 127.0.0.1:$DEAD_PORT
+	handle_errors 502 503 504 {
+		header Retry-After "15"
+		# handle-errors-scope-check: deliberate-no-content-type
+		respond 503 {
+			body "BARKPARK_MAINTENANCE_PAGE"
+			close
+		}
+	}
+}
+EOF
+}
 
 fails=0
 probe() { # $1 arm  $2 label  $3 path  $4 expected status
@@ -136,6 +174,16 @@ probe() { # $1 arm  $2 label  $3 path  $4 expected status
   else
     printf '    %-7s %-13s GET %-28s -> %s  (expected %s)  *** MISMATCH ***\n' "$1" "$2" "$3" "$got" "$4"
     echo "      body was: $(head -c 120 "$RIG/body.out")"
+    fails=$((fails + 1))
+  fi
+}
+
+probe_ctype() { # $1 arm  $2 label  $3 path  $4 expected Content-Type
+  local got; got="$(ctype_of "$3")"
+  if [ "$got" = "$4" ]; then
+    printf '    %-7s %-13s GET %-28s -> %-28s (expected %s)  OK\n' "$1" "$2" "$3" "$got" "$4"
+  else
+    printf '    %-7s %-13s GET %-28s -> %-28s (expected %s)  *** MISMATCH ***\n' "$1" "$2" "$3" "$got" "$4"
     fails=$((fails + 1))
   fi
 }
@@ -163,6 +211,39 @@ probe SCOPED "CONTROL DEAD" /                       503
 halt
 echo
 
+# ---------------------------------------------------------------------------
+# THE Content-Type HALF. deploy/caddy/barkpark-maintenance.caddy:19-20 asserts
+# that `respond` with a body and no Content-Type defaults to
+# `text/plain; charset=utf-8`. Until now that was a sentence. These two arms
+# MEASURE it on the same rig, against the same dead upstream:
+#   ARM NO-CT  — the handler WITHOUT the header : Content-Type is text/plain.
+#                The browser paints the raw <!doctype html> source.
+#   ARM CT     — the handler WITH it            : Content-Type is text/html.
+# CONTROL: the STATUS is 503 under BOTH arms, so the header is a RENDERING fix
+# and costs the maintenance page nothing it was there to do; and the static
+# CONTROL HIT still answers 200 with its own type under both, so the header is
+# scoped to the handler rather than stamped on every response.
+# ---------------------------------------------------------------------------
+render_no_ct > "$RIG/noct.caddy"
+
+echo "  ARM NO-CT  — handler with NO Content-Type   (the pre-fix shape)"
+boot "$RIG/noct.caddy"
+probe       "NO-CT"  "CONTROL DEAD" /                 503
+probe_ctype "NO-CT"  "INCIDENT"     /                 "text/plain; charset=utf-8"
+probe       "NO-CT"  "CONTROL HIT"  /sites/demo/index.html 200
+probe_ctype "NO-CT"  "CONTROL HIT"  /sites/demo/index.html "text/html; charset=utf-8"
+halt
+echo
+
+echo "  ARM CT     — handler WITH Content-Type      (the fix)"
+boot "$RIG/scoped.caddy"
+probe       "CT"     "CONTROL DEAD" /                 503
+probe_ctype "CT"     "FIXED"        /                 "text/html; charset=utf-8"
+probe       "CT"     "CONTROL HIT"  /sites/demo/index.html 200
+probe_ctype "CT"     "CONTROL HIT"  /sites/demo/index.html "text/html; charset=utf-8"
+halt
+echo
+
 if [ "$fails" -gt 0 ]; then
   echo "[handle_errors-behaviour] FAIL — $fails expectation(s) unmet."
   exit 1
@@ -171,4 +252,8 @@ echo "[handle_errors-behaviour] OK — the bare form swallows a file_server 404 
 echo "  branded 503; the status-scoped form lets it be a 404 while keeping the branded"
 echo "  503 on the dead upstream. Both controls behaved identically under both arms, so"
 echo "  the difference is the status list and nothing else."
+echo "[handle_errors-behaviour] OK — and a maintenance handler with no Content-Type answers"
+echo "  text/plain; charset=utf-8 (so the branded page arrives as raw markup), while the same"
+echo "  handler with the header answers text/html; charset=utf-8. The STATUS was 503 under both,"
+echo "  so the header is a RENDERING fix and nothing else."
 exit 0

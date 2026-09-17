@@ -58,14 +58,29 @@ migrations must be expand/contract (backward-compatible).
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
 `Retry-After` while the upstream is unreachable — blue/green keeps deploys
-seamless, this covers crashes/restarts outside deploys. The handler sets
-`Content-Type: text/html` explicitly: Caddy's `respond` defaults a body with no
-Content-Type to `text/plain`, which made the branded page arrive as raw markup
-the browser painted verbatim. That is a RENDERING fix only — the status was and
-stays an honest 503 + `Retry-After` on every path, `/assets/*.css` included, and
-a healthy upstream never reaches the handler (proved both ways by the harness's
-live-Caddy case). `instance-deploy.sh` also upgrades already-armed boxes in
-place, since the marker guard forbids a re-arm.
+seamless, this covers crashes/restarts outside deploys. Every renderer of that
+handler sets `Content-Type: text/html` explicitly: Caddy's `respond` defaults a
+body with no Content-Type to `text/plain`, which made the branded page arrive as
+raw markup the browser painted verbatim. That is a RENDERING fix only — the
+status was and stays an honest 503 + `Retry-After` on every path, `/assets/*.css`
+included, and a healthy upstream never reaches the handler (proved both ways by
+the harness's live-Caddy case). `instance-deploy.sh` also upgrades already-armed
+boxes in place, since the marker guard forbids a re-arm.
+
+Until 2026-09-18 that sentence described `instance-deploy.sh`'s handler ALONE
+and was false of the other three renderers — `internal/caddyfile/caddyfile.go`
+(`MaintenanceHandler`), `internal/cli/setup/assets/deploy.sh` and its
+byte-identical twin `deploy.sh` at the repo root all emitted a `respond 503`
+with no Content-Type, so a box provisioned by `bp setup` or root `deploy.sh` and
+never touched by `instance-deploy.sh` served the maintenance page as plain text
+indefinitely (`task-2ca3b45a2137aab4`). It is true of every renderer now, and
+the SECOND arm of `deploy/caddy-handle-errors-scope-check.sh` is what keeps it
+true: a maintenance `respond 503` emitted anywhere in the tree without a
+`header Content-Type "text/html…` line above it reds the check by name, with no
+stand-down. `deploy/caddy-handle-errors-behaviour-proof.sh` measures the claim
+itself — its `ARM NO-CT` boots a real Caddy with the header removed and reads
+`text/plain; charset=utf-8` off the wire, against `ARM CT`'s
+`text/html; charset=utf-8`, with the 503 status identical under both.
 
 The handler's status list `502 503 504` is load-bearing. `instance-deploy.sh`
 arms and repairs the corrected shape on existing boxes (idempotent, `caddy
