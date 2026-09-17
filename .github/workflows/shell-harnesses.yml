@@ -343,6 +343,8 @@ on:
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "tooling/fleet/spend-aggregate.py"
+      - "tooling/fleet/spend-aggregate.test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
       - "scripts/paper_structure.py"
@@ -949,6 +951,8 @@ on:
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "tooling/fleet/spend-aggregate.py"
+      - "tooling/fleet/spend-aggregate.test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
       - "scripts/paper_structure.py"
@@ -1553,6 +1557,8 @@ jobs:
           tooling-harnesses .github/workflows/reland-check.yml
           tooling-harnesses tooling/fleet/fleet-run.sh
           tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
+          tooling-harnesses tooling/fleet/spend-aggregate.py
+          tooling-harnesses tooling/fleet/spend-aggregate.test.sh
           tooling-harnesses scripts/audit-paper-readers.sh
           tooling-harnesses scripts/audit-paper-readers-test.sh
           tooling-harnesses scripts/paper_structure.py
@@ -2854,6 +2860,13 @@ jobs:
       - name: fleet-run verdict matrix
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash tooling/fleet/fleet-run-verdict-test.sh
+      # The orchestrator cap gate's spend total. Its own arms include two CONTROLS
+      # that run the pre-fix single-file reader against the same fixture and assert
+      # it gets the WRONG answer, so a green here is a measured discrimination and
+      # not a present-in-file claim.
+      - name: spend-aggregate arms (orchestrator cap-gate total)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash tooling/fleet/spend-aggregate.test.sh
       - name: audit-paper-readers.sh syntax check
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash -n scripts/audit-paper-readers.sh
