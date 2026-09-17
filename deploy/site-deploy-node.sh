@@ -1101,8 +1101,8 @@ if [ "$MODE" = selftest ]; then
   # sl_deploy-driven e2e blocks (task-a1a209424c7127e8). Until these landed, a
   # block's only negative assertion passed VACUOUSLY on a run that never arrived.
   # All 42 sit outside both optional blocks, so BOTH floors move by the same 42.
-  SELFTEST_FLOOR_MIN=480
-  SELFTEST_FLOOR_FULL=497
+  SELFTEST_FLOOR_MIN=530
+  SELFTEST_FLOOR_FULL=547
   TESTS=0; FAILS=0
   # A bare "FAIL - <label>" is not evidence. It cannot tell a SUBJECT that
   # misbehaved from a FIXTURE that never reached the state under test, and the
@@ -3493,6 +3493,235 @@ SWPMV
   swp_variant static     '^cp .*/\.next/static/\. -> .*/releases/n1\.partial/\.next/static/$'
   swp_variant public     '^cp .*/public/\. -> .*/releases/n1\.partial/public/$'
   swp_variant mv         '^mv .*/releases/n1\.partial -> .*/releases/n1$'
+  # =========================================================================
+  # PREBUILT (PLAN_MODE=prebuilt) — THE BUILD LEAVES THE SERVING BOX, and the
+  # node ABI is refused BEFORE STAGE.
+  #
+  # Its own slug, its own slot ports, its own src tree, so nothing above can
+  # leak into it. The whole block is written so that DELETING the prebuilt arm
+  # from the engine reds a NAMED row: the two mutation proofs at the foot drive
+  # the SAME fixtures through an engine with one line removed.
+  # =========================================================================
+  echo "[selftest] e2e: a PREBUILT node deploy STAGEs uploaded bytes with NO npm on this box"
+  PB="$TD/pb"; PBBIN="$PB/bin"; PBSRC="$PB/src"; PB_SITE="$TD/sites/pbnode"
+  mkdir -p "$PBBIN" "$PBSRC"
+  PB_PORT_A="$(reserve_port)"; PB_PORT_B="$(reserve_port)"
+  printf '{"name":"selftest-pb-node","private":true}\n' > "$PBSRC/package.json"
+  # The BOX half of the ABI comparison must be deterministic, so the fixture
+  # owns it: a fake `node` on PATH, ahead of everything. box_node_major shells
+  # `node -v`, so this is the real probe reading a real (fake) binary — not an
+  # env override standing in for the measurement.
+  PB_BOX_MAJOR=22
+  printf '#!/bin/sh\n[ "$1" = -v ] && { echo v%s.11.0; exit 0; }\nexit 0\n' "$PB_BOX_MAJOR" > "$PBBIN/node"
+  chmod +x "$PBBIN/node"
+  PB_CF="$TD/pb.Caddyfile"
+  printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$PB_CF"
+  pb_deploy() { # <engine> <build_id> [PREBUILT_DIR] [SHA] -> exit code; log $TD/pb.out
+    env PATH="$PBBIN:$FAKEBIN:$PATH" \
+      SITE_SLUG=pbnode BUILD_ID="$2" CONTENT_REV=rev-1 SITE_SRC="$PBSRC" \
+      PREBUILT_DIR="${3:-}" PREBUILT_SHA256="${4:-}" \
+      SITE_PORT_A="$PB_PORT_A" SITE_PORT_B="$PB_PORT_B" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+      BARKPARK_CADDYFILE="$PB_CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$PB/deploy.lock" \
+      BARKPARK_CADDYFILE_LOCK="$PB/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$PB/absent-node-link" \
+      BARKPARK_NODE_LIBC=glibc \
+      BARKPARK_SITE_NO_CAP=1 \
+      bash "$1" > "$TD/pb.out" 2>"$TD/pb.err"
+    echo $?
+  }
+  pb_saw() { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$TD/pb.out"; }
+  # <dir> <build_id> <body-marker> [node_major] [libc] — an UPLOADED node release
+  # root: server.js at the top, .next/static + public ALREADY folded in (the
+  # packer's job; there is no $SITE_SRC to take them from), plus the declaration.
+  mk_pb() {
+    local d="$1" bid="$2" body="$3" maj="${4:-$PB_BOX_MAJOR}" libc="${5:-glibc}"
+    rm -rf "$d"; mkdir -p "$d/.next/static" "$d/public"
+    printf '// UPLOADED standalone server\n' > "$d/server.js"
+    { printf '<!doctype html><html><head>\n'
+      printf '<meta name="bp-build-id" content="%s">\n' "$bid"
+      printf '<meta name="bp-content-rev" content="rev-1">\n'
+      printf '<meta name="bp-doc-id" content="doc-1">\n'
+      printf '</head><body><h1>%s</h1></body></html>\n' "$body"; } > "$d/index.html"
+    printf 'uploaded-chunk\n' > "$d/.next/static/chunk.js"
+    printf 'uploaded-robots\n' > "$d/public/robots.txt"
+    if [ "$maj" != NONE ]; then
+      { printf 'node_major=%s\n' "$maj"
+        [ "$libc" != NONE ] && printf 'libc=%s\n' "$libc"
+        printf 'packer=selftest\n'; } > "$d/.bp-node-abi"
+    fi
+  }
+  PB_SHA_A="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  PB_SHA_B="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+
+  # POSITIVE CONTROL FIRST. Without it, "ran NO npm" below is satisfied by a
+  # fixture whose npm was never reachable in the first place — an absence that
+  # proves the PATH, not the engine.
+  : > "$PBSRC/.npm-calls"
+  rc="$(pb_deploy "$SELF" pb0)"
+  check "positive control: a BOX build on this same slug DOES run npm" \
+    grep -q 'npm run build' "$PBSRC/.npm-calls"
+  check "positive control: that box build went live (the fixture is a working one)" \
+    [ "$rc" = 0 ]
+
+  : > "$PBSRC/.npm-calls"
+  mk_pb "$PB/up1" pb1 "UPLOADED-BYTES-pb1"
+  rc="$(pb_deploy "$SELF" pb1 "$PB/up1" "$PB_SHA_A")"
+  check "prebuilt deploy exit 0"                    [ "$rc" = 0 ]
+  check "ran NO npm on this box"                    [ ! -s "$PBSRC/.npm-calls" ]
+  check "BUILD is SKIPPED and SAYS prebuilt, naming the digest" \
+    grep -qE '^BPSTAGE name=BUILD status=skipped build_id=pb1 detail="prebuilt bytes \(.*sha256 0123456789ab\) - no build ran on this box"' "$TD/pb.out"
+  check "STAGE ok names the prebuilt digest AND the ABI it certified" \
+    grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab, node abi 22/glibc\)"' "$TD/pb.out"
+  check "the release root carries the UPLOADED server.js" \
+    grep -q 'UPLOADED standalone server' "$PB_SITE/releases/pb1/server.js"
+  check "…and the uploader's .next/static came through (the packer folds it in)" \
+    grep -q 'uploaded-chunk' "$PB_SITE/releases/pb1/.next/static/chunk.js"
+  check "…and the uploader's public/ too" \
+    grep -q 'uploaded-robots' "$PB_SITE/releases/pb1/public/robots.txt"
+  check "the release RECORDS which bytes it carries (.bp-prebuilt-sha256)" \
+    [ "$(cat "$PB_SITE/releases/pb1/$PREBUILT_MARK" 2>/dev/null)" = "$PB_SHA_A" ]
+  check "…and the ABI declaration rides into the release as its receipt" \
+    grep -q 'node_major=22' "$PB_SITE/releases/pb1/.bp-node-abi"
+  check "HEALTH ok"                                 pb_saw HEALTH ok pb1
+  check "SWITCH ok — uploaded bytes went LIVE"      pb_saw SWITCH ok pb1
+  # READ BACK the routed upstream rather than assuming TARGET_PORT: pb0 (the
+  # control box build) took slot a, so the prebuilt deploy is on b. An assertion
+  # against the port we INTENDED would be an assertion about this test's
+  # arithmetic, not about what Caddy is serving.
+  PB_LIVE_PORT="$(awk '/BARKPARK_SITE_ROUTE:pbnode/{f=1} f && /reverse_proxy localhost:/{sub(/.*localhost:/,""); sub(/[^0-9].*/,""); print; exit}' "$PB_CF")"
+  check "Caddy's pbnode block names a real port (the read-back is not empty)" \
+    sh -c "printf '%s' '$PB_LIVE_PORT' | grep -qE '^[0-9]+$'"
+  check "the ROUTED slot serves the UPLOADED body, not a rebuilt one" \
+    sh -c "curl -fsS --max-time 5 'http://127.0.0.1:$PB_LIVE_PORT/' 2>/dev/null | grep -q 'UPLOADED-BYTES-pb1'"
+
+  echo "[selftest] e2e: prebuilt bytes this box cannot NAME are refused before anything is staged"
+  mk_pb "$PB/up2" pb2 "UPLOADED-BYTES-pb2"
+  rc="$(pb_deploy "$SELF" pb2 "$PB/up2" "not-a-digest")"
+  check "a malformed PREBUILT_SHA256 exits 11"      [ "$rc" = 11 ]
+  check "…and nothing was staged"                   [ ! -d "$PB_SITE/releases/pb2" ]
+  rc="$(pb_deploy "$SELF" pb3 "$PB/absent-tree" "$PB_SHA_B")"
+  check "a PREBUILT_DIR that is not there exits 11" [ "$rc" = 11 ]
+  check "…and the detail names server.js (a node release root, not a dist/)" \
+    grep -q 'server.js at its top' "$TD/pb.out"
+
+  echo "[selftest] e2e: a NODE ABI MISMATCH is refused BEFORE STAGE — nothing staged, HEALTH never reached"
+  mk_pb "$PB/abi1" pb4 "UPLOADED-BYTES-pb4" 20 glibc
+  rc="$(pb_deploy "$SELF" pb4 "$PB/abi1" "$PB_SHA_B")"
+  check "a declared node_major the box does not run exits 17" [ "$rc" = 17 ]
+  check "…it spoke PLAN failed on the machine channel (never a silent exit)" \
+    pb_saw PLAN failed pb4
+  check "…the detail names BOTH majors (a diagnosis, not a symptom)" \
+    grep -qE 'declares node_major=20, this box runs node major 22' "$TD/pb.out"
+  check "…ZERO release dir was staged"              [ ! -d "$PB_SITE/releases/pb4" ]
+  check "…and no .partial/.aside was left behind either" \
+    sh -c "[ ! -e '$PB_SITE/releases/pb4.partial' ] && [ ! -e '$PB_SITE/releases/pb4.aside' ]"
+  check "…STAGE was never reached"                  sh -c "! grep -q '^BPSTAGE name=STAGE ' '$TD/pb.out'"
+  check "…HEALTH was never reached (the whole point: no wasted boot)" \
+    sh -c "! grep -q '^BPSTAGE name=HEALTH ' '$TD/pb.out'"
+  check "…and the live release pb1 is untouched" \
+    grep -q 'UPLOADED-BYTES-pb1' "$PB_SITE/releases/pb1/index.html"
+  mk_pb "$PB/abi2" pb5 "UPLOADED-BYTES-pb5" NONE
+  rc="$(pb_deploy "$SELF" pb5 "$PB/abi2" "$PB_SHA_B")"
+  check "an UNDECLARED ABI exits 17 (absence is not a pass)" [ "$rc" = 17 ]
+  check "…and says so by name"                      grep -q 'carries no .bp-node-abi' "$TD/pb.out"
+  check "…staging nothing"                          [ ! -d "$PB_SITE/releases/pb5" ]
+  mk_pb "$PB/abi3" pb6 "UPLOADED-BYTES-pb6" "$PB_BOX_MAJOR" musl
+  rc="$(pb_deploy "$SELF" pb6 "$PB/abi3" "$PB_SHA_B")"
+  check "a libc mismatch (musl bytes, glibc box) exits 17"   [ "$rc" = 17 ]
+  check "…and names both libcs"                     grep -q 'declares libc=musl, this box is glibc' "$TD/pb.out"
+  # THE QUIET CONTROL for the libc arm: an UNDECIDED libc must not be turned
+  # into a refusal. A probe that cannot tell has measured nothing, and the
+  # node_major half above still binds — so this arm is narrow, not vacuous.
+  mk_pb "$PB/abi4" pb7 "UPLOADED-BYTES-pb7" "$PB_BOX_MAJOR" unknown
+  rc="$(pb_deploy "$SELF" pb7 "$PB/abi4" "$PB_SHA_B")"
+  check "control: libc=unknown is UNDECIDED, not a refusal — the deploy lands" [ "$rc" = 0 ]
+  check "control: …and it really staged (the control is not a silent skip)" \
+    [ -f "$PB_SITE/releases/pb7/server.js" ]
+
+  echo "[selftest] e2e: MUTATION PROOF — delete the ABI refusal and the SAME mismatched bytes stage and boot"
+  # A mutant sources the common lib by its OWN dirname, so it needs a lib/ too.
+  PBMUTD="$PB/mut"; PBMUT="$PBMUTD/site-deploy-node.sh"
+  mkdir -p "$PBMUTD/lib"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$PBMUTD/lib/"
+  # Delete the FOURTH `exit 17` refusal line — the node_major mismatch. The three
+  # above it (no declaration, unreadable declaration, unreadable box) and the two
+  # below (libc) stay, so this mutation is as narrow as a mutation gets.
+  awk '$0 == "    log \"PLAN: $DETAIL\"; emit PLAN failed \"$DETAIL\"; exit 17" { n++; if (n == 4) next } { print }' "$SELF" > "$PBMUT"
+  check "the ABI mutant differs by exactly ONE deleted line" \
+    [ "$(diff "$SELF" "$PBMUT" | grep -c '^[<>]')" = 1 ]
+  mk_pb "$PB/mut1" pb8 "UPLOADED-BYTES-pb8" 20 glibc
+  rc="$(pb_deploy "$PBMUT" pb8 "$PB/mut1" "$PB_SHA_B")"
+  check "MUTANT: the node_major mismatch is no longer refused (exit 0, not 17)" [ "$rc" = 0 ]
+  check "MUTANT: bytes built for node 20 are STAGED onto a node 22 box" \
+    [ -f "$PB_SITE/releases/pb8/server.js" ]
+  check "MUTANT: and a slot was BOOTED for them — the wasted deploy this arm exists to prevent" \
+    grep -q '^BPSTAGE name=HEALTH ' "$TD/pb.out"
+  echo "  mutation proof: with the node_major refusal deleted, the pb4 specimen above (exit 17, zero release dir, no HEALTH line) instead exits 0, stages releases/<id>/server.js and reaches HEALTH — the four pb4 rows named above all red"
+  # QUIET CONTROL for the mutation: the ABI arm is PREBUILT-ONLY. Removing it
+  # must not disturb a box build, or the mutation proves the engine's health in
+  # general rather than this arm in particular.
+  : > "$PBSRC/.npm-calls"
+  rc="$(pb_deploy "$PBMUT" pb9)"
+  check "control: the SAME mutant still deploys a BOX build unchanged (the arm is prebuilt-only)" \
+    [ "$rc" = 0 ]
+  check "control: …and that box build really ran npm" \
+    grep -q 'npm run build' "$PBSRC/.npm-calls"
+
+  echo "[selftest] e2e: MUTATION PROOF — lose the prebuilt MARK and a health-failed release is rebuilt from the template"
+  PBMUT2D="$PB/mut2"; PBMUT2="$PBMUT2D/site-deploy-node.sh"
+  mkdir -p "$PBMUT2D/lib"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$PBMUT2D/lib/"
+  # SUBSTITUTED, not deleted: that write is the only statement in its `if`, and
+  # an emptied `if` body is a bash SYNTAX ERROR — a mutant that cannot parse
+  # exits 2 on every fixture and would "prove" the arm from a broken file.
+  # Matched by its redirection target, which occurs exactly once in this engine
+  # (the row below counts the diff, so a match of nothing cannot pass quietly).
+  awk 'index($0, "> \"$RELDIR/$PREBUILT_MARK\"") > 0 { print "    : # MUTANT: the prebuilt mark is never written"; next } { print }' "$SELF" > "$PBMUT2"
+  check "the MARK mutant differs by exactly ONE substituted line" \
+    [ "$(diff "$SELF" "$PBMUT2" | grep -c '^[<>]')" = 2 ]
+  check "the MARK mutant still PARSES (a syntax-error mutant proves nothing)" \
+    bash -n "$PBMUT2"
+  mk_pb "$PB/up-markmut" pbA "UPLOADED-BYTES-pbA"
+  rc="$(pb_deploy "$PBMUT2" pbA "$PB/up-markmut" "$PB_SHA_A")"
+  check "MUTANT: the deploy still succeeds (the loss is SILENT)" [ "$rc" = 0 ]
+  check "MUTANT: the release carries NO record that its bytes were uploaded" \
+    [ ! -f "$PB_SITE/releases/pbA/$PREBUILT_MARK" ]
+  # THE DOWNSTREAM CONSEQUENCE, MEASURED on a matched pair that differs in ONE
+  # file. A release that is staged, health-failed and NOT live is exactly the
+  # state PLAN's fail-closed arm exists for: with the mark it must refuse and
+  # say re-upload; without it, it is indistinguishable from a box build and the
+  # box rebuilds from the provisioned template — genuine markers, HEALTH green,
+  # the WRONG bytes booted. Built by hand rather than by a deploy, because a
+  # release this engine JUST deployed is LIVE and the no-op arm would claim the
+  # run before either arm under test is reached.
+  mk_failed_release() { # <build_id> <with-mark: 1|0>
+    local bid="$1" rd="$PB_SITE/releases/$1"
+    rm -rf "$rd"; mkdir -p "$rd"
+    printf '// UPLOADED standalone server\n' > "$rd/server.js"
+    printf '<!doctype html><html><body>UPLOADED-BYTES-%s</body></html>\n' "$bid" > "$rd/index.html"
+    [ "$2" = 1 ] && printf '%s\n' "$PB_SHA_A" > "$rd/$PREBUILT_MARK"
+    : > "$rd/$HEALTH_FAIL_MARK"
+  }
+  mk_failed_release pbF 1
+  check "precondition: the fixture release is staged, health-failed and NOT live" \
+    sh -c "[ -f '$PB_SITE/releases/pbF/$HEALTH_FAIL_MARK' ] && [ \"\$(cat '$SENV/pbnode__a.env' '$SENV/pbnode__b.env' 2>/dev/null | grep -c 'pbF')\" = 0 ]"
+  rc="$(pb_deploy "$SELF" pbF)"
+  check "FIXED: a MARKED health-failed release FAILS CLOSED (11), never a template rebuild" \
+    [ "$rc" = 11 ]
+  check "FIXED: …and says the only real fix out loud" \
+    grep -q 'RE-UPLOAD the artifact for this build_id' "$TD/pb.out"
+  check "FIXED: …leaving the uploaded bytes on disk" \
+    grep -q 'UPLOADED-BYTES-pbF' "$PB_SITE/releases/pbF/index.html"
+  mk_failed_release pbG 0
+  rc="$(pb_deploy "$SELF" pbG)"
+  check "control: the SAME shape WITHOUT the mark is an ordinary rebuild (the arm keys on the mark, not on health-failed)" \
+    [ "$rc" = 0 ]
+  check "control: …and the box's own bytes replaced it" \
+    sh -c "! grep -q 'UPLOADED-BYTES-pbG' '$PB_SITE/releases/pbG/index.html'"
+  echo "  mutation proof: with the .bp-prebuilt-sha256 write substituted away, the pbF pair collapses onto the pbG control — the mark-less mutant stages a release that no later reader can tell from a box build, so PLAN's fail-closed arm (exit 11, 're-upload') and purge_failed_release_node's keep-the-bytes arm both go silent and a template rebuild boots the WRONG bytes green"
+
   echo "[selftest] the shipped unit template treats a SIGTERM exit (143) as a clean stop"
   UNIT_TMPL="$(cd "$(dirname "$SELF")" && pwd)/systemd/barkpark-site@.service"
   unit_ses_section() { awk '/^\[/{s=$0} /^SuccessExitStatus=/{print s; exit}' "$UNIT_TMPL"; }
@@ -3900,7 +4129,10 @@ fi
 # site has, so neither arm below may claim this run.
 if [ -n "$PREBUILT_DIR" ]; then
   PLAN_MODE=prebuilt
-  if ! printf '%s' "$PREBUILT_SHA256" | grep -qE '^[0-9a-f]{64}$'; then
+  # `case`, not `printf … | grep -q`: a pipeline's status under `set -o pipefail`
+  # can be the PRODUCER's 141 when the early-exiting reader SIGPIPEs it, which
+  # inverts exactly this kind of refusal. No pipeline, no reading to get wrong.
+  if [ "${#PREBUILT_SHA256}" != 64 ] || case "$PREBUILT_SHA256" in *[!0-9a-f]*) true ;; *) false ;; esac; then
     DETAIL="PREBUILT_DIR is set but PREBUILT_SHA256 is '${PREBUILT_SHA256:-<missing>}' (want 64 lowercase hex) — refusing to stage bytes this box cannot name; the caller must pass the digest it verified for the artifact"
     log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 11
   fi
@@ -3923,11 +4155,11 @@ if [ -n "$PREBUILT_DIR" ]; then
   PB_ABI_LIBC="$(abi_decl_value "$PB_ABI_FILE" libc)"
   BOX_ABI_MAJOR="$(box_node_major)"
   BOX_ABI_LIBC="$(box_node_libc)"
-  if ! printf '%s' "$PB_ABI_MAJOR" | grep -qE '^[0-9]{1,3}$'; then
+  if [ -z "$PB_ABI_MAJOR" ] || [ "${#PB_ABI_MAJOR}" -gt 3 ] || case "$PB_ABI_MAJOR" in *[!0-9]*) true ;; *) false ;; esac; then
     DETAIL="$NODE_ABI_MARK declares node_major='${PB_ABI_MAJOR:-<missing>}' (want a bare integer, e.g. node_major=22) — refusing bytes whose target runtime this box cannot read; fix the packer's declaration"
     log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
   fi
-  if ! printf '%s' "$BOX_ABI_MAJOR" | grep -qE '^[0-9]{1,3}$'; then
+  if [ -z "$BOX_ABI_MAJOR" ] || [ "${#BOX_ABI_MAJOR}" -gt 3 ] || case "$BOX_ABI_MAJOR" in *[!0-9]*) true ;; *) false ;; esac; then
     DETAIL="this box cannot name its own node major (probed '$BOX_ABI_MAJOR' via ${NODE_LINK} / PATH node) while the artifact declares node_major=$PB_ABI_MAJOR — refusing to certify uploaded native addons against a runtime nobody can name; install node (or fix BARKPARK_NODE_LINK) and redeploy"
     log "PLAN: $DETAIL"; emit PLAN failed "$DETAIL"; exit 17
   fi
