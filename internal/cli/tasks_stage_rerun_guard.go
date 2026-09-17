@@ -49,14 +49,29 @@ package cli
 //	                        PDS-D336(a) rule honest, and which the measurement
 //	                        agrees is the majority case)
 //
-// A THIRD way out — REMOVING the rerun outright — does not exist yet, at any
-// door: `--rerun ''` is a no-op ("blank counts as absent"), and
-// `/v1/data/mutate` refuses `disposition_rerun: null` by name. That is the
-// SERVER half of task-5509618e1868d9f2 (`--clear-rerun` / `:clear_rerun` in
-// api/lib/barkpark/tasks/stage.ex) and it is outside this fence. Until it
-// lands, a reason that is a pure ruling can only be made honest by
-// --keep-rerun'ing a probe that does not bind it, which is why this guard SAYS
-// so in the refusal rather than pretending the removal exists.
+// THE THIRD WAY OUT LANDED (task-fcc590f205433209, PR #18817):
+//
+//	--clear-rerun           REMOVE the probe outright, for a reason that is a
+//	                        pure ruling nothing can check. The key comes back
+//	                        ABSENT, not null.
+//
+// It is a DECLARED manifest flag on `task.stage`, so bp picks it up from
+// /v1/capabilities and buildBody puts it on the wire with no Go change — but
+// this guard runs BEFORE the wire, and until the stand-down below it refused
+// the very call the operator reached for. MEASURED on guerrilla 2026-09-17 with
+// a bp built from origin/main 4f6b7f5e4, against a scratch row carrying a
+// reason and a rerun:
+//
+//	$ bp task stage <row> open --note '<pure ruling>' --supersede --clear-rerun
+//	exit=5  rerun_would_orphan   (refused HERE, nothing sent)
+//	read-back: disposition_rerun still present
+//
+// The same call through a bp WITHOUT this guard lands and the key comes back
+// absent, so the client was the only thing standing between the operator and
+// the REMOVE arm — and the refusal it printed told them the arm did not exist,
+// shadowing the server's own refusal, which names --clear-rerun correctly.
+// Both halves are fixed here: the flag stands the guard down, and the refusal
+// names all three doors.
 //
 // ── WHAT IT DELIBERATELY DOES NOT DO
 //
@@ -72,6 +87,9 @@ package cli
 //     displacing note (409 note_would_supersede), so a gate here would have no
 //     subject; a same-text re-stage is not a displacement either
 //   - --rerun on the same call               -> the rerun is being re-bound
+//   - --clear-rerun on the same call         -> the rerun is being REMOVED, so
+//     there is nothing left to strand; the door this refusal names must not be
+//     the door this refusal closes
 //   - --keep-rerun                           -> stated on purpose
 //   - row carries no rerun / a blank one     -> nothing to orphan
 //   - row's existing reason is blank/absent  -> nothing is being displaced
@@ -113,6 +131,17 @@ const stageKeepRerunFlag = "--keep-rerun"
 // codes reads one vocabulary whether the refusal came from here or from the
 // verb's write seam.
 const stageRerunOrphanCode = "rerun_would_orphan"
+
+// stageClearRerunFlagName is the SUBTRACTION door's declared manifest flag name
+// on `task.stage` (api/lib/barkpark/plugins/tasks.ex, type bool). Unlike
+// --keep-rerun it is NOT additive and is never stripped: the server declares it,
+// splitArgs binds it, and buildBody puts it on the query. The guard only needs
+// to RECOGNISE it, so that a call which removes the rerun is not refused for
+// stranding one.
+const stageClearRerunFlagName = "clear-rerun"
+
+// stageClearRerunFlag is that name as the operator types it, for the refusal.
+const stageClearRerunFlag = "--" + stageClearRerunFlagName
 
 // stageKeepRerunParam is what the flag becomes on the wire. The server reads
 // BOTH "keep_rerun" and "keep-rerun" (Params.stage_keep_rerun); the snake form
@@ -183,6 +212,17 @@ func stageRerunArgs(cmd manifest.Command, tail []string) (docID, note, dataset s
 	}
 	if strings.TrimSpace(stageLastFlagValue(flags, "rerun")) != "" {
 		// The same call re-binds the rerun. That is the fix, not the defect.
+		return "", "", "", false
+	}
+	if stageLastFlagValue(flags, stageClearRerunFlagName) == "true" {
+		// The same call REMOVES the rerun, so there is nothing left to strand.
+		// This stand-down is what makes PDS-D750's REMOVE arm reachable through
+		// bp at all: --clear-rerun is a DECLARED manifest flag that the server
+		// honours, and a guard that refused it would be the client withholding
+		// the one door built to answer this refusal. A server whose manifest
+		// does not declare the flag never reaches here — splitArgs above
+		// refuses the unknown flag, stageRerunArgs answers ok=false, and the
+		// ordinary unknown-flag error is what the operator sees.
 		return "", "", "", false
 	}
 	return docID, note, strings.TrimSpace(stageLastFlagValue(flags, "dataset")), true
@@ -318,9 +358,9 @@ func stageRerunOrphanRefusal(docID, rerun string) string {
 			"  --supersede is you saying you read the REASON you are replacing; it is not you saying you read the rerun. Two slots with one key to both locks is one slot wearing a costume. So pick one, on purpose:\n"+
 			"    --rerun '<command>'   re-bind the probe to the reason you are writing\n"+
 			"    %s          the EXISTING probe still binds the new reason (a SHARED rerun over distinct rows is the honest shape — PDS-D391b(b), PDS-D336(a) — and is never refused here)\n"+
-			"  REMOVING a rerun is not possible at any door yet: `--rerun ''` is a no-op (blank counts as absent) and /v1/data/mutate refuses disposition_rerun by name. That is the server half of task-5509618e1868d9f2 (--clear-rerun in api/lib/barkpark/tasks/stage.ex); until it lands, a reason that is a pure ruling can only be recorded with %s.\n"+
+			"    %s         REMOVE the probe, for a reason that is a pure ruling nothing can check — the key comes back ABSENT, not null (PDS-D750's REMOVE arm). `--rerun ''` cannot do this (blank counts as absent) and /v1/data/mutate refuses the key by name, so this flag is the only door that subtracts; sending it together with --rerun is refused as contradictory.\n"+
 			"  nothing was written — the row's reason and rerun are byte-identical.",
-		docID, rerun, stageKeepRerunFlag, stageKeepRerunFlag)
+		docID, rerun, stageKeepRerunFlag, stageClearRerunFlag)
 }
 
 // guardStageRerunOrphan gates one `bp task stage`. It reports refused=true with

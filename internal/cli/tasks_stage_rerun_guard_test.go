@@ -37,6 +37,7 @@ const stageRerunManifestJSON = `{
      "flags":[{"name":"note","type":"string","summary":"Adjudication reason."},
               {"name":"supersede","type":"bool","summary":"Replace a different reason."},
               {"name":"rerun","type":"string","summary":"Falsifying command."},
+              {"name":"clear-rerun","type":"bool","summary":"Remove the falsifying command."},
               {"name":"dataset","type":"string","summary":"Dataset."}],
      "writes":true,"batch":false,"paginated":false,"dry_run":false,
      "default_output":"minimal","scoped_prefix":null}
@@ -399,5 +400,71 @@ func TestStageKeepRerunFlagIsScopedAndRefusesAnInlineValue(t *testing.T) {
 	}
 	if stageKeepRerunFlagApplies(*get) {
 		t.Error("the additive flag is being stripped from a command that is not `task stage`")
+	}
+}
+
+// ── THE SUBTRACTION DOOR (task-5509618e1868d9f2 c3, cli half) ────────────────
+//
+// THE DEFECT, measured on guerrilla 2026-09-17 with a bp built from origin/main
+// 4f6b7f5e4: `--supersede --clear-rerun` — the operator taking exactly the door
+// PDS-D750's REMOVE arm is built on — exited 5 rerun_would_orphan HERE, nothing
+// was sent, and the row read back with its rerun still present. The server
+// implements the removal (PR #18817) and its own refusal names --clear-rerun;
+// this guard was the only thing withholding it, while printing a refusal that
+// said the removal did not exist.
+//
+// REVERT-RED: drop the stageClearRerunFlagName stand-down from stageRerunArgs
+// and this test fails — the stage is withheld and the exit is non-zero.
+func TestStageClearRerunIsNotRefusedForStrandingTheRerunItRemoves(t *testing.T) {
+	h := newStageRerunHarness(t)
+
+	code, _, stderr := h.runStage(theAdjudicatedRow, "open", "--note", theRulingNote, "--supersede", "--clear-rerun")
+
+	if code != exitOK {
+		t.Errorf("exit = %d — %s REMOVES the rerun, so there is nothing left to strand and the guard must stand down; stderr:\n%s",
+			code, stageClearRerunFlag, stderr)
+	}
+	if !h.sent("POST " + stageRerunStagePath) {
+		t.Errorf("the stage was withheld despite %s; requests seen: %v", stageClearRerunFlag, h.seen)
+	}
+	// Costs no round trip either: the flag is read off the call, so the guard
+	// never needs to know what the row carries.
+	if h.sent("GET " + stageRerunGetPath) {
+		t.Errorf("the guard probed the row on a call that removes the rerun; requests seen: %v", h.seen)
+	}
+	if strings.Contains(stderr, stageRerunOrphanCode) {
+		t.Errorf("a removal was described as an orphaning:\n%s", stderr)
+	}
+}
+
+// The refusal must name the subtraction door as a way out — and must NOT assert
+// the removal is impossible, which is what it said for as long as the server
+// half was unlanded. A refusal that hides the door built to answer it sends the
+// operator to --keep-rerun, i.e. to keeping a probe that does not bind the
+// reason they are writing: the exact orphan this guard exists to prevent.
+//
+// REVERT-RED: restore the old third line of stageRerunOrphanRefusal and this
+// test fails on both halves — no --clear-rerun, and "not possible at any door".
+func TestStageRerunRefusalNamesAllThreeDoors(t *testing.T) {
+	h := newStageRerunHarness(t)
+
+	_, _, stderr := h.runStage(theAdjudicatedRow, "open", "--note", theRulingNote, "--supersede")
+
+	for _, want := range []string{"--rerun", stageKeepRerunFlag, stageClearRerunFlag} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("refusal omits the %s door — every way out must be on the page:\n%s", want, stderr)
+		}
+	}
+	// The stale claim, in the spellings it shipped in. Probing for the NEW text
+	// alone would pass on a refusal that named --clear-rerun in one breath and
+	// called it unimplemented in the next.
+	for _, gone := range []string{
+		"not possible at any door",
+		"until it lands",
+		"server half of task-5509618e1868d9f2",
+	} {
+		if strings.Contains(stderr, gone) {
+			t.Errorf("refusal still asserts the removal is unlanded (%q) — it shipped in PR #18817 and is live:\n%s", gone, stderr)
+		}
 	}
 }
