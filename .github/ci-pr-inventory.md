@@ -457,3 +457,51 @@ rule's third clause keeps it and why it is NOT moved here: its harnesses are the
 only lane that runs them, and they are triggered by the very files a PR edits.
 Its 50 are a JOB-COUNT problem, not a venue problem — nearly all of them skip —
 and folding them is the same class of work as folding the required four.
+
+## RE-MEASURED 2026-09-17 (task-dee226be3107a98b, gates-r21-w8)
+
+Six PR heads merged 2026-09-17, counted as **distinct check-run names** with
+`gh api --paginate` and `sort -u` (a plain `per_page=100` read truncates: two of
+the six heads render more than 100 rows, and a fleet lead took a false
+"required context absent" off exactly that trap today):
+
+| head | PR | rows | distinct names |
+|---|---|---|---|
+| `1743cdd15b` | #18915 | 135 | **126** |
+| `a3536a1fab` | #18922 | 134 | **125** |
+| `ba5eaa906b` | #18921 | 79 | 68 |
+| `81a3da53bd` | #18912 | 77 | 68 |
+| `6492825f1e` | #18920 | 70 | 61 |
+| `4b1b658827` | #18916 | 70 | 61 |
+
+**The row's filing of "55 check runs from 46 workflows" is low by roughly 2x at
+the median and by more than 2x at the tail.** The distribution is bimodal and
+the split is entirely `shell-harnesses.yml`: the four heads it missed read
+61–68, the two it hit read 125–126.
+
+The required-four floor **re-confirms at 26** (`console-harness` 9 + `elixir` 8 +
+`cloud` 7 + `pr-task-gate` 2), so the §"under 20" verdict above stands unchanged:
+**UNREACHABLE BY TRIGGER EDITS.**
+
+### One committed claim above is CORRECTED, not re-confirmed
+
+The section above says of `shell-harnesses.yml`'s job count: *"nearly all of
+them skip"*. **That is true of some heads and false of others, and a one-head
+sample cannot tell which.** Measured per job conclusion:
+
+| head | PR | skipped | success |
+|---|---|---|---|
+| `a3536a1fab` | #18922 | 47 | 7 |
+| `1743cdd15b` | #18915 | **0** | **54** |
+
+On #18915 every one of the 54 jobs **executed** — 54 real runner boots over a
+15-minute wall clock (`09:02:10Z` → `09:17:21Z`), the largest single real-compute
+event on the PR path. The dispatcher's per-harness booleans do not narrow on a
+head that touches a broad path, and on such a head this one advisory workflow
+costs more than all four required workflows combined.
+
+So its 54 are **not** only a rollup-depth problem. `--skipped` split on one head
+is not a property of the workflow, and the sentence above should be read as
+describing #18922's shape, not the general one. Folding them remains the same
+class of work as folding the required four, and is filed separately — this
+amendment changes no trigger and moves no workflow.
