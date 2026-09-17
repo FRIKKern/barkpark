@@ -156,7 +156,10 @@ defmodule Barkpark.PdsDoorCensusTest do
           "A RETIRED- PRICE IS REFUSED",
           "AN UNANCHORED PREFIX IN FRONT OF CPU= IS REFUSED",
           "THE PARTITION PRINTS THE FULL VOCABULARY INCLUDING ZEROES",
-          "THE SUM IS ASSERTED"
+          "THE SUM IS ASSERTED",
+          "WIRED-CLAIM FIRES",
+          "WIRED-CLAIM CONTROL",
+          "WIRED-CLAIM FAIL-CLOSED"
         ] do
       assert out =~ arm,
              "the `#{arm}` arm is gone from the selftest. It covers a silence that was live on " <>
