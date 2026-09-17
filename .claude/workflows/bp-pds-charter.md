@@ -15898,7 +15898,7 @@ name unrelated code.
   makes it materially worse. There is no reading of this evidence under which a THROUGH is defensible,
   so the gate legs are NOT landed and are not proposed: **an `api/test/**` rider and an
   `ELIXIR_TEST_ONLY_PATHS` entry must land TOGETHER or not at all** (leg A without leg B, or leg B
-  without leg A, is the one class no existing gate can see — `scripts/pds-door-census.sh`@`leg B without leg A`), and under a
+  without leg A, is the one class no existing gate can see — `scripts/pds-door-census.sh`@`executed by no ExUnit case`), and under a
   PRICE ruling the correct number of legs is zero.
 
   **THE METER IS NAMED, AND IT IS DELIBERATELY NOT THE CENSUS'S OWN.** `/usr/bin/time -l` wrapped around
