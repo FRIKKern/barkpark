@@ -15782,3 +15782,72 @@ name unrelated code.
   The third arm `scripts/pds-rerun-symbol-coverage.py`@`def falsifiability(` closes the second axis
   at the reader seam, with its own controls in `--selftest` and its own false-positive shape stated
   in the docstring. PAYS: `task-778d9a95681c33bf` c0, c1, c3.
+- **PDS-D751 — A SHARED `disposition_rerun` IS HONEST (PDS-D391b STANDS, UNAMENDED). WHAT IS NOT
+  HONEST IS A RERUN THAT OUTLIVED ITS REASON. THE RERUN IS A PROPERTY OF THE REASON, NOT OF THE
+  ROW: ANY WRITE THAT DISPLACES A NON-BLANK `disposition_reason` MUST, IN THE SAME CALL, RETARGET
+  THE RERUN OR LEAVE THE ROW WITH NONE. NEVER INHERIT.**
+  `task-c72dd1f2a09d91cf` filed 317 of 515 rows carrying the byte-identical rerun
+  `git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs`
+  as "one boilerplate command that greens regardless of its row", and proposed a writer-side refusal
+  of a rerun already in use. **RE-COUNTED AT `fbfe8a6b6` over the complete ledger** (`bp task ls
+  --all -o json` → 9,435 rows, not the filing's 9,434): the 317/515 figure REPRODUCES exactly. The
+  DIAGNOSIS does not.
+  **THE 317 SPLIT, MEASURED: 192 rows carry a `disposition_reason` that literally turns on
+  `ROSTER_PAGE_LIMIT`** — the wave-S-4c bulk adoption, *"the epic's direct roster was 450 of the seal
+  predicate's ROSTER_PAGE_LIMIT 500, and a full page raises ROSTER-TRUNCATED and destroys the
+  verdict"* — so for those the command IS the symbol-specific probe of the claim being made, and the
+  sharing is the honest shape PDS-D391b(b) and PDS-D336(a) already ruled it to be. The filing read
+  the rows' TITLES (BEAM memory, TLS cutover, token revocation) where it needed to read their
+  REASONS: a disposition_reason is about the ADJUDICATION, never about the row's subject. **A
+  writer-side distinctness refusal would have refused 191 correct writes.** It stays ruled out, and
+  `bp task stage --rerun`'s own help already says so.
+  **THE REAL DEFECT IS THE OTHER 125, AND IT IS A DESYNC, NOT A DUPLICATE.** Those rows had their
+  reason REPLACED later (`--note --supersede`: *"premise expired; cancelled not done"* ×72,
+  *"Disposition repaired by the lead"* ×6, `RULED by team-lead` ×2, …) while `disposition_rerun`,
+  written by a separate optional flag on the same call, was simply left alone. **All 125 have
+  `updated_at > inserted_at`; not one was born wrong.** The row then presents a green, recent,
+  symbol-specific probe for a claim it no longer makes — which is exactly the census-level
+  indistinguishability `pds-dedup-unavailable-503-is-still-a-409` named, arrived at by a different
+  road.
+  **THE TRICHOTOMY'S THIRD ARM DOES NOT EXIST TODAY.** RETARGET is available (`--rerun <cmd>`);
+  REFUSE-ON-DUPLICATE is ruled out above; **REMOVE is unimplementable — `--rerun`'s "blank counts as
+  absent" means no call can clear a rerun, and `/v1/data/mutate` refuses the key by name.** A row
+  whose reason is a pure ruling (no code claim) therefore CANNOT be made honest by subtraction. The
+  missing verb is `--clear-rerun`, and it is half of the writer fix.
+  **WRITER FIX, FILED NOT SHIPPED (api fence, outside this ruling's):** bind the rerun to the note's
+  EXISTING supersede door — a `--note` that displaces a different non-blank reason on a row carrying
+  a non-blank `disposition_rerun` is refused unless the same call carries `--rerun` or
+  `--clear-rerun`. Its own flag, never `--supersede`'s, for the reason `check_instruction_supersession`
+  already gives at `api/lib/barkpark/tasks/stage.ex`: *"two slots with one key to both locks is one
+  slot wearing a costume."* That makes the 125 unfileable instead of merely findable.
+  **THE DETECTOR, SHIPPED HERE:** `scripts/pds-rerun-symbol-coverage.py` gains **P4 ORPHANED** — P1
+  run backwards. P1 asks whether the rerun mentions the reason and needs backticks, so it abstains on
+  415 of 515. P4 asks whether the REASON mentions what the rerun PROBES (the grep pattern and its
+  identifier tokens, the `rev-list` sha, the `cat-file` path), which is parseable with no backticks
+  at all — so P4 reaches into the ABSTAIN set by construction. It is not P2 wearing a hat: it CLEARS
+  192 rows P2 flags and NAMES 16 unique-rerun rows P2 cannot see. It is ORTHOGONAL to PDS-D750's P3,
+  not a refinement of it: **P3 asks whether a rerun CAN go red; P4 asks whether the row it sits on is
+  the row it was written for**, and a perfectly falsifiable rerun can still be testing somebody
+  else's claim. **Controls J and K share a rerun byte-for-byte and must disagree**, which is the
+  mutation proof that the verdict is about the reason and not the command; L pins the other two legal
+  spellings and makes an unknown one abstain LOUDLY rather than read as bound; M pins the multi-token
+  pattern binding on its identifier.
+  **LIVE, at `fbfe8a6b6`:** `DENOMINATOR 515 · P4 BOUND 375 · P4 ORPHANED 136 · P4 UNPARSED 4 ·
+  UNION(P1+P2) 351 · UNION+P4 362`. Four orphans had `.doc.claim.worker` null, re-read in the same
+  minute as each write, and were retargeted (121 of the 125 are HELD by a live six-lane campaign and
+  were LISTED, not written); after: `DENOMINATOR 516 · P4 BOUND 378 · P4 ORPHANED 134 ·
+  UNION(P1+P2) 347 · UNION+P4 360`. **The denominator moved 515 → 516 under the measurement** — a
+  seventh lane filed a rerun-carrying row mid-run — which is reported rather than smoothed: a ledger
+  census taken while the ledger is being written has a drifting denominator BY CONSTRUCTION, and a
+  figure that never moves is the one to distrust.
+  **A RETARGET CAN PAY P4 AND BREAK PDS-D750's P3, AND TWO OF MINE DID.** The first pass wrote
+  `git grep -n 'func channelStaleness' …` and `git grep -n 'def drain_distribution' …`; both BOUND
+  under P4 and both DEFINITION-SHAPED WITH A BARE IDENTIFIER TAIL, so P3 UNFALSIFIABLE-DEF went
+  6 → 8 on my own writes. Re-written with the delimiter (`channelStaleness(`, `drain_distribution(`)
+  it is back to 6. **The two arms must be read TOGETHER on every write to this field**, and the
+  instrument caught its author within one run of shipping — which is the argument for landing them
+  in the same program rather than in two. **The fourth,
+  `dr-w24-bl-internal-write-route-is-publicly-reachable`, is STILL NAMED after its retarget and that
+  is correct**: its reason is a ruling ("pick it up") with no code claim, so nothing a rerun can run
+  binds to it. That row is the specimen for `--clear-rerun`, and leaving it red rather than
+  massaging the predicate is the point.
