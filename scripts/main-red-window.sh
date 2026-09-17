@@ -261,7 +261,7 @@ _selftest() {
 
   _run(){ local lbl="$1" f="$2" want="$3" need="$4"
     out=$(bash "$_self" --verdict "$f" 2>&1); rc=$?
-    if [ "$rc" != "$want" ]; then _no "$lbl" "exit=$rc want=$want | $(printf '%s\n' "$out"|tail -2|head -1)"; return; fi
+    if [ "$rc" != "$want" ]; then _no "$lbl" "exit=$rc want=$want | $(printf '%s\n' "$out"|tail -2|sed -n '1p')"; return; fi
     case "$out" in *"$need"*) _ok "$lbl" "$(printf '%s\n' "$out"|grep -m1 -E 'CLEAN|NOT YET|NOT CLEAN|UNMEASURABLE|CANNOT READ')";;
       *) _no "$lbl" "output lacks [$need]";; esac; }
 
