@@ -130,6 +130,17 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun: "task",
+		Verb: "runtime-claims",
+		// The false-done class `bp task enrichment` cannot see: a SEALED
+		// criterion asserting a property of the RUNNING system, proved only by
+		// code presence. Advisory, read-only, exits 0.
+		Summary: "Sealed criteria asserting runtime properties proved only by code presence (always exits 0).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskRuntimeClaims(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "task",
 		Verb:    "tui",
 		Summary: "Open the live portrait task board (the same reader as `bp tasks`).",
