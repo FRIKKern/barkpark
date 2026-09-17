@@ -111,6 +111,14 @@ var nounBuiltins = []nounBuiltin{
 	},
 	{
 		Noun:    "task",
+		Verb:    "enrichment",
+		Summary: "Controlled read of the close_reason absence enrichment (always exits 0).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskEnrichment(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun:    "task",
 		Verb:    "tui",
 		Summary: "Open the live portrait task board (the same reader as `bp tasks`).",
 		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {

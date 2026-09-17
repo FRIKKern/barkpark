@@ -608,6 +608,10 @@ type claimWire struct {
 	// are detail fields and ride the frozen tolerance contract.
 	PreviousWorker json.RawMessage `json:"previous_worker"`
 	ExpiredAt      json.RawMessage `json:"expired_at"`
+	// ClosedBy is claim.closed_by, read under the SAME tolerant coercion: it is
+	// a detail field feeding the enrichment control's stratification, so a
+	// malformed value must degrade to "" rather than fail the whole list decode.
+	ClosedBy json.RawMessage `json:"closed_by"`
 	// Now is the D9 pulse — content.claim.now {"text","ts","criterion"?}.
 	// RawMessage + decodePulse's tolerance so a malformed pulse degrades to
 	// no-pulse instead of failing the whole list decode.
@@ -939,6 +943,7 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	if w.Claim != nil {
 		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
+		d.ClosedBy = rawString(w.Claim.ClosedBy)
 	}
 	return d
 }
