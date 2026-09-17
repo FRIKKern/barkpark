@@ -9445,47 +9445,53 @@ test("instance-login CONTROL: deleting the 200-and-url guard makes every refusal
 });
 
 test("instance-login: the resume shell asks the host-keyed door and navigates only on its 200", async () => {
-  const calls = [];
-  const toasts = [];
+  // Drives the REAL path — api() over a stubbed fetch, no injected transport —
+  // because the write call site has to be spelled `api("POST", "/v1/auth/…"` in
+  // the shipped source for the elevated-write binding census to see it at all.
+  const realFetch = sandbox.fetch;
+  const realLocation = sandbox.location;
+  const seen = [];
   const navs = [];
-  const deps = {
-    api: (m, p, b) => { calls.push([m, p, b]); return Promise.resolve({ status: 200, data: { url: "https://g.example/studio?t=1" } }); },
-    toast: (t) => toasts.push(t),
-    navigate: (u) => navs.push(u),
+  sandbox.location = Object.assign({}, realLocation, { replace: (u) => navs.push(u) });
+  const answer = (status, body) => (url, init) => {
+    seen.push({ url: String(url), method: init.method, body: init.body });
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
   };
-  await hooks.resumeStudioLogin("https://g.example", deps);
-  // Field-wise, not deepEqual: the body object is created inside the vm realm,
-  // so its prototype is a different Object and strict deepEqual refuses it.
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], "POST");
-  assert.equal(calls[0][1], "/v1/auth/studio-signin");
-  assert.equal(calls[0][2].host, "https://g.example");
-  assert.equal(Object.keys(calls[0][2]).length, 1, "the door is handed the host and nothing else");
-  assert.deepEqual(navs, ["https://g.example/studio?t=1"]);
-  assert.equal(toasts.length, 0);
+  try {
+    sandbox.fetch = answer(200, { url: "https://g.example/studio?t=1" });
+    await hooks.resumeStudioLogin("https://g.example");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].method, "POST");
+    assert.equal(seen[0].url, "/v1/auth/studio-signin");
+    // The door is handed the arriving origin and nothing else — no instance id
+    // (the console has none here) and no team (the whole point of the door).
+    assert.deepEqual(JSON.parse(seen[0].body), { host: "https://g.example" });
+    assert.deepEqual(navs, ["https://g.example/studio?t=1"]);
 
-  // A refusal toasts and does NOT navigate.
-  calls.length = 0; navs.length = 0;
-  await hooks.resumeStudioLogin("https://g.example", {
-    api: (m, p, b) => { calls.push([m, p, b]); return Promise.resolve({ status: 404, data: { error: "not_found" } }); },
-    toast: (t) => toasts.push(t),
-    navigate: (u) => navs.push(u),
-  });
-  assert.equal(navs.length, 0);
-  assert.equal(toasts.length, 1);
-  assert.equal(toasts[0].kind, "error");
-  assert.match(toasts[0].body, /isn't managed by this account/);
+    // A refusal must not navigate. The toast is a no-op in this sandbox (there
+    // is no #toast-stack), which is exactly why the SENTENCES are pinned on
+    // studioSigninOutcome above and only the NAVIGATION is measured here.
+    seen.length = 0;
+    sandbox.fetch = answer(404, { error: "not_found" });
+    await hooks.resumeStudioLogin("https://g.example");
+    assert.equal(seen.length, 1);
+    assert.equal(navs.length, 1, "a 404 navigated — the login path failed OPEN");
 
-  // A deep link that is not a URL asks nothing at all — no request, no toast.
-  calls.length = 0; toasts.length = 0;
-  const nothing = hooks.resumeStudioLogin("garbage", {
-    api: (m, p, b) => { calls.push([m, p, b]); return Promise.resolve({ status: 200, data: {} }); },
-    toast: (t) => toasts.push(t),
-    navigate: (u) => navs.push(u),
-  });
-  assert.equal(nothing, undefined);
-  assert.equal(calls.length, 0);
-  assert.equal(toasts.length, 0);
+    // A deep link that is not a URL asks nothing at all.
+    seen.length = 0;
+    sandbox.fetch = answer(200, { url: "https://g.example/studio?t=2" });
+    assert.equal(hooks.resumeStudioLogin("garbage"), undefined);
+    assert.equal(seen.length, 0);
+    assert.equal(navs.length, 1);
+  } finally {
+    sandbox.fetch = realFetch;
+    sandbox.location = realLocation;
+  }
 });
 
 test("instance-login: the resume path no longer reads the team-scoped fleet", () => {

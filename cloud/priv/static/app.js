@@ -19048,25 +19048,24 @@
   // dependence on which team this console is pinned to.
   //
   // Failures degrade to a toast on the normal dashboard — the park is cleared up
-  // front so a broken link can't loop every render. `deps` exists so the unit
-  // harness can drive this shell with a recording transport; production passes
-  // nothing and the real api/toast/navigator are used.
-  function resumeStudioLogin(instanceUrl, deps) {
+  // front so a broken link can't loop every render. The transport is the shared
+  // api() by NAME and not through any injected seam: the elevated-write binding
+  // census (`__binding_census.mjs`) finds this console's write call sites by
+  // reading `api("VERB", "<route>"` out of the shipped source, and a write
+  // routed through a local alias would be invisible to it. The unit harness
+  // drives the real path with a stubbed `fetch` instead.
+  function resumeStudioLogin(instanceUrl) {
     clearParkedStudioLogin();
     var host = studioLoginHost(instanceUrl);
     if (!host) return;
-    deps = deps || {};
-    var send = deps.api || api;
-    var say = deps.toast || toast;
-    var go = deps.navigate || function (u) { location.replace(u); };
 
-    return send("POST", "/v1/auth/studio-signin", { host: instanceUrl }).then(function (r) {
+    return api("POST", "/v1/auth/studio-signin", { host: instanceUrl }).then(function (r) {
       var outcome = studioSigninOutcome(r, host);
       if (outcome.go) {
-        go(outcome.go);
+        location.replace(outcome.go);
         return outcome;
       }
-      say({ kind: "error", title: outcome.toast.title, body: outcome.toast.body });
+      toast({ kind: "error", title: outcome.toast.title, body: outcome.toast.body });
       return outcome;
     });
   }
