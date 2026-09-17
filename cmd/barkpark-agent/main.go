@@ -174,6 +174,16 @@ func run(args []string) int {
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
 			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, healthToken, nil),
+			// "Can this box deploy sites" (dr-w15-s1's GET /v1/instance/site-deploy),
+			// on the SAME base+token seam as the health gate and the stats probe
+			// above. Empty health-url -> nil probe -> the key never reaches the wire.
+			//
+			// A box that predates that route answers 404, and the probe degrades to
+			// UNMEASURED (an absent key), NOT to `configured: false`. That is not a
+			// nicety here: the fleet is old, so the 404 is the COMMON reading for a
+			// long while, and `false` would tell the control plane every one of those
+			// boxes REFUSES deploys.
+			SiteDeployProbe: agent.NewSiteDeployProbe(*healthURL, healthToken, nil),
 			// WHO is spending the box, beside the aggregates that can only
 			// say THAT it is being spent. One bounded `ps` per beat, no state.
 			// This is the detection half of the 2026-08-06 guerrilla runaway;
