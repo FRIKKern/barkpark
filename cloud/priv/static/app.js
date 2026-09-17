@@ -25409,6 +25409,13 @@
     { key: "ram", label: "RAM", fmt: "percent" },
     { key: "req_per_s", label: "Req/s", fmt: "rate" },
     { key: "p95_ms", label: "p95 latency", fmt: "ms" },
+    // The third number off the same instance ring. It was measured by the agent
+    // and decoded by the control plane long before anything rendered it — a key
+    // that reached the browser's data and never an operator's eye. Bar-less
+    // like its two siblings (a 5xx rate has no plan wall), tinted from its own
+    // warn/over. A measured 0.0/s renders as a metered zero, which is the whole
+    // point: "no 5xx right now" is only good news when somebody looked.
+    { key: "err_5xx_per_s", label: "5xx/s", fmt: "rate" },
     { key: "api_requests", label: "API requests", fmt: "count" },
     { key: "bandwidth", label: "Bandwidth", fmt: "bytes" }
   ];
@@ -25421,6 +25428,16 @@
     var i = 0, v = n;
     while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
     return (i === 0 ? String(v) : v.toFixed(1)) + " " + units[i];
+  }
+
+  // Pure: a ring width in seconds as human span text ("60s", "5m", "1h"). Whole
+  // minutes/hours only — a 90-second ring reads "90s", never "1.5m", because a
+  // rounded window would misstate the very denominator it exists to pin.
+  function usageWindowText(seconds) {
+    var s = Math.round(seconds);
+    if (s % 3600 === 0 && s >= 3600) return (s / 3600) + "h";
+    if (s % 60 === 0 && s >= 60) return (s / 60) + "m";
+    return s + "s";
   }
 
   function c10FmtValue(fmt, value) {
@@ -25475,6 +25492,17 @@
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
+    // dr-w14-bl: the ring window the three request-stats rates were measured
+    // over, carried on those meters by Usage.compose/1 as the conditional
+    // `window_s`. It rides in the meter's sub-line beside the freshness because
+    // a rate an operator cannot bound is a number, not a reading — 0.22 5xx/s
+    // over 60s and over 1s are different facts. Rendered ONLY for a real
+    // positive span and ONLY when the meter reports a number: attaching "over
+    // 60s" to "Not yet metered" would claim a measurement window for a
+    // measurement nobody took.
+    var windowText = !unmetered && typeof meter.window_s === "number" && isFinite(meter.window_s) && meter.window_s > 0
+      ? "over " + usageWindowText(meter.window_s)
+      : "";
     // OC25 — the threshold state, computed independent of whether a bar draws.
     // "over" when the value reaches over_at OR the quota ceiling (both inclusive,
     // mirroring the create-time guard); "warn" once it crosses warn_at; "ok" for a
@@ -25517,12 +25545,12 @@
     var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
       ? history.slice()
       : null;
-    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
+    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, window: windowText, state: state, bar: bar, spark: spark };
   }
 
   function usageMeterHtml(spec, meter, history) {
     var d = usageMeterDisplay(spec, meter, history);
-    var sub = [d.freshness, d.pending].filter(Boolean).join(" · ");
+    var sub = [d.freshness, d.window, d.pending].filter(Boolean).join(" · ");
     // Wave 4 (OC19): the quiet 14-day trend. Rendered ONLY when the meter has real
     // numeric history — an absent/all-null series draws nothing (honest absence).
     // sparklineSvg is reused VERBATIM (currentColor, null-is-gap, isolated-point

@@ -15,7 +15,7 @@ defmodule BarkparkCloud.Usage do
       documents      datasets      webhooks       — instance-sourced inventory counts
       db_size        disk                          — telemetry-sourced (the agent's health beat)
       cpu            ram                           — telemetry machine meters (0-100 %, 100/70/90 ceiling)
-      req_per_s      p95_ms                        — telemetry load meters (rate/latency, warn+over, no bar)
+      req_per_s      p95_ms       err_5xx_per_s    — telemetry RING meters (rate/latency, warn+over, no bar)
       seats          instances                     — control-plane-sourced (team members / fleet count)
       api_requests   bandwidth                     — FLOW meters, not yet metered (see below)
 
@@ -45,9 +45,9 @@ defmodule BarkparkCloud.Usage do
     * **`cpu` / `ram` / `disk`** — PHYSICAL percent meters: a fixed `quota: 100`
       (the 0-100 bar ceiling) with `warn_at: 70` / `over_at: 90`. The red state
       fires at `over_at` (90) BELOW the bar ceiling (OC25).
-    * **`req_per_s` / `p95_ms`** — RATE/LATENCY meters: `warn_at` + `over_at`
-      thresholds but NO `quota` (a rate has no plan wall) → they tint but draw no
-      bar.
+    * **`req_per_s` / `p95_ms` / `err_5xx_per_s`** — RATE/LATENCY meters: `warn_at`
+      + `over_at` thresholds but NO `quota` (a rate has no plan wall) → they tint
+      but draw no bar.
 
   Every OTHER meter (inventory counts, db_size, seats, flow) keeps
   `quota`/`warn_at`/`over_at` nil — no invented limits.
@@ -55,6 +55,22 @@ defmodule BarkparkCloud.Usage do
   The `seats` meter additionally carries `:pending_invitations` (a non-negative
   integer, or absent when unavailable) — a cheap extra detail beside the seat
   count, never a second meter.
+
+  ## The ring window rides WITH the rates, and is not a meter (dr-w14-bl)
+
+  `req_per_s`, `p95_ms` and `err_5xx_per_s` are all read off the instance's ONE
+  request-stats ring, and the agent puts that ring's width on the beat as
+  `window_s`. A rate without its window is a number nobody can bound — 0.22
+  5xx/s over a 60-second ring and over a 1-second one are different facts — so
+  each of those three meters carries `:window_s` (a positive integer) as a
+  CONDITIONAL key, the `:pending_invitations` precedent again.
+
+  It is deliberately NOT a fourth meter: it has no threshold, no ceiling and no
+  bar, and a "meter" whose only job is to qualify three others would show up in
+  the vocabulary as a signal an operator is asked to judge. An absent or
+  sentinel (`-1`) window simply omits the key — the meter renders as it always
+  did, and the surface says nothing about a width nobody measured rather than
+  borrowing the documented 60s default.
 
   ## Two honesty tiers (D48)
 
@@ -139,6 +155,7 @@ defmodule BarkparkCloud.Usage do
   @src_ram "telemetry.mem_used_percent"
   @src_req_per_s "telemetry.req_per_s"
   @src_p95_ms "telemetry.p95_ms"
+  @src_err_5xx_per_s "telemetry.err_5xx_per_s"
   @src_seats "control-plane.team_members"
   # The fleet meter is a pure control-plane read (the team's managed-instance
   # count) — it returns even when every instance is down.
@@ -185,8 +202,7 @@ defmodule BarkparkCloud.Usage do
     telemetry = telemetry_or_nil(Map.get(inputs, :telemetry))
     measured_at = telemetry_measured_at(telemetry)
 
-    %{
-      meters: %{
+    meters = %{
         documents: instance_meter(Map.get(inputs, :documents), @src_documents),
         datasets: instance_meter(Map.get(inputs, :datasets), @src_datasets),
         webhooks: instance_meter(Map.get(inputs, :webhooks), @src_webhooks),
@@ -212,14 +228,55 @@ defmodule BarkparkCloud.Usage do
           ),
         p95_ms:
           telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
+        # The 5xx rate off the SAME ring. Thresholds are deliberately tiny and
+        # absolute rather than a share of req_per_s: a share needs a denominator
+        # this envelope cannot promise is present, and ANY sustained 5xx rate on
+        # a box is worth an operator's eye. warn at 0.1/s (roughly one 5xx every
+        # ten seconds), red at 1.0/s. A measured 0.0 survives as a metered zero
+        # — that is the good news the meter exists to show — while an unwired
+        # probe's -1 stays "unmetered", because zero 5xx and "nobody looked" are
+        # opposite facts and only one of them is reassuring.
+        err_5xx_per_s:
+          telemetry_threshold_meter(
+            telemetry,
+            :err_5xx_per_s,
+            @src_err_5xx_per_s,
+            measured_at,
+            nil,
+            0.1,
+            1.0
+          ),
         seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
         instances: instances_meter(Map.get(inputs, :instances)),
         # FLOW meters — always unmetered, whatever anyone passes. req/s is a
         # RATE, not the billing request count — the flow meters stay dark here.
         api_requests: meter(@unmetered, @src_not_metered, nil),
         bandwidth: meter(@unmetered, @src_not_metered, nil)
-      }
     }
+
+    %{meters: attach_ring_window(meters, telemetry)}
+  end
+
+  # The three request-stats meters all come off ONE instance ring, and the beat
+  # reports that ring's width. Attach it to each as the CONDITIONAL `:window_s`
+  # key so a rate is never rendered without the span it was measured over.
+  # Deliberately not a meter of its own — see the moduledoc.
+  @ring_meters [:req_per_s, :p95_ms, :err_5xx_per_s]
+
+  defp attach_ring_window(meters, telemetry) do
+    case telemetry && Map.get(telemetry, :window_s) do
+      # A real span only. The agent's `-1` sentinel and a 0 are both "we do not
+      # know how wide this window was" — omit the key rather than publish a
+      # width nobody measured, or (worse) a zero-second window that would make
+      # every rate look infinitely precise.
+      n when is_number(n) and n > 0 ->
+        Enum.reduce(@ring_meters, meters, fn key, acc ->
+          Map.update!(acc, key, &Map.put(&1, :window_s, n))
+        end)
+
+      _ ->
+        meters
+    end
   end
 
   # ── Meter builders ──────────────────────────────────────────────────────────
