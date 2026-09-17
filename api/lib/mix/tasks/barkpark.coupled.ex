@@ -120,8 +120,7 @@ defmodule Mix.Tasks.Barkpark.Coupled do
   defp kind_label(:pin_comparison), do: "pin-comparison"
 
   defp guard_line(%{kind: :pin_comparison, guard: [g | _]}),
-    do:
-      "\n    guard     : #{g}   (what --check runs; the producer above is YOURS to run and READ)"
+    do: "\n  guard     : #{g}   (what --check runs; the producer above is YOURS to run and READ)"
 
   defp guard_line(_), do: ""
 

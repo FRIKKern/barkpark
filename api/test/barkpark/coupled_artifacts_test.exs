@@ -15,7 +15,15 @@ defmodule Barkpark.CoupledArtifactsTest do
       `docs/cli/fixtures/full-manifest.json`, which has NO producer and which
       doctrine forbids both hand-editing and regenerating,
     * `--check`'s decision function stops reporting a dirty artifact, or starts
-      reporting a clean one.
+      reporting a clean one,
+    * PREDICATE 2 (task-c5b0e402137a2d4f) stops seeing a committed pin that a
+      workflow-invoked script compares against and offers to re-pin,
+    * the pin parser goes UNIFORM — classifying every script the same way,
+      which is the signature of a broken instrument rather than a rule.
+
+  THE TWO ARMS RED ON DIFFERENT MUTATIONS, which is the point of having two:
+  neutering `@diff_re` reds only the regenerate-then-diff arm; neutering
+  `@repin_vocab` reds only the pin-comparison arm. Both were run; see the PR.
   """
   use ExUnit.Case, async: true
 
@@ -164,6 +172,185 @@ defmodule Barkpark.CoupledArtifactsTest do
 
       assert [{_, _}, {_, _}] =
                CoupledArtifacts.violations([c, other], fn x -> x.artifacts end)
+    end
+  end
+
+  # ── PREDICATE 2: the pin comparison (task-c5b0e402137a2d4f) ───────────────
+
+  defp pins, do: Enum.filter(couplings(), &(&1.kind == :pin_comparison))
+
+  defp bindings_pin do
+    Enum.find(pins(), &("api/.sobelow-annotation-bindings" in &1.artifacts))
+  end
+
+  describe "PREDICATE 2 sees the pin coupling predicate 1 is blind to" do
+    test "api/.sobelow-annotation-bindings is derived, with its regen affordance named" do
+      c = bindings_pin()
+
+      refute is_nil(c),
+             """
+             api/.sobelow-annotation-bindings is no longer derived as a coupled
+             artifact. It is guarded by api/scripts/sobelow-inline-overlap-check.sh,
+             which a step in .github/workflows/security.yml runs, and cured by
+             --regen-bindings-pin. Either that script changed shape (it no longer
+             reads the pin, no longer writes it, or no longer prints the cure beside
+             $0) or the pin predicate stopped matching it.
+             derived pins: #{inspect(Enum.flat_map(pins(), & &1.artifacts))}
+             """
+
+      assert c.producer == [
+               "bash api/scripts/sobelow-inline-overlap-check.sh --regen-bindings-pin"
+             ],
+             "the AFFORDANCE must be the producer, not the guard. got: #{inspect(c.producer)}"
+
+      assert c.guard == ["bash api/scripts/sobelow-inline-overlap-check.sh"],
+             """
+             The guard must be the BARE invocation — the command the gate runs.
+             A guard carrying --selftest judges a fixture tree, not this one.
+             got: #{inspect(c.guard)}
+             """
+
+      assert c.workflow == ".github/workflows/security.yml"
+      assert c.job == "sobelow-inline-overlap"
+    end
+
+    test "predicate 1 alone cannot see it — the blindness this row was filed about" do
+      # The point is not that the pin is derived; it is that it is derived by the
+      # SECOND rule. If it ever appears under :regenerate_then_diff, the shapes
+      # have merged and this arm is measuring nothing.
+      regen = Enum.filter(couplings(), &(&1.kind == :regenerate_then_diff))
+
+      refute Enum.any?(regen, &("api/.sobelow-annotation-bindings" in &1.artifacts)),
+             "the pin is now attributed to regenerate-then-diff: #{inspect(regen)}"
+
+      assert bindings_pin().kind == :pin_comparison
+    end
+
+    test "predicate 2 is a rule, not a one-artifact special case" do
+      assert length(pins()) >= 2,
+             "derived only #{length(pins())} pin coupling(s): " <>
+               "#{inspect(Enum.flat_map(pins(), & &1.artifacts))}. A rule that fits " <>
+               "exactly its worked example has probably been narrowed onto it."
+
+      for c <- pins() do
+        assert [affordance] = c.producer
+
+        assert affordance =~ ~r/--(re-?gen|re-?pin|update)/,
+               "pin producer #{inspect(affordance)} is not an affordance invocation"
+      end
+    end
+  end
+
+  describe "MUTATION ARM: the pin parser is NON-UNIFORM" do
+    # A uniform verdict is the signature of a broken instrument. These arms
+    # assert the parser SEPARATES scripts, and separates files WITHIN one script.
+
+    @workflow_scripts [
+      "api/scripts/sobelow-inline-overlap-check.sh",
+      "api/scripts/sobelow-baseline-staleness-check.sh",
+      "api/scripts/sobelow-baseline-fingerprint-check.sh",
+      "api/scripts/sobelow-waiver-merge-time-check.sh",
+      "api/scripts/prod-postcheck.sh"
+    ]
+
+    test "it declares pins for some workflow-invoked scripts and NOT for others" do
+      declaring =
+        Enum.filter(@workflow_scripts, fn s ->
+          CoupledArtifacts.pin_declarations(@repo_root, s) != []
+        end)
+
+      # Control: the population is real. An absence is never caught by
+      # inspection — print the key set before treating an empty read as evidence.
+      for s <- @workflow_scripts do
+        assert File.regular?(Path.join(@repo_root, s)),
+               "probe is broken, not the parser: #{s} is not in the checkout"
+      end
+
+      assert declaring != [], "the parser declared NOTHING — it is not running"
+
+      assert length(declaring) < length(@workflow_scripts),
+             """
+             The parser declared a pin for EVERY script it was shown. A uniform
+             verdict is the signature of a broken instrument, not of a tree where
+             everything is pinned. declaring: #{inspect(declaring)}
+             """
+
+      assert "api/scripts/sobelow-inline-overlap-check.sh" in declaring
+
+      refute "api/scripts/sobelow-baseline-fingerprint-check.sh" in declaring,
+             "fingerprint-check has no re-pin affordance at all; declaring a pin " <>
+               "for it means conjunct 3 stopped discriminating"
+    end
+
+    test "WITHIN one script it separates the pin from the file it merely reads" do
+      decls =
+        CoupledArtifacts.pin_declarations(
+          @repo_root,
+          "api/scripts/sobelow-inline-overlap-check.sh"
+        )
+
+      artifacts = Enum.map(decls, & &1.artifact)
+
+      assert "api/.sobelow-annotation-bindings" in artifacts
+
+      # Control: the script really does resolve .sobelow-skips to a committed
+      # file — so its ABSENCE below is discrimination, not a failure to parse.
+      assert File.regular?(Path.join(@repo_root, "api/.sobelow-skips"))
+
+      assert File.read!(Path.join(@repo_root, "api/scripts/sobelow-inline-overlap-check.sh")) =~
+               "BASELINE=\"$API_DIR/.sobelow-skips\""
+
+      refute "api/.sobelow-skips" in artifacts,
+             """
+             api/.sobelow-skips was swept in. The same script resolves it to a
+             committed file and READS it — but nothing in that script WRITES it and
+             nothing prints a re-pin cure for it, so conjuncts 2 and 3 are false.
+             Sweeping it in means the predicate degenerated to "a committed file a
+             script reads", which is most of the repo. declared: #{inspect(artifacts)}
+             """
+    end
+
+    test "a script no workflow step names contributes nothing, however shaped" do
+      # The descent is workflow-driven. A script with the right shape that no
+      # gate runs is not a coupling — nothing reds if it drifts.
+      derived = Enum.flat_map(pins(), & &1.artifacts)
+
+      refute "api/scripts/sobelow-annotation-transfer-check.sh" in derived
+
+      assert Enum.all?(pins(), fn c ->
+               [g] = c.guard
+               String.contains?(g, ".sh")
+             end)
+    end
+  end
+
+  describe "PREDICATE 2 goes QUIET on a clean tree" do
+    test "the real guard exits 0 on this checkout, so the pin arm reports nothing" do
+      c = bindings_pin()
+      [cmd] = c.guard
+      [exe | args] = String.split(cmd, ~r/\s+/, trim: true)
+
+      {out, status} =
+        System.cmd(exe, args, cd: @repo_root, stderr_to_stdout: true)
+
+      assert status == 0,
+             """
+             The pin guard reds on a tree with no pending change, which means either
+             the pin is genuinely stale (re-pin it, in THIS commit, with
+             #{Enum.join(c.producer, " ")} — then READ THE DIFF) or the guard is
+             measuring something else. Guard output:
+             #{out}
+             """
+
+      # The decision function, given that live result, must be silent.
+      assert [] == CoupledArtifacts.violations([c], fn _ -> [] end)
+    end
+
+    test "and reds — naming the artifact — the moment the guard would fail" do
+      c = bindings_pin()
+
+      assert [{^c, ["api/.sobelow-annotation-bindings"]}] =
+               CoupledArtifacts.violations([c], fn x -> x.artifacts end)
     end
   end
 end
