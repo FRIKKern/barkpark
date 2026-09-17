@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Repo-wide PREDICATE: no file may EMIT a bare `handle_errors {`.
+# Repo-wide PREDICATE: no file may EMIT a handle_errors block with no status list.
 #
 # WHY THIS IS A PREDICATE AND NOT A LIST. deploy/site-deploy.sh's regression pin
 # (search it for "A MISS ON A SPAWNED STATIC SITE IS A 404") asserts the
@@ -84,12 +84,29 @@ while IFS= read -r f; do
   [ -n "$hits" ] || continue
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    body="${line#*:}"; body="${body#*:}"
+    # `grep -n` over a SINGLE file emits `LINENO:text` — strip exactly ONE
+    # field. Stripping two ate past a colon inside the text itself, which hid
+    # the leading `#` of a comment line and mis-sorted a status-scoped hit into
+    # the violation pile. Caught by deploy/site-deploy.sh --self-test, not by
+    # reading this loop.
+    body="${line#*:}"
+    case "$body" in
+      *[!\ ]*) : ;;
+      *) continue ;;
+    esac
     if printf '%s\n' "$body" | grep -qE "$COMMENT_RE"; then continue; fi
     if printf '%s\n' "$body" | grep -qE "$SCOPED_RE"; then
       scoped_files+=("$f:${line%%:*}")
-    else
+    elif printf '%s\n' "$body" | grep -qE "$BARE_RE"; then
       bare_hits+=("$f:$line")
+    else
+      # Neither pattern survives into the extracted body: the line matched the
+      # file-level grep but this loop cannot see why. That is a parse fault in
+      # THIS script, not a finding about the repo — say so rather than
+      # manufacturing a violation out of it.
+      echo "[handle_errors-scope] FAIL (parse fault) — $f:${line%%:*} matched the file scan but"
+      echo "  neither pattern matches the extracted body: <<$body>>"
+      exit 1
     fi
   done <<< "$hits"
 done < <(git ls-files)
@@ -112,7 +129,7 @@ echo "[handle_errors-scope] control OK — ${#scoped_files[@]} status-scoped emi
 for s in "${scoped_files[@]}"; do echo "    SCOPED  $s"; done
 
 if [ "${#bare_hits[@]}" -eq 0 ]; then
-  echo "[handle_errors-scope] OK — no bare 'handle_errors {' emitted anywhere in the tree."
+  echo "[handle_errors-scope] OK — no status-less handle_errors block is emitted anywhere."
   exit 0
 fi
 
@@ -133,7 +150,7 @@ if [ "$hard" -gt 0 ]; then
   echo "[handle_errors-scope] FAIL — $hard un-stood-down bare handle_errors emission(s)."
   echo "  A bare handle_errors catches EVERY error the site raises, including the 404 a"
   echo "  file_server raises inside an armed handle_path /sites/<slug>/*. Emit"
-  echo "  'handle_errors 502 503 504 {' instead. Reference: deploy/caddy/barkpark-maintenance.caddy"
+  echo "  the status-scoped form (502 503 504) instead. Reference: deploy/caddy/barkpark-maintenance.caddy"
   exit 1
 fi
 
