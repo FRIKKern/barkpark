@@ -41,7 +41,6 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Media
-  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets
   alias Barkpark.Repo
 
@@ -350,7 +349,7 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
         @asset_type,
         attrs,
         dataset,
-        [source: :api] ++ MediaFile.scope_opts(file)
+        [source: :api] ++ Barkpark.Media.Storage.MediaFile.scope_opts(file)
       )
     end
   end
