@@ -140,7 +140,8 @@ defmodule BarkparkCloud.Web.ChoiceFamilyProducerTest do
   end
 
   test "SELF-TEST — a head named only in a CSS COMMENT is not a declaration" do
-    css = "/* the retired .choice-list head is named here, in prose */\n.choice-ico { color: blue; }\n"
+    css =
+      "/* the retired .choice-list head is named here, in prose */\n.choice-ico { color: blue; }\n"
 
     assert declared_heads(css) == ["choice-ico"],
            "comment text is being read as a selector. The tombstone comment above " <>
