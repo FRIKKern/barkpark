@@ -30,6 +30,18 @@
 #                                           one. Fixtures prove the detector
 #                                           fires and stays quiet; the last arm
 #                                           runs it on this script.
+#   scripts/pds-pull-proof.sh --selftest-roster
+#                                           OFFLINE control that the rung-6
+#                                           sentinel exclusion roster has ONE
+#                                           edit site: scripts/pds-schema-row-
+#                                           census.md declares
+#                                           PDS_SENTINEL_EXCLUSION and this
+#                                           harness derives its NOT IN clause
+#                                           from it. Positive arm reads the
+#                                           real census; negative arm drifts a
+#                                           fixture by one row; refusal arms
+#                                           prove an unusable source reads as
+#                                           NOT DERIVED, never derived-empty.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -3457,9 +3469,90 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 # the SKIP count in the target's own server.log below (PDS-D129). That
 # cross-check is the only thing that turns a future guerrilla-only orphan, or a
 # third core writer, from a silent vacuous green into a loud red.
+#
+# ── ONE EDIT SITE, NOT TWO (PDS-D129) ────────────────────────────────────────
+#
+# The roster used to live here as a typed-in `NOT IN ('tag','metric')` AND again
+# as prose in scripts/pds-schema-row-census.md, and a third time in step 6's
+# scope banner. Three copies of a hand-maintained list is the drift shape the
+# census file was written to warn about, reproduced by the pair that wrote it.
+#
+# Now the census declares it once, machine-readably, and this harness DERIVES:
+#
+#   scripts/pds-schema-row-census.md   `PDS_SENTINEL_EXCLUSION = tag metric`
+#
+# The literal below is a FALLBACK for the one case where that file is not
+# readable, never a second authority. When both are readable and they disagree,
+# step 6 FAILS before the sentinel is written — sentinelling a set nobody
+# declared is exactly the vacuous green this rung exists to prevent. When the
+# census is unreadable the run says so and proceeds on the fallback, UNCHECKED.
+# Same shape as step 2's @e3_dataset_keyed derivation.
+SENTINEL_EXCLUSION_FALLBACK="tag metric"
+SENTINEL_EXCLUSION_SOURCE_REL="scripts/pds-schema-row-census.md"
+# The resolved roster, space separated. Seeded with the fallback so every reader
+# has a defined value; sentinel_roster_resolve below replaces it from the census
+# (or leaves it, loudly) before step 6 touches a row.
+SENTINEL_EXCLUSION="$SENTINEL_EXCLUSION_FALLBACK"
+# The census's answer, set only when it DISAGREES with the fallback, so the fail
+# message can name both sides. Defined up here because `set -u` is on.
+SENTINEL_ROSTER_DRIFT=""
+
+# Print the space-separated roster declared by the census, or nothing and a
+# non-zero exit when the file is unreadable or the declaration does not parse.
+# An unparseable source must read as "NOT derived", never as "derived empty":
+# an empty derivation would mismatch the fallback and red a healthy run for a
+# reason that has nothing to do with the census's contents.
+#
+# Takes the file to read as $1 so the selftest can point it at a fixture — a
+# derivation that can only ever read the real file cannot be given a negative
+# control, and a detector with no negative control is a claim, not a check.
+sentinel_exclusion_derive() {
+  local src="${1:-$REPO_ROOT/$SENTINEL_EXCLUSION_SOURCE_REL}" out
+  [ -r "$src" ] || return 1
+  out="$(sed -n 's/^PDS_SENTINEL_EXCLUSION[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$src" \
+          | head -n 1 | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
+  [ -n "$out" ] || return 1
+  # A name is interpolated into a SQL string literal below. Anything that could
+  # close that literal is REFUSED, not escaped: the roster is a handful of
+  # lowercase schema names and a surprise there is a defect, not a quoting job.
+  case "$out" in
+    *"'"*|*\\*) return 1 ;;
+  esac
+  printf '%s' "$out"
+}
+
+# The roster as a SQL IN-list: `tag metric` -> `'tag','metric'`.
+sentinel_exclusion_sql_list() {
+  local n out=""
+  for n in $SENTINEL_EXCLUSION; do
+    [ -n "$out" ] && out="$out,"
+    out="$out'$n'"
+  done
+  printf '%s' "$out"
+}
+
+# Resolve SENTINEL_EXCLUSION from the census. Exit 1 (having printed nothing)
+# when the census and the fallback DISAGREE — the caller turns that into a
+# `fail`, before any row is written.
+sentinel_roster_resolve() {
+  local derived
+  if ! derived="$(sentinel_exclusion_derive)"; then
+    SENTINEL_EXCLUSION="$SENTINEL_EXCLUSION_FALLBACK"
+    info "sentinel roster NOT derived this run ($SENTINEL_EXCLUSION_SOURCE_REL unreadable, or its PDS_SENTINEL_EXCLUSION line did not parse) — the exclusion below is named from the in-script fallback ('$SENTINEL_EXCLUSION_FALLBACK'), UNCHECKED against the census"
+    return 0
+  fi
+  if [ "$derived" != "$SENTINEL_EXCLUSION_FALLBACK" ]; then
+    SENTINEL_ROSTER_DRIFT="$derived"
+    return 1
+  fi
+  SENTINEL_EXCLUSION="$derived"
+  info "sentinel roster DERIVED this run from $SENTINEL_EXCLUSION_SOURCE_REL (PDS_SENTINEL_EXCLUSION = '$derived') and it MATCHES the in-script fallback"
+  return 0
+}
+
 sentinel_scope_sql() { # workspace_id -> the WHERE clause selecting exactly those 34
-  printf "workspace_id = '%s' AND dataset = '%s' AND name NOT IN ('tag','metric')" \
-    "$1" "$SOURCE_DS"
+  printf "workspace_id = '%s' AND dataset = '%s' AND name NOT IN (%s)" \
+    "$1" "$SOURCE_DS" "$(sentinel_exclusion_sql_list)"
 }
 
 scoped_column_digests() { # workspace_id -> ONE tab-separated line, one md5 per
@@ -3689,8 +3782,16 @@ step_6() {
   sentinel_id="$(printf '%s' "$RUN_ID" | tr -c 'A-Za-z0-9._-' '-')"
   mark="PDS-SENTINEL-$sentinel_id"
   say ""
+  # THE ROSTER, BEFORE ANYTHING IS WRITTEN. Resolving it here rather than at
+  # source-time means a census/harness disagreement reds the rung with the
+  # target untouched, instead of after a sentinel has already gone into a set
+  # nobody declared.
+  if ! sentinel_roster_resolve; then
+    fail 6 "SENTINEL ROSTER DRIFT: $SENTINEL_EXCLUSION_SOURCE_REL declares PDS_SENTINEL_EXCLUSION = '$SENTINEL_ROSTER_DRIFT', this harness's fallback names '$SENTINEL_EXCLUSION_FALLBACK'. The two are the same roster and only one of them can be right, so the sentinel would scope to a set nobody declared and both legs would be uninterpretable (PDS-D129). NOTHING was written to the target. FIX: make them agree — the census is the edit site, the fallback follows it."
+    return 0
+  fi
   info "SENTINEL        writing deliberate drift into all eight guarded columns"
-  info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ('tag','metric')"
+  info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ($(sentinel_exclusion_sql_list))"
   # THE PRE-SENTINEL STATE (PDS-D742), taken BEFORE the UPDATE and per row, so
   # the run can MEASURE which guarded columns the sentinel moved rather than
   # assume all eight moved because all eight appear in the SET list.
@@ -3814,7 +3915,7 @@ step_6() {
     return 0
   fi
   if [ "${skip_count:-0}" != "$sentinel_rows" ]; then
-    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} Bootstrap guard SKIPs (the core \`tag\` row's own TagRegistry skip, ${tag_skip_count:-0} this boot, is excluded from both sides on purpose). Those two numbers are derived independently — the sentinel from this script's hand-maintained exclusion list ('tag','metric'), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
+    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} Bootstrap guard SKIPs (the core \`tag\` row's own TagRegistry skip, ${tag_skip_count:-0} this boot, is excluded from both sides on purpose). Those two numbers are derived independently — the sentinel from the roster declared in $SENTINEL_EXCLUSION_SOURCE_REL ($(sentinel_exclusion_sql_list)), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
     return 0
   fi
 
@@ -4360,6 +4461,114 @@ cmd_selftest_citations() {
   return 1
 }
 
+# ═════════════════════════════════════════════════════════════════════════════
+# SELFTEST — THE SENTINEL EXCLUSION ROSTER HAS ONE EDIT SITE (PDS-D129)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# What this measures, in one sentence: that the roster this harness scopes its
+# rung-6 sentinel with is the roster scripts/pds-schema-row-census.md declares,
+# and that a disagreement between them is LOUD rather than silent.
+#
+# The old failure was not a wrong list. It was TWO lists — a `NOT IN` literal
+# here and prose there — that a reader had to keep in step by hand, with nothing
+# that noticed when they stopped agreeing. Both could be individually correct on
+# the day they were written and wrong together a month later.
+#
+# THREE ARMS, and the middle one is the point:
+#
+#   POSITIVE   the real census, read from disk, derives EXACTLY the fallback.
+#              This is the arm that reds if someone edits one file and not the
+#              other — in EITHER direction, because it compares, not asserts.
+#   NEGATIVE   a fixture census naming a third row derives that third row and is
+#              REJECTED against the fallback. Without this arm the positive arm
+#              proves only that the parser can return something.
+#   REFUSALS   unreadable / absent declaration / a name carrying a quote all read
+#              as NOT DERIVED (exit 1, no output), never as "derived empty" —
+#              because an empty derivation would mismatch the fallback and red a
+#              healthy run for a reason that is not about the roster at all.
+#
+# Offline. It reads two files and writes fixtures into a mktemp dir; it never
+# needs a target, a network or a database.
+cmd_selftest_roster() {
+  local tmpd arms=0 fails=0 got rc census
+
+  _sr_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _sr_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _sr_eq()  { if [ "$2" = "$3" ]; then _sr_ok "$1"; else _sr_bad "$1" "expected [$2], got [$3]"; fi; }
+  # Runs the derivation on a fixture and reports "<exit>|<stdout>", so an arm can
+  # tell "returned nothing and said so" from "returned nothing and claimed
+  # success" — the distinction the whole not-derived-vs-derived-empty rule rests on.
+  _sr_derive() { local o; if o="$(sentinel_exclusion_derive "$1")"; then printf '0|%s' "$o"; else printf '1|%s' "$o"; fi; }
+
+  tmpd="$(mktemp -d)"
+  census="$REPO_ROOT/$SENTINEL_EXCLUSION_SOURCE_REL"
+
+  say "selftest: the sentinel exclusion roster has ONE edit site"
+  say ""
+  say "  POSITIVE CONTROL — the real census on disk"
+
+  if [ -r "$census" ]; then
+    _sr_eq "the census declares a roster and it parses" "0|$SENTINEL_EXCLUSION_FALLBACK" "$(_sr_derive "$census")"
+  else
+    _sr_bad "the census declares a roster and it parses" \
+      "$SENTINEL_EXCLUSION_SOURCE_REL is not readable from $REPO_ROOT — the derivation has no source, so this harness is running on its UNCHECKED fallback"
+  fi
+
+  # The same comparison the run makes, made here where it costs nothing.
+  got="$(_sr_derive "$census")"
+  case "$got" in
+    "0|$SENTINEL_EXCLUSION_FALLBACK")
+      _sr_ok "census and in-script fallback AGREE ('$SENTINEL_EXCLUSION_FALLBACK') — step 6 would scope the sentinel to the declared roster" ;;
+    0\|*)
+      _sr_bad "census and in-script fallback AGREE" \
+        "they do NOT: the census declares '${got#0|}', this harness's fallback names '$SENTINEL_EXCLUSION_FALLBACK'. Step 6 would FAIL before writing. FIX: the census is the edit site; the fallback follows it." ;;
+    *)
+      _sr_bad "census and in-script fallback AGREE" "the census did not derive, so nothing was compared" ;;
+  esac
+
+  say ""
+  say "  NEGATIVE CONTROL — a census that names a THIRD row (the drift this catches)"
+
+  printf 'prose\nPDS_SENTINEL_EXCLUSION = tag metric a_third_row\nmore prose\n' > "$tmpd/drifted.md"
+  _sr_eq "a drifted census derives the drifted roster" "0|tag metric a_third_row" "$(_sr_derive "$tmpd/drifted.md")"
+  if [ "tag metric a_third_row" = "$SENTINEL_EXCLUSION_FALLBACK" ]; then
+    _sr_bad "the drifted roster is REJECTED against the fallback" \
+      "the fixture happens to equal the fallback, so it reproduces no drift and the positive arm above proves nothing"
+  else
+    _sr_ok "the drifted roster is REJECTED against the fallback (this is the red step 6 would print)"
+  fi
+
+  say ""
+  say "  REFUSALS — every unusable source reads as NOT DERIVED, never as derived-empty"
+
+  _sr_eq "an absent file: exit 1, no output" "1|" "$(_sr_derive "$tmpd/nope.md")"
+
+  printf 'a census with no declaration at all\n' > "$tmpd/silent.md"
+  _sr_eq "no PDS_SENTINEL_EXCLUSION line: exit 1, no output" "1|" "$(_sr_derive "$tmpd/silent.md")"
+
+  printf 'PDS_SENTINEL_EXCLUSION =    \n' > "$tmpd/empty.md"
+  _sr_eq "an empty declaration: exit 1, no output (NOT an empty roster)" "1|" "$(_sr_derive "$tmpd/empty.md")"
+
+  printf "PDS_SENTINEL_EXCLUSION = tag me'tric\n" > "$tmpd/quoted.md"
+  _sr_eq "a name carrying a quote is REFUSED, not escaped" "1|" "$(_sr_derive "$tmpd/quoted.md")"
+
+  say ""
+  say "  THE CLAUSE — what the roster becomes in SQL"
+
+  _sr_eq "the IN-list is built from the roster, not typed" "'tag','metric'" "$(SENTINEL_EXCLUSION='tag metric'; sentinel_exclusion_sql_list)"
+  got="$(SENTINEL_EXCLUSION='tag metric a_third_row'; sentinel_exclusion_sql_list)"
+  _sr_eq "a three-name roster widens the clause with no further edit" "'tag','metric','a_third_row'" "$got"
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
 main() {
   # ── --plan WINS WHEREVER IT APPEARS, and nothing trailing is ignored (PDS-D89)
   #
@@ -4417,12 +4626,17 @@ main() {
       cmd_selftest_citations
       exit $?
       ;;
+    --selftest-roster)
+      [ $# -le 1 ] || die "--selftest-roster takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_roster
+      exit $?
+      ;;
     -h|--help|help)
       sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--selftest-citations|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--selftest-citations|--selftest-roster|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac
