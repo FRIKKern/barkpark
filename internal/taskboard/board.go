@@ -695,16 +695,16 @@ func collapseDraftTwins(tasks []Task) []Task {
 	// The winning spelling tier, per bare id: does a bare-id row exist at all?
 	hasBare := make(map[string]bool, len(tasks))
 	for _, t := range tasks {
-		if !strings.HasPrefix(t.DocID, draftsPrefix) {
+		if !isDraftID(t.DocID) {
 			hasBare[t.DocID] = true
 		}
 	}
 	out := make([]Task, 0, len(tasks))
 	for _, t := range tasks {
-		if strings.HasPrefix(t.DocID, draftsPrefix) && hasBare[bareID(t.DocID)] {
+		if isDraftID(t.DocID) && hasBare[bareID(t.DocID)] {
 			continue // a draft twin whose published row is right there
 		}
-		if strings.HasPrefix(t.ParentID, draftsPrefix) && hasBare[bareID(t.ParentID)] {
+		if isDraftID(t.ParentID) && hasBare[bareID(t.ParentID)] {
 			t.ParentID = bareID(t.ParentID) // the parent we just suppressed
 		}
 		out = append(out, t)
@@ -739,7 +739,7 @@ func buildByBare(byID map[string]Task) map[string]Task {
 	m := make(map[string]Task, len(byID))
 	for _, t := range byID {
 		bare := bareID(t.DocID)
-		if prev, ok := m[bare]; ok && !strings.HasPrefix(prev.DocID, draftsPrefix) {
+		if prev, ok := m[bare]; ok && !isDraftID(prev.DocID) {
 			continue // a bare-id row already holds the slot; a draft twin never displaces it
 		}
 		m[bare] = t
