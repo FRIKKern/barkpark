@@ -278,8 +278,13 @@ check "(f) this installer creates no blue/green slot unit (if it ever does, the 
 # unit silently returns nothing on a slot box. Every such recipe must name the
 # slot units on the SAME line (directly, or via a `$U` whose definition line
 # carries them). `-u barkpark-connectors` is a different unit and not matched.
+# No `| grep -q` here: this file runs under `set -o pipefail`, and a -q that
+# closes the pipe SIGPIPEs the producer (141), which would make a negated
+# pipeline report PASS on a real hit. Capture, then test for emptiness.
+LONE_UNIT_RE='journalctl[^|]*-u barkpark[^-[:alnum:]_]'
+LONE_UNIT_HITS="$(grep -rnE "$LONE_UNIT_RE" "$ROOT/docs/ops" 2>/dev/null | grep -v 'barkpark-slot@' || true)"
 check "(f) no docs/ops recipe journalctls a lone 'barkpark' unit (D378)" \
-  '! grep -rnE "journalctl[^|]*-u barkpark[ '"'"'\"]" "$ROOT/docs/ops" | grep -v "barkpark-slot@" | grep -q .'
+  '[ -z "$LONE_UNIT_HITS" ] || { printf "%s\n" "$LONE_UNIT_HITS"; false; }'
 
 echo ""
 if [ "$fails" -eq 0 ]; then
