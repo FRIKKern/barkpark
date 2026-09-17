@@ -30,15 +30,18 @@ import (
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
-// Version is the agent's own build version, reported verbatim in every Report.
-// Stamped here (overridable at build time via -ldflags) rather than read from
-// the server so the report tells the truth about THIS binary.
-const Version = "0.1.0"
-
 // agentVersion is the build stamp of the agent binary ITSELF — what produced
-// THIS beat, as opposed to the hand-maintained Version const above, which only
-// says what the source tree called itself when a human last edited it and so
-// cannot distinguish two boxes running binaries months apart.
+// THIS beat.
+//
+// It REPLACES a hand-maintained `const Version = "0.1.0"` that used to sit here
+// and fill the wire's `version` key. That const was the misleading twin of this
+// stamp: two keys in one payload answering "which binary is this?", and only
+// one of them could. The const read 0.1.0 across every rebuild the fleet ever
+// took, so `version` looked like a determination and was a literal. It is gone;
+// `version` is now an ALIAS filled from this same resolution (see gatherReport),
+// so the two keys cannot drift — there is no second source left to go stale.
+// TestVersionKeyIsTheMeasuredTwin and TestNoHandMaintainedVersionConst red if
+// either half of that is undone.
 //
 // It is a var, not a const, so a blessed release can inject it:
 //
@@ -178,7 +181,15 @@ type Report struct {
 	// AgentStatus is always "online" in a report — the agent only reports when
 	// it is running. The registry flips a Barkpark to "offline" on staleness.
 	AgentStatus string `json:"agent_status"`
-	// Version is the agent binary version (Version const above).
+	// Version is the `version` key the control plane has read since cloud-9
+	// (router.ex lands it on barkparks.version; sites/deploy.ex uses it as the
+	// `code_rev` fallback when a box reports no git_commit). It is an ALIAS of
+	// AgentVersion below — the SAME resolved build stamp, filled from the same
+	// call in gatherReport — not a second, independently-maintained answer.
+	//
+	// It is kept, rather than dropped, because those CP readers are live: the
+	// key must keep arriving. It is no longer a constant, because a constant in
+	// a `code_rev` fallback freezes that half of every build_id.
 	Version string `json:"version"`
 	// AgentVersion dates the PRODUCER of this beat — which agent binary emitted
 	// it — from the binary's own build stamp (see AgentVersion above), not from
@@ -1035,12 +1046,17 @@ type ReportConfig struct {
 // or failing probe yields an honest unknown value, never a panic, so a partial
 // box still phones home with whatever it can prove.
 func gatherReport(cfg ReportConfig) Report {
+	// ONE resolution, TWO wire keys. `version` (the key the CP has read since
+	// cloud-9) and `agent_version` (the explicit producer stamp) are filled from
+	// the SAME call, so a beat can never carry two different answers to "which
+	// binary produced this?".
+	buildStamp := AgentVersion()
 	r := Report{
 		AgentStatus: "online",
-		Version:     Version,
 		// Always emitted, never "" — AgentVersion falls back to the explicit
 		// AgentVersionUnknown marker rather than to silence.
-		AgentVersion:    AgentVersion(),
+		Version:         buildStamp,
+		AgentVersion:    buildStamp,
 		HealthStatus:    "unknown",
 		DiskUsedPercent: -1,
 		PGSizeBytes:     -1,
