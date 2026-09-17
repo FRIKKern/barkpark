@@ -297,6 +297,18 @@ func renderIdentityVerdict(out *writer, total, notStamped int) {
 	out.outf("NOT SHOWN, on purpose: content.claim.worker. That string is written by the client whose")
 	out.outf("  mutations are being audited, so it is a self-report, never attribution. Printing it in")
 	out.outf("  an agent column would manufacture the identity this command just measured as absent.")
+	out.outf("")
+	// NAME THE SOURCE, because this timeline is NOT the whole mutation set. The
+	// revision store records document revisions (create/publish/...), while
+	// mutation_events additionally carries task.claimed / task.pulse /
+	// task.criterion / task.lease_renewed. On a real claimed-and-closed row
+	// measured 2026-09-17 that was 2 revisions against 30 events. A reader told
+	// "here is the timeline" without being told which store answered would read
+	// the 28 missing events as mutations that never happened.
+	out.outf("SOURCE: the revision store (GET /v1/data/history). The mutation_events stream")
+	out.outf("  (`bp task events <id>`) carries ADDITIONAL event kinds this view does not read —")
+	out.outf("  task.claimed, task.pulse, task.criterion, task.lease_renewed. A short list here is")
+	out.outf("  therefore not evidence that nothing else happened to this row.")
 }
 
 // shortRev renders the three-state `rev` column: nil is history written before

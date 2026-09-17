@@ -324,3 +324,22 @@ func TestHistoryArgParsing(t *testing.T) {
 		t.Fatalf("parse = %q %d %v", id, n, err)
 	}
 }
+
+// TestHistoryNamesItsSourceAndItsBlindSpot — the revision store is not the whole
+// mutation set (2 revisions against 30 mutation_events on a real closed row,
+// measured 2026-09-17). A timeline that does not name which store answered
+// invites the reader to treat the events it cannot see as mutations that never
+// happened.
+func TestHistoryNamesItsSourceAndItsBlindSpot(t *testing.T) {
+	out, stdout, _ := historyTestWriter()
+	renderTaskHistory(out, "task-x", historyReport{
+		Read:      true,
+		Revisions: []apiclient.Revision{rev("create", apiclient.Revision{})},
+	})
+	body := stdout.String()
+	for _, want := range []string{"SOURCE:", "/v1/data/history", "bp task events", "task.claimed"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("the output does not name %q:\n%s", want, body)
+		}
+	}
+}
