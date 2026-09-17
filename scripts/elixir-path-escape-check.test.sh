@@ -1131,6 +1131,120 @@ fi
 rm -f "$FX_CHAIN/api/test/barkpark/chain_ok_test.exs"
 echo
 
+# ── case 3k: SHAPE 8 — an ATTRIBUTE-INDIRECTED literal is seen ──────────────
+# `@mirrors ["nowhere/attr.json"]` + `Path.join(@repo_root, m)`. Every door
+# before this one needs the literal AT the call site, so one binding of
+# indirection took the read out of the census entirely: MEASURED on 974d3d2cb,
+# the attribute form resolved 66 reads and printed OK at rc=0 while the SAME
+# read written inline resolved 67 and redded — a false OK inside the REQUIRED
+# Elixir gate (task-5a00c588a808f523 / task-c605ea24bbe5066c).
+#
+# FOUR ARMS, because this door's whole risk is the opposite of blindness:
+#   (a) the join form reds and is TAGGED (the positive control — a non-zero
+#       test-rootattr count, so the door cannot go vacuous);
+#   (b) the `"../…" <> var` expand form reds the same way;
+#   (c) the door is LOAD-BEARING — disarm the pre-scan's `I` stream and the
+#       same read greens;
+#   (d) the ARMING is load-bearing too: the same attribute literals with NO
+#       indirect join site in the file must NOT red. A door that reported
+#       every attribute literal in every file would be a false-RED machine in
+#       a required gate, which costs more than the blindness it removes.
+echo "case 3k: SHAPE 8 — an attribute-indirected literal is seen, tagged test-rootattr"
+FX_ATTR="$TMPROOT/attr"
+make_fixture "$FX_ATTR"
+mkdir -p "$FX_ATTR/nowhere"
+: >"$FX_ATTR/nowhere/attr.json"
+cat >"$FX_ATTR/api/test/barkpark/attr_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @mirrors [
+    "nowhere/attr.json"
+  ]
+  def read_all, do: Enum.map(@mirrors, fn m -> File.read!(Path.join(@repo_root, m)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTR" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on an attribute-indirected uncovered read"
+else
+  no "PASSED with an attribute-indirected uncovered read — shape 8 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "names the path the attribute held"
+else
+  no "did not name the attribute-held path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/attr_test.exs"; then
+  ok "attributes the indirected read to its file"
+else
+  no "did not attribute the indirected read: $out"
+fi
+# THE POSITIVE CONTROL: the tag must actually carry a count. `test-rootattr: 0`
+# next to a red would mean some OTHER door caught this and shape 8 measured
+# nothing — the vacuous pass this case exists to refuse.
+if has "$out" "idiom test-rootattr: [1-9]"; then
+  ok "test-rootattr resolved a non-zero count — the door itself saw the read"
+else
+  no "test-rootattr is zero (or missing) while the read redded — shape 8 proved nothing: $out"
+fi
+# ARM (b): the `Path.expand("../…" <> var, __DIR__)` form of the same fault.
+FX_ATTRC="$TMPROOT/attrconcat"
+make_fixture "$FX_ATTRC"
+mkdir -p "$FX_ATTRC/nowhere"
+: >"$FX_ATTRC/nowhere/attr.json"
+cat >"$FX_ATTRC/api/test/barkpark/attrconcat_test.exs" <<'EX'
+  @mirrors ["nowhere/attr.json"]
+  def read_all, do: Enum.map(@mirrors, fn rel -> File.read!(Path.expand("../../../" <> rel, __DIR__)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTRC" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "the \"../..\" <> var expand form reds on the same read"
+else
+  no "the concatenated-prefix expand form did not red (rc=$rc): $out"
+fi
+# ARM (c): LOAD-BEARING. Disarm the pre-scan's `I` stream — the rows still get
+# collected, but under a tag nothing drains — and the same read must green.
+MUT_ATTR="$TMPROOT/mutant-no-indirect.sh"
+python3 - "$SCRIPT" "$MUT_ATTR" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if "awk -v t=I " in line:
+        target = i
+        break
+assert target is not None, "the shape-8 `I` pre-scan stream was not found — mutation would prove nothing"
+lines[target] = lines[target].replace("awk -v t=I ", "awk -v t=Z ")
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_ATTR" "$SCRIPT"; then
+  ok "the indirect-join mutation applied (the I stream really changed)"
+else
+  no "the indirect-join mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTR" bash "$MUT_ATTR" 2>&1)" && rc=0 || rc=$?
+if has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  no "the indirected read was still reported with the I stream disarmed — case 3k proves nothing: $out"
+else
+  ok "without the I stream the read goes dark again — shape 8's door is load-bearing"
+fi
+# ARM (d): the ARMING is load-bearing. Same attribute, NO indirect join site.
+FX_ATTRQ="$TMPROOT/attrquiet"
+make_fixture "$FX_ATTRQ"
+mkdir -p "$FX_ATTRQ/nowhere"
+: >"$FX_ATTRQ/nowhere/attr.json"
+cat >"$FX_ATTRQ/api/test/barkpark/attrquiet_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @mirrors ["nowhere/attr.json"]
+  def names, do: @mirrors
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTRQ" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && ! has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "an attribute with NO indirect join site stays quiet — no false red"
+else
+  no "shape 8 redded on an attribute nothing joins (rc=$rc) — a false red in a required gate: $out"
+fi
+echo
+
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
 # Same mutation, but inside a real git repo where the offending fixture is
 # present on disk and NOT tracked. A `git ls-files` enumeration reports clean

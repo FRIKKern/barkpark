@@ -273,11 +273,17 @@ scripts/prod-build-cache-guard.sh'
 #   why the bare templates tree stays out). The widget is a generated artifact
 #   touched only when the graph is rebuilt, so the full-suite cost is rare.
 #   The reads are written INLINE at the read site — `Path.join(@repo_root,
-#   "web/public/bp-graph.js")` — precisely so THIS census can see them: with the
-#   same three paths held in a module attribute and joined from it, the census
-#   resolved 50 reads, printed OK, and dispatched on none of them. A path
-#   constant one binding away from its `Path.join` is a blind spot of every
-#   door below; the test carries a comment saying so.
+#   "web/public/bp-graph.js")`. That USED TO BE load-bearing: with the same
+#   three paths held in a module attribute and joined from it, the census
+#   resolved 50 reads, printed OK, and dispatched on none of them, because a
+#   path constant one binding away from its `Path.join` was a blind spot of
+#   every door below. SHAPE 8 (`-rootattr`, task-5a00c588a808f523 /
+#   task-c605ea24bbe5066c) closed that door — re-measured on 974d3d2cb, the
+#   attribute form now reds exactly as the inline form does — so the inline
+#   spelling stays because it reads better, not because this census needs it.
+#   api/test/barkpark_web/static/bp_graph_escape_lock_test.exs still carries
+#   the old comment saying inline is REQUIRED; that sentence is now history and
+#   the api lane owns correcting it.
 #   THE scaffy-duels METER ENTRIES (2026-09-11, pds-w49-meter-ci-decision) are
 #   the wiring half of METER.md §6's decision. `tooling/scaffy-duels/meter.py` is
 #   the executable half of the cost standard; it was fast, self-proving and
@@ -553,6 +559,23 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # line stayed true — the same "no new undeclared read" result every earlier
 # shape gave. The value is prospective, not retroactive.
 #
+# SHAPE 8 — ATTRIBUTE-INDIRECTED literal — is closed after those, and it is
+# the first one found by an escape that ALREADY EXISTED rather than by a probe
+# matrix: `@mirrors ["web/public/bp-graph.js", …]` bound once, then
+# `Path.join(@repo_root, m)` — or `Path.expand("../../../" <> rel, __DIR__)` —
+# at the read site. Every door above needs the literal AT the call site, so one
+# binding of indirection removed the read from the census outright. MEASURED on
+# 974d3d2cb with the control run FIRST: an inline probe read of the undeclared
+# repo-root `Makefile` took the census 66 -> 67, `test-root` 8 -> 9 and redded
+# `UNCOVERED repo-root read: Makefile` at rc=1; the SAME read with the filename
+# in an attribute resolved 66, `test-root` 8, and printed the OK line at rc=0.
+# Tagged `-rootattr`, armed only by an indirect join site, and proven by harness
+# case 3k — whose four arms include a NON-ZERO `test-rootattr` count (so the
+# door cannot green behind another door's red) and a quiet-tree arm (so it
+# cannot become a false-RED machine). Closing it surfaced NO new undeclared
+# read: the clean census stayed at 66 and the OK line stayed true, the same
+# prospective-value result every shape before it gave.
+#
 # STILL BLIND — the honest boundary, and it is NOT "none". The 14-shape probe
 # matrix this note is derived from enumerates the idioms someone thought to
 # write down; it is not a proof of completeness, and three separate waves have
@@ -574,6 +597,13 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 #     not finish inside a CI timeout; see the note on that regex below.
 #   * WINDOW DEPTH — shapes 6 and 2 read 5 and 6 lines after their opener. A
 #     `Path.join(` or a `cd:` further down than that is missed.
+#   * AN INDIRECTION THE FILE DOES NOT HOLD AS AN ATTRIBUTE — shape 8 resolves
+#     a variable-joined read by resolving that file's DATA attributes against
+#     the base. A path that arrives from a function return, from a list
+#     literal written inline at the call site, from another module, or from
+#     the test's own setup block is still invisible. Declare such a read by
+#     hand in the sets above; harness case 6 is what guards a declared entry
+#     no census row protects.
 #   * `-sigil*` covers six delimiters; `~s|…|` inside another `|` context and
 #     the heredoc sigils are not lexed.
 #
@@ -627,28 +657,33 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # bypass of the only check that can tell "clean" from "blind", and the harness
 # asserts that setting ELIXIR_ESCAPE_IDIOM_MIN changes nothing.
 #
-# THE TEN FLOOR-0 ROWS ARE NOT DEAD WEIGHT, and they are not a laundered
+# THE TWELVE FLOOR-0 ROWS ARE NOT DEAD WEIGHT, and they are not a laundered
 # baseline. `test-rootpipe` and `test-rootlist` are the two join forms added
 # alongside `test-root`; `test-rootinterp`, `test-rootbase`, `test-rootmulti`,
 # `test-rootconcat`, `test-rootchain`, `test-rootexec`, `test-sigildir` and
 # `test-sigilcwd` are the shapes closed after them (the RESIDUE note above
-# numbers them 1, 4, 6, 3, 7, 2 and 5). All ten are LIVE IDIOMS in api/lib +
+# numbers them 1, 4, 6, 3, 7, 2 and 5); `test-rootattr` and `lib-rootattr` are
+# shape 8. Shape 8 gets a row for BOTH trees, unlike the ten, for the reason
+# the `lib-root` paragraph above records at first hand: a shape arriving in
+# api/lib without a row kills the run on `idiom has no entry` instead of NAMING
+# the escape, and a floor-0 row costs nothing to carry.
+# All twelve are LIVE IDIOMS in api/lib +
 # api/test — the script's grammar genuinely supports them — but no current
-# call site resolves OUTSIDE api/ through any of the ten, so their measured
+# call site resolves OUTSIDE api/ through any of them, so their measured
 # population on a clean tree is 0. A floor of 0 is the only honest number: a
 # positive floor would red every clean checkout (the `lib-root` reasoning
 # above), while OMITTING the rows makes the inventory check fire "idiom has no
-# floor" the moment any of the ten first matches — which reds for the
+# floor" the moment any of them first matches — which reds for the
 # SCANNER instead of naming the escape, masking the very finding the door
 # exists to report. Measured: with the `test-rootpipe` row absent, a planted
 # pipe-form escape produced `::error:: idiom 'test-rootpipe' has no entry` and
 # never printed the UNCOVERED line at all.
 #
 # What a floor of 0 does NOT buy is blindness detection: with population 0
-# there is nothing to shrink from, so deleting any of the ten grep doors would
+# there is nothing to shrink from, so deleting any of these grep doors would
 # not red this table. That protection lives in the HARNESS instead — a
 # fixture per shape in scripts/elixir-path-escape-check.test.sh, where
-# disarming a shape's grep reds the matching case. When any of the ten's live
+# disarming a shape's grep reds the matching case. When any of their live
 # population rises above 0, raise its floor to ~50% of the measured population
 # and say so here.
 ELIXIR_ESCAPE_IDIOM_MIN='test-cwd	8
