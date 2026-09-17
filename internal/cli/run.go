@@ -771,6 +771,12 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// `stage` that makes the state AND a later `task get` on it both say
 		// so; silent on every other shape (tasks_stranded_claim.go).
 		emitStrandedClaim(out, respBody)
+		// The COMPLEMENT of the stranded shape: the claim has lapsed or been
+		// released (claim.worker null, claim.epoch preserved) and the row is
+		// back in the ready queue, but criteria are still unmet. Nothing
+		// refuses such a row, so nothing else ever mentions the arrears
+		// (tasks_arrears_claim.go).
+		emitArrearsClaim(out, respBody)
 		// A ruling the row ALREADY carries (content.disposition_reason), shouted
 		// at claim time so a dispatcher cannot miss it. Verb-keyed (claim/next),
 		// stderr in every output mode, silent on a row with no ruling
