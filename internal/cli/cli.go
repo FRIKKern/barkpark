@@ -642,6 +642,16 @@ func Execute(args []string) int {
 		return exitOK
 	}
 
+	// `bp task resume <id> <worker>` — a purely LOCAL builtin, intercepted
+	// BEFORE the manifest lookup because there is no server verb behind it: it
+	// reads the priming manifest `bp task claim` wrote (tasks_priming_manifest.go)
+	// and prints a crash brief for the successor. It writes nothing, claims
+	// nothing and takes no lease — taking the row is still `bp task claim`. See
+	// tasks_resume_cmd.go, which carries the three-absence contract.
+	if noun == "task" && verb == "resume" {
+		return runTaskResume(out, g, ctx, tail)
+	}
+
 	cmd, ok := tree.Lookup(noun, verb)
 	if !ok {
 		// A REAL noun followed by something that is not one of its verbs used to
