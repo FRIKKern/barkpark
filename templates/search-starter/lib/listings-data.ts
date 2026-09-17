@@ -14,6 +14,8 @@
  * presentation the map/popover renders when present and skips when absent.
  */
 
+import { corpusStatusMarkerValue } from "./markers.ts";
+
 export interface Listing {
   /** Stable id. When wired to a real backend, set this to the same value the
    * left-rail finder uses as a result `slug`/`doc_id` — that is the key the
@@ -263,6 +265,18 @@ export interface ResolvedListings {
    * here rather than at the call site so the wording is under test.
    */
   notice?: string;
+  /**
+   * The upstream condition, in the MACHINE shape the `bp-corpus-status` deploy
+   * marker carries — `null` exactly when the rows are live.
+   *
+   * Distinct from `notice` on purpose, and both are needed. `notice` is a
+   * sentence for a human reading a server log; this is a bounded, single-line
+   * status a shell `sed` reads back out of the served HTML and the deployment
+   * row stores as its `failure_reason`. Mirrors `lib/graph.ts`'s
+   * `upstreamReason`, which is the in-repo precedent for carrying a cause out
+   * of a degrade instead of collapsing it into prose.
+   */
+  upstreamReason: string | null;
 }
 
 function errorReason(error: unknown): string {
@@ -296,7 +310,17 @@ export function resolveListings({
 }): ResolvedListings {
   if (!configured) {
     // Out of the box. Samples are the product here, not a failure.
-    return { listings: sample, source: "sample:unconfigured", substituted: false };
+    return {
+      listings: sample,
+      source: "sample:unconfigured",
+      substituted: false,
+      // Not an error — but not a content anchor either. A managed deploy that
+      // was never pointed at a content type has nothing real to stamp into
+      // bp-doc-id, and saying so is what stops a BUNDLED SAMPLE id from being
+      // passed off as content-truth (site-spawner D72: fail closed, name why).
+      upstreamReason:
+        "listings: LISTINGS_TYPE is unset — no live content source is configured",
+    };
   }
 
   const named = sourceName ? `LISTINGS_TYPE="${sourceName}"` : "LISTINGS_TYPE";
@@ -306,6 +330,7 @@ export function resolveListings({
       listings: sample,
       source: "sample:failed",
       substituted: true,
+      upstreamReason: `listings: ${named} is configured but the fetch failed: ${errorReason(error)}`,
       notice:
         `[listings] SERVING ${sample.length} BUNDLED SAMPLE LISTINGS INSTEAD OF LIVE DATA — ` +
         `${named} is configured but the fetch failed: ${errorReason(error)}. ` +
@@ -318,6 +343,7 @@ export function resolveListings({
       listings: sample,
       source: "sample:empty",
       substituted: true,
+      upstreamReason: `listings 200: ${named} is configured and answered, but matched ZERO rows`,
       notice:
         `[listings] SERVING ${sample.length} BUNDLED SAMPLE LISTINGS INSTEAD OF LIVE DATA — ` +
         `${named} is configured and answered, but matched ZERO rows. ` +
@@ -325,5 +351,67 @@ export function resolveListings({
     };
   }
 
-  return { listings: live, source: "live", substituted: false };
+  return { listings: live, source: "live", substituted: false, upstreamReason: null };
+}
+
+/* ── the two HEALTH markers the map landing emits ────────────────────────────
+ *
+ * The GRAPH landing already tells the deploy engine both halves of the truth:
+ * `bp-doc-id` (content-truth — which document the SSR anchored) and, only when
+ * that one is EMPTY, `bp-corpus-status` (cause-truth — which upstream condition
+ * emptied it). `deploy/site-deploy-node.sh` health_gate_node reads both back
+ * with a `sed` and folds the second into the deployment row's failure_reason.
+ *
+ * The MAP landing shipped half of that contract. It emitted `bp-doc-id`, and
+ * beside it a `bp-listings-source` marker — a name NOTHING in the repo reads
+ * (`git grep bp-listings-source` returned exactly one hit: the emit site). So a
+ * map deploy that lost its content link still recorded the SYMPTOM, and the
+ * cause it did compute was written to a channel with no reader.
+ *
+ * Worse in the unconfigured case: `listings[0].id` was a BUNDLED SAMPLE id, so
+ * a site never pointed at a content type stamped `mocca-oslo` into the
+ * content-truth marker and the gate PASSED on fabricated content. Both landings
+ * now answer the same way, through the same shaping function.
+ */
+export interface ListingsHealthMarkers {
+  /** `bp-doc-id` — a REAL content document id, or "" when there is none. */
+  docId: string;
+  /** `bp-corpus-status` — the cause, or "" (emit no marker) when healthy. */
+  corpusStatus: string;
+}
+
+/**
+ * Both markers, derived from one resolved read. Pure, and deliberately here
+ * rather than in the Server Component: `app/(finder)/page.tsx` cannot be loaded
+ * by `node --test`, so a decision kept there could only be proved by a fixture
+ * that hard-codes the very text it checks.
+ *
+ * It never fabricates a doc id. Only `source: "live"` — real rows from the
+ * configured source — can anchor one; every sample path (unconfigured, failed,
+ * empty) anchors NOTHING and names why instead. The gate keeps failing closed,
+ * which is correct (site-spawner D72); all this changes is that the refusal is
+ * legible.
+ */
+export function listingsHealthMarkers(
+  resolved: ResolvedListings,
+): ListingsHealthMarkers {
+  const docId =
+    resolved.source === "live" ? (resolved.listings[0]?.id ?? "") : "";
+
+  // A live read that somehow carried no anchorable row still needs a cause, or
+  // the shared shaping function would fall back to its GRAPH wording and
+  // describe this page as something it is not.
+  const reason =
+    resolved.upstreamReason ??
+    (docId === ""
+      ? `listings 200: the configured source returned ${resolved.listings.length} row(s), none usable as a content anchor`
+      : null);
+
+  return {
+    docId,
+    corpusStatus: corpusStatusMarkerValue(
+      { upstreamReason: reason, nodeCount: resolved.listings.length },
+      docId,
+    ),
+  };
 }
