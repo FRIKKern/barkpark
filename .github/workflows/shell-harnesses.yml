@@ -1918,6 +1918,15 @@ jobs:
     # `any`, and not a comparison against the matrix JSON: see the dispatcher's
     # outputs above for why an empty matrix must never reach this job.
     if: needs.changes.outputs.any == 'true'
+    # WHERE THE LEG NAMES COME FROM, for scripts/required-checks-generate.sh.
+    # A `name:` that is nothing but `${{ … }}` can only become the regex `^.+$`,
+    # and that generator refuses such a template outright — a pattern matching
+    # every rendered name would hand this job's provenance to other workflows'
+    # checks. This line is the finite answer: the 53 rendered names are the
+    # `name` field of every leg in the committed legs file, so the generator
+    # expands ONE index row per literal name instead of one wildcard row. Take
+    # this comment away and the generator refuses again, by design.
+    # required-checks: matrix-name-legs .github/shell-harness-legs.json .[].name
     name: ${{ matrix.leg.name }}
     strategy:
       # fail-fast would CANCEL sibling harnesses on the first red, inverting the
