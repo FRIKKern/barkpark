@@ -608,7 +608,26 @@ type CloudRefusal struct {
 	// fingerprint, never a Go map that would alphabetize the keys. Empty when the
 	// body sent no usable menu.
 	ReadableTypesRaw json.RawMessage
-	msg              string
+	// CLIHint is the TERMINAL's half of a refusal, and the reason this field
+	// exists at all is that it used to be welded into Detail.
+	//
+	// cch-w69-bl: POST /v1/sites wrote ONE `detail` for two surfaces and ended it
+	// with a `bp cloud site create … --doc-type <type>` line. Both consumers then
+	// had to separate the halves BY MATCHING THE PROSE — the console cut at the
+	// literal "Re-run naming a type" (app.js siteDetailWithoutCliReRun, deleted)
+	// and this package's caller searched for the same sentence
+	// (cloud_site_cmd.go, siteRefusalMessage). Two string matches on one server
+	// sentence: reword it and the console leaks a terminal incantation into a
+	// modal while the CLI silently loses the line, with no test on any side
+	// failing, because each side tests against its own fixture copy of the prose.
+	//
+	// The control plane now sends the facts in `detail` and the incantation in
+	// `cli_hint`. THE TAG IS NOT OPTIONAL AND IT RIDES THE SAME COMMIT as the
+	// server change: without it `json.Unmarshal` drops the key, `detail` no
+	// longer carries the re-run, and `bp cloud site create` would print a refusal
+	// with no fix in it — the key LAUNDERED, exactly the failure #18607 named.
+	CLIHint string
+	msg     string
 }
 
 // ReadableType is one row of the readable-types menu a `content_binding_empty`
@@ -690,6 +709,15 @@ func cloudError(status int, body []byte) error {
 		// raw array bytes are kept for the machine envelope (order-preserving) and
 		// the decoded rows drive the human menu; a row with an empty `type` is
 		// dropped, so a partly-malformed list still yields whatever is usable.
+		// The terminal hint, in its OWN isolated Unmarshal for the same reason
+		// every field above is. See CLIHint's doc for why the server stopped
+		// welding this into `detail`.
+		var hnt struct {
+			CLIHint string `json:"cli_hint"`
+		}
+		if json.Unmarshal(body, &hnt) == nil {
+			ref.CLIHint = strings.TrimSpace(hnt.CLIHint)
+		}
 		var rtm struct {
 			ReadableTypes json.RawMessage `json:"readable_types"`
 		}

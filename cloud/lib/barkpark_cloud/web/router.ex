@@ -8693,7 +8693,9 @@ defmodule BarkparkCloud.Web.Router do
   # `content_binding` verdict the control plane actually OBSERVED: `bound` (the
   # site read its own content, with the count) or `unverified` (with the reason it
   # could not be checked). A binding the site provably CANNOT read is refused 422
-  # `content_binding_empty` at the door, with the menu of types it can read.
+  # `content_binding_empty` at the door, with the menu of types it can read. The
+  # refusal `detail` is SURFACE-NEUTRAL (cch-w69-bl): the terminal re-run rides
+  # its own `cli_hint` key, so no consumer has to cut CLI voice back out of prose.
   post "/v1/sites" do
     conn = Auth.require_user(conn, [])
 
@@ -8818,8 +8820,9 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{
               error: "content_binding_required",
               detail:
-                "a static site builds FROM your content — bind it with " <>
-                  "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+                "a static site builds FROM your content — name the workspace, project and " <>
+                  "dataset it reads (missing: #{Enum.join(missing, ", ")})",
+              cli_hint: "--dataset <workspace>/<project>/<dataset>"
             })
 
           {:error, :ports_exhausted} ->
@@ -8837,11 +8840,11 @@ defmodule BarkparkCloud.Web.Router do
           # Refuse at the door with the real menu (what that token could actually
           # read) and the exact re-run, rather than 201ing a site whose first
           # build dies on a message naming neither the type nor the dataset.
-          {:error, {:binding_empty, detail, menu}} ->
+          {:error, {:binding_empty, detail, menu, cli_hint}} ->
             json(
               conn,
               422,
-              %{error: "content_binding_empty", detail: detail}
+              %{error: "content_binding_empty", detail: detail, cli_hint: cli_hint}
               |> maybe_put_menu(menu)
             )
 
@@ -9106,8 +9109,9 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{
           error: "content_binding_required",
           detail:
-            "a static site builds FROM your content — bind it with " <>
-              "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+            "a static site builds FROM your content — name the workspace, project and " <>
+              "dataset it reads (missing: #{Enum.join(missing, ", ")})",
+          cli_hint: "--dataset <workspace>/<project>/<dataset>"
         })
 
       :unknown ->
@@ -9122,11 +9126,11 @@ defmodule BarkparkCloud.Web.Router do
       {:error, {:mint_failed, detail}} ->
         json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
 
-      {:error, {:binding_empty, detail, menu}} ->
+      {:error, {:binding_empty, detail, menu, cli_hint}} ->
         json(
           conn,
           422,
-          %{error: "content_binding_empty", detail: detail}
+          %{error: "content_binding_empty", detail: detail, cli_hint: cli_hint}
           |> maybe_put_menu(menu)
         )
 
@@ -16321,18 +16325,34 @@ defmodule BarkparkCloud.Web.Router do
   defp query_total(%{"total" => total}) when is_integer(total), do: total
   defp query_total(_body), do: nil
 
-  # The refusal: name what is wrong, what this site CAN read, and the exact re-run.
+  # The refusal: name what is wrong and what this site CAN read — and NOTHING
+  # about how the caller got here.
+  #
+  # cch-w69-bl (charter D846's sequel): `detail` used to END with a literal
+  # `bp cloud site create … --doc-type <type>` re-run line, because ONE sentence
+  # served two surfaces and the CLI is the one that wanted it. The console then
+  # had to CUT that clause back off by matching the prose
+  # (`siteDetailWithoutCliReRun`, app.js) — a coupling that breaks silently the
+  # moment anybody rewords this string, with no test on either side failing.
+  #
+  # So the voice stops being the producer's choice. `detail` carries the FACTS
+  # (what is wrong, what is readable) in nobody's accent, and the terminal
+  # incantation moves to its OWN key, `cli_hint`, which a terminal renders and a
+  # modal ignores. Neither surface string-matches the other's copy any more, and
+  # a reword of either is now a reword of one audience's sentence alone.
   defp refuse_empty_binding(bp, ws, proj, ds, token, why) do
     menu = readable_type_menu(bp, ws, proj, ds, token)
 
     detail =
       "this site would build from nothing — #{why}. " <>
         menu_sentence(menu, ds) <>
-        " Re-run naming a type this site can read: " <>
-        "`bp cloud site create <name> --kind static --framework astro " <>
-        "--dataset #{ws}/#{proj}/#{ds} --doc-type <type>`"
+        " Name a content type this site can read."
 
-    {:error, {:binding_empty, detail, menu}}
+    cli_hint =
+      "bp cloud site create <name> --kind static --framework astro " <>
+        "--dataset #{ws}/#{proj}/#{ds} --doc-type <type>"
+
+    {:error, {:binding_empty, detail, menu, cli_hint}}
   end
 
   # The honest menu is the INTERSECTION: the instance admin token lists what EXISTS

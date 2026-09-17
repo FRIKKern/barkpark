@@ -1984,7 +1984,23 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `@emitted_pinned` does NOT move either — this slice writes no Elixir
   # serializer. It declares a READER for a key `barkpark_json/6` already emits,
   # which is the whole point of the pair.
-  @go_tag_pinned 380
+  #
+  # 380 -> 381 (cch-w69-bl-site-create-detail-is-cli-voiced-…). POST /v1/sites
+  # stopped writing a CLI-voiced refusal `detail` and moved the terminal re-run
+  # to its own key, `cli_hint`. THE GO TAG RIDES THAT SAME COMMIT AND IS NOT
+  # OPTIONAL: `CloudRefusal.Detail` no longer carries the incantation, so without
+  # `json:"cli_hint"` on `CloudRefusal.CLIHint` the key is LAUNDERED — the name
+  # union would stay green while `json.Unmarshal` dropped it and `bp cloud site
+  # create` printed a refusal with no fix in it (the #18607 shape). ONE new tag
+  # SITE carrying ONE name the package did not have, so this pin moves by one and
+  # the SITE register below does not move at all — the partition arm's expected
+  # total follows this line alone (728 sites = 381 names + the register's 347
+  # duplicated sites). MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@go_tag_pinned 380 -> 381"), never by arithmetic; `@emitted_pinned` HOLDS
+  # at 176 and the co-edit arm printed only this one moved pin, which is the
+  # measurement that the router's 422 bodies are outside the emit scanner's
+  # corpus.
+  @go_tag_pinned 381
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
