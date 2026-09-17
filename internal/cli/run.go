@@ -457,6 +457,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		writeClaimedDraft, tail = extractClaimedDraftMutationFlag(tail)
 	}
 
+	// `--store-unread`: the additive, opt-in flag that lets a secret write land
+	// under a name nothing on the instance reads back (secret_unread_name_guard.go).
+	// Stripped here for the same reason as the ones above — the manifest never
+	// declares it, so splitArgs would refuse it.
+	var storeUnreadSecret bool
+	if storeUnreadSecretFlagApplies(cmd) {
+		storeUnreadSecret, tail = extractStoreUnreadSecretFlag(tail)
+	}
+
 	// `bp task stage --keep-rerun`: the SEVENTH additive, opt-in flag the
 	// manifest never declares, stripped here for the same reason as the ones
 	// above — it must never reach splitArgs. See tasks_stage_rerun_guard.go for
@@ -687,6 +696,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// wording, and is the backstop underneath both if a call site is ever
 	// dropped. Still before the send: the refusal arrives BEFORE the write.
 	if code, refused := guardClaimedDraftMutation(out, g, ctx, m, cmd, req, writeClaimedDraft || editClaimedDraft || restoreOntoClaimed); refused {
+		return code
+	}
+
+	// Unread-secret-name pre-flight (secret_unread_name_guard.go): a
+	// `PUT …/secrets/<name>` whose name the instance reads from its ENVIRONMENT
+	// stores an encrypted row nothing resolves — `bp secret set anthropic_api_key`
+	// returned 200 and left Studio chat titles and the task judge exactly as
+	// keyless as before (task-512394bf1706afde). Keyed on the resolved request,
+	// so `secret set` and `secret scoped-set` are one check. Refuses naming the
+	// env var, the env file and the slot restart, unless --store-unread was given.
+	if code, refused := guardUnreadSecretName(out, req, storeUnreadSecret); refused {
 		return code
 	}
 
