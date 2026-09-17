@@ -855,8 +855,21 @@ census_check() {
 # census_check's job, on the heads that render them. The two clauses are the two
 # halves: census reads what GitHub RENDERED, this reads what the tree DECLARES,
 # and the defect above lived in the gap between them.
+# ITS OWN SCAN ROOT, and the reason is the same one `--prose` carries. Nearly
+# every --selftest probe overrides the SPEC with a three-name fixture while
+# leaving $WORKFLOWS_DIR pointed at the REAL tree. Under a truncated accounted
+# set half the committed workflows look "partially accounted", so this clause
+# would red inside probes 1, 15, 25, 26 and 29 — probes about entirely different
+# clauses. MEASURED, not predicted: that is exactly how those five failed the
+# first time this clause was wired in. `--partial-workflows` lets the suite point
+# THIS clause at a neutral fixture while the prose clauses keep reading the real
+# tree, which is the isolation --prose already buys. Every real invocation leaves
+# it empty and reads .github/workflows.
+PARTIAL_WF_DIR_OVERRIDE=""
+
 partial_accounting_check() {
-  local tmp rc=0 files n_acc n_files findings
+  local tmp rc=0 files n_acc n_files findings scan_dir
+  scan_dir="${PARTIAL_WF_DIR_OVERRIDE:-$WORKFLOWS_DIR}"
   tmp="$(mktemp -d)"
   jq -r '(.protection.required_status_checks.checks[]?.context),
          (.exclusions[]?.context)' "$SPEC" | sort -u > "$tmp/accounted"
@@ -869,7 +882,7 @@ partial_accounting_check() {
     rm -rf "$tmp"
     blocked "partial-accounting: the spec yielded $n_acc accounted context(s) — with no accounted set the antecedent can never fire and a green here would mean nothing."
   fi
-  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)"
+  files="$(find "$scan_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)"
   n_files="$(printf '%s\n' "$files" | grep -c . || true)"
   # CONTROL 2: there must be a workflow to read. Scanning ZERO files is a vacuous
   # pass, not a green — the same refusal merge_truth_prose_check makes. The floor
@@ -879,7 +892,7 @@ partial_accounting_check() {
   # and the suite reds over its harness instead of over the clause.
   if [ "${n_files:-0}" -lt 1 ]; then
     rm -rf "$tmp"
-    blocked "partial-accounting: $WORKFLOWS_DIR yielded $n_files workflow file(s) — scanning zero is a vacuous pass, not a green."
+    blocked "partial-accounting: $scan_dir yielded $n_files workflow file(s) — scanning zero is a vacuous pass, not a green."
   fi
   findings=0
   local f base names acc_here miss_here
@@ -2067,12 +2080,34 @@ JSON
   printf '%s\n' "Neutral corpus. It names no required context, so the merge-truth clause has something real to scan and nothing to say about it." \
     > "$neutral_prose/neutral.md"
 
+  # THE NEUTRAL WORKFLOW TREE for partial_accounting_check: one file, one job
+  # name, and that name is in no spec any probe uses — so the clause's antecedent
+  # ("this file is already in the ledger") cannot fire and it has nothing to say.
+  local neutral_partial="$tmp/wf-neutral-partial"
+  mkdir -p "$neutral_partial"
+  cat > "$neutral_partial/neutral.yml" <<'YML'
+name: Neutral
+on: [pull_request]
+jobs:
+  neutral:
+    name: Neutral fixture job in no ledger
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+
   probe() { # label expect_rc <args…>
     local label="$1" expect="$2"; shift 2
     local out rc=0
     # Only when the caller has not chosen its own corpus — probes 24-27 are ABOUT
     # this clause and pass their own --prose, which must win.
     case " $* " in *" --prose "*) : ;; *) set -- "$@" --prose "$neutral_prose" ;; esac
+    # Same reasoning, one clause over: partial_accounting_check is SPEC-DERIVED
+    # over the workflow tree, and nearly every probe below hands it a three-name
+    # fixture spec while $WORKFLOWS_DIR still points at the real one. Default it
+    # to a neutral tree; the four probes that are ABOUT this clause pass their
+    # own --partial-workflows, which wins.
+    case " $* " in *" --partial-workflows "*) : ;; *) set -- "$@" --partial-workflows "$neutral_partial" ;; esac
     out="$(bash "$SELF" "$@" 2>&1)" || rc=$?
     if [ "$rc" -eq "$expect" ]; then
       echo "  ok   $label (exit $rc)"
@@ -2414,22 +2449,22 @@ jobs:
       - run: 'true'
 YML
   probe "32/35 a workflow with one LEDGERED job name and one that carries no status REDS — the #18847 shape, caught from the tree instead of waiting for a head to render it" 1 \
-    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-partial" || rc=1
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-partial" || rc=1
 
   mkdir -p "$tmp/wf-complete"
   sed 's/name: Unledgered gamma/name: Ledgered beta/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-complete/widget.yml"
   probe "33/35 …and the IDENTICAL file with that one name accounted is GREEN — one line apart, opposite verdicts" 0 \
-    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-complete" || rc=1
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-complete" || rc=1
 
   mkdir -p "$tmp/wf-orphan"
   sed 's/name: Ledgered alpha/name: Unledgered delta/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-orphan/widget.yml"
   probe "34/35 a workflow where NOTHING is accounted stays QUIET — the antecedent is 'already in the ledger', not 'every job name in the tree' (31 workflows of inherited debt do not become this clause's red)" 0 \
-    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-orphan" || rc=1
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-orphan" || rc=1
 
   mkdir -p "$tmp/wf-matrix"
   sed 's/name: Unledgered gamma/name: Gate (${{ matrix.v }})/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-matrix/widget.yml"
   probe "35/35 a MATRIX-TEMPLATED name beside a ledgered one stays quiet — the rendered string is not derivable from the file, so it is census_check's to judge, not this clause's" 0 \
-    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-matrix" || rc=1
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-matrix" || rc=1
 
   rm -rf "$tmp"
   echo
@@ -2454,6 +2489,9 @@ main() {
       # override exists ONLY so the suite can point the identical clause at a
       # fixture tree; every real invocation reads the committed corpus.
       --prose) PROSE_ROOT_OVERRIDE="$2"; shift 2 ;;
+      # Same contract as --workflows and --prose: an override exists ONLY so the
+      # suite can point the partial-accounting clause at a fixture tree.
+      --partial-workflows) PARTIAL_WF_DIR_OVERRIDE="$2"; shift 2 ;;
       # Turn the merge-truth clause's zero-candidate green into a refusal. For
       # a caller about to STAND on this clause; see REQUIRE_PROSE_CANDIDATES.
       --require-prose-candidates) REQUIRE_PROSE_CANDIDATES=1; shift ;;
