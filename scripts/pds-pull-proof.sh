@@ -20,6 +20,16 @@
 #                                           quoted recipe must parse all four
 #                                           keys in SILENCE. No network, no
 #                                           target, no export.
+#   scripts/pds-pull-proof.sh --selftest-citations
+#                                           OFFLINE two-arm control over this
+#                                           file's OWN decision citations: a
+#                                           slash-compressed citation carries
+#                                           the PDS-D prefix on the first
+#                                           number only, so the standard census
+#                                           grep silently misses every later
+#                                           one. Fixtures prove the detector
+#                                           fires and stays quiet; the last arm
+#                                           runs it on this script.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -4244,6 +4254,112 @@ cmd_selftest_conninfo() {
   return 1
 }
 
+# ── CITATION GREP HONESTY (pds-w5-citation-grep-honesty) ─────────────────────
+#
+# The census contract for this harness is a grep: `grep -oE 'PDS-D[0-9]+'`
+# over the source is how a reader finds every ruling a line is governed by.
+# A citation written the compressed way — one PDS-D number, then a bare `/D`
+# continuation for each sibling — satisfies a HUMAN reader and defeats that
+# grep, because the prefix appears on the FIRST number only. The census
+# reports the head and silently loses every sibling behind it. The loss is
+# invisible: nothing errors, the number is just quietly too low.
+#
+# (This comment deliberately does not spell an example out. The guard below
+# reads THIS FILE, so an illustration here would be a real finding — which is
+# itself the proof that the guard carries no exception list.)
+#
+# A PREDICATE, NOT AN ENUMERATION. The row that asked for this named two
+# sites; the file had fourteen. So the guard is a shape — any PDS-D number
+# followed by a bare /D number — and not a list of the places we happened to
+# look. A list goes stale the first time someone writes a fifteenth.
+#
+# DENOMINATOR, STATED: `grep -o` counts MATCHES, not LINES. Two compressed
+# citations on one line are two findings, and `grep -c` would call them one.
+# Every count this selftest prints is a match count.
+compressed_citations() {
+  # Each offending citation, one per line. Empty output == clean.
+  grep -oE 'PDS-D[0-9]+(/D[0-9]+)+' "$1" 2>/dev/null || true
+}
+
+# What the standard census actually sees in a file: the distinct rulings a
+# naive `grep -oE 'PDS-D[0-9]+'` can reach.
+census_identifiers() {
+  grep -oE 'PDS-D[0-9]+' "$1" 2>/dev/null | sort -u || true
+}
+
+cmd_selftest_citations() {
+  local tmpd arms=0 fails=0 found n_compressed n_seen bad
+  # THE DEFECT SHAPE, BUILT FROM PARTS — never written as a literal.
+  # A fixture that spelled the compressed form out as a literal would itself
+  # be a finding in this file, and the last arm below would have to carve an
+  # exception for its own test data. A guard with an exception list is a guard
+  # you have to trust; this one measures the whole file with none.
+  bad='/D'
+
+  _st_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _st_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _st_eq()  { if [ "$2" = "$3" ]; then _st_ok "$1"; else _st_bad "$1" "expected [$2], got [$3]"; fi; }
+
+  tmpd="$(mktemp -d)"
+
+  say "selftest: decision-citation grep honesty"
+  say ""
+  say "  NEGATIVE CONTROL — the compressed form (the shape that loses numbers)"
+
+  {
+    printf '# the ONE full-fidelity export (PDS-D69%s70%s71)\n' "$bad" "$bad"
+    printf '# THE 34 (PDS-D127%s128)\n' "$bad"
+  } > "$tmpd/compressed.txt"
+
+  found="$(compressed_citations "$tmpd/compressed.txt")"
+  n_compressed="$(printf '%s' "$found" | grep -c . || true)"
+  _st_eq "compressed: the detector FIRES, and names 2 citations (match count, not line count)" \
+    "2" "$n_compressed"
+
+  # THE ACTUAL DAMAGE, MEASURED: five rulings are cited, the census reaches two.
+  n_seen="$(census_identifiers "$tmpd/compressed.txt" | grep -c . || true)"
+  _st_eq "compressed: the standard census reaches only 2 of the 5 cited rulings" "2" "$n_seen"
+  case "$(census_identifiers "$tmpd/compressed.txt" | tr '\n' ' ')" in
+    *PDS-D70*) _st_bad "compressed: D70 is INVISIBLE to the census" "the fixture did not reproduce the defect, so the positive arm proves nothing" ;;
+    *)         _st_ok  "compressed: PDS-D70 is INVISIBLE to the census (this is the bug)" ;;
+  esac
+
+  say ""
+  say "  POSITIVE CONTROL — the expanded form (a guard that shouts here is noise)"
+
+  {
+    printf '# the ONE full-fidelity export (PDS-D69/PDS-D70/PDS-D71)\n'
+    printf '# THE 34 (PDS-D127/PDS-D128)\n'
+  } > "$tmpd/expanded.txt"
+  # The expanded fixture IS spelled out: it is the correct shape, so it is
+  # exactly what the last arm should find nothing wrong with.
+
+  _st_eq "expanded: the detector is SILENT" "" "$(compressed_citations "$tmpd/expanded.txt")"
+  n_seen="$(census_identifiers "$tmpd/expanded.txt" | grep -c . || true)"
+  _st_eq "expanded: the census now reaches all 5 cited rulings" "5" "$n_seen"
+
+  say ""
+  say "  THE SUBJECT — this harness's own source"
+
+  found="$(compressed_citations "$0")"
+  n_compressed="$(printf '%s' "$found" | grep -c . || true)"
+  if [ "$n_compressed" -eq 0 ]; then
+    _st_ok "$SELF cites every ruling in full-prefix form ($(census_identifiers "$0" | grep -c . || true) distinct rulings reachable by the census grep)"
+  else
+    _st_bad "$SELF cites every ruling in full-prefix form" \
+      "$n_compressed compressed citation(s) still present — the census under-reports this file: $(printf '%s' "$found" | tr '\n' ' ')"
+  fi
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
 main() {
   # ── --plan WINS WHEREVER IT APPEARS, and nothing trailing is ignored (PDS-D89)
   #
@@ -4296,12 +4412,17 @@ main() {
       cmd_selftest_conninfo
       exit $?
       ;;
+    --selftest-citations)
+      [ $# -le 1 ] || die "--selftest-citations takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_citations
+      exit $?
+      ;;
     -h|--help|help)
       sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--selftest-citations|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac
