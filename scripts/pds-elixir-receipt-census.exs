@@ -14272,7 +14272,18 @@ defmodule PDS.Census do
     Enum.each(bound, fn d -> cas_int_removal_check!(d) end)
   end
 
-  @count_int_rx ~r/(===|!==|==|!=)(\s*)(\d+)/
+  # BOTH SPELLINGS OF "AN INTEGER LITERAL THE COUNT IS MATCHED AGAINST" — the comparison
+  # (`rows == 1`) and the case head (`case claimed do 1 -> ...`, webhooks.ex:919). Each
+  # integer becomes a VARIABLE of the same digits, which always parses and leaves the
+  # destructure, the write and the comparison in place; only the literal is gone.
+  #
+  # EVERY OCCURRENCE IN THE RANGE, NOT THE FIRST. Mutating one and leaving a second would
+  # assert "still reads CAS" against a body that still HOLDS a confirmation — a red with
+  # the wrong cause, which is worse than the miss it is hunting.
+  @count_int_cmp_rx ~r/(===|!==|==|!=)(\s*)(\d+)/
+  @count_int_head_rx ~r/^(\s*)(\d+)(\s*->)/
+
+  defp count_matches(line, rx), do: length(Regex.scan(rx, line))
 
   defp cas_int_removal_check!(d) do
     lines = d.path |> File.read!() |> String.split("\n")
@@ -14283,8 +14294,15 @@ defmodule PDS.Census do
       lines
       |> Enum.with_index()
       |> Enum.map_reduce(0, fn {line, i}, hits ->
-        if i >= lo and i <= hi and hits == 0 and Regex.match?(@count_int_rx, line) do
-          {Regex.replace(@count_int_rx, line, "\\1\\2n_\\3", global: false), hits + 1}
+        if i >= lo and i <= hi do
+          n = count_matches(line, @count_int_cmp_rx) + count_matches(line, @count_int_head_rx)
+
+          rewritten =
+            line
+            |> then(&Regex.replace(@count_int_cmp_rx, &1, "\\1\\2n_\\3"))
+            |> then(&Regex.replace(@count_int_head_rx, &1, "\\1n_\\2\\3"))
+
+          {rewritten, hits + n}
         else
           {line, hits}
         end
