@@ -97,6 +97,153 @@ jobs:
       - name: window arms (hermetic, no network)
         run: bash scripts/main-red-window.sh --selftest
 
+      # ══ THE 24 H WINDOW LEDGER MUST OUTLIVE THE RUNNER ════════════════════
+      # THE DEFECT (task-1f61db3eb910429e). scripts/main-red-window.sh shipped in
+      # PR #18922 complete and inert. --record appends one poll to a JSONL
+      # ledger and --verdict says whether a clean 24 h has actually been
+      # OBSERVED — but this workflow runs hourly on an EPHEMERAL runner, so a
+      # --record here wrote into a filesystem destroyed at the end of the job and
+      # the next run's --verdict correctly read an empty file and reported NOT
+      # YET MEASURED forever. task-0a48c7b64d5ab0f1 c0's "measured over 24 h"
+      # half was therefore not merely unmet, it was UNMEASURABLE.
+      #
+      # ── THE THREE CANDIDATES, ADJUDICATED ────────────────────────────────
+      # The discriminator is NOT durability. It is the one this repo has already
+      # used to decide this exact question twice, in OPPOSITE directions:
+      #
+      #     CAN A MISS BE MISTAKEN FOR A PASS?
+      #
+      # crown-reconcile.yml REFUSED actions/cache on it ("a cache miss is
+      # indistinguishable from an empty list — which is the exact defect being
+      # cured"). stale-verdict-watch.yml ACCEPTED actions/cache on it, because
+      # its script STATES the absence instead of reading it as an unchanged
+      # count. Same discriminator, opposite answers, both right.
+      #
+      # 1. actions/cache, rolling key.  ★ CHOSEN.
+      #    Here a miss CANNOT be mistaken for a pass, and that is not an opinion
+      #    — it is armed. A total loss leaves a ledger that no longer reaches
+      #    back past the window start: --verdict exits 2 NOT YET MEASURED (arm
+      #    "a ledger starting inside the window refuses"). A partial loss leaves
+      #    a hole mid-window: exit 2 again (arm "a store outage punched
+      #    mid-window refuses"). An absent ledger exits 4 (arm "a missing ledger
+      #    refuses"). NONE of those is 0, and 0 is the only pass. The silent
+      #    failure mode everyone rightly fears about cache eviction is, for THIS
+      #    consumer, the fail-closed one — and it is the cheapest: no new API
+      #    surface, no new secret, no bootstrap special case (a first run is
+      #    simply a short window), and a worked example forty lines away in
+      #    stale-verdict-watch.yml.
+      #
+      # 2. actions/upload-artifact + download-artifact.  REFUSED.
+      #    Nothing in this repo downloads an artifact across runs — grep for
+      #    download-artifact in .github/workflows/ returns NOTHING — so this is
+      #    a new mechanism, and a cross-run download needs the PREVIOUS run's
+      #    id, discovered by a paginated run-list query. That is the SAME
+      #    run-list feed whose intermittent, unmarked staleness the freshness
+      #    control in scripts/main-red-predicate.sh was written on 2026-09-17 to
+      #    defend against. Hanging the anti-stale instrument's own MEMORY off
+      #    the stale feed is a self-defeating dependency: the reading it is
+      #    meant to refuse would decide which history it reads it against. It
+      #    also needs a first-run bootstrap branch, which is precisely where a
+      #    false green would live. More machinery, more failure surface, and no
+      #    stronger a guarantee than the arms above already give.
+      #
+      # 3. Commit the ledger to main.  REFUSED, decisively, and not on noise.
+      #    This workflow carries `push: branches: [main]`. An hourly bot commit
+      #    to main would RETRIGGER THIS WORKFLOW, and with it every other
+      #    workflow in this repo carrying a push-on-main arm — the predicate
+      #    counted 56 of them. The instrument would become the dominant producer
+      #    of the main runs it exists to measure, which corrupts the measurement
+      #    whatever you do about the loop. Nothing in .github/workflows/ pushes
+      #    to main today and this is not the file to start with.
+      #
+      # STATED RESIDUALS, not papered over:
+      #   · Cache eviction (7 days idle, or the 10 GB repo cap) is SILENT. It
+      #     costs a window, never a false clean day. Hourly traffic keeps the
+      #     entry warm; the fixed prefix keeps one lineage.
+      #   · The save key is per-run-id because cache entries are IMMUTABLE — a
+      #     fixed key would be written once and never again. The restore falls
+      #     back to the newest main-red-window-* entry.
+      #   · Two concurrent runs (the hourly cron and a push on main) both
+      #     restore the same base and one save wins, so one poll can be LOST.
+      #     The hourly cron is the backbone and a lost push-run row leaves it
+      #     intact; a lost cron row shows up as a gap, which refuses.
+      #   · A cancellation that kills the VM before the always() save loses that
+      #     run's row. Same treatment: a gap, not a green.
+      #   · THE PREDICATE IS RUN TWICE PER HOUR — once by --record here and once
+      #     by the ownership step below — roughly doubling this job's GitHub
+      #     reads (~110 endpoints each; still far inside the 5000/h limit).
+      #     Sharing one reading would mean restructuring main-red-owner.sh, and
+      #     it is not obviously the right trade: the ledger row carries the
+      #     verdict line from ITS OWN run VERBATIM, so it can be audited against
+      #     the instrument rather than against a paraphrase of a sibling step's
+      #     output. Two independent readings of a feed with a known intermittent
+      #     staleness fault is a property, not only a cost.
+      - name: Restore the 24 h window ledger (best effort)
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/main-red-window.jsonl
+          key: main-red-window-${{ github.run_id }}
+          restore-keys: |
+            main-red-window-
+
+      # A RED POLL IS A DATUM, NOT A FAILURE OF THIS STEP. --record exits 1 when
+      # the poll it just took was not TRUE. Letting that red the step would stop
+      # the run before the save below and abandon recording at exactly the moment
+      # the record matters most. Only a genuine inability to APPEND (exit 4)
+      # fails here; the red itself is delivered by the ownership step, whose job
+      # that is.
+      - name: Record one poll into the 24 h window ledger
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          L="$RUNNER_TEMP/main-red-window.jsonl"
+          bash scripts/main-red-window.sh --record "$L" "$GITHUB_REPOSITORY"
+          rc=$?
+          echo "record exit=$rc  (0=poll was TRUE, 1=poll was not TRUE — both are DATA)"
+          if [ "$rc" -gt 1 ]; then
+            echo "TERMINAL: the ledger could not be appended to (exit $rc) — this run records NOTHING"
+            exit "$rc"
+          fi
+          echo "rows now: $(wc -l < "$L" | tr -d ' ')"
+          echo "TERMINAL: one poll recorded into the window ledger"
+
+      # ADVISORY ON PURPOSE, AND SAY SO. Reddening on a not-yet-clean window
+      # would red main's own watcher for the whole first day and for every day
+      # containing a single red — reproducing, one layer out, the "advisory red
+      # nobody owns" disease this workflow was written to cure. The verdict's
+      # consumer is a human stamping task-0a48c7b64d5ab0f1 c0, and it is
+      # published where that human can read it: the step summary.
+      - name: Has a clean 24 h actually been OBSERVED?
+        if: github.event_name != 'pull_request'
+        run: |
+          set -uo pipefail
+          L="$RUNNER_TEMP/main-red-window.jsonl"
+          bash scripts/main-red-window.sh --verdict "$L" | tee "$RUNNER_TEMP/mrw.txt"
+          rc=${PIPESTATUS[0]}
+          {
+            echo "## 24 h window — has a clean day been OBSERVED?"
+            echo
+            echo "exit $rc — 0 CLEAN · 1 RED in the window · 2 NOT YET MEASURED · 3 UNMEASURABLE (blind spot) · 4 ledger unreadable"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/mrw.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "TERMINAL: window verdict exit=$rc (advisory — this step never fails the run)"
+
+      # always(): the save must run even when a step above red, because the row
+      # this run just recorded is the one the NEXT window needs.
+      - name: Save the 24 h window ledger
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/main-red-window.jsonl
+          key: main-red-window-${{ github.run_id }}
+
       # NEVER ON A PULL REQUEST. This step writes issues and reads ~110 GitHub
       # endpoints; a PR head is the wrong place for both, and a check name born
       # on a PR head is eligible for the required set, which this repo refuses
