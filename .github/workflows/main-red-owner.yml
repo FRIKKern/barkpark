@@ -199,10 +199,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          # `rc=0; … || rc=$?` IS THE FIX, AND IT IS NOT STYLE (task-3b5edb3d1f5990e3).
+          # The runner's shell for a `run:` block is `/usr/bin/bash -e {0}`.
+          # `set -uo pipefail` adds nofail/pipefail; it does NOT turn errexit OFF.
+          # So the bare `bash … --record` below, whose exit 1 this step's own next
+          # line calls DATA, ABORTED THE STEP at that line: `rc=$?` never ran, the
+          # `-gt 1` adjudication never ran, and the workflow whose whole job is to
+          # report a red on main was itself counted as one — stably, for four
+          # consecutive runs on main's tip (35244509820 at a2c6e3837 and three
+          # before it), with the script's own TERMINAL line printed and NONE of
+          # this step's echoes. `|| rc=$?` keeps the status a DATUM: `-e` never
+          # fires on the left of `||`, so the adjudication below runs and decides.
+          # Do NOT "simplify" this back to a bare call, and do NOT reach for
+          # `continue-on-error` or `|| true` — those make a real append failure
+          # green, which is the one outcome this step must still red on.
           set -uo pipefail
           L="$RUNNER_TEMP/main-red-window.jsonl"
-          bash scripts/main-red-window.sh --record "$L" "$GITHUB_REPOSITORY"
-          rc=$?
+          rc=0
+          bash scripts/main-red-window.sh --record "$L" "$GITHUB_REPOSITORY" || rc=$?
           echo "record exit=$rc  (0=poll was TRUE, 1=poll was not TRUE — both are DATA)"
           if [ "$rc" -gt 1 ]; then
             echo "TERMINAL: the ledger could not be appended to (exit $rc) — this run records NOTHING"
@@ -220,9 +234,17 @@ jobs:
       - name: Has a clean 24 h actually been OBSERVED?
         if: github.event_name != 'pull_request'
         run: |
+          # SAME FAULT, SECOND SHAPE, AND IT MADE THE COMMENT ABOVE FALSE. Under
+          # `set -o pipefail` a pipeline carries the LEFT command's non-zero
+          # status, so `-e` aborted here on verdict exits 1/2/3/4 — and 2 (NOT
+          # YET MEASURED) is the NORMAL state of a fresh ledger. The step that
+          # says "this step never fails the run" was failing the run on its most
+          # common input, and the summary below — the verdict's only consumer —
+          # was never written. `|| :` keeps the pipeline's failure off `-e`;
+          # PIPESTATUS[0] still carries the script's own exit.
           set -uo pipefail
           L="$RUNNER_TEMP/main-red-window.jsonl"
-          bash scripts/main-red-window.sh --verdict "$L" | tee "$RUNNER_TEMP/mrw.txt"
+          bash scripts/main-red-window.sh --verdict "$L" | tee "$RUNNER_TEMP/mrw.txt" || :
           rc=${PIPESTATUS[0]}
           {
             echo "## 24 h window — has a clean day been OBSERVED?"
@@ -254,8 +276,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          # SAME FAULT, THIRD SHAPE. `-e` + `pipefail` aborted this step the
+          # instant main-red-owner.sh exited 3/4/5 — the COULD-NOT-DELIVER codes
+          # — so the step summary below, which is the whole diagnosis of a failed
+          # delivery, was written only on the path where nothing went wrong. The
+          # step still exits `$rc` at the end; `|| :` only buys the summary.
           set -o pipefail
-          bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt"
+          bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt" || :
           rc=${PIPESTATUS[0]}
           {
             echo "## main-red-owner"

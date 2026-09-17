@@ -147,6 +147,7 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/required-checks.test.sh"
       - "scripts/workflow-job-shape-check.sh"
+      - "scripts/workflow-errexit-capture-check.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
       - "scripts/main-red-breaker.sh"
@@ -499,6 +500,34 @@ jobs:
       - name: Every job in .github/workflows has a legal shape
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-job-shape-check.sh --dir .github/workflows
+
+      # ── THE SECOND STRUCTURAL LINT ON THIS JOB ─────────────────────────────
+      # A DIFFERENT SUBJECT, THE SAME HOST, AND ON PURPOSE. The job above judges
+      # whether Actions will PARSE a workflow; this one judges whether a step's
+      # shell will REACH the line that adjudicates an exit status. Both are
+      # single PyYAML passes over the same tree, both want to render on every PR
+      # including the ones that edit an unrelated workflow, and this job is the
+      # only one in the repo that is already dispatcher-independent and
+      # path-unfiltered for exactly that reason.
+      #
+      # A STEP, NOT A NEW JOB. A new job renders a new check-run name, and a new
+      # name pulls the required-checks census in behind it (generator stage S4,
+      # S6's leaf-granularity trap) for a lint that is asking for neither. The
+      # sibling above records the same trade-off for itself; this applies it
+      # rather than re-deriving it.
+      #
+      # WHAT IT CAUGHT ON ITS FIRST RUN (task-3b5edb3d1f5990e3): four sites, all
+      # four capturing an exit status the runner's `bash -e` had already killed
+      # the step over. One of them was main-red-owner.yml's own `--record` step,
+      # which had been STABLY RED on main's tip for it — the workflow whose job
+      # is to give a red on main an owner, counted as a red on main, by its own
+      # reporting bug.
+      - name: Prove the errexit-capture checker on planted fixtures (--selftest)
+        run: bash scripts/workflow-errexit-capture-check.sh --selftest
+
+      - name: No workflow captures an exit status the runner's `bash -e` already killed
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/workflow-errexit-capture-check.sh --dir .github/workflows
 
   # ── required contexts must be unable to conclude `cancelled` ────────────────
   #
