@@ -586,7 +586,16 @@ defmodule Barkpark.PdsDoorCensusTest do
     # hex>` or `ungraded-until=<YYYY-MM-DD>` in the field after `load1=<n>`, and
     # a row with neither reds. A NEW row pasted with neither reds on its first
     # --check, which a list of known-unkeyed basenames could never do.
-    refute out =~ "PRICE-UNGRADED",
+    # MATCHED AS AN ERROR LINE, NEVER AS A BARE SUBSTRING, AND THAT IS A REPAIR
+    # RATHER THAN A STYLE: the census PRINTS each price cell, and a shipped cell
+    # explains its own tokens in trailing prose. The first version of this
+    # assertion was `refute out =~ "PRICE-UNGRADED"` and it reddened on a GREEN
+    # census — the pds-door-census.sh row says "the PRICE-UNGRADED ruling landed
+    # with seven arms" in the prose the table reproduces verbatim. It is the same
+    # defect price_key_token was rewritten to be positional for, arriving one
+    # layer up. The emitted shape is `  <basename>: PRICE-UNGRADED — …` at the
+    # head of a line; prose never is.
+    refute out =~ ~r/^\s+\S+: PRICE-UNGRADED/m,
            "a THROUGH price row is neither keyed nor stood down with a dated " <>
              "`ungraded-until=`. Re-take it on a quiet host with `--measure <basename> " <>
              "<its gated arm>`, or stand it down explicitly.\n#{out}"
