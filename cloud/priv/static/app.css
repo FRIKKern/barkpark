@@ -34,17 +34,30 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     56 of this file's 62 `min-width` declarations are this escape, and none of
+     62 of this file's 69 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
-   break-all), 62 `min-width` (66 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 24
-   `overflow-wrap`. The raw line greps are higher (18 / 103 / 38) because this
-   block and the per-site comments name them in prose. Re-derive with a
-   comment-stripping pass, never a bare `grep -c`.
+   break-all), 69 `min-width` (72 occurrences less the THREE that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 30
+   `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
+   quoted here: this block and the per-site comments name the properties in
+   prose, so any raw-grep figure counts its own paragraph and moves whenever a
+   comment anywhere in the file is edited. There is no honest constant to state,
+   so none is stated. Re-derive with a comment-stripping pass, never a bare
+   `grep -c`.
+
+   AND “DERIVED” IS NOW ENFORCED RATHER THAN ASSERTED. Every integer in this
+   block is re-derived from this file and compared against the words you are
+   reading, by `cloud/test/web/wrap_vocabulary_header_test.exs`. Change a wrap
+   in this file without changing these numbers — or change a number here without
+   the file — and that test reds and prints both sides. It FAILS, never skips,
+   when it cannot find a figure to check: a sentence it can no longer parse is
+   itself a red, so rewording this paragraph past its reach is not a way to go
+   quiet. That is the whole difference between a count that is derived and a
+   count that merely says it is.
 
    AND THE PART THAT IS NOT A DECLARATION: none of the four is provable by
    reading. Every wrap in this file that is load-bearing carries a MEASUREMENT
