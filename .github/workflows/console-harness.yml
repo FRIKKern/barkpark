@@ -644,6 +644,33 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1481 — bumped 2026-09-17 from 1479 on console-r21-w6-statusmeta:
+      # +2 tests finishing the gr-backlog-d24 sweep — (f) the PREDICATE arm, which
+      # brace-matches statusMetaPill's body and refuses any status-pill class
+      # literal authored outside it (with a vacuous-green guard and a
+      # replaceUnique reversion control), and (g) the RENDER arm over the four
+      # absorbed call sites that are node-pinned. RE-MEASURED ON THE REBASED
+      # TREE, never arithmetic: this branch first carried 1477, measured against
+      # a base that predates the erasure PR's 1479; 1477 + nothing and 1479 + 2
+      # are both derivations, not measurements, so `bash scripts/console-harness.sh`
+      # was run again after the rebase and printed `# tests 1481 / # pass 1481 /
+      # # fail 0` (exit 0). RE-MEASURED AGAIN after a second rebase onto
+      # origin/main 10565fc62 (the base moved twice while this PR was open; the
+      # number did not, and it was measured each time rather than carried).
+      # TWO CONTROLS: (1) the diff against origin/main 10565fc62 adds exactly 2
+      # top-level `test(` registrations to __app.test.mjs and removes none;
+      # (2) a detached worktree at that same origin/main ran the same command and
+      # printed `# tests 1479 / # pass 1479 / # fail 0`, so main's own committed
+      # 1479 is what main MEASURES and 1481 is that plus exactly these two arms.
+      # A FIRST RUN OF THAT SAME COMMAND READ `# pass 1480 / # fail 1` under
+      # fleet load — `cch-bl: the IMPORTED citationScanFiles() equals the set the
+      # GATE actually scans`, whose subprocess output came back truncated. It is
+      # LOAD, not this diff: the same test passes alone on this branch, passes on
+      # a clean origin/main worktree, and `node cloud/priv/static/__css_check.mjs
+      # --citation-inventory` prints the identical 146 lines on both trees.
+      # NOTE: the pin lives in more slots than a grep inside the shell step shows
+      # (the step NAME carries it too); `bash scripts/console-pins.sh --selftest`
+      # is the reader that sees all of them and it passes on this branch.
       # PIN 1479 — bumped 2026-09-17 from 1475 on console-r21-w3-erasure
       # (task-c161ba42b88805c0): +4 tests for the two erasure Danger zones —
       # teamDangerZoneHtml's OWNER band with its admin/member/null controls,
@@ -755,7 +782,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1479-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1481-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -771,14 +798,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1479 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1479 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1481 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1481 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1479 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1479 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1479 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1481 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1481 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1481 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1479 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1481 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
