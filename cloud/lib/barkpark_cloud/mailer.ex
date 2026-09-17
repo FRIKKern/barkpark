@@ -27,6 +27,123 @@ defmodule BarkparkCloud.Mailer do
   """
   use Swoosh.Mailer, otp_app: :barkpark_cloud
 
+  require Logger
+
+  # Adapters that ACCEPT a message and never put it on a wire. `Test` is here so
+  # `deliverability/0` can NAME it, not so it can be alarmed on — `discards?/1`
+  # below deliberately excludes it (see `drops_mail?/0`).
+  @non_delivering %{
+    Swoosh.Adapters.Local => :local_mailbox,
+    Swoosh.Adapters.Test => :test_capture
+  }
+
+  @doc """
+  What this control plane's mail configuration can actually do, as
+  `%{adapter:, deliverable?:, reason:}`. `reason` is one of
+  `:ok | :local_mailbox | :test_capture | :unconfigured | :relay_unset`.
+
+  THE `:relay_unset` ARM IS THE ONE THAT MATTERS HERE, and it is why this is not
+  a copy of `Barkpark.Mailer.deliverability/0`. On an instance the mail-dead
+  shape is the LOCAL ADAPTER, because `api/config/config.exs` defaults to it and
+  `SMTP_HOST` opts in. On the control plane there is no such branch:
+  `cloud/config/runtime.exs` sets `Swoosh.Adapters.SMTP` UNCONDITIONALLY in prod
+  and passes `System.get_env("SMTP_HOST")` straight through as `:relay`. A plane
+  booted with `SMTP_HOST` unset therefore holds a DELIVERING adapter with a nil
+  relay — a state an adapter-only check reads as healthy while every send dies
+  in gen_smtp option validation (`:no_relay`, already classified by
+  `Notifications.DeliveryReason`).
+
+  The one place the question "can this plane send mail off-box?" is answered, so
+  the boot banner and any future health component cannot drift apart.
+  """
+  @spec deliverability() :: %{adapter: module() | nil, deliverable?: boolean(), reason: atom()}
+  def deliverability do
+    cfg = Application.get_env(:barkpark_cloud, __MODULE__, [])
+
+    case cfg[:adapter] do
+      nil ->
+        %{adapter: nil, deliverable?: false, reason: :unconfigured}
+
+      Swoosh.Adapters.SMTP = mod ->
+        if blank?(cfg[:relay]) do
+          %{adapter: mod, deliverable?: false, reason: :relay_unset}
+        else
+          %{adapter: mod, deliverable?: true, reason: :ok}
+        end
+
+      mod ->
+        case Map.fetch(@non_delivering, mod) do
+          {:ok, reason} -> %{adapter: mod, deliverable?: false, reason: reason}
+          :error -> %{adapter: mod, deliverable?: true, reason: :ok}
+        end
+    end
+  end
+
+  # A relay is "set" only if it is a non-blank string. `nil` is what
+  # `System.get_env("SMTP_HOST")` answers when the var is absent; `""` is what it
+  # answers when the var is present and empty, which a shell produces far more
+  # often than anyone expects (`SMTP_HOST=$UNSET_VAR`). Both are mail-dead.
+  defp blank?(nil), do: true
+  defp blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank?(_other), do: false
+
+  @doc """
+  Whether this configuration accepts transactional mail and drops it where a
+  REAL person was expecting it.
+
+  NARROWER than `not deliverability().deliverable?`: `Swoosh.Adapters.Test` is
+  excluded. That adapter only exists under `MIX_ENV=test`, where the recipient
+  IS the assertion and nothing was withheld from anyone — counting it would fire
+  the banner on every test run and teach people to ignore the one line that
+  matters.
+  """
+  @spec drops_mail?() :: boolean()
+  def drops_mail?, do: discards?(deliverability().reason)
+
+  # The ONE spelling of "this reason means a real person's mail is dropped".
+  defp discards?(reason), do: reason in [:local_mailbox, :unconfigured, :relay_unset]
+
+  @doc """
+  Log the undeliverable-mail banner at boot when this plane cannot send.
+
+  WARNS, it does not raise. A control plane with no relay is a legitimate
+  configuration — every `mix phx.server` on a laptop is one — so refusing the
+  node would make the honest signal unshippable.
+
+  The banner exists because the receipts this plane already writes CANNOT reach
+  the operator in this state. Every transactional send records a Delivery row
+  (`Notifications.record_delivery/6`) and a failed one carries the right
+  sentence, but password-reset / email-verification / email-change rows are
+  USER-scoped (`team_id` nil) by deliberate privacy design, so they surface in
+  NO team's delivery log. A plane booted without `SMTP_HOST` therefore drops
+  every identity email into rows nobody is looking at. The boot line is the
+  first moment anyone can be told.
+
+  Returns the deliverability map so a caller can assert on it.
+  """
+  @spec warn_if_undeliverable() :: map()
+  def warn_if_undeliverable do
+    status = deliverability()
+
+    if drops_mail?() do
+      Logger.warning("""
+      MAIL IS NOT DELIVERABLE — this control plane accepts transactional email and discards it.
+
+        adapter: #{inspect(status.adapter)} (#{status.reason})
+
+      Team invitations, password reset, email verification and email-change
+      confirmation codes will FAIL to send. The user-scoped delivery rows that
+      record those failures belong to no team, so nothing else will show you
+      this.
+
+      Set SMTP_HOST (plus SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD as your relay
+      requires). Ignore this if the plane is not meant to send mail.
+      """)
+    end
+
+    status
+  end
+
   @doc """
   The platform default `{name, address}` From, read at call time so a
   runtime.exs override (MAIL_FROM_ADDRESS / MAIL_FROM_NAME) wins over the
