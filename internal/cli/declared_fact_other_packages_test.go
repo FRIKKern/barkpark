@@ -99,8 +99,8 @@ type declaredFactQualifier struct {
 // declaredFactQualifiers are the declaring packages, with live numbers from
 // 2026-09-17 in the comment beside each floor.
 var declaredFactQualifiers = []declaredFactQualifier{
-	{Pkg: "manifest", MinBindingFiles: 30, MinBindings: 60},   // live: 65 files / 146 bindings
-	{Pkg: "apiclient", MinBindingFiles: 15, MinBindings: 25},  // live: 36 / 57
+	{Pkg: "manifest", MinBindingFiles: 30, MinBindings: 60},  // live: 65 files / 146 bindings
+	{Pkg: "apiclient", MinBindingFiles: 15, MinBindings: 25}, // live: 36 / 57
 	{Pkg: "cloudclient", MinBindingFiles: 10, MinBindings: 40, // live: 24 / 111
 		KnownHits: []string{"strings.HasPrefix(u.Unit) on cloudclient.SlotUnit"}},
 	{Pkg: "taskboard", MinBindingFiles: 5, MinBindings: 10}, // live: 11 / 21
