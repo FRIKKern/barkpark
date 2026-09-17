@@ -436,6 +436,10 @@
       "reason": "S4 PATHS-FILTERED: paper-editor.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). paper-editor.yml job `smoke-and-bundle` — it proves the paper-editor bundle in api/priv/static is FRESH against its sources in api/assets, and round-trips a document through the editor. Load-bearing on the PRs it renders on, absent on every other."
     },
     {
+      "context": "Narrow-viewport rendered sweep",
+      "reason": "S4 PATHS-FILTERED: paper-editor.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). paper-editor.yml job `narrow-render` — the narrow-viewport rendered sweep of the paper editor, the sibling of `Round-trip smoke + bundle freshness` directly above and behind the same nine-path filter. ADDED 2026-09-17 (task-49ec172e0fa91f9a)."
+    },
+    {
       "context": "Sheet-grid hook unit harness",
       "reason": "S4 PATHS-FILTERED: sheet-grid-js.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). sheet-grid-js.yml job `hook-unit` — the unit harness for the bp-sheet-grid / bp-sheet-formula LiveView hooks."
     },
@@ -516,6 +520,26 @@
       "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `main-verdict-presence`, fenced `if: github.event_name != 'pull_request'` exactly as its sibling is — its own comment says so and adds \"This job has NO authority over any pull request and nothing waits on it\". It asks whether every workflow whose push arm reaches main actually PUBLISHED a verdict on that sha (a run collapsed by cancel-in-progress publishes no context, and an absent context is not a red one). ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
     },
     {
+      "context": "Main gate watch configuration fault",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `main-gate-watch-fault` is fenced `if: github.event_name != 'pull_request'`, exactly as `Main gate watch` and `Main verdict presence` are; the census sees it only through push-to-main. It asks whether the WATCH ITSELF is mis-wired (its inputs unreadable, its route table stale) before the watch is allowed to speak — a question about the scheduled instrument, not about a head being merged. ADDED 2026-09-17 (task-49ec172e0fa91f9a)."
+    },
+    {
+      "context": "Report main-gate-watch configuration fault to a human",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `report-main-gate-watch-fault` is fenced `if: failure() && github.ref == 'refs/heads/main'`, so it cannot render on a pull_request head at all. An after-the-fact reporter — it opens (or comments on) one idempotent GitHub issue when the fault job reds on main; it certifies nothing about a PR. ADDED 2026-09-17 (task-49ec172e0fa91f9a)."
+    },
+    {
+      "context": "Report main-gate-watch scream to a human",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `report-main-gate-watch-scream` is fenced on `github.ref == 'refs/heads/main'`, so it cannot render on a pull_request head at all. An after-the-fact reporter for the watch's scream path; it certifies nothing about a PR. ADDED 2026-09-17 (task-49ec172e0fa91f9a)."
+    },
+    {
+      "context": "Report main verdict absence to a human",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: main-gate-watch.yml job `report-main-verdict-presence` is fenced `if: failure() && github.ref == 'refs/heads/main'`, so it cannot render on a pull_request head at all. An after-the-fact reporter for `Main verdict presence`, which already carries its own row above; it certifies nothing about a PR. ADDED 2026-09-17 (task-49ec172e0fa91f9a)."
+    },
+    {
+      "context": "Twoslash type-check",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: twoslash.yml declares NO `pull_request:` arm at all — only `push: branches: [main]` (paths-filtered), a nightly cron and workflow_dispatch — so this name cannot render on a PR head, and a required context that never renders reports 'expected' forever (D18). twoslash.yml job `gate` — it type-checks the twoslash code samples in js/docs against js/packages. Its sibling `Report main-push failure to a human` already carries a row. ADDED 2026-09-17 (task-49ec172e0fa91f9a)."
+    },
+    {
       "context": "Main gate watch harness",
       "reason": "S4 PATHS-FILTERED: main-gate-watch.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). main-gate-watch.yml job `main-gate-watch-harness`, fenced `if: github.event_name == 'pull_request'` and behind the workflow's six-path filter, so it renders only on PRs touching the watch itself. It is the both-ways proof set for scripts/main-gate-watch.sh and scripts/main-verdict-presence.sh — an instrument harness. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
     },
@@ -530,6 +554,10 @@
     {
       "context": "Starter-template contrast/focus literals",
       "reason": "S4 PATHS-FILTERED: search-template-gates.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-template-gates.yml job `contrast-focus-literals` — scripts/templates-literal-check.sh, selftest then scan, over the starter templates' hard-coded contrast and focus-ring literals. Same workflow-level constraint as its siblings: registering any name in this file would void its main-side concurrency marker. ADDED 2026-09-07 (task-6c8a76a6f6196dfd)."
+    },
+    {
+      "context": "Astro starter content-link specs (dep-free, no browser)",
+      "reason": "S4 PATHS-FILTERED: search-template-gates.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). search-template-gates.yml job `astro-starter-content-link` — it runs templates/astro-starter's content-link specs through scripts/node-test-floor.mjs --floor 1, dep-free and browser-free. Same workflow-level constraint as its four siblings above. ADDED 2026-09-17 (task-49ec172e0fa91f9a): the job landed in #18847 WITHOUT this row, and the census clause could not see the gap until a PR head happened to render the name three hours later — which is the blind spot the partial-accounting clause in scripts/required-checks-verify.sh now closes."
     },
     {
       "context": "Flagship template bp-command parse",
