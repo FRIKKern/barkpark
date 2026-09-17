@@ -2482,6 +2482,54 @@ defmodule BarkparkCloud.Registry do
   defp dropped_before([%{"dropped_before" => count} | _]) when is_integer(count), do: count
   defp dropped_before(_), do: 0
 
+  # dwb-18: the CONTROL PLANE'S OWN console entry for a builder transition it
+  # performs — the deploy-side twin of `append_provision_step/4`'s narration,
+  # written in the SAME changeset as the transition it describes.
+  #
+  # WHY THIS EXISTS. `console` only ever filled from the OUTSIDE: the builder
+  # POSTs lines via `append_deployment_console/2`. So a container deploy that
+  # was minted by a GitHub push and then claimed by a builder narrated NOTHING
+  # until the builder's first line landed — the row moved `queued -> building`
+  # with an empty console, and the dashboard's build console (`deployConsoleHtml`,
+  # fed from `deployment_json/1`'s `console` key) rendered an empty panel beside
+  # a spinning pill. The moment a build STARTS, and which worker started it, was
+  # the one transition nothing recorded.
+  #
+  # BEST-EFFORT AND NON-RAISING BY CONSTRUCTION: a claim must never fail because
+  # its narration could not be composed. An unusable line degrades to the console
+  # the row already had, so the claim proceeds with exactly the pre-dwb-18 array.
+  #
+  # BOUNDED AND ORDERED like every other console writer: the line is chopped at
+  # `@max_console_line_chars` with a `truncated_from` disclosure, the array is
+  # `cap_console/1`-capped at `@max_console_lines` with a `dropped_before`
+  # disclosure, and the timestamp is the SERVER clock (never a worker's).
+  # `"source" => "control-plane"` marks the entry as authored HERE rather than
+  # relayed from a build, which is the distinction a reader needs to tell the
+  # narration of the pipeline from the output of the build.
+  defp narrate_transition(%Deployment{} = deployment, line) when is_binary(line) do
+    existing = deployment.console || []
+
+    case validate_console_line(line) do
+      {:ok, text} ->
+        entry =
+          %{
+            "line" => text,
+            "at" => DateTime.to_iso8601(DateTime.utc_now()),
+            "source" => "control-plane"
+          }
+          |> Map.merge(console_line_meta(line))
+
+        cap_console(existing ++ [entry])
+
+      :error ->
+        existing
+    end
+  end
+
+  # The one place the builder-claim narration's wording is composed, so both
+  # container claim paths (fleet-wide and box-scoped) cannot drift apart.
+  defp builder_claim_line(worker_id), do: "BUILD — claimed by builder #{worker_id}"
+
   # Keep only the last @max_step_entries entries (oldest dropped) — the append-only
   # cap that bounds the step-transition array.
   defp cap_steps(entries) when is_list(entries) do
@@ -9582,7 +9630,11 @@ defmodule BarkparkCloud.Registry do
               status: "building",
               claim_worker: worker_id,
               claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-              claim_epoch: d.claim_epoch + 1
+              claim_epoch: d.claim_epoch + 1,
+              # dwb-18: narrate the transition the control plane is performing,
+              # in the SAME changeset — atomic with the claim, so a console entry
+              # for a claim that rolled back can never exist.
+              console: narrate_transition(d, builder_claim_line(worker_id))
             })
             |> Repo.update()
 
@@ -9660,7 +9712,11 @@ defmodule BarkparkCloud.Registry do
               status: "building",
               claim_worker: worker_id,
               claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-              claim_epoch: d.claim_epoch + 1
+              claim_epoch: d.claim_epoch + 1,
+              # dwb-18: narrate the transition the control plane is performing,
+              # in the SAME changeset — atomic with the claim, so a console entry
+              # for a claim that rolled back can never exist.
+              console: narrate_transition(d, builder_claim_line(worker_id))
             })
             |> Repo.update()
 
