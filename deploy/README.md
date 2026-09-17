@@ -65,11 +65,34 @@ the browser painted verbatim. That is a RENDERING fix only — the status was an
 stays an honest 503 + `Retry-After` on every path, `/assets/*.css` included, and
 a healthy upstream never reaches the handler (proved both ways by the harness's
 live-Caddy case). `instance-deploy.sh` also upgrades already-armed boxes in
-place, since the marker guard forbids a re-arm. Baked into the renderers
-(`internal/caddyfile/caddyfile.go`, `internal/cli/setup/caddy.go`,
-`internal/cli/setup/assets/deploy.sh`) so every provisioned instance gets it, and
-armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
-auto-reverting; port-flip-safe). Reference block + manual arming:
+place, since the marker guard forbids a re-arm.
+
+The handler's status list `502 503 504` is load-bearing, and `instance-deploy.sh`
+is the ONLY thing in this repo that arms or repairs the corrected shape
+(idempotent, `caddy validate`d, auto-reverting; port-flip-safe). This page used
+to credit the Go/asset renderers with baking the same block "so every provisioned
+instance gets it". They do not, and that sentence is withdrawn: as of 2026-09-17
+`internal/caddyfile/caddyfile.go` (`MaintenanceHandler`, feeding
+`internal/cli/setup/caddy.go` and `internal/provisioner/attach_domain.go`),
+`internal/cli/setup/assets/deploy.sh`, its byte-identical twin `deploy.sh` at the
+repo root, and the walkthrough in `docs/ops/adding-a-domain.md` all still carry
+the BARE `handle_errors {`. A box provisioned by `bp setup` and never touched by
+an instance deploy keeps the pre-fix shape indefinitely, and `site-deploy.sh`
+then arms a `handle_path /sites/<slug>/*` `file_server` route into that same
+block. `deploy/caddy-handle-errors-scope-check.sh` is the standing predicate over
+every tracked file — not a list of renderers anyone must remember — and names
+those sites on every run under a dated stand-down that expires 2026-09-24
+(`task-d06e8a2a42f1ed2f`); a bare emission anywhere else reds immediately. That
+same check asserts this paragraph names every stood-down site, so the prose
+cannot go stale behind the code again.
+
+The incident is MEASURED, not asserted:
+`bash deploy/caddy-handle-errors-behaviour-proof.sh` boots a real Caddy twice on
+one rig (dead upstream + an armed `handle_path /sites/demo/*` `file_server`) and
+observes the bare form answering a static-file miss with the branded **503**
+while the status-scoped form answers **404** — with two controls (an existing
+file → 200, the proxied path → 503) identical under both arms, so the difference
+is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
 script: `bash deploy/instance-deploy_test.sh` — 494 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +

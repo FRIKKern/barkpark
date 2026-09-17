@@ -58,7 +58,20 @@ is_stood_down() {
 #   * a file whose name marks it a test (*_test.*, */testdata/*) pins whatever
 #     the renderer currently does and is updated with the renderer;
 #   * a line whose first non-blank characters are `#` or `//` is a comment
-#     ABOUT the bare form — this check's own header would otherwise red it.
+#     ABOUT the bare form — this check's own header would otherwise red it;
+#   * in a MARKDOWN file, a match wrapped in backticks is prose NAMING the shape
+#     ("still carries the bare `handle_errors {`"), while an unbacktick'd match
+#     is a block an operator is being told to paste. deploy/README.md's
+#     withdrawal of the old "baked into the renderers" claim has to be able to
+#     say the words; docs/ops/adding-a-domain.md:41 hands out the bare block in
+#     an indented code sample and must stay visible. The two specimens differ on
+#     exactly this, so the rule is the difference, not a filename;
+#   * a line carrying the inline marker `handle-errors-scope-check:
+#     deliberate-bare` is a NEGATIVE ARM rendering the pre-fix shape on purpose
+#     (deploy/caddy-handle-errors-behaviour_* boots one to measure it). It is
+#     PRINTED on every run as DELIBERATE — not skipped silently — so a marker
+#     used to launder a real renderer is visible in the same output as the
+#     violations it is pretending not to be.
 is_scanned_file() {
   case "$1" in
     *_test.*|*/testdata/*|*/__tests__/*) return 1 ;;
@@ -67,11 +80,14 @@ is_scanned_file() {
 }
 
 BARE_RE='handle_errors[[:space:]]*\{'
+MD_PROSE_RE='`handle_errors[[:space:]]*\{'
+DELIBERATE_RE='handle-errors-scope-check: deliberate-bare'
 SCOPED_RE='handle_errors[[:space:]]+502[[:space:]]+503[[:space:]]+504[[:space:]]*\{'
 COMMENT_RE='^[[:space:]]*(#|//)'
 
 bare_hits=()
 scoped_files=()
+deliberate_hits=()
 scanned=0
 skipped=0
 
@@ -95,6 +111,17 @@ while IFS= read -r f; do
       *) continue ;;
     esac
     if printf '%s\n' "$body" | grep -qE "$COMMENT_RE"; then continue; fi
+    case "$f" in
+      *.md)
+        # Prose naming the shape, in backticks. An unbacktick'd match in the same
+        # file is still a violation — this is a per-LINE rule, not a file skip.
+        if printf '%s\n' "$body" | grep -qE "$MD_PROSE_RE"; then continue; fi
+        ;;
+    esac
+    if printf '%s\n' "$body" | grep -qF -- "$DELIBERATE_RE"; then
+      deliberate_hits+=("$f:$line")
+      continue
+    fi
     if printf '%s\n' "$body" | grep -qE "$SCOPED_RE"; then
       scoped_files+=("$f:${line%%:*}")
     elif printf '%s\n' "$body" | grep -qE "$BARE_RE"; then
@@ -128,6 +155,11 @@ fi
 echo "[handle_errors-scope] control OK — ${#scoped_files[@]} status-scoped emission(s) found, the scan reaches real sites:"
 for s in "${scoped_files[@]}"; do echo "    SCOPED  $s"; done
 
+if [ "${#deliberate_hits[@]}" -gt 0 ]; then
+  echo "[handle_errors-scope] ${#deliberate_hits[@]} marked-deliberate bare emission(s) (negative arms, NOT skipped silently):"
+  for h in "${deliberate_hits[@]}"; do echo "    DELIBERATE  $h"; done
+fi
+
 if [ "${#bare_hits[@]}" -eq 0 ]; then
   echo "[handle_errors-scope] OK — no status-less handle_errors block is emitted anywhere."
   exit 0
@@ -145,6 +177,41 @@ for h in "${bare_hits[@]}"; do
     hard=$((hard + 1))
   fi
 done
+
+# ---------------------------------------------------------------------------
+# DOC TRUTH ARM. The stand-down is a promise that these sites are KNOWN-bare, and
+# a promise nobody can read is not one. deploy/README.md carried "Baked into the
+# renderers ... so every provisioned instance gets it" for the whole life of the
+# fix while three of the renderers it named emitted the bare form — the prose was
+# the reason nobody looked. So: every path on the stand-down above must be NAMED
+# in deploy/README.md. Derived from the array, never a second hand-list, so a
+# renderer added to the stand-down tomorrow reds this arm until the page says so,
+# and a renderer FIXED out of the stand-down stops being required.
+#
+# Substring match is deliberate: naming `internal/cli/setup/assets/deploy.sh`
+# also satisfies the bare `deploy.sh` entry, because that IS the twin the page is
+# describing. This arm asserts the page TALKS ABOUT each site, not its wording.
+# ---------------------------------------------------------------------------
+DOC="deploy/README.md"
+if [ ! -f "$DOC" ]; then
+  echo "[handle_errors-scope] FAIL (broken scan) — $DOC is missing; the doc truth arm"
+  echo "  cannot be satisfied or refuted, and a silent pass here is the exact failure"
+  echo "  this arm exists to prevent."
+  exit 1
+fi
+undocumented=()
+for s in "${standdown_paths[@]}"; do
+  grep -qF -- "$s" "$DOC" || undocumented+=("$s")
+done
+if [ "${#undocumented[@]}" -gt 0 ]; then
+  echo "[handle_errors-scope] FAIL — $DOC does not name ${#undocumented[@]} stood-down site(s):"
+  for s in "${undocumented[@]}"; do echo "    UNDOCUMENTED  $s"; done
+  echo "  A stand-down the operator docs do not mention is how 'Baked into the renderers'"
+  echo "  survived. Name each site in $DOC's maintenance-page section, or take it off the"
+  echo "  stand-down by fixing it."
+  exit 1
+fi
+echo "[handle_errors-scope] doc truth arm OK — $DOC names all ${#standdown_paths[@]} stood-down site(s)."
 
 if [ "$hard" -gt 0 ]; then
   echo "[handle_errors-scope] FAIL — $hard un-stood-down bare handle_errors emission(s)."

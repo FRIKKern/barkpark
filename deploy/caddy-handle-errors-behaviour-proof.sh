@@ -128,10 +128,10 @@ echo "[handle_errors-behaviour] rig: dead upstream 127.0.0.1:$DEAD_PORT, site ht
 echo "[handle_errors-behaviour] route under test: handle_path /sites/demo/* { root * <rig>; file_server }"
 echo
 
-render 'handle_errors {' > "$RIG/bare.caddy"
+render 'handle_errors {' > "$RIG/bare.caddy"  # handle-errors-scope-check: deliberate-bare
 render 'handle_errors 502 503 504 {' > "$RIG/scoped.caddy"
 
-echo "  ARM BARE   — handle_errors {           (the pre-fix shape)"
+echo "  ARM BARE   — handle_errors {           (the pre-fix shape)"  # handle-errors-scope-check: deliberate-bare
 boot "$RIG/bare.caddy"
 probe BARE   "INCIDENT"    /sites/demo/missing.css  503
 probe BARE   "CONTROL HIT" /sites/demo/index.html   200
