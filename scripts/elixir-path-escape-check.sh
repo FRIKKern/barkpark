@@ -666,7 +666,9 @@ test-rootconcat	0
 test-rootchain	0
 test-rootexec	0
 test-sigildir	0
-test-sigilcwd	0'
+test-sigilcwd	0
+lib-rootattr	0
+test-rootattr	0'
 
 # ELIXIR_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -783,6 +785,7 @@ list_escapes() {
   local chains ch subname sublit subdir cjoins
   local sigil orow omatch el xlits xl
   local prescan_file p_tab pla pla_eof prest pf ppay ptag
+  local indirects ir ilit iname ibases ib attrlits al
   # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
   # .exs on disk is code the suite will run, so it is code this ratchet must see.
   sources="$(cd -- "$REPO_ROOT" && find api/lib api/test -type f \( -name '*.ex' -o -name '*.exs' \) 2>/dev/null | LC_ALL=C sort)"
@@ -835,6 +838,9 @@ list_escapes() {
       printf '%s\n' "$sources" | tr '\n' '\0' |
         xargs -0 grep -EoH '"\.\./[^"]*"|~[sScC]\(\.\./[^)]*\)|~[sScC]\{\.\./[^}]*\}|~[sScC]\[\.\./[^]]*\]|~[sScC]<\.\./[^>]*>|~[sScC]/\.\./[^/]*/|~[sScC]\|\.\./[^|]*\|' 2>/dev/null |
         awk -v t=L '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
+      printf '%s\n' "$sources" | tr '\n' '\0' |
+        xargs -0 grep -EoH 'Path\.join\(\[?[[:space:]]*@?[a-zA-Z_][a-zA-Z0-9_]*,[[:space:]]*[a-z_][a-zA-Z0-9_]*[[:space:]]*[]),]|@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\|>[[:space:]]*Path\.join\([a-z_][a-zA-Z0-9_]*\)|Path\.expand\("[./]*"[[:space:]]*<>[[:space:]]*[a-z_][a-zA-Z0-9_]*,[[:space:]]*__DIR__\)' 2>/dev/null |
+        awk -v t=I '{ i = index($0, ":"); print t "\t" substr($0, 1, i - 1) "\t" substr($0, i + 1) }' || true
     } | LC_ALL=C sort -s -t"$p_tab" -k2,2
   ) >"$prescan_file"
 
@@ -858,6 +864,7 @@ list_escapes() {
     anchors=""
     openers=""
     lits=""
+    indirects=""
     while [ "$pla_eof" -eq 0 ]; do
       prest="${pla#*$p_tab}"
       pf="${prest%%$p_tab*}"
@@ -870,6 +877,8 @@ list_escapes() {
         O) openers="$openers$ppay
 " ;;
         L) lits="$lits$ppay
+" ;;
+        I) indirects="$indirects$ppay
 " ;;
       esac
       IFS= read -r pla <&9 || pla_eof=1
@@ -1182,6 +1191,141 @@ EOF
     done <<EOF
 $anchors
 EOF
+
+    # ---- SHAPE 8: ATTRIBUTE-INDIRECTED LITERAL (tagged `-rootattr`) --------
+    # `@mirrors ["web/public/bp-graph.js", …]` bound once, then
+    # `Path.join(@repo_root, m)` — or `Path.expand("../../../" <> rel,
+    # __DIR__)` — at the read site. EVERY door above needs the path literal AT
+    # the call site: the three join forms grep `,[[:space:]]*"…"`, the literal
+    # doors grep `"../…"`, and a bare `m` is neither. So ONE binding of
+    # indirection took a real read out of the census entirely, and the ratchet
+    # certified the escape green.
+    #
+    # MEASURED on 974d3d2cb, control first (task-5a00c588a808f523 /
+    # task-c605ea24bbe5066c): a probe test reading the undeclared repo-root
+    # `Makefile` INLINE — `Path.join(@root, "Makefile")` — took the census
+    # 66 -> 67, `test-root` 8 -> 9, and redded `UNCOVERED repo-root read:
+    # Makefile` at rc=1. The SAME read with the filename in `@mirrors` and
+    # joined from the loop variable resolved 66, `test-root` 8, and printed
+    # `OK: every repo-root read … is dispatched on.` at rc=0. The concat form
+    # `Path.expand("../../../" <> rel, __DIR__)` measured identically.
+    #
+    # Resolution is deliberately DATAFLOW-FREE — this is a grep census, not a
+    # compiler, and it does not try to prove which attribute feeds which
+    # variable. It resolves the other way round: a file that joins a
+    # NON-LITERAL onto a tracked anchor (or onto an inline `"../…" <> var`
+    # expand) has its DATA attributes' string literals resolved against that
+    # base, and the existence filter keeps the guesses honest — exactly how
+    # shape 2's window scan already treats every literal near a `cd:`.
+    #
+    # THREE NARROWINGS, each priced against what a false RED costs a required
+    # gate:
+    #   * the door is ARMED ONLY by an indirect join site (`I` in the
+    #     pre-scan). No such site in the file, no rows — which is why this
+    #     door adds zero reads to the real tree today and `test-rootattr`
+    #     joins the floor-0 rows;
+    #   * only DATA attributes are read: an attribute whose own definition
+    #     calls `Path.` / `File.` / `System.` is skipped, so
+    #     `@r1 Path.join(@root, "x")` stays the `-root` door's row and is not
+    #     double-tagged here;
+    #   * a literal starting `../` is skipped — that is the literal doors'
+    #     territory, and resolving it again here would report one read twice.
+    #
+    # WHAT IT STILL CANNOT SEE, said out loud rather than counted as covered:
+    # a path built from a function return, from a list literal written inline
+    # at the call site, or from anything the file does not hold as a module
+    # attribute. Those remain outside a grep census; declare such a read by
+    # hand in ELIXIR_TEST_ONLY_PATHS and let case 6 of the harness guard it.
+    if [ -n "$indirects" ]; then
+      ibases=""
+      while IFS= read -r ir; do
+        [ -n "$ir" ] || continue
+        iname=""
+        case "$ir" in
+          Path.expand*)
+            # `Path.expand("../../../" <> var, __DIR__)`: the dots ARE the base.
+            ilit="${ir#*\"}"
+            ilit="${ilit%%\"*}"
+            norm_path_v "$d/$ilit"
+            # `.` and not "" — a base that resolves to the repo root is a real
+            # base, and an empty line is dropped by every reader below.
+            ibases="$ibases${NP:-.}
+"
+            ;;
+          *'|>'*)
+            iname="${ir%%|>*}"
+            iname="${iname//[[:space:]]/}"
+            iname="${iname#@}"
+            ;;
+          *)
+            iname="${ir#*(}"
+            iname="${iname#\[}"
+            iname="${iname%%,*}"
+            iname="${iname//[[:space:]]/}"
+            iname="${iname#@}"
+            ;;
+        esac
+        [ -n "$iname" ] || continue
+        while IFS= read -r ap; do
+          [ -n "$ap" ] || continue
+          aname="${ap%%	*}"
+          [ "$aname" = "$iname" ] || continue
+          aadir="${ap#*	}"
+          ibases="$ibases${aadir:-.}
+"
+        done <<EOF
+$anchor_pairs
+EOF
+      done <<EOF
+$indirects
+EOF
+      ibases="$(printf '%s\n' "$ibases" | sed '/^$/d' | LC_ALL=C sort -u)"
+      if [ -n "$ibases" ]; then
+        # A DATA attribute's block: the definition line, plus the continuation
+        # lines of a multi-line list (`@mirrors [` … `]`), which is the shape
+        # the finding was measured in. Bracket depth, not a line count.
+        attrlits="$(awk '
+          !inattr && /^[[:space:]]*@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]/ {
+            if ($0 ~ /Path\.|File\.|System\./) next
+            inattr = 1; depth = 0
+          }
+          inattr {
+            line = $0
+            o = gsub(/\[/, "[", line)
+            c = gsub(/\]/, "]", line)
+            depth += o - c
+            print
+            if (depth <= 0) inattr = 0
+          }
+        ' "$REPO_ROOT/$f" | grep -Eoh '"[^"]*"' || true)"
+        while IFS= read -r al; do
+          [ -n "$al" ] || continue
+          al="${al#\"}"
+          al="${al%\"}"
+          case "$al" in
+            '' | /* | ../* | *'#{'*) continue ;;
+            *'*'*)
+              al="${al%%\**}"
+              al="${al%/}"
+              ;;
+          esac
+          [ -n "$al" ] || continue
+          while IFS= read -r ib; do
+            [ -n "$ib" ] || continue
+            norm_path_v "$ib/$al"
+            resolved="$NP"
+            [ -n "$resolved" ] || continue
+            case "$resolved" in api | api/*) continue ;; esac
+            [ -e "$REPO_ROOT/$resolved" ] || continue
+            printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-rootattr"
+          done <<EOF
+$ibases
+EOF
+        done <<EOF
+$attrlits
+EOF
+      fi
+    fi
 
     # ---- SHAPE 6: MULTI-LINE JOIN (tagged `-rootmulti`) ---------------------
     # A `Path.join(` whose anchor and literal sit on the lines AFTER the
