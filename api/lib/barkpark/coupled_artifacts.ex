@@ -118,6 +118,10 @@ defmodule Barkpark.CoupledArtifacts do
   `required?: false` rather than inventing authority the repo did not grant.
   """
   @spec required_contexts(String.t()) :: [String.t()]
+  # sobelow_skip ["Traversal.FileModule"]
+  # The read target is a FIXED repo-relative path joined onto a caller-supplied
+  # root; no user input reaches it. This is a developer tool run from a
+  # checkout, never a request path.
   def required_contexts(repo_root) do
     path = Path.join(repo_root, ".github/required-checks.json")
 
@@ -175,6 +179,9 @@ defmodule Barkpark.CoupledArtifacts do
   # shapes we need (job key, `name:`, `needs:`, `- name:` steps, `run:` blocks)
   # are all unambiguous at fixed indents in GitHub's schema.
 
+  # sobelow_skip ["Traversal.FileModule"]
+  # `path` comes from Path.wildcard(".github/workflows/*.yml") under the repo
+  # root — an enumeration of the checkout, not an externally supplied name.
   defp couplings_in_workflow(path, repo_root, required) do
     rel = Path.relative_to(path, repo_root)
     lines = path |> File.read!() |> String.split("\n")
