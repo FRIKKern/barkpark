@@ -89,7 +89,7 @@ DUPE_CEILING="${PDS_ANCHOR_DUPE_CEILING:-20}"
 UNCLASSIFIED_CEILING="${PDS_ANCHOR_UNCLASSIFIED_CEILING:-8}"
 # The charter is append-only: this count may grow, never shrink. A fall means
 # the pattern broke, not that decisions were deleted.
-DEF_FLOOR="${PDS_ANCHOR_DEF_FLOOR:-808}"
+DEF_FLOOR="${PDS_ANCHOR_DEF_FLOOR:-809}"
 
 if [ ! -f "$CHARTER" ]; then
   printf 'pds-charter-anchors-check: charter not found: %s\n' "$CHARTER" >&2

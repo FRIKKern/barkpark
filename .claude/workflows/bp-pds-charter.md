@@ -16057,3 +16057,47 @@ name unrelated code.
   literal backslash-u sequence into the regex and the definition count read 0 while the duplicate
   count read a reassuring 0 beside it. (v) A legitimate new unique definition raises the count to
   809 and PASSES, so the arm does not simply red on growth.
+
+## LATE ADJUDICATION — THE FROZEN-BLOB ANCHOR CRITERION, RULED (decided 2026-09-17, task `pds-bl-charter-anchors-stale-vs-frozen-blob`)
+
+- **PDS-D757 — THE ROW'S FIRST CRITERION IS UNSATISFIABLE AS WORDED AND ITS PURPOSE IS ALREADY
+  DISCHARGED MORE STRONGLY; IT IS RECORDED AS SUPERSEDED, NOT FORCED TO MET (2026-09-17).** The
+  criterion asks that every harness line-anchor in PDS-D101 and PDS-D116 resolve *against blob
+  `e219e97ccf7f33797c86a2b84d998d599b6bda31`*, shown by pasting the referenced line. Three things
+  are true at once and together they settle it:
+
+  **(i) THE ANCHORS ARE NO LONGER LINE-ANCHORS.** On `origin/main` today, neither decision cites a
+  line number. PDS-D101 cites `scripts/pds-pull-proof.sh`@`canonical_order() { # space-separated ids`
+  and `scripts/pds-pull-proof.sh`@`acquire_full_bundle() {`; PDS-D116 cites five content anchors of
+  the same form. The criterion's subject — "harness line-anchor" — has no referent in the text it
+  governs. **A criterion whose subject no longer exists cannot be met and cannot be missed; it can
+  only be superseded.**
+
+  **(ii) PINNING TO THAT BLOB IS FORBIDDEN BY THE CHARTER'S OWN LAW.** PDS-D732 rules the freeze
+  identity is READ, never TYPED, and names `e219e97…` as the stale value quoted as current in at
+  least four places. PDS-D296 rules the freeze is climb-scoped and derived at run time, so there is
+  no repo-wide blob for a line number to be true against. **Be precise about what is dead:** the
+  object is still reachable — `git cat-file -t e219e97ccf7f33797c86a2b84d998d599b6bda31` answers
+  `blob`, and it is 2611 lines against main's 4154. It is not unopenable; it is simply not the tree
+  any reader or any guard reads, and the charter forbids typing it as the reference. Satisfying the
+  criterion literally would have meant re-introducing exactly the constant two rulings exist to
+  remove.
+
+  **(iii) THE PURPOSE IS DISCHARGED BY A PREDICATE, NOT BY A PASTE.** The criterion's purpose was
+  that a reader can re-derive the single-invocation law from the citations. Content anchors
+  discharge it better than any paste could: `scripts/pds-charter-anchors-check.sh` arm A requires
+  every anchor to match its file EXACTLY ONCE, so zero hits AND two-or-more hits both red, on every
+  commit, forever. Run on this charter at this commit it reports **25 anchors checked, 0 rotted**. A
+  paste is a snapshot of one moment; a guard is a rule. Note also what the old form HID: inside the
+  frozen blob itself, the cited lines 2240 and 2003 are BLANK, 1665 is a bare `return 1`, and 2177
+  is a bare `fi` — so a literal discharge would have pasted blank lines and a bare `fi` as proof
+  that an anchor resolves.
+
+  **THE RECOMMENDED RE-CUT, for the owner who holds the row's wording:** "every anchor in PDS-D101
+  and PDS-D116 is a CONTENT anchor of the form `<path>`@`<literal>`, and
+  `scripts/pds-charter-anchors-check.sh` resolves every one of them to exactly one line on
+  `origin/main`." That is checkable by a command, blob-independent, and re-checks itself on every
+  future thaw with no reminder needed. **It is NOT applied here.** Re-wording a published criterion
+  is the row owner's act, not a worker's, and a worker who edits the criterion they are measured by
+  has removed the only thing that could have refuted them. The ruling is recorded; the wording is
+  the owner's.
