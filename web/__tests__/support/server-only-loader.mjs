@@ -39,6 +39,17 @@ function resolveAlias(specifier) {
   return undefined;
 }
 
+/** Restore the extension Next's bundler would have supplied. */
+function resolveRelative(specifier, parentURL) {
+  if (/\.[mc]?[jt]sx?$/.test(specifier)) return undefined; // already explicit
+  for (const ext of TS_EXTENSIONS) {
+    if (ext === "") continue; // node already tried the bare form
+    const candidate = new URL(`${specifier}${ext}`, parentURL);
+    if (isFile(candidate)) return candidate.href;
+  }
+  return undefined;
+}
+
 export function resolve(specifier, context, nextResolve) {
   if (specifier === "server-only") {
     return { shortCircuit: true, url: "data:text/javascript," };
@@ -48,9 +59,25 @@ export function resolve(specifier, context, nextResolve) {
   if (specifier === "next/server") {
     return nextResolve("next/server.js", context);
   }
+  // Same shape, same reason: `next/cache` is an extensionless subpath of a
+  // package with no `exports` map, so `lib/get-document.ts` (which imports
+  // `unstable_cache`) is unimportable under `node --test` without this. Also
+  // strictly additive — no existing test resolves this specifier.
+  if (specifier === "next/cache") {
+    return nextResolve("next/cache.js", context);
+  }
   if (specifier.startsWith("@/")) {
     const aliased = resolveAlias(specifier);
     if (aliased) return nextResolve(aliased, context);
+  }
+  // Extensionless RELATIVE specifiers (`./barkpark-client`, `../lib/x`). Next's
+  // bundler restores the extension; node refuses. Same restoration the `@/`
+  // alias above already performs, applied to the relative form, and equally
+  // additive: a specifier that already carries an extension resolves through
+  // `nextResolve` untouched, and a miss falls through to node's own error.
+  if (specifier.startsWith(".") && context.parentURL) {
+    const relative = resolveRelative(specifier, context.parentURL);
+    if (relative) return nextResolve(relative, context);
   }
   return nextResolve(specifier, context);
 }

@@ -68,7 +68,15 @@ function captureRoute(path: string): { urls: URL[] } {
       const document = { _id: 'pd1', _type: 'paper', slug: 'plan', content: { blocks } }
       return HttpResponse.json(
         path.includes('/query/')
-          ? { result: { perspective: 'published', documents: [document], count: 1, limit: 1, offset: 0 } }
+          ? {
+              result: {
+                perspective: 'published',
+                documents: [document],
+                count: 1,
+                limit: 1,
+                offset: 0,
+              },
+            }
           : { result: document, etag: 'rev-1' },
       )
     }),
