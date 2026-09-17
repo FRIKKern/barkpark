@@ -14842,3 +14842,152 @@ and its mechanism was wrong, which is the failure mode worth naming: **a close c
 PR number outlives the PR and then blocks nothing, because the thing it was guarding happened anyway.** Pin
 close conditions to the SYMBOL on `main`, never to a PR number.
 
+
+### D618 — 2026-09-17 — NO AUTOMATON MAY RE-DISPATCH A ZOMBIED RUN. THE ONE ACTOR IS THE ON-DUTY DEPLOY LANE, BY HAND, ONE RUN AT A TIME; AND THE DEAD-HEAD RULING IS NOT "CANCEL RATHER THAN RETRY" BUT A THREE-WAY SPLIT ON THE JOB COUNT, WHOSE THIRD ARM HAS NO VERB AT ALL.
+
+`dr-w10-f1-zombied-run-remediation` was filed on the premise that `scripts/absent-context-census.sh` detects a
+ZOMBIED run and **nothing acts on the finding** — that the open questions were "who may re-dispatch", "is an
+automatic re-run safe", and "should a run whose branch is gone be cancelled rather than retried". Three of that
+premise's four load-bearing facts do not survive contact with the instrument or with the live queue. **The
+ruling below is therefore mostly a LIFT, not an invention**: the cancel-versus-re-dispatch question was already
+decided, in code, with measurements, inside the census's own stale-queue arm. What was genuinely missing is the
+only thing a detector cannot supply — a NAMED ACTOR — and one class the row asked about that the instrument
+cannot name.
+
+#### THE PREMISE, TESTED BEFORE IT WAS BUILT ON
+
+The row names two live specimens. **Neither is zombied any more, and neither was ever re-dispatched by a human.**
+
+| Specimen | Row's claim (2026-08-07) | Read 2026-09-17 | Class today |
+|---|---|---|---|
+| `console-harness` 31120806862 | queued, attempt 1, 12.7h, PR #9887 | `completed` / **`cancelled`**, attempt 1, `jobs.total_count` 0 | `NAME_NOT_IN_RUN` |
+| `pr-task-gate` 29988818645 | queued, attempt 9, 357.7h | `completed` / **`cancelled`**, attempt 9, `jobs.total_count` 0 | `RERUN_DELETED` |
+
+Both carry `updated_at` **2026-08-20T13:49:15Z** and **13:49:20Z** — five seconds apart, fourteen and
+twenty-eight days after they were filed as live. **That is a bulk reap, not a remediation.** The status quo
+already terminates a zombie; it does so by cancellation, applied from GitHub's side, silently, on nobody's
+schedule, leaving no record any reader of this repo can find. **The row's implicit claim that a zombie waits
+forever for a human is false: it waits for an unannounced reaper.** Rerun:
+
+```
+gh api repos/FRIKKern/barkpark/actions/runs/31120806862 --jq '{status,conclusion,run_attempt,updated_at}'
+gh api repos/FRIKKern/barkpark/actions/runs/29988818645 --jq '{status,conclusion,run_attempt,updated_at}'
+```
+
+**And the "branch that will never push again" is still there.** Both head branches —
+`loop-epic/the-triage-ladder-lands-eleven-rungs-bp--0` and `docs/connectors-w33-wave-log` — resolve on
+`repos/FRIKKern/barkpark/branches/…` today. #9887 merged 2026-08-07. **A merged PR is not a deleted branch**,
+and the row conflated them. This matters because the census has **no deleted-branch class at all**: `RERUN_DELETED`
+names a deleted *check run* (`scripts/absent-context-census.sh`@`# A re-run that finished and still rendered nothing is a DELETED`),
+not a deleted branch. The row's c0 asks for a ruling on a class the instrument cannot detect, and c2 asks a
+probe to decline a `RERUN_DELETED` run as though that were the deleted-branch case. **It is not.** The class the
+row means is the census's `ORPHANED` — *head not on any open PR or main*.
+
+#### THE INSTRUMENT ALREADY RULES. THE ROW READ ONLY HALF OF IT.
+
+The census has two sections. The row cites the first — the per-required-context classifier that emits
+`ZOMBIED`. **The second is a repo-wide sweep of every queued run, and it already prints a remedy per shape**,
+with the cancel-versus-re-dispatch question answered and its measurements recorded in place:
+
+| Shape | Census verdict | Remedy the census already names |
+|---|---|---|
+| head live on an open PR | `STALE … LIVE HEAD` — screams | **re-run the workflow on the head** |
+| head live, PR idle > `DORMANT_PR_DAYS` (14) | `DORMANT PR HEAD` — notice | re-run is **notional**; "a remedy nobody will apply is not a remedy" |
+| dead head, `jobs > 0`, some started | `STALE … DISPATCHED` — screams | **`gh run cancel <id>`** |
+| dead head, `jobs > 0`, **none ever started**, > 24h | `PHANTOM` — no verdict | **none** — GitHub answers *"Cannot cancel a workflow run that is completed"* on a run it still lists as queued |
+| dead head, `jobs == 0` | `ORPHANED` — notice | **none** — *"measured on all 8: run cancel says 'completed', REST says 'NOT BEEN QUEUED YET'"* |
+
+So: **"nothing acts on the finding" is true only in the narrowest sense.** The census prints an imperative and
+no one executes it. The *content* of the ruling the row asks for already exists for four of five shapes, and it
+was arrived at by measurement, not by argument. Re-deciding it here would be the failure D605 names — quoting a
+number nobody re-derived — in reverse.
+
+#### THE RULING
+
+**1. NO AUTOMATON MAY RE-DISPATCH. Ever, on any shape.** Not a workflow, not a cron, not a bot, not a step
+appended to the census. The census's job ends at printing the remedy line; it acquires no verb. Three
+independent reasons, any one of which is sufficient:
+
+- **ZOMBIEING IS CORRELATED, AND A PER-RUN ACTOR CANNOT SEE THAT.** Read 2026-09-17, thirty runs sit `queued`,
+  twenty-nine of them older than 24h, `jobs.total_count` 0 on six of seven sampled. **Twenty-six of the thirty
+  arrive in three bursts** — twelve share `created_at` `2026-09-13T08:50:42Z` to the second, seven share
+  `2026-08-07T09:08:43Z`, six share `2026-09-13T08:43:35Z`. A run does not zombie on its own account; a
+  *dispatch moment* zombies and takes its whole batch. An actor that decides per run therefore fires twelve
+  dispatches into a queue that has just demonstrated it does not drain. **That is the stampede, and it is not a
+  hypothetical: the population to stampede with is sitting in the queue today.** Rerun:
+  `gh api "repos/FRIKKern/barkpark/actions/runs?status=queued&per_page=100" --jq '.workflow_runs[].created_at' | sort | uniq -c | sort -rn`
+- **FOUR OF THE FIVE SHAPES HAVE NO REMEDY OR A NOTIONAL ONE.** An actor built here would spend almost all of
+  its life declining. An actor whose dominant behaviour is declining is a classifier with a dangerous button
+  bolted on, and the census is already the classifier.
+- **THE WORKING VERB CHANGES THE MERGE SURFACE.** `gh run rerun` is a no-op on a queued run (the row's own
+  note, and consistent with the `ORPHANED` measurement above). The verb that works is a fresh
+  `gh workflow run`, which mints a **new run id** and therefore a new check-run identity on the PR. Re-dispatch
+  is not a restoration; it is an edit to what the branch protection sees. Per D603's principle that every
+  instrument the exit cites gets a named owner, an act with merge-gate consequences gets a named actor, not a
+  scheduler.
+
+**2. THE ONE ACTOR IS THE ON-DUTY DEPLOY-RELIABILITY LANE — a person or the agent holding that lane — acting by
+hand, one run at a time, from the census's own printed remedy line.** Not "someone"; not "whoever notices the
+scheduled run went red", which is the vacuum this row was filed against. Three obligations attach, and they are
+what make the actor real rather than decorative:
+
+- **The burst check precedes the act.** Before re-dispatching anything, group the queued feed by `created_at`
+  (command above). If the target shares its second with siblings, **the finding is the batch, not the run**:
+  the lane re-dispatches *nothing* and escalates the dispatch moment. A single isolated zombie on a live head is
+  the only shape a bare re-dispatch may be applied to.
+- **Only the shape the census named.** The lane executes the remedy string the census printed for that run id
+  and no other. If the census printed no remedy — `PHANTOM`, `ORPHANED` — **there is nothing to do and doing
+  something is the error.**
+- **`gh run rerun` is forbidden in this lane.** It overwrites a conclusion, which destroys the evidence the next
+  reader needs to classify the run at all. Cancel writes a terminal conclusion onto a run that had none;
+  rerun *replaces* one that existed.
+
+**3. THE DEAD-HEAD RULING IS A THREE-WAY SPLIT ON THE JOB COUNT, AND "CANCEL RATHER THAN RETRY" IS ONLY ITS
+MIDDLE ARM.** The row asked for cancel-or-retry. **The honest answer does not fit in that binary.**
+
+- **Dead head, `jobs > 0`, some started → CANCEL, NEVER RETRY.** Retry is not merely worse here, it is
+  incoherent: a re-dispatch needs a ref, the ref resolves to no open PR head, so no green it produced could
+  gate any merge — while the run itself is holding a runner slot, which in the correlated case is precisely the
+  scarce resource. Cancel is non-destructive of evidence and releases the slot. **This, and only this, is the
+  arm where "cancel rather than retry" is the right sentence.**
+- **Dead head, `jobs > 0`, none ever started, > 24h → NEITHER VERB EXISTS.** Measured on `compose-smoke`
+  32219250070: GitHub answers *"Cannot cancel a workflow run that is completed"* on a run it still lists as
+  queued. Policy: record, count in phantom-queued, **do not scream and do not act**.
+- **Dead head, `jobs == 0` → NEITHER VERB EXISTS.** Measured on all eight specimens: cancel says `completed`,
+  REST says `NOT BEEN QUEUED YET`. Same policy. **This is the class the row meant by "branch is gone", and its
+  ruling is not "cancel" — it is that our side has no button.**
+
+Writing "cancel, not retry" as the whole dead-head rule would therefore be a **false remedy on two of three
+arms**, and a false remedy is worse than none: it sends the lane to run a command that will fail and report the
+failure as a fault of the run rather than of the instruction.
+
+#### WHAT IS NOT DECIDED HERE, AND WHY IT IS NOT A RIDER
+
+**The census cannot see most of the live zombie population.** Its first section iterates `gh pr list --state open --limit 100`
+(`scripts/absent-context-census.sh`@`    gh pr list --repo "$REPO" --state open --limit 100 \`), so the
+`ZOMBIED` class is scoped to open PR heads. Of the three branches carrying queued runs today —
+`gates/scratchpad-reaper`, `deploy/compose-buildinfo`, `api-r19-seed-prose` — **none has an open PR**, and
+twelve of the queued runs are on `main`, which is not a PR head at all. The second section does sweep repo-wide
+and does count them. **No change is proposed to either.** Widening the scope is a `scripts/` edit under the
+**gates** fence, it changes what a required gate screams about, and it is filed rather than smuggled in beside
+a policy decision — the rider trap D614's neighbour paragraph names.
+
+**The deleted-branch detector does not exist and is not built here.** The ruling in §3 keys on the job count
+and on head-liveness, both of which the census already reads; a literal *branch deleted* signal is a distinct
+read and would be a new class. Filed, not built, for the same fence reason.
+
+#### THE ROW'S OTHER TWO CRITERIA ARE HONEST MISSES
+
+- **c1 ("proven against a real zombied run, with before/after run status quoted") is NOT MET and was not
+  attempted.** The proof it demands is a live dispatch or cancel against production CI, which this lane may not
+  perform and which `gh run rerun` — forbidden above and a no-op besides — cannot supply. **What would unblock
+  it:** an isolated `STALE … LIVE HEAD` specimen (none exists today; all three queued branches are dead-headed)
+  plus explicit owner authorisation to execute one `gh workflow run` and quote the before/after. Note that the
+  two specimens the row nominated **cannot** serve, because GitHub already terminated them.
+- **c2 ("a fixture-driven probe shows it declining a DISPATCHED_PENDING and a RERUN_DELETED run") is NOT MET
+  and is unbuildable as written.** A probe tests an actor, and §1 rules that no automated actor may exist — the
+  declining is done by a human reading a printed class, which no fixture can exercise. Insofar as a probe is
+  still wanted, it belongs beside the classifier in `scripts/`, i.e. the **gates** fence, not here. **What would
+  unblock it:** a gates-fenced slice adding the two fixture arms to the census's own probe suite, asserting the
+  *classifier* never emits `ZOMBIED` for a run that is `DISPATCHED_PENDING` or `RERUN_DELETED`. That is a real
+  and useful test; it is a test of the detector, not of a remediator, and the row should be re-cut to say so.
