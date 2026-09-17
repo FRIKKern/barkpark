@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/FRIKKern/barkpark/internal/semrole"
 	"github.com/mattn/go-runewidth"
@@ -229,12 +231,99 @@ func renderKV(out *writer, obj map[string]any) {
 			width = n
 		}
 	}
+	// The value column starts after the padded key plus the two-space gutter;
+	// continuation lines hang there so a wrapped value reads as one block
+	// instead of restarting at column 0 under the key.
+	valueCol := width + 2
+	avail := out.kvValueWidth(valueCol)
+	hang := strings.Repeat(" ", valueCol)
 	for _, k := range keys {
 		v := cellString(obj[k])
-		// The value is the last thing on the line (no padding), so bare == painted
-		// input; paintCell is a no-op unless color is on AND v is a status token.
-		out.outf("%s  %s", runewidth.FillRight(k, width), out.paintCell(v, v))
+		segs := wrapKVValue(v, avail)
+		if len(segs) == 1 {
+			// The value is the last thing on the line (no padding), so bare ==
+			// painted input; paintCell is a no-op unless color is on AND v is a
+			// status token.
+			out.outf("%s  %s", runewidth.FillRight(k, width), out.paintCell(v, v))
+			continue
+		}
+		// A value that needed WRAPPING is prose, never a status token — the
+		// painter keys on the WHOLE cell (statusRole/semrole.Color match a bare
+		// "failed", not a sentence containing it), so painting per-segment could
+		// only ever fire on a fragment the wrap happened to isolate, colouring one
+		// line of a paragraph for no reason. Wrapped values go out unpainted.
+		for i, seg := range segs {
+			if i == 0 {
+				out.outf("%s  %s", runewidth.FillRight(k, width), seg)
+				continue
+			}
+			out.outf("%s%s", hang, seg)
+		}
 	}
+}
+
+// kvMinValueWidth is the narrowest value column renderKV will wrap into. Below
+// it the wrap stops helping and starts shredding: a 10-cell column turns a URL
+// into a column of fragments that is harder to read — and harder to copy out of
+// — than the terminal's own hard wrap. So a window narrower than key + gutter +
+// 20 cells gets the UNWRAPPED line, which is the pre-existing behaviour.
+const kvMinValueWidth = 20
+
+// kvValueWidth resolves how many display cells renderKV may spend on a value
+// before wrapping, given the column the value starts at.
+//
+// Three-way, and the zero is load-bearing: 0 means DO NOT WRAP.
+//
+//   - kvWrapWidth set (tests, and any future --width flag) wins outright.
+//   - else the real terminal, and only when stdout is genuinely an *os.File we
+//     can size. A bytes.Buffer under test is never sized — so the wrap cannot
+//     depend on whether the suite happens to run attached to a terminal, and a
+//     test that merely sets w.isTTY does not silently acquire wrapping.
+//   - else 0: piped/redirected output stays byte-identical to today, one value
+//     per line, because the consumer downstream is grep or a golden file, not
+//     an 80-column window.
+//
+// A window too narrow to hold kvMinValueWidth also answers 0 (see above), as
+// does any non-positive size the terminal reports — dividing a value into a
+// zero-width column is a hang, not a cosmetic improvement.
+func (w *writer) kvValueWidth(valueCol int) int {
+	total := w.kvWrapWidth
+	if total <= 0 {
+		total = w.terminalWidth()
+	}
+	if total <= 0 {
+		return 0
+	}
+	avail := total - valueCol
+	if avail < kvMinValueWidth {
+		return 0
+	}
+	return avail
+}
+
+// wrapKVValue splits a KV value into the lines it occupies at the given value
+// width. width <= 0 (see kvValueWidth) means no wrapping: one line, verbatim.
+//
+// Wrapping is on DISPLAY CELLS, not bytes and not runes — ansi.StringWidth and
+// ansi.Wrap both count the columns a terminal actually spends, so a CJK
+// ideograph costs two, a combining mark zero, and an emoji two. A byte- or
+// len()-keyed split would break a multi-byte rune in half and mis-measure every
+// non-ASCII value in the payload. ansi.Wrap breaks on spaces; a single token
+// longer than the column (a URL, a base64 blob) still has to go somewhere, so
+// ansi.Hardwrap finishes the job on any segment that came back overlong.
+func wrapKVValue(v string, width int) []string {
+	if width <= 0 || ansi.StringWidth(v) <= width {
+		return []string{v}
+	}
+	var lines []string
+	for _, seg := range strings.Split(ansi.Wrap(v, width, " "), "\n") {
+		if ansi.StringWidth(seg) > width {
+			lines = append(lines, strings.Split(ansi.Hardwrap(seg, width, false), "\n")...)
+			continue
+		}
+		lines = append(lines, seg)
+	}
+	return lines
 }
 
 // renderRows prints a list of objects as a column table. meta (the enclosing
