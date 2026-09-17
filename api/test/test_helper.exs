@@ -70,7 +70,19 @@ ExUnit.start(
     # ~40s per run, needs OAuth login). Opt-in via scripts/claude-chat-e2e.sh —
     # NEVER in the default lane or CI. See
     # test/barkpark_web/studio/claude_chat_real_binary_test.exs (charter D20).
-    :real_binary
+    :real_binary,
+    # The claim-forward LIVE probe (task-adaae4196cffa86f): it reaches a REAL
+    # instance's `/v1/tasks/prime` derived-ready head over HTTP, so it needs a
+    # network and a credential and can never run in the default lane. Point it
+    # at an instance and opt in:
+    #
+    #     BARKPARK_LIVE_URL=https://guerrilla.barkpark.cloud \
+    #     BARKPARK_LIVE_TOKEN=<a read token> \
+    #     mix test --include live_probe \
+    #       test/barkpark/tasks/board/claim_forward_live_probe_test.exs
+    #
+    # Mirrors the TUI half's `-tags liveprobe` build tag.
+    :live_probe
   ]
 )
 
