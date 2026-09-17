@@ -1154,7 +1154,15 @@ func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selP
 			// summary, so a truncate at the pane width cuts off exactly the part
 			// the line exists to hand over. labeledWrap is the same 'about'/'done'
 			// block shape, so the task line reads as one more honest field.
-			out = append(out, labeledWrap(indent, "task", taskboard.AgentTaskSummary(tj, now), w)...)
+			summary := taskboard.AgentTaskSummary(tj, now)
+			// The link is ONE unbreakable token: no wrap can split it, so on a pane
+			// narrower than the link it would overrun the frame. Drop it there
+			// rather than truncate it — a cut URL is a broken URL, and the doc id
+			// the line still carries IS the actionable handle (`bp task get <id>`).
+			if lipgloss.Width(tj.DeepLink) > w-lipgloss.Width(indent) {
+				summary = strings.TrimSuffix(summary, " · "+tj.DeepLink)
+			}
+			out = append(out, labeledWrap(indent, "task", summary, w)...)
 		}
 	}
 	return out

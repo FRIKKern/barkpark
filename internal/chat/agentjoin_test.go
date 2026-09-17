@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/FRIKKern/barkpark/internal/taskboard"
@@ -110,6 +111,50 @@ func TestAgentDetailPaintsNoTaskLineWhenTheJoinDegrades(t *testing.T) {
 				t.Errorf("the agent's own detail vanished with the task line:\n%s", pane)
 			}
 		})
+	}
+}
+
+// Every rendered line must fit the pane at every supported width. The deep
+// link is a single unbreakable token, so a pane narrower than the link is the
+// one case a wrap cannot save — it drops the link and keeps the doc id rather
+// than overrunning the frame or handing over a cut URL. This arm reds on a
+// blowout AND on a link that is silently truncated into an unusable one.
+func TestTaskLineIsWidthSafeAtEveryPaneWidth(t *testing.T) {
+	task := taskboard.Task{
+		DocID: "wsc-bl-agent-task-join", Title: "Intermingle the agent row",
+		Criteria: &taskboard.Criteria{Met: 2, Total: 4},
+		Claim: &taskboard.Claim{Worker: "w", Now: &taskboard.ClaimPulse{
+			Text: "a deliberately long now-line that will not fit on one terminal row at all",
+			At:   joinNow.Add(-3 * time.Minute),
+		}},
+	}
+	rows := []taskboard.Task{task}
+	m := Model{joinTasks: rows, joinIndex: taskboard.NewAgentTaskIndex(rows)}
+	wf := &Workflow{Status: "running", Nodes: []WorkflowNode{
+		{Type: "workflow_phase", Index: 1, Title: "Build"},
+		joinAgent("build:intermingle-the-agent-row"),
+	}}
+	const link = "/admin/projects?task=wsc-bl-agent-task-join"
+	for _, w := range []int{40, 56, 60, 72, 80, 100} {
+		lines := renderWorkflowAgentDetail(w, journeyOf(wf), joinNow, 0, 0, true, m.agentTaskJoin)
+		joined := ansi.Strip(strings.Join(lines, "\n"))
+		for i, ln := range lines {
+			plain := ansi.Strip(ln)
+			if got := lipgloss.Width(plain); got > w {
+				t.Errorf("width %d: line %d is %d cols: %q", w, i, got, plain)
+			}
+		}
+		// The doc id is never dropped — it is the handle that survives every width.
+		if !strings.Contains(joined, "wsc-bl-agent-task-join") {
+			t.Errorf("width %d: the doc id vanished:\n%s", w, joined)
+		}
+		if w >= 56 && !strings.Contains(joined, link) {
+			t.Errorf("width %d: the deep link was dropped even though it fits:\n%s", w, joined)
+		}
+		// A PARTIAL link is worse than none: it reads as a URL and is not one.
+		if i := strings.Index(joined, "/admin/projects?task="); i >= 0 && !strings.Contains(joined, link) {
+			t.Errorf("width %d: the deep link was truncated into an unusable one:\n%s", w, joined)
+		}
 	}
 }
 
