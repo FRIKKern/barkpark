@@ -144,6 +144,21 @@ else
   no "12 expected rc=12 with unchanged bytes; rc=$RC, ledgers changed: $(diff <(echo "$BEFORE") <(echo "$AFTER") | head -3)"
 fi
 
+# ── 12b. a ledger that is not valid UTF-8 is a NAMED abort, not a traceback ─────
+# Found by probing, not by reading: the first cut raised UnicodeDecodeError and exited
+# 1 with a stack trace. rc=1 still fails closed, but it is not the contract, and the
+# obvious "fix" — errors="replace" — would coerce undecodable bytes to U+FFFD and feed
+# them to json.loads, which is the same coercion by another route.
+H12B="$TMP/binary"; mkdir -p "$H12B/muscle-1"
+printf '{"order_id":"a","cost_usd":1.0}\n\200\201\376\n' > "$H12B/muscle-1/spend.jsonl"
+OUT=$(python3 "$AGG" --fleet-home "$H12B" --total 2>"$TMP/e12b"); RC=$?
+if [ "$RC" = 12 ] && [ -z "$OUT" ] && grep -q 'not valid UTF-8' "$TMP/e12b" \
+   && ! grep -q 'Traceback' "$TMP/e12b"; then
+  ok "12b a non-UTF-8 ledger aborts rc=12 by NAME (no traceback, no total, no U+FFFD coercion)"
+else
+  no "12b expected rc=12 + named UTF-8 abort + empty stdout; got rc=$RC stdout='$OUT' stderr='$(head -2 "$TMP/e12b")'"
+fi
+
 # ── 13. --total is a bare number a shell gate can consume ───────────────────────
 T=$(python3 "$AGG" --fleet-home "$(mkhome bare)" --total)
 case "$T" in ''|*[!0-9.]*) no "13 --total emitted a non-numeric '$T'";;

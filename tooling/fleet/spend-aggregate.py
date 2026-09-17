@@ -79,8 +79,20 @@ def sum_file(path):
     """(total, rows, priced, unpriced, miss) for one ledger. Raises on malformed."""
     total = 0.0
     rows = priced = unpriced = miss = 0
+    # errors="strict" ON PURPOSE, and the decode error is caught and RENAMED into the
+    # same named abort as any other malformed row. Reading a corrupt ledger with
+    # errors="replace" would silently turn undecodable bytes into U+FFFD and hand the
+    # line to json.loads — coercion of a brake input by another route.
     with open(path, encoding="utf-8") as fh:
-        for n, line in enumerate(fh, 1):
+        n = 0
+        while True:
+            try:
+                line = fh.readline()
+            except UnicodeDecodeError as exc:
+                raise Malformed(path, n + 1, "not valid UTF-8 at or after this line (%s)" % exc.reason, "")
+            if line == "":
+                break
+            n += 1
             line = line.strip()
             if not line:
                 continue
