@@ -189,10 +189,31 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   defp render(:agent_reachable, payload, _owner?),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
 
+  # cch-w29-bl-agent-unreachable-letter-has-no-next-step — the letter that
+  # reaches a person at the worst moment now says what to do.
+  #
+  # ONE SENTENCE WAS THE WHOLE LETTER: "<name> stopped reporting and may be
+  # down." No cause, no next step, nowhere to go — and `detail(payload)` renders
+  # "" for this event 100% of the time, because both and only both producers
+  # pass a name and nothing else (`Health.StalenessWorker.flip_offline/1` sends
+  # `%{name: offline.name}`; the report-flip site calls
+  # `dispatch_barkpark_event/2`, whose payload defaults to `%{}`). The empty
+  # interpolation is KEPT rather than deleted: it is the seam a future
+  # detail-carrying producer lands on, and `alert_detail_reachability_test.exs`
+  # pins today's `:never` so that arrival cannot be silent.
+  #
+  # THE NEXT STEP IS NOT WRITTEN HERE. `Render.unreachable_next_step/0` owns it,
+  # exactly as `Render.deployment_identity/1` owns the identity line, so the
+  # inbox and the chat channels cannot tell a person two different stories about
+  # the same outage. Its docstring carries the evidence for each sentence — and
+  # for what is deliberately absent: no cause, no duration, no missed-tick
+  # count, because Barkpark has no active probe and one of the two producers
+  # fires on a single reported transition with no debounce to count.
   defp render(:agent_unreachable, payload, _owner?),
     do:
       {"Your Barkpark is unreachable",
-       "#{name(payload)} stopped reporting and may be down.#{detail(payload)}"}
+       "#{name(payload)} stopped reporting and may be down.#{detail(payload)}" <>
+         Render.unreachable_next_step()}
 
   # The remedy — the billing portal — is behind `require_current_team_owner`. The
   # consequence is everyone's business, so it is what the non-owner arm leads
