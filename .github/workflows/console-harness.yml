@@ -644,6 +644,19 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1479 — bumped 2026-09-17 from 1475 on console-r21-w3-erasure
+      # (task-c161ba42b88805c0): +4 tests for the two erasure Danger zones —
+      # teamDangerZoneHtml's OWNER band with its admin/member/null controls,
+      # accountDangerZoneHtml's deliberate ABSENCE of a band (the route gates on
+      # the session alone, so a band would invent a refusal), and the two
+      # failure-copy functions (409 instances_present counts singular/plural and
+      # its zero-count fallback, 409 sole_owner team names, and the friendly()
+      # delegation control). MEASURED, never arithmetic: `node --test
+      # cloud/priv/static/__app.test.mjs` on this branch printed
+      # `# tests 1479 / # pass 1478 / # fail 1`, the single fail being the
+      # __node-version self-guard on a node-22 workstation — this job runs the
+      # DECLARED major, where that guard passes, so the CI-comparable tally is
+      # 1479.
       # PIN 1454 — bumped 2026-09-15 from 1453 on console/internal-tree-blocking-coverage.
       # PIN 1456 — bumped 2026-09-15 from 1454 on console/w57-s4-suspended-js-test:
       # PIN 1459 — bumped 2026-09-15 from 1456 on console/css-check-main-guard:
@@ -758,14 +771,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1475 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1475 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1479 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1479 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1475 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1475 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1475 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1479 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1479 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1479 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1475 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1479 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

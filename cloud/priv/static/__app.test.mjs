@@ -34005,3 +34005,68 @@ test("gr-backlog-d24 (d): every ledger status renders through the shared family,
   assert.match(unknown, /<span class="status-pill-label">Teleporting<\/span>/,
     "…and render its own word, never an invented one");
 });
+
+// ── ERASURE DANGER ZONES (task-c161ba42b88805c0) ────────────────────────────
+//
+// Four arms, each with the control that makes it mean something. The team zone
+// is OWNER-BANDED (the server refuses an admin, so a rendered button would be a
+// lie); the account zone is UNBANDED (the server gates on the session alone, so
+// a band would be an invented refusal). Getting either backwards is the defect
+// these tests exist to catch, so each render arm asserts its own negative.
+
+test("teamDangerZoneHtml: owner-only — an admin, a member and an absent ctx render NOTHING", () => {
+  const owner = hooks.teamDangerZoneHtml({ role: "owner", teamId: "t-1" });
+  assert.match(owner, /Danger zone/);
+  assert.match(owner, /data-team-erase="t-1"/);
+  // The instance refusal is named BEFORE the button, not after the attempt.
+  assert.match(owner, /Decommission every/);
+
+  // CONTROLS — every non-owner band renders the empty string, not a disabled
+  // button and not a partial section.
+  assert.equal(hooks.teamDangerZoneHtml({ role: "admin", teamId: "t-1" }), "");
+  assert.equal(hooks.teamDangerZoneHtml({ role: "member", teamId: "t-1" }), "");
+  assert.equal(hooks.teamDangerZoneHtml(null), "");
+  assert.equal(hooks.teamDangerZoneHtml({ teamId: "t-1" }), "");
+});
+
+test("accountDangerZoneHtml: unbanded, and it names the anonymisation rather than promising a full wipe", () => {
+  const html = hooks.accountDangerZoneHtml({ email: "a@example.com" });
+  assert.match(html, /Danger zone/);
+  assert.match(html, /id="account-erase"/);
+  // The honest half: the team's audit history SURVIVES, with the name removed.
+  assert.match(html, /audit history with your name removed/);
+  // CONTROL — an empty model still renders the affordance (the session is the
+  // authority; a cold /v1/me must not withhold a self-scoped control).
+  assert.match(hooks.accountDangerZoneHtml({}), /id="account-erase"/);
+  assert.match(hooks.accountDangerZoneHtml(null), /id="account-erase"/);
+});
+
+test("teamEraseFailureCopy: the 409 counts come from the SERVER's numbers, singular and plural", () => {
+  const one = hooks.teamEraseFailureCopy(409, { error: "instances_present", barkparks: 1, sites: 0 });
+  assert.match(one, /1 instance\b/);
+  assert.doesNotMatch(one, /1 instances/);
+  const many = hooks.teamEraseFailureCopy(409, { error: "instances_present", barkparks: 3, sites: 2 });
+  assert.match(many, /3 instances and 2 sites/);
+  // A 409 whose counts are both zero must not read as "still owns  ." — the
+  // sentence falls back rather than emitting an empty noun phrase.
+  assert.match(hooks.teamEraseFailureCopy(409, { error: "instances_present", barkparks: 0, sites: 0 }),
+    /live infrastructure/);
+  // CONTROLS — the other statuses keep their own sentences, and an unrecognised
+  // shape is DELEGATED to friendly() rather than guessing a cause.
+  assert.match(hooks.teamEraseFailureCopy(403, {}), /Only an owner/);
+  assert.match(hooks.teamEraseFailureCopy(404, {}), /no longer there/);
+  assert.match(hooks.teamEraseFailureCopy(500, {}), /try again/i);
+});
+
+test("accountEraseFailureCopy: 401 names the OAuth-only dead end; 409 names the teams", () => {
+  assert.match(hooks.accountEraseFailureCopy(401, {}), /GitHub or Google/);
+  const sole = hooks.accountEraseFailureCopy(409, { error: "sole_owner", teams: ["acme", "beta"] });
+  assert.match(sole, /acme, beta/);
+  assert.match(sole, /Promote another owner/);
+  // A sole_owner 409 that named no team still reads as a sentence.
+  assert.match(hooks.accountEraseFailureCopy(409, { error: "sole_owner", teams: [] }),
+    /a team that still exists/);
+  // CONTROL — a 409 that is NOT sole_owner is not given the sole_owner story.
+  assert.doesNotMatch(hooks.accountEraseFailureCopy(409, { error: "something_else" }), /Promote another owner/);
+  assert.match(hooks.accountEraseFailureCopy(500, {}), /try again/i);
+});

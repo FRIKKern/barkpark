@@ -68,6 +68,11 @@ export const A_OPERATOR = "Auth.require_platform_operator";
 export const A_USER_OR_PAT = "Auth.require_user_or_pat";
 export const A_ABILITY = "Auth.require_ability";
 export const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
+// The OWNER rung of the same path-team helper. A separate constant, not a
+// widening of H_TEAM_ROLE: team erasure (DELETE /v1/teams/:id) is the only
+// route on this helper's owner rung, and a single string covering both rungs
+// would let an admin-gated affordance claim an owner predicate.
+export const H_TEAM_ROLE_OWNER = 'with_team_role(conn, "owner")';
 
 // The tiers that are elevated above plain team membership.
 //
@@ -75,7 +80,7 @@ export const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
 // an oversight: a browser SESSION carries ["root"], so require_ability is a
 // PAT-shaped fence and a no-op for the console. Counting it as elevated would
 // make the sweep withhold controls the server honours.
-const ELEVATED_TIERS = new Set([A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, H_TEAM_ROLE]);
+const ELEVATED_TIERS = new Set([A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, H_TEAM_ROLE, H_TEAM_ROLE_OWNER]);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE INLINE-COND OVERLAY (charter D421) — router routes whose refusal of a

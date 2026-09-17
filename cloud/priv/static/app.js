@@ -1398,12 +1398,105 @@
         accountTwoFactorPanelHtml({ phase: a2fPhase, meState: meStateValue }) +
       "</div>" +
 
+      accountDangerZoneHtml(model) +
+
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Close</button>' +
         '<button class="btn btn-primary" type="button" id="modal-logout">Log out</button>' +
       "</div>" +
       "</div>"
     );
+  }
+
+  // Pure: the account sheet's Danger zone — the self-serve erasure affordance.
+  //
+  // It is UNCONDITIONAL, and that is the decision, not an omission. Every other
+  // elevated affordance on this console is role-banded because the server would
+  // refuse a member who pressed it; DELETE /v1/account is gated on nothing but
+  // holding the session, so banding it would be the console inventing a refusal
+  // the plane does not make. The two things that CAN refuse it — a wrong
+  // password, and being the sole owner of a live team — are refusals the server
+  // alone can decide, and both arrive as honest in-modal sentences
+  // (accountEraseFailureCopy) rather than as a hidden button.
+  //
+  // The sentence names ANONYMISATION as well as deletion. "Delete my account"
+  // that quietly leaves the team's audit trail standing would be a promise the
+  // route does not keep; saying so here is cheaper than a support thread.
+  function accountDangerZoneHtml(model) {
+    model = model || {};
+    return '<div class="am-head">' +
+        '<h3 class="modal-section">Danger zone</h3>' +
+      "</div>" +
+      '<div class="sessions-box">' +
+        '<p class="muted">Deleting your account removes your profile, every session and access token you hold, ' +
+          "your sign-in identities and your personal security log. Your teams keep their audit history with your " +
+          "name removed from it. This can't be undone.</p>" +
+        '<button class="btn btn-danger btn-sm" type="button" id="account-erase">Delete account…</button>' +
+      "</div>";
+  }
+
+  // Delete the account = destroy-tier typed-confirm (DELETE /v1/account) with a
+  // PASSWORD FIELD in the body slot. The typed echo proves attention; the
+  // password proves identity, and the two are not the same proof. A live session
+  // says the browser was authenticated once, which is not enough for the one
+  // write on this plane an operator cannot undo.
+  function confirmEraseAccount() {
+    var model = accountModalModel();
+    var email = model.email ? String(model.email) : "";
+    openConfirmModal({
+      tier: "destroy",
+      title: "Delete account?",
+      resourceName: email || "delete",
+      bodyHtml:
+        '<label class="label" for="acct-erase-pw">Confirm your password</label>' +
+        '<input class="form-input" id="acct-erase-pw" type="password" autocomplete="current-password" />',
+      consequences: [
+        "Removes your profile, every session and access token you hold, and your sign-in identities.",
+        "Removes your personal security log.",
+        "Your teams keep their audit history, with your name removed from it.",
+        "Refused while you're the only owner of a team that still exists.",
+        "This can't be undone.",
+      ],
+      confirmLabel: "Delete account",
+      busyLabel: "Deleting\u2026",
+      onConfirm: function (ctl) { runEraseAccount(ctl); },
+    });
+  }
+
+  function runEraseAccount(ctl) {
+    var field = $("#acct-erase-pw");
+    var password = field ? String(field.value || "") : "";
+    api("DELETE", "/v1/account", { password: password }).then(function (r) {
+      if (r.ok) {
+        ctl.succeed();
+        // The session token died with the user row. Clear local state before
+        // anything can re-render off a cache describing an account that is gone.
+        clearSession();
+        location.hash = "";
+        location.reload();
+        return;
+      }
+      ctl.fail(accountEraseFailureCopy(r.status, r.data), "Try again", function (c) {
+        c.busy();
+        runEraseAccount(c);
+      });
+    });
+  }
+
+  // Pure: the honest sentence for a failed DELETE /v1/account, one per refusal
+  // the route can actually make. `sole_owner` names the teams, because "you own
+  // a team" without saying WHICH is a dead end on an account with several.
+  function accountEraseFailureCopy(status, data) {
+    if (status === 401) {
+      return "That password didn't match. If you sign in with GitHub or Google and have never set a password, " +
+        "set one first \u2014 account deletion needs it.";
+    }
+    if (status === 409 && data && data.error === "sole_owner") {
+      var teams = (data.teams || []).join(", ");
+      return "You're the only owner of " + (teams || "a team that still exists") +
+        ". Promote another owner, or delete the team first.";
+    }
+    return friendly(data, "Please try again.");
   }
 
   // ======================================================= TWO-FACTOR (GR52/GR55/GR56)
@@ -1883,6 +1976,9 @@
     // model this open already built, through the ONE phase mapper.
     a2fView = { phase: accountTwoFactorPhase(model.twoFactorEnabled), meState: meState() };
     a2fWire();
+
+    var erase = $("#account-erase");
+    if (erase) erase.addEventListener("click", function () { confirmEraseAccount(); });
 
     var out = $("#modal-logout");
     if (out) out.addEventListener("click", function () {
@@ -26921,7 +27017,50 @@
             : '<p class="set-empty">No pending invitations.</p>') +
         "</section>";
     }
+    out += teamDangerZoneHtml(ctx);
     return out;
+  }
+
+  // Pure: the Members view's Danger zone — team erasure, OWNER ONLY.
+  //
+  // Banded here and NOT on the account sheet, because here the band is real:
+  // DELETE /v1/teams/:id runs through with_team_role(conn, "owner", ...), so an
+  // admin who pressed this would be refused by the server, and a button the
+  // server will refuse is a lie the console told. `ctx.role` is membersContext's
+  // fail-closed floor ("member" when the authority names no role), so an
+  // unresolved authority renders NOTHING rather than a destroy button.
+  //
+  // The instance sentence is the one that matters. The route refuses while the
+  // team still owns a box, and an owner who finds that out only by typing the
+  // team name and pressing the red button has been ambushed.
+  function teamDangerZoneHtml(ctx) {
+    if (!ctx || ctx.role !== "owner") return "";
+    return '<section class="set-section">' +
+      '<h2 class="set-h">Danger zone</h2>' +
+      '<p class="set-purpose">Deleting the team removes it, every membership and invitation, its connected ' +
+        "providers, its subscription, its notification settings and its audit history. Decommission every " +
+        "instance and site first &mdash; the team can't be deleted while it still owns one.</p>" +
+      '<div class="set-list">' +
+        '<button class="btn btn-danger btn-sm" type="button" data-team-erase="' + esc(ctx.teamId || "") + '">Delete team\u2026</button>' +
+      "</div>" +
+      "</section>";
+  }
+
+  // Pure: the honest sentence for a failed DELETE /v1/teams/:id. The 409 names
+  // the COUNTS the server measured, not the ones the console had cached.
+  function teamEraseFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "instances_present") {
+      var bp = Number(data.barkparks || 0);
+      var sites = Number(data.sites || 0);
+      var parts = [];
+      if (bp) parts.push(bp === 1 ? "1 instance" : bp + " instances");
+      if (sites) parts.push(sites === 1 ? "1 site" : sites + " sites");
+      return "This team still owns " + (parts.join(" and ") || "live infrastructure") +
+        ". Decommission them first \u2014 deleting the team now would leave the servers running and billing.";
+    }
+    if (status === 403) return "Only an owner can delete a team.";
+    if (status === 404) return "That team is no longer there.";
+    return friendly(data, "Please try again.");
   }
 
   // Load the Members panel: resolve the team context (from /v1/me, fetching it
@@ -27030,6 +27169,52 @@
     box.querySelectorAll("[data-invite-revoke]").forEach(function (b) {
       b.addEventListener("click", function () {
         confirmRevokeInvite(ctx, b.getAttribute("data-invite-revoke"), b.getAttribute("data-email"));
+      });
+    });
+    box.querySelectorAll("[data-team-erase]").forEach(function (b) {
+      b.addEventListener("click", function () { confirmEraseTeam(ctx); });
+    });
+  }
+
+  // Delete the team = destroy-tier typed-confirm (DELETE /v1/teams/:id). The
+  // echo is the team NAME, read from the same /v1/me envelope membersContext
+  // came from; a team whose name never landed echoes its slug-free id rather
+  // than an invented label.
+  function confirmEraseTeam(ctx) {
+    var team = (meCache && meCache.team) || {};
+    var label = team.name ? String(team.name) : (team.slug ? String(team.slug) : "this team");
+    openConfirmModal({
+      tier: "destroy",
+      title: "Delete team?",
+      resourceName: label,
+      consequences: [
+        "Removes " + label + " and every membership, invitation and pending invite on it.",
+        "Removes its connected providers, its subscription and its notification settings.",
+        "Removes its audit history \u2014 the team's record of what happened to it.",
+        "Refused while the team still owns an instance or a site.",
+        "This can't be undone.",
+      ],
+      confirmLabel: "Delete team",
+      busyLabel: "Deleting\u2026",
+      onConfirm: function (ctl) { runEraseTeam(ctx, ctl); },
+    });
+  }
+
+  function runEraseTeam(ctx, ctl) {
+    api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId)).then(function (r) {
+      if (r.ok) {
+        ctl.succeed();
+        toast({ kind: "success", title: "Team deleted" });
+        // The team this console was scoped to is gone; a re-render off a stale
+        // meCache would paint a dead team. Drop the session view and reload the
+        // envelope from the server.
+        location.hash = "";
+        location.reload();
+        return;
+      }
+      ctl.fail(teamEraseFailureCopy(r.status, r.data), "Try again", function (c) {
+        c.busy();
+        runEraseTeam(ctx, c);
       });
     });
   }
@@ -29884,6 +30069,10 @@
       // gr-p5-account-2fa (GR54): the account modal body, extracted PURE so its
       // eight lockout-bearing element ids are node-pinned.
       accountModalHtml: accountModalHtml,
+      accountDangerZoneHtml: accountDangerZoneHtml,
+      accountEraseFailureCopy: accountEraseFailureCopy,
+      teamDangerZoneHtml: teamDangerZoneHtml,
+      teamEraseFailureCopy: teamEraseFailureCopy,
       accountModel: accountModel, accountIdentityLine: accountIdentityLine,
       // GR63: one session row, pure — the seam that lets a node test build the
       // TALL (9+ session) modal that broke on live without a browser.
