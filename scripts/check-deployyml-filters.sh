@@ -1113,7 +1113,7 @@ EOF
   # The exclusion, published too: it is the single highest-traffic routing fact
   # on the page and the README never mentioned it.
   local ex_re ex_derived ex_rows ex_n ex_published
-  ex_re="$(deploy_yaml_job_lines "$yml" changes | { grep -oE "grep -vE '[^']+'" || true; } | sed -E "s/^grep -vE '//; s/'\$//" | head -1)"
+  ex_re="$(deploy_yaml_job_lines "$yml" changes | { grep -oE "grep -vE '[^']+'" || true; } | sed -E "s/^grep -vE '//; s/'\$//" | sed -n '1p')"
   if [ -n "$ex_re" ]; then
     ex_derived="$(printf '%s\n' "${ex_re#^}" | sed -E 's:/?$:/**:' | sort -u)"
     ex_rows="$({ grep -E '^- excluded from both: ' "$readme" || true; })"
