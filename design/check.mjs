@@ -1342,6 +1342,14 @@ if (failed === failedBeforeH)
 // under a second name from a second source is the SAME pair rather than a new
 // failure. That removes this file's own contribution to the class. It does not
 // guard the class, and this record exists so that nobody reads it as if it did.
+//
+// FINALLY, AND THIS IS WHAT KEEPS THE PARAGRAPH HONEST: none of the three facts
+// above is restated from memory. Part H2 reads them back from their sources every
+// run — the one invocation site in .github/workflows, this context's absence from
+// the required set, and the strict flag — and reds if any has moved. Two of those
+// checks fire when the repository gets BETTER, which is deliberate: an exposure
+// that has quietly been guarded must stop being carried as accepted just as
+// loudly as one whose reasoning rotted.
 // └─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (END) ─────────────
 console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canvas palette (keyed on the resolved colour)");
 {
