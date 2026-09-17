@@ -208,6 +208,12 @@ defmodule BarkparkCloud.Health.StalenessWorkerTest do
       refute body =~ ~r/\bcrash/i
       refute body =~ ~r/\bfor \d+ (second|minute|hour)/i
       refute body =~ ~r/\b\d+ (missed |health )?check/i
+
+      # `assert_email_sent/1` asserts on the FUNCTION'S RETURN VALUE, and
+      # `refute/1` returns `false` — so a trailing refute would fail the
+      # assertion no matter what the body said. Every check above raises on its
+      # own; this line only keeps the predicate truthy.
+      true
     end)
   end
 
