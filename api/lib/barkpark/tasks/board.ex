@@ -31,12 +31,44 @@ defmodule Barkpark.Tasks.Board do
   The loader projects each `%Document{}` into:
 
       %{doc_id, title, priority, parent_id, labels, worker, lifecycle_status,
+        draft: boolean,
         criteria: %{met, total} | nil, github: map | nil, github_synced: boolean,
         blocker_statuses: [String.t()], sub, next_criterion, updated_at}
 
   and `build/2` enriches each with a `:col` (its bucket), a `:glyph`, and a
   `:color_role` per the §1 shared white-ladder vocabulary
   (`.claude/workflows/bp-task-design-language-spec.md`).
+
+  ## THE DRAFT LABEL CONTRACT (PDS-D749)
+
+  This is the contract every reader of a task row paints from. Stated once,
+  here, so no surface invents a second spelling (the ruling on
+  task-9d0c7adbbe1a5af1 is explicit about that):
+
+    * **What marks a draft row.** The `drafts.` prefix on the document's OWN
+      stored `doc_id`, and nothing else. It is the sole discriminator; the
+      row's `status`, its `lifecycle_status` and its content say nothing about
+      draftness.
+    * **Who owns the test.** `Barkpark.Content.DraftId.draft?/1` — the single
+      owner of the prefix rule (`@canonical capability:draft-published-id`).
+      Never a second `String.starts_with?("drafts.", …)` anywhere.
+    * **What the marker is called.** `draft`. On the Elixir card it is the atom
+      key `:draft` carrying a plain `boolean()`, ALWAYS present (the card is a
+      fixed-shape projection, so `false` is emitted, not omitted). The paper
+      task-snapshot row spells the same concept `"draft" => true` and omits it
+      on a published row only because that row is a byte-pinned snapshot
+      (`PortableDoc.TaskResolver.row_from_task/1`). Same NAME, different
+      presence rule for a documented reason.
+    * **Where it is derived.** At the projection boundary — `to_card/4` and
+      `card_from_broadcast/3` — off the RAW `doc_id`, BEFORE
+      `Content.published_id/1` strips the prefix off the card's own `doc_id`
+      field. Downstream of that point the spelling no longer exists, so no
+      painter can re-derive it; it must be carried.
+    * **What a reader does with it.** Paints a visible DRAFT marker on any card
+      whose `draft` is true. The Studio board does this in
+      `Plugins.Tasks.Web.BoardLive` (`data-role="draft"`); the TUI's twin lives
+      in `internal/taskboard` and is a separate row.
+
   """
 
   import Ecto.Query
@@ -129,6 +161,7 @@ defmodule Barkpark.Tasks.Board do
           labels: [String.t()],
           worker: String.t() | nil,
           lifecycle_status: String.t(),
+          draft: boolean(),
           criteria: %{met: non_neg_integer(), total: pos_integer()} | nil,
           github: map() | nil,
           github_synced: boolean(),
@@ -392,6 +425,7 @@ defmodule Barkpark.Tasks.Board do
       # versa).
       worker: gated_worker(content, readable?),
       lifecycle_status: lifecycle_of(doc),
+      draft: DraftId.draft?(doc.doc_id),
       criteria: Tasks.criteria_progress(content),
       github: Link.get(doc),
       github_synced: Link.synced?(doc),
@@ -658,6 +692,7 @@ defmodule Barkpark.Tasks.Board do
         if(readable?.("labels"), do: normalize_labels(Map.get(content, "labels")), else: []),
       worker: gated_worker(content, readable?),
       lifecycle_status: Map.get(content, "lifecycle_status") || "open",
+      draft: DraftId.draft?(msg_doc.doc_id),
       criteria: Tasks.criteria_progress(content),
       github: Link.get(synthetic),
       github_synced: Link.synced?(synthetic),
