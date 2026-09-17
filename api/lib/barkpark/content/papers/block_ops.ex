@@ -4612,16 +4612,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   #   2. the first heading block's text (legacy heading-driven papers);
   #   3. the slug (the desk list always needs a title).
   defp paper_title(content, slug) when is_map(content) do
-    blocks = Map.get(content, "blocks")
+    blank_to_nil(Map.get(content, "title")) || heading_title(Map.get(content, "blocks")) || slug
+  end
 
-    heading_text =
-      if is_list(blocks) do
-        Enum.find_value(blocks, fn b ->
-          if Map.get(b, "type") == "heading", do: blank_to_nil(Map.get(b, "text"))
-        end)
+  @doc """
+  The first heading block's PLAIN text, or `nil` when there is no heading with
+  printable text.
+
+  Public so the ingest controller's create-precheck twin (`create_title/3` in
+  `BulldocsIngestController`) derives the title the SAME way the authoritative
+  upsert wall does — the two derivations must move in lockstep or a dry-run
+  passes under one title and the write stores another.
+
+  Reads BOTH authored heading forms (bp-paper-ingest-title-trap): the flat
+  `"text"` key (legacy heading-driven papers) and the normal PortableDoc inline
+  `"content"` array. Matching only `"text"` made an array-authored heading miss
+  the fallback entirely, so the row title fell silently to the slug.
+  """
+  def heading_title(blocks) when is_list(blocks) do
+    Enum.find_value(blocks, fn b ->
+      if is_map(b) and Map.get(b, "type") == "heading" do
+        blank_to_nil(Map.get(b, "text")) || heading_content_text(b)
       end
+    end)
+  end
 
-    blank_to_nil(Map.get(content, "title")) || heading_text || slug
+  def heading_title(_), do: nil
+
+  defp heading_content_text(b) do
+    case Map.get(b, "content") do
+      nodes when is_list(nodes) -> nodes |> inline_plain_text() |> String.trim() |> blank_to_nil()
+      _ -> nil
+    end
   end
 
   defp blank_to_nil(""), do: nil
