@@ -455,6 +455,15 @@ else
   bad "escalation threshold: could not read a positive escalate_after= literal out of $SCRIPT (got '$N')"
   N=3
 fi
+# UPPER BOUND, because this arm plants N+3 REAL firings against a real socket.
+# An escalate_after raised out of reach would not fail this suite, it would HANG
+# it — a disarm experiment with escalate_after=999999 planted a million firings
+# and had to be killed. A threshold nobody can sit through is itself the defect
+# (the spiral is back), so name it rather than run it.
+if [ "$N" -gt 25 ] 2>/dev/null; then
+  bad "escalation threshold: escalate_after=$N is too high to be an escalation — $N repeat notifications IS the spiral this bounds. Cap it at 25."
+  N=25
+fi
 
 # fire — one firing against the LIVE state file, appending to the shared logs.
 # `run` truncates them, which would erase the very history this arm counts.
