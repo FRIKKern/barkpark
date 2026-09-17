@@ -2453,14 +2453,31 @@ defmodule BarkparkCloud.Registry do
 
   defp console_line_meta(_), do: %{}
 
-  # Keep only the last @max_console_lines entries (oldest dropped) — the append-only
-  # cap that bounds the row size — and DISCLOSE the drop: the oldest SURVIVING
-  # entry carries `"dropped_before" => <cumulative count>`, so a reader can tell a
-  # complete narration from the tail of one. The count is cumulative because the
-  # entry being dropped is itself the previous oldest survivor and carries the
-  # running total; below the cap nothing is dropped and no key is written (an
-  # absent key reads as 0).
-  defp cap_console(entries) when is_list(entries) do
+  @doc """
+  dwb-18: THE canonical console cap — keep only the last `@max_console_lines`
+  entries (oldest dropped), the append-only bound on the row size, and DISCLOSE
+  the drop: the oldest SURVIVING entry carries `"dropped_before" => <cumulative
+  count>`, so a reader can tell a complete narration from the tail of one. The
+  count is cumulative because the entry being dropped is itself the previous
+  oldest survivor and carries the running total; below the cap nothing is
+  dropped and no key is written (an absent key reads as 0).
+
+  PUBLIC because it has a caller outside this module.
+  `BarkparkCloud.Sites.Deploy.record_stage/2` writes `console` directly inside
+  the same fenced CAS as the stage transition — it cannot route through
+  `append_deployment_console/2` without splitting that atomicity — and until
+  dwb-18 it was the ONE console writer whose bound held by ARITHMETIC (six
+  stages x three statuses = eighteen entries against a cap of 300) rather than
+  by enforcement. Arithmetic is not a bound: nothing noticed the cap being
+  lowered, and appending onto a console another path had already capped silently
+  overflowed it and lost the `dropped_before` disclosure — a console that had
+  dropped its head became indistinguishable from a complete one. Re-deriving the
+  ring at the call site would have bought the bound with a silent `Enum.take/2`,
+  committing that very defect, so the one canonical implementation is promoted
+  instead of copied.
+  """
+  @spec cap_console([map()]) :: [map()]
+  def cap_console(entries) when is_list(entries) do
     case length(entries) - @max_console_lines do
       drop when drop > 0 ->
         entries

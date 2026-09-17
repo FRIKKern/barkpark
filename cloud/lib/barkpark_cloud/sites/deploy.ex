@@ -1198,28 +1198,26 @@ defmodule BarkparkCloud.Sites.Deploy do
     attrs = %{
       stage: stage.name,
       detail: stage.detail || stage_line(stage),
-      # cch-w33-bl, NAMED CONSENT — this is the ONE console writer that does not
-      # go through `Registry.cap_console/1`; the other three do
-      # (`append_deployment_console/2`, `cancel_preview/2`, and the provision
-      # twin). The bound holds by ARITHMETIC, not by enforcement: `apply_stages/2`
-      # records a stage at most once per {name, status} pair (`recorded?/2`), and
-      # six stages over three terminal statuses ceilings this at eighteen entries
-      # against `@max_console_lines` 300.
+      # dwb-18 — the consent of cch-w33-bl is DISCHARGED. This writer used to be
+      # the ONE console writer that did not go through `Registry.cap_console/1`
+      # (the other three do: `append_deployment_console/2`, `cancel_preview/2`,
+      # and the provision twin), on the argument that the bound held by
+      # ARITHMETIC: `apply_stages/2` records a stage at most once per
+      # {name, status} pair (`recorded?/2`), so six stages over three terminal
+      # statuses ceilinged this at eighteen entries against a cap of 300.
       #
-      # Latent is not harmless. Nothing here would notice the cap being lowered,
-      # and if this writer ever appends onto a console another path already
-      # capped, the row silently exceeds the cap and loses `cap_console/1`'s
-      # `dropped_before` disclosure — a console that dropped its head would then
-      # be indistinguishable from a complete one, which is the exact defect class
-      # this epic exists to remove.
+      # Arithmetic is not a bound. Nothing here noticed the cap being lowered,
+      # and this writer appends onto WHATEVER console the row already holds —
+      # including one the builder filled through `append_deployment_console/2`
+      # and `cap_console/1` already capped. The row then silently exceeded the
+      # cap and lost the `dropped_before` disclosure, making a console that had
+      # dropped its head indistinguishable from a complete one.
       #
-      # CONSENTED RATHER THAN FIXED, deliberately: capping here means either
-      # promoting `cap_console/1` to public in `registry.ex`, or re-deriving the
-      # ring locally — and a local `Enum.take/2` would drop the head SILENTLY,
-      # buying the bound by committing the very defect above. The honest fix is
-      # to promote the one canonical implementation, which is a `registry.ex`
-      # change and belongs with whoever holds that file.
-      console: (deployment.console || []) ++ [entry],
+      # `cap_console/1` is now public in `registry.ex` and called here, so the
+      # bound is ENFORCED by the one canonical implementation and every drop is
+      # disclosed. Not re-derived locally: a local `Enum.take/2` would drop the
+      # head SILENTLY, buying the bound by committing the very defect above.
+      console: Registry.cap_console((deployment.console || []) ++ [entry]),
       status: status_for_stage(deployment.status, stage),
       # Heartbeat: every stage CAS refreshes the lease so the reaper doesn't
       # mistake a long-but-healthy BUILD for an abandoned claim.
