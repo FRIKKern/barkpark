@@ -165,6 +165,16 @@
 //       ever returns, at which point the gate reports green over a family it has
 //       never checked. Compared against `allowlistedHits`, the walker's own
 //       record, so the arm and the waiver are judged on the same evidence.
+//   E20 a HOOK WAIVER THAT ABSOLVES NOTHING: an ALLOW_HOOK_CLASSES entry no
+//       emission in the scanned tree actually carries as a class. E19's exact
+//       shape, one list over — ALLOW_HOOK_CLASSES was the ONE of this file's
+//       four suppression lists with no decay arm at all, so a name deleted from
+//       the console left a standing consent nobody was ever told about and the
+//       run still printed `0 error(s)`. HARD, like E19 and unlike the
+//       report-only `stale` lines: see the block's own comment for why the four
+//       lists are not all the same severity. Judged against `hookHits`, the E2
+//       loop's own record, and it runs its own controls so it cannot pass by
+//       never having had a subject.
 //   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
 //
 //         A rule whose selector is WRAPPER-SCOPED onto the pill
@@ -748,13 +758,22 @@ function emittedDomainRungRoles(js) {
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
-// printed on every run; removing the hook from the markup should remove the
-// entry too.
+// printed on every run, and E20 below now REQUIRES each to fire: removing the
+// hook from the markup no longer merely "should" remove the entry, it reds the
+// gate until someone does.
+//
+// THE ENTRY THIS ARM FOUND ON ITS FIRST RUN: "notif-smtp", carrying the reason
+// `querySelector(".notif-smtp") — SMTP fieldset container`. The console never
+// emitted it as a class; notifEmailSectionHtml() writes `id="notif-smtp"` (grep
+// -n 'function notifEmailSectionHtml' app.js) and every reader is the ID
+// selector `$("#notif-smtp")` — `grep -n 'notif-smtp' app.js` shows every site
+// is `#notif-smtp` or a `notif-smtp-*` input id, and none is a class. So
+// the entry waived nothing and its stated reason was false in the same breath,
+// which is the whole reason a list needs an arm rather than a convention.
 const ALLOW_HOOK_CLASSES = [
   "view",              // section container app.js shows/hides per route ($$(".view"))
   "modal-body",        // openModal() innerHTML target (selected by #modal-body)
   "session-revoke",    // querySelectorAll(".session-revoke") — revoke button in the sessions panel
-  "notif-smtp",        // querySelector(".notif-smtp") — SMTP fieldset container in notifications
   "token-revoke",      // querySelectorAll(".token-revoke[data-id]") — per-token revoke button
   "token-ab",          // querySelectorAll(".token-ab") — ability checkboxes in the new-token modal
   "fleet-open-studio", // querySelectorAll(".fleet-open-studio") — Open Studio button per fleet row
@@ -1196,10 +1215,16 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
 // survives any sibling shift a line number cannot.
 //
 // SCANS THE WHOLE SOURCE TEXT, not a comment subset. A comment-only walk was
-// prototyped and REJECTED: a {string, //, /* */} state machine over 893 KB of
-// app.js (template literals, regex literals) desyncs and MISSES real citations
+// prototyped and REJECTED: a {string, //, /* */} state machine over the ~1,651 KiB
+// of app.js (template literals, regex literals) desyncs and MISSES real citations
 // — a false-negative in a tripwire, the exact disease this epic removes. Full
 // text cannot desync and cannot miss a citation that migrates into a string.
+// THAT SIZE IS MEASURED, AND THE PREVIOUS ONE WAS NOT: this sentence said
+// "893 KB" long after the file had nearly doubled past it. Re-derive it, never
+// quote it forward — `wc -c cloud/priv/static/app.js` reads 1,690,235 bytes at
+// the commit that corrected this line. A justification carrying a number that
+// is half of reality is the same shape as an allowlist entry that waives
+// nothing: still persuasive, no longer true, and nothing in the run checks it.
 // The shape `app.js:<digits>` is citation-specific: measured on this tree every
 // one of the seven live occurrences is a comment citation, zero are in code, so
 // full-text scanning is both robust AND false-positive-free today.
@@ -3137,6 +3162,108 @@ function statusMetaPillBody(src) {
         `dynamic class composition in app.js or index.html has that head. A waiver for an ` +
         `unemitted head can never fail, so it reads as live consent forever and pre-exempts ` +
         `the family if the name returns. Delete the entry; re-add it with the emission.`,
+    );
+  }
+}
+
+// E20 — a HOOK waiver must absolve something, same rule as E19 one list over.
+//
+// WHY THIS EXISTS. This file runs four suppression lists, and until this arm
+// landed only three could notice an entry going dead: ALLOW_PREFIXES has E19
+// (hard), KNOWN_GAPS computes `staleGaps`, ALLOW_RAW_COLORS computes
+// `staleRawAllows`. ALLOW_HOOK_CLASSES had neither — its only uses were the
+// membership test in the E2 loop and the `allow` print of the hits that DID
+// fire. MEASURED before the fix: inserting a fictional entry into the array
+// left the run at exit 0, the summary unchanged, and produced ZERO output
+// naming it. A class deleted from the console therefore left a standing consent
+// nobody was told about, and the next reader learned a class exists that does
+// not.
+//
+// HARD ERROR, NOT A `stale` LINE — the asymmetry between the four lists is a
+// DECISION, stated here so the next reader does not have to infer it:
+//   · KNOWN_GAPS and ALLOW_RAW_COLORS report-only because each DEMOTES a real,
+//     already-true violation that another slice owns. Their stale line asks a
+//     third party to prune; making that fatal would red this gate on someone
+//     else's cleanup, which is precisely backwards.
+//   · ALLOW_PREFIXES (E19) and ALLOW_HOOK_CLASSES are consent granted BY this
+//     gate's own owners over this gate's own files. Nothing outside the console
+//     can make one of these entries go stale, so the person who breaks it is
+//     the person who can fix it in the same commit. Hard.
+//   · And the failure mode is the worse one: an unfired hook entry silently
+//     PRE-EXEMPTS the class the day the name comes back, at which point E2
+//     reports green over a class it never checked.
+//
+// Judged against `hookHits` — the E2 loop's own record of the entries it really
+// used — so the arm and the waiver are decided on the same evidence, never on a
+// second, differently-shaped grep that could disagree with it.
+function hookAllowlistErrors(allowlist, hookHits, emittedCount) {
+  const errs = [];
+  // (a) PRECONDITION — the arm must HAVE a subject. Both of these would make
+  //     the (b) loop pass by measuring nothing, which is the exact disease the
+  //     arm was written to cure; a guard that can go vacuous is not a guard.
+  if (!emittedCount) {
+    errs.push(
+      "E20 __css_check.mjs  the class census produced ZERO emitted classes, so `hookHits` is " +
+        "empty for a reason that has nothing to do with the allowlist. Every ALLOW_HOOK_CLASSES " +
+        "entry would read as stale and the E2 loop reported on nothing at all — fix the walker " +
+        "or the scan root; do not read this run's class verdicts as a result.",
+    );
+  }
+  if (!allowlist.length) {
+    errs.push(
+      "E20 __css_check.mjs  ALLOW_HOOK_CLASSES is EMPTY, so this decay arm has nothing to " +
+        "check and would pass forever without measuring anything (KNOWN_GAPS' stale arm sits " +
+        "in exactly that state today). If the console genuinely has no ruleless hook classes " +
+        "left, delete this arm and its call in the same commit and say so — an emptied list " +
+        "under a live arm is an arm that cannot lose.",
+    );
+  }
+  if (errs.length) return errs;
+  // (b) STALENESS — one line per entry that waived nothing on this run.
+  const used = new Set(hookHits.map((h) => h.cls));
+  for (const cls of allowlist) {
+    if (used.has(cls)) continue;
+    errs.push(
+      `E20 __css_check.mjs  ALLOW_HOOK_CLASSES entry "${cls}" waived nothing on this run — ` +
+        `nothing under the scan root emits it as a class, so this consent can never fail and ` +
+        `is indistinguishable from an entry doing real work. It also PRE-EXEMPTS the class the ` +
+        `day the name returns, at which point E2 reports green over a class it never checked. ` +
+        `Delete the entry; re-add it with the emission. (An id selector is not a class: check ` +
+        `whether the reason on the entry says \`.${cls}\` while the code says \`#${cls}\`.)`,
+    );
+  }
+  return errs;
+}
+
+for (const e of hookAllowlistErrors(ALLOW_HOOK_CLASSES, hookHits, emitted.length)) errors.push(e);
+
+// E20's OWN CONTROLS, run inside the measurement rather than in a test that
+// could stop being run. The shipped call above can only ever print a clean
+// nothing; these three say whether that nothing was MEASURED. Each drives the
+// same function the gate uses, on this run's real `hookHits`.
+{
+  const probe = "zz-css-check-control-class-that-is-never-emitted";
+  const ctlStale = hookAllowlistErrors([probe], hookHits, emitted.length);
+  if (!(ctlStale.length === 1 && ctlStale[0].includes(probe))) {
+    errors.push(
+      `E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: a ` +
+        `fabricated entry "${probe}", which nothing emits, produced ${ctlStale.length} error(s) ` +
+        `instead of exactly one naming it. The clean ALLOW_HOOK_CLASSES verdict this run printed ` +
+        `is therefore not evidence of anything.`,
+    );
+  }
+  if (!hookAllowlistErrors([], hookHits, emitted.length).length) {
+    errors.push(
+      "E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: an EMPTY " +
+        "allowlist was accepted silently, so emptying the array would retire the arm without " +
+        "anyone deciding to.",
+    );
+  }
+  if (!hookAllowlistErrors([probe], [], 0).length) {
+    errors.push(
+      "E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: a census " +
+        "that emitted ZERO classes was accepted silently, so a walker that stopped finding its " +
+        "subject would read as a clean allowlist.",
     );
   }
 }
