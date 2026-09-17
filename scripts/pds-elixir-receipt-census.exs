@@ -7164,10 +7164,13 @@ defmodule PDS.Census do
 
   # -- the router AST ---------------------------------------------------------
   #
-  # SCOPE STATE IS {path prefix, alias segments} AND BOTH NEST. `scope "/v1", BarkparkWeb
-  # do get("/x", FooController, :y) end` is GET /v1/x -> BarkparkWeb.FooController.y, and
+  # SCOPE STATE IS {path prefix, alias segments} AND BOTH NEST. The worked example is a
+  # LIVE ROUTE, not a placeholder, so the claim is re-derivable rather than illustrative:
+  # `scope "/v1", BarkparkWeb do get("/meta", MetaController, :index) end` in
+  # api/lib/barkpark_web/router.ex is GET /v1/meta -> BarkparkWeb.MetaController.index, and
   # reading the literal alone (as an earlier route-linkage probe did) manufactures false
-  # findings on every scoped controller in the file.
+  # findings on every scoped controller in the file. A made-up `FooController` was what
+  # stood here, and PROSE-NAMES-RESOLVE cannot tell a placeholder from a rename.
   defp router_literal_routes(ast), do: Enum.reverse(router_walk(ast, {"", []}, []))
 
   @route_verbs ~w(get post put patch delete options head live)a
@@ -16205,6 +16208,206 @@ defmodule PDS.Census do
     [{"BASIS-FALSIFIERS", red == [], why}]
   end
 
+  # -- PROSE-NAMES-RESOLVE ----------------------------------------------------
+  #
+  # THE ARTIFACT'S OWN PROSE IS A MEASURED SURFACE, OR IT IS NOT MEASURED AT ALL.
+  # Wave 42 found this file's comments and printed lines naming `AuthController.register`
+  # on the CALL-substitution mechanism it was never on. That sentence shipped inside the
+  # artifact whose stated purpose is disclosure and survived a full wave with every arm
+  # printing PASS, because nothing here read the file's own sentences. The named instance
+  # carries its correction above; ONE FIX IS NOT THE DELIVERABLE. An enumeration of the
+  # sentences known to be wrong today is a snapshot; this arm is the predicate, and it
+  # runs on every census.
+  #
+  # THE POPULATION IS A RULE, NOT A LIST: every fully-qualified name rooted at `Barkpark`
+  # or `BarkparkWeb` that this file writes ANYWHERE — comment, printed line, register
+  # note, blind-shape sentence — with a lowercase final segment, so `Foo.Bar.baz` and
+  # `Foo.Bar.baz/2` are in and a bare module alias is not. Each is resolved against the
+  # SAME index the register and roster arms resolve against: the whole `api/lib` corpus,
+  # by {module segments, function name}, with the cited arity checked through `accepts?/2`
+  # when one is written. A name that resolves is CONFIRMED BY RUN, which is the half of
+  # this that no reader can do by eye over 300 citations.
+  #
+  # FOUR CLASSES, AND ONLY TWO OF THEM ARE THE FINDING.
+  #   corpus           — module and function are there, and the cited arity is accepted.
+  #   self_declared    — the name belongs to this file's OWN synthetic `--selftest` corpus
+  #                      (`Barkpark.Filler.*`, `Barkpark.Repo`, …). Those modules exist
+  #                      only in the heredocs below, so the api/lib index CANNOT resolve
+  #                      them and a red on them would be a false accusation on every run.
+  #                      Membership is DERIVED from this file's own `defmodule` lines, not
+  #                      listed: a fixture module added tomorrow is covered the day it is
+  #                      written, and a fixture module DELETED stops covering its citations.
+  #   mutation_payload — a name written inside an ESCAPED quote, i.e. a string inside a
+  #                      string. That is the shape of a `mut:` replacement and of nothing
+  #                      else in this file (measured: 4 occurrences on 536b65ced, all four
+  #                      inside `mut:` tuples). A mutation payload is REQUIRED to name
+  #                      something absent — that is what it mutates INTO — so redding on
+  #                      one would red every clean checkout.
+  #   drift            — everything else, split by which half moved: the function is gone
+  #                      from a module that is still there, the module itself is gone, or
+  #                      the arity moved under a live name. This is the finding.
+  #
+  # WHAT IT CANNOT SEE, SAID PLAINLY AND PRINTED BESIDE THE PASS.
+  #   (a) EXISTENCE AND ARITY, NEVER TRUTH. `Barkpark.Tasks.close/3 renders the stored
+  #       row` is checked only as far as `close/3` being there. The wave-42 sentence would
+  #       NOT have reddened here — `AuthController.register` existed; the MECHANISM claim
+  #       about it was the false part. This arm catches the species that is mechanically
+  #       decidable and says so rather than implying it caught the genus.
+  #   (b) UNQUALIFIED NAMES ARE INVISIBLE. `handle_intake/2` or `the register's create
+  #       clause` carry no module root, so no index lookup is possible and they are not in
+  #       the denominator. The denominator below is occurrences SWEPT, never sentences
+  #       written.
+  #   (c) A MACRO-GENERATED FUNCTION IS NOT IN THE INDEX. `collect_defs/2` reads `def`,
+  #       `defp`, `defmacro`, `defdelegate` — a function a `use` injects (Ecto.Repo's
+  #       `update/1` is the live example) has no def to find, so a prose citation to one
+  #       would land in `function_absent`. The only such citation in this file names the
+  #       FIXTURE `Barkpark.Repo`, which the self_declared clause takes first.
+  #   (d) A MODULE GENERATED UNDER AN INTERPOLATED `defmodule` PREFIX is accepted WHOLE:
+  #       `defmodule Barkpark.Filler.#{m}` declares the prefix `Barkpark.Filler.`, so every
+  #       `Barkpark.Filler.Anything.f` citation is self_declared without the suffix being
+  #       checked. Narrowing that needs the generator's own value list, which is data this
+  #       lens does not evaluate.
+  @prose_name_re ~r/\b(?:Barkpark|BarkparkWeb)(?:\.[A-Z][A-Za-z0-9_]*)+\.[a-z_][A-Za-z0-9_?!]*(?:\/[0-9]+)?/
+
+  # THE FIXTURE NAMESPACE, DERIVED FROM THIS FILE ON EVERY RUN. `#{` immediately after the
+  # captured name means the `defmodule` is interpolated, and what it declares is a PREFIX
+  # rather than a name — see blind spot (d).
+  defp prose_fixture_decls(src) do
+    ~r/defmodule\s+((?:Barkpark|BarkparkWeb)[A-Za-z0-9_.]*)(\#\{)?/
+    |> Regex.scan(src)
+    |> Enum.map(fn
+      [_, name, _interp] -> {:prefix, name}
+      [_, name] -> {:exact, name}
+    end)
+    |> Enum.uniq()
+  end
+
+  defp prose_self_declared?(mod, decls) do
+    Enum.any?(decls, fn
+      {:exact, d} -> mod == d
+      {:prefix, d} -> String.starts_with?(mod, d)
+    end)
+  end
+
+  # A NAME INSIDE AN ESCAPED QUOTE IS A MUTATION PAYLOAD. Read off the two bytes before
+  # the match, never off a line-shaped guess about which table the line belongs to.
+  defp prose_mutation_payload?(_line, at) when at < 2, do: false
+  defp prose_mutation_payload?(line, at), do: binary_part(line, at - 2, 2) == "\\\""
+
+  defp prose_split_name(name) do
+    {name, arity} =
+      case String.split(name, "/") do
+        [n] -> {n, nil}
+        [n, a] -> {n, String.to_integer(a)}
+      end
+
+    {mod_segs, [fun]} = name |> String.split(".") |> Enum.split(-1)
+    {Enum.join(mod_segs, "."), Enum.map(mod_segs, &String.to_atom/1), fun, arity}
+  end
+
+  defp prose_name_class(%{mutant?: true}, _index, _decls), do: :mutation_payload
+
+  defp prose_name_class(%{name: name}, index, decls) do
+    {mod_str, segs, fun, arity} = prose_split_name(name)
+    clauses = Map.get(index.by_key, {segs, String.to_atom(fun)}, [])
+
+    cond do
+      clauses != [] and Enum.any?(clauses, &accepts?(&1, arity)) ->
+        :corpus
+
+      clauses != [] ->
+        {:arity_moved, clauses |> Enum.map(& &1.arity) |> Enum.uniq() |> Enum.sort()}
+
+      prose_self_declared?(mod_str, decls) ->
+        :self_declared
+
+      Map.has_key?(index.by_module, segs) ->
+        :function_absent
+
+      true ->
+        :module_absent
+    end
+  end
+
+  defp prose_names_sweep(index) do
+    src = File.read!(@self_source)
+    decls = prose_fixture_decls(src)
+
+    src
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {line, i} ->
+      @prose_name_re
+      |> Regex.scan(line, return: :index)
+      |> Enum.map(fn [{at, len}] ->
+        %{
+          name: binary_part(line, at, len),
+          line: i,
+          mutant?: prose_mutation_payload?(line, at)
+        }
+      end)
+    end)
+    |> Enum.map(fn o -> Map.put(o, :class, prose_name_class(o, index, decls)) end)
+  end
+
+  defp prose_class_tag({:arity_moved, _}), do: :arity_moved
+  defp prose_class_tag(c), do: c
+
+  defp prose_drift_sentence(%{class: {:arity_moved, live}, name: n, line: l}),
+    do: "#{n} at :#{l} — that function is defined at aritie(s) #{Enum.join(live, ", ")}, never the one written"
+
+  defp prose_drift_sentence(%{class: :function_absent, name: n, line: l}),
+    do: "#{n} at :#{l} — the module is in the corpus and defines no such function"
+
+  defp prose_drift_sentence(%{class: :module_absent, name: n, line: l}),
+    do: "#{n} at :#{l} — no module of that name is in the corpus at all"
+
+  # THE DENOMINATOR IS PRINTED ON BOTH BRANCHES, because "0 wrong" over an unstated
+  # population is the vacuous green this epic refuses: the number that makes a PASS
+  # readable is how many claims were CHECKED, not how many were bad.
+  defp prose_names_check(parsed) do
+    index = roster_index(parsed)
+    rows = prose_names_sweep(index)
+    by = Enum.group_by(rows, &prose_class_tag(&1.class))
+    n = fn k -> length(Map.get(by, k, [])) end
+    distinct = rows |> Enum.map(& &1.name) |> Enum.uniq() |> length()
+
+    drift =
+      Map.get(by, :function_absent, []) ++
+        Map.get(by, :module_absent, []) ++ Map.get(by, :arity_moved, [])
+
+    denom =
+      "#{length(rows)} qualified name occurrence(s) swept from this file (#{distinct} distinct) · " <>
+        "#{n.(:corpus)} RESOLVED by run against the #{length(index.modules)}-module api/lib corpus · " <>
+        "#{n.(:self_declared)} name this file's OWN --selftest fixture modules · " <>
+        "#{n.(:mutation_payload)} are mutation payloads (a name inside an escaped quote, required to be absent)"
+
+    blind =
+      "BLIND TO: the sentence AROUND the name (existence and arity only — the wave-42 " <>
+        "sentence named a function that EXISTED), unqualified names (no module root, no lookup, " <>
+        "not in the denominator), and macro-injected functions (no def to index)"
+
+    cond do
+      # VACUITY PRECONDITION. A sweep that resolves NOTHING has examined nothing — a broken
+      # pattern, an empty index or a self-read that failed all print `0 drifted` otherwise,
+      # which is a green bought with an empty set.
+      n.(:corpus) == 0 ->
+        {"PROSE-NAMES-RESOLVE", false,
+         "VACUOUS — #{denom}. NOT ONE name resolved against the corpus, so the 0-drift verdict " <>
+           "below would be a verdict over an empty population: the pattern, the index or the " <>
+           "self-read is what failed, not the prose"}
+
+      drift == [] ->
+        {"PROSE-NAMES-RESOLVE", true, "#{denom} · 0 drifted. #{blind}"}
+
+      true ->
+        {"PROSE-NAMES-RESOLVE", false,
+         "#{length(drift)} committed name(s) NAME CODE THAT IS NOT THERE — the prose outlived " <>
+           "its subject: " <> Enum.map_join(Enum.take(drift, 4), " · ", &prose_drift_sentence/1) <>
+           " [#{denom}]"}
+    end
+  end
+
   defp register_checks(classified, parsed) do
     case register_scope(classified) do
       :scoped_out -> []
@@ -16216,6 +16419,7 @@ defmodule PDS.Census do
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
           roster_check(parsed),
+          prose_names_check(parsed),
           register_callee_split_check(classified)
         ]
     end
