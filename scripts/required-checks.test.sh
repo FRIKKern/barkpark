@@ -2680,7 +2680,14 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # generator reports it LOST. This is the SIXTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
         # this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "taskboard hermetic drive (ADVISORY)")
+        --expect-unrendered "taskboard hermetic drive (ADVISORY)"
+        # ci.yml job `golden-rule-8-guard` is CREATED by the same commit as its
+        # .exclusions row (pws-bl-golden-rule-8-zero-mechanism): it postdates the
+        # frozen fixture pair, so the pair cannot render it and the generator
+        # reports it LOST. This is the SEVENTH place, paid in the same commit.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly this name as MISSING ACK_EX (and nothing else) on this tree.
+        --expect-unrendered "Golden Rule 8 observer (selftest)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
