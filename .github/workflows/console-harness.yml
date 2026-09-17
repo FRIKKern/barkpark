@@ -644,6 +644,33 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1491 — bumped 2026-09-17 from 1485 on console-r21-w16-webhook-tab:
+      # +6 tests for the two halves of the webhook-tab authority defect. HALF 2
+      # (the copy): (1) the ROLE arm — a flat forbidden envelope carrying
+      # required/scope now renders the role the server named, with the deleted
+      # lossy rebuild re-implemented IN THE TEST as a control so the arm cannot
+      # pass vacuously; (2) the QUIET arm — the network_error shape the rebuild
+      # was written for, plus every crash shape the terminal line receives,
+      # pinned byte-for-byte as unmoved (this is the ONE new arm that stays green
+      # on a revert, which is its whole job); (3) the PREDICATE arm — a rule, not
+      # a hand-list, that finds every single-key `{ error: <ident> }` envelope
+      # rebuild reaching the copy ladder and demands zero, with a denominator
+      # floor so a green cannot mean "scanned nothing"; (4) the LOSSLESS arm —
+      # derives the sibling keys the ladder reads by following friendly()'s
+      # delegation one hop, then asserts the hand-off is identity for each.
+      # HALF 1 (the controls): (5) the card arm and (6) the shell arm — the six
+      # admin-gated card controls and the New webhook CTA are omitted for a
+      # DETERMINATE refusal only, "unknown" and the absent argument stay
+      # byte-identical to the shipped render, and the tab plus its two
+      # member-tier controls are asserted to SURVIVE. RE-MEASURED, never
+      # arithmetic: `bash scripts/console-harness.sh` on this branch printed
+      # `# tests 1491 / # pass 1491 / # fail 0`, and the same command with
+      # cloud/priv/static/app.js reverted to the branch's origin/main base
+      # printed `# tests 1491 / # pass 1486 / # fail 5` — the five reverting arms
+      # red, the quiet arm green. `bash scripts/console-pins.sh --selftest` was
+      # run after the bump, which is what reads the step `name:` slot a grep from
+      # inside the shell step cannot see.
+      #
       # PIN 1485 — bumped 2026-09-17 from 1481 on console-r21-w14-studio-login:
       # the "Log in with Barkpark Cloud" resume path moved from a client-side
       # fleet match to POST /v1/auth/studio-signin. ONE test was DELETED (the
@@ -799,7 +826,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1485-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1491-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -815,14 +842,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1485 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1485 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1491 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1491 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1485 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1485 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1485 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1491 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1491 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1491 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1485 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1491 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

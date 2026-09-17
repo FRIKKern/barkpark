@@ -34339,3 +34339,234 @@ test("gr-backlog-d24 (g): the absorbed call sites still render the shared family
   assert.match(chip, /<span class="status-pill-dot" aria-hidden="true"><\/span>/,
     "the binding chip lost the family's dot");
 });
+
+// ── cch-r21-w16: THE WEBHOOK TAB TELLS THE TRUTH ABOUT THE TIERS AS THEY STAND ─
+//
+// Two defects, one symptom, both reachable only since the instance-webhook
+// `:mutate` tier moved to team admin. Seven proxy verbs now answer a plain
+// member 403 (create, update — which is also the enable/disable toggle —
+// delete, rotate, test-send, the deliveries read, replay); `webhook.list` and
+// `webhook.show` stayed member-tier by the router's own written ruling.
+//
+//   HALF 1 — the console offered all seven anyway. No role branch existed
+//            anywhere in the tab.
+//   HALF 2 — and when one of them 403'd, the sentence claimed the refusal named
+//            no role, on a payload whose whole point was to name one.
+//
+// Nothing here changes a tier. Which role may call which verb is an owner
+// ruling; these arms only hold the console to what the server already does.
+
+test("cch-r21-w16: a webhook 403 renders the ROLE the server named, not the no-role generic", () => {
+  // The exact payload Auth.forbidden/2 sends for require_team_admin: FLAT, the
+  // evidence sitting beside the slug rather than nested under it.
+  const admin = hooks.webhookMutationError({ error: "forbidden", required: "admin", scope: "team" }, 403);
+  assert.match(admin, /admin role on this team/,
+    "a member's webhook 403 still hides the role the refusal named: " + admin);
+  assert.ok(!/didn't say which role/i.test(admin),
+    "the generic no-role sentence survived a refusal that DID say which role: " + admin);
+
+  // The other two evidence shapes the same gate family can send. Both were
+  // equally discarded, and each renders a DIFFERENT true sentence — so this arm
+  // cannot pass by hard-coding one string somewhere upstream.
+  const token = hooks.webhookMutationError({ error: "forbidden", required: "deploy", scope: "token" }, 403);
+  assert.match(token, /No team role grants it/,
+    "a token-ability refusal still reads as a grantable team role: " + token);
+  const noTeam = hooks.webhookMutationError({ error: "forbidden", reason: "no_team" }, 403);
+  assert.match(noTeam, /isn't on a team/,
+    "a teamless refusal still reads as the no-role generic: " + noTeam);
+
+  // The deliveries READ is admin-gated too, and it renders through the OTHER
+  // helper — the sibling the predicate arm below finds by rule.
+  const html = hooks.webhookErrorHtml({ error: "forbidden", required: "admin", scope: "team" }, "demo", 403);
+  assert.match(html, /admin role on this team/,
+    "the deliveries-read 403 panel still hides the role the refusal named: " + html);
+
+  // THE CONTROL. The rebuild that used to stand in both helpers, re-implemented
+  // here: if it were still there, every assert above would be unreachable. This
+  // proves the arms measure the hand-off and not some unrelated upstream string.
+  const err = { error: "forbidden", required: "admin", scope: "team" }.error;
+  const rebuilt = typeof err === "string" ? { error: err } : null;
+  assert.equal(hooks.faultCopy(403, rebuilt, "Please check the details and try again."),
+    hooks.friendly({ error: "forbidden" }, "Please check the details and try again."),
+    "the control no longer reproduces the old lossy rebuild — this test would pass vacuously");
+  assert.ok(!/admin role on this team/.test(
+    hooks.faultCopy(403, rebuilt, "Please check the details and try again.")),
+    "the OLD rebuild would have rendered the role — the defect is not what these arms describe");
+});
+
+test("cch-r21-w16 QUIET ARM: the shapes the deleted rebuild was written for still render unmoved", () => {
+  // The rebuild's stated reason for existing was `{error: "network_error"}` —
+  // api()'s fetch-catch shape. Deleting it must not move that sentence. (It
+  // never could: that shape returns at the TOP of webhookMutationError and has
+  // never reached the terminal line. This arm is what makes that claim checkable
+  // rather than asserted.)
+  assert.equal(hooks.webhookMutationError({ error: "network_error" }, 0),
+    hooks.friendly({ error: "network_error" }, "unused"),
+    "the network_error sentence moved when the rebuild was deleted");
+  assert.match(hooks.webhookMutationError({ error: "network_error" }, 0), /[Nn]etwork error/);
+  assert.match(hooks.webhookErrorHtml({ error: "network_error" }, "demo", 0), /Network error/,
+    "the read-panel's network_error branch moved");
+
+  // Every other flat-slug shape the terminal line actually receives, byte-for-
+  // byte as the shipped file rendered them before this change.
+  const unmoved = [
+    [{ error: "server_error" }, 500, "Something broke on our side — not your input. Try again in a moment."],
+    [{ error: "server_error", request_id: "0a1b2c3d4e5f6071" }, 500, "Something broke on our side — not your input. Try again in a moment."],
+    [{}, 502, "Something broke on our side — not your input. Try again in a moment."],
+    [{ error: "bad_gateway" }, 502, "Something broke on our side — not your input. Try again in a moment."],
+    [{}, 422, "Please check the details and try again."],
+    [{}, undefined, "Please check the details and try again."],
+  ];
+  for (const [data, status, want] of unmoved) {
+    assert.equal(hooks.webhookMutationError(data, status), want,
+      "a shape the rebuild covered moved: " + JSON.stringify(data) + " @" + status);
+  }
+  // And the specific branches ahead of the terminal line are untouched.
+  assert.equal(hooks.webhookMutationError({ ok: false, error: { code: "instance_unreachable" }, reachable: false }, 502),
+    "Couldn't reach the instance — the change is unconfirmed.");
+  assert.equal(hooks.webhookMutationError({ error: { code: "upstream_error", status: 422, detail: { error: { details: { url: ["must be https"] } } } } }, 502),
+    "url must be https");
+});
+
+test("cch-r21-w16 PREDICATE: no helper rebuilds a flat envelope and drops the keys friendly() reads", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // THE RULE, not a hand-list. A single-key object literal `{ error: <ident> }`
+  // built from another envelope and handed to the copy ladder is the defect
+  // SHAPE: friendly() reads more keys than `error`, so any such rebuild silently
+  // discards whatever else the server sent. Comment lines are excluded (this
+  // file's own prose quotes the form).
+  const rebuilds = [];
+  src.split("\n").forEach((line, i) => {
+    if (line.trimStart().startsWith("//")) return;
+    if (/\{ *error: *[A-Za-z_$][A-Za-z0-9_$]* *\}/.test(line)) rebuilds.push([i, line.trim()]);
+  });
+  // A rebuild is only a DEFECT if the thing it builds reaches the copy ladder.
+  // `{ error: true }` (the OAuth-return sentinel) is a boolean flag that never
+  // does, so the predicate's second clause is what excludes it — by rule.
+  const reaching = rebuilds.filter(([i, line]) => {
+    if (/\{ *error: *(true|false|null) *\}/.test(line)) return false;
+    const window = src.split("\n").slice(i, i + 3).join("\n");
+    return /\b(friendly|faultCopy)\(/.test(window);
+  });
+  assert.deepEqual(reaching.map(([, l]) => l), [],
+    "a lossy envelope rebuild reaches the copy ladder: " + JSON.stringify(reaching));
+
+  // THE DENOMINATOR, so a green above cannot mean "the predicate found nothing
+  // to look at". These are the helpers that take a raw envelope apart with
+  // `.error || {}` — the population the two fixed ones came out of.
+  const population = (src.match(/\.error \|\| \{\}/g) || []).length;
+  assert.ok(population >= 3,
+    "the envelope-splitting population collapsed to " + population + " — the predicate above may be scanning nothing");
+});
+
+test("cch-r21-w16 LOSSLESS: every sibling key friendly() reads survives the hand-off", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // Derive the sibling keys BY RULE rather than listing them: a future rung that
+  // reads a sixth key is covered the day it lands, and a test that enumerated
+  // five would not have been. The rule FOLLOWS THE DELEGATION one hop — friendly()
+  // hands the whole envelope to helpers (the forbidden-evidence fence is one), so
+  // a derivation that read only friendly()'s own body would miss exactly the keys
+  // this row is about, and would have shipped green while blind to them.
+  const bodyOf = (name) => {
+    const at = src.indexOf("function " + name + "(");
+    assert.ok(at > 0, name + "() was renamed — this rule cannot find its body");
+    return src.slice(at, src.indexOf("\n  function ", at + 10));
+  };
+  const top = bodyOf("friendly");
+  const delegates = [...new Set([...top.matchAll(/\b([A-Za-z_$][\w$]*)\(data\)/g)].map((m) => m[1]))]
+    .filter((n) => n !== "Array" && n !== "String" && n !== "Boolean");
+  assert.ok(delegates.length > 0,
+    "friendly() no longer hands the envelope to any helper — re-check this rule before trusting it");
+  const keys = [...new Set(
+    [top, ...delegates.map(bodyOf)].flatMap((b) => [...b.matchAll(/\bdata\.([a-z_]+)/g)].map((m) => m[1]))
+  )].filter((k) => k !== "error");
+  assert.ok(keys.length >= 3,
+    "the ladder reads only " + keys.length + " sibling keys — the derivation broke: " + keys);
+
+  // The invariant: for a FLAT-slug envelope, both helpers must hand the whole
+  // thing to the ladder, so their answer is identical to calling the ladder
+  // directly. A rebuild of any kind breaks this for at least one key.
+  const probe = { forbidden: { required: "admin", scope: "team" }, invalid: { details: { url: ["must be https"] } } };
+  for (const slug of ["forbidden", "invalid", "server_error", "bad_gateway"]) {
+    for (const key of keys) {
+      const data = Object.assign({ error: slug }, probe[slug] || {}, { [key]: data_probe(key) });
+      for (const status of [0, 403, 422, 500]) {
+        assert.equal(hooks.webhookMutationError(data, status),
+          hooks.faultCopy(status, data, "Please check the details and try again."),
+          "webhookMutationError dropped a key on " + JSON.stringify(data) + " @" + status);
+      }
+    }
+  }
+  function data_probe(key) {
+    if (key === "details") return { url: ["must be https"] };
+    if (key === "required") return "admin";
+    if (key === "scope") return "team";
+    if (key === "reason") return "no_team";
+    return "probe";
+  }
+});
+
+test("cch-r21-w16: the webhook card offers no control a refused member's role cannot use", () => {
+  const row = { id: "wh1", url: "https://x.test/h", events: ["doc.created"], active: true };
+  // Every action in the bar drives an `Auth.require_team_admin` proxy verb.
+  // `data-wh-deliveries>` (with the closing angle) is the BUTTON; the hidden
+  // panel `data-wh-deliveries-box` is not a control and is not asserted on.
+  const controls = ["data-wh-edit", "data-wh-toggle", "data-wh-rotate", "data-wh-test",
+    "data-wh-delete", "data-wh-deliveries>"];
+
+  const grant = hooks.webhookCardHtml(row, "demo", "production", "grant");
+  for (const c of controls) assert.ok(grant.includes(c), "an admin lost a control: " + c);
+
+  const refuse = hooks.webhookCardHtml(row, "demo", "production", "refuse");
+  for (const c of controls) {
+    assert.ok(!refuse.includes(c), "a refused member is still offered a control that 403s: " + c);
+  }
+  // It says WHY, in the server's own words — not a fourth wording of one fact.
+  assert.match(refuse, /admin role on this team/,
+    "the refused card removed the controls and explained nothing: " + refuse);
+  // The row itself still renders: `webhook.list` is member-tier, so a member
+  // may SEE their team's configuration. Hiding the data would be a second lie.
+  assert.ok(refuse.includes("https://x.test/h") && refuse.includes("doc.created"),
+    "the refused card hid the configuration a member is allowed to read");
+
+  // "unknown" is /v1/me not having answered. It is not a refusal and claims
+  // nothing — the shipped card, matching every other band in this file.
+  assert.equal(hooks.webhookCardHtml(row, "demo", "production", "unknown"), grant,
+    "an unanswered /v1/me was treated as a determinate refusal");
+  // No argument at all is byte-identical to "grant", which is what keeps the
+  // pure call sites (and the harness arms above this one) unmoved.
+  assert.equal(hooks.webhookCardHtml(row, "demo", "production"), grant,
+    "the default authority stopped being 'grant'");
+
+  // The auto-disable banner's Re-enable is the same PUT, so it gates with it.
+  const dead = { id: "wh2", url: "https://x.test/h", active: false, auto_disabled_at: "2026-01-01T00:00:00Z" };
+  assert.ok(hooks.webhookCardHtml(dead, "demo", "production", "grant").includes("data-wh-reenable"),
+    "an admin lost Re-enable");
+  assert.ok(!hooks.webhookCardHtml(dead, "demo", "production", "refuse").includes("data-wh-reenable"),
+    "a refused member is still offered Re-enable, which is an admin-gated PUT");
+});
+
+test("cch-r21-w16: the webhooks tab keeps its member-tier reads and drops only the admin CTA", () => {
+  const grant = hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "grant");
+  const refuse = hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "refuse");
+
+  assert.ok(grant.includes("data-wh-new"), "an admin lost the New webhook CTA");
+  assert.ok(!refuse.includes("data-wh-new"),
+    "a refused member is still offered New webhook, which is an admin-gated POST");
+
+  // THE TAB IS NOT REMOVED, and neither are the two member-tier controls. The
+  // router rules `webhook.list`/`webhook.show` member-tier on purpose, so the
+  // dataset picker and Load must keep working for a member.
+  for (const keep of ["data-wh-load", "wh-dataset-input"]) {
+    assert.ok(refuse.includes(keep), "a refused member lost a member-tier control: " + keep);
+  }
+  assert.ok(hooks.instanceTabs.includes("webhooks"),
+    "the webhooks tab was removed — a member may still read their box's configuration");
+
+  assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production"), grant,
+    "the shell's default authority stopped being 'grant'");
+  assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "unknown"), grant,
+    "an unanswered /v1/me was treated as a determinate refusal in the shell");
+});
