@@ -53,9 +53,12 @@ on:
 permissions:
   contents: read
 
+# Per-SHA on main, so a merge cannot evict the pending main run before a runner
+# picks it up (scripts/main-run-concurrency-check.sh measured 37 of 40 main runs
+# cancelled under merge cadence); PR runs still collapse to the newest push.
 concurrency:
-  group: taskboard-drive-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: taskboard-drive-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   hermetic-drive:

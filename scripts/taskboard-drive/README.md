@@ -137,5 +137,7 @@ at all: its capture carries no accent SGR and differs from the off-gutter
 baseline only in that heading (`Harbor lights epic` vs `Mulch the seedling
 beds`). The judged run in `evidence-hermetic/` has no
 `g5-hover-header-col86.txt` at all — the file is written only for a column that
-responds, and in August col 86 did not. It is a churn-coupled assert — the one thing this harness's own evidence law
+responds, and in August col 86 did not. The same red reproduces byte-for-byte on `ubuntu-latest` (PR #18824's first
+advisory run: `17 pass, 1 fail`, same assert text, same columns), so it is
+neither a Darwin artifact nor scheduler latency. It is a churn-coupled assert — the one thing this harness's own evidence law
 forbids — and it needs its comparison scoped to the divider cells.
