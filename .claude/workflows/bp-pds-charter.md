@@ -15953,3 +15953,42 @@ name unrelated code.
   this ruling provide. **It is flagged, not edited.** The honest in-repo proof stands in its place:
   `deploy/site-deploy.sh:1639-1648`, hard-failing `exit 1` on a missing python3 under
   `BARKPARK_SELFTEST_REQUIRE_E2E=1`.
+
+- **PDS-D755 — A PRE-WARM IS DEFINED BY THE TREE THE CLIMB READS, NOT BY THE TREE SOMEBODY MEASURED.
+  THE LAUNCHER NOW WARMS `MIX_ENV=dev` FIRST, THEN `prod`, AND EVERY STAMP NAMES ITS ENV
+  (2026-09-17).** `scripts/pds-crown-launch.sh` paid `CC=/usr/bin/clang MIX_ENV=prod mix compile` in
+  both its legs — the detached child's and `--prewarm-now`'s synchronous one — while the harness's
+  ONLY mix invocation is `MIX_ENV=dev mix run --no-start` (`scripts/pds-pull-proof.sh`). Mix envs do
+  not share a `_build` tree, so the pre-warm stamped `prewarm: OK — the window will not pay a cold
+  compile` having warmed a tree the climb never opens. **The defect is not that the pre-warm was
+  slow; it is that it was a PASSING instrument measuring the wrong subject** — the reassuring stamp
+  was the false one, and it survived PDS-D241, PDS-D258 and four waves of runbook prose because
+  nobody had pointed the launcher at the real harness until wave 16.
+
+  **MEASURED, not estimated.** A cold `_build/dev` for `api/` on the campaign host (Elixir on
+  darwin/arm64, deps present, `MIX_BUILD_PATH` redirected to an empty dir so the live tree was never
+  touched): **428.4 s wall** for `CC=/usr/bin/clang MIX_ENV=dev mix compile`. Warm, the harness's own
+  call shape — `MIX_ENV=dev mix run --no-start -e …` — costs **3.3 s**. That 425 s is what a
+  prod-only pre-warm left INSIDE the window it exists to protect, and it is 2.7x PDS-D241's own
+  155.72 s cold-prod figure, so the larger of the two costs was the unwarmed one.
+
+  **THE RULING.** `PREWARM_ENVS="dev prod"`, dev first, `CC=/usr/bin/clang` on BOTH legs (bare `cc`
+  is the Claude CLI wrapper and `argon2_elixir` fails to build under it — that is not a dev-leg
+  novelty, it is the same D241 hazard applied to the env D241 forgot). Each stamp carries its
+  `MIX_ENV=`, including the failure stamp, so `collect`'s PRE-WARM FAILURE branch can name which env
+  to fix instead of pointing at "the compile". The classifier's `prewarm: FAILED rc=` prefix is
+  unchanged, so historical transcripts still classify.
+
+  **AND THE GUARD IS A PREDICATE, NOT A LIST.** `selftest §10` DERIVES the expected env set by
+  grepping `$HARNESS` for `MIX_ENV=<x> mix` and asserts both pre-warm legs warm every env it finds —
+  a hard-coded `dev` would keep passing if the harness moved again, which is this defect one level
+  up. It carries a precondition (the derivation must be non-empty, or every assertion below it is
+  vacuous), a control (the same extractor is run over the pre-PDS-D755 prod-only body and must report
+  dev as NOT warmed, or it discriminates nothing), and a naming rule scoped to the per-env LOOP
+  rather than to a list of stamp prefixes — the first draft listed prefixes, and a mutation that
+  stripped `MIX_ENV=` from a stamp changed that stamp's prefix and slipped the filter entirely. Both
+  arms are run: reverting `PREWARM_ENVS` to `"prod"` reds §10 on both legs; stripping one stamp's env
+  reds the naming check ALONE and leaves the warm checks quiet.
+
+  **PDS-D258 STANDS, UNAMENDED.** No pre-warm form runs `mix deps.get`, and a fresh `origin/main`
+  worktree still has no `api/deps`. Both crown runbooks are corrected to match.

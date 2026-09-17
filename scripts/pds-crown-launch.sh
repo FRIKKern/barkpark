@@ -86,11 +86,16 @@
 #
 # ── WHERE THE PRE-WARM RUNS, AND WHY IT MOVED (PDS-D241) ────────────────────
 #
-# D241 requires `cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile` to be paid
-# BEFORE the timed window opens (measured 155.72 s cold-prod on a real host). The
-# `CC` override is LOAD-BEARING: bare `cc` resolves to the Claude CLI wrapper and
+# D241 requires `cd api && CC=/usr/bin/clang mix compile` to be paid BEFORE the
+# timed window opens (measured 155.72 s cold-prod on a real host). The `CC`
+# override is LOAD-BEARING: bare `cc` resolves to the Claude CLI wrapper and
 # argon2_elixir then FAILS to build ("unknown option '-g'") rather than merely
 # running slow.
+#
+# PDS-D755 fixes WHICH env is warmed. It was `MIX_ENV=prod` only, while the
+# harness's sole mix invocation is `MIX_ENV=dev mix run --no-start` — separate
+# _build trees, so the pre-warm stamped OK having warmed nothing the climb
+# reads. Both are now warmed, dev FIRST, and every stamp names its env.
 #
 # That compile is paid by the CHILD, as its first act, before the first draw is
 # taken. This is deliberate: paying it inside `arm` would blow the one constraint
@@ -432,26 +437,42 @@ stamp "home   BARKPARK_HOME=${BARKPARK_HOME:-<unset>}"
 stamp "point  PDS_SCRATCH_POINTER=${PDS_SCRATCH_POINTER:-<unset>}"
 stamp "art    PDS_PROOF_ARTIFACTS=${PDS_PROOF_ARTIFACTS:-<unset>}"
 
-# ── PRE-WARM (PDS-D241) ──────────────────────────────────────────────────────
-# CC=/usr/bin/clang is LOAD-BEARING: bare `cc` is the Claude CLI wrapper and
-# argon2_elixir FAILS to build under it ("unknown option '-g'"). This is paid
-# HERE, before the first draw, so the timed window never pays a cold compile.
+# ── PRE-WARM (PDS-D241, PDS-D755) ────────────────────────────────────────────
+# CC=/usr/bin/clang is LOAD-BEARING in BOTH envs: bare `cc` is the Claude CLI
+# wrapper and argon2_elixir FAILS to build under it ("unknown option '-g'").
+# This is paid HERE, before the first draw, so the timed window never pays a
+# cold compile.
+#
+# PDS-D755: `dev` is FIRST and is not optional. The harness's only mix
+# invocation is `MIX_ENV=dev mix run --no-start` (pds-pull-proof.sh), and mix
+# envs do not share a _build tree — a prod-only pre-warm reported OK while
+# warming a tree the climb never reads, so a cold api/_build/dev still paid its
+# compile inside the window the pre-warm exists to protect. `prod` is retained
+# because PDS-D241 measured it (155.72 s cold-prod) and a release build is the
+# fallback path. EVERY stamp below NAMES its env, so the transcript says which
+# tree was warmed instead of leaving a reader to assume.
+PREWARM_ENVS="dev prod"
 if [ "$DO_PREWARM" = "1" ]; then
-  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
-  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
-    stamp "prewarm: OK — the window will not pay a cold compile"
-  else
-    rc=$?
-    stamp "prewarm: FAILED rc=$rc — NOT firing. A climb that pays 155 s of compile"
-    stamp "         inside its own window is a measurement of the compile."
-    sentinel "$rc"
-    exit "$rc"
-  fi
+  stamp "prewarm: envs=$PREWARM_ENVS (dev first — the harness runs MIX_ENV=dev mix run; PDS-D755)"
+  for pw_env in $PREWARM_ENVS; do
+    stamp "prewarm: MIX_ENV=$pw_env — cd $API_DIR && CC=/usr/bin/clang MIX_ENV=$pw_env mix compile"
+    if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV="$pw_env" mix compile ); then
+      stamp "prewarm: OK MIX_ENV=$pw_env — api/_build/$pw_env is warm"
+    else
+      rc=$?
+      stamp "prewarm: FAILED rc=$rc MIX_ENV=$pw_env — NOT firing. A climb that pays 155 s of compile"
+      stamp "         inside its own window is a measurement of the compile."
+      sentinel "$rc"
+      exit "$rc"
+    fi
+  done
+  stamp "prewarm: OK — the window will not pay a cold compile (warmed: $PREWARM_ENVS)"
 elif [ "$DO_PREWARM" = "0" ]; then
-  stamp "prewarm: already paid synchronously in the arming shell (--prewarm-now)"
+  stamp "prewarm: already paid synchronously in the arming shell (--prewarm-now), envs=$PREWARM_ENVS"
 else
-  stamp "prewarm: SKIPPED by --no-prewarm. If api/_build/prod is not already warm,"
-  stamp "         the window below pays the compile and measures it (PDS-D241)."
+  stamp "prewarm: SKIPPED by --no-prewarm. If api/_build/dev (what the harness reads)"
+  stamp "         and api/_build/prod are not already warm, the window below pays the"
+  stamp "         compile and measures it (PDS-D241/PDS-D755)."
 fi
 
 # ── the draw probe — ONE ssh round trip, every value a READ ──────────────────
@@ -619,7 +640,8 @@ cmd_arm() {
     case "$1" in
       --force)       force=1 ;;
       --prewarm-now) DO_PREWARM=0 ;;
-      # For a tree whose api/_build/prod is ALREADY warm, and for proving `arm`
+      # For a tree whose api/_build/dev AND api/_build/prod are ALREADY warm,
+      # and for proving `arm`
       # itself against a dummy harness. Skipping it on a cold tree makes the
       # window pay a 155 s compile, which is why it is opt-in and never default.
       --no-prewarm)  DO_PREWARM=2 ;;
@@ -728,9 +750,15 @@ cmd_arm() {
   child="$run_dir/child.sh"
 
   if [ "$DO_PREWARM" -eq 0 ]; then
-    say "pre-warming synchronously (--prewarm-now); arming will take as long as this compile."
-    ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ) \
-      || die "pre-warm FAILED — refusing to arm a climb that would pay a cold compile inside its own window."
+    say "pre-warming synchronously (--prewarm-now); arming will take as long as these compiles."
+    # PDS-D755: the SAME env list as the child leg, dev first, and each leg says
+    # which env it is paying. dev is the one the harness actually reads.
+    for pw_env in dev prod; do
+      say "pre-warm MIX_ENV=$pw_env — cd $API_DIR && CC=/usr/bin/clang MIX_ENV=$pw_env mix compile"
+      ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV="$pw_env" mix compile ) \
+        || die "pre-warm FAILED at MIX_ENV=$pw_env — refusing to arm a climb that would pay a cold compile inside its own window."
+      say "pre-warm OK MIX_ENV=$pw_env — api/_build/$pw_env is warm"
+    done
   fi
 
   write_child_script "$child" "$run_tag"
@@ -1041,7 +1069,8 @@ cmd_collect() {
         info "PDS-D241 pre-warm (:264), before its first draw — no FIRE stamp,"
         info "so the harness was NEVER INVOKED and ZERO export attempts were"
         info "spent. Re-arming is free, but it will fail identically until the"
-        info "\`MIX_ENV=prod mix compile\` above builds; fix that first."
+        info "\`mix compile\` above builds — the stamp names WHICH MIX_ENV"
+        info "failed (PDS-D755); fix that env first."
       else
         info "Sentinel present, no ^RESULT:, and NEITHER the FIRE (:358) nor the"
         info "STAND-DOWN (:373) nor the pre-warm-failure (:264) stamp is in the"
@@ -1218,6 +1247,7 @@ cmd_selftest() {
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
   local state live_pid dead_pid out i reuse_log rc
   local unbooted_id unbooted_tag unbooted_home booted_id booted_tag
+  local pw_harness_envs pw_leg pw_body pw_list pw_lits pw_have pw_env pw_unnamed pw_legacy pw_stamps
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
@@ -1654,8 +1684,8 @@ DUMMY
   # attempt was spent is D252's own error with the polarity flipped.
   {
     printf '[2026-07-21T07:00:00Z] child up — pid=1234\n'
-    printf '[2026-07-21T07:00:01Z] prewarm: cd /x && CC=/usr/bin/clang MIX_ENV=prod mix compile\n'
-    printf '[2026-07-21T07:02:00Z] prewarm: FAILED rc=1 — NOT firing. A climb that pays 155 s of compile\n'
+    printf '[2026-07-21T07:00:01Z] prewarm: MIX_ENV=dev — cd /x && CC=/usr/bin/clang MIX_ENV=dev mix compile\n'
+    printf '[2026-07-21T07:02:00Z] prewarm: FAILED rc=1 MIX_ENV=dev — NOT firing. A climb that pays 155 s of compile\n'
     printf 'EXIT: 1\n'
   } > "$scratch/prewarm-fail.log"
   state="$(classify "$scratch/prewarm-fail.log" "$scratch/dummy.pid")"
@@ -2075,6 +2105,101 @@ MUTECHILD
     bad "the banner makes a promise about the climb's outcome that one read cannot back"
   fi
 
+  # ── 10. the pre-warm warms the env the HARNESS runs (PDS-D755) ────────────
+  say ""
+  say "10 · the pre-warm warms every MIX_ENV the harness actually runs (PDS-D755)"
+
+  # The expected env set is DERIVED FROM THE HARNESS, never listed here. A
+  # hard-coded "dev" would go on passing if the harness moved to another env —
+  # which is exactly the class of bug this section exists to catch, one level up.
+  pw_harness_envs="$(grep -oE 'MIX_ENV=[a-z]+[[:space:]]+mix[[:space:]]' "$HARNESS" 2>/dev/null \
+                     | grep -oE 'MIX_ENV=[a-z]+' | cut -d= -f2 | sort -u | tr '\n' ' ')"
+  pw_harness_envs="${pw_harness_envs% }"
+
+  # PRECONDITION, not a control: an empty derivation would make every assertion
+  # below vacuously true. Print the key set before trusting an empty read.
+  if [ -n "$pw_harness_envs" ]; then
+    ok "the harness names at least one MIX_ENV (derived from $HARNESS: $pw_harness_envs)"
+  else
+    bad "derived NO MIX_ENV from $HARNESS — every check below would be vacuous; fix the derivation"
+  fi
+
+  # `pw_warmed_envs <file>` prints the envs a pre-warm body compiles, one per
+  # line. It reads compile invocations only, so a mere mention in a comment
+  # does not count as warming.
+  pw_warmed_envs() {
+    grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?[[:space:]]+mix[[:space:]]+compile' "$1" \
+      | grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?' | sed 's/MIX_ENV=//; s/"//g' | sort -u
+  }
+
+  # The child's pre-warm body, and the synchronous --prewarm-now leg, verbatim
+  # from this file. Both are compared against the SAME derived set, because a
+  # fix that lands in only one of them leaves the other warming the wrong tree.
+  sed -n '/^# ── PRE-WARM (PDS-D241/,/^fi$/p'  "$SCRIPT_DIR/$SELF" > "$scratch/pw-child.txt"
+  sed -n '/pre-warming synchronously/,/^  fi$/p' "$SCRIPT_DIR/$SELF" > "$scratch/pw-sync.txt"
+
+  for pw_leg in child sync; do
+    pw_body="$scratch/pw-$pw_leg.txt"
+    if [ ! -s "$pw_body" ]; then
+      bad "could not extract the $pw_leg pre-warm leg from $SELF — the anchor moved"
+      continue
+    fi
+    # A literal env, or the loop variable expanded from a literal list.
+    pw_list="$(grep -oE 'PREWARM_ENVS="[a-z ]+"|for pw_env in [a-z ]+;' "$pw_body" \
+               | sed 's/.*PREWARM_ENVS="//; s/for pw_env in //; s/[";]//g' | tr ' ' '\n' | sort -u)"
+    pw_lits="$(pw_warmed_envs "$pw_body" | grep -v '^\$' || true)"
+    pw_have="$(printf '%s\n%s\n' "$pw_list" "$pw_lits" | grep -v '^$' | sort -u)"
+    for pw_env in $pw_harness_envs; do
+      if printf '%s\n' "$pw_have" | grep -qx "$pw_env"; then
+        ok "the $pw_leg pre-warm leg warms MIX_ENV=$pw_env — the env the harness runs"
+      else
+        bad "the $pw_leg pre-warm leg does NOT warm MIX_ENV=$pw_env; it warms: $(printf '%s' "$pw_have" | tr '\n' ' ')"
+      fi
+    done
+  done
+
+  # …and every per-env stamp NAMES its env, so the transcript is
+  # self-describing rather than leaving a reader to assume which tree was
+  # warmed. The rule is "every stamp INSIDE the per-env loop", not a list of
+  # stamp prefixes — a list would stop matching the very stamp that dropped
+  # its env, and pass.
+  sed -n '/for pw_env in \$PREWARM_ENVS; do/,/^  done$/p' "$scratch/pw-child.txt" \
+    > "$scratch/pw-loop.txt"
+  pw_stamps="$(grep -cE '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" || true)"
+  if [ "${pw_stamps:-0}" -ge 3 ]; then
+    ok "the per-env pre-warm loop was found and carries $pw_stamps stamps"
+  else
+    bad "found only ${pw_stamps:-0} stamp(s) in the per-env pre-warm loop — the anchor moved and the naming check below is vacuous"
+  fi
+  pw_unnamed="$(grep -E '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" \
+                | grep -cv 'pw_env' || true)"
+  if [ "${pw_unnamed:-1}" -eq 0 ]; then
+    ok "every stamp inside the per-env pre-warm loop names its MIX_ENV"
+  else
+    bad "$pw_unnamed stamp(s) inside the per-env pre-warm loop do not name their MIX_ENV"
+  fi
+
+  # CONTROL — the predicate must DISCRIMINATE. Run the same extractor over the
+  # pre-PDS-D755 body (prod only). If this reports dev as warmed, the checks
+  # above are passing on their own shape and prove nothing about the fix.
+  cat > "$scratch/pw-legacy.txt" <<'LEGACYPW'
+if [ "$DO_PREWARM" = "1" ]; then
+  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
+    stamp "prewarm: OK — the window will not pay a cold compile"
+  fi
+fi
+LEGACYPW
+  pw_legacy="$(pw_warmed_envs "$scratch/pw-legacy.txt" | tr '\n' ' ')"
+  case " $pw_legacy " in
+    *" prod "*) ok "the extractor does read the legacy body (it sees prod: $pw_legacy)" ;;
+    *)          bad "the extractor cannot even read the legacy body — it measures nothing" ;;
+  esac
+  case " $pw_legacy " in
+    *" dev "*) bad "the extractor reports dev warmed by a prod-only body — it cannot detect this defect" ;;
+    *)         ok  "the extractor reports the prod-only body as NOT warming dev (the defect is detectable)" ;;
+  esac
+
   say ""
   rule
   printf '  %d ok · %d FAIL\n' "$ST_PASS" "$ST_FAIL"
@@ -2098,7 +2223,9 @@ usage: $SELF <command>
   arm [--force] [--prewarm-now|--no-prewarm] [--max-draws N] [--interval S]
         Launch the climb DETACHED and return. Does not poll; the poll loop
         lives in the child, which outlives this turn. By default the child
-        pays the MIX_ENV=prod pre-warm before its first draw (PDS-D241).
+        pays the pre-warm before its first draw (PDS-D241): MIX_ENV=dev
+        first — the env the harness actually runs — then MIX_ENV=prod
+        (PDS-D755). Each stamp names its env.
 
   collect [<run-tag>] [--transcript P --pid-file F]
         Classify a transcript into one of six states (PDS-D247):
