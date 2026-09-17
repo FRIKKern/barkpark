@@ -1145,16 +1145,46 @@ hotfix_case "step hotfix: no labels at all"     '[]' "hotfix=0"
 # matter what was written: a silent, unattributable waiver of a required check.
 # A POST-accepting stub stands in for the ledger so the SUCCESS path is exercised
 # too — a pair of red cases alone would be satisfied by a step that always reds.
+# The stub LOGS every request line to $recport.log. That log is what makes the
+# publish-idempotence pair below falsifiable in BOTH directions: the ARM asserts
+# no mutate POST was issued, and the CONTROL asserts one WAS — a step that simply
+# stopped writing would satisfy the arm vacuously and is caught by the control.
+# The doc status is read from $recport.docstatus AT REQUEST TIME, not baked in at
+# start-up, so one server serves both the "no published twin" and the "published
+# twin exists" world without a second port to race on.
 recport="$fixtures/rec.port"
+: > "$fixtures/rec.port.log"
+echo 404 > "$fixtures/rec.port.docstatus"
 python3 - "$recport" >/dev/null 2>&1 <<'PY' &
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+LOG = sys.argv[1] + ".log"
+DOCSTATUS = sys.argv[1] + ".docstatus"
+
+def note(method, path):
+    with open(LOG, "a") as f:
+        f.write("%s %s\n" % (method, path.split("?")[0]))
+
 class H(BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        note("POST", self.path)
         self.send_response(200); self.send_header("Content-Type", "application/json")
         self.end_headers(); self.wfile.write(b'{"results":[]}')
+
+    def do_GET(self):
+        note("GET", self.path)
+        try:
+            code = int(open(DOCSTATUS).read().strip())
+        except Exception:
+            code = 404
+        payload = (b'{"doc":{"doc_id":"hotfix-pr-4242","type":"task"}}'
+                   if code == 200 else b'{"error":{"code":"not_found"}}')
+        self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers(); self.wfile.write(payload)
+
     def log_message(self, *a): pass
 
 srv = HTTPServer(("127.0.0.1", 0), H)
@@ -1187,6 +1217,57 @@ record_case() { # record_case <label> <token> <ledger base> <want exit> <want su
 record_case "hotfix record: no token REDS"   ""    "$REC_BASE"        1 "::error title=Hotfix override not recorded::"
 record_case "hotfix record: dead ledger REDS" "tok" "http://127.0.0.1:1" 1 "::error title=Hotfix override not recorded::"
 record_case "hotfix record: filed passes"    "tok" "$REC_BASE"        0 "::notice title=Hotfix lane::"
+
+# -- PUBLISH IDEMPOTENCE, both directions (task-067a69b6fa4bb3e0) --------------
+# THE DEFECT: `createIfNotExists` resolves `existing` from `DraftId.draft_id(id)`
+# ALONE, and publishing DELETES the draft — so once the override record for a PR
+# is published, the next re-fire of the record step mints a SECOND record
+# (`drafts.hotfix-pr-<N>`) beside it and the PR has two "durable records". The
+# fix is a published-set read before the create. These two cases pin it as
+# BEHAVIOUR, not as a line that happens to sit in the file:
+#
+#   ARM      a published twin exists (GET -> 200): the step must pass AND issue
+#            NO mutate POST. Revert the write to a bare createIfNotExists and the
+#            POST reappears -> this case reds.
+#   CONTROL  no published twin (GET -> 404): the step must pass AND issue the
+#            mutate POST exactly as before. A step that simply stopped writing
+#            would satisfy the ARM vacuously -> this case reds.
+#
+# Both assert the GET happened at all first, so neither can go green against a
+# stub the step never reached.
+idem_case() { # idem_case <label> <doc status> <want mutate POST: yes|no>
+  local label="$1" docstatus="$2" want_post="$3" got posts
+  local so="$fixtures/idem.out" ss="$fixtures/idem.summary"
+  : > "$so"; : > "$ss"; : > "$fixtures/rec.port.log"
+  echo "$docstatus" > "$fixtures/rec.port.docstatus"
+  ( GITHUB_STEP_SUMMARY="$ss" LEDGER_BASE="$REC_BASE" TASK_TOKEN="tok" \
+    PR_NUMBER=4242 PR_TITLE="urgent: the roof is on fire" \
+    PR_URL="https://github.com/example/repo/pull/4242" \
+    bash --noprofile --norc -e -o pipefail "$fixtures/body.hotfix_record" ) > "$so" 2>&1
+  got=$?
+  echo 404 > "$fixtures/rec.port.docstatus"
+  # The read must actually have happened, or the whole pair measures nothing.
+  if ! grep -qF "GET /v1/data/doc/production/task/hotfix-pr-4242" "$fixtures/rec.port.log"; then
+    fail=$((fail+1))
+    printf 'FAIL %-40s the step never READ the published set (no GET in the stub log)\n' "$label"
+    return
+  fi
+  posts="$(grep -cF "POST /v1/data/mutate/production" "$fixtures/rec.port.log" || true)"
+  if [ "$got" != "0" ]; then
+    fail=$((fail+1)); printf 'FAIL %-40s want exit 0 got %s\n' "$label" "$got"
+  elif [ "$want_post" = "no" ] && [ "$posts" != "0" ]; then
+    fail=$((fail+1))
+    printf 'FAIL %-40s a published record exists, yet the step issued %s mutate POST(s) — that write mints a draft twin\n' "$label" "$posts"
+  elif [ "$want_post" = "yes" ] && [ "$posts" = "0" ]; then
+    fail=$((fail+1))
+    printf 'FAIL %-40s no published record, yet the step issued NO mutate POST — the override would never be filed\n' "$label"
+  else
+    pass=$((pass+1)); printf 'ok   %-40s (exit 0, mutate POSTs=%s)\n' "$label" "$posts"
+  fi
+}
+
+idem_case "hotfix record: published twin -> NO create" 200 no
+idem_case "hotfix record: no twin -> create as before" 404 yes
 
 # -- THE ESCAPE-LANE CENSUS, BIDIRECTIONAL ------------------------------------
 # THE DEFECT THIS EXISTS FOR: this workflow's exit-2 ::error told a blocked
