@@ -153,6 +153,13 @@ on:
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
+      # MERGE-CHECK (task-73d2dc0989787be9, 2026-09-17). Its `--selftest` had NO
+      # caller of any kind — no workflow, no Makefile target — while it carried
+      # the arm that let #18497 merge under a live `hold` label. It rides the
+      # merge-verb job because it is the same claim read by the same operators:
+      # merge-check prints the verdict, bp-merge.sh acts on it, and the two must
+      # not disagree about what a hold is.
+      - "scripts/merge-check.sh"
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
@@ -729,6 +736,13 @@ on:
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
+      # MERGE-CHECK (task-73d2dc0989787be9, 2026-09-17). Its `--selftest` had NO
+      # caller of any kind — no workflow, no Makefile target — while it carried
+      # the arm that let #18497 merge under a live `hold` label. It rides the
+      # merge-verb job because it is the same claim read by the same operators:
+      # merge-check prints the verdict, bp-merge.sh acts on it, and the two must
+      # not disagree about what a hold is.
+      - "scripts/merge-check.sh"
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
@@ -1413,6 +1427,7 @@ jobs:
           doctor-matrix scripts/doctor.test.sh
           merge-verb-table scripts/bp-merge.sh
           merge-verb-table scripts/bp-merge.test.sh
+          merge-verb-table scripts/merge-check.sh
           merge-verb-table scripts/required-checks-verify.sh
           merge-verb-table scripts/lib/check-runs.sh
           merge-verb-table scripts/lib/check-runs.test.sh
@@ -1870,6 +1885,18 @@ jobs:
       - name: bp-merge refusal-string table (captured fixtures, no live GitHub)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/bp-merge.test.sh
+      - name: merge-check.sh syntax check
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash -n scripts/merge-check.sh
+      - name: merge-check arm suite (offline; hold-label arms A17..A17m)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        # `--selftest` returns BEFORE any `gh` call and drives the shipped
+        # functions (mc_hold_verdict, mc_wf_classify, the arm/cannot/waitfor
+        # counters) over fixtures — no token, no network, so it cannot rot into
+        # a skip. It carries its own DERIVED vacuity floor: if the arm count
+        # falls below it the suite exits 3 rather than reporting a green tally
+        # that measured nothing.
+        run: bash scripts/merge-check.sh --selftest
       - name: the shared check-run reader survives a feed larger than an argument
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # scripts/lib/check-runs.sh is read by this job's own verifier, by
