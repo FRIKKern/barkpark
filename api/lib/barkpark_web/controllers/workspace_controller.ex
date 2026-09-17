@@ -1183,7 +1183,18 @@ defmodule BarkparkWeb.WorkspaceController do
   # `Archive.open_scratch_dir!/0` just created — `spill_dir/0` (operator config)
   # plus System.unique_integer/1. No request input reaches the path; `spill_body`
   # below writes only to `Path.join(scratch, "body.tar")` under it.
-  # sobelow_skip ["Traversal.FileModule"]
+  #
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own, not even a capture. The removal it describes is
+  # `Archive.discard_scratch_dir/1` — see the `after` clause below, which spells
+  # out why it is that and not a bare `File.rm_rf/1` — and the write is
+  # `spill_body/2`'s. Each of those carries its own waiver where the call
+  # actually is. A waiver here suppressed nothing and told the next reader a
+  # risk had been weighed on this def; the reachability argument above outlived
+  # the call it was written for. If you add a direct `File.` call below, the
+  # waiver belongs with it — not back up here. (PR #12837 moved an annotation
+  # onto this function once already; `.sobelow-annotation-bindings` is what
+  # catches that, and it no longer has a row here to be stolen.)
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 
