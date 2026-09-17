@@ -26,7 +26,8 @@ defmodule Barkpark.Plugins.Github.ResolutionNotice do
 
   **The CODE half is built, live, and is not what is missing.** Re-verified on
   `origin/main` @ 6bf92d057: `Structure.build_generic_types_group/3` is composed into
-  `host_main` (`structure.ex:251`, defined at `:957`) and
+  `host_main` (`structure.ex`, where it is both composed into the group list and
+  defined) and
   `SchemaDefinition` carries `field :singleton, :boolean, default: false`
   (`schema_definition.ex:36`). The arities and line numbers have DRIFTED from the
   2026-08 report (`/2` at `:806`/`:747` then) while the behaviour has not — so a
