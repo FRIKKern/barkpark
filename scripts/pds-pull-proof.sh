@@ -4529,9 +4529,9 @@ cmd_selftest_roster() {
   say ""
   say "  NEGATIVE CONTROL — a census that names a THIRD row (the drift this catches)"
 
-  printf 'prose\nPDS_SENTINEL_EXCLUSION = tag metric launch_delay\nmore prose\n' > "$tmpd/drifted.md"
-  _sr_eq "a drifted census derives the drifted roster" "0|tag metric launch_delay" "$(_sr_derive "$tmpd/drifted.md")"
-  if [ "tag metric launch_delay" = "$SENTINEL_EXCLUSION_FALLBACK" ]; then
+  printf 'prose\nPDS_SENTINEL_EXCLUSION = tag metric a_third_row\nmore prose\n' > "$tmpd/drifted.md"
+  _sr_eq "a drifted census derives the drifted roster" "0|tag metric a_third_row" "$(_sr_derive "$tmpd/drifted.md")"
+  if [ "tag metric a_third_row" = "$SENTINEL_EXCLUSION_FALLBACK" ]; then
     _sr_bad "the drifted roster is REJECTED against the fallback" \
       "the fixture happens to equal the fallback, so it reproduces no drift and the positive arm above proves nothing"
   else
@@ -4556,8 +4556,8 @@ cmd_selftest_roster() {
   say "  THE CLAUSE — what the roster becomes in SQL"
 
   _sr_eq "the IN-list is built from the roster, not typed" "'tag','metric'" "$(SENTINEL_EXCLUSION='tag metric'; sentinel_exclusion_sql_list)"
-  got="$(SENTINEL_EXCLUSION='tag metric launch_delay'; sentinel_exclusion_sql_list)"
-  _sr_eq "a three-name roster widens the clause with no further edit" "'tag','metric','launch_delay'" "$got"
+  got="$(SENTINEL_EXCLUSION='tag metric a_third_row'; sentinel_exclusion_sql_list)"
+  _sr_eq "a three-name roster widens the clause with no further edit" "'tag','metric','a_third_row'" "$got"
 
   rm -rf "$tmpd"
   say ""

@@ -255,6 +255,31 @@ The count arithmetic in §1 is unaffected either way (it comes from the transcri
 `rows=36` and the extracted 34, not from the public list), but the *completeness* of the
 `NOT IN` roster rests on this bound, which is exactly why §5's tripwire is load-bearing.
 
+### What the STORE can never tell you about the writer (2026-09-17)
+
+Separate from the bound above, and cheaper to settle: *no schema read recovers who wrote
+`metric`, authenticated or not.* The row carries no writer. Reproduced offline:
+
+```
+grep -n 'schema "schema_definitions"' api/lib
+sed -n '7,80p' api/lib/barkpark/content/schema_definition.ex | grep -E 'field |belongs_to|timestamps'
+```
+
+> The mapped columns are content and tenancy only — `name title icon visibility singleton
+> kind fields dataset cors_origins actions groups desk_groups desk list_preview
+> initial_values cross_validations layout prefill owner_scoped`, the three FKs, and
+> `timestamps(type: :utc_datetime_usec)`. Not one records an actor, a plugin, a package or
+> an origin. §6 already proves this for the *derivability* of the roster; the consequence
+> for provenance is the same fact read the other way.
+
+So the affirmative half of "who wrote it and via which path" cannot come from the table.
+The only surfaces that could still answer are **both on the box**: the row's own
+`inserted_at`/`updated_at`, and whatever request log covers that instant — `POST
+/v1/schemas/:dataset` (`schema_controller.ex`, `upsert/2` → `Content.upsert_schema/3`) is
+the leading hypothesis and it stamps nothing. A local checkout cannot narrow this further
+in either direction; what it CAN do is stop anyone spending an authenticated `SELECT *`
+expecting a writer column to fall out of it.
+
 ---
 
 ## 5. The sentinel's WHERE clause, and the assertion that keeps it honest
