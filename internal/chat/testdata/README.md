@@ -33,3 +33,26 @@ The TUI session list decodes this shape straight into
 by **field projection** (mechanism-A): decode the fixture, assert the projected
 fields — never a byte-diff, and never an extension of the pdrender D13
 reply-body harness.
+
+## Negative rail fixtures — the no-affordance path (wsc-bl-agent-detail-fixture-gaps)
+
+Three hand-written rails carry the REAL wire shapes that must expose **no**
+agent-detail affordance, so the rule is proven instead of code-traced. They are
+**not** generated mirrors — they are the shapes the Elixir folds actually write:
+
+- `rail_codex_origin.json` — two codex threads exactly as `rail_apply_codex_item/3`
+  writes them: `row` + `origin: "codex"` + `model` + `status`, and **no
+  `workflow` key at all**.
+- `rail_background_no_workflow.json` — a background `agent` row with no workflow
+  key, plus a background `local_workflow` row carrying the seeded-but-EMPTY
+  envelope `seed_workflow_envelope/2` writes (`"workflow": []`, `"usage": null`).
+- `rail_codex_thin_workflow.json` — the harder negative: a codex entry that DOES
+  carry workflow nodes, so the strip paints and the phase level opens, but every
+  agent node is detail-less (no `promptPreview` / `lastToolName` /
+  `lastToolSummary` / `resultPreview`, `attempt` 0) — the `agentHasDetail` gate
+  must refuse the THIRD level.
+
+`workflow_no_affordance_test.go` drives them. Every negative arm is paired with a
+precondition (the fixture decoded to a non-empty rail with rows that would paint)
+and a CONTROL built from the same bytes that DOES produce the affordance — an
+absence is never caught by inspection.
