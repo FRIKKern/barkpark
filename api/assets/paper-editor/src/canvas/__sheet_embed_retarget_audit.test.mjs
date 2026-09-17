@@ -54,8 +54,10 @@
 //
 // §1  PRECONDITION — both atoms mount and their chips CARRY the reference value.
 //     (Without this every assertion below could pass on an empty chip.)
-// §2  THE AFFORDANCE IS EXACTLY ONE PICKER — the sheet node-view exposes the
-//     reference picker and NOTHING else; the embed node-view still exposes zero.
+// §2  THE AFFORDANCE IS EXACTLY ONE PICKER — EACH node-view exposes its reference
+//     picker (sheet: ref-type="sheet"; embed: ref-type="paper", since
+//     pd-ee-embed-retarget) and NOTHING else. The older "the embed exposes zero"
+//     reading of this section is SUPERSEDED, not regressed — see WHAT CHANGED AGAIN.
 //     PROVEN NON-VACUOUS by a positive control: the SAME query finds the figure
 //     atom's caption control in the SAME document.
 // §3  SELECT → DELETE → UNDO restores the block with its reference VERBATIM.
@@ -63,10 +65,17 @@
 // §4  ROUND TRIP — the mounted doc's carried block is BYTE-identical
 //     (JSON.stringify, key order included) to the seed until something drives the
 //     picker, and the sheet's cells are still not editable here.
-// §5  THE RETARGET, DRIVEN — a real picker selection emits exactly
+// §5  THE SHEET RETARGET, DRIVEN — a real picker selection emits exactly
 //     patch-block{ref:<new>, snapshot:null}; re-picking the SAME ref and clearing to
-//     "" each emit ZERO ops; and the picker is ABSENT under data-picker-browse=false,
-//     under a read-only editor, and on a template-locked block.
+//     "" each emit ZERO ops.
+// §5c THE EMBED RETARGET, DRIVEN — its own op, patch-block{target} with NO snapshot
+//     key, committing the paper's TITLE (never the doc id the picker emits), and a
+//     bare typed title commits verbatim where the sheet's picker has no free-text door.
+// §5d THE RETARGET IS UNDOABLE — a SECOND, DIFFERENT reference on each atom, then
+//     undo: block AND chip go back. §3's undo is a DELETE; this one is an attr step.
+// §5b WHERE IT IS NOT OFFERED — the picker is ABSENT under data-picker-browse=false,
+//     under a read-only editor, and on a template-locked block, asserted on the
+//     exported predicate and mounted once to prove the predicate is what decides.
 //
 // Run: node src/canvas/__sheet_embed_retarget_audit.test.mjs   (or: npm test)
 
@@ -123,13 +132,20 @@ const fetchMock = async (url, options = {}) => {
   // for. One shared answer would let the embed drive pass on a sheet-shaped hit and
   // hide the whole value-space divergence this file now pins.
   const paperSearch = String(url).includes("type=paper");
+  // §5d needs a SECOND, DIFFERENT sheet to retarget to: an undo that "restores" a
+  // value it never left would pass on a no-op re-pick and measure nothing. The
+  // alternate document answers only the `q=alt` term, so every earlier drive still
+  // sees exactly the single hit it was written against.
+  const altSheet = String(url).includes("q=alt");
   return {
     ok: true,
     json: async () => ({
       searchEventId: "search-event-1",
       documents: paperSearch
         ? [{ _id: "drafts.paper-7f2", title: "Q4 Retro", type: "paper" }]
-        : [{ _id: "drafts.q4-forecast", title: "Q4 forecast", type: "sheet" }],
+        : altSheet
+          ? [{ _id: "drafts.alt-forecast", title: "Alt forecast", type: "sheet" }]
+          : [{ _id: "drafts.q4-forecast", title: "Q4 forecast", type: "sheet" }],
     }),
   };
 };
@@ -142,6 +158,7 @@ await import("../../../../priv/static/assets/bp-reference-picker.js");
 await import("./index.js");
 const { atomRetargetAllowed } = await import("./embed-node.js");
 const { NodeSelection } = await import("@tiptap/pm/state");
+const { closeHistory } = await import("@tiptap/pm/history");
 
 let failures = 0;
 function check(name, fn) {
@@ -838,6 +855,107 @@ try {
       [],
       "typing into the SHEET picker and pressing Enter committed a hand-typed ref",
     );
+  });
+
+  // ── §5d THE RETARGET IS UNDOABLE ────────────────────────────────────────────
+  //
+  // The row asks for selection, deletion, undo AND the retarget action. §3 proves
+  // undo of a DELETE; nothing above proves undo of a RETARGET, and they are not the
+  // same step: a delete removes a node (a structural step ProseMirror has always
+  // undone), while a retarget rewrites `bpBlock` on a node that stays put. A
+  // node-view that committed its value OUTSIDE a ProseMirror transaction — straight
+  // onto the attrs object, or through a step marked `addToHistory: false` — would
+  // pass every check above and still leave the author with no way back to the
+  // reference they just replaced. That is the failure this section measures, and it
+  // measures it on BOTH atoms because the two adapters commit different values.
+  //
+  // Driven against a SECOND, DIFFERENT reference on each atom, never a re-pick: a
+  // re-pick emits zero ops (§5/§5c), so an undo across one would "restore" a value
+  // that never moved and pass on an editor with no history at all.
+
+  // ProseMirror's history groups steps that land close together in TIME into one undo
+  // event (`newGroupDelay`, 500ms). That is right for typing and wrong for measuring
+  // here: without a deliberate break, the sheet's commit joins §5c's embed commit and a
+  // single undo reverses BOTH — which is how the first run of this section read a
+  // "restored" embed target it had never set. So each arm closes the history first, and
+  // then measures ONE retarget. (The grouping itself is default editor behaviour, not a
+  // defect of the picker; the closing is how the measurement stays about the picker.)
+  const startNewUndoStep = () => editor.view.dispatch(closeHistory(editor.state.tr));
+
+  const ALT_REF = "alt-forecast";
+  const refBeforeUndo = nodeOfType("bpSheet").attrs.bpBlock.ref;
+  startNewUndoStep();
+  const altPick = await drivePick("paper-sheet-retarget", "alt");
+
+  check("§5d sheet: the retarget MOVED the ref (precondition — an undo needs something to undo)", () => {
+    assert.equal(
+      refBeforeUndo,
+      NEW_REF,
+      "precondition: the sheet did not carry the §5 ref going in, so this section is not measuring what it says",
+    );
+    assert.deepEqual(
+      altPick.flat().filter((op) => op && op.id === "sh-1"),
+      [{ op: "patch-block", id: "sh-1", patch: { ref: ALT_REF, snapshot: null } }],
+      "the alternate sheet did not commit — §5d's undo would have nothing to reverse",
+    );
+    assert.equal(nodeOfType("bpSheet").attrs.bpBlock.ref, ALT_REF);
+  });
+
+  check("§5d sheet: undo restores the PREVIOUS ref, on the block and on the chip", () => {
+    assert.equal(editor.commands.undo(), true, "undo reported no step for the sheet retarget — the commit is outside the history");
+    assert.equal(
+      nodeOfType("bpSheet").attrs.bpBlock.ref,
+      refBeforeUndo,
+      "undo did not put the sheet back on the ref it was retargeted away from",
+    );
+    assert.ok(
+      byTestId("paper-readonly-sheet")
+        .querySelector(".bp-canvas-readonly-chip")
+        .textContent.includes(refBeforeUndo),
+      "the block went back but the CHIP still names the undone ref — the author reads a lie",
+    );
+  });
+
+  const UNDO_TARGET = "A Note Typed Then Taken Back";
+  const targetBeforeUndo = nodeOfType("bpEmbed").attrs.bpBlock.target;
+  batches.length = 0;
+  startNewUndoStep();
+  typeTarget("paper-retarget-embed", UNDO_TARGET);
+  const undoTargetBatches = batches.slice();
+
+  check("§5d embed: the retarget MOVED the target (precondition)", () => {
+    assert.equal(
+      targetBeforeUndo,
+      TYPED_TARGET,
+      "precondition: the embed did not carry the §5c target going in",
+    );
+    assert.deepEqual(embedOps(undoTargetBatches), [
+      { op: "patch-block", id: "em-1", patch: { target: UNDO_TARGET } },
+    ]);
+    assert.equal(nodeOfType("bpEmbed").attrs.bpBlock.target, UNDO_TARGET);
+  });
+
+  check("§5d embed: undo restores the PREVIOUS target, on the block and on the chip", () => {
+    assert.equal(editor.commands.undo(), true, "undo reported no step for the embed retarget — the commit is outside the history");
+    assert.equal(
+      nodeOfType("bpEmbed").attrs.bpBlock.target,
+      targetBeforeUndo,
+      "undo did not put the embed back on the target it was retargeted away from",
+    );
+    assert.ok(
+      byTestId("paper-readonly-embed")
+        .querySelector(".bp-canvas-readonly-chip")
+        .textContent.includes(targetBeforeUndo),
+      "the block went back but the CHIP still names the undone target",
+    );
+  });
+
+  check("§5d neither undo touched the OTHER atom's reference", () => {
+    // Two undos ran back to back. If a retarget commit rewrote more of the document
+    // than its own node, the second undo would walk the first atom back further than
+    // the section asked — and the whole section would still read green without this.
+    assert.equal(nodeOfType("bpSheet").attrs.bpBlock.ref, NEW_REF);
+    assert.equal(nodeOfType("bpEmbed").attrs.bpBlock.target, TYPED_TARGET);
   });
 
   // ── §5b WHERE THE AFFORDANCE IS NOT OFFERED ─────────────────────────────────
