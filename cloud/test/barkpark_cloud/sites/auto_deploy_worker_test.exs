@@ -533,6 +533,98 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       assert Registry.get_deployment(in_flight.id).coalesced_attempts == 3
     end
 
+    # dr-w19-bl-coalesced-counter-reads-a-confident-zero — THE UNIT, SETTLED.
+    #
+    # The test above proves the counter is ALIVE (3 in flight, 0 behind a busy
+    # box). It does NOT, on its own, refute the reading that made the row: "0
+    # coalesces against 1,371 deferrals". That reading survives an alive counter
+    # if the two numbers count the SAME unit and one of them is simply lossy.
+    # They do not, and this is the arm that says so — in ONE run, over ONE site,
+    # with ONE attempt stream, rather than in two separately-observed regimes.
+    #
+    # THE INVARIANT: every `AutoDeployWorker` attempt that reaches `drive/2`
+    # takes exactly one of the two branches, so over any attempt stream
+    #
+    #     rows MINTED by attempts  +  Σ coalesced_attempts  ==  attempts
+    #
+    # holds as an EQUALITY, not a bound. An attempt is therefore never in both
+    # populations and never in neither: `deferred` ROWS and COALESCED ATTEMPTS
+    # are complementary halves of one total, which is exactly why a count of the
+    # first can never be a denominator for the second. 1,371 deferral rows are
+    # 1,371 attempts that took the OTHER branch.
+    #
+    # STRICTER THAN A RATIO, on purpose: a ratio can be explained away by a
+    # lossy increment, an equality cannot. Drop one increment and the left side
+    # is short by exactly one.
+    #
+    # NO PROD NUMBER IS INHERITED HERE. The `oban_jobs`-minus-`deployments`
+    # estimator is not used and cannot be: post-migration it goes NEGATIVE (651
+    # jobs vs 658 rows, -7) because the populations are not nested, and
+    # `oban_jobs` prunes at 7 days. The quantity below is counted in-process
+    # from the attempts this test itself issues.
+    #
+    # MUTATION-PROVED BOTH WAYS:
+    #   * delete `record_coalesced_attempt(in_flight)` → the equality reds
+    #     (5 + 0 == 8 is false) while the busy-box row assertions stay green;
+    #   * add `"deferred"` to `Deploy.active_production_deployment/1`'s status
+    #     list → phase 2 stops minting rows and the equality reds the other way.
+    test "THE PARTITION: minted rows + coalesced attempts == attempts, so deferrals can never be this counter's denominator" do
+      {bp, site} = setup_site()
+
+      # A build genuinely in flight. It is NOT one of the attempts — it is the
+      # row the first phase's attempts will coalesce ONTO — so it is excluded
+      # from the minted-by-attempts count below by id.
+      {:ok, in_flight} = Deploy.enqueue(site, bp, true, "content-auto")
+      {:ok, in_flight} = Registry.claim_deployment(in_flight.id, "worker-1")
+      assert in_flight.status == "building"
+
+      # ── PHASE 1: 3 attempts while that row is ACTIVE → the COALESCE branch. ──
+      assert %Deployment{id: active_id} = Deploy.active_production_deployment(site.id)
+      assert active_id == in_flight.id
+
+      for _ <- 1..3 do
+        assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+      end
+
+      # ── PHASE 2: settle it, then 5 attempts against a busy box → the MINT
+      # branch, the production regime of 2026-08-07. ──────────────────────────
+      settle(Registry.get_deployment(in_flight.id))
+
+      Process.put(:site_deploy_starter, Deploy.SyncStarter)
+      program_busy_box(site)
+
+      for round <- 1..5 do
+        assert is_nil(Deploy.active_production_deployment(site.id)),
+               "round #{round}: a terminal deferral must leave the active set"
+
+        assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+      end
+
+      attempts = 3 + 5
+      rows = content_autos(site)
+      minted_by_attempts = Enum.reject(rows, &(&1.id == in_flight.id))
+      coalesced_total = Enum.sum(Enum.map(rows, & &1.coalesced_attempts))
+
+      # THE TWO POPULATIONS, counted in the units the census reads them in:
+      # `volume` counts ROWS, `coalesced_attempts` sums a COLUMN ON ROWS. Here
+      # they are 5 and 3.
+      assert length(minted_by_attempts) == 5
+      assert Enum.all?(minted_by_attempts, &(&1.status == "deferred"))
+      assert coalesced_total == 3
+
+      # THE EQUALITY. Nothing is lost and nothing is double-counted.
+      assert length(minted_by_attempts) + coalesced_total == attempts
+
+      # DISJOINT, row by row: not one deferral row carries a coalesce, and the
+      # row that carries all three is not a deferral. A deferral count can
+      # therefore never bound this counter in either direction.
+      assert Enum.all?(minted_by_attempts, &(&1.coalesced_attempts == 0))
+
+      carrier = Registry.get_deployment(in_flight.id)
+      assert carrier.coalesced_attempts == 3
+      refute carrier.status == "deferred"
+    end
+
     test "RETRY ACCOUNTING: six consecutive busy boxes never DISCARD the rebuild" do
       {_bp, site} = setup_site()
 
