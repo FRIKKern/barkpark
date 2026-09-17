@@ -1354,6 +1354,9 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
   // Set by the accepted-exposure record arm below, and printed on the ok line so
   // a reader can see that the arm RAN rather than inferring it from silence.
   let recordWords = 0;
+  // Set by the premise arm below, on the same principle: an arm that ran must say
+  // so on the ok line, so "the premise held" is never inferred from silence.
+  let premiseNote = "premise NOT measured";
 
   const FAMILY = "color.graphCanvas";
   const GRAPH_JS = "web/public/bp-graph.js";
@@ -1665,6 +1668,101 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
     }
   }
 
+  // ── the record's PREMISE, read from the repo instead of restated ──────────
+  // The arm above proves the record is PRESENT and still SAYS its five load-
+  // bearing things. It cannot tell whether any of them is still TRUE. That gap is
+  // the whole risk of an option-(b) answer: the record is not a preference, it is
+  // a DERIVATION from three facts about this repository, and if any of them
+  // changes the record keeps reading like a reasoned decision while having become
+  // a false sentence committed to main. The assertion is where people stop
+  // looking, so the three facts are checked here, at their sources:
+  //
+  //   1. VENUE. `node design/check.mjs` is invoked from exactly one workflow.
+  //      A second invocation — especially from a workflow that publishes a
+  //      REQUIRED context — is precisely the venue the record says does not
+  //      exist, and code added to this file would then be able to stop a merge.
+  //   2. AUTHORITY. That workflow's context is not in branch protection's
+  //      required set, and is still carried in required-checks.json's own
+  //      `exclusions`.
+  //   3. THE REAL REMEDY. `required_status_checks.strict` is false — that flag IS
+  //      "require branches to be up to date before merging", the mechanism the
+  //      record names as the thing that would actually catch the class.
+  //
+  // Note the direction: 2 and 3 red when the world gets BETTER. That is intended.
+  // A ratchet has two failure directions, and an exposure that has quietly BEEN
+  // guarded must stop being carried as accepted just as loudly as one whose
+  // reasoning rotted. Every message below says which way it went.
+  {
+    const REQ_PATH = ".github/required-checks.json";
+    const WF_DIR = ".github/workflows";
+    const CTX = "Doc budgets + anchors";
+    const HOME_WF = "doc-gates.yml";
+    // `node design/check.mjs` on a real command line, never in a YAML comment and
+    // never inside the `paths:` list that merely NAMES the file.
+    const INVOKES = /(?:^|[\s;&|(])node\s+design\/check\.mjs(?![\w./-])/;
+
+    let wfFiles = null;
+    try { wfFiles = readdirSync(join(repoRoot, WF_DIR)).filter((n) => /\.ya?ml$/.test(n)).sort(); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read ${WF_DIR} (${err.code || err.message}) — the accepted-exposure record's first premise is "this file has exactly one CI venue", and an unreadable workflow directory means that premise is UNMEASURED, which is a REFUSAL rather than a pass.`); }
+
+    let venues = null;
+    if (wfFiles !== null) {
+      if (wfFiles.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${WF_DIR} lists ZERO workflow files. An empty read is a broken derivation, never a pass: it would report "one venue" as "no second venue" and the premise check would measure nothing.`);
+      } else {
+        venues = [];
+        for (const n of wfFiles) {
+          let src = null;
+          try { src = readFileSync(join(repoRoot, WF_DIR, n), "utf8"); }
+          catch (err) { failH2(`  Part H2 FAIL: cannot read ${WF_DIR}/${n} (${err.code || err.message}) — one unreadable workflow is one unsearched venue, so the "exactly one CI venue" premise cannot be answered from ${wfFiles.length - 1} of ${wfFiles.length} files.`); continue; }
+          if (src.split("\n").some((l) => !/^\s*#/.test(l) && INVOKES.test(l))) venues.push(n);
+        }
+        if (venues.length === 0) {
+          failH2(`  Part H2 FAIL: REFUSING — no workflow in ${WF_DIR} (${wfFiles.length} file(s)) invokes \`node design/check.mjs\` at all. Either this gate stopped running in CI, or the invocation was reworded past ${INVOKES} — both leave the venue premise unmeasurable, and "zero venues" must never read as "one venue".`);
+        } else if (venues.length !== 1 || venues[0] !== HOME_WF) {
+          failH2(`  Part H2 FAIL: the accepted-exposure record's VENUE premise no longer holds — \`node design/check.mjs\` is invoked from [${venues.join(", ")}], not from ${HOME_WF} alone. The record (option (b)) rests on this file having exactly one CI venue, publishing one non-required context; a second venue may be able to stop a merge, in which case a standing guard here IS landable and criterion c4 of task-4462bbaf17f63ec1 must be re-opened and re-answered as (a).`);
+        } else {
+          let home = null;
+          try { home = readFileSync(join(repoRoot, WF_DIR, HOME_WF), "utf8"); } catch { /* unreachable: read above succeeded */ }
+          if (home !== null && !home.includes(`name: ${CTX}`)) {
+            failH2(`  Part H2 FAIL: ${WF_DIR}/${HOME_WF} no longer declares \`name: ${CTX}\` — the record names that exact context as the one thing this file's venue publishes, and required-checks.json is keyed on the same string. A renamed job silently detaches the record's authority premise from the check it is about; re-point both, or re-open c4.`);
+          }
+        }
+      }
+    }
+
+    let req = null;
+    try { req = JSON.parse(readFileSync(join(repoRoot, REQ_PATH), "utf8")); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read or parse ${REQ_PATH} (${err.code || err.message}) — the record cites this file BY NAME for both its authority premise and its "no merge queue, no strict" remedy premise. Unreadable means UNMEASURED, which is a refusal.`); }
+
+    let strict = null, requiredNames = null;
+    if (req !== null) {
+      const checks = req?.protection?.required_status_checks?.checks;
+      if (!Array.isArray(checks) || checks.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${REQ_PATH} has no non-empty protection.required_status_checks.checks array (got ${JSON.stringify(checks)}). An empty or missing required set would make "${CTX} is not required" true VACUOUSLY, which is the shape of a premise check that has stopped measuring.`);
+      } else {
+        requiredNames = checks.map((c) => c?.context);
+        if (requiredNames.includes(CTX)) {
+          failH2(`  Part H2 FAIL: the accepted-exposure record's AUTHORITY premise has FLIPPED — "${CTX}" is now in ${REQ_PATH}'s required set [${requiredNames.join(", ")}]. This is the world getting BETTER: a red from this file can now stop a merge, so a standing guard against the green-apart/red-together class IS landable here and option (b) is no longer the honest answer. Re-open criterion c4 of task-4462bbaf17f63ec1 and answer it as (a); do not restore the old setting to quiet this line.`);
+        }
+      }
+      const excl = req?.exclusions;
+      if (!Array.isArray(excl) || excl.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${REQ_PATH} has no non-empty \`exclusions\` array (got ${Array.isArray(excl) ? "[]" : JSON.stringify(excl)}); the record quotes that array's reason for "${CTX}" verbatim, so its absence leaves the citation unverifiable rather than false.`);
+      } else if (!excl.some((e) => e?.context === CTX)) {
+        failH2(`  Part H2 FAIL: ${REQ_PATH} no longer carries "${CTX}" in \`exclusions\` (${excl.length} row(s): ${excl.map((e) => e?.context).filter(Boolean).slice(0, 6).join(", ")}…). The record cites that row as the reason this file's context holds no merge authority; with the row gone the citation points at nothing, whichever way the underlying fact went. Re-ground the record or re-open c4.`);
+      }
+      strict = req?.protection?.required_status_checks?.strict;
+      if (strict !== false) {
+        failH2(`  Part H2 FAIL: the accepted-exposure record's REMEDY premise has FLIPPED — ${REQ_PATH} now records protection.required_status_checks.strict = ${JSON.stringify(strict)}, not false. That flag IS "require branches to be up to date before merging", which the record names as the mechanism that would actually catch this class. If it is on, the class is guarded at the repository and the record must stop claiming it is accepted-and-unguarded. Re-open criterion c4 of task-4462bbaf17f63ec1; this is a BETTER world, not a regression to revert.`);
+      }
+    }
+
+    if (venues !== null && requiredNames !== null && strict === false) {
+      premiseNote = `premise live-checked (1 venue ${venues.join("")} of ${wfFiles.length} workflow(s), "${CTX}" absent from the ${requiredNames.length} required context(s), strict=false)`;
+    }
+  }
+
   // The one hook this part lacked until task-e33b3fc1a5fc921b. It goes through
   // failH2, not the shared fail(), so the injected failure is counted by the
   // SAME counter the ok line below is gated on — a hook that bypassed h2Failed
@@ -1673,7 +1771,7 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
   if (FAULT.has("H2")) failH2("  Part H2 FAIL: injected fault (--selftest)");
 
   if (h2Failed === 0)
-    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived; accepted-exposure record present and intact (${recordWords} words, option (b))`);
+    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived; accepted-exposure record present and intact (${recordWords} words, option (b), ${premiseNote})`);
 }
 
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
