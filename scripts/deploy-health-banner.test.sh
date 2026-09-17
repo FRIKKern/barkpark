@@ -264,7 +264,7 @@ check "(e) APP_PORT is re-read from the .env the service sources" \
 # while the banner keeps pointing at the old name. So assert the coupling
 # instead of the literal, and refuse the slot names outright.
 echo "== (f) static: banner journalctl unit == installed unit =="
-INSTALLED_UNIT="$(sed -n 's#^cat > /etc/systemd/system/\([a-z0-9@.-]*\)\.service .*#\1#p' "$DEPLOY" | head -1)"
+INSTALLED_UNIT="$(sed -n 's#^cat > /etc/systemd/system/\([a-z0-9@.-]*\)\.service .*#\1#p' "$DEPLOY" | sed -n '1p')"
 check "(f) deploy.sh installs exactly one named systemd unit" \
   '[ -n "$INSTALLED_UNIT" ] && [ "$(grep -c "^cat > /etc/systemd/system/" "$DEPLOY")" -eq 1 ]'
 check "(f) the failure banner journalctls THAT unit" \
