@@ -741,7 +741,9 @@ RESOURCES
                 (S3 credentials, not the API token — bp cloud hetzner storage -h)
   backup        Postgres backups to Object Storage: create · list · restore ·
                 prune                               (bp cloud hetzner backup -h)
-  server-types  the offered server types            (read-only)
+  server-types  the offered server types + per-location stock (read-only;
+                AVAILABLE is "?" when the API did not report stock at all,
+                "none" when it reported it and nothing is in stock)
   lb-types      the offered load-balancer types     (read-only)
   locations     the available locations             (read-only)
   datacenters   the available datacenters           (read-only)
