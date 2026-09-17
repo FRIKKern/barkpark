@@ -173,3 +173,34 @@ func TestStretchTracksSpendsTheRemainder(t *testing.T) {
 		}
 	}
 }
+
+// TestCardsBoxReachesTheContentEdge is the one assertion a group-level pad
+// cannot satisfy on its own. A `cards` box is the only one of the three families
+// whose child edge is VISIBLE (a rounded border), and the measurement says that
+// edge sits flush with the container: outer gap 0.00px. Right-padding the group
+// would hide a two-column-short box behind trailing spaces, so this measures the
+// box itself — the last non-space column of every bordered line must be the
+// content width, in both orientations.
+//
+// It is the arm for the cards half specifically: lipgloss Style.Width() sets the
+// block width INCLUDING padding but EXCLUDING the border, so asking for
+// width-chrome (W-4) draws W-2. Put the `- chrome` back and this reds.
+func TestCardsBoxReachesTheContentEdge(t *testing.T) {
+	reg := testRegistry()
+	pair := fullBleedBlocks()["cards"]
+	for _, w := range fullBleedWidths {
+		ctx := RenderCtx{Width: w, Theme: DarkTheme(), Profile: NoColor}
+		for oi, orientation := range []string{"stacked", "grid"} {
+			for i, raw := range reg.Render(pair[oi], ctx) {
+				line := ansi.Strip(raw)
+				if !strings.ContainsAny(line, "╭╮╰╯│") {
+					continue // a flat-degrade or prose line: no visible child edge
+				}
+				if edge := ansi.StringWidth(strings.TrimRight(line, " ")); edge != w {
+					t.Errorf("cards/%s w%d: line %d's box edge is at column %d, want %d — the reader's card gap here is 0.00px: %q",
+						orientation, w, i, edge, w, line)
+				}
+			}
+		}
+	}
+}
