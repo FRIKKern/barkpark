@@ -16254,13 +16254,56 @@ name unrelated code.
   have nothing to do with a freeze, so a PR-number join manufactures records that were never written.
   A 40-hex blob OID in this file can only ever have got here as a freeze record.
 
-  **(v) THE WINDOW IS DERIVED AND THE EXEMPTION HAS A MECHANICAL TEST.** The anchor is the OLDEST
-  harness-moving commit whose blob this charter records — today `58d1bd3a5` (blob `e219e97cc…`,
-  PDS-D146's re-freeze). A harness-moving commit older than the anchor predates the freeze doctrine
-  and is **EXEMPT**; the exemption's test is `git merge-base --is-ancestor <sha> <anchor>` and
-  `--axis f` prints it rather than implying it. The anchor is not a literal in the script: it is
-  re-derived on every run, so recording an older thaw moves the window by itself. An enumeration of
-  exempt shas would be a snapshot; this is a predicate.
+  **(v) THE WINDOW BOUNDARY IS A FLOOR THAT ONLY RATCHETS BACK, AND THE EXEMPTION HAS A MECHANICAL
+  TEST.** *Amended by r21 dw28 against `task-c15b65d9e1f19a8f`. The clause below replaces a first cut
+  that derived the boundary entirely from this charter, and the amendment is recorded rather than
+  overwritten because the superseded reasoning is the lesson.*
+
+  **WHAT THE FIRST CUT SAID, AND WHY IT WAS WRONG.** It made the anchor the OLDEST harness-moving
+  commit whose blob this charter records, and defended that as a predicate rather than a snapshot:
+  "the anchor is not a literal in the script: it is re-derived on every run, so recording an older
+  thaw moves the window by itself." The defence is true and it is one-directional. It considered
+  RECORDING an older thaw and never considered UN-RECORDING the oldest one. Read the other way, the
+  arm's expected value was read out of the very artifact it guards, so DELETING THE OLDEST LEDGER ROW
+  did not make that commit unrecorded — it promoted the next row to anchor, made the deleted commit
+  pre-doctrine and therefore EXEMPT, shrank the window by one to match, and printed PARITY rc 0.
+  Measured on `4543b0239`: deleting `e219e97cc…` took the window 20 -> 19, rc 0; deleting the four
+  oldest rows in one pass took it 20 -> 16, rc 0. Induction finishes it — this ledger could be erased
+  from the bottom, one row per commit, with the arm green at every step. The realistic adversary was
+  never a malicious deletion; it is a SPLIT or REWRITE of this charter that drops the oldest rows as
+  historical noise, exactly the edit the (vii) table invites as it grows, and that edit landed green.
+  This also made clause (ii)'s sentence "the ledger below grows by one row per thaw and never shrinks"
+  load-bearing and unenforced: the boundary depended on it and nothing checked it.
+
+  **THE RULE NOW.** The boundary is the OLDER of two values:
+
+  1. **`AXIS_F_FLOOR_COMMIT`, a literal 40-hex commit in `scripts/pds-record-parity.sh`** — today
+     `1f15017bf3d51ac85c34d3e4f5aa2f903a0815a6` (`1f15017bf`, #4686, 2026-07-20, "the last legal
+     harness edit before the freeze"), so every thaw of the doctrine era is at or newer than it. **No
+     edit to this charter can move it**: it is not in this charter. It is in `scripts/`, a different
+     file behind a different fence and a different review, and erasing every row of the (vii) table
+     leaves it and the window's full 21 commits untouched — the deletion then surfaces as N
+     unrecorded rows, each named by short sha, date, blob and subject.
+  2. the oldest harness-moving commit this charter records, used **only when it is strictly older**
+     than the floor.
+
+  **DIRECTION IS THE WHOLE POINT.** This charter may still move the boundary BACK — record an older
+  thaw and the window widens by itself, which is the predicate property the first cut was built for
+  and which an enumeration of exempt shas would have lost. It may never move it FORWARD. A ledger row
+  is now a claim the arm checks, never an input to the question the arm asks.
+
+  A harness-moving commit at or older than the boundary predates the freeze doctrine and is
+  **EXEMPT**; the exemption's test is `git merge-base --is-ancestor <sha> <boundary>` and `--axis f`
+  prints it rather than implying it. If the pinned floor is absent from the checkout (a shallow clone,
+  a fixture repo) or is not an ancestor of `origin/main`, the arm returns **UNCHECKED (rc 2)** and
+  does **not** fall back to deriving the boundary from this charter — a fallback would silently
+  reinstate the hole this floor exists to close.
+
+  **WHY A PINNED COMMIT AND NOT A MONOTONIC COUNT FLOOR.** A floor on the in-window count, in the
+  idiom of `scripts/pds-charter-anchors-check.sh`'s `DEF_FLOOR`, would also red on a shrink — but it
+  needs raising on every thaw, it reds in two directions, and it can only say a row went missing, not
+  WHICH. A pinned boundary needs no maintenance as thaws land (new thaws are newer than it by
+  construction) and it names the exact commit whose record was dropped.
 
   **(vi) NON-VACUITY IS PROVEN IN BOTH DIRECTIONS BY A PLANTED CONTROL, NOT BY A ZERO.** A run
   reporting zero unrecorded commits proves nothing on its own — that is the shape this decision
@@ -16269,6 +16312,16 @@ name unrelated code.
   count is zero. Both arms are run and both are quoted in the landing PR. The arm additionally
   refuses to score at all if `grep -c PDS-D` over the charter returns 0 — an empty read cannot pass
   as a clean read.
+
+  **THIS CLAIM IS UNIVERSALLY QUANTIFIED OVER LEDGER ROWS AND WAS FALSE FOR ONE OF THEM UNTIL (v) WAS
+  AMENDED.** Under the first cut it was false for exactly the OLDEST recorded row on every run, and
+  the falsity was self-renewing, because deleting the anchor promoted the next row into the same blind
+  spot. The amended (v) makes the sentence true for every row including the oldest: measured on
+  `4543b0239`, deleting `e219e97cc…` (the former anchor) now returns rc 1 and names `58d1bd3a5`,
+  deleting the four oldest rows in one pass returns rc 1 and names all four, and the pre-existing
+  mid-row control on `97d9cbb86…` still returns rc 1 and still names `4d5a84001`. The selftest in
+  `scripts/pds-record-parity.test.sh` pins all of it, so the property is a standing arm and not a
+  sentence in this paragraph.
 
   **(vii) THE RETROACTIVE LEDGER — ALL 20 IN-WINDOW THAWS, DERIVED, NOT TYPED FROM MEMORY.** Each
   row's blob was produced by `git rev-parse <sha>:scripts/pds-pull-proof.sh` at
