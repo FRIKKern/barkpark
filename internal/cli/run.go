@@ -2166,7 +2166,26 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 // contract and what it replaced). Headless dispatchers (MCP stdio and HTTP) do
 // not own process stdin: it may be a protocol transport, so they neither
 // inspect nor consume it, and `--file -` is refused outright.
+//
+// The assembled body then passes checkParkPayloadCeiling before it is handed
+// back — see park_ceiling.go for why that guard is a wrapper and not another
+// branch inside the assembly below.
 func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
+	body, stream, contentType, err = assembleBody(cmd, flags, args, ownsProcessStdin)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if err := checkParkPayloadCeiling(cmd, body); err != nil {
+		return nil, nil, "", err
+	}
+	return body, stream, contentType, nil
+}
+
+// assembleBody is the body assembly itself: --file/stdin, declared body args,
+// --set merges and the mutation wrapper. It has several return sites, which is
+// exactly why the ceiling check sits in the wrapper above rather than being
+// repeated at each of them.
+func assembleBody(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
 	if !cmd.Writes {
 		return nil, nil, "", nil
 	}
