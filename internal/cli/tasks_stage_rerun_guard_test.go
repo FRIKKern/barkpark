@@ -147,8 +147,8 @@ func newStageRerunHarness(t *testing.T) *stageRerunHarness {
 	}
 	h.m = m
 	h.ctx = manifest.Context{
-		Server:            h.server.URL,
-		Token:             "tok",
+		Server:    h.server.URL,
+		Token:     "tok",
 		Workspace: "acme",
 		Project:   "site",
 		Dataset:   "production",
