@@ -211,3 +211,29 @@ func TestDispositionClassAndStratum(t *testing.T) {
 		t.Error("terminal predicate mis-classifies cancelled/in_progress")
 	}
 }
+
+// The enumeration is load-bearing: the row this command serves demands the
+// absent-reason rows be listed by id and adjudicated one at a time. A verdict
+// with no ids is a number nobody can act on.
+func TestTaskEnrichment_EnumeratesTheSuspectAbsences(t *testing.T) {
+	ids := missingIDs(bulkClosed())
+	if len(ids) != 9 {
+		t.Fatalf("enumerated %d ids, want 9 — the same count the verdict reports as Suspect.Missing", len(ids))
+	}
+	for i := 1; i < len(ids); i++ {
+		if ids[i-1] >= ids[i] {
+			t.Fatalf("ids are not sorted: %q before %q", ids[i-1], ids[i])
+		}
+	}
+	// It must list the SUSPECT class only. A clean-class row missing its reason
+	// is a different (and much rarer) defect; folding it in here would inflate
+	// the list the operator adjudicates by the baseline's own absences.
+	for _, id := range ids {
+		if !strings.HasPrefix(id, "s-") {
+			t.Fatalf("id %q is not a stale-class row — the enumeration leaked the baseline", id)
+		}
+	}
+	if got := enrichmentVerdictOf(bulkClosed()).Suspect.Missing; got != len(ids) {
+		t.Fatalf("verdict says %d absences, enumeration lists %d — the report contradicts itself", got, len(ids))
+	}
+}

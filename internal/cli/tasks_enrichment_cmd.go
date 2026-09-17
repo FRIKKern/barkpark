@@ -60,7 +60,7 @@ func runTaskEnrichment(out *writer, g globals, ctx manifest.Context, tail []stri
 	if err != nil {
 		return fetchSnapshotErr(out, "enrichment", err)
 	}
-	return renderEnrichment(out, enrichmentVerdictOf(details))
+	return renderEnrichment(out, enrichmentVerdictOf(details), missingIDs(details))
 }
 
 // enrichmentVerdictOf is the pure half: index -> rows -> verdict. Split out so
@@ -99,7 +99,7 @@ func missingIDs(details taskboard.DetailIndex) []string {
 	return ids
 }
 
-func renderEnrichment(out *writer, v taskboard.EnrichmentVerdict) int {
+func renderEnrichment(out *writer, v taskboard.EnrichmentVerdict, ids []string) int {
 	if out.machineOut() {
 		payload := map[string]any{
 			"ok":                true,
@@ -113,6 +113,11 @@ func renderEnrichment(out *writer, v taskboard.EnrichmentVerdict) int {
 			"discriminates":     v.Discriminates,
 			"survives":          v.Survives,
 			"reason":            v.Reason,
+			// The rows a human has to adjudicate one at a time. A verdict is a
+			// number; a report that omits the ids cannot be acted on, and a
+			// bulk flip over them is the exact laundering this control exists
+			// to stop.
+			"missing_ids": ids,
 		}
 		if out.output == "yaml" {
 			out.renderYAML(payload)
@@ -130,6 +135,13 @@ func renderEnrichment(out *writer, v taskboard.EnrichmentVerdict) int {
 		ratioLabel(v.PooledRatio()), v.Comparable, defaultMinStratum)
 	out.outf("verdict  %s", verdictWord(v))
 	out.outf("         %s", v.Reason)
+	if len(ids) > 0 {
+		out.outf("")
+		out.outf("the %d %s rows carrying no close_reason — adjudicate INDIVIDUALLY, never a bulk flip:", len(ids), taskboard.ClassStale)
+		for _, id := range ids {
+			out.outf("  %s", id)
+		}
+	}
 	return exitOK
 }
 
