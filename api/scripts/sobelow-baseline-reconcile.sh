@@ -93,6 +93,25 @@ if [[ ${diff_status:-0} -gt 1 ]]; then
   exit "$diff_status"
 fi
 
+# THE SET DIFF — the artifact a reviewer can actually act on.
+#
+# `sobelow-skips.diff` above is a LINE diff of two files whose ROW ORDER is
+# non-deterministic: `--mark-skip-all` re-emits the same finding set in a
+# different order on every run. MEASURED on run 35250633882 (main 8bd4a8c1a,
+# Elixir 1.18.1 / OTP 27): that line diff showed 10 removed and 10 added rows
+# while the row SET was byte-identical to the committed baseline — 24 rows both
+# sides, zero membership change. A reviewer reading it would have been asked to
+# adjudicate twenty rows, none of which changed anything.
+#
+# So the reconciliation now also emits a membership-only verdict. The question
+# that matters is "does the regenerated baseline SWALLOW anything the committed
+# one did not", and only an ADDED row answers yes. Its exit code is recorded,
+# never enforced here: this script produces an artifact for human review and
+# must not start failing the job on a finding-set change it was built to REPORT.
+setdiff_status=0
+bash "$API_DIR/scripts/sobelow-baseline-setdiff.sh" "$backup" "$BASELINE" \
+  > "$ARTIFACT_DIR/sobelow-skips.setdiff" 2>&1 || setdiff_status=$?
+
 if command -v sha256sum >/dev/null 2>&1; then
   baseline_sha=$(sha256sum "$BASELINE" | awk '{print $1}')
 else
@@ -103,6 +122,9 @@ fi
   printf 'baseline_lines=%s\n' "$(wc -l < "$BASELINE" | tr -d ' ')"
   printf 'baseline_sha256=%s\n' "$baseline_sha"
   printf 'sequence=clear-skip,skip+mark-skip-all\n'
+  printf 'setdiff_exit=%s  # 0 membership identical, 1 membership changed, 2 fail-closed\n' "$setdiff_status"
+  grep -E '^(membership_added|membership_removed|reordering_only)=' \
+    "$ARTIFACT_DIR/sobelow-skips.setdiff" || true
   printf 'review=human-required;never-auto-commit\n'
 } > "$ARTIFACT_DIR/metadata.txt"
 
