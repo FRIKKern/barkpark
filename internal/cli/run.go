@@ -777,6 +777,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// refuses such a row, so nothing else ever mentions the arrears
 		// (tasks_arrears_claim.go).
 		emitArrearsClaim(out, respBody)
+		// The row's `brief` is a MIRROR of `description` and
+		// `acceptance_criteria`; 1,761 terminal rows carry one that disagrees
+		// with the fields it mirrors, and the ruling on that residue was to
+		// LEAVE it. This says so at the reader instead. Keyed on the SINGLE
+		// document envelope, never on a list page, and tolerant of the
+		// server's legacy three-pass strip so it does not fire on
+		// task-8ba550b59141bccb for the wrong reason
+		// (tasks_brief_mirror_warn.go).
+		emitBriefMirrorWarning(out, respBody)
 		// A ruling the row ALREADY carries (content.disposition_reason), shouted
 		// at claim time so a dispatcher cannot miss it. Verb-keyed (claim/next),
 		// stderr in every output mode, silent on a row with no ruling

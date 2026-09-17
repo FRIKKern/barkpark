@@ -778,7 +778,14 @@ func ensureTaskPortableBrief(body map[string]any) {
 	// fixture BOTH suites read, pinned here by TestComposerMatchesSharedStripCorpus
 	// and TestComposerStripsMarkdownInOneNonOverlappingPass. Rewriting this line
 	// as sequential ReplaceAll calls reds both on exactly the divergent rows.
-	description = strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(description))
+	// THE RULE ITSELF NOW LIVES ONCE, in briefPurposeStripOnePass
+	// (tasks_brief_mirror_warn.go), because a READ-TIME warning compares
+	// mirrored blocks against it: if the composer that WRITES the block and the
+	// warning that JUDGES it could drift, the warning would eventually lie. The
+	// shape is unchanged — strings.NewReplacer, one non-overlapping pass — and
+	// both corpus tests below still run through ensureTaskPortableBrief, so
+	// rewriting it as sequential ReplaceAll calls still reds them.
+	description = briefPurposeStripOnePass(description)
 	// THE AUTO-STUB RULING (task-23c70e97c90809c6, ruling B: THE STUB STAYS).
 	// tooling/grip/ledger/brief-purpose-drift-2026-08-20.md counted 122 published
 	// rows (76 of them open, 2026-08-20 count) whose brief purpose is this stub

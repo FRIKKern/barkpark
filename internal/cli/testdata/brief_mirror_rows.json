@@ -1,0 +1,421 @@
+[
+  {
+    "name": "task-c6310cdb79217d4a",
+    "note": "purpose-copy EXACT under the one-pass rule",
+    "lifecycle_status": "cancelled",
+    "want_warn": false,
+    "want_blocks": [],
+    "envelope": {
+      "doc": {
+        "doc_id": "task-c6310cdb79217d4a",
+        "lifecycle_status": "cancelled",
+        "content": {
+          "description": "w24-trial3-1789009415",
+          "brief": {
+            "blocks": [
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "w24-trial3-1789009415"
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "pds-w43-verify-probeD-1785694966",
+    "note": "criteria-list EXACT",
+    "lifecycle_status": "cancelled",
+    "want_warn": false,
+    "want_blocks": [],
+    "envelope": {
+      "doc": {
+        "doc_id": "pds-w43-verify-probeD-1785694966",
+        "lifecycle_status": "cancelled",
+        "content": {
+          "description": "scratch: discard-draft vs wait, arm D",
+          "acceptance_criteria": [
+            {
+              "criterion": "criterion one",
+              "met": false
+            }
+          ],
+          "brief": {
+            "blocks": [
+              {
+                "id": "criteria",
+                "level": 2,
+                "text": "Criteria",
+                "type": "heading"
+              },
+              {
+                "id": "criteria-list",
+                "items": [
+                  "criterion one"
+                ],
+                "ordered": false,
+                "type": "list"
+              },
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "scratch: discard-draft vs wait, arm D"
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "task-8ba550b59141bccb",
+    "note": "THE TOLERANCE ARM. purpose-copy fails the one-pass expectation and MATCHES the server's legacy three-pass output. The only such row in the whole published population (1 of 9,119, measured 2026-09-17) and it is the row that REPORTED the one-pass/three-pass split. It must stay QUIET: a three-pass-faithful mirror is not a false record, and warning here would be the warning lying on exactly the row that provoked it.",
+    "lifecycle_status": "open",
+    "want_warn": false,
+    "want_blocks": [],
+    "envelope": {
+      "doc": {
+        "doc_id": "task-8ba550b59141bccb",
+        "lifecycle_status": "open",
+        "content": {
+          "description": "MEASURED 2026-09-08 by lead-ledger-c5 while re-deriving gr-bl-brief-drift-backfill-714. Two implementations of the SAME normalisation disagree, and the reason they have gone unnoticed is that they look equivalent.\n\n  Go      internal/cli/tasks_create_cmd.go:744\n          strings.NewReplacer(\"**\", \"\", \"__\", \"\", \"`\", \"\").Replace(description)\n          ONE non-overlapping left-to-right pass considering all three patterns at once.\n\n  Elixir  api/lib/barkpark/tasks/brief_mirror.ex:161\n          defp strip_markdown(text), do: Enum.reduce(@stripped, text, &String.replace(&2, &1, \"\"))\n          THREE passes, one pattern each, each over the previous pass's result.\n\nWHY THEY LOOK EQUIVALENT AND ARE NOT. The three patterns use DISJOINT characters (`*`, `_`, backtick), so no two matches can ever overlap — which is the argument that makes the two forms look interchangeable, and it is the wrong argument. The Elixir form RESCANS: a removal in pass 1 can bring two `_` together, and pass 2 then strips them. The Go form has already advanced past that position and never looks again.\n\nMEASURED, 3 of 8 cases diverge — with 5 controls AGREEING, so the probe discriminates rather than reporting difference everywhere:\n\n  \"_**_\"          go=\"__\"        elixir=\"\"\n  \"foo_**_bar\"    go=\"foo__bar\"  elixir=\"foobar\"\n  \"a_**_b_**_c\"   go=\"a__b__c\"   elixir=\"abc\"\n  \"*__*\"          go=\"**\"        elixir=\"**\"       <- SAME\n  \"__**__\"        go=\"\"          elixir=\"\"         <- SAME\n  \"_**bold**_\"    both \"_bold_\"                    <- SAME\n  \"`a`\"           both \"a\"                         <- SAME\n  \"**x**\"         both \"x\"                         <- SAME\n\nTHE ASYMMETRY IS THE TELL, and it identifies the mechanism precisely: `_**_` diverges but its mirror image `*__*` does NOT, because the `**` pass runs FIRST. The bug is in pass ORDER plus rescanning, not in the patterns.\n\nWHY IT MATTERS BEYOND TIDINESS. These two are supposed to produce the SAME purpose-copy text from the same description — the CLI on create, the server on every subsequent write. Where they disagree, a row's mirror flips between two values depending on WHICH DOOR last wrote it, and a drift census then counts that row as drifted or not depending on which rule the census itself used.\n\nIT HAS ALREADY POISONED A COUNT. gr-bl-brief-drift-backfill-714's criterion 2 says \"normalises markdown exactly as the composer does\" and cites the GO CLI — but the composer that decides the post-write state is the SERVER's. Its criterion 1 evidence already records a related contradiction: strict-composer normalisation gives 1,099 divergent, the baseline companion's method gives 1,007, against a published baseline of 714. WITH THIS FINDING THERE ARE THREE NORMALISATIONS IN PLAY, NOT TWO: the Go CLI's, the Elixir server's, and the baseline census's (markdown-strip PLUS control-byte strip PLUS whitespace collapse). Any figure quoted without naming which one produced it is unreproducible.\n\nREACHABILITY, STATED RATHER THAN ASSUMED. The divergent shape needs `_` immediately followed by `**` immediately followed by `_` with nothing between — e.g. `foo_**_bar`. This is not common prose, and I have NOT measured how many live descriptions contain it. That measurement is criterion 3 below, and it decides whether this is a live defect or a latent one. Filing it as latent-until-measured is deliberate: the mechanism is proven, the blast radius is not.",
+          "acceptance_criteria": [
+            {
+              "attempts": [
+                {
+                  "note": "MISS - and the DIAGNOSIS is the deliverable. Two readers (the builder and verifier cli-r20-v3) independently rule the SERVER wrong, not the CLI: api/lib/barkpark/tasks/brief_mirror.ex declares in its own comment that it mirrors the Go composer EXACTLY and that a more aggressive normaliser would rewrite prose the composer keeps - and its three-pass Enum.reduce over the stripped set IS that more aggressive normaliser. Rescanning destroys literal characters that only became adjacent when a delimiter was removed. The composer is also UPSTREAM (the CLI writes, the server re-derives), so the CLI one-pass behaviour is canonical. The clause that fails: the two implementations still do NOT agree on every input - brief_mirror.ex still carries the three-pass reduce on origin/main and still claims Mirrored here EXACTLY. PR #18522 (merge c0aaf034e8, ancestor of origin/main) shipped the in-fence half: internal/cli/tasks_brief_strip_parity_test.go freezes the canonical one-pass side, and flipping the composer to three passes reds 3 subtests while the 6 agreeing shapes stay quiet. WHAT IS LEFT, one line in api/: :binary.replace(text, @stripped, \"\", [:global]), which reproduces the Go output on all 9 cases. Handoff at $ORCH/r20/cli-r20-w14-SERVER-SIDE-HANDOFF.md; routed to the api lane by the lead.",
+                  "ts": "2026-09-16T09:56:22.686384Z",
+                  "worker": "lead-cli-r20"
+                },
+                {
+                  "note": "MISS, unchanged and NOT this fence's to fix: the remedy is one line in api/lib/barkpark/tasks/brief_mirror.ex and api/ is the api lane's fence (task-b641646addba4bdf). What this attempt ADDS is the acceptance surface that criterion was missing. PR #18714 ships internal/cli/testdata/brief_strip_corpus.json: 1,313 mechanically generated inputs (every tuple of length 1..4 over {*,**,_,__,backtick,a} = 1,134, plus embedded/escaped/unterminated/nested/unicode/CRLF/code-span/link/runs families and the 5 named shapes). Every input fed to BOTH REAL RUNTIMES - the Go composer, and BriefMirror.maybe_resync_task_brief/2 loaded read-only from the checkout; api/ was not edited. 19 of 1,313 diverge, 1,294 agree, so the probe discriminates. All 19 contain the substring _**_; the escaped, unterminated, nested, runs and embedded families agree EXACTLY, so the mechanism is confirmed as pass order plus rescanning and nothing else. CONTROL: the routed one-line fix (:binary.replace/4) applied to a scratch COPY of the module and run on the real Elixir runtime takes the count 19 -> 0 on all 1,313 - the row's brief promised that on 9 cases, it now holds on 1,313. A DIVERGENCE CLASS THE ROW DID NOT NAME, 10 of the 19: where the description is ONLY the divergent shape, the server's strip empties it and compose_purpose/3 takes the stub branch, so the author's description is REPLACED by 'Complete the work described by ...'. Not different prose - no prose. Handoff with a ready-to-paste ExUnit arm: $ORCH/r20/cli-r20-w54-API-LANE-HANDOFF.md",
+                  "ts": "2026-09-16T21:26:25.101943Z",
+                  "worker": "cli-r20-w54"
+                }
+              ],
+              "criterion": "THE TWO IMPLEMENTATIONS AGREE ON EVERY INPUT, or the divergence is deliberate and recorded AT BOTH SITES with the reason. One of them is chosen as canonical — the SERVER's is the candidate, since it decides the post-write state — and the other is changed to match it or to call it. Evidence: the same probe re-run showing zero diverging cases, with the controls still agreeing so it is shown to still discriminate.",
+              "met": false
+            },
+            {
+              "attempts": [
+                {
+                  "note": "MISS on the clause \"feeds the SAME inputs to BOTH implementations and asserts identical output\". What shipped is a Go-side freeze: tasks_brief_strip_parity_test.go re-creates the three-pass behaviour in Go (multiPassStrip) and asserts it DIFFERS, which pins the canonical side but does not cross the language boundary - editing brief_mirror.ex reds nothing. A true cross-language parity arm needs a fixture both suites read, and the Elixir half is api/ - out of the CLI fence. Reachable once the server fix lands (see criterion 0 note).",
+                  "ts": "2026-09-16T09:56:22.839443Z",
+                  "worker": "lead-cli-r20"
+                },
+                {
+                  "note": "MISS on the CROSS-LANGUAGE clause, honestly, and the reason is the fence - but the thing the clause actually needs now EXISTS. The criterion asks for a fixture BOTH suites read. PR #18714 ships it: internal/cli/testdata/brief_strip_corpus.json, 1,313 rows carrying input/one_pass/three_pass/family/divergent, and the Go half reads it (internal/cli/tasks_brief_strip_corpus_test.go). It carries _**_, foo_**_bar and a_**_b_**_c BY INPUT (asserted by name, not by count) and *__* as a required AGREEING shape, because the asymmetry between them is what names the mechanism. What it cannot do from this fence is add the Elixir reader: editing brief_mirror.ex still reds nothing until the api lane adds an ExUnit test reading ../internal/cli/testdata/brief_strip_corpus.json - stated plainly in the test header rather than papered over, and handed over ready-to-paste at $ORCH/r20/cli-r20-w54-API-LANE-HANDOFF.md. THE ARMS WERE PROVEN BY MUTATION, not by being present in the file: (1) flip the composer to the three-pass shape -> exactly 19 reds, SET-EQUAL to the 19 rows the fixture marks divergent, and all 1,294 agreeing rows stay quiet; (2) edit the fixture to bless the drift (foo_**_bar -> foobar) -> TestBriefStripCorpusColumnsAreDerivable reds, because every column is re-derived from an INDEPENDENT scanner rather than read from the implementation it guards; (3) drop the auto-stub rows -> the non-vacuity guard reds. Each mutation applied, observed, restored. A POSITIVE CONTROL the harness was not written against: teaching the composer a 4th token (*_) produced 198 new mismatches. AND AN HONEST DEFECT IN MY OWN FIRST ARM: the auto-stub counter was nested inside the want==\"\" branch where it could never fire (one_pass for _**_ is __, non-empty), so it was vacuous; mutation 3 is what caught it, and it is fixed and re-proven.",
+                  "ts": "2026-09-16T21:26:37.018036Z",
+                  "worker": "cli-r20-w54"
+                }
+              ],
+              "criterion": "A TEST PINS THE AGREEMENT so the next edit to either side reds rather than silently re-diverging. It feeds the SAME inputs to BOTH implementations and asserts identical output, and it carries `_**_` and `foo_**_bar` explicitly — the shapes that diverge today — plus a positive control proving the harness can SEE a disagreement it was not written against. A comment saying the two must match is what let them drift; the file already has one.",
+              "met": false
+            },
+            {
+              "attempts": [
+                {
+                  "note": "MISS on the clause \"if non-zero, name the rows\", and a NUMBER IN THE PR IS WRONG - corrected here rather than inherited. The substantive finding is CONFIRMED by independent re-derivation (cli-r20-v3 paged /v1/data/query/production/task at both perspectives and ran the one-pass vs three-pass predicate with controls printed): exactly 1 diverging row, and it is task-8ba550b59141bccb itself; latent everywhere else. But the PR quoted a denominator of 9,356 live task descriptions with 17 empty. The 17-empty shape matches perspective=raw, and raw today is 9,723 (published 8,963). 9,356 is verbatim the 2026-09-10 figure from tooling/grip/ledger/pds-tagregistry-twin-capture-2026-09-10.md - a count attributed to a run that did not produce it. Use 1 of 9,723 raw. The naming clause fails because nothing on origin/main records the diverging row: grep -rn 8ba550b59141bccb . returns 0 hits (control grep -rn \"9,356\" returns 2).",
+                  "ts": "2026-09-16T09:56:22.974115Z",
+                  "worker": "lead-cli-r20"
+                },
+                {
+                  "note": "MEASURED AFRESH, and I am recording this as a MISS rather than a met on the lead's own standard: the naming clause is satisfied only once the tree carries the row, and that lands with PR #18714, not before. THE MEASUREMENT (2026-09-16, worker cli-r20-w54, independent of the earlier one): 9,786 task documents exported from production, 763 of them drafts; 9,769 carry a string description. Running the divergence predicate (one-pass output != three-pass output) over those 9,769: exactly ONE row diverges, task-8ba550b59141bccb - this row. CONTROLS PRINTED ON THE SAME RUN so the 1 cannot be read as a predicate that never fired: 1,177 descriptions contain **, 884 contain __, 3,948 contain a backtick, and the one-pass strip MODIFIED 4,582 of them. So the RULE is live on nearly half the corpus and the DIVERGENCE is latent in exactly one place. TWO CORRECTIONS TO THE RECORD, both to figures this lane published. (1) The denominator: PR #18522 quoted 9,356 live task descriptions; that is verbatim the 2026-09-10 count from tooling/grip/ledger/pds-tagregistry-twin-capture-2026-09-10.md and was not produced by that run. It is 9,769 as of 2026-09-16. (2) The '17 of them empty' is also mis-described: those 17 rows carry NO description key at all, not an empty string - there are ZERO empty-string descriptions. The VERDICT survives both corrections; the numbers did not. AN INSTRUMENT FAULT WORTH THE NEXT READER'S TIME: my first pass over the export read .content.description and found only 7 descriptions in 9,786 docs, which would have reported ZERO divergent rows. bp export FLATTENS content to the top level. Printing the key set - not reading the zero - is what caught it. PR #18714 names the row in internal/cli/tasks_brief_strip_corpus_test.go and tasks_brief_strip_parity_test.go, so a grep for 8ba550b59141bccb stops returning nothing; flip this criterion on that merge.",
+                  "ts": "2026-09-16T21:27:12.592888Z",
+                  "worker": "cli-r20-w54"
+                }
+              ],
+              "criterion": "REACHABILITY IS MEASURED, and the row's severity is set by the answer rather than by assumption. Count live task descriptions matching the divergent shape (`_` immediately followed by `**` immediately followed by `_`, and the mirror cases). If the count is ZERO, say so and record this as LATENT with the count and the date — an absence that was measured is worth more than a severity that was guessed. If it is non-zero, name the rows.",
+              "evidence": "REACHABILITY MEASURED, and the naming clause is satisfied now that #18714 (1020c4ee81708fcb86c7ca291a2ad38be2a4c1a3, verified ancestor of origin/main) carries the row in the tree. 9,786 task docs exported, 9,769 with a string description; EXACTLY 1 diverging row — task-8ba550b59141bccb itself — which a prior grep had reported as nothing. CONTROLS printed on the same export so the 1 is not a blind read: 1,177 rows contain **, 884 contain __, 3,948 contain a backtick, 4,582 are modified by the strip at all. TWO CORRECTIONS to figures this lane had published: the 9,356 denominator was a borrowed 2026-09-10 count, and the \"17 empty\" rows carry NO description key rather than an empty string. INSTRUMENT FAULT CAUGHT AND CORRECTED: the first export read .content.description and found 7 of 9,786 — printing the KEY SET rather than reading the zero is what caught it.",
+              "met": true
+            },
+            {
+              "criterion": "THE THREE NORMALISATIONS ARE NAMED WHEREVER A DRIFT FIGURE IS QUOTED. Go CLI, Elixir server, and the 2026-08-20 census method (markdown + control-byte + whitespace) produce DIFFERENT counts on the same population — 1,099 vs 1,007 were already measured against a 714 baseline. Any surviving figure in gr-bl-brief-drift-backfill-714 or its companion JSON states which rule produced it, or is withdrawn.",
+              "evidence": "Pre-existing on origin/main, NOT produced by PR #18522, and stamped on that reading: tooling/grip/ledger/brief-purpose-drift-2026-08-20.json .method.normalise names the rule for 714, and gr-bl-brief-drift-backfill-714 criteria 1 and 4 attribute 1099 (strict-composer) vs 1007 (baseline-method) vs 714. Verified by cli-r20-v3.",
+              "met": true
+            }
+          ],
+          "brief": {
+            "blocks": [
+              {
+                "id": "criteria",
+                "level": 2,
+                "text": "Criteria",
+                "type": "heading"
+              },
+              {
+                "id": "criteria-list",
+                "items": [
+                  "THE TWO IMPLEMENTATIONS AGREE ON EVERY INPUT, or the divergence is deliberate and recorded AT BOTH SITES with the reason. One of them is chosen as canonical — the SERVER's is the candidate, since it decides the post-write state — and the other is changed to match it or to call it. Evidence: the same probe re-run showing zero diverging cases, with the controls still agreeing so it is shown to still discriminate.",
+                  "A TEST PINS THE AGREEMENT so the next edit to either side reds rather than silently re-diverging. It feeds the SAME inputs to BOTH implementations and asserts identical output, and it carries `_**_` and `foo_**_bar` explicitly — the shapes that diverge today — plus a positive control proving the harness can SEE a disagreement it was not written against. A comment saying the two must match is what let them drift; the file already has one.",
+                  "REACHABILITY IS MEASURED, and the row's severity is set by the answer rather than by assumption. Count live task descriptions matching the divergent shape (`_` immediately followed by `**` immediately followed by `_`, and the mirror cases). If the count is ZERO, say so and record this as LATENT with the count and the date — an absence that was measured is worth more than a severity that was guessed. If it is non-zero, name the rows.",
+                  "THE THREE NORMALISATIONS ARE NAMED WHEREVER A DRIFT FIGURE IS QUOTED. Go CLI, Elixir server, and the 2026-08-20 census method (markdown + control-byte + whitespace) produce DIFFERENT counts on the same population — 1,099 vs 1,007 were already measured against a 714 baseline. Any surviving figure in gr-bl-brief-drift-backfill-714 or its companion JSON states which rule produced it, or is withdrawn."
+                ],
+                "ordered": false,
+                "type": "list"
+              },
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "MEASURED 2026-09-08 by lead-ledger-c5 while re-deriving gr-bl-brief-drift-backfill-714. Two implementations of the SAME normalisation disagree, and the reason they have gone unnoticed is that they look equivalent.\n\n  Go      internal/cli/tasks_create_cmd.go:744\n          strings.NewReplacer(\"\", \"\", \"\", \"\", \"\", \"\").Replace(description)\n          ONE non-overlapping left-to-right pass considering all three patterns at once.\n\n  Elixir  api/lib/barkpark/tasks/brief_mirror.ex:161\n          defp strip_markdown(text), do: Enum.reduce(@stripped, text, &String.replace(&2, &1, \"\"))\n          THREE passes, one pattern each, each over the previous pass's result.\n\nWHY THEY LOOK EQUIVALENT AND ARE NOT. The three patterns use DISJOINT characters (*, _, backtick), so no two matches can ever overlap — which is the argument that makes the two forms look interchangeable, and it is the wrong argument. The Elixir form RESCANS: a removal in pass 1 can bring two _ together, and pass 2 then strips them. The Go form has already advanced past that position and never looks again.\n\nMEASURED, 3 of 8 cases diverge — with 5 controls AGREEING, so the probe discriminates rather than reporting difference everywhere:\n\n  \"\"          go=\"\"        elixir=\"\"\n  \"foobar\"    go=\"foobar\"  elixir=\"foobar\"\n  \"abc\"   go=\"abc\"   elixir=\"abc\"\n  \"**\"          go=\"\"        elixir=\"\"       <- SAME\n  \"\"        go=\"\"          elixir=\"\"         <- SAME\n  \"_bold_\"    both \"_bold_\"                    <- SAME\n  \"a\"           both \"a\"                         <- SAME\n  \"x\"         both \"x\"                         <- SAME\n\nTHE ASYMMETRY IS THE TELL, and it identifies the mechanism precisely:  diverges but its mirror image ** does NOT, because the  pass runs FIRST. The bug is in pass ORDER plus rescanning, not in the patterns.\n\nWHY IT MATTERS BEYOND TIDINESS. These two are supposed to produce the SAME purpose-copy text from the same description — the CLI on create, the server on every subsequent write. Where they disagree, a row's mirror flips between two values depending on WHICH DOOR last wrote it, and a drift census then counts that row as drifted or not depending on which rule the census itself used.\n\nIT HAS ALREADY POISONED A COUNT. gr-bl-brief-drift-backfill-714's criterion 2 says \"normalises markdown exactly as the composer does\" and cites the GO CLI — but the composer that decides the post-write state is the SERVER's. Its criterion 1 evidence already records a related contradiction: strict-composer normalisation gives 1,099 divergent, the baseline companion's method gives 1,007, against a published baseline of 714. WITH THIS FINDING THERE ARE THREE NORMALISATIONS IN PLAY, NOT TWO: the Go CLI's, the Elixir server's, and the baseline census's (markdown-strip PLUS control-byte strip PLUS whitespace collapse). Any figure quoted without naming which one produced it is unreproducible.\n\nREACHABILITY, STATED RATHER THAN ASSUMED. The divergent shape needs _ immediately followed by  immediately followed by _ with nothing between — e.g. foobar. This is not common prose, and I have NOT measured how many live descriptions contain it. That measurement is criterion 3 below, and it decides whether this is a live defect or a latent one. Filing it as latent-until-measured is deliberate: the mechanism is proven, the blast radius is not."
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "task-7c86463e27ac80f3",
+    "note": "purpose-copy DIVERGENT, terminal",
+    "lifecycle_status": "cancelled",
+    "want_warn": true,
+    "want_blocks": [
+      "purpose-copy (mirrors `description`)"
+    ],
+    "envelope": {
+      "doc": {
+        "doc_id": "task-7c86463e27ac80f3",
+        "lifecycle_status": "cancelled",
+        "content": {
+          "description": "Throwaway verification probe created by the PDS wave 43 surveyor to establish by run how a draft twin behaves under doc patch and task stamp. Cancelled immediately after read-back.",
+          "brief": {
+            "blocks": [
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "throwaway; cancelled immediately"
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "cloud-control-plane-correctness-audit",
+    "note": "purpose-copy DIVERGENT, LIVE — exercises the self-healing remedy line",
+    "lifecycle_status": "considering",
+    "want_warn": true,
+    "want_blocks": [
+      "purpose-copy (mirrors `description`)"
+    ],
+    "envelope": {
+      "doc": {
+        "doc_id": "cloud-control-plane-correctness-audit",
+        "lifecycle_status": "considering",
+        "content": {
+          "description": "Improvement-only Phoenix/OTP/Ecto mastery audit of cloud/lib/barkpark_cloud across four correctness classes: Ecto efficiency/correctness (N+1, missing preloads, missing transactions, changeset gaps, unsafe binary_id Repo.get), Oban job robustness (crash-loop bounds, idempotency, enqueue-before-commit races, silent drops), provisioning state machine (dead-ends, missing failure/timeout edges, terminal re-entry), and error handling (unhandled with/case branches, swallowed rescues). Verify-heavy: each candidate re-derived against origin/main and classified REAL bug with failing scenario or SAFE pattern with cited reason. Fence: cloud/lib/barkpark_cloud + cloud/test only. Distinct from the security campaign and disjoint from the js SDK and api Studio waves.",
+          "brief": {
+            "blocks": [
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Complete the work described by “Cloud control-plane correctness & quality audit (Felix-style, non-security)” and record verifiable evidence."
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "hgw5-bl-provision-barkpark-task-token",
+    "note": "criteria-list DIVERGENT by COUNT; this row ALSO diverges on purpose-copy, so it is the arm proving a notice names BOTH blocks rather than stopping at the first.",
+    "lifecycle_status": "cancelled",
+    "want_warn": true,
+    "want_blocks": [
+      "criteria-list (mirrors `acceptance_criteria[].criterion`)",
+      "purpose-copy (mirrors `description`)"
+    ],
+    "envelope": {
+      "doc": {
+        "doc_id": "hgw5-bl-provision-barkpark-task-token",
+        "lifecycle_status": "cancelled",
+        "content": {
+          "description": "AUDIT FINDING (8th program done-set audit, 2026-08-18). Verified live: gh secret list on FRIKKern/barkpark shows BARKPARK_TASK_TOKEN is NOT provisioned (only BREAKGLASS_TOKEN, CP_HOST, DEPLOY_SSH_KEY, GUERRILLA_HOST, HETZNER_DNS_TOKEN, NPM_TOKEN). Consequence on origin/main: the pr-task-gate hotfix! emergency lane (.github/workflows/pr-task-gate.yml ~L244/267) REDS fail-closed instead of recording an override and clearing. Row hgw5-s5-task-gate-exit-and-reason shipped this fail-closed posture openly (criterion 4 discloses INOPERABLE until the secret exists), so this is DISCLOSED, not a false-done; the audit left hgw5-s5 standing. The follow-up was never filed (a builder mutate timed out), so this row is the only tracked home. HUMAN-GATED: only a repo admin can mint the secret. The armed emergency path today is admin break-glass (scripts/breakglass.sh, BREAKGLASS_TOKEN provisioned).",
+          "acceptance_criteria": [
+            {
+              "criterion": "BARKPARK_TASK_TOKEN is provisioned as a repo secret on FRIKKern/barkpark with scope sufficient for the hotfix_record step to write the override record; evidence names the gh secret list line showing it present",
+              "evidence": "",
+              "met": false
+            },
+            {
+              "criterion": "A hotfix! PR run demonstrates the emergency lane RECORDS the override and clears green rather than fail-closed red; evidence names the run URL",
+              "evidence": "",
+              "met": false
+            },
+            {
+              "criterion": "The pr-task-gate.yml disclosure comments that describe the token as unprovisioned are updated to reflect the provisioned state; evidence names the file:line",
+              "evidence": "",
+              "met": false
+            }
+          ],
+          "brief": {
+            "blocks": [
+              {
+                "id": "criteria",
+                "level": 2,
+                "text": "Criteria",
+                "type": "heading"
+              },
+              {
+                "id": "criteria-list",
+                "items": [
+                  "BARKPARK_TASK_TOKEN provisioned"
+                ],
+                "ordered": false,
+                "type": "list"
+              },
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "AUDIT FINDING test"
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "gr-wave-reconcile-2026-08-18-log",
+    "note": "criteria-list DIVERGENT by TEXT (same count, different wording)",
+    "lifecycle_status": "done",
+    "want_warn": true,
+    "want_blocks": [
+      "criteria-list (mirrors `acceptance_criteria[].criterion`)"
+    ],
+    "envelope": {
+      "doc": {
+        "doc_id": "gr-wave-reconcile-2026-08-18-log",
+        "lifecycle_status": "done",
+        "content": {
+          "description": "Per-wave referent for the Cloud GUI remake RECONCILIATION wave (2026-08-18). Carries the docs-only charter PR (GR169-GR172 + true residue) and the wave log. Claimed by Decide so the pr-task-gate has a live lease at PR-open time; the lead closes it on charter-PR merge.",
+          "acceptance_criteria": [
+            {
+              "criterion": "The docs-only charter PR (GR169-GR173 reconciliation section) is opened against main and reporting checks",
+              "evidence": "PR #12202 open against main, carries Task: gr-wave-reconcile-2026-08-18-log on its own line",
+              "met": true
+            },
+            {
+              "criterion": "Both wave slices and the seal-and-spin backlog row are filed, published, and parented under the epic",
+              "evidence": "Filed+published under epic task-47bc4168392dec17: gr-blk-false-done-audit-closed-children (Slice1), gr-r-rehome-belowbar-instruments (Slice2), gr-recon-seal-and-spin (backlog)",
+              "met": true
+            }
+          ],
+          "brief": {
+            "blocks": [
+              {
+                "id": "criteria",
+                "level": 2,
+                "text": "Criteria",
+                "type": "heading"
+              },
+              {
+                "id": "criteria-list",
+                "items": [
+                  "The docs-only charter PR (GR169-GR172 reconciliation section) is opened against main and reporting checks",
+                  "Both wave slices and the seal-and-spin backlog row are filed, published, and parented under the epic"
+                ],
+                "ordered": false,
+                "type": "list"
+              },
+              {
+                "id": "purpose",
+                "level": 2,
+                "text": "Purpose",
+                "type": "heading"
+              },
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Per-wave referent for the Cloud GUI remake RECONCILIATION wave (2026-08-18). Carries the docs-only charter PR (GR169-GR172 + true residue) and the wave log. Claimed by Decide so the pr-task-gate has a live lease at PR-open time; the lead closes it on charter-PR merge."
+                  }
+                ],
+                "id": "purpose-copy",
+                "type": "paragraph"
+              }
+            ],
+            "version": 1
+          }
+        }
+      }
+    }
+  }
+]
