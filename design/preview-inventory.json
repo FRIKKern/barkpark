@@ -1,0 +1,67 @@
+{
+  "_readme": "The previewability inventory (stw4-backlog-picker-thumbnails c0). It answers ONE question for a create-site picker: which of the things under templates/ and design/themes/ have representative visual output worth photographing, and which are framework or infrastructure choices that must stay text-only. It is the DATA CONTRACT a picker renders against — it deliberately holds no image paths, because a binary preview asset must not ride inside a published starter payload. design/template-theme-contract.test.mjs proves every claim here against the tree; see templates/MANIFEST.md for the prose.",
+  "inventoryVersion": "1",
+  "rules": {
+    "template_previewable": "TRUE exactly when the directory carries a barkpark.template.json (it is enumerated by the deploy UI at all) AND that manifest sets demoContent:true (there is representative output to photograph, not a bare scaffold). A directory failing either test is a framework scaffold and stays text-only.",
+    "theme_pinnable": "TRUE exactly when the palette name appears in the `theme` enum of templates/barkpark.template.schema.json. A palette file that ships in design/themes/ but is absent from the enum cannot be selected by any manifest, so a picker must not offer it as a preview axis."
+  },
+  "templates": {
+    "search-starter": {
+      "previewable": true,
+      "kind": "site",
+      "reason": "The flagship Next edition: live search, an interactive corpus graph and PortableDoc document pages, all over seeded demo content. Two deploys of it differ visibly, so a name alone does not convey the choice."
+    },
+    "astro-search-starter": {
+      "previewable": true,
+      "kind": "site",
+      "reason": "The static edition of the same flagship. It renders the same surfaces from pre-built files, so it is visually distinguishable from the Next edition only in ways a preview can actually show."
+    },
+    "place-directory": {
+      "previewable": true,
+      "kind": "site",
+      "reason": "A map-backed listing site — pins on a map is the most visually distinctive output in the roster and the hardest to infer from the title."
+    },
+    "blog-starter": {
+      "previewable": true,
+      "kind": "site",
+      "reason": "Seeded posts rendered as a list plus detail pages. Low differentiation against website-starter, but it does produce representative output."
+    },
+    "website-starter": {
+      "previewable": true,
+      "kind": "site",
+      "reason": "A seeded hero-plus-body marketing page. Representative output exists, though a preview adds less here than for place-directory."
+    },
+    "next-starter": {
+      "previewable": false,
+      "kind": "framework-scaffold",
+      "reason": "Bare Next.js wiring with no barkpark.template.json and no seeded content. It is a FRAMEWORK choice, not an appearance choice — a thumbnail of an empty page would misrepresent it as a designed option."
+    },
+    "astro-starter": {
+      "previewable": false,
+      "kind": "framework-scaffold",
+      "reason": "Bare Astro wiring with no barkpark.template.json and no seeded content. Same reasoning as next-starter: the honest control is a text label, not an image."
+    }
+  },
+  "themes": {
+    "evergreen": {
+      "pinnable": true,
+      "reason": "The default palette and the one both flagship editions pin. A preview of a previewable template is a preview of this palette unless the manifest says otherwise."
+    },
+    "ember": {
+      "pinnable": true,
+      "reason": "Selectable from a manifest, so a picker may offer it as a palette variant of an already-previewable template."
+    },
+    "fjord": {
+      "pinnable": true,
+      "reason": "Selectable from a manifest, so a picker may offer it as a palette variant of an already-previewable template."
+    },
+    "charple": {
+      "pinnable": true,
+      "reason": "Selectable from a manifest, so a picker may offer it as a palette variant of an already-previewable template."
+    },
+    "iris": {
+      "pinnable": false,
+      "reason": "Ships as design/themes/iris.json but is ABSENT from the theme enum in templates/barkpark.template.schema.json, so no manifest can select it today. A picker that offered an iris preview would advertise a deploy the descriptor refuses."
+    }
+  }
+}
