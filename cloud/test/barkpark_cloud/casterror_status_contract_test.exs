@@ -190,4 +190,81 @@ defmodule BarkparkCloud.CastErrorStatusContractTest do
       assert length(hits) > 10, "only #{length(hits)} CastError lines found in the corpus"
     end
   end
+
+  describe "the MODULE axis the 400 sweep cannot see" do
+    # #18730 corrected three cloud/ lines that named the bare `Ecto.CastError`
+    # while describing the :binary_id QUERY path (a router comment, a
+    # verify_test comment, a bootstrap_template_test NAME). Nothing guarded
+    # that correction: every one of those lines says 500 or says nothing about
+    # status, so the "CastError -> 400" sweep above stays green if they are
+    # re-planted verbatim. This describe block is the arm that reds instead.
+    #
+    # RULE (a predicate, not a list): inside cloud/lib and cloud/test, naming
+    # the bare `Ecto.CastError` is folklore UNLESS the line also names the
+    # changeset/`cast!` path where that struct genuinely fires, or is
+    # explicitly talking about api//phoenix_ecto, or names the query struct in
+    # the same breath.
+    @module_justifiers ~w(cast! changeset mixed phoenix_ecto api/ Ecto.Query.CastError)
+
+    # `Ecto.CastError` NOT preceded by `Query.` — the lookbehind is what keeps
+    # this from being a plain CastError grep.
+    @bare_cast_error ~r/(?<!Query\.)Ecto\.CastError/
+
+    defp wrong_module_line?(line) do
+      Regex.match?(@bare_cast_error, line) and
+        not Enum.any?(@module_justifiers, &String.contains?(line, &1))
+    end
+
+    test "no cloud/ line names the bare Ecto.CastError on the query path" do
+      offenders = folklore_offenders(&wrong_module_line?/1)
+
+      assert offenders == [],
+             """
+             These cloud/ lines name `Ecto.CastError` where the :binary_id
+             query path raises `Ecto.Query.CastError`. They are different
+             structs: an `assert_raise Ecto.CastError` on that path can never
+             match, and a comment written that way sends the next reader to
+             the wrong module. Say `Ecto.Query.CastError`, or name the
+             changeset/`cast!` path where `Ecto.CastError` really does fire:
+
+             #{Enum.join(offenders, "\n")}
+             """
+    end
+
+    test "CONTROL: the module sweep reds on the exact lines #18730 removed, and stays quiet on the ones it kept" do
+      # RED arm — the three verbatim pre-#18730 strings, recovered from the
+      # diff of c051d938060f5056619544bd792df609ad129199. If this guard had
+      # existed, it would have caught all three; reverting that commit reds
+      # the test above.
+      for planted <- [
+            "  # malformed id never raises an `Ecto.CastError` here.",
+            "    test \"a NON-UUID id → 404, not an Ecto.CastError 500 (binary_id guard)\" do",
+            "      # A garbage id → the SAME 404, no Ecto.CastError."
+          ] do
+        assert wrong_module_line?(planted), "missed a known offender: #{planted}"
+      end
+
+      # QUIET arm — none of these may trip it, or the guard is just a grep.
+      #  * the corrected form of the same three lines
+      #  * registry.ex's genuine changeset raise, which MUST stay `Ecto.CastError`
+      #  * this file's own cast!/1 arm
+      #  * repo.ex's docstring, which names api/'s 400 on purpose
+      for kept <- [
+            "  # malformed id never raises an `Ecto.Query.CastError` here.",
+            "      # A garbage id → the SAME 404, no Ecto.Query.CastError.",
+            "      # with mixed atom and string keys outright (`Ecto.CastError`), so putting",
+            "      err = assert_raise Ecto.CastError, fn -> Ecto.UUID.cast!(nil) end",
+            "  `phoenix_ecto`, which maps both CastError structs to 400, while `cloud/` is"
+          ] do
+        refute wrong_module_line?(kept), "false positive on: #{kept}"
+      end
+
+      # and the corpus it walks is non-empty and really does contain bare
+      # `Ecto.CastError` lines to discriminate among — otherwise the green
+      # above would have no subject.
+      bare = folklore_offenders(&Regex.match?(@bare_cast_error, &1))
+      assert bare != [], "no bare Ecto.CastError lines found in cloud/lib + cloud/test at all"
+    end
+  end
+
 end
