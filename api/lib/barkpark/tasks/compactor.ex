@@ -331,8 +331,13 @@ defmodule Barkpark.Tasks.Compactor do
         # no live content pointing at it; the next compaction cycle will
         # see the row is still eligible (compacted_at still NULL) and
         # produce a fresh snapshot. The stale snapshot is reachable via
-        # list_revisions and harmless — at worst a little extra storage
-        # the existing revision-pruning sweep handles.
+        # list_revisions and harmless — at worst a little extra storage.
+        #
+        # [loop-low-history-offset-retention] This note used to end "...the
+        # existing revision-pruning sweep handles". No such sweep exists, and
+        # none ever did: revision retention is INDEFINITE, bounded only by the
+        # scope CASCADE (see the `Barkpark.Content.Revisions` moduledoc). The
+        # storage is kept, not reclaimed.
         :skipped
     end
   end

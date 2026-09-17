@@ -45,6 +45,38 @@ defmodule Barkpark.Content.Revisions do
   resolves through `get_revision/3` and so inherits the narrowing — a strict
   tightening on a write path. Pinned by
   `test/barkpark_web/integration/export_revision_grant_narrowing_test.exs`.
+
+  ## Retention: INDEFINITE, and deliberately so (loop-low-history-offset-retention)
+
+  There is no age sweep, no per-document cap, and no archival tier. A revision
+  row lives until the SCOPE that owns it is deleted. That is the whole policy,
+  and it is written here because "how long is history kept" had no answer
+  anywhere and the compactor had already guessed at one.
+
+  The enumeration behind that claim: every `Repo.delete_all/1` and
+  `Repo.delete/1` call site in `api/lib` was listed, and none names
+  `Barkpark.Content.Revision` or the `revisions` table. The only paths that
+  remove a revision row are the three scope foreign keys — `workspace_id` /
+  `project_id` / `dataset_id` — flipped to `ON DELETE CASCADE` by migration
+  `20260527160000_cascade_content_on_scope_delete`. So deleting a workspace,
+  project or dataset takes its revisions along with its documents, and nothing
+  else ever does.
+
+  Two consequences worth stating, because they are what a caller actually needs:
+
+    * Deleting a DOCUMENT does not delete its revisions. `revisions.doc_id` is
+      a plain string with no FK to `documents`, so the history of a deleted
+      document stays listable and `restore_revision/4` can bring it back. The
+      `action: "delete"` entry is itself a revision.
+    * The compaction snapshot written by `Barkpark.Tasks.Compactor` (action
+      `"compaction_snapshot"`) is an ordinary revision row and inherits exactly
+      this retention. Nothing prunes it. That module's note about "the existing
+      revision-pruning sweep" described a sweep that has never existed; it has
+      been corrected.
+
+  A bounded policy, if one is ever wanted, is a NEW decision with a NEW
+  migration — never a behaviour to assume is already running. Pinned by
+  `test/barkpark/content/revision_retention_and_paging_test.exs`.
   """
 
   import Ecto.Query
@@ -56,9 +88,32 @@ defmodule Barkpark.Content.Revisions do
   import Barkpark.Content.Scope,
     only: [scope_to_workspace_or_global: 3, maybe_scope_to_grants: 2]
 
-  @doc "List revisions for a document, newest first."
+  @doc """
+  List revisions for a document, newest first.
+
+  ## Options
+
+    * `:limit` — page size (default 50).
+    * `:offset` — how many of the newest revisions to skip (default 0).
+      Negative values clamp to 0.
+
+  ### Why the order key is a PAIR (loop-low-history-offset-retention)
+
+  `revisions.inserted_at` is NOT unique: `Broadcast.save_revision/5` stamps it
+  from the write, and a single mutation batch (or two writers landing in the
+  same microsecond) produces rows that tie. Postgres gives no stable order
+  among tied rows, so a bare `desc: inserted_at` + OFFSET can return the SAME
+  row on two consecutive pages and never return another — a caller paging the
+  whole history silently loses restorable evidence it was never told about.
+
+  Ordering by `{inserted_at, id}` makes the sort total (`id` is the primary
+  key, so the pair is unique by construction), which is what makes OFFSET a
+  contract rather than a suggestion. The first page is unchanged for any
+  document whose revisions have distinct timestamps.
+  """
   def list_revisions(doc_id, type, dataset, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
+    offset = opts |> Keyword.get(:offset, 0) |> max(0)
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
@@ -67,8 +122,9 @@ defmodule Barkpark.Content.Revisions do
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_grants(opts)
-    |> order_by([r], desc: r.inserted_at)
+    |> order_by([r], desc: r.inserted_at, desc: r.id)
     |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
   end
 
