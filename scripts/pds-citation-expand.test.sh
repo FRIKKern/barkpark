@@ -6,12 +6,17 @@
 # compressed citation could re-enter the PDS fence and no red would ever fire.
 # This is the runnable tenant a workflow can adopt in one line.
 #
-# NOT YET WIRED, AND SAYING SO. .github/workflows/shell-harnesses.yml selects
-# its tenants by an explicit `paths:` list and an explicit step per harness —
-# that file belongs to the gates lane, not this one. Until a gates-lane change
-# adds this script beside the other `*.test.sh` tenants, this harness runs only
-# when somebody runs it. That is a known gap, stated here rather than left for
-# a reader to discover from a guard that never fired.
+# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
+# scripts/pds-citation-expand.test.sh` step on the `PDS census / parity /
+# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml (that
+# job already TRIGGERS on these files via its `scripts/pds-*.sh` glob; it just
+# runs an enumerated list this file is not on), and .github/ is the gates
+# lane's fence, not the deploy/PDS lane's. Same handoff, same job, same reason
+# as scripts/pds-citation-precedes-merge_test.sh:27 and
+# scripts/pds-artifact-retention.test.sh:20. This exemption is a HANDOFF, not a
+# verdict: until that line lands, a compressed citation re-entering the fence is
+# caught by running this file BY HAND, and by nothing else. Wiring row:
+# task-b92409dc562dc20c. Baseline at authoring: 4 passed, 0 failed.
 #
 # usage: bash scripts/pds-citation-expand.test.sh
 
