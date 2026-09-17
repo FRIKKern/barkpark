@@ -3019,6 +3019,20 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- parsing
 
+  # THE ONE PARSE LENS, NAMED. Every arm that re-parses a file (the CAS-spelling removal
+  # mutation below) has to read it through the SAME encoder as the census, or its refusal
+  # is a different lens wearing this one's name — literal_encoder is what wraps a 2-tuple,
+  # and a mutant parsed without it reads zero through every tuple predicate in this file.
+  defp census_parse_opts do
+    [
+      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
+      token_metadata: true,
+      columns: true,
+      emit_warnings: false,
+      unescape: false
+    ]
+  end
+
   defp parse_file(path) do
     src = File.read!(path)
     lines = String.split(src, "\n")
@@ -3031,16 +3045,8 @@ defmodule PDS.Census do
           List.duplicate({n, :string}, count(line, "\"ok\" => true"))
       end)
 
-    opts = [
-      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
-      token_metadata: true,
-      columns: true,
-      emit_warnings: false,
-      unescape: false
-    ]
-
     ast =
-      case Code.string_to_quoted(src, opts) do
+      case Code.string_to_quoted(src, census_parse_opts()) do
         {:ok, ast} -> ast
         {:error, _} -> :parse_error
       end
@@ -4848,11 +4854,46 @@ defmodule PDS.Census do
   defp cas_confirmed?(%{body: nil}), do: false
 
   defp cas_confirmed?(%{body: body} = d) do
-    updates? = Enum.any?(verb_hits(d), fn {k, v, _} -> k == :write and v == :"Repo.update_all" end)
-    updates? and int_tuple_match?(body)
+    update_all_writer?(d) and int_tuple_match?(body)
   end
 
+  defp update_all_writer?(d) do
+    Enum.any?(verb_hits(d), fn {k, v, _} -> k == :write and v == :"Repo.update_all" end)
+  end
+
+  # THE TWO SPELLINGS OF A ROW-COUNT CONFIRMATION, AND WHY A LIST OF ONE WAS A BUG
+  # (pds-bl-cas-int-tuple-spelling-blind). This predicate used to be `literal_int_tuple?/1`
+  # ALONE: it required the integer to sit IN the tuple, `{1, [saved]} = ... update_all`.
+  # api/lib/barkpark/content/sessions.ex writes the identical CAS twice with the count
+  # BOUND and compared one line later —
+  #
+  #     {rows, _} = from(...) |> Repo.update_all(set: [...])
+  #     if rows == 1, do: %{...}, else: Repo.rollback(:stale)
+  #
+  # — and a bound variable compared to 1 is invisible to a pattern test. Re-derived over
+  # api/lib at the widening: 60 defs write with `Repo.update_all`; 16 carry the LITERAL
+  # spelling, 11 the BOUND-COUNT spelling, 33 carry NEITHER and are still refused. A
+  # predicate that starts matching everything is not a repair, so the refused half is the
+  # number that has to be quoted beside the new one.
+  #
+  # THE COMPARISON SET IS EQUALITY-FAMILY ONLY, and that is a VERDICT, not an oversight.
+  # The arm's own sentence is "matches its update_all result against a literal row count".
+  # `n > 0` (webhooks.ex:655/:744, scim.ex:246) guards on the count without matching it —
+  # admitting ordering operators moves BOUND-COUNT 11 -> 14 and quietly re-labels three
+  # threshold guards as confirmed echoes. A `case count do 1 -> ...` head IS a match and is
+  # admitted, because it is the literal spelling wearing a case instead of a `=`.
+  #
+  # THE BINDING MUST COME OFF THE WRITE. Only a 2-tuple whose RHS itself calls
+  # `.update_all` binds a count here — without that, any `{n, _} = Enum.split(...)` later
+  # compared to an integer would certify a CAS the function never performed. Scope is the
+  # whole body (no shadowing analysis), the same known over-reach POST-READ's prewalk
+  # carries (pds-bl-has-select-in-update-unsound); it can only over-fire, and the
+  # update_all-on-the-RHS requirement is what keeps that from being free.
   defp int_tuple_match?(body) do
+    literal_int_tuple?(body) or bound_count_match?(body)
+  end
+
+  defp literal_int_tuple?(body) do
     {_, found} =
       Macro.prewalk(body, false, fn
         {:{}, _, [a, _]} = n, acc -> {n, acc or int_lit?(a)}
@@ -4862,6 +4903,80 @@ defmodule PDS.Census do
 
     found
   end
+
+  defp bound_count_match?(body) do
+    body
+    |> update_all_count_vars()
+    |> Enum.any?(&count_var_matched_to_int?(body, &1))
+  end
+
+  # EVERY `{count, _} = <expr calling .update_all>` IN THE BODY, by bound name. A
+  # `_`-prefixed head is a DISCARD and is not a count: naming it `_rows` says the row
+  # count was thrown away, which is the opposite of a confirmation.
+  defp update_all_count_vars(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:=, _, [lhs, rhs]} = n, acc ->
+          case tuple2_head_var(lhs) do
+            nil -> {n, acc}
+            v -> if calls_update_all?(rhs), do: {n, [v | acc]}, else: {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  # parse_file/1's literal_encoder WRAPS A 2-TUPLE (see `ok_pattern_var/1`, same unwrap),
+  # so the pattern arrives as {:__block__, _, [{var, _}]} and a naive match reads nothing.
+  defp tuple2_head_var({:__block__, _, [inner]}), do: tuple2_head_var(inner)
+  defp tuple2_head_var({{v, _, ctx}, _}) when is_atom(v) and is_atom(ctx), do: named_var(v)
+  defp tuple2_head_var({:{}, _, [{v, _, ctx}, _]}) when is_atom(v) and is_atom(ctx), do: named_var(v)
+  defp tuple2_head_var(_), do: nil
+
+  defp named_var(v) do
+    if String.starts_with?(Atom.to_string(v), "_"), do: nil, else: v
+  end
+
+  defp calls_update_all?(node) do
+    {_, found} =
+      Macro.prewalk(node, false, fn
+        {{:., _, [_, :update_all]}, _, _} = n, _acc -> {n, true}
+        n, acc -> {n, acc}
+      end)
+
+    found
+  end
+
+  @count_match_ops [:==, :===, :!=, :!==]
+
+  defp count_var_matched_to_int?(body, v) do
+    {_, found} =
+      Macro.prewalk(body, false, fn
+        {op, _, [l, r]} = n, acc when op in @count_match_ops ->
+          {n, acc or (var?(l, v) and int_lit?(r)) or (var?(r, v) and int_lit?(l))}
+
+        {:case, _, [subj, [{_do, clauses} | _]]} = n, acc ->
+          {n, acc or (var?(subj, v) and int_headed_clause?(clauses))}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    found
+  end
+
+  defp int_headed_clause?(clauses) do
+    Enum.any?(List.wrap(clauses), fn
+      {:->, _, [[head], _]} -> int_lit?(head)
+      _ -> false
+    end)
+  end
+
+  defp var?({v, _, ctx}, v) when is_atom(ctx), do: true
+  defp var?(_, _), do: false
 
   defp int_lit?(node) do
     case lit(node) do
@@ -14013,6 +14128,7 @@ defmodule PDS.Census do
     p("")
 
     unwrap_checks!()
+    cas_spelling_checks!()
 
     src = File.read!(@self_source)
     # THE OS PID IS LOAD-BEARING (PDS-D542). System.unique_integer/1 is VM-LOCAL: eight
@@ -14077,6 +14193,142 @@ defmodule PDS.Census do
   # measuring the fixture; these two read the same two functions the live report reads.
   # Both refusals are raises, not skips: a selftest that reported OK while its own
   # substring check was inert is the exact failure this repairs.
+  # THE CAS-SPELLING ARMS, RUN BEFORE ANY CASE AND OVER THE LIVE api/lib TREE, using this
+  # census's OWN producers (tree_population/0, parse_file/1, cas_confirmed?/1) rather than
+  # a hand-typed body — a fixture here would encode a shape the corpus never writes and
+  # the arms would be measuring the fixture. Every refusal is a raise, never a skip: an
+  # arm that reports OK while its specimen set was empty is the failure this repairs.
+  #
+  # THE THREE PRECONDITIONS COME FIRST BECAUSE A CONTROL SAYS NOTHING ABOUT THEM. `bound`
+  # empty means the widening has no witness and arm 4 would pass with the widening
+  # deleted; `literal` empty means the older spelling went dark and a green here would
+  # certify a lens nobody is using; `refused` empty means the predicate matches every
+  # update_all writer in the tree, which is not a repair but a detector that has stopped
+  # discriminating. Each is stated as a POPULATION read off this run, never as a number
+  # typed into this file, so a corpus that grows a new spelling moves them by itself.
+  defp cas_spelling_checks! do
+    defs =
+      tree_population()
+      |> Enum.filter(&String.contains?(File.read!(&1), "update_all"))
+      |> Enum.flat_map(fn path -> parse_file(path).defs end)
+      |> Enum.filter(&update_all_writer?/1)
+
+    literal = Enum.filter(defs, &literal_int_tuple?(&1.body))
+    bound = Enum.filter(defs, fn d -> not literal_int_tuple?(d.body) and cas_confirmed?(d) end)
+    refused = Enum.reject(defs, &cas_confirmed?/1)
+
+    if bound == [] do
+      raise "CAS-SPELLING arms are VACUOUS: no api/lib def binds an update_all row count " <>
+              "and matches it against an integer literal, so the BOUND-COUNT arm below would " <>
+              "pass with the widening reverted. #{length(defs)} update_all writer(s) were " <>
+              "scanned under CWD #{File.cwd!()} — a zero here is a corpus that moved or a " <>
+              "selftest run from the wrong directory, not a green."
+    end
+
+    if literal == [] do
+      raise "CAS-SPELLING arms are HALF-BLIND: no api/lib def carries the LITERAL-TUPLE " <>
+              "spelling any more, so nothing on this run exercises the original predicate " <>
+              "and a green certifies only the half that was added."
+    end
+
+    if refused == [] do
+      raise "CAS-SPELLING arms have STOPPED DISCRIMINATING: all #{length(defs)} update_all " <>
+              "writer(s) in api/lib now read as CAS-CONFIRMED-ECHO. A predicate that matches " <>
+              "its whole population is not a widened detector, it is an absent one."
+    end
+
+    p("  CAS SPELLING LENS — re-derived over api/lib on this run, never typed")
+    p("    api/lib defs writing with Repo.update_all ......... #{length(defs)}")
+    p("    LITERAL-TUPLE spelling ({1, _} = update_all) ...... #{length(literal)}")
+    p("    BOUND-COUNT spelling ({n, _} = ...; n == <int>) ... #{length(bound)}")
+    p("    REFUSED — no integer row-count match at all ....... #{length(refused)}")
+
+    Enum.each(bound, fn d -> p("      BOUND-COUNT  #{d.path}:#{d.line}  #{label(d)}") end)
+
+    p("    LENS NOTE: this is the CORPUS lens (update_all writers), NOT the emitted-site")
+    p("    lens the shape table prints. The two are different denominators and the")
+    p("    emitted-site CAS figure does not follow from this one.")
+    p("")
+
+    # THE ARM THAT REDS IF THE WIDENING IS REVERTED. Every BOUND-COUNT member is, BY
+    # CONSTRUCTION of the partition above, refused by literal_int_tuple?/1 — so
+    # int_tuple_match?/1 narrowed back to its literal half makes cas_confirmed? false on
+    # all of them and this raises, naming them.
+    Enum.each(bound, fn d ->
+      unless cas_confirmed?(d) do
+        raise "CAS-SPELLING BOUND-COUNT arm FAILED: #{d.path}:#{d.line} binds an update_all " <>
+                "row count and matches it against an integer literal, and cas_confirmed?/1 " <>
+                "does not see it."
+      end
+    end)
+
+    # THE ARM THAT MUST STAY QUIET, AND IT IS A MUTATION ON THE REAL SOURCE, not a second
+    # fixture: the integer literal each member matches its count against is replaced, IN
+    # THAT MEMBER'S OWN LINE RANGE ONLY, by a variable of the same name. Nothing else about
+    # the def moves — it still writes with update_all, still binds the count, still
+    # compares it — and cas_confirmed? must go FALSE. If it does not, the predicate is
+    # reading the destructure alone and every `{n, _} = update_all(...)` in the tree is
+    # about to certify a confirmation nobody wrote.
+    Enum.each(bound, fn d -> cas_int_removal_check!(d) end)
+  end
+
+  @count_int_rx ~r/(===|!==|==|!=)(\s*)(\d+)/
+
+  defp cas_int_removal_check!(d) do
+    lines = d.path |> File.read!() |> String.split("\n")
+    lo = d.line - 1
+    hi = min(d.last, length(lines)) - 1
+
+    {mutated, hits} =
+      lines
+      |> Enum.with_index()
+      |> Enum.map_reduce(0, fn {line, i}, hits ->
+        if i >= lo and i <= hi and hits == 0 and Regex.match?(@count_int_rx, line) do
+          {Regex.replace(@count_int_rx, line, "\\1\\2n_\\3", global: false), hits + 1}
+        else
+          {line, hits}
+        end
+      end)
+
+    if hits == 0 do
+      raise "CAS-SPELLING removal arm is VACUOUS at #{d.path}:#{d.line}: no integer-literal " <>
+              "comparison was found in lines #{d.line}-#{d.last} to remove, so the quiet arm " <>
+              "below would assert over an unmutated body."
+    end
+
+    src = Enum.join(mutated, "\n")
+
+    case Code.string_to_quoted(src, census_parse_opts()) do
+      {:ok, ast} ->
+        mutant = ast |> collect_defs(d.path) |> Enum.find(&(&1.line == d.line))
+
+        cond do
+          is_nil(mutant) ->
+            raise "CAS-SPELLING removal arm at #{d.path}:#{d.line}: the mutated copy holds no " <>
+                    "def on that line — the substitution moved the tree and the arm is measuring " <>
+                    "a different function."
+
+          not update_all_writer?(mutant) ->
+            raise "CAS-SPELLING removal arm at #{d.path}:#{d.line}: the mutant stopped writing " <>
+                    "with Repo.update_all, so a refusal below would be the LOST WRITE talking, " <>
+                    "not the lost integer."
+
+          cas_confirmed?(mutant) ->
+            raise "CAS-SPELLING removal arm FAILED at #{d.path}:#{d.line}: with the integer " <>
+                    "literal replaced by a variable, cas_confirmed?/1 STILL reads CAS. The " <>
+                    "predicate is matching the destructure alone."
+
+          true ->
+            :ok
+        end
+
+      {:error, _} ->
+        raise "CAS-SPELLING removal arm at #{d.path}:#{d.line}: the mutated copy of " <>
+                "#{d.path} does not parse, so its refusal would be a parse error wearing a " <>
+                "predicate's name."
+    end
+  end
+
   defp unwrap_checks! do
     indent = "             "
     targets = for i <- 1..8, do: {"FixtureController.helper_number_#{i}/3", nil, nil}
