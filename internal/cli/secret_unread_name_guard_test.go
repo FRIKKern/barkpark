@@ -77,11 +77,11 @@ func newSecretHarness(t *testing.T) *secretHarness {
 	}
 	h.m = m
 	h.ctx = manifest.Context{
-		Server:            h.server.URL,
-		Token:             "tok",
-		Workspace:         "acme",
-		Project:           "site",
-		Dataset:           "production",
+		Server:    h.server.URL,
+		Token:     "tok",
+		Workspace: "acme",
+		Project:   "site",
+		Dataset:   "production",
 		// NOT explicit: `bp secret set` refuses an explicitly-typed -w/-p on the
 		// FLAT /v1/secrets route (that refusal is a different, pre-existing guard).
 		// The slugs stay populated so the scoped-set path_template still renders.
