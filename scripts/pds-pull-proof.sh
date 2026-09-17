@@ -3510,7 +3510,7 @@ sentinel_exclusion_derive() {
   local src="${1:-$REPO_ROOT/$SENTINEL_EXCLUSION_SOURCE_REL}" out
   [ -r "$src" ] || return 1
   out="$(sed -n 's/^PDS_SENTINEL_EXCLUSION[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$src" \
-          | head -n 1 | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
+          | sed -n '1p' | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
   [ -n "$out" ] || return 1
   # A name is interpolated into a SQL string literal below. Anything that could
   # close that literal is REFUSED, not escaped: the roster is a handful of
