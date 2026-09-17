@@ -25,7 +25,7 @@ skipped), while a docs-only stretch still resolves to a no-op.
 
 | Target | Trigger paths | Script | Mechanism |
 |---|---|---|---|
-| Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for instant `docker start` rollback) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
+| Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for `cp-deploy.sh --rollback`, which RECREATES it — never `docker start`, which would replay the env baked in at creation) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
 | Content instance | `api/**`, `internal/**`, `connectors/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
 
 Both hosts overlap old+new code on the new schema for the swap window, so
@@ -549,10 +549,23 @@ re-issues the mail relay's Let's Encrypt cert via DNS-01, ships it to
   active one was never touched); scripts also leave the prior commit reachable
   (`git reset --hard <old>`) and, for the control plane, a
   `cloud-control_plane:rollback` image tag.
-- Instant manual rollback after a bad-but-healthy swap: flip the port in
-  `/etc/caddy/Caddyfile` back (4100↔4101 / 4000↔4001), `systemctl reload
-  caddy`, start the old slot (`docker start …` / `systemctl start
-  barkpark-slot@<slot>`).
+- Instant manual rollback after a bad-but-healthy swap:
+  - **Control plane** — `bash /opt/barkpark/deploy/cp-deploy.sh --rollback`
+    (`--rollback-preflight` first for a read-only "which slot, which port"). It
+    takes the deploy lock, retags `cloud-control_plane:rollback` → `:latest`,
+    sources `cloud/.env`, `--force-recreate`s the dormant slot, health-gates it
+    and only then flips Caddy; it refuses with a distinct exit code at every
+    precondition it cannot satisfy. **Never `docker start` the dormant slot.**
+    `docker start` resumes an existing container object and replays the
+    environment baked in when that container was *created*, so a slot older than
+    a `cloud/.env` change comes back serving stale secrets and allowlists with a
+    200 on every probe and no signal anywhere
+    (`gr-blk-cp-deploy-rollback-stale-env`).
+  - **Content instance** — flip the port in `/etc/caddy/Caddyfile` back
+    (4000↔4001), `systemctl reload caddy`, `systemctl start
+    barkpark-slot@<slot>`. This one is safe as written: the unit carries
+    `EnvironmentFile=/opt/barkpark/.slots/%i.env`, which systemd re-reads on
+    every start, so the slot cannot come back on stale env.
 
 ## Connectors `:cloud` runner (host prereqs)
 
