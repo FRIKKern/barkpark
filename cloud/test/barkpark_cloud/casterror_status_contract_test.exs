@@ -266,5 +266,4 @@ defmodule BarkparkCloud.CastErrorStatusContractTest do
       assert bare != [], "no bare Ecto.CastError lines found in cloud/lib + cloud/test at all"
     end
   end
-
 end
