@@ -1548,18 +1548,25 @@ func (r TaskReadback) IsDraft() bool {
 // error; a non-200 carries the status. Both are honest read failures — the
 // caller must NOT read them as "the write landed".
 func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
-	resp, err := c.authGet(c.flatURL("/v1/tasks/" + url.PathEscape(docID)))
+	raw, status, err := c.taskGetRaw(docID, "")
 	if err != nil {
 		return TaskReadback{}, err
 	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return TaskReadback{}, fmt.Errorf("task read-back %s: %w", docID, err)
+	// A doc_id that exists in more than one dataset makes the BARE route
+	// refuse 409 ambiguous_dataset. The write that this read is checking was
+	// already addressed by dataset (`bp task stamp/close/pulse -d <ds>` sends
+	// ?dataset=), so the read-back must name the same one or it reports a
+	// landed write as NOT STORED — and tells the operator to write again.
+	// Retry ONLY on the 409, and only with the dataset the caller resolved, so
+	// every non-ambiguous row keeps today's bare-route behaviour byte for byte
+	// (including the server-side `drafts.` fallback that route performs).
+	if status == http.StatusConflict && c.Dataset != "" {
+		if raw2, status2, err2 := c.taskGetRaw(docID, c.Dataset); err2 == nil && status2 == http.StatusOK {
+			raw, status = raw2, status2
+		}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return TaskReadback{}, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
+	if status != http.StatusOK {
+		return TaskReadback{}, fmt.Errorf("task read-back %s: status %d", docID, status)
 	}
 	var env struct {
 		OK     bool   `json:"ok"`
@@ -1592,6 +1599,26 @@ func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
 		LifecycleStatus: env.Doc.LifecycleStatus,
 		Claim:           env.Doc.Claim,
 	}, nil
+}
+
+// taskGetRaw performs one GET /v1/tasks/:doc_id, optionally naming a dataset,
+// and hands back the body with its status. An empty dataset sends the BARE
+// route, byte-identical to the request this read-back has always made.
+func (c *Client) taskGetRaw(docID, dataset string) ([]byte, int, error) {
+	endpoint := c.flatURL("/v1/tasks/" + url.PathEscape(docID))
+	if dataset != "" {
+		endpoint += "?dataset=" + url.QueryEscape(dataset)
+	}
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	return raw, resp.StatusCode, nil
 }
 
 // GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join
