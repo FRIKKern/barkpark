@@ -87,15 +87,24 @@ Elixir security gates, path-triggered on `api/**`:
      satisfying a required context.
    - The registrable name is **`Security gate`**: unmatrixed, `if: always()`, and
      it ASSERTS over every upstream result rather than echoing them.
-   - `sobelow` is deliberately **NOT in that aggregator's `needs`**. Measured: a
-     `continue-on-error: true` job that exits 1 concludes FAILURE and renders a
-     RED check run while `needs.<job>.result` reads `success` — byte-identical to
-     a genuine pass, and undecomposable, because the information is destroyed
-     before the aggregator's shell starts. There is no honest "tolerate sobelow"
-     branch to write, so its own red check run is the only truthful signal it
-     has. `scripts/security-gate-shape.test.sh` forces this shape (deriving the
-     continue-on-error set FROM the workflow, so it self-corrects the day Sobelow
-     becomes blocking), and the unfiltered `gate-shape` job runs it on every head.
+   - `sobelow` IS in that aggregator's `needs`, and is judged on
+     `needs.sobelow.outputs.verdict`, **never on its `.result`**. The
+     measurement behind the older rule stands: a `continue-on-error: true` job
+     that exits 1 concludes FAILURE and renders a RED check run while
+     `needs.<job>.result` reads `success` — byte-identical to a genuine pass,
+     and undecomposable. What was wrong was the conclusion drawn from it, that
+     no aggregation was possible: `continue-on-error` launders a job's RESULT
+     and does not touch its OUTPUTS, so the `scripts/run-instrument.sh` verdict
+     channel the other three jobs already publish on carries Sobelow intact.
+     Until 2026-09-17 it did not, and a fresh finding therefore reached no
+     rollup at all — one advisory, unaggregated, unrequired check run was the
+     whole signal. `scripts/security-gate-shape.test.sh` now enforces a
+     predicate rather than a ban: a continue-on-error job in `needs` must
+     declare `outputs.verdict` (bound to a step that exists), the aggregator
+     must bind that verdict, and it must bind that job's `.result` nowhere.
+     An EMPTY verdict on a DISPATCHED job is CANNOT READ and reds. Main's
+     standing findings stay neutral via the `main-red-breaker`, so only a
+     head-introduced finding travels.
    - **The remaining blocker is not topology, and it is no longer a live red
      either — it is that `mix-audit` reads a LIVE advisory database.** History: [merge-gates-history.md](merge-gates-history.md#the-mix-audit-blocker-retracted). The standing ground is forward-looking: a CVE published
      tomorrow reds `Security gate` on every open PR with no change to this repo,
@@ -105,10 +114,9 @@ Elixir security gates, path-triggered on `api/**`:
      `scripts/registration-deadlock-sweep.sh` — not a silent promotion by the
      next regeneration.
 
-   So flipping `continue-on-error: true` → `false` on `sobelow` now DOES change
-   the picture: the shape ratchet immediately demands it be added to the
-   aggregator's `needs`, and from then on a Sobelow regression reds `Security
-   gate`. That is a consequence to intend, not a side effect to discover.
+   Flipping `continue-on-error: true` → `false` on `sobelow` remains a separate
+   decision: it would move the job onto the ordinary `decide` roster and make
+   its red fail the job outright, rather than only its verdict travel.
 
    **Sobelow's greenness therefore is not a branch-protection concern — it is
    still a real one.** A permanently-red regression gate cannot report a
