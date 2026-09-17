@@ -67,8 +67,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # `|| :` IS LOAD-BEARING (task-3b5edb3d1f5990e3). A `run:` block's shell
+          # is `/usr/bin/bash -e {0}`, and `set -o pipefail` makes this pipeline
+          # carry the SCRIPT's status, so `-e` aborted the step the moment
+          # scheduled-arm-health.sh exited 1 (at least one red arm) or 2 (cannot
+          # measure) — which are this script's two INTERESTING outcomes. The step
+          # summary below was therefore written only when there was nothing to
+          # report. The `exit "$rc"` at the end still fails the step exactly as
+          # before; `|| :` only keeps `-e` from stealing the diagnosis.
           set -o pipefail
-          bash scripts/scheduled-arm-health.sh 2>&1 | tee "$RUNNER_TEMP/arm-health.txt"
+          bash scripts/scheduled-arm-health.sh 2>&1 | tee "$RUNNER_TEMP/arm-health.txt" || :
           rc=${PIPESTATUS[0]}
           {
             echo '## scheduled-arm-health'
