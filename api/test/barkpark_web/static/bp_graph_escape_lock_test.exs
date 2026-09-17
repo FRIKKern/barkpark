@@ -57,16 +57,25 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
   @repo_root Path.expand("../../../..", __DIR__)
   @canonical "api/priv/static/assets/bp-graph.js"
 
-  # The paths are written INLINE at the read site, never assembled from a
-  # module attribute, on purpose: scripts/elixir-path-escape-check.sh resolves
-  # `Path.join(@root_anchor, "<literal>")` and cannot see a literal that lives
-  # in a separate attribute. MEASURED on this tree — with the mirrors read via
-  # an attribute list the ratchet printed "50 distinct repo-root read(s) ... OK"
-  # and dispatched on none of them; with the literals inline it requires all
-  # three to be declared. Written this way, the ratchet enforces the
+  # The paths are written INLINE at the read site. That used to be LOAD-BEARING:
+  # scripts/elixir-path-escape-check.sh resolved only
+  # `Path.join(@root_anchor, "<literal>")` and could not see a literal that
+  # lived in a separate attribute — measured on the tree of the day, the
+  # mirrors read via an attribute list printed "50 distinct repo-root read(s)
+  # ... OK" and dispatched on none of them. That hole is CLOSED: #18832 added
+  # SHAPE 8 (`-rootattr`), which resolves a DATA attribute's string literals
+  # against a tracked anchor whenever the file joins a non-literal onto it, so
+  # the attribute form is now censused too. Re-MEASURED on this tree: a probe
+  # test joining `@mirrors ["Makefile"]` onto the repo-root anchor takes the
+  # census 66 -> 67, `test-rootattr` 0 -> 1, and reds `UNCOVERED repo-root
+  # read: Makefile` at rc=1; removing it returns 66, `test-rootattr` 0, rc=0.
+  # So inline is now a STYLE choice, not a coverage requirement — either form
+  # is seen. Written either way, the ratchet enforces the
   # ELIXIR_TEST_ONLY_PATHS declaration that puts these three files into the
   # Elixir dispatcher's path set, so a mirror-only PR runs this suite instead
-  # of skipping it.
+  # of skipping it. (What SHAPE 8 still cannot see is a path built from a
+  # function return or a list literal written inline at the call site; those
+  # must be declared by hand.)
   defp canonical_path, do: Path.join(@repo_root, "api/priv/static/assets/bp-graph.js")
 
   defp mirror_paths do
