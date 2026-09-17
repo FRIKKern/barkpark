@@ -237,14 +237,14 @@ defmodule BarkparkCloud.DeployLedgerDeliveryScopeTest do
       # Each sits AFTER its own site's last live mark, which is what makes it
       # censored at all: a row is DELIVERED by the first live mark at or after
       # it, so an in-flight row before one is resolved, not still waiting.
-      deployments!(f.site_a, [%{status: "in_flight", inserted_at: still_waiting_at(4)}])
+      deployments!(f.site_a, [%{status: "deferred", inserted_at: still_waiting_at(4)}])
 
       deployments!(f.site_b, [
         # PAST B's last live mark: B's 9th row lands at +9h and answers 9,000s
         # later, so anything before +11.5h is DELIVERED by it, not waiting.
-        %{status: "in_flight", inserted_at: still_waiting_at(12)},
-        %{status: "in_flight", inserted_at: still_waiting_at(13)},
-        %{status: "in_flight", inserted_at: still_waiting_at(14)}
+        %{status: "deferred", inserted_at: still_waiting_at(12)},
+        %{status: "deferred", inserted_at: still_waiting_at(13)},
+        %{status: "deferred", inserted_at: still_waiting_at(14)}
       ])
 
       a = DeployLedger.delivery(@from, @to, site_ids: [f.site_a.id], as_of: @to)
@@ -344,7 +344,7 @@ defmodule BarkparkCloud.DeployLedgerDeliveryScopeTest do
       # Deliberately thin: 4 delivered rows, far below `min_sample` 200. Scoping
       # is what MAKES it thin — the fleet has 13 — which is the whole point:
       # a smaller population makes refusals more likely, never less.
-      deployments!(f.site_a, [%{status: "in_flight", inserted_at: still_waiting_at(4)}])
+      deployments!(f.site_a, [%{status: "deferred", inserted_at: still_waiting_at(4)}])
 
       b = body(call("/v1/deploy-ledger/census?#{@window}", session_token(f.user_a)))
       d = b["delivery"]
