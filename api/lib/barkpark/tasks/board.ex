@@ -75,11 +75,11 @@ defmodule Barkpark.Tasks.Board do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Content.DraftId
   alias Barkpark.Plugins.Github.Link
   alias Barkpark.Repo
   alias Barkpark.Tasks
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.TwinCollapse
   alias Barkpark.Tasks.Validation
 
   # The status ladder in render order. The five WORK columns come first; the two
@@ -346,38 +346,10 @@ defmodule Barkpark.Tasks.Board do
     )
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
-    |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)
-  end
-
-  # TWIN COLLAPSE POLICY (TwinResolver rule 1, the board's own policy):
-  # *collapse, published wins*; an UNPAIRED `drafts.<id>` row — no published
-  # twin — IS the row of record and resolves as ITSELF (rule 1 with its premise
-  # absent). That carve-out is deliberate, NOT a blanket `drafts.` drop:
-  # dropping unpaired drafts would make the whole mutate-created population
-  # unreadable (`Tasks.Dedup` / `Tasks.Queue` / `Tasks.DraftTerminalFence` all
-  # rest on it).
-  #
-  # WHY A TIE-BREAK AND NOT `hd/1`. The bucket reaches here from
-  # `load_task_docs/1`'s `Repo.all |> Enum.group_by` with NO `ORDER BY`, so the
-  # previous `Enum.find(twins, hd(twins), …)` DEFAULT — taken whenever the
-  # bucket holds no published row — answered by Postgres STORAGE ORDER, not by
-  # a rule. The Go mirror of this exact shape (`internal/taskboard`'s
-  # `buildByBare`) was measured live: over 400 builds the draft twin won the
-  # slot 349 times and the published row 51. Nothing in the write path is
-  # asserted here to make a two-unpublished-member bucket impossible, so the
-  # order is pinned by a RULE instead of by an assumption about the storage:
-  #
-  #   1. a `status == "published"` row beats any other,
-  #   2. then a bare id beats a `drafts.`-prefixed one,
-  #   3. then the lexicographically lowest `doc_id`.
-  #
-  # Rules 2-3 are total, so the answer no longer depends on the row order the
-  # database happens to hand back.
-  defp canonical_twin(twins) do
-    Enum.min_by(twins, fn d ->
-      {if(d.status == "published", do: 0, else: 1), if(DraftId.draft?(d.doc_id), do: 1, else: 0),
-       d.doc_id}
-    end)
+    # TWIN COLLAPSE POLICY: the rule, its carve-out for unpaired drafts, and
+    # why it is a total order and not `hd/1`, all live in `Tasks.TwinCollapse`
+    # — the ONE home the board and `Tasks.Fleet` share (task-f7d389c21c68839f).
+    |> Enum.map(fn {_lid, twins} -> TwinCollapse.canonical(twins) end)
   end
 
   # One batched query for every outbound `blocks` edge in the corpus, grouped
