@@ -36,3 +36,5 @@ PDS-D750	2026-09-16T23:44:21Z	task-778d9a95681c33bf (a rerun that cannot go red)
 PDS-D751	2026-09-17T00:13:14Z	task-c72dd1f2a09d91cf (a rerun is a property of its reason)
 PDS-D752	2026-09-17T01:07:03Z	pds-w44-bl-ledger-census-door-repriced (the ledger-census door is re-priced UP again and stays PRICE)
 PDS-D755	2026-09-17T07:36:46Z	pds-bl-w16-prewarm-warms-the-wrong-build-tree (r21 dw02)
+PDS-D756	2026-09-17T13:44:49Z	pds-bl-charter-d399-duplicate-identifier (r21 dw14) — duplicate census re-lensed 5 to 20, arm D ratchet
+PDS-D757	2026-09-17T13:54:39Z	pds-bl-charter-anchors-stale-vs-frozen-blob (r21 dw14) — frozen-blob criterion ruled superseded, content anchors + live guard

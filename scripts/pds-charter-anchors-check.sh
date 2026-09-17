@@ -32,6 +32,37 @@
 # separately rather than folded into arm B so a gain in one form can never be
 # hidden by a loss in the other.
 #
+# RULE (arm D, ratchet): no PDS-D identifier may be DEFINED twice. A duplicated
+# number makes every future citation of it ambiguous by construction, which is
+# the same defect arm A refuses for content anchors, one level up. Three
+# numbers, not one, because the LENS is where this check goes wrong:
+#
+#   * duplicates .......... ceiling below. Definitions are counted with the
+#     em-dash discriminator `PDS-D<n> — `, because `**PDS-D454 stands — no
+#     Elixir gate this wave**` is a bold CITATION at line start and is not a
+#     definition; a looser boundary counts it and manufactures a duplicate.
+#   * unclassified ........ lines that LOOK like a definition (`**PDS-D<n>` or
+#     `### PDS-D<n>` at line start) but do not carry the discriminator. Ratcheted so the lens
+#     cannot go blind quietly: a definition written with a different separator
+#     would otherwise vanish from the duplicate count with nothing reporting it.
+#   * definitions floor ... a PRECONDITION, and it is scoped to the CANONICAL
+#     charter only. The production charter is append-only, so the
+#     definition count can only grow. If it FALLS, the pattern stopped matching
+#     and every verdict above it is vacuous — that reds, loudly, rather than
+#     printing a reassuring `duplicates 0`. A fixture charter is legitimately
+#     two lines long, so the floor is SKIPPED (and says so) for any other path;
+#     the duplicate and unclassified arms still run on it, and the self-test
+#     exercises both there.
+#
+# THE LENS IS THE WHOLE FINDING HERE, TWICE. A census scoped to the LIST-ITEM
+# form `^- **PDS-D<n>` sees 590 of 808 definitions and reports FIVE duplicates.
+# Widening to the un-bulleted `**PDS-D<n>` form finds thirteen more (18).
+# Widening again to the indented and `### PDS-D<n>` heading forms — the lens
+# pds-record-parity.sh already used — finds two more (20). A guard baselined on
+# any of the narrow lenses would have gone green on the wrong number and locked
+# it in. Baseline every ceiling from a run of THIS script, never from a figure
+# quoted in prose, and cross-check the lens against an INDEPENDENT instrument.
+#
 # Usage: bash scripts/pds-charter-anchors-check.sh [charter-path]
 # Exit 0 = every anchor resolves and no new bare citation appeared. Exit 1 = a
 # citation no longer resolves; the output names each one.
@@ -50,6 +81,15 @@ LEGACY_BARE_CEILING="${PDS_ANCHOR_LEGACY_CEILING:-15}"
 # File-less `` `:NNN` `` citations still in the charter (arm C). Same ratchet
 # rule: lower it as decisions are converted; raising it is what arm C refuses.
 FILELESS_CEILING="${PDS_ANCHOR_FILELESS_CEILING:-641}"
+
+# Duplicated PDS-D identifiers still in the charter (arm D). Same ratchet rule.
+DUPE_CEILING="${PDS_ANCHOR_DUPE_CEILING:-20}"
+# Definition-shaped lines that carry no em-dash discriminator (arm D's blind
+# spot, made visible). Both known ones are bold prose citations, not definitions.
+UNCLASSIFIED_CEILING="${PDS_ANCHOR_UNCLASSIFIED_CEILING:-8}"
+# The charter is append-only: this count may grow, never shrink. A fall means
+# the pattern broke, not that decisions were deleted.
+DEF_FLOOR="${PDS_ANCHOR_DEF_FLOOR:-809}"
 
 if [ ! -f "$CHARTER" ]; then
   printf 'pds-charter-anchors-check: charter not found: %s\n' "$CHARTER" >&2
@@ -112,11 +152,44 @@ bare="$(grep -oE 'pds-pull-proof\.sh`?:[0-9]' "$CHARTER" | wc -l | tr -d ' ')"
 # occurrence (grep -c would count LINES, and a charter line can carry three).
 fileless="$(grep -oE '`:[0-9]+(-[0-9]+)?`' "$CHARTER" | wc -l | tr -d ' ')"
 
+# Arm D — the duplicate-identifier ratchet. A definition is `**PDS-D<n> — `
+# at line start, optionally as a markdown list item. The em dash immediately
+# after the number is the discriminator that separates a DEFINITION from a bold
+# CITATION; see the header.
+# The lens is deliberately the SAME one scripts/pds-record-parity.sh uses for
+# `--axis d` (indented or bulleted `**PDS-D<n>`, plus the `### PDS-D<n>` heading
+# form), so the two instruments cannot disagree about what a definition IS. A
+# narrower lens here was caught by exactly that comparison: it missed the
+# heading form and two more duplicates with it.
+DEF_RE='^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+[a-z]? — |^#+[[:space:]]+PDS-D[0-9]+[a-z]? — '
+LOOSE_RE='^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+|^#+[[:space:]]+PDS-D[0-9]+'
+
+# The floor is a property of the CANONICAL append-only charter. A fixture is
+# legitimately tiny, so scope it rather than letting it red every self-test arm.
+CANONICAL_CHARTER="$REPO_ROOT/.claude/workflows/bp-pds-charter.md"
+charter_abs="$(cd "$(dirname "$CHARTER")" && pwd)/$(basename "$CHARTER")"
+if [ "$charter_abs" = "$CANONICAL_CHARTER" ]; then is_canonical=1; else is_canonical=0; fi
+
+defs="$(grep -cE "$DEF_RE" "$CHARTER" || true)"
+unclassified="$(grep -cE "$LOOSE_RE" "$CHARTER" || true)"
+unclassified=$((unclassified - defs))
+dupe_list="$(grep -oE "$DEF_RE" "$CHARTER" \
+  | grep -oE 'PDS-D[0-9]+[a-z]?' \
+  | sort | uniq -c | awk '$1 > 1 { print $2 }')"
+dupes="$(printf '%s' "$dupe_list" | grep -c . || true)"
+
 printf '\n'
 printf 'anchors checked ..... %s (arm A: each must resolve to exactly 1 line)\n' "$checked"
 printf 'anchors rotted ...... %s\n' "$fails"
 printf 'legacy bare cites ... %s (ceiling %s)\n' "$bare" "$LEGACY_BARE_CEILING"
 printf 'file-less cites ..... %s (ceiling %s)\n' "$fileless" "$FILELESS_CEILING"
+if [ "$is_canonical" -eq 1 ]; then
+  printf 'D-definitions ....... %s (floor %s — append-only, may only grow)\n' "$defs" "$DEF_FLOOR"
+else
+  printf 'D-definitions ....... %s (floor SKIPPED — not the canonical charter)\n' "$defs"
+fi
+printf 'duplicate D-numbers . %s (ceiling %s)\n' "$dupes" "$DUPE_CEILING"
+printf 'unclassified lines .. %s (ceiling %s — definition-shaped, no discriminator)\n' "$unclassified" "$UNCLASSIFIED_CEILING"
 
 if [ "$bare" -gt "$LEGACY_BARE_CEILING" ]; then
   printf '\nFAIL: a NEW bare `pds-pull-proof.sh:NNN` citation was added (%s > ceiling %s).\n' "$bare" "$LEGACY_BARE_CEILING"
@@ -136,6 +209,36 @@ if [ "$fileless" -gt "$FILELESS_CEILING" ]; then
 elif [ "$fileless" -lt "$FILELESS_CEILING" ]; then
   printf '\nPROGRESS: file-less citations are down to %s. LOWER THE CEILING to %s in this script\n' "$fileless" "$fileless"
   printf '          so the gain is locked in. This is NOT a failure.\n'
+fi
+
+# Arm D's PRECONDITION first: if the lens stopped seeing definitions, every
+# duplicate verdict below it is vacuous and must not be printed as a pass.
+if [ "$is_canonical" -eq 1 ] && [ "$defs" -lt "$DEF_FLOOR" ]; then
+  printf '\nFAIL: only %s PDS-D definitions matched, below the floor of %s.\n' "$defs" "$DEF_FLOOR"
+  printf '      The charter is append-only, so this is the PATTERN breaking, not decisions\n'
+  printf '      being deleted. Arm D measured nothing; fix the pattern before trusting it.\n'
+  fails=$((fails + 1))
+elif [ "$is_canonical" -eq 1 ] && [ "$defs" -gt "$DEF_FLOOR" ]; then
+  printf '\nPROGRESS: %s definitions now (floor %s). RAISE THE FLOOR to %s so a future\n' "$defs" "$DEF_FLOOR" "$defs"
+  printf '          pattern break cannot hide behind a stale floor. This is NOT a failure.\n'
+fi
+
+if [ "$unclassified" -gt "$UNCLASSIFIED_CEILING" ]; then
+  printf '\nFAIL: %s definition-shaped lines carry no `— ` discriminator (ceiling %s).\n' "$unclassified" "$UNCLASSIFIED_CEILING"
+  printf '      Arm D cannot see these, so a duplicate hiding in one would read as 0.\n'
+  printf '      Write the definition as `**PDS-D<n> — TITLE.**`, or arm D is blind to it.\n'
+  fails=$((fails + 1))
+fi
+
+if [ "$dupes" -gt "$DUPE_CEILING" ]; then
+  printf '\nFAIL: %s PDS-D identifiers are defined twice (ceiling %s):\n' "$dupes" "$DUPE_CEILING"
+  printf '%s\n' "$dupe_list" | sed 's/^/      /'
+  printf '      A number defined twice makes every citation of it ambiguous by construction.\n'
+  printf '      Mint the next free number from tooling/pds/d-number-reservations.tsv instead.\n'
+  fails=$((fails + 1))
+elif [ "$dupes" -lt "$DUPE_CEILING" ]; then
+  printf '\nPROGRESS: duplicate D-numbers are down to %s. LOWER THE CEILING to %s.\n' "$dupes" "$dupes"
+  printf '          This is NOT a failure.\n'
 fi
 
 if [ "$fails" -ne 0 ]; then

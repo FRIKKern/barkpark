@@ -15992,3 +15992,112 @@ name unrelated code.
 
   **PDS-D258 STANDS, UNAMENDED.** No pre-warm form runs `mix deps.get`, and a fresh `origin/main`
   worktree still has no `api/deps`. Both crown runbooks are corrected to match.
+
+## LATE ADJUDICATION — THE DUPLICATED DECISION NUMBERS, RE-CENSUSED AND GUARDED (decided 2026-09-17, task `pds-bl-charter-d399-duplicate-identifier`)
+
+- **PDS-D756 — THE DUPLICATE POPULATION IS TWENTY, NOT FIVE, AND EVERY STEP OF THE DIFFERENCE IS
+  THE LENS, NOT THE CHARTER (2026-09-17).** The row filed ONE duplicated identifier. The
+  wave-preceding census reported FIVE — PDS-D397, D398, D399, D400, D492 — and recorded a rider
+  specifying a guard baselined at that figure. Re-measured here the true count is **TWENTY**, and
+  the lens moved twice to get there:
+
+  | lens | definitions seen | duplicates reported |
+  |---|---|---|
+  | list-item only, `^- **PDS-D<n>` (the earlier census) | 590 | 5 |
+  | + the un-bulleted `**PDS-D<n>` form | 736 | 18 |
+  | + indented and `### PDS-D<n>` heading forms (this ruling) | 808 | 20 |
+
+  The thirteen found at step two are PDS-D145, D146, D493, D494, D495, D553, D554, D555, D556,
+  D570, D571, D572 and D573; the two found at step three are PDS-D664 and D665. **Step three was
+  not found by thinking harder — it was found by comparing the new lens against an INDEPENDENT
+  instrument.** `scripts/pds-record-parity.sh`'s `--axis d` already counted definitions with the
+  wider pattern and reported 754 distinct numbers where the draft arm saw 719. Two instruments
+  disagreeing about what a DEFINITION is was the whole signal, and the fix was to make arm D use
+  parity's lens verbatim so they cannot disagree again.
+
+  **THIS IS THE RIDER'S OWN WARNING, ONE LEVEL UP.** That rider correctly refused to baseline a
+  guard at TWENTY-SIX — a pattern with no trailing boundary folds D448a, D448b and D480a onto their
+  parent prefix and reads each as a duplicate of it — and it was right to refuse. But the narrow
+  form it chose instead was wrong in the opposite direction, and a guard shipped at 5 would have
+  gone GREEN on a charter carrying 18 and locked the wrong number in permanently. **Both errors are
+  the same error: a ceiling inherited from prose rather than re-derived by a run of the instrument
+  that will enforce it.** Arm D's header now says so in as many words, and adds the second half
+  this ruling paid for: cross-check the lens against an independent instrument before baselining.
+
+  **THE SHAPE IS SIX CONTIGUOUS BLOCKS, NOT TWENTY SLIPS.** D145–146, D397–400, D492–495,
+  D553–556, D570–573 and D664–665. Each block is one wave minting a range a previous wave had already minted,
+  which is why re-issuing any single number is cosmetic: the mechanism that produced them is
+  block-minting without a reservation read, and `tooling/pds/d-number-reservations.tsv` plus arm D
+  are what actually close it. **The historical entries are NOT edited** — the charter is
+  append-only memory and a duplicate that is recorded, counted and ratcheted is honest; a duplicate
+  silently renumbered under a later reader's hand is not.
+
+  **THE GUARD IS ARM D OF `scripts/pds-charter-anchors-check.sh`, NOT A NEW SCRIPT, AND THAT IS
+  DELIBERATE.** A new `scripts/pds-*.sh` owes the door census a disposition row, and a missing one
+  reddened the required Elixir gate for a whole fleet earlier in this campaign; folding the check
+  into the charter guard that is already wired and already run positionally costs zero new doors.
+  Arm D reports THREE numbers, because the counting lens is where this check goes wrong:
+  duplicates (ceiling 20), **unclassified** definition-shaped lines carrying no `— ` discriminator
+  (ceiling 8 — every one is a bold prose CITATION, `**PDS-D454 stands …**` and `**PDS-D648 IS
+  REFUTED …**` among them, and counting any of them as a definition manufactures a false
+  duplicate), and a **definitions floor** of 808 that is a PRECONDITION: the charter is
+  append-only, so a FALL in the definition
+  count means the pattern broke and every duplicate verdict above it is vacuous. Without that
+  floor, a broken pattern prints `duplicate D-numbers . 0` and reads as a pass.
+
+  **FIVE CONTROLS RAN, AND ONE OF THEM CAUGHT THE AUTHOR.** (i) Colliding a number defined exactly
+  once, in LIST form, takes duplicates 20 → 21 and reds. The FIRST attempt at that control collided
+  PDS-D700, which has ZERO definitions — it added a first definition, not a second, and the arm
+  correctly stayed quiet; a control that does not fire is worthless until you have checked it was
+  aimed at something. (ii) The same collision in HEADING form — the shape the narrow lens could not
+  see — also reds, which is the arm that would have been vacuous before step three. (iii)
+  Appending a definition with a hyphen separator instead of an em dash takes unclassified 8 → 9 and
+  reds, so the lens cannot go blind quietly. (iv) Raising the floor above the true count reds on
+  the precondition; the same red fired for real during authoring, when an escaping bug wrote a
+  literal backslash-u sequence into the regex and the definition count read 0 while the duplicate
+  count read a reassuring 0 beside it. (v) A legitimate new unique definition raises the count to
+  809 and PASSES, so the arm does not simply red on growth.
+
+## LATE ADJUDICATION — THE FROZEN-BLOB ANCHOR CRITERION, RULED (decided 2026-09-17, task `pds-bl-charter-anchors-stale-vs-frozen-blob`)
+
+- **PDS-D757 — THE ROW'S FIRST CRITERION IS UNSATISFIABLE AS WORDED AND ITS PURPOSE IS ALREADY
+  DISCHARGED MORE STRONGLY; IT IS RECORDED AS SUPERSEDED, NOT FORCED TO MET (2026-09-17).** The
+  criterion asks that every harness line-anchor in PDS-D101 and PDS-D116 resolve *against blob
+  `e219e97ccf7f33797c86a2b84d998d599b6bda31`*, shown by pasting the referenced line. Three things
+  are true at once and together they settle it:
+
+  **(i) THE ANCHORS ARE NO LONGER LINE-ANCHORS.** On `origin/main` today, neither decision cites a
+  line number. PDS-D101 cites `scripts/pds-pull-proof.sh`@`canonical_order() { # space-separated ids`
+  and `scripts/pds-pull-proof.sh`@`acquire_full_bundle() {`; PDS-D116 cites five content anchors of
+  the same form. The criterion's subject — "harness line-anchor" — has no referent in the text it
+  governs. **A criterion whose subject no longer exists cannot be met and cannot be missed; it can
+  only be superseded.**
+
+  **(ii) PINNING TO THAT BLOB IS FORBIDDEN BY THE CHARTER'S OWN LAW.** PDS-D732 rules the freeze
+  identity is READ, never TYPED, and names `e219e97…` as the stale value quoted as current in at
+  least four places. PDS-D296 rules the freeze is climb-scoped and derived at run time, so there is
+  no repo-wide blob for a line number to be true against. **Be precise about what is dead:** the
+  object is still reachable — `git cat-file -t e219e97ccf7f33797c86a2b84d998d599b6bda31` answers
+  `blob`, and it is 2611 lines against main's 4154. It is not unopenable; it is simply not the tree
+  any reader or any guard reads, and the charter forbids typing it as the reference. Satisfying the
+  criterion literally would have meant re-introducing exactly the constant two rulings exist to
+  remove.
+
+  **(iii) THE PURPOSE IS DISCHARGED BY A PREDICATE, NOT BY A PASTE.** The criterion's purpose was
+  that a reader can re-derive the single-invocation law from the citations. Content anchors
+  discharge it better than any paste could: `scripts/pds-charter-anchors-check.sh` arm A requires
+  every anchor to match its file EXACTLY ONCE, so zero hits AND two-or-more hits both red, on every
+  commit, forever. Run on this charter at this commit it reports **25 anchors checked, 0 rotted**. A
+  paste is a snapshot of one moment; a guard is a rule. Note also what the old form HID: inside the
+  frozen blob itself, the cited lines 2240 and 2003 are BLANK, 1665 is a bare `return 1`, and 2177
+  is a bare `fi` — so a literal discharge would have pasted blank lines and a bare `fi` as proof
+  that an anchor resolves.
+
+  **THE RECOMMENDED RE-CUT, for the owner who holds the row's wording:** "every anchor in PDS-D101
+  and PDS-D116 is a CONTENT anchor of the form `<path>`@`<literal>`, and
+  `scripts/pds-charter-anchors-check.sh` resolves every one of them to exactly one line on
+  `origin/main`." That is checkable by a command, blob-independent, and re-checks itself on every
+  future thaw with no reminder needed. **It is NOT applied here.** Re-wording a published criterion
+  is the row owner's act, not a worker's, and a worker who edits the criterion they are measured by
+  has removed the only thing that could have refuted them. The ruling is recorded; the wording is
+  the owner's.
