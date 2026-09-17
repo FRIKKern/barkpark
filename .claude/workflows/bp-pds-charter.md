@@ -15637,7 +15637,7 @@ name unrelated code.
 
   | PDS-D409 said | What `origin/main` `3c89c3b94` actually holds |
   |---|---|
-  | `board.ex:210-219` = twin collapse | that range is `snapshot/1`'s loader preamble. The collapse is ~100 lines below in `load_task_docs/1`: `api/lib/barkpark/tasks/board.ex`@`Enum.group_by(fn d -> Content.published_id(d.doc_id) end)` then `api/lib/barkpark/tasks/board.ex`@`defp canonical_twin(twins) do` (that helper is where the collapse rule now lives — #18909 replaced the storage-order `Enum.find(twins, hd(twins), …)` default with a total three-key tie-break) |
+  | `board.ex:210-219` = twin collapse | that range is `snapshot/1`'s loader preamble. The collapse is ~100 lines below in `load_task_docs/1`: `api/lib/barkpark/tasks/board.ex`@`Enum.group_by(fn d -> Content.published_id(d.doc_id) end)` then `api/lib/barkpark/tasks/twin_collapse.ex`@`def canonical([_ | _] = twins), do: Enum.min_by(twins, &collapse_key/1)` (the ONE home the collapse rule now lives in — #18909 replaced the storage-order `Enum.find(twins, hd(twins), …)` default with a total three-key tie-break, and #18986 then folded four copies of that helper out of `board.ex`/`fleet.ex` onto `Tasks.TwinCollapse`; cite the home, not a call site, so the next dedup does not rot this again) |
   | `queue.ex:146-166` = conditional collapse | the collapse is still there and still conditional, but that range is now `ready_query/1`'s scope preamble; the policy sentence is `api/lib/barkpark/tasks/queue.ex`@`only a draft with a same-scope published twin is suppressed, by axis 3 above.` |
   | `board.go:613-614` = prefix-stripping join | now `internal/taskboard/board.go`@`func buildByBare(byID map[string]Task) map[string]Task {`; the strip itself lives one file over at `internal/taskboard/detail_data.go`@`func bareID(id string) string { return strings.TrimPrefix(id, draftsPrefix) }`, and the third site is `internal/taskboard/paper.go`@`put("drafts."+pub, chip)` |
   | `tasks_next_cmd.go:77` = the drafts perspective | the line is still 77, but it is **not the only one** — a SECOND `Perspective: "drafts"` sits in `printReadyFrontierHeader`. The commented site is `internal/cli/tasks_next_cmd.go`@`Perspective: "drafts", // tasks live as drafts, exactly like` |
@@ -15649,7 +15649,7 @@ name unrelated code.
 
   **THE FIFTH SURFACE:** `Barkpark.Tasks.Fleet` carries THREE more verbatim copies of `canonical_twin/1`
   (`load_listeners/2`, `current_tasks_by_worker/2`, and the by-ids read), anchored at
-  `api/lib/barkpark/tasks/fleet.ex`@`# canonical row (published wins), Board-style.`. Same policy,
+  `api/lib/barkpark/tasks/twin_collapse.ex`@`defmodule Barkpark.Tasks.TwinCollapse do`. Same policy,
   four copies of the function across two modules, no shared home.
 
 - **PDS-D748 — THERE ARE NOT THREE POLICIES. THERE IS ONE RULE WITH A CARVE-OUT, ONE READER THAT DOES
