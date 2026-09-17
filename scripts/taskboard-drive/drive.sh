@@ -139,6 +139,48 @@ FAIL=0
 
 TMX() { tmux -L "$SOCK" "$@"; }
 
+# PIN THE COLOR PROFILE THE WAY WE PIN THE GEOMETRY. The board resolves its
+# lipgloss profile from the PANE's environment (termenv ColorProfile: TERM +
+# COLORTERM + TERM_PROGRAM), and tmux hands a pane whatever `default-terminal`
+# says — plain "screen" when no ~/.tmux.conf sets otherwise. termenv maps a bare
+# "screen" to **Ascii**, so on such a host the board paints with NO SGR AT ALL
+# and every style-keyed assert here is silently unmeasurable — it compares two
+# unstyled rows and reports "no response" rather than "I could not see".
+#
+# MEASURED on ubuntu-latest (PR #18858's first advisory run): capture-pane -e
+# returned the header row with ZERO escape sequences, and G7 read {} responding
+# columns on a healthy gutter. Darwin hosts pass only because the developer's
+# tmux.conf happens to set a 256color default-terminal.
+#
+# So the harness pins it: COLORTERM=truecolor + TERM_PROGRAM=tmux take termenv's
+# truecolor branch for a "screen*" TERM, and terminal-features RGB keeps tmux
+# from downsampling the 38;2;r;g;b it stores and re-emits. Same bytes on every
+# host — the same reason -x/-y is pinned rather than inherited.
+# MEASURED, in this order, on ubuntu-latest: tmux's own `default-terminal`
+# option plus `new-session -e` did NOT style the pane; forcing TERM/COLORTERM on
+# the app's command line did NOT either. The actual gate is `CI`:
+#
+#   termenv.go:28  func (o *Output) isTTY() bool {
+#   termenv.go:32    if len(o.environ.Getenv("CI")) > 0 { return false }
+#
+# and ColorProfile() returns Ascii the moment isTTY() is false — before TERM or
+# COLORTERM is read at all. Every GitHub runner exports CI=true, so the board
+# painted with zero SGR and every style-keyed assert here was unmeasurable.
+#
+# The pane genuinely IS a tty, so `env -u CI` is the honest correction, not a
+# workaround: it tells termenv the truth about the thing it is asking about.
+# TERM/COLORTERM/TERM_PROGRAM stay pinned so the profile is TrueColor rather
+# than whatever the host's tmux.conf happens to imply, and terminal-features RGB
+# keeps tmux from downsampling the 38;2;r;g;b it stores and re-emits — the same
+# captured bytes on every host. BP_ENV is the launch prefix every new-session
+# uses.
+pin_pane_color() {
+  TMX set-option -g  default-terminal  screen-256color >/dev/null 2>&1 || true
+  TMX set-option -ga terminal-features ",*:RGB"        >/dev/null 2>&1 || true
+}
+PANE_ENV=(-e COLORTERM=truecolor -e TERM_PROGRAM=tmux -e TERM=screen-256color)
+BP_ENV="env -u CI TERM=screen-256color COLORTERM=truecolor TERM_PROGRAM=tmux"
+
 cleanup() {
   if [ "${BP_DRIVE_KEEP:-}" = "" ]; then
     TMX kill-server 2>/dev/null || true
@@ -244,6 +286,48 @@ arrow_col() {
   [ -n "$hl" ] || { echo ""; return; }
   snap "$s" | sed -n "${hl}p" | perl -CSD -Mutf8 -ne \
     'my $i=0; for my $ch (split //){ $i++; if (ord($ch)==0x2194){ print $i; exit } }'
+}
+
+# THE STYLED DIVIDER CELL of a captured header row: the ↔ affordance together
+# with the SGR state that applies to it. Compose paints the ENTIRE divider —
+# every gutter cell, every row — with ONE style (compose.go: dividerRestStyle,
+# swapped for dividerHoverStyle when m.wideDividerHover, dividerGrabbedStyle
+# while dragging), so this one cell is a complete and faithful readout of the
+# gutter hit-test's answer for the whole gutter.
+#
+# WHY G7 READS THIS AND NOT THE WHOLE HEADER ROW. The header row's TAIL is the
+# reading pane's preview heading, and that heading reverts from the hovered
+# board row's title to the cursor's title the instant the pointer leaves the
+# board. A whole-row diff therefore calls EVERY off-board column "responding",
+# accent or not: col boardW+2 sits inside the reader pane, carries no hover
+# accent SGR at all, and still differed from the off-gutter baseline — by the
+# heading alone ("Harbor lights epic" vs "Mulch the seedling beds") — so a
+# healthy 2-cell gutter measured as three responding columns. That is churn
+# coupling, the one thing this harness's evidence law forbids (it is why G1/G2/
+# G3/G4/G8 are banished to live mode). The fix is to narrow what the probe
+# MEASURES, never to widen paneGutter2 to satisfy it.
+#
+# Reads one styled row on stdin, prints "<active SGR><↔>", or NO-DIVIDER when
+# the row carries no affordance. It never exits early mid-pipe: a `grep -q`-
+# shaped SIGPIPE under this script's pipefail is exactly how a probe lies (see
+# snap_has above).
+divider_cell_styled() {
+  perl -CSD -Mutf8 -ne '
+    chomp;
+    my $s = $_;
+    my @st;
+    my $cell = "NO-DIVIDER";
+    while (length $s) {
+      if ($s =~ s/^\e\[([0-9;]*)m//) {
+        my $p = $1;
+        if ($p eq "" || $p eq "0") { @st = () } else { push @st, "\e[" . $p . "m" }
+        next;
+      }
+      $s =~ s/^(.)//s;
+      if (ord($1) == 0x2194) { $cell = join("", @st) . $1; last }
+    }
+    print $cell, "\n";
+  '
 }
 
 # 1-based line number of the ▎ selection marker
@@ -396,8 +480,9 @@ if [ -z "$BP" ]; then
 fi
 
 TMX kill-server 2>/dev/null || true
-TMX new-session -d -x 130 -y 40 -s "$WIDE" "$BP tasks"
-TMX new-session -d -x 70 -y 24 -s "$NARROW" "$BP tasks"
+pin_pane_color
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP_ENV $BP tasks"
+TMX new-session -d "${PANE_ENV[@]}" -x 70 -y 24 -s "$NARROW" "$BP_ENV $BP tasks"
 
 geo=$(TMX display -p -t "$WIDE" '#{window_width}x#{window_height}')
 if [ "$geo" = "130x40" ]; then ok "wide session geometry is 130x40 detached"; else bad "wide geometry: got $geo, want 130x40"; fi
@@ -543,6 +628,14 @@ fi
 # ── G5+G7: divider hover accent + exact 2-col gutter bounds ──────────────────
 # The ↔ affordance recolors and the gutter │ lights on hover; the responding
 # column set, probed from behavior, must be EXACTLY the 2 gutter cells.
+#
+# G7's per-column probe reads the STYLED DIVIDER CELL (divider_cell_styled),
+# not the whole header row — see that helper for why the whole-row form was a
+# churn-coupled probe that read a healthy 2-cell gutter as three. G5's restore
+# assert below DOES keep the whole-row comparison on purpose: "the accent
+# restored exactly" is a claim about the entire painted row, and both of its
+# captures are taken from the same parked pointer position, so no heading churn
+# separates them.
 A=$(arrow_col "$WIDE")
 if [ -n "$A" ]; then
   ok "header ↔ divider affordance located at col $A"
@@ -553,15 +646,28 @@ fi
 hover "$WIDE" 10 12   # park off-gutter
 REST=$(snape "$WIDE" | sed -n "${HL}p")
 printf '%s\n' "$REST" >"$EVID/g5-hover-header-rest.txt"
+# PRECONDITION, LOUD AND NAMED. The divider hover accent is a STYLE, so a
+# capture carrying no SGR at all cannot answer G7 either way — it would report
+# an empty responding set, which reads exactly like "the hit-test responds
+# nowhere" and is in fact "this probe could not see". That is precisely how the
+# unstyled-pane defect hid: on a host whose tmux hands the pane a bare "screen"
+# TERM, termenv resolves Ascii and the board paints with zero escapes. An
+# absence is never caught by inspecting the result; assert the precondition.
+if grep -q $'\033\[' <<<"$REST"; then
+  ok "G7 precondition: the captured header row carries SGR — the pane is styled, so a hover-accent probe can see"
+else
+  bad "G7 precondition: the captured header row carries NO SGR — the pane is UNSTYLED (termenv resolved Ascii; check the pane's TERM/COLORTERM, pin_pane_color) and every style-keyed assert below is unmeasurable, not merely failing"
+fi
 RESPOND=""
 for c in $((A-2)) $((A-1)) "$A" $((A+1)) $((A+2)); do
   hover "$WIDE" 10 12
-  base=$(snape "$WIDE" | sed -n "${HL}p")
+  base=$(snape "$WIDE" | sed -n "${HL}p" | divider_cell_styled)
   hover "$WIDE" "$c" 12
-  cur=$(snape "$WIDE" | sed -n "${HL}p")
+  currow=$(snape "$WIDE" | sed -n "${HL}p")
+  cur=$(printf '%s\n' "$currow" | divider_cell_styled)
   if [ "$cur" != "$base" ]; then
     RESPOND="$RESPOND $c"
-    printf '%s\n' "$cur" >"$EVID/g5-hover-header-col$c.txt"
+    printf '%s\n' "$currow" >"$EVID/g5-hover-header-col$c.txt"
   fi
 done
 hover "$WIDE" 10 12
@@ -573,13 +679,13 @@ GUTL=$A
 if [ "$NRESP" = "2" ]; then
   first=${RESPOND%% *}; second=${RESPOND##* }
   if [ "$second" = "$((first+1))" ]; then
-    ok "G7 divider hover bounds: exactly 2 contiguous cols respond ($RESPOND); neighbours $((first-1)) and $((second+1)) do not"
+    ok "G7 divider hover bounds: exactly 2 contiguous cols light the divider cell ($RESPOND); neighbours $((first-1)) and $((second+1)) do not"
     GUTL=$first
   else
-    bad "G7 hover-responding cols not contiguous: $RESPOND"
+    bad "G7 divider-cell-lighting cols not contiguous: $RESPOND"
   fi
 else
-  bad "G7 divider hover bounds: responding cols {$RESPOND} (want exactly 2)"
+  bad "G7 divider hover bounds: cols lighting the divider cell {$RESPOND} (want exactly 2)"
 fi
 if [ "$OFF" = "$REST" ]; then
   ok "G5 hover accent paints on gutter hover and restores exactly when the pointer leaves (styled header row diff)"
@@ -775,7 +881,8 @@ else
   bad "G6 prefs not rewritten on release ($RATIO_BEFORE -> $RATIO_AFTER)"
 fi
 TMX kill-session -t "$WIDE"
-TMX new-session -d -x 130 -y 40 -s "$WIDE" "$BP tasks"
+pin_pane_color
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP_ENV $BP tasks"
 if wait_ready "$WIDE"; then
   HL=$(header_line "$WIDE")
   A2=$(arrow_col "$WIDE")
