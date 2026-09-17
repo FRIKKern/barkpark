@@ -132,6 +132,149 @@ defmodule Barkpark.Quiz.BridgeTest do
     assert Quiz.state(pin_stag).question.prompt == "STAGING CONTENT"
   end
 
+  describe "binding lifetime (hq-bridge-binding-gc)" do
+    # The Bridge is a singleton GenServer shared by the whole (async: false)
+    # run, and the :DOWN it acts on is asynchronous, so these assertions poll
+    # its OWN index rather than sleeping a fixed amount.
+    defp await_bindings(fun, remaining_ms \\ 2000) do
+      bindings = Quiz.Bridge.bindings()
+
+      cond do
+        fun.(bindings) ->
+          bindings
+
+        remaining_ms <= 0 ->
+          flunk("binding index never satisfied: #{inspect(bindings)}")
+
+        true ->
+          Process.sleep(20)
+          await_bindings(fun, remaining_ms - 20)
+      end
+    end
+
+    defp pins_for(bindings, qid), do: bindings |> Map.get(qid, %{}) |> Map.keys()
+
+    test "a reaped room's pin is retired from the index", %{pin: pin, qid: qid} do
+      publish_quiz(qid, "Original?", [%{"id" => "a", "label" => "A"}])
+      assert :ok = Quiz.bind_quiz(pin, qid)
+      assert pin in pins_for(await_bindings(&(pin in pins_for(&1, qid))), qid)
+
+      # The room's real death path — the same one the idle timer takes.
+      Quiz.stop_room(pin)
+
+      refute pin in pins_for(await_bindings(&(pin not in pins_for(&1, qid))), qid)
+    end
+
+    test "the GC retires only the dead pin — a live sibling in another dataset stays bound",
+         %{qid: qid} do
+      Content.upsert_schema(
+        %{
+          "name" => "quiz",
+          "title" => "Quiz",
+          "visibility" => "public",
+          "fields" => Quiz.Content.schema().fields
+        },
+        "staging"
+      )
+
+      n = System.unique_integer([:positive])
+      dead_pin = "TGD#{n}"
+      live_pin = "TGL#{n}"
+      {:ok, _} = Quiz.ensure_room(dead_pin)
+      {:ok, _} = Quiz.ensure_room(live_pin)
+      on_exit(fn -> Quiz.stop_room(live_pin) end)
+
+      publish_quiz_in(qid, "PROD CONTENT", [%{"id" => "a", "label" => "A"}], "production")
+      publish_quiz_in(qid, "STAGING CONTENT", [%{"id" => "a", "label" => "A"}], "staging")
+
+      Quiz.bind_quiz(dead_pin, qid, "production")
+      Quiz.bind_quiz(live_pin, qid, "staging")
+      await_bindings(&(dead_pin in pins_for(&1, qid) and live_pin in pins_for(&1, qid)))
+
+      Quiz.stop_room(dead_pin)
+
+      bindings = await_bindings(&(dead_pin not in pins_for(&1, qid)))
+      # The surviving sibling keeps BOTH its entry and its own dataset — a GC
+      # that dropped the quiz_id wholesale would fail here.
+      assert live_pin in pins_for(bindings, qid)
+      assert bindings[qid][live_pin] == "staging"
+
+      # And it is still LIVE-bound, not merely present: a publish still reaches it.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(live_pin))
+      publish_quiz_in(qid, "STAGING EDITED", [%{"id" => "a", "label" => "A"}], "staging")
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:production",
+        {:document_changed, %{type: "quiz", doc_id: qid}}
+      )
+
+      assert_receive {:quiz, ^live_pin, {:question_updated, %{prompt: "STAGING EDITED"}}}, 2000
+    end
+
+    test "the sweep retires a pin bound while no room was live — the monitor cannot see it",
+         %{qid: qid} do
+      publish_quiz(qid, "Original?", [%{"id" => "a", "label" => "A"}])
+
+      # Nothing forbids binding ahead of a room, and Barkpark.Quiz.BridgeSandboxCascadeTest
+      # does exactly this. There is no process to monitor, so this entry is the
+      # one the :DOWN path structurally cannot retire.
+      roomless = "TNR#{System.unique_integer([:positive])}"
+      refute Quiz.Room.whereis(roomless)
+      assert :ok = Quiz.bind_quiz(roomless, qid)
+      assert roomless in pins_for(Quiz.Bridge.bindings(), qid)
+
+      # A LIVE sibling in the same index must survive the same sweep.
+      live_pin = "TNL#{System.unique_integer([:positive])}"
+      {:ok, _} = Quiz.ensure_room(live_pin)
+      on_exit(fn -> Quiz.stop_room(live_pin) end)
+      Quiz.bind_quiz(live_pin, qid)
+
+      bindings = Quiz.Bridge.sweep()
+
+      refute roomless in pins_for(bindings, qid)
+      assert live_pin in pins_for(bindings, qid)
+    end
+
+    test "a reaped-then-recreated room rebinds to the CURRENT question, not the default",
+         %{pin: pin, qid: qid} do
+      publish_quiz(qid, "Original?", [%{"id" => "a", "label" => "A"}])
+      Quiz.bind_quiz(pin, qid)
+      assert Quiz.state(pin).question.prompt == "Original?"
+      await_bindings(&(pin in pins_for(&1, qid)))
+
+      # Reap. The room process holds the last-applied question, so its death
+      # loses it — this is the state a returning audience would land in.
+      Quiz.stop_room(pin)
+      await_bindings(&(pin not in pins_for(&1, qid)))
+
+      # Meanwhile the quiz moved on while no room existed.
+      publish_quiz(qid, "EDITED WHILE REAPED", [%{"id" => "a", "label" => "A"}])
+
+      {:ok, _} = Quiz.ensure_room(pin)
+
+      assert Quiz.state(pin).question.prompt == Quiz.Room.default_question().prompt,
+             "a recreated room must start on the default — otherwise this test proves nothing"
+
+      # The rebind the host mount performs. It must land the CURRENT question
+      # immediately, without waiting for a further publish.
+      assert :ok = Quiz.bind_quiz(pin, qid)
+      assert Quiz.state(pin).question.prompt == "EDITED WHILE REAPED"
+
+      # ...and the re-indexed binding still receives LATER publishes.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
+      publish_quiz(qid, "EDITED AFTER REBIND", [%{"id" => "a", "label" => "A"}])
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:production",
+        {:document_changed, %{type: "quiz", doc_id: qid}}
+      )
+
+      assert_receive {:quiz, ^pin, {:question_updated, %{prompt: "EDITED AFTER REBIND"}}}, 2000
+    end
+  end
+
   test "a non-quiz document change is ignored", %{pin: pin, qid: qid} do
     publish_quiz(qid, "Original?", [%{"id" => "a", "label" => "A"}])
     Quiz.join(pin, "p1", "Alice")
