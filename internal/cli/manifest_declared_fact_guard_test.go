@@ -104,6 +104,15 @@ func scanManifestFactStringMatches(fset *token.FileSet, f *ast.File) []manifestF
 // real tree looks like. Nothing asserted that the detector still binds anything
 // in the tree it actually gates. See TestManifestFactDetectorReachesTheRealTree.
 func bindManifestIdents(f *ast.File) map[string]string {
+	return bindDeclaredFactIdents(f, manifestQualifier)
+}
+
+// bindDeclaredFactIdents is bindManifestIdents with the declaring package as a
+// PARAMETER. The split is what lets the same predicate run over every package
+// whose types carry declarations, not just internal/manifest — see
+// declared_fact_other_packages_test.go (task-ce8f04315a6d1f10 c0). manifest is
+// simply the qualifier the seed defect happened to live under.
+func bindDeclaredFactIdents(f *ast.File, qualifier string) map[string]string {
 	bound := map[string]string{}
 	bind := func(name, typ string) {
 		if name != "" && name != "_" {
@@ -122,7 +131,7 @@ func bindManifestIdents(f *ast.File) map[string]string {
 			return "", false
 		}
 		x, ok := s.X.(*ast.Ident)
-		if !ok || x.Name != manifestQualifier {
+		if !ok || x.Name != qualifier {
 			return "", false
 		}
 		return s.Sel.Name, true
