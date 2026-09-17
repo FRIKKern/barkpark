@@ -9,12 +9,24 @@ defmodule BarkparkCloud.Web.CharterAuthSymbols do
   auth-wrapper symbols by name, 40+ times, and nothing anywhere checks that the
   names it spells are names `router.ex`/`auth.ex` still contain.
 
-  It had already rotted. `require_primary_team_admin/1` and
-  `require_primary_team_owner/1` were renamed `require_current_team_*` in
-  #15871; D896 says so in one sentence and twelve charter citations kept the
-  dead spelling regardless, because a sentence is not a gate. A reader who greps
-  the codebase for a name the charter gave them finds nothing and has to guess
-  whether the charter or the code is wrong.
+  It had already rotted. The two `require_primary_team_*` gates were renamed
+  `require_current_team_admin`/`_owner` in #15871; D896 says so in one sentence
+  and twelve charter citations kept the dead spelling regardless, because a
+  sentence is not a gate. A reader who greps the codebase for a name the charter
+  gave them finds nothing and has to guess whether the charter or the code is
+  wrong.
+
+  THE SIBLING GUARD, AND WHY THIS FILE IS NOT IT.
+  `auth_gate_name_census_test.exs` already bans those retired identifiers — but
+  it scans `cloud/lib`, `cloud/priv/static` and `cloud/test`, and its moduledoc
+  puts `.claude/workflows/` DELIBERATELY out of scope, because rewriting a dated
+  record falsifies it. That exemption is correct and this file keeps it: the
+  charter is allowed to carry the old name, on condition that it declares what
+  replaced it. The two halves are complementary — one forbids the name in live
+  code, the other requires an explanation for it in the log.
+
+  (This module therefore never spells either retired identifier literally, or
+  the sibling census would red on this very file.)
 
   WHAT COUNTS AS A CITATION, precisely (this is the predicate, stated once):
 
