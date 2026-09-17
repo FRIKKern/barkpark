@@ -199,3 +199,43 @@ func TestRuntimeClaims_RejectsPositionalArguments(t *testing.T) {
 		t.Fatalf("a positional argument must be a usage error, got exit %d", code)
 	}
 }
+
+// TestRuntimeClaims_NoEffectIsNotCalledConfounded is the live ledger's own
+// shape, and the arm that keeps a true number from carrying a false story.
+//
+// On production 2026-09-18 the marginal ratio is 0.95x: runtime claims are
+// proved with a live probe slightly MORE often than repo-local ones. There is
+// no enrichment. Reporting that as CONFOUNDED would tell a reader an effect
+// existed and was merely mis-attributed to the class — it never existed, and
+// "the absence tracks the closing worker" is an explanation of nothing.
+func TestRuntimeClaims_NoEffectIsNotCalledConfounded(t *testing.T) {
+	// Suspect misses LESS than baseline, inside a single comparable stratum:
+	// marginal < 1, comparable > 0, field discriminates.
+	rows := []taskboard.EnrichmentRow{
+		{ID: "r1", Class: taskboard.ClassRuntimeClaim, Stratum: "w1", Missing: true},
+		{ID: "r2", Class: taskboard.ClassRuntimeClaim, Stratum: "w1"},
+		{ID: "b1", Class: taskboard.ClassRepoLocalClaim, Stratum: "w1", Missing: true},
+		{ID: "b2", Class: taskboard.ClassRepoLocalClaim, Stratum: "w1", Missing: true},
+	}
+	v := taskboard.ControlEnrichment(rows, taskboard.ClassRuntimeClaim, taskboard.ClassRepoLocalClaim, 2)
+
+	// Setup assertions: without these the arm could pass on a verdict that
+	// never reached the branch under test.
+	if !v.Discriminates {
+		t.Fatalf("setup: the field must discriminate here (%s)", v.Reason)
+	}
+	if v.Comparable != 1 {
+		t.Fatalf("setup: want exactly 1 comparable stratum, got %d", v.Comparable)
+	}
+	if got := v.MarginalRatio(); got > 1 {
+		t.Fatalf("setup: want a marginal ratio <= 1 (the live shape), got %.2fx", got)
+	}
+
+	word := runtimeControlWord(v)
+	if strings.Contains(word, "CONFOUNDED") {
+		t.Fatalf("a marginal ratio of %.2fx has no effect to confound; word = %q", v.MarginalRatio(), word)
+	}
+	if !strings.Contains(word, "NO EFFECT") {
+		t.Fatalf("control word = %q, want the NO EFFECT reading", word)
+	}
+}

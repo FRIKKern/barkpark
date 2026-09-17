@@ -190,6 +190,12 @@ func runtimeControlWord(v taskboard.EnrichmentVerdict) string {
 		return "NO MEASUREMENT — live-probe citation does not discriminate (the per-row findings still stand)"
 	case v.Comparable == 0:
 		return "UNCONTROLLED — no stratum separates class from closing worker"
+	case v.MarginalRatio() <= 1:
+		// There was never an effect for the control to kill. Saying CONFOUNDED
+		// here would explain a non-effect — a true number with a false story,
+		// and a reader would come away believing an enrichment existed and was
+		// merely mis-attributed. It did not exist.
+		return "NO EFFECT — runtime claims are not proved worse than repo-local ones; there was no enrichment to control"
 	default:
 		return "CONFOUNDED — the absence tracks the closing worker, not the class"
 	}
