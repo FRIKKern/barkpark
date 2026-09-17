@@ -96,6 +96,20 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun: "task",
+		Verb: "resume",
+		// A purely LOCAL read: it rebuilds what a crashed predecessor held from
+		// the manifest `bp task claim` wrote and prints a crash brief. There is
+		// no server verb behind it, and REGISTERING it here rather than
+		// hand-writing an `if` in Execute is why `bp task --help` and
+		// `bp capabilities` can name it — a resume verb nobody can discover is
+		// the flight recorder's whole point thrown away.
+		Summary: "Rebuild a crashed agent's loadout from its claim-time manifest and print a crash brief (reads only).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskResume(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "task",
 		Verb:    "tui",
 		Summary: "Open the live portrait task board (the same reader as `bp tasks`).",
