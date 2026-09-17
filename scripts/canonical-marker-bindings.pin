@@ -22,6 +22,7 @@ failure-caption-clamp	caption
 field-encryption	encrypted?
 field-encryption-chokepoint	encrypt_marked
 fleet-presence-staleness	roster
+gh-actions-builder-template	renderDeployWorkflow
 github-adopt	adopt
 github-inbound-intake	ingest
 github-mirror-reconcile	reconcile
