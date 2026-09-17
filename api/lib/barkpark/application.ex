@@ -630,3 +630,5 @@ defmodule Barkpark.Application do
     :ok
   end
 end
+
+# probe: r20d-s6 quiet arm — delete me
