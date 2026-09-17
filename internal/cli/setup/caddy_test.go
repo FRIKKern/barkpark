@@ -38,7 +38,7 @@ func TestRenderCaddyfile_AcmeGolden(t *testing.T) {
 	for _, sub := range []string{
 		"acme.barkpark.cloud",
 		"reverse_proxy localhost:4000",
-		"handle_errors {",
+		"handle_errors 502 503 504 {",
 		"Retry-After",
 	} {
 		if !strings.Contains(got, sub) {

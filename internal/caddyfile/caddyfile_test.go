@@ -45,7 +45,7 @@ func TestRender_StudioFallback(t *testing.T) {
 func TestMaintenanceHandler_ShapeAndStatus(t *testing.T) {
 	h := MaintenanceHandler("  ")
 	for _, sub := range []string{
-		"  handle_errors {",
+		"  handle_errors 502 503 504 {", // the status list is load-bearing: a bare block eats file_server 404s
 		"header Retry-After \"15\"",
 		"respond 503 {",
 		"body <<BARKPARK_MAINTENANCE",
@@ -56,6 +56,16 @@ func TestMaintenanceHandler_ShapeAndStatus(t *testing.T) {
 			t.Errorf("maintenance handler missing %q:\n%s", sub, h)
 		}
 	}
+
+	// NEGATIVE ARM. The status list is the whole fix for the static-site 404
+	// incident: a bare `handle_errors {` also catches the 404 a file_server
+	// raises inside an armed handle_path /sites/<slug>/*, so every miss on a
+	// spawned static site answered this branded 503. Assert the bare opener is
+	// ABSENT, not merely that the scoped one is present — a renderer that
+	// emitted both would satisfy the positive arm alone.
+	if strings.Contains(h, "handle_errors {") {
+		t.Errorf("maintenance handler emits a status-LESS handle_errors block; it must be scoped to 502 503 504:\n%s", h)
+	}
 }
 
 func TestRender_EverySiteGetsMaintenance(t *testing.T) {
@@ -65,7 +75,7 @@ func TestRender_EverySiteGetsMaintenance(t *testing.T) {
 			{Slug: "b", Domains: []string{"b.com"}, Port: 7002},
 		},
 	})
-	if n := strings.Count(got, "handle_errors {"); n != 2 {
+	if n := strings.Count(got, "handle_errors 502 503 504 {"); n != 2 {
 		t.Errorf("expected one maintenance handler per site (2), got %d:\n%s", n, got)
 	}
 }
@@ -352,7 +362,7 @@ func TestRender_MixedBox_StaticAndReverseProxy(t *testing.T) {
 		t.Errorf("expected exactly one reverse_proxy (proxied only), got %d:\n%s", n, got)
 	}
 	// Maintenance handler rides the proxied site only, not the static one.
-	if n := strings.Count(got, "handle_errors {"); n != 1 {
+	if n := strings.Count(got, "handle_errors 502 503 504 {"); n != 1 {
 		t.Errorf("expected exactly one maintenance handler (proxied only), got %d:\n%s", n, got)
 	}
 	// Slug order: flat (f) before proxied (p).

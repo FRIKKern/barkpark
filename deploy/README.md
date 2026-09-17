@@ -67,24 +67,23 @@ a healthy upstream never reaches the handler (proved both ways by the harness's
 live-Caddy case). `instance-deploy.sh` also upgrades already-armed boxes in
 place, since the marker guard forbids a re-arm.
 
-The handler's status list `502 503 504` is load-bearing, and `instance-deploy.sh`
-is the ONLY thing in this repo that arms or repairs the corrected shape
-(idempotent, `caddy validate`d, auto-reverting; port-flip-safe). This page used
-to credit the Go/asset renderers with baking the same block "so every provisioned
-instance gets it". They do not, and that sentence is withdrawn: as of 2026-09-17
+The handler's status list `502 503 504` is load-bearing. `instance-deploy.sh`
+arms and repairs the corrected shape on existing boxes (idempotent, `caddy
+validate`d, auto-reverting; port-flip-safe), and as of 2026-09-18 every other
+renderer emits the corrected shape too. This page used to credit the Go/asset
+renderers with baking the same block "so every provisioned instance gets it"
+while they emitted the bare form; that sentence was withdrawn on 2026-09-17,
+and `task-859a0dbc8ab0583e` then fixed the four sites it named —
 `internal/caddyfile/caddyfile.go` (`MaintenanceHandler`, feeding
 `internal/cli/setup/caddy.go` and `internal/provisioner/attach_domain.go`),
 `internal/cli/setup/assets/deploy.sh`, its byte-identical twin `deploy.sh` at the
-repo root, and the walkthrough in `docs/ops/adding-a-domain.md` all still carry
-the BARE `handle_errors {`. A box provisioned by `bp setup` and never touched by
-an instance deploy keeps the pre-fix shape indefinitely, and `site-deploy.sh`
-then arms a `handle_path /sites/<slug>/*` `file_server` route into that same
-block. `deploy/caddy-handle-errors-scope-check.sh` is the standing predicate over
-every tracked file — not a list of renderers anyone must remember — and names
-those sites on every run under a dated stand-down that expires 2026-09-24
-(`task-d06e8a2a42f1ed2f`); a bare emission anywhere else reds immediately. That
-same check asserts this paragraph names every stood-down site, so the prose
-cannot go stale behind the code again.
+repo root, and the walkthrough in `docs/ops/adding-a-domain.md`. A box
+provisioned by `bp setup` therefore no longer keeps the pre-fix shape when
+`site-deploy.sh` arms a `handle_path /sites/<slug>/*` `file_server` route into
+that same block. `deploy/caddy-handle-errors-scope-check.sh` is the standing
+predicate over every tracked file — not a list of renderers anyone must
+remember — and its dated stand-down is now EMPTY: a bare emission anywhere,
+including in those four files, reds immediately with no grace.
 
 The incident is MEASURED, not asserted:
 `bash deploy/caddy-handle-errors-behaviour-proof.sh` boots a real Caddy twice on

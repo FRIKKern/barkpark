@@ -453,7 +453,7 @@ if [ "$PHX_SCHEME" = "https" ] && printf '%s' "$DOMAIN" | grep -q '[a-zA-Z]'; th
     cat > /etc/caddy/Caddyfile <<CADDYEOF
 $DOMAIN {
 	reverse_proxy localhost:$APP_PORT
-	handle_errors {
+	handle_errors 502 503 504 {
 		header Retry-After "15"
 		respond 503 {
 			body <<BARKPARK_MAINTENANCE
