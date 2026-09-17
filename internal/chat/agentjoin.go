@@ -61,8 +61,8 @@ func (m *Model) maybeLoadJoinTasks() tea.Cmd {
 // NOTHING — when the rows are not in yet, the fetch failed, the label names no
 // task, or the label is ambiguous. There is deliberately no fifth answer.
 func (m Model) agentTaskJoin(label string) (taskboard.AgentTaskJoin, bool) {
-	if len(m.joinTasks) == 0 {
+	if m.joinIndex.Len() == 0 {
 		return taskboard.AgentTaskJoin{}, false
 	}
-	return taskboard.JoinAgentTask(label, m.joinTasks)
+	return m.joinIndex.Join(label)
 }

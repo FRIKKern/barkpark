@@ -34,7 +34,7 @@ func renderJoinPane(a WorkflowNode, tasks []taskboard.Task) string {
 	wf := &Workflow{Status: "running", Nodes: []WorkflowNode{
 		{Type: "workflow_phase", Index: 1, Title: "Build"}, a,
 	}}
-	m := Model{joinTasks: tasks}
+	m := Model{joinTasks: tasks, joinIndex: taskboard.NewAgentTaskIndex(tasks)}
 	lines := renderWorkflowAgentDetail(80, journeyOf(wf), joinNow, 0, 0, true, m.agentTaskJoin)
 	return ansi.Strip(strings.Join(lines, "\n"))
 }

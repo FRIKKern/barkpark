@@ -156,6 +156,7 @@ type Model struct {
 	// operator is reading. An empty joinTasks therefore means exactly what it
 	// renders: nothing to join against.
 	joinTasks      []taskboard.Task
+	joinIndex      taskboard.AgentTaskIndex
 	joinTasksAsked bool
 
 	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
@@ -249,7 +250,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// pane must never say "could not load tasks" — that is chrome about the
 		// client, not truth about the agent.
 		if msg.err == nil {
+			// Index ONCE, here. The pane asks the join question on every paint and
+			// the live corpus is ~9.5k rows, so a scan per paint would be a full
+			// re-collapse of the corpus at the 100ms tick.
 			m.joinTasks = msg.tasks
+			m.joinIndex = taskboard.NewAgentTaskIndex(msg.tasks)
 		}
 		return m, nil
 	case fleetErrMsg:

@@ -110,31 +110,74 @@ func AgentTaskDeepLink(docID string) string {
 	return "/admin/projects?task=" + bareID(docID)
 }
 
-// JoinAgentTask resolves one workflow agent label to the task it advances.
-// Candidates are matched on the label's last colon-segment against BOTH the
-// emitter slug (capped at 40) and the uncapped slugify of each task's title.
-// Exactly one distinct task must match; zero (no match) and two or more
-// (ambiguous) both return ok=false, and the caller renders NOTHING. Draft twins
-// are collapsed first — exactly as BuildBoard collapses them — so a
-// drafts.X/X pair is one candidate, not an ambiguity.
+// AgentTaskIndex is the join's precomputed candidate map: emitted-slug (and,
+// where it differs, uncapped slug) -> the rows carrying it. Building it once is
+// not a micro-optimisation — the live corpus is ~9.5k rows, and the terminal
+// asks this question on every paint of an open agent-detail pane, so a scan per
+// call is O(rows) per frame plus a full collapseDraftTwins allocation each
+// time. It is also what makes a whole-corpus sweep (the liveprobe arm) finish:
+// key-by-key JoinAgentTask over 9.5k keys is 9.5k scans.
 //
-// It is pure and allocates only the candidate scan: safe to call per paint.
-func JoinAgentTask(label string, tasks []Task) (AgentTaskJoin, bool) {
-	key, ok := AgentLabelTaskKey(label)
-	if !ok {
-		return AgentTaskJoin{}, false
-	}
-	var match Task
-	found := 0
+// A key whose slice holds more than one DISTINCT row is ambiguous and resolves
+// to nothing — the ambiguity lives in the index, so every consumer degrades the
+// same way without re-deriving the rule.
+type AgentTaskIndex struct {
+	byKey map[string][]Task
+}
+
+// NewAgentTaskIndex builds the join index. Draft twins are collapsed exactly as
+// BuildBoard collapses them, so a drafts.X/X pair is one candidate rather than
+// a manufactured ambiguity.
+func NewAgentTaskIndex(tasks []Task) AgentTaskIndex {
+	idx := AgentTaskIndex{byKey: make(map[string][]Task, len(tasks))}
 	for _, t := range collapseDraftTwins(tasks) {
 		if t.Title == "" {
 			continue
 		}
-		if agentEmitterSlug(t.Title) != key && slugify(t.Title) != key {
-			continue
+		full := slugify(t.Title)
+		emitted := full
+		if len(emitted) > agentSlugBudget {
+			emitted = emitted[:agentSlugBudget]
 		}
+		idx.byKey[emitted] = append(idx.byKey[emitted], t)
+		if full != emitted {
+			idx.byKey[full] = append(idx.byKey[full], t)
+		}
+	}
+	return idx
+}
+
+// Len reports how many distinct keys the index holds — the liveprobe arm's
+// denominator, and the honest answer to "is this index empty?".
+func (idx AgentTaskIndex) Len() int { return len(idx.byKey) }
+
+// Keys returns every indexed key. Order is map order (unspecified); callers
+// that need determinism sort it.
+func (idx AgentTaskIndex) Keys() []string {
+	out := make([]string, 0, len(idx.byKey))
+	for k := range idx.byKey {
+		out = append(out, k)
+	}
+	return out
+}
+
+// Rows returns the rows carrying key — len > 1 is the ambiguous population.
+func (idx AgentTaskIndex) Rows(key string) []Task { return idx.byKey[key] }
+
+// Join resolves one workflow agent label against the index. Exactly one
+// distinct row must carry the label's last colon-segment; zero (no match) and
+// two or more (ambiguous) both return ok=false and the caller renders NOTHING.
+func (idx AgentTaskIndex) Join(label string) (AgentTaskJoin, bool) {
+	key, ok := AgentLabelTaskKey(label)
+	if !ok {
+		return AgentTaskJoin{}, false
+	}
+	rows := idx.byKey[key]
+	var match Task
+	found := 0
+	for _, t := range rows {
 		if found > 0 && bareID(t.DocID) == bareID(match.DocID) {
-			continue // the same row seen twice is not an ambiguity
+			continue // the same row indexed under both slug forms is not an ambiguity
 		}
 		found++
 		if found > 1 {
@@ -158,6 +201,21 @@ func JoinAgentTask(label string, tasks []Task) (AgentTaskJoin, bool) {
 		j.Met, j.Total, j.HasCriteria = match.Criteria.Met, match.Criteria.Total, true
 	}
 	return j, true
+}
+
+// JoinAgentTask resolves one workflow agent label to the task it advances.
+// Candidates are matched on the label's last colon-segment against BOTH the
+// emitter slug (capped at 40) and the uncapped slugify of each task's title.
+// Exactly one distinct task must match; zero (no match) and two or more
+// (ambiguous) both return ok=false, and the caller renders NOTHING. Draft twins
+// are collapsed first — exactly as BuildBoard collapses them — so a
+// drafts.X/X pair is one candidate, not an ambiguity.
+//
+// It is the ONE-SHOT convenience form: it builds a whole AgentTaskIndex per
+// call, so a surface that asks per paint or per row must hold an index instead
+// (that is the whole reason AgentTaskIndex is exported).
+func JoinAgentTask(label string, tasks []Task) (AgentTaskJoin, bool) {
+	return NewAgentTaskIndex(tasks).Join(label)
 }
 
 // AgentTaskSummary is the one-line plain-text projection both readers paint:
