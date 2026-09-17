@@ -287,6 +287,73 @@ not a count. The recipe in that ledger is the command to run; it is deliberately
 here (this slice has no prod reach) and the result must be re-derived fresh, not inherited
 from an August count.
 
+### What is still missing, and what is actually stopping it (2026-09-17)
+
+The open item is **NAMES**, not a count: no committed artefact lists guerrilla's private
+schema names, and the roster's completeness needs names.
+
+```
+git grep -lE 'schema_definitions' -- '*.md' '*.sh'        # control: the grep can find the table named in tracked text
+git grep -nE "visibility[^a-z]*private" -- '*.md'          # no name+visibility listing among the hits
+```
+
+The honest statement of the blocker, because "prod-gated" was worth testing rather than
+assuming: the probe is **not technically unavailable on a developer box**. The guerrilla
+admin token is at `~/.config/barkpark/config.json` (`.token`, with `.server` =
+`https://guerrilla.barkpark.cloud`), `psql` is on PATH, and the provenance SSH key
+`~/.ssh/barkpark_indx` exists. What is missing is **authority**, exactly as this slice's
+task row says ("nothing has ever blocked it but an owner"). The ledger recipe in
+`tooling/grip/ledger/graph-visibility-ceiling-2026-08-05.md` §R1 is the command, and it
+wants ONE change to answer this file's question rather than the one it was written for:
+print the NAMES, not the counts.
+
+```
+curl -s -H "authorization: Bearer $ADMIN" https://guerrilla.barkpark.cloud/v1/schemas/production \
+  | python3 -c "import json,sys;[print(x.get('visibility','<none>'),x['name']) for x in sorted(json.load(sys.stdin)['schemas'],key=lambda x:x['name'])]"
+```
+
+Diff that name list against §1's 34 + `tag` + `metric`. Anything left over is the private
+orphan §4 is about, and it belongs in §5's `PDS_SENTINEL_EXCLUSION` line **only if** the
+boot logs no `Plugins.Bootstrap` SKIP for it — the tripwire below is the arbiter, not the
+name's appearance in this listing.
+
+### Which of the two committed counts to believe — dated, not preferred (2026-09-17)
+
+The caution above says "at least one is stale" and stops there. The dates are recoverable
+from git and settle *which is newer*, though not *which is right*:
+
+```
+git log -1 --format='%h %ad %s' --date=short -L 245,260:api/lib/barkpark_web/controllers/legacy_controller.ex
+git log -1 --format='%h %ad %s' --date=short -S'34 of 39 schemas on guerrilla' -- .claude/workflows/bp-search-template-charter.md
+git log --format='%h %ad' --date=short -- tooling/grip/ledger/graph-visibility-ceiling-2026-08-05.md | tail -1
+```
+
+| count | artefact | landed |
+|---|---|---|
+| 39 total, **34** non-public | `bp-search-template-charter.md` D62 | 2026-07-26 |
+| 39 total, **34** non-public | ledger `graph-visibility-ceiling-2026-08-05.md` §R1 | 2026-08-05 |
+| 39 total, **31** private-declared | `legacy_controller.ex` `schemas/2` comment | 2026-08-17 (#11764) |
+
+So the **31 is the newest read by twelve days**, and it was written by the change that
+FIRST filtered this route — before #11764 `/api/schemas` served all 39, private fields
+included, which is why its author had a whole-table view to count from.
+
+But "newer" does not settle it, because the two numbers are not known to be answering the
+same question. The ledger's recipe counts `visibility != 'public'`; the comment's phrase is
+"private-**declared**", which reads as the literal string `'private'`. Those predicates
+differ by exactly the rows whose visibility is neither — and 34 − 31 = 3. Two readings
+survive the repository and nothing committed separates them:
+
+- **(a) Three rows flipped public** between 2026-08-05 and 2026-08-17. Then 31 is current.
+- **(b) Three rows carry a visibility that is neither `'public'` nor `'private'`**, and both
+  counts have been simultaneously correct the whole time.
+
+`Schema.public_schema?/1` is `v == "public"` (`api/lib/barkpark/content/schema.ex`), so the
+*code* draws the public/not-public line the ledger drew; it says nothing about how a human
+counted "private-declared" in a comment. **Do not quote either number as the private
+count.** Both agree on the only figure this file needs — **39 > 36** — and that is the
+finding the §4 bound rests on either way.
+
 ### What the STORE can never tell you about the writer (2026-09-17)
 
 Separate from the bound above, and cheaper to settle: *no schema read recovers who wrote
@@ -362,6 +429,48 @@ leg A on `tag` (which reverts even with the guard working) and hangs leg B red *
 on `metric` (which never reverts, guard or no guard). The transcript would then show a
 digest that moved with the stamp present, which reads exactly like *the guard failed*.
 Getting the scope wrong does not weaken the rung; it inverts its verdict.
+
+### The dataset term — `PDS_SOURCE_DATASET` MUST STAY UNSET, and a guard says so
+
+The clause above has three terms and the exclusion roster is only one of them. The
+`dataset = '$SOURCE_DS'` term resolves from `${PDS_SOURCE_DATASET:-production}` at the top
+of `scripts/pds-pull-proof.sh`, and **no supported non-production value exists**. The reason
+is in the application, not in the harness:
+
+| fact | where |
+|---|---|
+| plugin rows land in `production` unless the plugin says otherwise | `api/lib/barkpark/plugins/bootstrap.ex`, `register_schema/3`: `dataset = schema.dataset || "production"` |
+| and no plugin says otherwise | every string-literal `dataset:` under `api/lib/barkpark/plugins/` reads `"production"`; the single non-literal (`tickets.ex`, `dataset: dataset`) defaults from `@dataset_default "production"` |
+| the `tag` row's other writer does not run off production at all | `api/lib/barkpark/schema_bootstrap.ex`, `init/1` calls `Barkpark.Content.TagRegistry.register!("production")` with the dataset as a literal (PDS-D145) |
+
+Export `PDS_SOURCE_DATASET=anything-else` and the sentinel's `WHERE` selects a dataset that
+holds none of these rows: the `UPDATE` matches **zero**, and both legs of rung 6 become
+vacuous.
+
+**This is recorded as an assertion, not as this paragraph.** A justification nothing checks
+rots the first time the failure path moves, so the requirement lives in the harness:
+
+- `sentinel_dataset_refusal` in `scripts/pds-pull-proof.sh` REFUSES a non-production dataset
+  **before any row is written**, in the same place and for the same reason as the
+  roster-drift refusal. Without it the run still reds — at the existing *"the sentinel
+  UPDATE matched ZERO rows"* `fail` — but that message diagnoses the symptom: it says there
+  is nothing for the boot-time upsert to clobber, not that an environment variable moved the
+  scope off the only dataset the rows have ever lived in.
+- `scripts/pds-pull-proof.sh --selftest-roster` drives it **both directions, offline**: an
+  unset / exported-empty / explicit `production` value is accepted, `scratch` and
+  `production-2` are refused with the value named, and one live arm reports what *this*
+  process would actually scope to.
+- The **premise** behind the refusal is a fact about `api/lib`, so the same selftest
+  RE-DERIVES it rather than trusting the table above: it greps the plugin sources for
+  string-literal `dataset:` declarations and reads `tickets.ex`'s `@dataset_default`. A
+  future plugin that declares another dataset reds that arm and sends a reader back here.
+  Stated bound, because a detector without one is a claim: those two arms see literal
+  declarations and that one module attribute. A third declaration shape would be seen by
+  neither.
+
+Controls run when the guard landed (2026-09-17): `PDS_SOURCE_DATASET=scratch` reds the live
+arm; a plugin edited to `dataset: "staging"` reds the premise arm; moving `@dataset_default`
+reds the tickets arm; the untouched tree is 18/18 quiet.
 
 ### The tripwire
 
