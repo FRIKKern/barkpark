@@ -1164,10 +1164,11 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   line-height: 1.2;
 }
 
-/* pd-ee-sheet-embed-retarget: the sheet atom's ONE control — the existing
- * <bp-reference-picker>, scoped to sheet documents (embed-node.js
- * mountSheetRetarget). It sits BESIDE the summary chip, not inside it: the chip
- * still says what this block resolves to, the picker says which sheet that is.
+/* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
+ * <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
+ * names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
+ * BESIDE the summary chip, not inside it: the chip still says what this block
+ * resolves to, the picker says which document that is.
  * Three overrides the read-only atom's own rules make necessary:
  *   * user-select — the atom sets `none` (nothing inside is text to select); a
  *     typeahead input IS text to select, so the island opts back in.
