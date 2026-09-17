@@ -673,8 +673,13 @@ expand_matrix_name_legs() {
     grep -qE '^[]A-Za-z0-9_.@:|()[ "'"'"'-]+$' <<<"$filter" \
       || die "MATRIX LEG FILTER IS NOT A PLAIN jq PATH: $file job '$job' declares filter \`$filter\` — keep it to a readable path expression (\`.[].name\`) so a reviewer can see the leg set it names."
 
-    names="$(jq -r "$filter" "$REPO_ROOT/$legsfile" 2>/dev/null)" \
-      || die "MATRIX LEG SOURCE DOES NOT PARSE: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, and jq could not read it. An unreadable leg source resolves to no finite set, so \`name: $tmpl\` is still a catch-all."
+    # WRAPPED, not run bare. `jq -r .[].nope` over a 53-element array prints the
+    # WORD `null` 53 times — a filter that names a field the leg file does not
+    # have looks, to a bare read, like 53 successfully-enumerated names. The
+    # wrapper makes a non-string leg an ERROR instead of a string, which is the
+    # only way "this filter resolved nothing" and "this filter resolved" differ.
+    names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"leg name \" + tojson + \" is not a string\") end) | .[]" "$REPO_ROOT/$legsfile" 2>&1)" \
+      || die "MATRIX LEG SOURCE DOES NOT RESOLVE: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, and jq refused it: $(head -1 <<<"$names"). A leg source that does not yield a list of strings resolves to no finite set, so \`name: $tmpl\` is still a catch-all."
     [ -n "$names" ] \
       || die "MATRIX LEG SOURCE IS EMPTY: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, which yielded ZERO names. An empty enumeration is not a finite resolution of \`name: $tmpl\` — it is a template with nothing behind it."
 
@@ -928,7 +933,11 @@ main() {
   local idx
   idx="$(build_workflow_index)"
   [ -n "$idx" ] || die "the workflow index is empty — the parser is broken, not the repo"
-  idx="$(expand_matrix_name_legs "$idx")"
+  # `|| exit 1` explicitly: `die` fires inside a COMMAND SUBSTITUTION, so its
+  # exit reaches this shell only through `set -e`. A copy of this script with
+  # `-e` weakened would otherwise carry on with an EMPTY index and a refusal
+  # that printed but did not stop anything.
+  idx="$(expand_matrix_name_legs "$idx")" || exit 1
   [ -n "$idx" ] || die "the workflow index came back empty from matrix-name expansion — refusing to reason about a tree it can no longer see"
   assert_no_catchall_job_names "$idx"
   assert_no_laundered_jobs "$idx"
