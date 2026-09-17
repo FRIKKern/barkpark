@@ -29,6 +29,12 @@
 set -euo pipefail
 
 if ! command -v caddy >/dev/null 2>&1; then
+  if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+    echo "[handle_errors-behaviour] FAIL - a real caddy(1) is REQUIRED here"
+    echo "  (BARKPARK_SELFTEST_REQUIRE_E2E=1) and none is on PATH. The only arms that"
+    echo "  observe anything did not run; a green from this run would measure nothing."
+    exit 1
+  fi
   echo "[handle_errors-behaviour] SKIPPED — no \`caddy\` on PATH."
   echo "  This proof needs a real Caddy (>=2.x). Install it and re-run; it is NOT"
   echo "  a substitute for deploy/caddy-handle-errors-scope-check.sh, which is the"
@@ -45,12 +51,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Port liveness via bash's own /dev/tcp. netcat is NOT guaranteed on a CI
+# runner, and a missing netcat makes every probe exit non-zero - i.e. report
+# every port free and the dead-upstream precondition satisfied without ever
+# testing it.
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
+
 # A port nothing listens on: the "upstream is down" half of the rig.
 DEAD_PORT=45999
 # The site port. Picked high and checked, not assumed free.
 SITE_PORT=45871
-while nc -z 127.0.0.1 "$SITE_PORT" 2>/dev/null; do SITE_PORT=$((SITE_PORT + 1)); done
-if nc -z 127.0.0.1 "$DEAD_PORT" 2>/dev/null; then
+while port_open "$SITE_PORT"; do SITE_PORT=$((SITE_PORT + 1)); done
+if port_open "$DEAD_PORT"; then
   echo "[handle_errors-behaviour] FAIL (broken rig) — something is LISTENING on the"
   echo "  designated dead upstream port $DEAD_PORT. The 'upstream down' arm would be"
   echo "  measuring that process, not a dial failure."
@@ -90,7 +102,7 @@ boot() { # $1 = config path
   echo $! > "$PIDFILE"
   local i
   for i in $(seq 1 60); do
-    if nc -z 127.0.0.1 "$SITE_PORT" 2>/dev/null; then return 0; fi
+    if port_open "$SITE_PORT"; then return 0; fi
     sleep 0.25
   done
   echo "[handle_errors-behaviour] FAIL (broken rig) — caddy never listened on $SITE_PORT."
@@ -104,7 +116,7 @@ halt() {
   rm -f "$PIDFILE"
   local i
   for i in $(seq 1 40); do
-    nc -z 127.0.0.1 "$SITE_PORT" 2>/dev/null || return 0
+    port_open "$SITE_PORT" || return 0
     sleep 0.25
   done
   return 0
