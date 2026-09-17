@@ -14678,3 +14678,71 @@ Query files and CSV exports left in `/tmp` on guerrilla and barkpark-cp, plus `/
 lane's fence by construction — removing them means reaching for the boxes this decision forbids reaching for.
 **Ruled a named ops act for the owner or an ops-credentialed lane, not a slice**, and deliberately not performed
 here. It is the cheapest of the four items and the only one with no argument in it.
+
+## D616 — THIS CHARTER'S D-NUMBERS ARE NOW MINTED FROM A RESERVATION LEDGER, NOT FROM A READ OF THIS FILE. IT IS THE PDS ARBITER BEHIND A PREFIX ARGUMENT, AND DELIBERATELY NOT A SECOND ONE. (2026-09-17)
+
+Row: `task-a312c1496c51209c`, worker `dw34`. **This decision's own number was reserved before this paragraph was
+written** — `deploy/d-number-reservations.tsv` carries `D616` with the timestamp of its reservation. Minting it by
+reading the charter would have been the defect committing itself.
+
+### THE INCIDENT
+
+On 2026-09-16 two PRs in flight the same hour both read this file, both correctly found the highest number defined
+was **D613**, and both minted **D614**. Both had checked BOTH numbering styles this charter uses — `###` headings
+and the `- **D` bullet list — so the scan was not the defect. #18700 merged first and kept D614; #18701 rebased and
+renumbered to D615 (its own text above says so). The cost was one build cycle and a rebase. The next collision may
+land both.
+
+**NEITHER READER WAS CARELESS, AND THAT IS THE WHOLE POINT.** Two correct readers of one unchanged document a
+minute apart get the same answer. A document is a lagging record of what has LANDED; it cannot express what is IN
+FLIGHT. The window between "I have decided to use D614" and "D614 is in the charter" is exactly where the collision
+lives, and no reader of the charter can see into it. Something outside the charter has to hold the claim. A bigger
+grep cannot: every lens over this file shares the one property that causes this.
+
+### THE RULING
+
+Before writing a decision into this charter, **reserve its number**:
+
+    bash deploy/d-number-arbiter.sh --allocate-d 1 --for "task-… <who>"
+
+and commit the resulting `deploy/d-number-reservations.tsv` row **in the same PR as the charter edit**. The arbiter
+takes an atomic `mkdir` lock, reads the charter AND the ledger, and mints above both — so the second author, minutes
+later with this file still untouched, reads a corpus that already says the number is taken. The collision is not
+detected afterwards; it cannot be minted. `bash deploy/d-number-arbiter.sh --check-alloc` scores it and names an
+unreserved number as `UNRESERVED-MINT`.
+
+### IT IS THE PDS ARBITER, NOT A COPY — AND THAT CHOICE IS THE DECISION
+
+`scripts/pds-record-parity.sh` already owns the definition lens, the allocation lock, the SEED semantics and the
+refusal. Its allocation arms were PDS-specific only in one token, so that token is now the `--prefix` parameter and
+`deploy/d-number-arbiter.sh` is **three variable bindings with no logic of its own**. **Two arbiters that can drift
+is a worse outcome than one**, and the evidence is in that file's own history: its lens has already drifted once
+(`PDS-D679` — a heading-blind second copy manufactured six phantom citations). A lens change now happens once, for
+both charters. The default prefix stays `PDS-D`, so every existing PDS caller, fixture and CI arm is byte-identical.
+
+### THE SEED IS 615, AND A NAIVE SCAN WOULD HAVE SAID 716
+
+The seed is the high-water at adoption; numbers at or below it predate the arbiter and are not scored, because a
+retroactive reservation is a claim about history nobody measured. It was derived with the **strict union lens** —
+bold-lead bullet UNION own-line heading, `charter_defined_numbers()` — which reads **633 definitions over 615
+distinct numbers, contiguous `1..615`**. A naive `\bD[0-9]+\b` scan reads **716** and is wrong: this charter's prose
+cites **PDS-D716**, the PDS charter's fence adjudication, six times, and a loose lens reads that cross-charter
+citation as this charter's own high-water. The PDS ledger warns of the identical trap with its `PDS-D777`/`PDS-D999`
+fixtures. **A lens that counts citations as definitions jumps the pointer by a hundred on the strength of a
+footnote.**
+
+### WHAT IS NOT DONE HERE, NAMED RATHER THAN IMPLIED
+
+The `--check-alloc` arm is not yet wired to run on a PR that touches only this charter. That wiring lives in
+`.github/workflows/shell-harnesses.yml` — the `pds-harnesses` job's `paths:` filter lists
+`.claude/workflows/bp-pds-charter.md` and the `scripts/pds-*` doors, and this charter appears in **no** workflow
+path filter anywhere. `.github/workflows/**` is outside this lane's fence, so it is **routed, not faked**: until
+that filter carries `.claude/workflows/bp-deploy-reliability-charter.md` and `deploy/d-number-reservations.tsv`,
+and the job gains the deploy arm, the mechanism exists and is runnable by hand but **a guard that does not watch the
+file it guards is not yet a guard.** Stated so the next reader does not mistake a ledger for enforcement.
+
+**HISTORICAL CONTEXT FOR WHY THIS IS URGENT.** The same strict lens counts **16 numbers in this charter defined
+more than once** (633 definitions, 615 distinct — 18 excess definitions): `D14 D30 D31 D66 D68 D142 D206 D214 D256
+D351 D384 D411 D492 D593 D605 D608`. The PDS charter's own count is *eighteen pairs*, every one a wave-REVIEW block
+colliding with the next wave's DECIDE block off a single unowned pointer. **This charter is on the same curve and
+was previously running the same unowned pointer.** D614 was simply the first one anybody noticed in the same hour.
