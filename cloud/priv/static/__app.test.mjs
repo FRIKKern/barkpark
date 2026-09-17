@@ -4134,7 +4134,11 @@ test("cch-r21-w22: the operator card roster is DERIVED three ways and they agree
   assert.deepEqual(operatorTypedCounts(), [],
     "an operator comment states a card/route/read count as a typed numeral; say it without the number, or derive it");
 
-  // ── THE CONTROLS, RUN INSIDE THE MEASUREMENT. Each mutates a COPY of the
+  // ── THE CONTROLS, RUN INSIDE THE MEASUREMENT. Each goes through
+  // replaceUnique (the file's own import) rather than a bare `.replace`: a bare
+  // string needle takes the first match anywhere and is SILENT when it drifts,
+  // which would make a control that proves nothing look exactly like one that
+  // passed. replaceUnique REFUSES a drifted or ambiguous needle instead. Each mutates a COPY of the
   // shipped source and re-runs the SAME derivation, so CI's existing
   // invocation of this suite wires them and there is no separate test anyone
   // could filter out or stop. Without these, every assertion above is a claim
@@ -4149,23 +4153,28 @@ test("cch-r21-w22: the operator card roster is DERIVED three ways and they agree
 
   // CONTROL 2 — rename one renderer out of the funnel: the read count is
   // unchanged, the renderer count drops, and one-renderer-per-read must fail.
-  const renamed = APP_SRC.replace("return operatorCensusCardHtml(data);", "return operatorCensusCardHtmlX(data);");
+  const renamed = replaceUnique(APP_SRC, "return operatorCensusCardHtml(data);", "return operatorCensusCardHtmlX(data);",
+    { what: "control 2 (a renderer leaves the funnel)" });
   assert.notEqual(renamed, APP_SRC, "control 2 must actually mutate the source");
   assert.notEqual(operatorCardHtmlNames(renamed).length, operatorPaintTargets(renamed).length,
     "CONTROL: a read whose renderer left the funnel must break one-renderer-per-read");
 
   // CONTROL 3 — re-type a count into the prose: the scan must see it.
-  const retyped = APP_SRC.replace("// THE ONE FUNNEL, made pure so EVERY operator card",
-    "// THE ONE FUNNEL, made pure so all THREE cards");
+  const retyped = replaceUnique(APP_SRC, "// THE ONE FUNNEL, made pure so EVERY operator card",
+    "// THE ONE FUNNEL, made pure so all THREE cards", { what: "control 3 (a count re-typed into the prose)" });
   assert.notEqual(retyped, APP_SRC, "control 3 must actually mutate the source");
   assert.ok(operatorTypedCounts(retyped).length > 0,
     "CONTROL: a typed count re-introduced into the operator prose must be caught");
 
   // CONTROL 4 — the anchors are load-bearing. A source that no longer carries
   // operatorRefresh must THROW, not answer an empty roster.
-  assert.throws(() => operatorPaintTargets(APP_SRC.replace("function operatorRefresh() {", "function operatorRefreshRenamed() {")),
+  const unanchored = replaceUnique(APP_SRC, "function operatorRefresh() {", "function operatorRefreshRenamed() {",
+    { what: "control 4 (the roster anchor goes missing)" });
+  assert.throws(() => operatorPaintTargets(unanchored),
     /no subject/, "CONTROL: a lost anchor is a FAILURE, never a silent zero");
-  assert.throws(() => operatorTypedCounts(APP_SRC.replace(OPERATOR_PROSE_CUTS[0][0], "// gone")),
+  const unanchoredProse = replaceUnique(APP_SRC, OPERATOR_PROSE_CUTS[0][0], "// gone",
+    { what: "control 4b (the prose anchor goes missing)" });
+  assert.throws(() => operatorTypedCounts(unanchoredProse),
     /no subject/, "CONTROL: a lost prose anchor is a FAILURE, never a silent zero");
 });
 
