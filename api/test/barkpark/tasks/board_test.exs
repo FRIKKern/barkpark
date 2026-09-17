@@ -266,17 +266,26 @@ defmodule Barkpark.Tasks.BoardTest do
     # The two arms below pin the policy in BOTH directions and are deliberately
     # asymmetric under mutation:
     #
-    #   * "a PAIRED bucket yields the PUBLISHED row" is the RED arm — delete the
-    #     `d.status == "published"` preference so the bucket answers `hd(twins)`
-    #     and this assertion goes RED (the draft row is inserted FIRST, so it is
-    #     the head).
+    #   * "a PAIRED bucket yields the PUBLISHED row" pins the COLLAPSE: it reds
+    #     when `load_task_docs/1` stops grouping by `Content.published_id/1` and
+    #     both twins reach the board. It measures the COLUMNS, not
+    #     `cards_by_id` — `to_card/4` keys every card by the published id, so
+    #     both twins land on the SAME key and `map_size(cards_by_id)` is 1
+    #     whether or not anything collapsed. A count taken there is vacuous.
     #   * "an UNPAIRED drafts. row resolves as itself" is the QUIET arm — it
-    #     passes straight through that same mutation (a one-member bucket has no
-    #     preference to express) and reds only on a BLANKET `drafts.` drop, which
-    #     is the OTHER way to get this wrong: it would make the whole
-    #     mutate-created population unreadable.
+    #     passes straight through a lost published preference (a one-member
+    #     bucket has no preference to express) and reds only on a BLANKET
+    #     `drafts.` drop, which is the OTHER way to get this wrong: it would
+    #     make the whole mutate-created population unreadable.
+    #   * "with NO published row the winner is the RULE" reds on the pre-
+    #     tie-break `Enum.find(twins, hd(twins), …)`, i.e. on storage order.
+    #   * "rule 1 decides when the published row is the drafts.-spelled one" is
+    #     the ONLY arm that reds when the `d.status == "published"` clause is
+    #     deleted. In every bucket a normal corpus produces the published copy
+    #     is the BARE id, so rule 2 agrees with rule 1 and hides it; without
+    #     this arm the headline policy (published wins) is pinned by nothing.
     #
-    # Neither arm names a line number; the third arm pins the tie-break itself.
+    # No arm names a line number.
 
     # Like `task!/3` but lets the caller choose the physical `status`, which is
     # the whole subject here.
@@ -306,9 +315,30 @@ defmodule Barkpark.Tasks.BoardTest do
 
       # The pair COLLAPSES to one card. `to_card/4` keys every card by the
       # PUBLISHED id, so the surviving row is identified by its TITLE, not by
-      # the key: "Draft twin" here would mean the draft won the slot.
-      assert map_size(board.cards_by_id) == 1,
+      # the key: "Draft twin" here would mean the draft won the slot — and for
+      # the same reason `map_size(board.cards_by_id)` CANNOT see a lost
+      # collapse (both twins share the key). Count what the columns hold: that
+      # is the list a non-collapsing `load_task_docs/1` grows to two.
+      live_cards = board.columns |> Map.values() |> List.flatten()
+
+      assert length(live_cards) == 1,
              "the pair must COLLAPSE — the draft twin is not a second card"
+    end
+
+    test "rule 1 decides when the published row is the drafts.-spelled one" do
+      # The one bucket shape where rules 1 and 2 DISAGREE: the published row
+      # carries the `drafts.` spelling and the bare twin does not. Rule 2 alone
+      # would answer "Unpublished bare"; only the `status == "published"`
+      # clause answers the other way. Every other arm here is satisfied by
+      # rules 2-3, so this is the arm that keeps rule 1 from rotting into
+      # dead code unnoticed.
+      twin_task!("rule1-inverted", "Unpublished bare", "draft")
+      twin_task!("drafts.rule1-inverted", "Published draft-spelled", "published")
+
+      board = Board.snapshot(dataset: "production")
+
+      assert board.cards_by_id["rule1-inverted"].title == "Published draft-spelled",
+             "status == published must outrank the bare-id tie-break"
     end
 
     test "an UNPAIRED drafts. row IS the row of record and resolves as ITSELF" do
