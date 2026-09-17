@@ -264,7 +264,8 @@ defmodule BarkparkCloud.Web.RouterStudioSigninTest do
 
       StudioLinkFakeHttpClient.program([ticket("bplt_must-not-mint")])
 
-      unregistered = signin("nobody-here-#{System.unique_integer([:positive])}.example.com", token)
+      unregistered =
+        signin("nobody-here-#{System.unique_integer([:positive])}.example.com", token)
 
       {_owner, team_a} = user_with_team()
       other = signin(URI.parse(live_barkpark(team_a).url).host, token)
