@@ -402,3 +402,106 @@ func TestTristateRendersAllThreeStatesDistinctly(t *testing.T) {
 		t.Errorf("true must render true, got %q", got)
 	}
 }
+
+// THE ARM THAT MAKES THE READBACK EVIDENCE.
+//
+// Deleting the readback left every other test in this file green — measured,
+// which is why this one exists. Each case is a write that reports SUCCESS and
+// leaves the file wrong; only a readback can tell, so each reds the moment the
+// readback is removed.
+func TestReadbackCatchesASilentlyLostWrite(t *testing.T) {
+	env, _ := fullyMeasuredEnv(t)
+	m := buildPrimingManifest(env, "task-x", "w1")
+
+	cases := []struct {
+		name  string
+		io    primingIO
+		wants string
+	}{
+		{
+			// The write is a lie: it returns nil and stores nothing. The file
+			// does not exist afterwards.
+			name: "write silently stores nothing",
+			io: primingIO{
+				mkdirAll:  func(string, os.FileMode) error { return nil },
+				writeFile: func(string, []byte, os.FileMode) error { return nil },
+				readFile:  func(string) ([]byte, error) { return nil, errors.New("no such file") },
+			},
+			wants: "could not re-read",
+		},
+		{
+			// The write lands TRUNCATED — the classic full-disk shape. Bytes
+			// exist; they do not parse.
+			name: "write lands truncated",
+			io: primingIO{
+				mkdirAll:  func(string, os.FileMode) error { return nil },
+				writeFile: func(string, []byte, os.FileMode) error { return nil },
+				readFile:  func(string) ([]byte, error) { return []byte(`{"schema":1,"doc_`), nil },
+			},
+			wants: "does not parse",
+		},
+		{
+			// A DIFFERENT row's manifest is at the path — another process
+			// wrote over it between our write and our read.
+			name: "another writer's manifest is at the path",
+			io: primingIO{
+				mkdirAll:  func(string, os.FileMode) error { return nil },
+				writeFile: func(string, []byte, os.FileMode) error { return nil },
+				readFile: func(string) ([]byte, error) {
+					other := buildPrimingManifest(env, "task-SOMEONE-ELSE", "w9")
+					return json.Marshal(other)
+				},
+			},
+			wants: "expected doc_id",
+		},
+		{
+			// The right row, but the content no longer hashes to the digest it
+			// carries: the file says one thing and is another.
+			name: "content no longer matches its own digest",
+			io: primingIO{
+				mkdirAll:  func(string, os.FileMode) error { return nil },
+				writeFile: func(string, []byte, os.FileMode) error { return nil },
+				readFile: func(string) ([]byte, error) {
+					tampered := m
+					tampered.Worker = "impostor"
+					return json.Marshal(tampered)
+				},
+			},
+			wants: "hashes to",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := writePrimingManifestIO(tc.io, "/anywhere", m)
+			if err == nil {
+				t.Fatalf("a write that did not land must FAIL LOUD; got nil — " +
+					"the readback is gone or no longer compares anything")
+			}
+			if !strings.Contains(err.Error(), "readback FAILED") {
+				t.Errorf("the refusal must name the readback, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.wants) {
+				t.Errorf("the refusal must say %q, got: %v", tc.wants, err)
+			}
+		})
+	}
+
+	// THE QUIET CONTROL: the same path with an HONEST filesystem must pass, or
+	// the four cases above prove only that the guard refuses everything.
+	store := map[string][]byte{}
+	honest := primingIO{
+		mkdirAll:  func(string, os.FileMode) error { return nil },
+		writeFile: func(p string, b []byte, _ os.FileMode) error { store[p] = b; return nil },
+		readFile: func(p string) ([]byte, error) {
+			b, ok := store[p]
+			if !ok {
+				return nil, errors.New("no such file")
+			}
+			return b, nil
+		},
+	}
+	if err := writePrimingManifestIO(honest, "/anywhere", m); err != nil {
+		t.Fatalf("an honest write must pass the readback, got: %v", err)
+	}
+}

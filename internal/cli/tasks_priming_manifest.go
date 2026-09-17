@@ -256,13 +256,33 @@ func primingManifestPath(dir, docID string) string {
 	return filepath.Join(dir, docID+".priming.json")
 }
 
+// primingIO is the filesystem writePrimingManifest is allowed to touch,
+// injected for ONE reason that is not a style preference: the failure the
+// readback exists to catch is a write that reports SUCCESS and does not land.
+// os cannot be made to do that on demand, so without injection the readback has
+// no arm that reds when it is deleted — measured, on this very file: removing
+// the readback left the whole suite green. See TestReadbackCatchesASilentlyLostWrite.
+type primingIO struct {
+	mkdirAll  func(string, os.FileMode) error
+	writeFile func(string, []byte, os.FileMode) error
+	readFile  func(string) ([]byte, error)
+}
+
+func osPrimingIO() primingIO {
+	return primingIO{mkdirAll: os.MkdirAll, writeFile: os.WriteFile, readFile: os.ReadFile}
+}
+
 // writePrimingManifest writes the manifest and then PROVES it: the file is read
 // back, re-parsed, and its doc id and digest compared against what was written.
 // A write that did not land, landed truncated, or landed as something that no
 // longer parses fails loud here instead of being discovered by the successor
 // who needed it.
 func writePrimingManifest(dir string, m PrimingManifest) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	return writePrimingManifestIO(osPrimingIO(), dir, m)
+}
+
+func writePrimingManifestIO(io primingIO, dir string, m PrimingManifest) error {
+	if err := io.mkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("could not create priming dir %s: %w — this claim's loadout is NOT recorded", dir, err)
 	}
 	path := primingManifestPath(dir, m.DocID)
@@ -270,11 +290,11 @@ func writePrimingManifest(dir string, m PrimingManifest) error {
 	if err != nil {
 		return fmt.Errorf("could not encode priming manifest for %s: %w", m.DocID, err)
 	}
-	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+	if err := io.writeFile(path, append(b, '\n'), 0o644); err != nil {
 		return fmt.Errorf("could not write priming manifest %s: %w — this claim's loadout is NOT recorded", path, err)
 	}
 	// THE READBACK.
-	back, err := os.ReadFile(path)
+	back, err := io.readFile(path)
 	if err != nil {
 		return fmt.Errorf("priming-manifest readback FAILED: could not re-read %s: %w", path, err)
 	}
