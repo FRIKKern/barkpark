@@ -3,6 +3,8 @@ package pdrender
 import (
 	"math"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ── stat / KPI block ─────────────────────────────────────────────────────────
@@ -15,7 +17,7 @@ import (
 //
 // CONTRACT (ratified, pbp-tui-creative-slate §3):
 //
-//	stat:  {value, max?, denom?, unit?, label?, body?, spark?:[n…], source?}
+//	stat:  {value, max?, denom?, unit?, label?, body?, verdict?, spark?:[n…], source?}
 //
 //	- value  the headline datum. Rendered as a DISPLAY string (the slate stamps
 //	         pre-formatted values like "1.24M", "$42.10", "73%"), so it is read
@@ -34,6 +36,14 @@ import (
 //	- unit   optional dim qualifier after value/denom, separated by a space.
 //	- label  optional caption under the number/bar (dim).
 //	- body   optional dim prose after the label, wrapped without truncation.
+//	- verdict optional JUDGEMENT word, "loss" or "peace". Present and in
+//	         vocabulary → the VALUE DIGITS take the Theme's verdict ink; label,
+//	         body, bar and sparkline keep the page voice, so the number carries
+//	         the judgement and the cell does not become a coloured box. Absent or
+//	         off-vocabulary → BYTE-IDENTICAL to before. MIRROR of data_viz.ex
+//	         stat_html/1 and js/.../dataviz.ts, which stamp
+//	         .bp-stat__v--loss/--peace on exactly the same element: three render
+//	         engines, one vocabulary.
 //	- spark  optional numeric array → an eighth-block sparkline row beneath the
 //	         stat, through the reusable primitive.
 //	- source valid datum provenance, rendered outside the cell as a kilde footer.
@@ -148,6 +158,28 @@ func parseSpark(m map[string]any) []float64 {
 	return out
 }
 
+// ── the verdict ink ──────────────────────────────────────────────────────────
+
+// verdictInk returns `base` re-inked with the Theme's verdict colour when the
+// cell's `verdict` key is in vocabulary ("loss"/"peace"), and `base` untouched
+// otherwise. Only the FOREGROUND moves — weight/bold and every other attribute
+// of the base style survive, so the big-number stays bold and the bullet-bar
+// value stays plain-weight exactly as before.
+//
+// Two ways this is a no-op, both deliberate: a Theme built by a caller that
+// predates the field (Verdict == nil), and an absent/off-vocabulary word. Both
+// return `base`, so an unverdicted stat renders byte-for-byte as it did.
+func verdictInk(m map[string]any, ctx RenderCtx, base lipgloss.Style) lipgloss.Style {
+	if ctx.Theme.Verdict == nil {
+		return base
+	}
+	ink, ok := ctx.Theme.Verdict(strings.TrimSpace(attrStr(m, "verdict")))
+	if !ok {
+		return base
+	}
+	return base.Foreground(ink.GetForeground())
+}
+
 // ── the single stat cell ─────────────────────────────────────────────────────
 
 // statRenderer draws ONE KPI cell. It is the unit the plural `stats` grid lays
@@ -218,14 +250,14 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 			if barW < 1 {
 				barW = 1
 			}
-			out = append(out, statBar(proportion, barW, ctx)+ctx.Theme.Body.Render(valuePart)+denomSuffix+unitSuffix)
+			out = append(out, statBar(proportion, barW, ctx)+verdictInk(m, ctx, ctx.Theme.Body).Render(valuePart)+denomSuffix+unitSuffix)
 		} else {
 			// max present but non-positive → degrade to a plain prominent value.
-			out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix+unitSuffix)
+			out = append(out, verdictInk(m, ctx, ctx.Theme.Body.Bold(true)).Render(value)+denomSuffix+unitSuffix)
 		}
 	} else {
 		// Big-number: the value stands alone, prominent.
-		out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix+unitSuffix)
+		out = append(out, verdictInk(m, ctx, ctx.Theme.Body.Bold(true)).Render(value)+denomSuffix+unitSuffix)
 	}
 
 	// Caption under the number/bar. EVERY wrapped line is emitted — the label is
