@@ -1476,15 +1476,34 @@ defmodule PDS.Census do
   # head_hash} and are separated by expr_fp ALONE.
   #
   # WHAT head_hash CANNOT DISCRIMINATE (scope stated, or a reader believes it is near
-  # unique on its own — it is not, and it does not need to be): across all 17,620 defs it
-  # collides in exactly 3 buckets WITHIN a {path, module.name/arity} group, and 0 times
-  # within the 75 site-owning groups. Only ONE of the three is a benign bodiless
-  # declaration head; the other TWO are DISTINCT functions inside two `defimpl Inspect,
-  # for: ...` blocks (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137)
-  # that this walker cannot tell apart. Corpus-wide — ignoring path and mfa — it is 912
-  # groups over 2,543 defs under this normaliser (the wave brief recorded 913/2,544 under
-  # another spelling; that figure does not survive a spelling change and is not quotable
-  # across one).
+  # unique on its own — it is not, and it does not need to be). RE-DERIVED at ac35fbe06
+  # over 23,771 defs, under this normaliser and under the walker's CURRENT attribution:
+  # it collides in 3 buckets (6 defs) WITHIN a {path, module.name/arity} group, and 0
+  # times inside the 82 site-owning groups (99 defs, 100 emitted keys, all distinct).
+  #
+  # THE THREE ARE A RULE, NOT A LIST: every survivor is a pair of clause heads that CANNOT
+  # both be a distinct runtime function, so a key that cannot separate them is losing
+  # nothing. Two are a bodiless `@spec` companion header colliding with its own last
+  # clause (plugins/capabilities.ex visible?/2, media/storage/object_key.ex derive/3); one
+  # is the two arms of a compile-time `if @test_env do ... else ... end`, of which exactly
+  # one ever compiles (content/dedup_wall.ex default_timeout/0).
+  #
+  # THE OLD SENTENCE HERE SAID "3 buckets ... only ONE of the three is a benign bodiless
+  # declaration head" AND NAMED THE OTHER TWO AS DEFIMPL CLAUSES. Both halves are retired:
+  # the defimpl pairs (plugins/github/errors.ex inspect/2, plugins/indx/errors.ex
+  # inspect/2) were REAL and are now separated by the walker recording the defimpl target
+  # — they were 2 of the 5 groups the pre-change key produced, and the count is 5 -> 3 on
+  # the same population. The description "all benign bodiless declaration heads" was never
+  # true of them and is not the predicate above. See defimpl_key_checks!/0, which derives
+  # both partitions off ONE walk on every `--selftest` run and raises if the witness set
+  # goes empty.
+  #
+  # Corpus-wide — ignoring path and mfa — it is 1,103 groups over 3,040 defs under this
+  # normaliser at this sha (widest: init/1 at 62, call/2 at 40, render/1 at 31). THE PATH
+  # AND THE MFA CARRY THAT LOAD. Earlier figures (912/2,543 here, 913/2,544 in the wave
+  # brief) were derived on a smaller corpus and under an older attribution; a corpus-wide
+  # number survives neither a spelling change nor a tree that grew, and is not quotable
+  # across one.
   #
   # CHURN, MEASURED across the three merges that landed into this sha: 5 orphaned / 5
   # arrived / 86 common, and it was a PURE RE-KEY — the {path, mfa} multiset was
@@ -3474,16 +3493,43 @@ defmodule PDS.Census do
   defp impl_segs(nil), do: []
   defp impl_segs({proto, target}), do: proto ++ target
 
-  # `defimpl Proto, for: Target do ... end` parses as [proto_alias, [for: target], [do: _]]
-  # — and Elixir merges the `do:` into the SAME keyword list as `for:`, so the target is
-  # read out of the option list rather than off a positional slot. A `defimpl` this clause
-  # cannot read a single alias target out of (a `for:` list, a var, an absent `for:`)
-  # falls through to the generic descent below and keeps the OLD blind attribution, which
-  # is a known-narrow arm rather than a guessed one: every `defimpl` in this corpus is the
-  # single-alias shape, and defimpl_key_checks!/0 raises if that population goes empty.
-  defp impl_target({:__aliases__, _, proto}, opts) when is_list(opts) do
-    case Keyword.get(opts, :for) do
-      {:__aliases__, _, target} when is_list(target) -> {proto, target}
+  # THE OPTION LIST IS NOT A KEYWORD LIST HERE, AND `Keyword.get/2` SILENTLY RETURNS NIL
+  # ON IT. Under census_parse_opts/0's `literal_encoder` every literal — including a
+  # keyword KEY — comes back as `{:__block__, meta, [:for]}`, so `Keyword.get(opts, :for)`
+  # finds nothing and a clause built on it reads as "not a defimpl". Worse, the arity is
+  # not fixed either: `defimpl P, for: T do ... end` parses as [proto, [for: T], [do: _]]
+  # under these options and as [proto, [for: T, do: _]] under bare ones. Both shapes are
+  # handled by merging every list-shaped argument after the protocol and reading the
+  # options out of THAT — the same `lit/1`-tolerant read `kw/2` already does for
+  # `defdelegate`. Measured cost of getting this wrong: 21 defs silently vanished from the
+  # index (23771 -> 23750) because the do-block was never descended into.
+  defp opt_key?(k, key) do
+    case lit(k) do
+      {:lit, ^key, _} -> true
+      _ -> k == key
+    end
+  end
+
+  # kw/2 runs its value through alias_or_atom/1, which is right for `for:` and destroys a
+  # `do:` block. This is the raw read, returning {:ok, value} so an absent key and a nil
+  # value stay distinguishable.
+  defp kw_raw(opts, key) when is_list(opts) do
+    Enum.find_value(opts, fn
+      {k, v} -> if opt_key?(k, key), do: {:ok, v}
+      _ -> nil
+    end)
+  end
+
+  defp kw_raw(_, _), do: nil
+
+  # A `defimpl` this clause cannot read a single alias target out of (a `for:` LIST, a var,
+  # an absent `for:`) falls through to the generic descent and keeps the OLD blind
+  # attribution — a known-narrow arm rather than a guessed one. Every `defimpl` in this
+  # corpus is the single-alias shape, and defimpl_key_checks!/0 raises if that population
+  # goes empty.
+  defp impl_target({:__aliases__, _, proto}, opts) do
+    case kw_raw(opts, :for) do
+      {:ok, {:__aliases__, _, target}} when is_list(target) -> {proto, target}
       _ -> nil
     end
   end
@@ -3495,10 +3541,12 @@ defmodule PDS.Census do
       {:defmodule, _, [{:__aliases__, _, segs}, body]} ->
         defs(body, mod ++ segs, impl, path, acc)
 
-      {:defimpl, _, [proto, opts | _]} when is_list(opts) ->
-        case impl_target(proto, opts) do
-          nil -> Enum.reduce([proto, opts], acc, &defs(&1, mod, impl, path, &2))
-          t -> defs(Keyword.get(opts, :do), mod, t, path, acc)
+      {:defimpl, _, [proto | rest] = args} when rest != [] ->
+        opts = Enum.flat_map(rest, fn o -> if is_list(o), do: o, else: [] end)
+
+        case {impl_target(proto, opts), kw_raw(opts, :do)} do
+          {t, {:ok, body}} when not is_nil(t) -> defs(body, mod, t, path, acc)
+          _ -> Enum.reduce(args, acc, &defs(&1, mod, impl, path, &2))
         end
 
       {op, meta, [head | rest]} when op in [:def, :defp, :defmacro, :defmacrop] ->
@@ -5155,22 +5203,37 @@ defmodule PDS.Census do
   # every register row keyed under the old spelling orphans at once. Bump @key_normaliser
   # in the same commit so the register can see which spelling produced its integers.
   #
-  # WHAT head_hash CANNOT DISCRIMINATE — DERIVED UNDER THIS NORMALISER, not transcribed.
-  # Across all 17,620 defs it collides in exactly 3 buckets (6 defs) WITHIN a
-  # {path, module.name/arity} group, and 0 times within the 75 site-owning groups. Only
-  # ONE of the three is the benign bodiless header (plugins/capabilities.ex visible?/2
-  # :144/:155, where :144 is the header and :155 the last clause); the other TWO are two
-  # DISTINCT functions inside two `defimpl Inspect, for: ...` blocks
-  # (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137) that this walker
-  # cannot tell apart, because it reads the head and defimpl reuses it verbatim.
+  # WHAT head_hash CANNOT DISCRIMINATE — DERIVED UNDER THIS NORMALISER, not transcribed,
+  # and RE-DERIVED at ac35fbe06 after the walker learned the defimpl target. Across all
+  # 23,771 defs it collides in 3 buckets (6 defs) WITHIN a {path, module.name/arity}
+  # group, and 0 times within the 82 site-owning groups.
   #
-  # CORPUS-WIDE — ignoring path and mfa — it is 912 groups over 2,543 defs (`def all()` is
-  # byte-identical in 7 modules; the widest groups are init/1 at 53 defs and call/2 at 39).
-  # THE PATH AND THE MFA ARE CARRYING THAT LOAD, which is why the key is a 4-tuple and not
-  # a hash. NOTE: the wave brief recorded 913 over 2,544 for this figure — re-derived here
-  # it is 912 over 2,543. The corpus-wide partition is NOT covered by the two normalisers'
-  # within-group partition identity, so that number does not survive a spelling change and
-  # is not quotable across one. capabilities.ex visible?/2 hashes 52289869 here.
+  # THE THREE ARE A PREDICATE, NOT AN ENUMERATION — every survivor is a pair of heads that
+  # cannot both be a distinct runtime function, so the key loses nothing by not separating
+  # them. Two are a bodiless `@spec` companion header against its own last clause
+  # (plugins/capabilities.ex visible?/2, media/storage/object_key.ex derive/3, each cited
+  # by SYMBOL because the line anchors this comment used to carry — :144/:155 — had
+  # already rotted to :166/:177 by the time anyone re-read them). The third is the two
+  # arms of a compile-time `if @test_env do ... else ... end`, of which exactly one ever
+  # compiles (content/dedup_wall.ex default_timeout/0).
+  #
+  # WHAT USED TO BE HERE, AND WHY IT IS GONE: this comment claimed the three were "the
+  # benign bodiless header" plus TWO DISTINCT functions inside two `defimpl Inspect,
+  # for: ...` blocks that the walker could not tell apart. That was TRUE and it was a real
+  # hole in the key — a receipt inside a defimpl was silently un-keyable. It is closed: the
+  # walker records the defimpl protocol and target (see collect_defs/2), so the two pairs
+  # now live in different {path, mfa} groups and the count went 5 -> 3 on one population.
+  # defimpl_key_checks!/0 derives both partitions off ONE walk on every `--selftest` run,
+  # and raises rather than passing if the witness set or the defimpl population goes empty.
+  #
+  # CORPUS-WIDE — ignoring path and mfa — it is 1,103 groups over 3,040 defs at this sha
+  # (widest: init/1 at 62 defs, call/2 at 40, render/1 at 31). THE PATH AND THE MFA ARE
+  # CARRYING THAT LOAD, which is why the key is a 4-tuple and not a hash. NOTE: earlier
+  # readings of this figure (912/2,543 here, 913/2,544 in the wave brief) were taken on a
+  # smaller corpus; the corpus-wide partition is covered by NEITHER the two normalisers'
+  # within-group partition identity NOR a stable tree, so no corpus-wide number survives a
+  # spelling change or a growing corpus and none is quotable across one.
+  # capabilities.ex visible?/2 hashes 52289869 here.
   @key_normaliser "total-meta-drop/phash2-term/v1"
 
   defp drop_meta(ast) do
