@@ -181,3 +181,5 @@ func (m *Map) accept(src, b64 string) string {
 	m.bytes[key] = raw
 	return ""
 }
+
+// probe: throwaway, do not merge (task-519d5ea68ddca27f dispatch proof)
