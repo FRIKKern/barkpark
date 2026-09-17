@@ -1,6 +1,6 @@
 # taskboard-drive report
 
-- date: 2026-09-17T03:21:26Z
+- date: 2026-09-17T04:12:30Z
 - mode: hermetic
 - tmux: tmux 3.4
 - host: Darwin arm64
@@ -20,7 +20,7 @@
 - PASS — G10b click on the counted ↑ overflow marker (line 3) stepped the cursor EXACTLY one row BACK: "Rebush the treble clapper" -> "Shim the oak bell frame", the same task one `k` selects
 - PASS — G10 board restored to its boot cursor row ("Harbor lights epic") — the asserts that follow see the baseline board
 - PASS — header ↔ divider affordance located at col 84
-- **FAIL** — G7 divider hover bounds: responding cols {84 85 86} (want exactly 2)
+- PASS — G7 divider hover bounds: exactly 2 contiguous cols light the divider cell (84 85); neighbours 83 and 86 do not
 - PASS — G5 hover accent paints on gutter hover and restores exactly when the pointer leaves (styled header row diff)
 - PASS — G4 leaf descended on FIRST click: divider form flipped board->reader (↔ col 84 -> 85)
 - PASS — esc after descend: board footer still present (ascended cleanly)
@@ -35,5 +35,5 @@
 
 ## totals
 
-- pass: 23
-- fail: 1
+- pass: 24
+- fail: 0
