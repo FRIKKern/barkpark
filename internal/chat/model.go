@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
 // model.go — the Bubble Tea SHELL. It is deliberately thin: all conversation
@@ -146,6 +148,17 @@ type Model struct {
 	wfAgentDetail bool
 	wfAgent       int
 
+	// The agent↔task join's candidate rows (task wsc-bl-agent-task-join). They
+	// are fetched LAZILY — once, the first time the agent-detail level opens —
+	// so a chat that never drills pays nothing. joinTasksAsked is the one-shot
+	// guard; it stays true after a FAILED fetch too, because the honest degrade
+	// for this surface is "no task line", not a retry storm behind a pane the
+	// operator is reading. An empty joinTasks therefore means exactly what it
+	// renders: nothing to join against.
+	joinTasks      []taskboard.Task
+	joinIndex      taskboard.AgentTaskIndex
+	joinTasksAsked bool
+
 	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
 	mode         string
 	modelChoice  string
@@ -228,6 +241,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if h, ok := applyFleetFrame(m.herd, msg.event, msg.data); ok {
 			m.herd = h
 			m = m.syncCursorFromHerd()
+		}
+		return m, nil
+	case joinTasksMsg:
+		// The agent↔task join's candidate rows. A failed fetch is NOT an error
+		// state: joinTasks stays empty and every agent-detail pane simply paints
+		// no task line, which is the same degrade an ambiguous label gets. The
+		// pane must never say "could not load tasks" — that is chrome about the
+		// client, not truth about the agent.
+		if msg.err == nil {
+			// Index ONCE, here. The pane asks the join question on every paint and
+			// the live corpus is ~9.5k rows, so a scan per paint would be a full
+			// re-collapse of the corpus at the 100ms tick.
+			m.joinTasks = msg.tasks
+			m.joinIndex = taskboard.NewAgentTaskIndex(msg.tasks)
 		}
 		return m, nil
 	case fleetErrMsg:
