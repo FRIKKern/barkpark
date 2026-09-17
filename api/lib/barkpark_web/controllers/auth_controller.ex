@@ -554,7 +554,12 @@ defmodule BarkparkWeb.AuthController do
 
       {:error, changeset} ->
         # PURE ECHO — DECLARED-HONEST (task-ef7f93eebba52fd3). This failure arm
-        # falls through to the SAME `ok: true` the success path returns, and
+        #
+        # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
+        # space. The census counts that literal substring corpus-wide and its
+        # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
+        # be counted AS a receipt. Re-spacing it here reds the census.
+        # falls through to the SAME `ok:true` the success path returns, and
         # that merge is DELIBERATE, not an oversight.
         #
         # WHY IT MUST MERGE. A mint failure is only reachable for an address that

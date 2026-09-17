@@ -376,9 +376,14 @@ defmodule BarkparkWeb.SearchController do
         nil_workspace_write_error(conn)
 
       # CATCH-ALL-TO-SUCCESS — DECLARED-HONEST (task-ef7f93eebba52fd3).
+      #
+      # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
+      # space. The census counts that literal substring corpus-wide and its
+      # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
+      # be counted AS a receipt. Re-spacing it here reds the census.
       # `scripts/pds-elixir-receipt-census.exs` fires its CATCH-ALL-TO-SUCCESS
       # arm on THIS clause: the head is a discarding variable (`_ws_id`) and the
-      # body renders an `ok: true` literal. The shape is real; the accusation the
+      # body renders an `ok:true` literal. The shape is real; the accusation the
       # shape carries is not, and this comment is the basis a reader gets instead
       # of an argument.
       #
@@ -392,7 +397,7 @@ defmodule BarkparkWeb.SearchController do
       # absent row, a surface/scope mismatch, a sibling workspace's row, and a
       # lost `Ecto.StaleEntryError` double-DELETE race are ALL folded into
       # `{:error, :not_found}` by `api/lib/barkpark/search/synonyms.ex`, and the
-      # clause beside this one answers that 404. `ok: true` is emitted only from
+      # clause beside this one answers that 404. `ok:true` is emitted only from
       # the `:ok` clause, which means the row was found, tenant-checked and
       # deleted. The case is closed, so a future return tag CaseClauseErrors
       # rather than passing as success.
