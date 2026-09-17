@@ -173,7 +173,7 @@ export const INLINE_COND_KEYS = new Set(
 export const ROUTE_TIERS = [
   // ── reads ──
   { key: "GET /v1/notifications/deliveries", auth_fn: A_USER, pin: null,
-    why_no_pin: "a READ. The census PIN is 80 WRITE call sites; no read has a row there. The overlay records this route as the EXCLUDED self-scope narrowing — a member sees their own rows, never a refusal",
+    why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there. The overlay records this route as the EXCLUDED self-scope narrowing — a member sees their own rows, never a refusal",
     why: "any member may page their own delivery log" },
   // cch-w36-bl: the team audit trail, which entered this table when
   // `activity-denied` gave the corpus its first member actor on #activity and
@@ -187,7 +187,7 @@ export const ROUTE_TIERS = [
   // a member asking for the team trail is answered 403 with
   // `required: "admin", scope: "team"` and renders nothing.
   { key: "GET /v1/audit", auth_fn: A_PTADMIN, pin: null,
-    why_no_pin: "a READ. The census PIN is 80 WRITE call sites; no read has a row there",
+    why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there",
     why: "the team's append-only trail is team-admin-only — a plain member is REFUSED, not narrowed" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session ──

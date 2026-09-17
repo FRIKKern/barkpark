@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 79 write call sites collapse to 67 route keys; 11 of those keys are
+// The 84 write call sites collapse to 73 route keys; 10 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -73,13 +73,13 @@
 //
 //   (Re-derive both: grep -n 'function submitProviderCred' app.js, and the same
 //   for submitInlineProviderCred. NO LINE NUMBER IS WRITTEN DOWN IN THIS FILE,
-//   and every line number this census prints — app.js sites and the six router
+//   and every line number this census prints — app.js sites and the router
 //   overlay sites alike — is DERIVED at run time from the live file. That is a
 //   description of the file as it stands, not an aspiration: it was FALSE until
-//   charter D528, when the PIN's 79 documentary `line:` fields were deleted
-//   (nothing read them; all 79 were stale) and the inline-cond overlay's six
-//   typed-and-printed router lines were replaced by a resolver over the live
-//   router source. Line numbers rot on any sibling shift — charter D41 /
+//   charter D528, when every documentary `line:` field the PIN then carried was
+//   deleted (nothing read them; every one of them was stale) and the
+//   inline-cond overlay's typed-and-printed router lines were replaced by a
+//   resolver over the live router source. Line numbers rot on any sibling shift — charter D41 /
 //   bp-honest-gates D5 — so the PIN is keyed on the function name, and a
 //   printed numeral is only ever this run's reading of the tree. cch-w47-rv
 //   made that sentence a CHECK rather than a promise: (2h) below reads this
@@ -99,18 +99,22 @@
 //     no-op for it". The check discriminates PATs, not people. Every console
 //     call site whose only guard above membership is `require_ability` (or
 //     `with_team_site(conn, {:ability, "write"}, …)`) is therefore PLAIN
-//     MEMBER here: loadSite (PATCH /v1/sites/:*), runPromote, runSiteRollback,
-//     createAndDeploy and runDeploy. A builder who counts `require_ability` as
-//     elevated gets 46, not 40 — those five plus submitToken, whose whole
-//     authority also lives below the router (see (c)).
+//     MEMBER here: 6 rows — loadSite (PATCH /v1/sites/:*), runPromote,
+//     runSiteRollback, runSiteDelete, createAndDeploy and runDeploy. Note who
+//     is NOT among them: openSiteEnvModal's guard is `with_team_site(conn, fn)`,
+//     tenancy with no ability term at all, so promoting it would need a
+//     different mistake than this one. A builder who counts `require_ability`
+//     as elevated gets 56, not 49 — those 6 plus the 1 row whose whole
+//     authority lives below the router in Accounts.pat_abilities_allowed?/2,
+//     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor silently drops 13 of the 79 — they build their path from a
-//     variable or a helper — and a census that counted what it saw would call
-//     that 66-of-66 and go green over a hole. Two of the dropped are the
-//     console's HIGHEST-privilege writes (fleetRolloutAction and
-//     operatorConfirmBrake, the operator autoupdate brake). Worse, a 14th does
-//     not drop at all: submitActivateDecision builds
+//     path extractor cannot read 15 of the 84 — they build their path from a
+//     variable or a helper — and a census that counted only what it read
+//     literally would call that 69-of-69 and go green over a hole. Two of those
+//     15 are the console's HIGHEST-privilege writes (fleetRolloutAction and
+//     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
+//     does not drop at all: submitActivateDecision builds
 //     `"/v1/auth/device/" + decision` — a literal PREFIX with a variable last
 //     segment, which a naive extractor ACCEPTS and mis-routes to
 //     "/v1/auth/device/". Silent mis-routing beats silent dropping for damage,
@@ -167,7 +171,8 @@
 //   `fence`, removing the predicate around the call site IS now reachable —
 //   deleting the band read, neutering the decision, or dropping the fence pin
 //   itself each exit 2. The narrowing is exactly as wide as the fence pins go,
-//   and today that is ONE BAND. Every other predicated row is still LIMIT 1.
+//   and today that is 10 bands over 40 of the 48 predicated rows. Every other
+//   predicated row is still LIMIT 1.
 //
 //   LIMIT 1b — (2i-4)'s ACCOUNTING IS OVER READ SITES, NOT OVER ROWS. It walks
 //   the band's live call sites and demands each enclosing function be claimed
@@ -187,18 +192,18 @@
 //   ratchet, not a proof of absence.
 //
 //   LIMIT 3 — THE INLINE-COND OVERLAY IS CONTENT-MATCHED, NOT LINE-PINNED.
-//   Eight router routes refuse non-admins inside a `cond` rather than through an
+//   6 router routes refuse non-admins inside a `cond` rather than through an
 //   `Auth.*` guard, so they are invisible to any guard grep. They are checked
 //   by counting the exact `Accounts.team_admin?(conn.assigns.current_user,
 //   conn.assigns.current_team)` form, so the check survives line drift — but it
-//   cannot tell WHICH route grew a ninth. It tells you to go look.
+//   cannot tell WHICH route grew a 7th. It tells you to go look.
 //
 //   The overlay also PRINTS a `router.ex:NNNN` per route, and those numbers
 //   are DERIVED by the same two regexes at run time — nothing compares them to
-//   anything, so they cannot red and cannot go stale. What IS pinned is the six
+//   anything, so they cannot red and cannot go stale. What IS pinned is the 6
 //   ROUTE NAMES, and the print pairs name to line BY SOURCE ORDER. So the one
-//   thing this print can still get wrong is a router that REORDERS these eight
-//   while keeping the count at eight: the lines stay right and the names slide.
+//   thing this print can still get wrong is a router that REORDERS these 6
+//   while keeping the count at 6: the lines stay right and the names slide.
 //   On any count change the pairing is dropped and the derived lines print
 //   UNLABELED, because a mis-labelled failure message is a new false statement
 //   of exactly the kind this census exists to remove.
@@ -313,13 +318,13 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 79 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 84 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
 // (`lineOf`, below) and looked up by KEY, so it is correct by construction. The
-// rows used to carry a documentary `line:` beside it; measured, all 79 were
-// stale (median drift 524, max 928, zero correct) and nothing read them —
+// rows used to carry a documentary `line:` beside it; measured, every one of
+// them was stale (median drift 524, max 928, zero correct) and nothing read —
 // setting one to 999999 left the report BYTE-IDENTICAL at rc 0. A number no
 // check can red and no reader can trust is not orientation, it is a second
 // answer that disagrees with the first. Deleted (charter D528).
@@ -948,7 +953,7 @@ const ratchetVerdict = (pinRows, ceilingKeys) => {
 //
 // WHY IT SHORT-CIRCUITS HERE — after `seenByKey`, before every check below. A
 // fixture is not app.js, and the checks are statements ABOUT app.js: (2b)'s
-// EXPECT {79, 40, …} is nonsense against four hundred bytes of fixture, and
+// EXPECT's live totals are nonsense against four hundred bytes of fixture, and
 // (2e)/(2f) read Elixir the fixture has nothing to do with. Measured before this
 // block existed: handing a fixture to the bare census resolves cleanly through
 // (2a) and then dies at (2d) with `submitProviderCred → MISSING` — a red that
@@ -1215,13 +1220,25 @@ for (const r of rows) {
 const pinnedElevated = PIN.filter((r) => r.elevated);
 const pinnedPredicated = pinnedElevated.filter((r) => r.predicate);
 const pinnedUnpredicated = pinnedElevated.filter((r) => !r.predicate);
+
+// Ruling (a)'s counterfactual, DERIVED rather than typed. The rows a builder
+// would wrongly promote are exactly the ones this pin marks NOT elevated whose
+// only guard above membership is the router's ability check (or the
+// with_team_site ability tuple), plus the rows whose cap lives in
+// Accounts.pat_abilities_allowed?/2 below the router. Both sets are read off
+// the pin, so the counterfactual moves when the pin does.
+const abilityGuard = (r) => /require_ability/.test(r.auth_fn || "") || /\{:ability,/.test(r.context_fn || "");
+const patAbilityGuard = (r) => /pat_abilities_allowed/.test(r.context_fn || "");
+const pinnedAbilityOnly = PIN.filter((r) => !r.elevated && abilityGuard(r));
+const pinnedPatAbility = PIN.filter((r) => !r.elevated && patAbilityGuard(r));
+const naiveAbilityElevated = pinnedElevated.length + pinnedAbilityOnly.length + pinnedPatAbility.length;
 const liveByKey = (r) => seenByKey.get(keyOf(r));
 
 console.log("");
 console.log(`classification   : ${PIN.length} call sites · ${pinnedElevated.length} ELEVATED above plain member · ` +
   `${pinnedPredicated.length} PREDICATED · ${pinnedUnpredicated.length} UNPREDICATED`);
 console.log("                   (require_ability is NOT elevated for the console — a session carries [\"root\"];");
-console.log("                    counting it would give 46, not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
+console.log("                    counting it would give " + naiveAbilityElevated + ", not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
 console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
 console.log("This census does NOT fix them. cch-w38-s1 (criterion 3) took the THREE this list was named for —");
@@ -1700,6 +1717,150 @@ if (PIN.length !== EXPECT.total ||
   ]);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// (2p) THE ORIENTATION PROSE IS DERIVED-OR-DEAD (task-597f2ffeeb9a43d4)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT THIS ARM CLOSES. Everything above this line is checked. The
+// paragraphs a reader starts from were not: they carried typed populations
+// that no arm compared to anything, so they decayed silently while the gate
+// itself stayed green — the same shape charter D528 removed from the pin rows
+// and (2h) removed from the note strings, left standing one level up, in the
+// sentences that TELL A READER WHAT THE INSTRUMENT MEASURES. Measured on the
+// tree this arm landed against: five asserting sentences described a
+// population five rows smaller than the pin sitting underneath them, and the
+// counterfactual the summary PRINTS was smaller than the number it contrasted
+// itself with.
+//
+// HOW IT WORKS. Every comment line in this file is flattened to one whitespace-
+// normalised string, and each claim below names a regex whose captures ARE the
+// numerals of one sentence, paired with the live quantity each must equal. A
+// claim whose regex does not match EXACTLY ONCE is a FAILURE, never a skip:
+// zero matches means the sentence was reworded out from under its own check
+// (which is how a prose check goes quietly vacuous), and two mean the regex is
+// no longer pointing at one sentence. The claim list may not be empty either.
+//
+// WHAT IS PINNED RATHER THAN DERIVED, said out loud. Numerals that record a
+// PAST tree — what D528 deleted, what a wave moved — are not in this list, and
+// they are not in the prose either: they were removed rather than pinned,
+// because a number describing a tree that no longer exists is the decoy this
+// census exists to delete, not orientation a reader can use.
+{
+  const selfSrc = fs.readFileSync(new URL(import.meta.url).pathname, "utf8");
+  const prose = selfSrc
+    .split("\n")
+    .filter((l) => /^\s*\/\//.test(l))
+    .map((l) => l.replace(/^\s*\/\/ ?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ");
+  if (prose.length < 10000) {
+    die2([
+      "FAIL(2): (2p) could not read this file's own comment prose (" + prose.length + " chars).",
+      "  The orientation check has no subject, which is indistinguishable from a passing check.",
+    ]);
+  }
+
+  const total = PIN.length;
+  const keys = PIN.map((r) => r.verb + " " + r.route);
+  const keyCount = new Map();
+  for (const k of keys) keyCount.set(k, (keyCount.get(k) || 0) + 1);
+  const routeKeys = keyCount.size;
+  const multiSiteKeys = [...keyCount.values()].filter((n) => n > 1).length;
+  const resolverSites = sites.filter((s) => s.via === "resolver").length;
+  const literalSites = sites.length - resolverSites;
+  const fenceRows = PIN.filter((r) => r.fence);
+  const fenceBands = new Set(fenceRows.map((r) => r.fence.band)).size;
+  const inlineCond = INLINE_COND_ROUTES.length;
+
+  const CLAIMS = [
+    { id: "collapse",
+      re: /The (\d+) write call sites collapse to (\d+) route keys; (\d+) of those keys are multi-site/g,
+      want: [total, routeKeys, multiSiteKeys],
+      names: ["pin rows", "distinct VERB+route keys", "keys with more than one call site"] },
+    { id: "pin-banner",
+      re: /THE PIN — (\d+) write call sites, keyed by/g,
+      want: [total],
+      names: ["pin rows"] },
+    { id: "ruling-a-rows",
+      re: /MEMBER here: (\d+) rows — loadSite/g,
+      want: [pinnedAbilityOnly.length],
+      names: ["non-elevated rows guarded only by the ability check"] },
+    { id: "ruling-a-naive",
+      re: /counts `require_ability` as elevated gets (\d+), not (\d+) — those (\d+) plus the (\d+) row whose whole authority lives below the router/g,
+      want: [naiveAbilityElevated, pinnedElevated.length, pinnedAbilityOnly.length, pinnedPatAbility.length],
+      names: ["the counterfactual total", "pinned elevated rows", "ability-guarded rows", "pat-ability rows"] },
+    { id: "ruling-b-drop",
+      re: /path extractor cannot read (\d+) of the (\d+) — they build their path/g,
+      want: [resolverSites, sites.length],
+      names: ["live sites resolved through RESOLVERS", "live write call sites"] },
+    { id: "ruling-b-floor",
+      re: /would call that (\d+)-of-(\d+) and go green over a hole\. Two of those (\d+) are/g,
+      want: [literalSites, literalSites, resolverSites],
+      names: ["literally-readable sites", "literally-readable sites", "resolver sites"] },
+    { id: "limit1-fences",
+      re: /as wide as the fence pins go, and today that is (\d+) bands over (\d+) of the (\d+) predicated rows/g,
+      want: [fenceBands, fenceRows.length, pinnedPredicated.length],
+      names: ["distinct fence bands", "fence-pinned rows", "predicated rows"] },
+    { id: "limit3-count",
+      re: /(\d+) router routes refuse non-admins inside a `cond` rather than through an/g,
+      want: [inlineCond],
+      names: ["inline-cond overlay routes"] },
+    { id: "limit3-next",
+      re: /cannot tell WHICH route grew a (\d+)th\./g,
+      want: [inlineCond + 1],
+      names: ["one more than the overlay count"] },
+    { id: "limit3-names",
+      re: /What IS pinned is the (\d+) ROUTE NAMES/g,
+      want: [inlineCond],
+      names: ["inline-cond overlay routes"] },
+    { id: "limit3-reorder",
+      re: /REORDERS these (\d+) while keeping the count at (\d+)/g,
+      want: [inlineCond, inlineCond],
+      names: ["inline-cond overlay routes", "inline-cond overlay routes"] },
+  ];
+
+  if (!CLAIMS.length) {
+    die2(["FAIL(2): (2p) has no claims left to check — an empty claim list passes everything."]);
+  }
+
+  const lost = [];
+  const wrong = [];
+  for (const c of CLAIMS) {
+    const hits = [...prose.matchAll(c.re)];
+    if (hits.length !== 1) {
+      lost.push("  " + c.id + "  — matched " + hits.length + " time(s) in this file's prose, needs exactly 1");
+      continue;
+    }
+    const got = hits[0].slice(1).map(Number);
+    got.forEach((n, i) => {
+      if (n !== c.want[i]) {
+        wrong.push("  " + c.id + "[" + i + "]  prose says " + n + ", live " + c.names[i] + " = " + c.want[i]);
+      }
+    });
+  }
+  if (lost.length) {
+    die2([
+      "FAIL(2): (2p) lost the sentence it checks. A prose claim with no subject is a check that cannot lose.",
+      ...lost,
+      "",
+      "  Re-word the sentence back onto its regex, or move the regex onto the new wording —",
+      "  but do not delete the claim to make this quiet.",
+    ]);
+  }
+  if (wrong.length) {
+    die2([
+      "FAIL(2): the orientation prose at the top of this file states a population this tree does not have.",
+      ...wrong,
+      "",
+      "  The prose is what a reader takes the instrument to measure. Correct the sentence in the",
+      "  same commit that moves the population — the numbers are orientation, not decoration.",
+    ]);
+  }
+  console.log("");
+  console.log("(2p) orientation prose : " + CLAIMS.length + " claim(s), " +
+    CLAIMS.reduce((n, c) => n + c.want.length, 0) + " numeral(s), each located exactly once and equal to the live derivation");
+}
+
 // ── (2j) THE RATCHET. LEGACY_UNPREDICATED is a CEILING, not a count. ────────
 //
 //      WHAT IT CLOSES. Everything above this arm is a SET DIFF over CALL SITES,
@@ -2105,7 +2266,7 @@ if (dupes.length) {
 //     in the shared table and the census's own pin refutes it here.
 //
 // A table row may decline to name a PIN key, but then it must say WHY and this
-// prints the reason — the PIN is 80 WRITE call sites, so a read route or a band
+// prints the reason — the PIN covers WRITE call sites only, so a read route or a band
 // label has nothing there to bind to. Bind or explain is a rule, not a list, which
 // is why a third unbound row cannot appear quietly.
 {
@@ -3594,8 +3755,8 @@ if (!FIXTURE_MODE) {
 // (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).
 //
 //      The header at the top of this file asserts, flatly, that NO LINE NUMBER
-//      IS WRITTEN DOWN HERE. Charter D528 made that true of the 79 PIN rows and
-//      of the six printed router lines — and left SEVEN behind in prose that
+//      IS WRITTEN DOWN HERE. Charter D528 made that true of the PIN rows and
+//      of the printed router lines — and left SEVEN behind in prose that
 //      nothing read and nothing could red: five `note:` strings naming
 //      router.ex lines for the inline-cond sites, the excluded local-binding
 //      site, and the two /v1/auth/device routes. Every one of them was already
