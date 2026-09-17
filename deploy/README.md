@@ -343,7 +343,7 @@ SIGKILL. Fails OPEN and loudly (no `flock(1)`, unopenable lock) — a gate that
 denies every deploy is worse than the contention it prevents.
 
 Offline gate (no npm/caddy/systemd):
-`bash deploy/site-deploy.sh --self-test` — 558 checks: the symlink flip,
+`bash deploy/site-deploy.sh --self-test` — 559 checks: the symlink flip,
 forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
