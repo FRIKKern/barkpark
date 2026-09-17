@@ -4,6 +4,7 @@
 import type { BuildIdentity } from './provenance.ts'
 import { createClient, type BarkparkClient } from '@barkpark/core'
 import { collectCorpus } from './paginate'
+import { browseSearchRequest, browseSeedIsNonempty, type BrowseAuthMode } from './browse-request'
 
 const API_VERSION = '2026-04-01'
 
@@ -154,6 +155,26 @@ export interface BrowseSeed {
   initialSeed: SeedDoc[]
 }
 
+/** How a failed browse seed should be NAMED in the build log.
+ *
+ * The live finding this exists for: a public-read bearer on the flat route was
+ * answered 403, browseSeed warned once in prose indistinguishable from an
+ * offline instance, and the island's live refetch made the page look correct —
+ * so the build silently stopped baking the thing it exists to bake. An
+ * anonymous read is an EXPECTED configuration; an authenticated one that fails
+ * is a DEFECT; a token with nowhere scoped to send it is a MISCONFIGURATION.
+ * Three states, three sentences, one grep each. */
+function seedFailurePrefix(mode: BrowseAuthMode): string {
+  switch (mode) {
+    case 'scoped-bearer':
+      return 'browse seed AUTHENTICATED read FAILED —'
+    case 'unscopable-anonymous':
+      return 'browse seed ANONYMOUS FALLBACK (BARKPARK_TOKEN set but no workspace/project scope to send it to) —'
+    default:
+      return 'browse seed ANONYMOUS FALLBACK (no BARKPARK_TOKEN — the deployed site uses this transport too) —'
+  }
+}
+
 /**
  * The finder's first-paint browse landing + prefix seed, baked at build into a
  * static JSON the island fetches (the static-site edition of the Next finder's
@@ -164,7 +185,8 @@ export interface BrowseSeed {
  * proved ranked-browse order (`engine=indx q=' '`) is byte-identical to
  * `_updatedAt:desc` listing order (concordance 1.0000), so one listing call is
  * the source, no engine dependency. `initialData` is a build-time
- * flat-anonymous browse search so the island paints the exact browse hits with
+ * browse search — SCOPED-authenticated when a token is configured, flat and
+ * anonymous otherwise (`./browse-request`) — so the island paints those hits with
  * engine relevance/highlights on first frame.
  */
 export async function browseSeed(): Promise<BrowseSeed> {
@@ -176,33 +198,30 @@ export async function browseSeed(): Promise<BrowseSeed> {
     type: d._type,
   }))
 
-  // The browse FindResponse. `/v1/data/search/:dataset` is a FLAT route — same
-  // origin-derivation as graphCorpus (a scoped apiUrl + flat route 404s). A
-  // missing/failed browse must NOT fail the build: the island falls back to the
-  // seed's prefix index and its own live fetch. Empty q (' ') = ranked browse.
-  // engine=postgres: the one engine every instance actually provisions (the
-  // indx claim is retired); the served engine rides back as `engineUsed`.
-  const params = new URLSearchParams({
-    q: ' ',
-    engine: 'postgres',
-    types: env.docType,
-    perspective: 'published',
-    limit: '100',
-    // Same ?fields= allowlist the island requests per keystroke — the baked
-    // browse must not weigh megabytes (papers' body_html is 97% of a full hit).
-    fields:
-      'title,name,excerpt,description,bio,slug,publishedAt,status,author,category',
-  })
-  const url = `${new URL(env.apiUrl).origin}/v1/data/search/${encodeURIComponent(env.dataset)}?${params}`
+  // The browse FindResponse. WHERE THE BEARER GOES is the whole subtlety here
+  // and it lives in `./browse-request` (dep-free, unit- AND producer-pinned):
+  // a public-read token presented on the FLAT route is answered 403 by the real
+  // producer, so a token only ever rides the SCOPED `/w/:ws/p/:p` spelling and
+  // a tokenless build goes out flat and anonymous — the deployed site's own
+  // transport. Empty q (' ') = ranked browse; engine=postgres is the one engine
+  // every instance provisions (the indx claim is retired) and the served engine
+  // rides back as `engineUsed`.
+  const req = browseSearchRequest(env)
   let initialData: unknown = null
   try {
-    const res = await fetch(url, {
-      headers: env.token ? { authorization: `Bearer ${env.token}` } : {},
-    })
+    const res = await fetch(req.url, { headers: req.headers })
     if (res.ok) initialData = await res.json()
-    else console.warn(`browse seed search returned ${res.status}; shipping seed-only landing`)
+    else console.warn(`${seedFailurePrefix(req.authMode)} search returned ${res.status}; shipping seed-only landing`)
   } catch (err) {
-    console.warn(`browse seed search failed (${(err as Error).message}); shipping seed-only landing`)
+    console.warn(
+      `${seedFailurePrefix(req.authMode)} search failed (${(err as Error).message}); shipping seed-only landing`,
+    )
+  }
+  // A 200 that carries no hits is not a baked seed. Say so in the SAME words
+  // the non-2xx path uses, because the island cannot tell the two apart and a
+  // build log that only reports the loud failure reports half of them.
+  if (initialData !== null && !browseSeedIsNonempty(initialData)) {
+    console.warn(`${seedFailurePrefix(req.authMode)} search returned no hits; shipping seed-only landing`)
   }
 
   return { initialData, initialSeed }

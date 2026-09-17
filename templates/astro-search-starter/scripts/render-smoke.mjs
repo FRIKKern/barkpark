@@ -25,7 +25,7 @@
 //  chromium, types, and asserts what a human would see.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-//  THE FOUR BEATS
+//  THE BEATS
 // ─────────────────────────────────────────────────────────────────────────────
 //    LAND    the island hydrates: >=1 [data-nav-result] row, no
 //            [data-search-error] banner.
@@ -36,6 +36,17 @@
 //    MULTI   a MULTI-character query ("bark"), typed on top of it — the debounced
 //            HTTP path, a second transition over an already-rendered list.
 //            After it: >=1 row, still no banner.
+//    GDESK   1440x900 CONTROL — bp-graph.js IS fetched and the pane mounts.
+//            Without it the two phone claims below are satisfied perfectly by a
+//            graph that is broken at every width.
+//    GWIDTH  CONTROL — the two arms really were different viewports.
+//    GPHONE  390x844 — ZERO bp-graph.js/graph.json requests. HIDDEN IS NOT
+//            UNDELIVERED: the slot is hidden below `md` with CSS, and
+//            `display:none` stops PAINT, not a mount effect appending a script
+//            tag. Measured live at 576,990 B delivered to an invisible pane.
+//    GMOUNT  390x844 — no `[data-bp-graph-mount]` in the DOM. The marker is
+//            carried by BOTH flagship editions' canvas host, so the claim is
+//            about the graph rather than about one template's selector.
 //    CLEAN   ZERO uncaught pageerrors and ZERO console errors across all three.
 //            This is the beat the FinderErrorBoundary makes necessary: it
 //            catches a throw and paints an on-brand fallback, so a page that
@@ -94,6 +105,24 @@ const NAV_TIMEOUT = 30_000
 // island looks like from outside.
 const QUERY_TIMEOUT = 10_000
 const SETTLE_MS = 400
+// ── the graph arms ──────────────────────────────────────────────────────────
+// Every asset the corpus graph costs a visitor: the renderer and the baked
+// corpus. On the measured phone case these were 140,221 B + 436,769 B = 576,990
+// B delivered to a pane whose computed `display` was `none`.
+const GRAPH_ASSET = /bp-graph\.js|graph\.json/
+// Selector-AGNOSTIC: `[data-bp-graph-mount]` is in the DOM iff the graph subtree
+// rendered, and both flagship editions carry it (the Astro pane portals into
+// `#bp-graph-slot`, the Next one mounts GraphView directly). Keying on
+// `#bp-graph-slot` is what made the live journey harness pass VACUOUSLY on the
+// Next edition — the selector was absent, so "the pane is not mounted" was true
+// of a page that has no such pane at any width.
+const GRAPH_MOUNT = '[data-bp-graph-mount]'
+const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
+const PHONE_VIEWPORT = { width: 390, height: 844 }
+// How long the renderer's mount effect is given. The DESKTOP arm runs FIRST and
+// waits for the POSITIVE signal, which is what licenses the phone arm's flat
+// wait: "zero requests" is trivially true of a page nobody waited for.
+const GRAPH_SETTLE_CAP = 8_000
 
 function parseArgs(argv) {
   const a = { port: 4319, build: true }
@@ -239,9 +268,10 @@ async function main() {
     die(2, `CANNOT MEASURE — chromium would not launch (${e.message.split('\n')[0]}).\n  Try: npx playwright install chromium`)
   }
   // 1280x900 is above the finder's `md` breakpoint, so this is the FULL desktop
-  // composition — rail plus the portalled corpus graph. The graph is not
-  // asserted here (journey-smoke owns it), but it MOUNTS, so a throw inside it
-  // still reaches the CLEAN beat rather than hiding behind a narrow viewport.
+  // composition — rail plus the portalled corpus graph. The finder beats below
+  // run here; the graph's own claims run on their own contexts (`graphArms`),
+  // because a phone arm sharing this session would answer out of the HTTP cache
+  // and a cache hit is not a request that never happened.
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const page = await ctx.newPage()
 
@@ -317,6 +347,85 @@ async function main() {
     return { transport, typed: true }
   }
 
+  /**
+   * DESKTOP + PHONE, on two fresh contexts. Returns the beat rows.
+   *
+   * HIDDEN IS NOT UNDELIVERED — the whole point. `#bp-graph-slot` is hidden
+   * below `md` with CSS, and `display: none` stops PAINT; it does not stop the
+   * subtree's mount effect from appending `<script src="bp-graph.js">` to
+   * document.head. The gate is therefore on the WIRE, not on computed style.
+   *
+   * The desktop arm is the CONTROL and it is not optional: without it "zero
+   * graph bytes on a phone" is satisfied perfectly by a graph that is broken at
+   * every width. Both arms measure the same build, minutes apart.
+   */
+  async function graphArms() {
+    const openArm = async (viewport) => {
+      const c = await browser.newContext({ viewport })
+      const pg = await c.newPage()
+      const hits = []
+      pg.on('request', (r) => {
+        if (GRAPH_ASSET.test(r.url())) hits.push(r.url())
+      })
+      // The arms share the page-error collector deliberately: a throw inside
+      // the graph pane is a finding for the CLEAN beat too.
+      pg.on('pageerror', (e) => note('pageerror', e.stack || e.message))
+      pg.on('console', (m) => {
+        if (m.type() === 'error') note('console.error', m.text())
+      })
+      await pg.goto(`${origin}/`, { waitUntil: 'load', timeout: NAV_TIMEOUT })
+      return { c, pg, hits }
+    }
+
+    const desk = await openArm(DESKTOP_VIEWPORT)
+    // Wait for the POSITIVE signal, not a flat sleep — the instant the renderer
+    // request exists, the cap has been SHOWN to be long enough for this runner.
+    const deadline = Date.now() + GRAPH_SETTLE_CAP
+    while (Date.now() < deadline && desk.hits.length === 0) await desk.pg.waitForTimeout(150)
+    await desk.pg.waitForTimeout(1_200) // let the fetched renderer mount the pane
+    const deskMounted = await desk.pg.locator(GRAPH_MOUNT).count()
+    const deskMd = await desk.pg.evaluate('window.matchMedia("(min-width: 768px)").matches')
+    const deskHits = desk.hits.slice()
+    await desk.c.close()
+
+    const phone = await openArm(PHONE_VIEWPORT)
+    await phone.pg.waitForTimeout(GRAPH_SETTLE_CAP + 1_200) // the FULL cap the desktop arm just validated
+    const phoneMounted = await phone.pg.locator(GRAPH_MOUNT).count()
+    const phoneMd = await phone.pg.evaluate('window.matchMedia("(min-width: 768px)").matches')
+    const phoneHits = phone.hits.slice()
+    await phone.c.close()
+
+    const paths = (urls) => urls.map((u) => new URL(u).pathname).join(' + ') || 'none'
+
+    // The two controls FIRST: a red here means the beats below certify nothing.
+    let bad = !record(
+      'GDESK  1440x900 · the renderer IS fetched and the pane mounts',
+      deskHits.length > 0 && deskMounted > 0,
+      `requests=${paths(deskHits)} mounts=${deskMounted}`,
+    )
+    bad =
+      !record(
+        'GWIDTH the two arms really were different viewports',
+        deskMd === true && phoneMd === false,
+        `matchMedia(min-width:768px): desktop=${deskMd} phone=${phoneMd}`,
+      ) || bad
+    bad =
+      !record(
+        'GPHONE 390x844 · ZERO graph bytes cross the wire',
+        phoneHits.length === 0,
+        phoneHits.length === 0
+          ? 'nothing matching /bp-graph.js|graph.json/ was requested'
+          : `${phoneHits.length} request(s) DELIVERED TO A HIDDEN PANE: ${paths(phoneHits)}`,
+      ) || bad
+    bad =
+      !record(
+        'GMOUNT 390x844 · the graph subtree never rendered',
+        phoneMounted === 0,
+        `${GRAPH_MOUNT} count=${phoneMounted}${phoneMounted > 0 ? ' — the pane MOUNTED inside a hidden box' : ''}`,
+      ) || bad
+    return bad
+  }
+
   let failed = false
   try {
     console.log(`render-smoke: opening ${origin}/`)
@@ -346,6 +455,13 @@ async function main() {
           `typed=${t.typed ? 'yes' : 'no'} transport=${t.transport ? 'yes' : 'NO REQUEST'} rows=${s.rows} errorBanner=${s.banner}`,
         ) || failed
     }
+
+    // The graph arms run on their OWN contexts (a viewport change mid-session
+    // would let the desktop arm's already-fetched assets answer the phone arm
+    // out of the HTTP cache, and a cache hit is not a request that never
+    // happened). They are additive: a graph failure never rewrites the finder
+    // beats above.
+    failed = (await graphArms()) || failed
   } catch (e) {
     record('DRIVE  the browser could drive the page', false, e.message.split('\n')[0])
     failed = true
