@@ -15,7 +15,7 @@ defmodule BarkparkCloud.Usage do
       documents      datasets      webhooks       — instance-sourced inventory counts
       db_size        disk                          — telemetry-sourced (the agent's health beat)
       cpu            ram                           — telemetry machine meters (0-100 %, 100/70/90 ceiling)
-      req_per_s      p95_ms       err_5xx_per_s    — telemetry RING meters (rate/latency, warn+over, no bar)
+      req_per_s      p95_ms                        — telemetry RING meters (rate/latency, warn+over, no bar)
       seats          instances                     — control-plane-sourced (team members / fleet count)
       api_requests   bandwidth                     — FLOW meters, not yet metered (see below)
 
@@ -45,9 +45,9 @@ defmodule BarkparkCloud.Usage do
     * **`cpu` / `ram` / `disk`** — PHYSICAL percent meters: a fixed `quota: 100`
       (the 0-100 bar ceiling) with `warn_at: 70` / `over_at: 90`. The red state
       fires at `over_at` (90) BELOW the bar ceiling (OC25).
-    * **`req_per_s` / `p95_ms` / `err_5xx_per_s`** — RATE/LATENCY meters: `warn_at`
-      + `over_at` thresholds but NO `quota` (a rate has no plan wall) → they tint
-      but draw no bar.
+    * **`req_per_s` / `p95_ms`** — RATE/LATENCY meters: `warn_at` + `over_at`
+      thresholds but NO `quota` (a rate has no plan wall) → they tint but draw no
+      bar.
 
   Every OTHER meter (inventory counts, db_size, seats, flow) keeps
   `quota`/`warn_at`/`over_at` nil — no invented limits.
@@ -56,21 +56,33 @@ defmodule BarkparkCloud.Usage do
   integer, or absent when unavailable) — a cheap extra detail beside the seat
   count, never a second meter.
 
-  ## The ring window rides WITH the rates, and is not a meter (dr-w14-bl)
+  ## The ring's other two numbers ride WITH the rates, and are not meters
 
-  `req_per_s`, `p95_ms` and `err_5xx_per_s` are all read off the instance's ONE
-  request-stats ring, and the agent puts that ring's width on the beat as
-  `window_s`. A rate without its window is a number nobody can bound — 0.22
-  5xx/s over a 60-second ring and over a 1-second one are different facts — so
-  each of those three meters carries `:window_s` (a positive integer) as a
-  CONDITIONAL key, the `:pending_invitations` precedent again.
+  `req_per_s` and `p95_ms` are read off the instance's ONE request-stats ring,
+  and the agent puts two more numbers from that same ring on the beat:
+  `err_5xx_per_s` (the 5xx rate) and `window_s` (the ring's width in seconds).
+  Both reach the console as CONDITIONAL keys on the ring meters — the
+  `:pending_invitations` precedent — never as meters of their own.
 
-  It is deliberately NOT a fourth meter: it has no threshold, no ceiling and no
-  bar, and a "meter" whose only job is to qualify three others would show up in
-  the vocabulary as a signal an operator is asked to judge. An absent or
-  sentinel (`-1`) window simply omits the key — the meter renders as it always
-  did, and the surface says nothing about a width nobody measured rather than
-  borrowing the documented 60s default.
+  **`window_s`** rides on both ring meters. A rate without its window is a
+  number nobody can bound: 0.22 5xx/s over a 60-second ring and over a
+  1-second one are different facts. It has no threshold, no ceiling and no bar,
+  so a "meter" whose only job is to qualify two others would appear in the
+  vocabulary as a signal an operator is asked to judge.
+
+  **`err_5xx_per_s`** rides on `req_per_s` SPECIFICALLY, and that placement is
+  charter D103 made structural rather than written down. D103: an error rate's
+  severity cannot be read without the volume it came out of — 0.22 5xx/s is
+  14.4% of traffic at the median observed request rate and 2.0% at the max, a
+  7x severity spread from one unchanged number. As its own meter it could be
+  rendered, screenshotted and escalated with its denominator nowhere on screen.
+  Hung on the request-rate meter, it CANNOT be: the volume is the row it sits
+  in.
+
+  Both are omitted entirely when absent or carrying the agent's `-1` sentinel —
+  a width nobody measured is not borrowed from the documented default, and a
+  fabricated 0 5xx/s would read "this box is serving no errors" about a box
+  nobody looked at.
 
   ## Two honesty tiers (D48)
 
@@ -155,7 +167,6 @@ defmodule BarkparkCloud.Usage do
   @src_ram "telemetry.mem_used_percent"
   @src_req_per_s "telemetry.req_per_s"
   @src_p95_ms "telemetry.p95_ms"
-  @src_err_5xx_per_s "telemetry.err_5xx_per_s"
   @src_seats "control-plane.team_members"
   # The fleet meter is a pure control-plane read (the team's managed-instance
   # count) — it returns even when every instance is down.
@@ -228,24 +239,6 @@ defmodule BarkparkCloud.Usage do
           ),
         p95_ms:
           telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
-        # The 5xx rate off the SAME ring. Thresholds are deliberately tiny and
-        # absolute rather than a share of req_per_s: a share needs a denominator
-        # this envelope cannot promise is present, and ANY sustained 5xx rate on
-        # a box is worth an operator's eye. warn at 0.1/s (roughly one 5xx every
-        # ten seconds), red at 1.0/s. A measured 0.0 survives as a metered zero
-        # — that is the good news the meter exists to show — while an unwired
-        # probe's -1 stays "unmetered", because zero 5xx and "nobody looked" are
-        # opposite facts and only one of them is reassuring.
-        err_5xx_per_s:
-          telemetry_threshold_meter(
-            telemetry,
-            :err_5xx_per_s,
-            @src_err_5xx_per_s,
-            measured_at,
-            nil,
-            0.1,
-            1.0
-          ),
         seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
         instances: instances_meter(Map.get(inputs, :instances)),
         # FLOW meters — always unmetered, whatever anyone passes. req/s is a
@@ -254,14 +247,18 @@ defmodule BarkparkCloud.Usage do
         bandwidth: meter(@unmetered, @src_not_metered, nil)
     }
 
-    %{meters: attach_ring_window(meters, telemetry)}
+    %{meters: attach_ring_context(meters, telemetry)}
   end
 
-  # The three request-stats meters all come off ONE instance ring, and the beat
-  # reports that ring's width. Attach it to each as the CONDITIONAL `:window_s`
-  # key so a rate is never rendered without the span it was measured over.
-  # Deliberately not a meter of its own — see the moduledoc.
-  @ring_meters [:req_per_s, :p95_ms, :err_5xx_per_s]
+  # Both ring meters come off ONE instance ring, so the ring's width qualifies
+  # both. Deliberately not a meter of its own — see the moduledoc.
+  @ring_meters [:req_per_s, :p95_ms]
+
+  defp attach_ring_context(meters, telemetry) do
+    meters
+    |> attach_ring_window(telemetry)
+    |> attach_err_5xx(telemetry)
+  end
 
   defp attach_ring_window(meters, telemetry) do
     case telemetry && Map.get(telemetry, :window_s) do
@@ -273,6 +270,27 @@ defmodule BarkparkCloud.Usage do
         Enum.reduce(@ring_meters, meters, fn key, acc ->
           Map.update!(acc, key, &Map.put(&1, :window_s, n))
         end)
+
+      _ ->
+        meters
+    end
+  end
+
+  # charter D103: the 5xx rate hangs on the REQUEST-RATE meter, so it can never
+  # be read apart from the volume that bounds it. A measured 0.0 lands — that is
+  # the good news the carriage exists to deliver — while a negative sentinel or
+  # an absent key omits it, because "no 5xx" and "nobody looked" are opposite
+  # facts and only one of them is reassuring.
+  #
+  # It is attached even when req_per_s itself is UNMETERED: the box may have a
+  # 5xx rate and no request rate (an older instance exposing one probe and not
+  # the other), and dropping the error rate because its denominator is missing
+  # would hide the more alarming of the two. The surface says so — see app.js's
+  # meter sub-line, which words an unbounded rate as unbounded.
+  defp attach_err_5xx(meters, telemetry) do
+    case telemetry && Map.get(telemetry, :err_5xx_per_s) do
+      n when is_number(n) and n >= 0 ->
+        Map.update!(meters, :req_per_s, &Map.put(&1, :err_5xx_per_s, n))
 
       _ ->
         meters

@@ -23,7 +23,9 @@ defmodule BarkparkCloud.BeatRingCarriageCensusTest do
     2. `Usage.compose/1` puts it in the envelope the console fetches.
     3. `app.js` RENDERS it, in one of the two shapes the meter model allows: a
        meter of its own (a `USAGE_METERS` spec) or the conditional qualifier
-       that rides on the ring meters (`meter.<key>`).
+       that rides on a ring meter (`meter.<key>`) — the shape `window_s` and
+       `err_5xx_per_s` both take, because neither is a signal an operator is
+       asked to judge on its own.
 
   Door 3 is the one that matters and the one nothing enforced before: a key
   that clears doors 1 and 2 and fails door 3 is decoded-but-unrendered, which
@@ -113,17 +115,21 @@ defmodule BarkparkCloud.BeatRingCarriageCensusTest do
     end
   end
 
-  # The window is deliberately NOT a fourth meter (see Usage's moduledoc): it
-  # has no threshold, no ceiling and no bar. This pins the SHAPE of its
-  # carriage, so a later slice cannot "fix" a red by promoting it to a meter
-  # an operator is asked to judge.
-  test "window_s rides as a qualifier on the ring meters, never as a meter of its own" do
+  # Neither `window_s` nor `err_5xx_per_s` is a meter of its own (see Usage's
+  # moduledoc): the window has no threshold and no bar, and the 5xx rate hangs
+  # on the request-rate meter BECAUSE charter D103 forbids printing an error
+  # rate apart from the volume that bounds it. This pins that shape, so a later
+  # slice cannot "fix" a carriage red by promoting either to a meter — which
+  # would also red the three-runtime `usage_meters.json` vocabulary fixture.
+  test "the ring's context keys ride as qualifiers, never as meters of their own" do
     a = File.read!(@app_js)
 
-    refute String.contains?(a, ~s|{ key: "window_s"|),
-           "window_s became a USAGE_METERS entry — it is a denominator, not a signal"
+    for key <- ["window_s", "err_5xx_per_s"] do
+      refute String.contains?(a, ~s|{ key: "#{key}"|),
+             "#{key} became a USAGE_METERS entry — it qualifies a meter, it is not one"
 
-    assert String.contains?(a, "meter.window_s"),
-           "window_s is not read by the meter renderer — the rates lost their window again"
+      assert String.contains?(a, "meter.#{key}"),
+             "#{key} is not read by the meter renderer — the carriage broke again"
+    end
   end
 end
