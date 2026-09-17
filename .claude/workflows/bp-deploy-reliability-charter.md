@@ -8684,6 +8684,14 @@ about to lose. It cancels nothing (S-4a's forbidden act) and keeps every row fin
 
 ### D435 — THE DOOR READER GAP IS ALREADY BUILT. SHEPHERD #10811; DO NOT RE-CUT dr-w22-s5.
 
+> **AMENDED 2026-09-17, D617 — #10811 NEVER MERGED, AND THE WORK LANDED ANYWAY.** `#10811` is `CLOSED` with
+> `mergedAt: null`, so "the task closes on #10811's merge" below is a condition that can never fire. It did not
+> need to: `dr-w22-s5` is `done` 8/8, because the same work relanded as **#12738** (the capacity cross-reference,
+> same title, fresh branch) and **#17281** (the door population line). Read "#10811" below as "the change #10811
+> carried", which is on `main`. **The residue this block files as one follow-on is now two-thirds discharged** —
+> D617 rules on it and re-cuts what is left (the BOX_BUSY cross-reference only). Do not size that follow-on from
+> the paragraph below.
+
 CONFIRMED: the census reader prints the DEFERRAL total (`1434 deferred`) and never the DOOR population
 (1434 + 6 terminal). REFUTED, and this matters because it was the brief's evidence: *"the cause split is not
 rendered (grep for BOX_ hits only the test file)"* is a level-skip. `renderDeployCensus` echoes
@@ -14746,3 +14754,91 @@ more than once** (633 definitions, 615 distinct — 18 excess definitions): `D14
 D351 D384 D411 D492 D593 D605 D608`. The PDS charter's own count is *eighteen pairs*, every one a wave-REVIEW block
 colliding with the next wave's DECIDE block off a single unowned pointer. **This charter is on the same curve and
 was previously running the same unowned pointer.** D614 was simply the first one anybody noticed in the same hour.
+
+## D617 — RULING ON `dr-w24-bl-census-names-the-door-population`: IT WILL NOT BE DONE AS FILED, BECAUSE TWO OF ITS THREE CLAIMS ARE ALREADY DISCHARGED ON `main`. THE RESIDUE IS THE BOX_BUSY CROSS-REFERENCE, AND IT IS RE-CUT, NOT CARRIED. (2026-09-17)
+
+The row's single criterion offered a choice — *"A wave picks this up, or the lead rules it will not be done and
+says why in the charter."* **This is that ruling, and it is not a deferral.** The row as filed describes a
+codebase that no longer exists; two of the three defects it names were fixed by successor PRs while the row sat
+in `dr-backlog-never-started`. Carrying it forward unchanged would send a wave to build something that is
+already built. **What is left is real, and it is one-third of what the row says it is.**
+
+### WHAT WAS VERIFIED, AGAINST `origin/main` AND NOT AGAINST THE ROW'S PROSE
+
+**CLAIM 2 — "no line names the DOOR POPULATION as such" — IS DISCHARGED.**
+`internal/cli/cloud_deploy_census_cmd.go`@`func deployCensusDoorLine(d *cloudclient.DeployBoxDoor) string {`
+renders exactly the missing aggregate: the door's REFUSAL count over its own named predicate, the cause-keyed
+reader's count beside it, and the DELTA between them with the producer's own status split —
+`internal/cli/cloud_deploy_census_cmd.go`@`box door — REFUSALS %d over its own population (%s). The cause-keyed reader (%s) sees %d`.
+It is reached from `renderDeployCensus`, not merely defined. It landed as **#17281** (`e60630764`, *"the census
+stops undercounting the box door"*) under `dr-w32`. A nil term prints NOT MEASURED rather than a flattering zero.
+
+**THE PREMISE CORRECTION'S OWN INFERENCE IS REFUTED, and this is the lesson worth more than the row.** The
+2026-08-21 correction on the row reasoned: #10811 is `CLOSED` with `mergedAt: null`, **therefore** "the function
+was never opened." The PR state is true — verified again 2026-09-17, `state: CLOSED`, `mergedAt: null`, closed
+`2026-08-20T08:47:20Z`. **The conclusion drawn from it is false.**
+`internal/cli/cloud_deploy_census_cmd.go`@`func deployCensusCapacityLine(census cloudclient.DeployCensus) string {`
+is on `main` and has been since **#12738** (`87bfbcf41`) — a PR carrying #10811's *byte-identical title*, i.e. the
+same work relanded on a fresh branch. **A closed PR says its branch died; it says nothing about whether its
+content reached `main`.** The correction was right to distrust the row and wrong to stop at the PR state
+instead of grepping the file. Cost of the check that would have caught it: one `git grep` against `origin/main`.
+
+**CLAIM 1 — the BOX_BUSY pair — IS THE LIVE RESIDUE, and it is the whole remaining job.**
+`BOX_BUSY_409` sits in the failure classes and `cloud/lib/barkpark_cloud/deploy_ledger.ex`@`    "BOX_BUSY_DEFERRED",`
+in the deferral classes: the identical one-cause/two-cohort split that `deployCensusCapacityLine` was built to
+disclose for capacity. **No equivalent line exists for it.** `BOX_BUSY` appears in the reader source exactly
+once, inside a comment on `deployCensusCapacityLine` that names it only to say it is *not* the capacity class —
+against 7 occurrences of the capacity class names in the same file, and 18 in the reader's test file. Per D7 the
+codeless-409 mass makes BOX_BUSY the **larger** of the two door causes, so the undisclosed split is the bigger one.
+
+**AND THE DOOR LINE DOES NOT COVER IT, which is why discharging claim 2 does not discharge claim 1.** The door
+population is capacity-keyed at the source: `cloud/lib/barkpark_cloud/deploy_ledger.ex`@`  @box_door_marker "%409%box_at_capacity%"`.
+BOX_BUSY rows are outside that marker entirely. The census now names **one** door honestly and is silent that a
+second, larger one exists.
+
+### THE 1,434 / 1,439 FIGURES ARE A DATED OBSERVATION, NOT A CURRENT FACT
+
+Recorded here in the form D614 and the amended D166 require. **READING OF 2026-08-08, over a pinned 24h window,
+taken from a live control-plane DB read that no later reader can reproduce**: 1,434 rows on the deferral line
+against 1,439 in the door population — a gap of 6 terminal door rows that landed in the failure numerator and
+were absent from the deferral line. **Nothing standing follows from it.** It sized a defect on the day it was
+measured; the discrepancy it describes is now *rendered* by the door line rather than inferred, and today's gap
+is whatever `d.Unkeyed` reads over the window a caller actually asks for. Any wave that re-quotes 1,434/1,439 as
+a present-tense quantity is repeating the mistake this paragraph exists to prevent.
+
+### WHY IT IS NOT BEING BUILT IN THIS WAVE
+
+Not cost — **the build is small, and that is precisely why it should not ride this row.** The residue is one
+function beside `deployCensusCapacityLine` on the same shape, reading two counts already on the wire, plus its
+fixture test: renderer-only, no server term, no migration, no new client field. It is smaller than the row's own
+~15-line estimate implies once the discharged two-thirds are subtracted.
+
+**The blocker is that the row can no longer describe its own work.** Its title, its criterion and its body all
+sell the door-population aggregate, which is built. A builder claiming it would either build nothing and stamp
+it, or silently substitute a different job — and the row's acceptance criterion would be satisfied by neither.
+**A row whose title is discharged cannot gate the work that remains.** So: this row is ruled DONE-BY-SUPERSESSION
+against claims 2 and 3, and the residue is re-cut as its own row with its own criterion naming BOX_BUSY.
+
+### WHAT A LATER WAVE INHERITS, STATED SO NOTHING IS RE-DERIVED
+
+- **Build:** a `deployCensusBoxBusyLine` beside `deployCensusCapacityLine`, same two-cohort disclosure shape,
+  reading `BOX_BUSY_409` off `census.Classes` and `BOX_BUSY_DEFERRED` off `census.Deferred` via the existing
+  `deployCensusClassCount`. Return `""` when both are zero, as its sibling does.
+- **Do NOT re-derive:** whether the causes reach the screen. They do — `renderDeployCensus` echoes
+  `census.Classes` and `census.Deferred` verbatim. The row's *"grep BOX_ hits only the test file"* was a
+  level-skip when first filed and is still one. **What is missing is the CROSS-REFERENCE, not the causes.**
+- **Do NOT extend the door term** to cover BOX_BUSY as part of this. That changes `@box_door_marker` and is a
+  server-side population change with its own migration-shaped blast radius — a separate decision, not a rider.
+- **Fence:** `internal/cli/` only. The cloud-side door term is already correct for what it counts.
+
+### D435 IS AMENDED, NOT DELETED
+
+D435 instructed the lead to *"SHEPHERD #10811"* and to close `dr-w22-s5` **on #10811's merge**. That merge never
+happened, so the close condition could never fire on its own terms. **It did not need to**: `dr-w22-s5` is
+`done`, 8/8 criteria met, and it is legitimately done — its work reached `main` through #12738 and #17281, and
+`internal/cloudclient/client.go` still names the `BoxDoor` field *"the dr-w22-s5 addition"*. **The row was not
+closed by the condition D435 wrote; it was closed by the work landing another way.** D435's verdict was right
+and its mechanism was wrong, which is the failure mode worth naming: **a close condition pinned to a specific
+PR number outlives the PR and then blocks nothing, because the thing it was guarding happened anyway.** Pin
+close conditions to the SYMBOL on `main`, never to a PR number.
+
