@@ -147,10 +147,13 @@ defmodule BarkparkWeb.Router.Plugins do
   moduledoc for why it consults `collect_routes/1` rather than
   `Registry.lookup/1`.
 
-  The mirror-image comment above `plugin_modules_sync/0` in
-  `Barkpark.Plugins.Registry.BootCollectors` has the same shape (correct
-  about its function, wrong about which branch compile time reaches) and is
-  not corrected here — that file is outside this change's fence.
+  The mirror-image comment in `Barkpark.Plugins.Registry.BootCollectors` had
+  the same shape (correct about its function, wrong about which branch compile
+  time reaches). It was outside this change's fence and has since been
+  corrected in its own row: the block above `plugin_modules_sync/0` there now
+  carries the per-caller branch table (which callers run before vs. after
+  `config/runtime.exs`) and states what `plugin_free_boot_test.exs` actually
+  locks.
   """
 
   alias BarkparkWeb.Plugs.PluginRouteGuard
