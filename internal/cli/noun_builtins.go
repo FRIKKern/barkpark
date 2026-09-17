@@ -110,6 +110,18 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun: "task",
+		Verb: "history",
+		// The CLI half of flight-recorder P3 (task-b3045c0a79510f28). REGISTERED
+		// rather than special-cased in Execute for the same reason `resume` is:
+		// a timeline verb that `bp task --help` and `bp capabilities` deny the
+		// existence of is a flight recorder nobody can find.
+		Summary: "The per-mutation timeline for one task row, with WHO as the store answered it (reads only).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskHistory(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "task",
 		Verb:    "enrichment",
 		Summary: "Controlled read of the close_reason absence enrichment (always exits 0).",
