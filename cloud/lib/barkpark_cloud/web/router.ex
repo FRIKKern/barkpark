@@ -3871,9 +3871,15 @@ defmodule BarkparkCloud.Web.Router do
       user = conn.assigns.current_user
       host = conn.body_params["host"]
 
+      # The TEAM is laundered through `Accounts.get_team/1` BEFORE the grant is
+      # read, so `get_membership/2` receives a real `%Team{}` and never a raw
+      # id — guard form (3) of the Authz call-site census
+      # (`authz_call_site_census_test.exs` ARM 2, which reds on an id-shaped
+      # team argument). A row whose team has vanished therefore refuses at the
+      # resolve, one step before the grant question is even asked.
       with %Barkpark{} = bp <- Registry.get_barkpark_by_public_host(host || ""),
-           %{} <- Accounts.get_membership(bp.team_id, user.id),
-           team when not is_nil(team) <- Accounts.get_team(bp.team_id) do
+           %Team{} = team <- Accounts.get_team(bp.team_id),
+           %{} <- Accounts.get_membership(team, user.id) do
         case Registry.mint_studio_link(bp, user.email) do
           {:ok, url} ->
             audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
