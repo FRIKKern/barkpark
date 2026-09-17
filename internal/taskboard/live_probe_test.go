@@ -55,6 +55,48 @@ func TestLiveProbe(t *testing.T) {
 		fmt.Printf("  NOW %-40q worker=%s age=%s\n", tk.Title, tk.Claim.Worker, time.Since(tk.Claim.ClaimedAt).Round(time.Minute))
 	}
 
+	// ── Claim-forward against the LIVE ready overlay (task p-claim-forward) ──
+	// The board's ready set is not authored here: composeSnapshot OVERLAYS it
+	// from prime's derived ready head (storage never stores lifecycle "ready"),
+	// clamped at primeReadyLimit and raced against claims landing between the
+	// two fetches. A fixture cannot speak for that. ClaimForwardViolations is
+	// the SAME predicate the CI arms in claimforward_test.go exercise — run
+	// here against the real corpus, so "verified against the live guerrilla
+	// ready overlay" means a command, not a reading.
+	liveReadyOutsideNow := 0
+	liveNow := map[string]bool{}
+	for _, tk := range b.Now {
+		liveNow[bareID(tk.DocID)] = true
+	}
+	for _, tk := range collapseDraftTwins(snap.Tasks) {
+		if tk.Lifecycle == lifeReady && !liveNow[bareID(tk.DocID)] {
+			liveReadyOutsideNow++
+		}
+	}
+	fmt.Printf("claim-forward: overlay-ready-outside-NOW=%d next-strip=%d next-more=%d independent-ready=%d clamped=%v\n",
+		liveReadyOutsideNow, len(b.Next), b.NextReadyMore, b.IndependentReady, snap.ReadyHeadClamped)
+	for i, ni := range b.Next {
+		kind := "ready"
+		if ni.Kind == nextResume {
+			kind = "resume"
+		}
+		fmt.Printf("  NEXT[%d] %-6s %-34q reason=%q\n", i, kind, ni.Task.DocID, ni.Reason)
+	}
+	if v := ClaimForwardViolations(snap, b); len(v) != 0 {
+		for _, msg := range v {
+			t.Errorf("claim-forward violation on the LIVE corpus: %s", msg)
+		}
+	} else {
+		fmt.Printf("claim-forward contract OK on the live corpus (C0/C1/C2)\n")
+	}
+	// The live queue is never empty in practice, so assert the non-vacuous arm
+	// explicitly: a pass above must have MEASURED ready work, not skipped it.
+	if liveReadyOutsideNow == 0 {
+		t.Log("claim-forward: live overlay held no ready work outside NOW — C0 was vacuous this run")
+	} else if len(b.Next) == 0 {
+		t.Errorf("claim-forward: %d ready tasks in the live overlay but the NEXT strip is empty", liveReadyOutsideNow)
+	}
+
 	// ── Live-shape regression guard ─────────────────────────────────────────
 	// Wave 2 shipped on fixtures alone; this pins the invariants the real
 	// guerrilla queue exercises that a fixture can't, so a future change that
