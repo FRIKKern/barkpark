@@ -67,6 +67,23 @@ defmodule Barkpark.Quiz.Bridge do
   Cross-dataset safety: both paths remove one PIN at a time, per quiz_id. A
   second pin bound to the same quiz in another dataset keeps its entry — one
   room's death never unbinds another dataset's live room.
+
+  ## Rebind replaces, it does not accumulate (hq-bridge-rebind-retires-old-quiz)
+
+  Liveness GC is about entries whose ROOM is dead. A rebind is the other case:
+  the room is alive and correctly bound, and it is the STALE QUIZ ID beside the
+  live one that is wrong. `bind(pin, quiz_a)` then `bind(pin, quiz_b)` must
+  leave `pin` indexed under quiz_b ONLY — a pin displays exactly one quiz at a
+  time. Left additive, a later publish of quiz_a re-applies quiz_a's question to
+  a room showing quiz_b, on SOMEBODY ELSE'S edit: to the host the room appears
+  to revert on its own, and nothing in the room's state explains it, because the
+  room is not wrong — the index is. The monitor cannot see this; there is
+  nothing dead to observe.
+
+  `retire_previous_quiz/4` is scoped by PIN (the index is many-pins-per-quiz, so
+  dropping the old quiz_id wholesale would unbind unrelated live rooms) and by
+  DATASET (the same pin string in another dataset is a different binding, and a
+  rebind on production says nothing about staging).
   """
   use GenServer
 
@@ -140,6 +157,12 @@ defmodule Barkpark.Quiz.Bridge do
     # topic so a room on a non-default dataset still gets live edits.
     state = ensure_subscribed(dataset, state)
     apply_now(pin, quiz_id, dataset)
+
+    # A REBIND REPLACES, it does not accumulate. A pin shows exactly one quiz at
+    # a time, so its PREVIOUS quiz id must be retired here — otherwise a later
+    # publish of that old quiz re-applies the old question to a room that has
+    # moved on, and to the host the room looks like it spontaneously reverted.
+    state = retire_previous_quiz(state, pin, quiz_id, dataset)
 
     # Index pins BY pin → its own dataset (not one dataset per quiz_id): the same
     # quiz_id bound in two datasets must reload each pin from the dataset it bound,
@@ -230,6 +253,38 @@ defmodule Barkpark.Quiz.Bridge do
       nil ->
         %{state | rooms: Map.put(state.rooms, pin, {room, Process.monitor(room)})}
     end
+  end
+
+  # Retire `pin` from its OTHER quiz ids — scoped two ways, because both scopes
+  # are load-bearing:
+  #
+  #   * by PIN, not by quiz_id: the index is many-pins-per-quiz, so dropping the
+  #     old quiz_id wholesale would silently unbind every unrelated live room
+  #     bound to it (the failure shape PR #18850's mutation (D) demonstrates).
+  #   * by DATASET: the same pin string bound in another dataset is a DIFFERENT
+  #     binding, and a rebind on production says nothing about staging.
+  #
+  # `drop_pin/2` is the liveness path's remover and is deliberately NOT reused —
+  # it is dataset-blind, which is correct when the ROOM is dead (a dead room kills
+  # every dataset's binding) and wrong here (the room is alive).
+  defp retire_previous_quiz(state, pin, quiz_id, dataset) do
+    bindings =
+      Enum.reduce(state.bindings, %{}, fn
+        {^quiz_id, pins}, acc ->
+          Map.put(acc, quiz_id, pins)
+
+        {other_quiz_id, pins}, acc ->
+          if Map.get(pins, pin) == dataset do
+            case Map.delete(pins, pin) do
+              rest when map_size(rest) == 0 -> acc
+              rest -> Map.put(acc, other_quiz_id, rest)
+            end
+          else
+            Map.put(acc, other_quiz_id, pins)
+          end
+      end)
+
+    %{state | bindings: bindings}
   end
 
   # Remove ONE pin from every quiz_id it is indexed under, dropping quiz_ids that

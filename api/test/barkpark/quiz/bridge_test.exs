@@ -275,6 +275,114 @@ defmodule Barkpark.Quiz.BridgeTest do
     end
   end
 
+  describe "rebinding a pin to a second quiz (hq-bridge-rebind-retires-old-quiz)" do
+    test "the old quiz is retired from the index AND its publishes stop reaching the room",
+         %{pin: pin} do
+      n = System.unique_integer([:positive])
+      quiz_a = "quiz-a-#{n}"
+      quiz_b = "quiz-b-#{n}"
+
+      # The CONTROL pin: bound to quiz_a and never rebound. It is what separates
+      # "the rebind retired ONE pin's stale entry" from "the Bridge stopped
+      # delivering quiz_a to anybody" — criterion 2 passes on both without it.
+      sibling = "TRS#{n}"
+      {:ok, _} = Quiz.ensure_room(sibling)
+      on_exit(fn -> Quiz.stop_room(sibling) end)
+
+      publish_quiz(quiz_a, "QUIZ A", [%{"id" => "a", "label" => "A"}])
+      publish_quiz(quiz_b, "QUIZ B", [%{"id" => "a", "label" => "A"}])
+
+      assert :ok = Quiz.bind_quiz(sibling, quiz_a)
+      assert :ok = Quiz.bind_quiz(pin, quiz_a)
+      assert :ok = Quiz.bind_quiz(pin, quiz_b)
+
+      # C1 — read the INDEX, not the room. bind/3 and bindings/0 are both
+      # synchronous calls on the same GenServer, so this needs no polling.
+      bindings = Quiz.Bridge.bindings()
+      assert pin in pins_for(bindings, quiz_b)
+
+      refute pin in pins_for(bindings, quiz_a),
+             "rebinding #{pin} to #{quiz_b} left it still indexed under #{quiz_a}"
+
+      # ...and the retirement was surgical: the sibling's own quiz_a entry stays.
+      assert sibling in pins_for(bindings, quiz_a)
+      assert Quiz.state(pin).question.prompt == "QUIZ B"
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(sibling))
+
+      publish_quiz(quiz_a, "QUIZ A EDITED", [%{"id" => "a", "label" => "A"}])
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:production",
+        {:document_changed, %{type: "quiz", doc_id: quiz_a}}
+      )
+
+      # C3 first — it is also the BARRIER: the Bridge fans a publish out to every
+      # indexed pin inside one handle_info, so the sibling's arrival proves the
+      # quiz_a fan-out has already run. Only then is the refute below about a
+      # message that was never sent rather than one not yet sent.
+      assert_receive {:quiz, ^sibling, {:question_updated, %{prompt: "QUIZ A EDITED"}}}, 2000
+
+      # C2 — the arm that matters.
+      refute_receive {:quiz, ^pin, {:question_updated, _}}, 300
+
+      assert Quiz.state(pin).question.prompt == "QUIZ B",
+             "a publish of the OLD quiz reverted the room's question underneath its players"
+    end
+
+    test "a rebind in one dataset leaves the SAME pin's binding in another dataset alone" do
+      Content.upsert_schema(
+        %{
+          "name" => "quiz",
+          "title" => "Quiz",
+          "visibility" => "public",
+          "fields" => Quiz.Content.schema().fields
+        },
+        "staging"
+      )
+
+      n = System.unique_integer([:positive])
+      pin = "TRX#{n}"
+      quiz_s = "quiz-s-#{n}"
+      quiz_a = "quiz-xa-#{n}"
+      quiz_b = "quiz-xb-#{n}"
+      {:ok, _} = Quiz.ensure_room(pin)
+      on_exit(fn -> Quiz.stop_room(pin) end)
+
+      publish_quiz_in(quiz_s, "STAGING CONTENT", [%{"id" => "a", "label" => "A"}], "staging")
+      publish_quiz(quiz_a, "QUIZ A", [%{"id" => "a", "label" => "A"}])
+      publish_quiz(quiz_b, "QUIZ B", [%{"id" => "a", "label" => "A"}])
+
+      # The same pin string in two datasets is TWO bindings, not one.
+      assert :ok = Quiz.bind_quiz(pin, quiz_s, "staging")
+      assert :ok = Quiz.bind_quiz(pin, quiz_a, "production")
+      assert :ok = Quiz.bind_quiz(pin, quiz_b, "production")
+
+      bindings = Quiz.Bridge.bindings()
+      assert pin in pins_for(bindings, quiz_b)
+      refute pin in pins_for(bindings, quiz_a)
+
+      # The cross-dataset sibling survives, keeping its OWN dataset. An
+      # over-eager retire that keys on the pin alone reds here with right: [].
+      assert pin in pins_for(bindings, quiz_s)
+      assert bindings[quiz_s][pin] == "staging"
+
+      # Present is not enough — it must still be LIVE-bound.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
+      publish_quiz_in(quiz_s, "STAGING EDITED", [%{"id" => "a", "label" => "A"}], "staging")
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:staging",
+        {:document_changed, %{type: "quiz", doc_id: quiz_s}}
+      )
+
+      assert_receive {:quiz, ^pin, {:question_updated, %{prompt: "STAGING EDITED"}}}, 2000
+    end
+  end
+
   test "a non-quiz document change is ignored", %{pin: pin, qid: qid} do
     publish_quiz(qid, "Original?", [%{"id" => "a", "label" => "A"}])
     Quiz.join(pin, "p1", "Alice")
