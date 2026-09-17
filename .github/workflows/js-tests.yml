@@ -213,6 +213,19 @@ jobs:
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
 
+      # REGISTRATION for js/scripts/check-vitest-projects.mjs, added by the PR
+      # that creates it. Execution floor for every project js/vitest.config.mts
+      # declares: it asks vitest for the declared set, runs them, and reds if
+      # any executed ZERO tests. #19085 was one instance — react-browser
+      # inherited a setupFiles path above the repo root, printed "Tests no
+      # tests" on every run, and nothing here noticed, because the steps above
+      # never invoke the root config's projects at all. Runs AFTER Test so the
+      # build + browser install are in place. Asserts on COUNTS, never on
+      # vitest's exit code — see the emptiness note above: in projects mode an
+      # empty project exits 0.
+      - name: "Every declared vitest project actually executed (#19085 class)"
+        run: node scripts/check-vitest-projects.mjs
+
       # @barkpark/core advertises edge/worker runtime support, and the two files
       # that look like the proof of that claim were the two that never ran: `pnpm
       # test` uses vitest.config.ts, which EXPLICITLY excludes
