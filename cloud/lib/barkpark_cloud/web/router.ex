@@ -15680,11 +15680,21 @@ defmodule BarkparkCloud.Web.Router do
           # to clear. The wire code stays `cloudflare_bind_failed` — the client
           # contract is "the bind did not happen, the box is still standalone",
           # which is exactly true — and only the bounded `detail` distinguishes.
-          {:ok, %{proxied: false}} ->
+          #
+          # The pattern binds `proxied` rather than matching the literal `false`
+          # on purpose. `Real.ensure_zone_proxied/3` lifts the value straight out
+          # of the Cloudflare body (`%{"result" => %{"proxied" => proxied}}`)
+          # WITHOUT checking it is a boolean, so a body carrying `"proxied": null`
+          # (or any non-boolean) yields an `{:ok, _}` the `boolean()` spec does
+          # not describe and a `false`-literal clause would miss — the same crash
+          # one field-value away. Anything not `true` is "not proxied", and this
+          # arm swallows no error term: `{:error, _}` still owns the clauses below.
+          {:ok, %{proxied: proxied}} ->
             Logger.error(
               "cloudflare_bind_not_proxied: #{domain} -> #{origin} Cloudflare accepted the " <>
-                "proxy PATCH but the record stayed GREY (proxied=false); refusing to persist " <>
-                "a cf_proxied binding. The A record written above is LEFT IN PLACE, unproxied."
+                "proxy PATCH but the record is not proxied (proxied=#{inspect(proxied)}); " <>
+                "refusing to persist a cf_proxied binding. The A record written above is " <>
+                "LEFT IN PLACE, unproxied."
             )
 
             {:halt,

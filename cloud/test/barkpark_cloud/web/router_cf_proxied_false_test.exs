@@ -120,7 +120,11 @@ defmodule BarkparkCloud.Web.RouterCfProxiedFalseTest do
   # succeeds normally; the proxy flip (`:patch`) comes back 200 with the record
   # reporting `proxied` as whatever the caller asked for — `false` is the grey
   # cloud that never flipped, the crash shape.
-  defp put_cloudflare_reporting_proxied(proxied) when is_boolean(proxied) do
+  # `proxied` is deliberately UNGUARDED: `Real.ensure_zone_proxied/3` lifts the
+  # value straight out of the body without checking it is a boolean, so a
+  # non-boolean (the `nil` arm below) is a shape the real client really can
+  # produce.
+  defp put_cloudflare_reporting_proxied(proxied) do
     stub = fn
       %{method: :patch} ->
         {:ok,
@@ -196,6 +200,26 @@ defmodule BarkparkCloud.Web.RouterCfProxiedFalseTest do
       refute reread.serving_mode == "cf_proxied"
       assert is_nil(reread.cf_record_id)
       assert is_nil(reread.cf_domain)
+    end
+
+    test "the sibling shape: a non-boolean `proxied` (null in the body) is handled too" do
+      # `Real` does not check the value is a boolean, so `"proxied": null` yields
+      # `{:ok, %{proxied: nil}}` — an `{:ok, _}` the `boolean()` spec does not
+      # describe, and the same crash one field-value away from `false`. REDS if
+      # the router clause is narrowed back to the `false` literal.
+      put_cloudflare_reporting_proxied(nil)
+      {conn, log, site} = drive_bind()
+
+      assert conn.status == 502,
+             "expected the bounded cf-bind refusal, got #{conn.status}: #{conn.resp_body}"
+
+      assert json_body(conn)["error"] == "cloudflare_bind_failed"
+      assert log =~ "cloudflare_bind_not_proxied"
+      assert log =~ "proxied=nil"
+
+      reread = Registry.get_site(site.id)
+      refute reread.serving_mode == "cf_proxied"
+      assert is_nil(reread.cf_record_id)
     end
 
     test "THE CONTROL: proxied:true still binds — the fix did not swallow the normal path" do
