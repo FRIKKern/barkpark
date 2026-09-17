@@ -749,6 +749,22 @@ try {
     );
   });
 
+  check("§5c the canvas never RESOLVES the transclusion — it reads no paper's content", () => {
+    // RESOLVED CONTENT STAYS OUT OF REACH: the editor buys the ability to change the
+    // POINTER and nothing else. A document READ of a paper would be the first step of
+    // resolving one in-canvas. (The SHEET picker does issue a doc read — it seeds from
+    // a doc id and resolves its title — so this is scoped to paper reads, not to "no
+    // doc read at all", which would pass for the wrong reason.)
+    const paperDocReads = fetches
+      .map(({ url }) => url)
+      .filter((url) => url.includes("/v1/data/doc/") && url.includes("/paper/"));
+    assert.deepEqual(
+      paperDocReads,
+      [],
+      "the canvas read a paper document — it is starting to resolve transclusions",
+    );
+  });
+
   const embedRepick = await drivePick("paper-embed-retarget", "retro");
   check("§5c re-picking the SAME paper emits ZERO ops", () => {
     assert.deepEqual(embedRepick, [], `a no-change re-pick emitted ${JSON.stringify(embedRepick)}`);
