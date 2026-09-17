@@ -1,6 +1,6 @@
 # taskboard-drive report
 
-- date: 2026-09-17T04:44:01Z
+- date: 2026-09-17T05:11:11Z
 - mode: hermetic
 - tmux: tmux 3.4
 - host: Darwin arm64
@@ -33,6 +33,7 @@
 - PASS — narrow first-click descend reached the reading frame (footer shows the M mouse note)
 - PASS — narrow esc ascended back to the board
 - PASS — hermetic '● live' still pinned at run end (held-open stream survived the G6 relaunch; no polling fallback)
+  - README floor arm: scripts/taskboard-drive/README.md states a 25-assert hermetic floor at 2 places and this run measured 25 — agreed
 
 ## totals
 

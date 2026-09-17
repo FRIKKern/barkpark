@@ -983,6 +983,48 @@ if [ "$MODE" = hermetic ]; then
   fi
 fi
 
+# ── README floor arm (hermetic only) ──────────────────────────────
+# A number written into a doc rots the moment someone adds an assert, and this
+# README's floor had rotted by SEVEN (it said 18 while the run gave 25) before a
+# human noticed. So the floor stops being prose the reader has to trust: the
+# README states it as the literal phrase "<N>-assert hermetic floor", and this
+# arm compares every occurrence of that phrase against the assert total THIS
+# run actually produced.
+#
+# It is not counted as an assert of its own (no `ok`), so the floor it checks
+# stays the number of BOARD asserts in the table and cannot chase its own tail.
+# On disagreement it calls `bad`, which reds the run through the normal verdict
+# — the local law and the advisory CI job both refuse a drifted README.
+#
+# Three ways it reds, all named:
+#   - the phrase is absent or appears fewer than twice (someone deleted the
+#     number instead of correcting it, which must not read as "no drift");
+#   - two occurrences disagree with EACH OTHER (the heading says one thing and
+#     THE LAW another);
+#   - the stated floor disagrees with PASS+FAIL from this run.
+# Hermetic only: the live matrix is server-shaped and has no fixed floor to pin.
+if [ "$MODE" = hermetic ]; then
+  DRIVE_README="$SCRIPT_DIR/README.md"
+  TOTAL_ASSERTS=$((PASS + FAIL))
+  if [ ! -f "$DRIVE_README" ]; then
+    bad "README floor arm: $DRIVE_README is missing — the floor this run measured ($TOTAL_ASSERTS) is pinned by nothing"
+  else
+    # No `grep -q`, no early-exit pipe: capture whole, then match (pipefail).
+    FLOOR_HITS=$(grep -oE '[0-9]+-assert hermetic floor' "$DRIVE_README" || true)
+    FLOOR_N=$(printf '%s' "$FLOOR_HITS" | grep -c . || true)
+    FLOOR_VALS=$(printf '%s\n' "$FLOOR_HITS" | sed 's/-assert hermetic floor//' | sort -u | tr '\n' ' ' | sed 's/ *$//')
+    if [ "${FLOOR_N:-0}" -lt 2 ]; then
+      bad "README floor arm: scripts/taskboard-drive/README.md carries ${FLOOR_N:-0} occurrence(s) of the literal '<N>-assert hermetic floor' (want at least 2 — THE LAW block and the floor section). This run measured $TOTAL_ASSERTS asserts. A deleted number is drift, not the absence of drift."
+    elif [ "$(printf '%s' "$FLOOR_VALS" | tr ' ' '\n' | grep -c .)" -ne 1 ]; then
+      bad "README floor arm: the README states MORE THAN ONE hermetic floor ($FLOOR_VALS) — its own occurrences disagree. This run measured $TOTAL_ASSERTS."
+    elif [ "$FLOOR_VALS" != "$TOTAL_ASSERTS" ]; then
+      bad "README floor arm: README says the hermetic floor is $FLOOR_VALS, this run measured $TOTAL_ASSERTS asserts ($PASS pass, $FAIL fail). Re-measure and correct scripts/taskboard-drive/README.md — both the '<N>-assert hermetic floor' phrases AND the per-assert table."
+    else
+      note "README floor arm: scripts/taskboard-drive/README.md states a $FLOOR_VALS-assert hermetic floor at $FLOOR_N places and this run measured $TOTAL_ASSERTS — agreed"
+    fi
+  fi
+fi
+
 # ── verdict ──────────────────────────────────────────────────────────────────
 {
   echo
