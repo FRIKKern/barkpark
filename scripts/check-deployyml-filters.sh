@@ -1042,6 +1042,20 @@ readme_globs_of_row() {
     | { grep -oE '`[^`]+`' || true; } | tr -d '`' | sort -u
 }
 
+# set_minus <a> <b> — the lines of <a> absent from <b>, one per line.
+#
+# Written with a single awk stream rather than `comm <(…) <(…)`: process
+# substitution is bash-only, and scripts/posix-vacuous-green-census.sh reds an
+# unguarded procsub in this tree because a script that dies on `(` under `sh`
+# exits having compared NOTHING and still reads as a pass. No procsub, no guard
+# needed, and the comparison runs wherever this file does.
+set_minus() {
+  printf '%s\n\x01\n%s\n' "$2" "$1" | awk '
+    !seen && $0 == "\001" { seen = 1; next }
+    !seen { b[$0] = 1; next }
+    length($0) && !($0 in b) { print }'
+}
+
 # check_readme_routing <yml> <readme> <label>
 check_readme_routing() {
   local yml="$1" readme="$2" label="$3"
@@ -1079,8 +1093,8 @@ check_readme_routing() {
       echo "  PUBLISHED  $jr_job  ->  $readme publishes a prefix set the '$jr_job' classifier does not use." >&2
       echo "          workflow (truth):  $(printf '%s' "$derived"   | tr '\n' ' ')" >&2
       echo "          README (asserted): $(printf '%s' "$published" | tr '\n' ' ')" >&2
-      echo "          only in the workflow: $(comm -23 <(printf '%s\n' "$derived") <(printf '%s\n' "$published") | tr '\n' ' ')" >&2
-      echo "          only in the README:   $(comm -13 <(printf '%s\n' "$derived") <(printf '%s\n' "$published") | tr '\n' ' ')" >&2
+      echo "          only in the workflow: $(set_minus "$derived" "$published" | tr '\n' ' ')" >&2
+      echo "          only in the README:   $(set_minus "$published" "$derived" | tr '\n' ' ')" >&2
       failures=$((failures + 1))
       continue
     fi
