@@ -1307,6 +1307,42 @@ if (failed === failedBeforeH)
 //     the canvas ground is not its ground and it has no single resolved ratio.
 //   - Translucent inks are excluded for the same reason the first version
 //     excluded them: rgba() over a ground has no one ratio.
+//
+// ┌─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (BEGIN) ───────────
+// This row (task-4462bbaf17f63ec1) exists because #18162 and #18109 were each
+// green on their own branch and red only once main held both. Its last criterion
+// offers two answers and forbids blurring them. OPTION (b) IS CHOSEN: no
+// standing guard against that class is in scope here, and the exposure goes on
+// the record as ACCEPTED rather than quietly closed. The reason is mechanical,
+// not a preference.
+//
+// A guard catches a class BEFORE main only if it can stop a merge. This file has
+// exactly one CI venue: `node design/check.mjs` in .github/workflows/
+// doc-gates.yml, and there is no second invocation anywhere in .github. That
+// workflow publishes ONE check-run context, `Doc budgets + anchors`, and that
+// context is not in the required set of .github/required-checks.json — it sits in
+// that file's `exclusions` array as "S4 PATHS-FILTERED", and doc-gates.yml's own
+// header says of its red, in those words, that "none of it stops a merge". So no
+// code added to this file can catch anything before main. It can only make
+// main's red louder and better named, which is a different and smaller promise.
+//
+// The mechanism that would actually catch the class is not a checker at all: it
+// is re-evaluating a pull request's checks against the CURRENT tip before the
+// merge lands — "require branches to be up to date", or a merge queue. Both are
+// branch protection settings on the repository: owner-only, outside every lane
+// fence, and outside this file. .github/required-checks.json records that this
+// repo is user-owned with no merge queue today, so neither is switched on.
+// Writing a checker here and calling it the remedy would put the fix in the one
+// place that provably cannot deliver it, and would read afterwards as though the
+// class had been guarded.
+//
+// What IS in scope, and is shipped above: the KEY. The collision produced 46
+// blessings for 19 facts only because pairings were keyed on NAMES. They are
+// keyed on the resolved `<ink>|<ground>` bytes now, so the same colour arriving
+// under a second name from a second source is the SAME pair rather than a new
+// failure. That removes this file's own contribution to the class. It does not
+// guard the class, and this record exists so that nobody reads it as if it did.
+// └─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (END) ─────────────
 console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canvas palette (keyed on the resolved colour)");
 {
   // Part H2 counts its OWN failures. `failed` is a shared, sticky boolean, so
@@ -1315,6 +1351,9 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
   // carries the same own-counter idiom and the same reason.
   let h2Failed = 0;
   const failH2 = (msg) => { h2Failed++; fail(msg); };
+  // Set by the accepted-exposure record arm below, and printed on the ok line so
+  // a reader can see that the arm RAN rather than inferring it from silence.
+  let recordWords = 0;
 
   const FAMILY = "color.graphCanvas";
   const GRAPH_JS = "web/public/bp-graph.js";
@@ -1577,8 +1616,57 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
   if (huePairs.length < hueValues.size * 2)
     failH2(`  Part H2 FAIL: REFUSING — ${hueValues.size} distinct per-type hues produced only ${huePairs.length} pairings, not the ${hueValues.size * 2} a both-grounds evaluation owes. A hue bound to one theme is a derivation that narrowed, which is how a gate goes quiet without going empty.`);
 
+
+  // ── the accepted-exposure record, ENFORCED rather than trusted ────────────
+  // A written finding does not fire by itself. The record above the part header
+  // is the WHOLE of this row's answer to the green-apart/red-together class, and
+  // a comment block is deletable by anyone editing this file for an unrelated
+  // reason — which is exactly how an ACCEPTED exposure turns back into a SILENT
+  // one, with nothing anywhere reporting the change. So Part H2 reads its own
+  // source and refuses to pass without it. This arm guards the RECORD, not the
+  // class; the record itself says why no guard on the class is landable here.
+  {
+    const MARK = "ACCEPTED-EXPOSURE RECORD: green-apart/red-together";
+    const SELF = fileURLToPath(import.meta.url);
+    let selfSrc = null;
+    try { selfSrc = readFileSync(SELF, "utf8"); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read own source ${SELF} (${err.code || err.message}) — the accepted-exposure record is verified by reading this file, so an unreadable self is a REFUSAL, never a pass.`); }
+    if (selfSrc !== null) {
+      const srcLines = selfSrc.split("\n");
+      const isComment = (l) => l.trim().startsWith("//");
+      // Markers are matched only on COMMENT lines, so the literals in this arm
+      // (which necessarily spell the same words) can never be mistaken for the
+      // block they delimit.
+      const markerAt = (tag) => srcLines.flatMap((l, i) => (isComment(l) && l.includes(`${MARK} (${tag})`) ? [i] : []));
+      const begins = markerAt("BEGIN"), ends = markerAt("END");
+      if (begins.length !== 1 || ends.length !== 1 || ends[0] <= begins[0] + 1) {
+        failH2(`  Part H2 FAIL: the accepted-exposure record is missing or unbalanced — ${begins.length} BEGIN and ${ends.length} END comment marker(s) for "${MARK}" in ${SELF}, needing exactly one of each with prose between them. Criterion c4 of task-4462bbaf17f63ec1 chose option (b), a WRITTEN statement, so the statement IS the deliverable: restore it rather than deleting this arm.`);
+      } else {
+        const body = srcLines.slice(begins[0] + 1, ends[0]);
+        const stray = body.filter((l) => l.trim() !== "" && !isComment(l));
+        if (stray.length)
+          failH2(`  Part H2 FAIL: the accepted-exposure record holds ${stray.length} non-comment line(s) — the block is prose only, so code inside it means the markers have drifted onto something they do not delimit.`);
+        const prose = body.map((l) => l.trim().replace(/^\/\/ ?/, "")).join(" ").replace(/\s+/g, " ").trim();
+        const words = prose.split(" ").filter(Boolean).length;
+        const MIN_WORDS = 120;
+        if (words < MIN_WORDS)
+          failH2(`  Part H2 FAIL: the accepted-exposure record is ${words} words, under the ${MIN_WORDS}-word floor — an exposure accepted in one sentence is not on the record, it is waved through. Restore the reasoning, or re-open the criterion.`);
+        // Each phrase carries one load-bearing half of the statement: WHICH
+        // option was taken, WHAT is being accepted, WHY no venue reachable from
+        // this file can catch the class, WHERE the real remedy lives, and WHICH
+        // row owns the decision. Lose one and the record stops saying the thing
+        // it was stamped for while still looking like a paragraph.
+        const REQUIRED = ["OPTION (b) IS CHOSEN", "no standing guard", "Doc budgets + anchors", "required-checks.json", "branch protection", "task-4462bbaf17f63ec1"];
+        const missing = REQUIRED.filter((phrase) => !prose.includes(phrase));
+        if (missing.length)
+          failH2(`  Part H2 FAIL: the accepted-exposure record no longer states ${missing.map((m) => JSON.stringify(m)).join(", ")} — each names one load-bearing half of the decision (which option, what is accepted, why no venue here can catch it, where the remedy lives, which row owns it), so a record that has lost one has stopped saying what it was stamped for.`);
+        recordWords = words;
+      }
+    }
+  }
+
   if (h2Failed === 0)
-    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived`);
+    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived; accepted-exposure record present and intact (${recordWords} words, option (b))`);
 }
 
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
