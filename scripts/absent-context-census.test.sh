@@ -281,6 +281,94 @@ if [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT"; then
 else
   bad "2.4 expected class NAME_NOT_IN_RUN at exit 1; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
+# ═══ 2s. STARTUP_FAILURE — the class a `completed` run can hide inside ═══════
+#
+# THE SPECIMEN. PR #18045, head b1990da86: 22 workflow runs, 18 of them
+# conclusion `startup_failure`, FOUR check runs on the entire head, three
+# required contexts pending for two hours and never concluding. A startup
+# failure is refused at creation, publishes zero jobs and zero check runs, and
+# is TERMINAL — only a new head clears it. Before this class, every one of those
+# rows came out NAME_NOT_IN_RUN, whose printed remedy is "rebase, or edit the
+# spec", sending a reader to hunt a renamed job that does not exist.
+#
+# THE ARMS RUN OVER ONE CORPUS and both must hold: the startup_failure head is
+# reported, and a head that differs ONLY in its conclusion is NOT.
+STARTUP_ARMS=0
+
+# ARM ONE — a startup_failure run MUST be reported, under its own class.
+D2S="$(derive startup-failure)"
+drop_victim_checkrun "$D2S"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .conclusion = "startup_failure" else . end]}' \
+  "$D2S/runs-$SHA.json" > "$D2S/.tmp" && mv "$D2S/.tmp" "$D2S/runs-$SHA.json"
+OUT="$(run_census "$D2S")"; RC=$?
+STARTUP_ARMS=$((STARTUP_ARMS + 1))
+if [ "$RC" = "1" ] && grep -qE '^ +class +STARTUP_FAILURE$' <<<"$OUT"; then
+  ok "2s.1 ARM ONE — a COMPLETED run with conclusion startup_failure ⇒ STARTUP_FAILURE (exit 1), not NAME_NOT_IN_RUN"
+else
+  bad "2s.1 expected class STARTUP_FAILURE at exit 1; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+if grep -qE '^ +remedy +.*update-branch' <<<"$OUT"; then
+  ok "2s.2 …and the REPORT names the remedy — $(grep -E '^ +remedy ' <<<"$OUT" | head -1 | sed 's/^ *//' | cut -c1-96)"
+else
+  bad "2s.2 the startup_failure row does not name update-branch as its remedy"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# The report must NOT reproduce gh's canned guess, which was measured FALSE on
+# the specimen head: all 72 workflow files at that ref parsed.
+if ! grep -qiE 'likely (failed )?because of a workflow file' <<<"$OUT"; then
+  ok "2s.3 …and it guesses NO cause — gh's canned 'likely a workflow file issue' string is absent, because GitHub exposes no reason field"
+else
+  bad "2s.3 the output reproduces gh's guessed cause"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ARM TWO — THE CONTROL, and the mutation that proves ARM ONE can lose. The same
+# fixture with conclusion `failure`: a run that EXECUTED and simply carried no
+# job of this name. That is a genuine NAME_NOT_IN_RUN, and it is precisely the
+# row a substring test for `failure` would steal into STARTUP_FAILURE. Only the
+# whole-token match keeps these two apart.
+D2T="$(derive startup-failure-control)"
+drop_victim_checkrun "$D2T"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .conclusion = "failure" else . end]}' \
+  "$D2T/runs-$SHA.json" > "$D2T/.tmp" && mv "$D2T/.tmp" "$D2T/runs-$SHA.json"
+OUT="$(run_census "$D2T")"; RC=$?
+STARTUP_ARMS=$((STARTUP_ARMS + 1))
+if [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT" && ! grep -q 'STARTUP_FAILURE' <<<"$OUT"; then
+  ok "2s.4 ARM TWO (control) — conclusion \`failure\` stays NAME_NOT_IN_RUN; the new class did not become a catch-all, and a substring test for 'failure' would have lost this row"
+else
+  bad "2s.4 conclusion 'failure' must stay NAME_NOT_IN_RUN; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# …and the control's remedy is the OTHER remedy: the two classes are told apart
+# by the report text, not only by the label.
+if grep -qE '^ +remedy +.*rebase, or edit the spec' <<<"$OUT" && ! grep -q 'update-branch' <<<"$OUT"; then
+  ok "2s.5 …and its remedy line is the OPPOSITE one (rebase/spec, never update-branch) — the two diagnoses are legible without opening a log"
+else
+  bad "2s.5 the control row does not carry the NAME_NOT_IN_RUN remedy"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ARM THREE — the class must not fire on a HEALTHY head. Same required-context
+# set, same runs, the check run RESTORED and the conclusion still
+# startup_failure: nothing renders absent, so nothing is reported. Without this
+# arm, 2s.1 is satisfied by a census that reports every head.
+D2U="$(derive startup-failure-healthy)"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .conclusion = "startup_failure" else . end]}' \
+  "$D2U/runs-$SHA.json" > "$D2U/.tmp" && mv "$D2U/.tmp" "$D2U/runs-$SHA.json"
+OUT="$(run_census "$D2U")"; RC=$?
+STARTUP_ARMS=$((STARTUP_ARMS + 1))
+if [ "$RC" = "0" ] && ! grep -q 'ABSENT' <<<"$OUT" && ! grep -q 'STARTUP_FAILURE' <<<"$OUT"; then
+  ok "2s.6 ARM THREE (control) — a head whose required contexts all RENDER is silent even beside a startup_failure run; the class tracks absence, not conclusion"
+else
+  bad "2s.6 a healthy head must stay exit 0 and silent; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ZERO ARMS RUN IS "CANNOT READ", NEVER A CLEAN VERDICT. A `derive` that fails,
+# a jq that writes nothing, a renamed victim — any of those would skip the block
+# above and leave the section reporting nothing at all, which reads identically
+# to a pass. The count is asserted so it cannot.
+if [ "$STARTUP_ARMS" = "3" ]; then
+  ok "2s.7 arms run: $STARTUP_ARMS of 3 — a silent section cannot masquerade as a clean one"
+else
+  bad "2s.7 CANNOT READ — $STARTUP_ARMS of 3 startup_failure arms actually ran"
+fi
+
 # …and it must not be reachable from a status the census has NOT ruled on: the
 # named class is the `completed` arm alone, never a catch-all wearing a name.
 D2D="$(derive unnamed-status)"
