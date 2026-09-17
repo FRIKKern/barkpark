@@ -12,7 +12,20 @@ export default defineConfig({
     projects: [
       'packages/*/vitest.config.ts',
       {
-        extends: './packages/react/vitest.config.ts',
+        // NO `extends` here, on purpose. It used to extend
+        // ./packages/react/vitest.config.ts, and `extends` MERGES array
+        // fields — so this project inherited that config's
+        // `setupFiles: ['../../test-utils/vitest.setup.ts']`, which is wrong
+        // here twice over: the relative path resolves against THIS file's
+        // directory (js/), not packages/react/, landing one level above the
+        // repo; and the file it names imports test-utils/msw/server, i.e.
+        // `msw/node`, which a real browser cannot load. Either fault aborts
+        // the setup import, so this project reported
+        // "Test Files 1 failed (1) / Tests no tests" on every run and the
+        // browser proof never executed one assertion. An override cannot
+        // undo it (`setupFiles: []` merges to the same inherited entry), so
+        // the project is declared standalone. The browser suite is pure
+        // renderToString and makes no network calls, so it needs no setup.
         test: {
           name: 'react-browser',
           browser: {
