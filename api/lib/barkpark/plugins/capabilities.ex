@@ -954,7 +954,14 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("type", true, "string", "Document type."),
           arg("doc_id", true, "string", "Document id.")
         ],
-        flags: [flag("limit", "int", "Max revisions to return.")],
+        flags: [
+          flag("limit", "int", "Max revisions to return (default 50, max 200)."),
+          flag(
+            "offset",
+            "int",
+            "Skip this many revisions — pages past the first. The response carries limit, offset and has_more."
+          )
+        ],
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

@@ -157,6 +157,31 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "doc.history pagination flags (task-c59788170e244f51)" do
+    test "history declares BOTH `limit` and `offset` in the SERVED manifest",
+         %{conn: conn} do
+      # LIVE SHAPE, not a file read: this goes through the router and reads the
+      # manifest `bp` and the SDKs actually consume. PR #18882 gave
+      # `GET /v1/data/history/...` real offset pagination, but the capability
+      # stayed undeclared — a flag present in the source yet absent from the
+      # served manifest is undiscoverable from the client, the same shape as
+      # the stripped `--keep-rerun` (task-4d5a2dde8a02d057).
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "doc.history")
+
+      assert cmd != nil, "doc.history command not found in manifest"
+
+      flag_names = Enum.map(cmd["flags"], & &1["name"])
+      assert "limit" in flag_names
+
+      assert "offset" in flag_names,
+             "doc.history must declare an `offset` flag; got: #{inspect(flag_names)}"
+
+      offset_flag = Enum.find(cmd["flags"], &(&1["name"] == "offset"))
+      assert offset_flag["type"] == "int"
+    end
+  end
+
   describe "media.upload path contract (BUG 2)" do
     test "media.upload path_template is /v1/media/:dataset/upload", %{conn: conn} do
       manifest = capabilities(conn)
