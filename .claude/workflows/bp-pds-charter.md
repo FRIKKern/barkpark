@@ -15691,3 +15691,94 @@ name unrelated code.
   PAYS: `pds-w29-bl-twin-policy-split` c0 (PDS-D747), c1 (PDS-D748), c2 (PDS-D749), c3 (the table
   above). c4 is NOT paid here — its tests live in `api/test/**` and `internal/taskboard/**`, outside
   this ruling's fence, and are filed as `task-a7c3a17984689b3d`.
+
+- **PDS-D750 — A RERUN MUST BE ABLE TO FAIL, AND A BARE IDENTIFIER IS NOT A PROBE. THE PATTERN MUST
+  CARRY A TERMINATOR. THE WRITER-SEAM REFUSAL IS RULED IN, AND IT IS NARROW: THE DEFINITION-SHAPED
+  UNDELIMITED PATTERN ONLY.**
+
+  **THE LAW.** `disposition_rerun` exists so a reason carries one command an auditor can run to try
+  to prove it WRONG (PDS-D390). A command that cannot go red is not a probe; it is a decoration that
+  passes every audit. `git grep` matches a SUBSTRING, so a pattern ending in an identifier character
+  is a PREFIX match — and a suffix rename is the most common way a symbol actually changes. A rerun
+  whose pattern names a symbol MUST terminate that pattern: with the language's own delimiter
+  (`(`, `:`, `{`, ` do`, `<`), with a regex end-anchor (`\b`, `$`), or with the next literal token of
+  the line. The terminator is the whole probe; without it the command asserts only that a string
+  still starts with those letters.
+
+  **MEASURED AT THIS SHA, NOT INHERITED.** Two specimens, each run bare and delimited, against
+  `origin/main` and against a synthetic commit carrying the suffix rename (built with `git commit-tree`
+  off `origin/main`, one blob changed), every rerun string executed through a no-shell subprocess:
+
+  | probe | @ origin/main | @ mutated ref |
+  |---|---|---|
+  | `git grep -n 'defp apply_engagement' -- api/lib/barkpark/tasks/stage.ex` | rc=0 | rc=0 — **INERT**, prints `defp apply_engagement_RENAMED(...)` back as a hit |
+  | `git grep -n 'defp apply_engagement(' -- api/lib/barkpark/tasks/stage.ex` | rc=0 | **rc=1 — RED** |
+  | `git grep -n 'def round_done_predicate' -- scripts/pds-ledger-census.sh` | rc=0 | rc=0 — **INERT**, prints `def round_done_predicate_MUT(report):` |
+  | `git grep -n 'def round_done_predicate(report):' -- scripts/pds-ledger-census.sh` | rc=0 | **rc=1 — RED** |
+
+  The bare form does not merely fail to red — it returns the MUTATED line as its evidence, so the
+  auditor reading the output sees the renamed symbol and the exit code says nothing happened.
+
+  **WHY THIS ROW AND NOT AN ORDINARY BUG.** One of the rows the specimen probes were written for is
+  `pds-w27-bl-stamp-guard-substring-false-positive` — a row ABOUT a substring guard producing false
+  positives. The instrument written to check it committed the same substring defect. A lesson written
+  down once does not transfer; it has to be enforced in the vocabulary the next writer actually uses.
+
+  **THE ENFORCEMENT QUESTION, RULED — NOT DEFERRED, AND NOT A `should`.** An undelimited
+  bare-identifier `git grep` JOINS the `--rerun` refusal vocabulary at the write seam
+  (`api/lib/barkpark/tasks/stage.ex`@`@forbidden_rerun_shapes [`), as a FIFTH arm, code
+  `:prefix_match_probe` — but only in its DEFINITION-SHAPED form. The refused predicate, stated so it
+  is runnable and not a judgement of intent:
+
+  > the positional PATTERN of a `git grep` segment BEGINS with a definition keyword
+  > (`def` / `defp` / `defmodule` / `defmacro` / `func` / `function` / `class` / `type` / `struct` /
+  > `interface` / `const` / `let` / `var` / `fn`) followed by an identifier, AND ENDS in `[A-Za-z0-9_]`
+  > with no terminator, end-anchor or `\b`.
+
+  Everything else — a bare reference to a constant, a path, a workflow name, a prose span quoted out
+  of a charter — is NOT refused here.
+
+  **THE COST OF THE BLUNT ANSWER, WITH THE NUMBER THAT DECIDED IT.** Swept over every ledger row
+  carrying a `disposition_rerun` (`bp task ls --all -o json`, 9,438 rows fetched, 515 with a rerun,
+  470 of those using `git grep`):
+
+  | shape | rows | distinct rerun strings |
+  |---|---|---|
+  | pattern already anchored/terminated | 30 | — |
+  | **undelimited identifier tail — total** | **440 (93.6% of git-grep reruns)** | 126 |
+  | ... of which DEFINITION-shaped (this ruling refuses) | **8 (1.7%)** | **8** |
+  | ... of which REFERENCE-shaped (this ruling does NOT refuse) | 432 | 118 |
+
+  A blunt "any identifier tail is refused" would refuse 440 of 470 — nine in ten of the corpus's own
+  shape — and 432 of those are references with no delimiter to add: `git grep -c sobelow_skip`,
+  `git grep -n "THE FILING LAW" -- .claude/workflows/bp-felix-pristine-charter.md`,
+  `git grep -n ROSTER_PAGE_LIMIT -- cloud/priv/static/__preview__/seal-predicate.mjs`. Telling a
+  writer to "terminate" a quoted sentence of charter prose is not advice, it is a riddle; the refusal
+  would be routed around, and a refusal that teaches "find the spelling that gets past the door" is
+  worse than none. The narrow arm costs 8 rows and each of the 8 has an obvious one-character fix.
+
+  **THE NARROW ARM'S OWN FALSE POSITIVE, STATED AND SIZED.** A probe may target a FAMILY of
+  definitions by prefix ON PURPOSE — `git grep -n 'defp handle_' …` to assert that a clause group
+  still exists. That is a legitimate probe and this arm refuses it. Its remedy is one character
+  (`defp handle_[a-z]`, or `-E 'defp handle_\w+\('`), and its measured frequency in the corpus today
+  is **0 of 470** — all 8 definition-shaped specimens name one specific symbol, none is a family
+  probe. That is the price, and it is paid knowingly: the arm is written to be narrow precisely so
+  the family probe is the ONLY thing it can wrongly refuse.
+
+  **SCOPE — READ IT NARROWLY.** The api half of this ruling is `api/lib/barkpark/tasks/stage.ex`
+  (`@forbidden_rerun_shapes` and its `why` string), the mirror tokeniser `tooling/pds/spellings.mjs`,
+  and the shared fixture `api/test/fixtures/rerun-spellings.json` — all three move together or none
+  does, because `test/barkpark/tasks/rerun_spelling_mirror_test.exs` exists to red exactly the drift
+  a one-sided edit creates. It is filed as its own row for the api lane and is NOT carried by the PR
+  that lands this decision. Nothing here licenses touching any other arm of the screen, the legal
+  substitutes list, or the READ seam's severity ladder.
+
+  **THE READER SEAM IS NOT THE WRITER SEAM, AND BOTH ARE PAID.** The write seam screens what a writer
+  may STORE; it sees one command at a time and cannot revisit the 440 rows already on the ledger.
+  `scripts/pds-rerun-symbol-coverage.py` is the reader: it sweeps the whole corpus, and until this
+  row it measured COVERAGE ONLY — whether a rerun is ABOUT the symbol its reason turns on — and was
+  structurally blind to whether that rerun can ever go red. Those are two axes, not one: a probe can
+  name exactly the right symbol and still be unfalsifiable, which is what both specimens above are.
+  The third arm `scripts/pds-rerun-symbol-coverage.py`@`def falsifiability(` closes the second axis
+  at the reader seam, with its own controls in `--selftest` and its own false-positive shape stated
+  in the docstring. PAYS: `task-778d9a95681c33bf` c0, c1, c3.
