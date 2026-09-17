@@ -13805,7 +13805,7 @@ defmodule BarkparkCloud.Web.Router do
   # Team-scoped lookup: only the owning team's instance resolves; everything else
   # (another team's id, an unknown id, a non-UUID string) is `nil` → the same
   # 404. `Registry.get_barkpark/1` already guards the `:binary_id` cast, so a
-  # malformed id never raises an `Ecto.CastError` here.
+  # malformed id never raises an `Ecto.Query.CastError` here.
   defp resolve_team_barkpark(team, id) do
     case Registry.get_barkpark(id) do
       %Barkpark{team_id: tid} = bp when tid == team.id -> bp
