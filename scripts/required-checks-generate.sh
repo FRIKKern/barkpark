@@ -663,26 +663,28 @@ expand_matrix_name_legs() {
     case "$legsfile" in
       /*|*..*) die "MATRIX LEG SOURCE IS NOT REPO-RELATIVE: $file job '$job' declares \`$legsfile\` — the leg set must be a committed file inside the repo, so the index is derived from the tree under review and not from whatever the runner happens to have on disk." ;;
     esac
-    # ANCHORED TO THE TREE UNDER REVIEW, not to this script's own checkout.
-    # `--workflows <dir>` is how every caller points the generator at a tree,
-    # and the mutation suite runs COPIES of this script out of a mktemp dir —
-    # where `$REPO_ROOT` is that temp dir and no leg file has ever existed. An
-    # anchor on $0 therefore turns "read the legs of the workflows you were
-    # given" into "read the legs of wherever the binary happens to live", and
-    # the whole suite reds with MATRIX LEG SOURCE IS MISSING. The workflow dir
-    # names its own root: `<root>/.github/workflows`.
-    local legsroot="" legspath=""
-    legsroot="$(cd "$WORKFLOW_DIR/../.." 2>/dev/null && pwd)" || legsroot=""
-    if [ -n "$legsroot" ] && [ -f "$legsroot/$legsfile" ]; then
-      legspath="$legsroot/$legsfile"
-    elif [ -f "$REPO_ROOT/$legsfile" ]; then
-      # A synthetic `--workflows` dir that is not inside a repo at all (the
-      # suite's own fixture trees): fall back to this checkout. Both anchors
-      # are committed files in a repo; neither can widen a regex.
-      legspath="$REPO_ROOT/$legsfile"
-    fi
+    # ANCHORED TO THE TREE UNDER REVIEW, not to this script's own checkout, and
+    # found by WALKING UP rather than by a fixed offset. `--workflows <dir>` is
+    # how every caller points the generator at a tree, and that dir is not
+    # always `<root>/.github/workflows`: the mutation suite runs COPIES of this
+    # script out of a mktemp dir and hands them a FLAT `$TMP/workflows-14b/`
+    # holding only `*.yml`. A fixed `../..` offset reads the wrong root for
+    # both, and the whole suite reds with MATRIX LEG SOURCE IS MISSING.
+    #
+    # The walk can only ever FIND A FILE AT THE DECLARED RELATIVE PATH, and
+    # whatever it finds is run through the literal checks below — so the worst
+    # a wrong ancestor can do is name the wrong literals, loudly. No ancestor
+    # can widen a regex, which is the property this whole function preserves.
+    local legspath="" legsdir=""
+    for legsdir in "$WORKFLOW_DIR" "$REPO_ROOT"; do
+      local d="$legsdir"
+      while [ -n "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do
+        if [ -f "$d/$legsfile" ]; then legspath="$d/$legsfile"; break 2; fi
+        d="$(dirname "$d")"
+      done
+    done
     [ -n "$legspath" ] \
-      || die "MATRIX LEG SOURCE IS MISSING: $file job '$job' declares its legs live in \`$legsfile\`, which exists under neither the workflow tree (\`${legsroot:-?}\`) nor this checkout (\`$REPO_ROOT\`). The template \`name: $tmpl\` therefore resolves to NOTHING and stays a catch-all — commit the leg file or take the declaration off."
+      || die "MATRIX LEG SOURCE IS MISSING: $file job '$job' declares its legs live in \`$legsfile\`, which exists at that path under no ancestor of the workflow dir (\`$WORKFLOW_DIR\`) nor of this checkout (\`$REPO_ROOT\`). The template \`name: $tmpl\` therefore resolves to NOTHING and stays a catch-all — commit the leg file or take the declaration off."
     # jq is handed the filter as ONE argv element, so there is no shell here to
     # inject into; the charset guard is about keeping the declaration readable
     # and reviewable, not about escaping.

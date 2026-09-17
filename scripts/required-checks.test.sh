@@ -2789,6 +2789,16 @@ jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" \
 # workflow publishing the PR-only seed name. Used by §14b alone.
 mkdir -p "$TMP/workflows-14b"
 cp "$REPO_ROOT/.github/workflows"/*.yml "$TMP/workflows-14b/" 2>/dev/null || true
+# FIXTURE FIDELITY, not an accommodation. The copy above takes `*.yml` and
+# nothing else, but a workflow may declare a committed DATA file that the
+# generator reads at index-build time (shell-harnesses.yml names its matrix leg
+# set, so its 53 rendered names expand to literals instead of `^.+$`). Copying
+# only the YAML hands the generator a tree whose declaration points at nothing,
+# and it refuses — correctly, and about a subject §14b is not testing. §14b is
+# a statement about the EXCLUSION UNION; the leg file is part of the tree it
+# means to hand over.
+mkdir -p "$TMP/.github"
+cp "$REPO_ROOT/.github/shell-harness-legs.json" "$TMP/.github/" 2>/dev/null || true
 cat >"$TMP/workflows-14b/zz-seeded-pr-only.yml" <<EOF
 name: zz-seeded-pr-only
 on:
