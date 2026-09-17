@@ -35,6 +35,18 @@
 # and the bug looks cosmetic. It is not: the SUMMARY — the whole diagnosis of
 # the failure — is written only on the path where nothing went wrong.
 #
+# THE THIRD SHAPE, and it is this file's OWN former advice (2026-09-17,
+# task-0a48c7b64d5ab0f1):
+#
+#     cmd | tee log || :       # `:` runs, and `:` IS A PIPELINE
+#     rc=${PIPESTATUS[0]}      # <-- reads `:`'s status. ALWAYS 0.
+#
+# Reachable, and dead. Three steps in this repo took the advice and published
+# false greens with it: a `NOT YET MEASURED` 24 h window reported as `exit 0 —
+# 0 CLEAN`, and two `exit "$rc"` lines that concluded SUCCESS on their scripts'
+# could-not-deliver codes. The remedy is `set +e` around the pipeline and the
+# capture, or keeping the capture inside the guarded compound.
+#
 # THE DISCRIMINATOR IS NOT THE STRING `rc=$?`. About eighty sites in this repo
 # match that grep and nearly all are already correct, because their step ran
 # `set +e` first. What makes a site defective is whether ERREXIT IS STILL IN
@@ -208,6 +220,7 @@ def protected(cmd):
 
 
 bad = []
+dead_ps = []
 unreachable = []
 captures_seen = 0
 selftest_lines_seen = 0
@@ -295,7 +308,46 @@ for path in files:
                         e_on = not verdict
                 if CAPTURE.match(line):
                     captures_seen += 1
-                    if e_on and not protected(prev):
+                    # ── THE THIRD SHAPE: A DEAD PIPESTATUS CAPTURE ──────────
+                    # (task-0a48c7b64d5ab0f1, 2026-09-17.) This one is the
+                    # OPPOSITE of the rule below and it is why it needs its own
+                    # test: the capture is perfectly REACHABLE — `protected()`
+                    # says so — and it still reads a number that has nothing to
+                    # do with the pipeline.
+                    #
+                    # PIPESTATUS is rewritten by EVERY pipeline, and a bare
+                    # command is a pipeline. So the right-hand side of a `||`
+                    # clobbers it before the capture on the next line runs:
+                    #
+                    #     (exit 3) | cat || :        # `:` is a pipeline
+                    #     rc=${PIPESTATUS[0]}        # reads `:`'s status — 0
+                    #
+                    # Measured, not reasoned: bash 3.2 and 5.x both print 0, and
+                    # `|| rc=$?` does it too — an assignment with no command is
+                    # still a simple command and still resets the array.
+                    #
+                    # WHAT IT COST. This file's own FIX line used to recommend
+                    # `<cmd> | tee … || :` for a pipeline, and three steps in
+                    # this repo took the advice. main-red-owner.yml run
+                    # 35276736665 printed `NOT YET MEASURED …` and then `window
+                    # verdict exit=0`, where its summary labels exit 0 `0 CLEAN`
+                    # — a false clean day on the one instrument the main-red 24 h
+                    # criterion is stamped from. In the same file the ownership
+                    # step's `exit "$rc"` concluded SUCCESS on could-not-deliver
+                    # codes 3/4/5, and scheduled-arm-health.yml's did the same on
+                    # a red arm. Three false greens from one blessed idiom.
+                    #
+                    # THE ONLY CORRECT FORMS put NOTHING between the pipeline and
+                    # the capture: `set +e` around the pair (grip-suite.yml,
+                    # research-coverage-suite.yml), or keep the capture INSIDE the
+                    # protected compound — `rc=0; { cmd | tee f; rc=${PIPESTATUS[0]}; } || :`.
+                    #
+                    # `$?` captures are NOT affected: `cmd || rc=$?` is the
+                    # documented remedy and `$?` there is the left side's status.
+                    # This rule fires only on the `${PIPESTATUS[` form.
+                    if "${PIPESTATUS[" in line and protected(prev):
+                        dead_ps.append((label, lineno, line.strip(), prev.strip()))
+                    elif e_on and not protected(prev):
                         bad.append((label, lineno, line.strip(), prev.strip()))
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#"):
@@ -316,6 +368,25 @@ if unreachable:
         print("           `gate_rc=0; <cmd> || gate_rc=$?` then adjudicate both.")
         print()
 
+if dead_ps:
+    print("workflow-errexit-capture-check: %d DEAD PIPESTATUS capture(s) — the `||` on the "
+          "line above overwrote the array, so this reads 0 no matter what the pipeline did"
+          % len(dead_ps))
+    print()
+    for label, lineno, cap, prev in dead_ps:
+        print("  %s" % label)
+        print("      run-body line %d: %s" % (lineno, cap))
+        print("      the command above it: %s" % (prev or "(none)"))
+        print("      The right-hand side of that `||` IS A PIPELINE, so it replaced")
+        print("      PIPESTATUS before this line ran. The capture is reachable and DEAD.")
+        print("      FIX: `set +e` around the pipeline and the capture (then `set -e`),")
+        print("           or keep the capture inside the guarded compound:")
+        print("           `rc=0; { <cmd> | tee f; rc=${PIPESTATUS[0]}; } || :`")
+        print()
+    print("scanned %d run-step(s), %d status capture(s)" % (steps_seen, captures_seen))
+    print("TERMINAL: exit 1")
+    sys.exit(1)
+
 if bad:
     print("workflow-errexit-capture-check: %d status capture(s) reached with errexit ARMED" % len(bad))
     print()
@@ -324,7 +395,11 @@ if bad:
         print("      run-body line %d: %s" % (lineno, cap))
         print("      the command above it: %s" % (prev or "(none)"))
         print("      -e kills the step on that line, so this capture never runs.")
-        print("      FIX: `rc=0; <cmd> || rc=$?`  (or `<cmd> | tee … || :` for a pipeline)")
+        # NOT `<cmd> | tee … || :`, which this file recommended until
+        # 2026-09-17 and which silently zeroes PIPESTATUS — see the DEAD
+        # PIPESTATUS rule above.
+        print("      FIX: `rc=0; <cmd> || rc=$?`, or for a pipeline `set +e` around")
+        print("           the pipeline AND its `${PIPESTATUS[n]}` capture, then `set -e`")
         print()
     print("scanned %d run-step(s), %d status capture(s)" % (steps_seen, captures_seen))
     print("TERMINAL: exit 1")
@@ -434,10 +509,39 @@ Y
   out="$(run_check "$d/pipe.yml" 2>&1)"; rc=$?
   [ "$rc" = 1 ] && _ok "A4 pipeline shape" "\`cmd | tee; rc=\${PIPESTATUS[0]}\` under pipefail reds (rc 1)" \
                 || _no "A4 pipeline shape" "expected rc 1, got rc $rc"
-  sed 's@| tee out.txt@| tee out.txt || :@' "$d/pipe.yml" > "$d/pipe-fixed.yml"
+  # ── A5. THE REVERT ARM FOR THE 2026-09-17 FIX ───────────────────────────
+  # `| tee … || :` was THIS FILE'S OWN recommended remedy and it is a DEAD
+  # capture: `:` is a pipeline, so it overwrites PIPESTATUS and the next line
+  # reads 0 whatever the pipeline did. Three steps in this repo shipped false
+  # greens on it. If someone re-blesses the idiom, this arm reds.
+  sed 's@| tee out.txt@| tee out.txt || :@' "$d/pipe.yml" > "$d/pipe-deadps.yml"
+  out="$(run_check "$d/pipe-deadps.yml" 2>&1)"; rc=$?
+  if [ "$rc" = 1 ] && case "$out" in *'DEAD PIPESTATUS'*) true;; *) false;; esac; then
+    _ok "A5 dead PIPESTATUS" "a trailing \`|| :\` before a \${PIPESTATUS[0]} capture REDS (rc 1)"
+  else
+    _no "A5 dead PIPESTATUS" "expected rc 1 naming DEAD PIPESTATUS, got rc $rc: $out"
+  fi
+
+  # ── A5b. THE QUIET ARM: the CORRECT pipeline remedy stays silent ────────
+  # `set +e` around the pipeline AND the capture. Nothing runs between them, so
+  # PIPESTATUS still carries the pipeline's own status.
+  sed -e 's@          set -o pipefail@          set -o pipefail\n          set +e@' \
+      -e 's@          rc=${PIPESTATUS\[0\]}@          rc=${PIPESTATUS[0]}\n          set -e@' \
+      "$d/pipe.yml" > "$d/pipe-fixed.yml"
   out="$(run_check "$d/pipe-fixed.yml" 2>&1)"; rc=$?
-  [ "$rc" = 0 ] && _ok "A5 pipeline fixed" "a trailing \`|| :\` clears the pipeline shape (rc 0)" \
-                || _no "A5 pipeline fixed" "expected rc 0, got rc $rc: $out"
+  [ "$rc" = 0 ] && _ok "A5b pipeline fixed" "\`set +e\` around pipeline+capture clears it (rc 0)" \
+                || _no "A5b pipeline fixed" "expected rc 0, got rc $rc: $out"
+
+  # ── A5c. `|| rc=$?` IS STILL THE BLESSED REMEDY FOR A \`$?\` CAPTURE ─────
+  # The new rule must fire ONLY on the \`${PIPESTATUS[\` form. If it widened to
+  # every capture after a \`||\`, arm A2 above would already be red — but A2
+  # uses the record fixture, so this arm states the boundary on the PIPELINE
+  # fixture, where a widened rule would be easiest to write by accident.
+  sed -e 's@          rc=${PIPESTATUS\[0\]}@          rc=0@' \
+      -e 's@ | tee out.txt@ | tee out.txt || rc=$?@' "$d/pipe.yml" > "$d/pipe-dollar.yml"
+  out="$(run_check "$d/pipe-dollar.yml" 2>&1)"; rc=$?
+  [ "$rc" = 2 ] || [ "$rc" = 0 ] && _ok "A5c \`$?\` unaffected" "\`|| rc=\$?\` is not read as a dead capture (rc $rc)" \
+                || _no "A5c \`$?\` unaffected" "expected rc 0 or 2, got rc $rc: $out"
 
   # ── A6. `set -o pipefail` MUST NOT BE READ AS RE-ARMING ERREXIT ─────────
   # `set +e` then `set -o pipefail` is the commonest safe shape in this repo
@@ -660,6 +764,74 @@ Y
   n_out="$(FAKE_ST=0 FAKE_GATE=0 bash -e "$d/new-step.sh" 2>&1)"; n_rc=$?
   [ "$n_rc" = 0 ] && _ok "C7 all green" "both clean still exits 0 — the fix does not manufacture a red" \
                   || _no "C7 all green" "expected exit 0, got rc $n_rc: $n_out"
+
+  # ── D. THE BEHAVIOUR ARMS FOR THE DEAD CAPTURE ─────────────────────────
+  # The scan above is a PROXY. These make the claim directly, in a real shell:
+  # the blessed-until-2026-09-17 idiom loses the status, the `set +e` form keeps
+  # it, and the `{ … } || :` form keeps it too. Run under `bash -e` because that
+  # is the shell a `run:` block gets.
+  # SUT_DIR was `unset` after the B arms (and these fixtures run under `set -u`,
+  # where an unbound variable exits 1 — which read as a PASSING D1 and a failing
+  # D2/D3 the first time this was written). Re-export it explicitly.
+  export SUT_DIR="$d"
+  cat > "$d/exit3.sh" <<'S'
+echo "TERMINAL: the script spoke"
+exit 3
+S
+  cat > "$d/ps-old.sh" <<'S'
+set -uo pipefail
+bash "$SUT_DIR/exit3.sh" | tee /dev/null || :
+rc=${PIPESTATUS[0]}
+echo "rc=$rc"
+S
+  cat > "$d/ps-setplus.sh" <<'S'
+set -uo pipefail
+set +e
+bash "$SUT_DIR/exit3.sh" | tee /dev/null
+rc=${PIPESTATUS[0]}
+set -e
+echo "rc=$rc"
+S
+  cat > "$d/ps-group.sh" <<'S'
+set -uo pipefail
+rc=0
+{ bash "$SUT_DIR/exit3.sh" | tee /dev/null; rc=${PIPESTATUS[0]}; } || :
+echo "rc=$rc"
+S
+  local d_out
+  # D0 — THE FIXTURE CONTROL. D1's expected value is 0, which is also what a
+  # fixture that never ran would produce for several reasons (an unbound
+  # variable, a missing file). Assert the subject SPOKE before reading D1.
+  d_out="$(bash -e "$d/ps-old.sh" 2>&1)"
+  case "$d_out" in
+    *'TERMINAL: the script spoke'*) _ok "D0 fixture control" "the exit-3 subject actually ran" ;;
+    *) _no "D0 fixture control" "the subject never ran, so D1's 0 would mean nothing: $d_out" ;;
+  esac
+  d_out="$(printf '%s' "$d_out" | tail -1)"
+  [ "$d_out" = "rc=0" ] && _ok "D1 old idiom loses the status" "\`| tee … || :\` then \${PIPESTATUS[0]} reads 0, not 3" \
+                        || _no "D1 old idiom loses the status" "expected 'rc=0' (the defect), got '$d_out'"
+  d_out="$(bash -e "$d/ps-setplus.sh" 2>&1 | tail -1)"
+  [ "$d_out" = "rc=3" ] && _ok "D2 set +e keeps it" "the shipped remedy reads the pipeline's own 3" \
+                        || _no "D2 set +e keeps it" "expected 'rc=3', got '$d_out'"
+  d_out="$(bash -e "$d/ps-group.sh" 2>&1 | tail -1)"
+  [ "$d_out" = "rc=3" ] && _ok "D3 guarded compound keeps it" "\`{ …; rc=\${PIPESTATUS[0]}; } || :\` reads 3" \
+                        || _no "D3 guarded compound keeps it" "expected 'rc=3', got '$d_out'"
+  # D4 — the step SURVIVES. A remedy that keeps the status but lets `-e` kill
+  # the step has fixed nothing; both forms must reach their last line.
+  bash -e "$d/ps-setplus.sh" >/dev/null 2>&1
+  [ $? = 0 ] && _ok "D4 set +e step survives" "\`-e\` does not abort on the pipeline's exit 3" \
+             || _no "D4 set +e step survives" "the step aborted — the diagnosis is still stolen"
+
+  # ── D5. THE REPO IS CLEAN OF THE IDIOM ─────────────────────────────────
+  # Not a fixture: the real tree. A new dead capture added anywhere under
+  # .github/workflows/ reds here as well as in the scan.
+  if [ -d .github/workflows ]; then
+    out="$(run_check .github/workflows 2>&1)"; rc=$?
+    case "$out" in
+      *'DEAD PIPESTATUS'*) _no "D5 live tree" "a DEAD PIPESTATUS capture is live in .github/workflows: $out" ;;
+      *) _ok "D5 live tree" "no DEAD PIPESTATUS capture under .github/workflows (rc $rc)" ;;
+    esac
+  fi
 
   local total=$((_pass + _fail))
   if [ "$total" -lt 8 ]; then

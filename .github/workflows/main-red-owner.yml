@@ -240,12 +240,30 @@ jobs:
           # YET MEASURED) is the NORMAL state of a fresh ledger. The step that
           # says "this step never fails the run" was failing the run on its most
           # common input, and the summary below — the verdict's only consumer —
-          # was never written. `|| :` keeps the pipeline's failure off `-e`;
-          # PIPESTATUS[0] still carries the script's own exit.
+          # was never written.
+          #
+          # THEN THE REMEDY ITSELF WAS WRONG, AND IT PUBLISHED A FALSE CLEAN DAY.
+          # (task-0a48c7b64d5ab0f1, 2026-09-17.)
+          # `:` is itself a pipeline, so running it on the right of `||` REPLACES
+          # PIPESTATUS with its own status — `(exit 3) | cat || :` then reads
+          # `${PIPESTATUS[0]}` as 0. The capture below was therefore not merely
+          # reachable, it was DEAD: it read 0 on every interesting exit. This is
+          # not theoretical — it is the measured fault this edit was opened on.
+          # `set +e` around the pipeline is the form three other workflows in
+          # this repo already use (grip-suite.yml, research-coverage-suite.yml):
+          # `-e` cannot steal the diagnosis, and nothing overwrites PIPESTATUS
+          # between the pipeline and the capture. Do NOT put the `|| :` back.
+          # MEASURED: run 35276736665 printed `NOT YET MEASURED: no anchor poll
+          # at or before now-86400s` and, on the very next line, `window verdict
+          # exit=0` — and the summary this step writes labels exit 0 as `0
+          # CLEAN`. The one instrument c0 of task-0a48c7b64d5ab0f1 is stamped
+          # from was publishing CLEAN over an unmeasured ledger.
           set -uo pipefail
           L="$RUNNER_TEMP/main-red-window.jsonl"
-          bash scripts/main-red-window.sh --verdict "$L" | tee "$RUNNER_TEMP/mrw.txt" || :
+          set +e
+          bash scripts/main-red-window.sh --verdict "$L" | tee "$RUNNER_TEMP/mrw.txt"
           rc=${PIPESTATUS[0]}
+          set -e
           {
             echo "## 24 h window — has a clean day been OBSERVED?"
             echo
@@ -279,11 +297,21 @@ jobs:
           # SAME FAULT, THIRD SHAPE. `-e` + `pipefail` aborted this step the
           # instant main-red-owner.sh exited 3/4/5 — the COULD-NOT-DELIVER codes
           # — so the step summary below, which is the whole diagnosis of a failed
-          # delivery, was written only on the path where nothing went wrong. The
-          # step still exits `$rc` at the end; `|| :` only buys the summary.
+          # delivery, was written only on the path where nothing went wrong.
+          #
+          # AND THE `|| :` REMEDY DEFEATED THE FAIL-CLOSED GUARANTEE THIS FILE'S
+          # HEADER PROMISES. `:` overwrites PIPESTATUS, so `rc` read 0 on every
+          # could-not-deliver code and `exit "$rc"` below concluded SUCCESS —
+          # i.e. "ownership was delivered" — when the predicate could not read
+          # its inputs (4) or the issue API refused (5). A watcher that reports
+          # success when it could not deliver is the exact failure this workflow
+          # exists to stop. `set +e` keeps `-e` off the pipeline without letting
+          # anything run between it and the capture. Do NOT put the `|| :` back.
           set -o pipefail
-          bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt" || :
+          set +e
+          bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt"
           rc=${PIPESTATUS[0]}
+          set -e
           {
             echo "## main-red-owner"
             echo
