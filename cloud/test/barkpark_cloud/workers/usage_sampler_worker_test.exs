@@ -22,6 +22,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
   alias BarkparkCloud.Workers.UsageSamplerWorker
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   @admin_token "instance-admin-token-plaintext-XYZ"
 
@@ -175,5 +176,38 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     assert tick() == :ok
 
     assert length(samples_for(bp)) == 2
+  end
+
+  # ── dr-w26-bl…-sampler-tick — the sweep REPORTS a tick nobody was up for ────
+
+  describe "missed-tick reporting is wired into the sweep" do
+    test "a sweep whose trailing window has no samples warns, attributably" do
+      # The wiring arm: revert the `report_gaps/1` call in `perform/1` and this
+      # reds. A fresh instance has no prior samples, so the 31-minute trailing
+      # window holds at least two expected 15-minute instants and at most one
+      # can be covered by this tick's own row — a hole is guaranteed.
+      team = team_fixture()
+      _bp = live_instance(team)
+      program_simple(1, 0)
+
+      log = capture_log(fn -> assert tick() == :ok end)
+
+      assert log =~ "usage_sampler_missed_tick"
+      assert log =~ "cause=no_node_observed_the_cron_minute"
+      assert log =~ "usage_sampler_gaps swept=1 reported=true"
+    end
+
+    test "CONTROL — an empty checkable fleet sweeps silently" do
+      # No checkable instance means no row is written on ANY tick, so every
+      # expected instant would read as a hole. That is noise about a fleet that
+      # does not exist, and the swept==0 guard must stop it — while still
+      # proving the reporter RAN (the accounting line is emitted either way).
+      _team = team_fixture()
+
+      log = capture_log(fn -> assert tick() == :ok end)
+
+      refute log =~ "usage_sampler_missed_tick"
+      assert log =~ "usage_sampler_gaps swept=0 reported=false reason=no_checkable_instances"
+    end
   end
 end
