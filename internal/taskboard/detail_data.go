@@ -185,6 +185,21 @@ func bareID(id string) string { return strings.TrimPrefix(id, draftsPrefix) }
 // CLI's `bp task frontier` renderer) that need the drafts.-stripped id.
 func BareID(id string) string { return bareID(id) }
 
+// isDraftID is the package's ONE prefix test — the Go half of THE DRAFT LABEL
+// CONTRACT (Barkpark.Tasks.Board's moduledoc, shipped in #18961). What marks a
+// row a draft is the `drafts.` spelling of its OWN stored doc_id and nothing
+// else: not status, not lifecycle_status, not content. A `drafts.`-spelled row
+// stored status:"published" is STILL a draft, which is exactly why this may
+// never become a status check. Elixir consolidated the same test into
+// Barkpark.Content.DraftId.draft?/1 (@canonical capability:draft-published-id)
+// after the scattered String.starts_with? calls drifted; this is the mirror of
+// that consolidation, so every caller in this package tests the prefix HERE —
+// `grep -rn 'strings.HasPrefix(.*drafts' internal/taskboard` must stay a single
+// site. It is deliberately the NEIGHBOUR of bareID: the test reads the RAW id,
+// bareID destroys the evidence, so the two live together and the ordering
+// (test, THEN strip) is visible in one screen.
+func isDraftID(id string) bool { return strings.HasPrefix(id, draftsPrefix) }
+
 // ChildrenOf returns the direct children of docID — every task whose
 // parent_id names it, drafts.-prefix-agnostic on both sides — oldest-inserted
 // first, so a goal's sub-task rail reads in authoring order like the server's

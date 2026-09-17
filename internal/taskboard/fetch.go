@@ -682,7 +682,11 @@ type eventWire struct {
 
 func (w taskWire) toTask() Task {
 	t := Task{
-		DocID:           w.DocID,
+		DocID: w.DocID,
+		// THE DRAFT LABEL CONTRACT: derived HERE, off the RAW wire doc_id,
+		// before anything in this package strips the prefix. Carried from here
+		// on — never re-derived downstream, where the spelling may be gone.
+		Draft:           isDraftID(w.DocID),
 		Rev:             w.Rev,
 		Title:           w.Title,
 		Lifecycle:       w.Lifecycle,
