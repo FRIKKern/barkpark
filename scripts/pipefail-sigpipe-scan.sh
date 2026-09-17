@@ -219,8 +219,12 @@ check_provenance() {
   # the text after the LAST re-measurement banner.  `sed -n '/RE-MEASURED/,$p'`
   # would start at the FIRST one; this keeps only the final block, which is the
   # one that has to describe the number in force.
+  # Anchored on the BANNER (`# ── RE-MEASURED …`), not on the bare word: this
+  # file's own prose explains the rule and contains the phrase, and a bare-word
+  # anchor lands on that explanation and reads an empty block after it — which
+  # this check duly reported as MISSING while the block above it was complete.
   local last
-  last="$(grep -n 'RE-MEASURED' "$file" | tail -1)"
+  last="$(grep -nE '^#[[:space:]]*(─|-){2}[[:space:]]*RE-MEASURED' "$file" | tail -1)"
   last="${last%%:*}"
   if [ -z "$last" ]; then
     # no re-measurement yet: the whole header is the block.

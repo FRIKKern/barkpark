@@ -243,4 +243,97 @@
 #       the change that causes it — this file was loose by one for four days.
 #
 # Filed under task-0c3f58ec7fb18137.
-101
+
+# ── RE-MEASURED 2026-09-17 (task-bf9d623529d86a86): 101 → 97, AND THE FOUR
+#    cp-ops REMOTE-SSH SITES WERE A SCANNER ATTRIBUTION BUG ───────────────────
+# THIS IS NOT A REGENERATION. Read the three blocks above before this one, and
+# read them as a whole: 16 → 113 was a DETECTOR WIDENING on an UNCHANGED tree
+# (#17951, d76319490 — the command-substitution blind spot; the same tree read
+# 15 with the old scanner and 113 with the new one in the same commit), and
+# every move since has been DOWNWARD and earned: 113 → 108 (#18560, f2cd6a7bb),
+# 108 → 101 (#18621, b569033e2e), 101 → 97 here. Nobody has ever regenerated
+# this number to bury a red. A reader who sees only `16 → 113` will read it as
+# laundering; the git history is the answer:
+#
+#     git log -p --follow -- scripts/pipefail-sigpipe-baseline.txt
+#     git show d76319490 -- scripts/pipefail-sigpipe-scan.sh   # the widening
+#
+# THE MEASUREMENT, on a git archive SNAPSHOT of the commit — never a checkout:
+#
+#     git archive 22c02e98f | tar -x -C <scratch> && cd <scratch>
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 97 finding(s) — high 97 · medium 0 · low 0 — over 442 file(s)
+#     (all confidences on the same tree: 240 — high 97 · medium 139 · low 4)
+#     sha  22c02e98f1f7155e6dc3cabb0d005353ffa6086f   (origin/main b736382f6 + this change)
+#     utc  2026-09-17T16:50:00Z
+#
+# THE −4, AND WHY IT IS A DETECTOR FIX AND NOT A SITE FIX. Not one line of
+# cp-ops.yml changed. All four sites — 96, 97, 149, 406 as of b569033e2e — sit
+# INSIDE a quoted remote ssh command string:
+#
+#     $SSH "root@${CP_HOST}" "            ← opens a double quote
+#       ssh -i \"\$KEY\" root@${BOX_IP} '
+#         docker ps -a --format \"…\" | head -10     ← a DIFFERENT shell, on a
+#       '                                             DIFFERENT host, runs this
+#     "                                   ← closes it
+#
+# strip_quoted() and strip_quoted_keep_subst() are per-LINE: they start every
+# line unquoted, so a quote opened on one line and closed on another is
+# invisible and every line between them is read as code THIS shell runs. The
+# `run:` body says `set -euo pipefail`, so the inner `| head -10` was reported
+# as "bare command under set -e". It is not: 96/97/406 run in a remote shell
+# that sets nothing at all, and 149's sets `-uo` with no `-e` and gets none
+# from a runner. The block above left them on exactly this reading — "the
+# attribution is wrong for these four; the sites are not" — and then banked
+# them anyway. Banking a KNOWN false positive into an enforced ratchet is the
+# dishonesty this file exists to prevent, so the ATTRIBUTION is fixed.
+#
+# KEYED ON THE SHAPE, NEVER ON A FILE AND A LINE. An enumeration is a snapshot:
+# a skip list of those four lines would pass every arm today and let a FIFTH
+# remote site ship unreported while this number silently dropped. track_quote()
+# carries the quote state across lines and applies the shell's own rule — a line
+# that BEGINS inside an unterminated quoted run is a string literal to the shell
+# that reads it — so it covers `ssh`, `docker exec … sh -c`, `su -c`, `bash -c`
+# and every remote runner not yet written. The selftest plants the hazard behind
+# TWO different doors (remote-ssh-quoted-body, remote-quoted-body-not-ssh) and
+# pins the discrimination with a third arm that reports the byte-identical
+# pipeline OUTSIDE the quote (remote-outer-command-still-reported).
+#
+# DIFFED AS A LIST, NOT AS A COUNT. 101 → 97 is also what an over-suppression
+# looks like, so the arm compares the two finding LISTS:
+#     origin/main 101 · this branch 97 · DROPPED: cp-ops.yml 96, 97, 149, 406
+#     ADDED: (none)
+# That mattered. An earlier cut of the tracker read a trailing comment's
+# apostrophe — `# the R1 main's roster` — as an open quote and suppressed 11
+# REAL findings further down required-checks.test.sh and pdf-mvp0-journey-proof.sh,
+# taking the count to 86. The count alone looked like the fix working harder.
+# Arms apostrophe-in-trailing-comment-is-not-a-quote and
+# hash-in-expansion-is-not-a-comment pin that direction.
+#
+# COST: 1.55s → 2.12s on scripts/required-checks.test.sh, the tree's worst file
+# (6k lines). A first cut that pre-counted quote characters per line to decide
+# whether to run the tracker cost MORE than the tracker (3.03s) and was removed.
+#
+# ── TWO NEW MODES, because prose does not fire ────────────────────────────────
+# `--verify-against-origin-main` — extracts origin/main with `git archive`, runs
+#     THAT snapshot's own scanner over THAT snapshot's files against THAT
+#     snapshot's baseline, and prints the sha, the command, both numbers and the
+#     date. It exists because on 2026-09-16 this repo's main checkout was 38
+#     commits behind and read `high 107` against a banked 108 — which reads as
+#     harmless RATCHET LOOSE and was really a measurement of the PRE-FIX tree.
+#     The RATCHET LOOSE message now names this command.
+# `--check-provenance FILE` — refuses a banked number whose last RE-MEASURED
+#     block does not carry the scanner's own output line quoting that number,
+#     the literal command, an ISO date and a sha. A bare number is not a
+#     measurement, and a small inherited one (8, 15 or 16 — all from the
+#     PRE-widening detector) is how "high <= 6" reached an acceptance criterion
+#     and stood for four days. Both directions are pinned in --selftest,
+#     including the laundering shape: an integer edited away from the number its
+#     own block quotes is REFUSED.
+#
+# THE RULE IS UNCHANGED: from here the number may FALL and may never RISE, and
+# a rise is a NEW site. To lower it, run the SNAPSHOT command above and put its
+# printed count, its date and its sha in this header in the same commit.
+#
+# Filed under task-bf9d623529d86a86.
+97
