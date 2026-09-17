@@ -41,6 +41,9 @@
 //          pass, and must never read as a project defect either.
 
 import { createVitest } from 'vitest/node'
+import { execFileSync } from 'node:child_process'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 const argv = process.argv.slice(2)
 const minIdx = argv.indexOf('--min')
@@ -55,6 +58,63 @@ if (!Number.isInteger(MIN) || MIN < 1) {
 function declaredNames(vitest) {
   return vitest.projects.map((p) => String(p.name).replace(/\s*\([^()]*\)\s*$/, ''))
 }
+
+// ---------------------------------------------------------------------------
+// PRECONDITIONS, ALSO DERIVED AND NOT LISTED.
+//
+// Running every project through the ROOT config skips each package's own `test`
+// script, so any work that script does BEFORE handing off to vitest never
+// happens — and the project then collects a file it cannot load, which this
+// gate would report as a defect it is not. @barkpark/pinned-parity is the live
+// case: its `test` is `pnpm run prepare:pinned && vitest run`, and without the
+// pack step its one test file throws on import.
+//
+// The fix is a predicate, like the rest of this script: read every workspace
+// package's `scripts.test`, and if it CHAINS commands before `vitest`, run that
+// prefix first. Nothing here names a package or a script — a new package that
+// adopts the same shape is handled on its first run. Only `pnpm|npm run <name>`
+// segments are accepted; anything else is reported and skipped rather than
+// executed, so this stays a lifecycle hook and never an arbitrary-shell door.
+function runDerivedPreconditions(pkgRoot) {
+  if (!existsSync(pkgRoot)) return
+  for (const dir of readdirSync(pkgRoot, { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue
+    const cwd = join(pkgRoot, dir.name)
+    const manifest = join(cwd, 'package.json')
+    if (!existsSync(manifest)) continue
+    let pkg
+    try {
+      pkg = JSON.parse(readFileSync(manifest, 'utf8'))
+    } catch {
+      continue
+    }
+    const testScript = pkg?.scripts?.test
+    if (typeof testScript !== 'string') continue
+    const vitestAt = testScript.search(/\bvitest\b/)
+    if (vitestAt <= 0) continue // no prefix, nothing to do
+    const prefix = testScript.slice(0, vitestAt).replace(/&&\s*$/, '').trim()
+    if (!prefix) continue
+    for (const seg of prefix.split('&&').map((x) => x.trim()).filter(Boolean)) {
+      const m = /^(pnpm|npm)\s+run\s+([A-Za-z0-9:_-]+)$/.exec(seg)
+      if (!m) {
+        console.log(`  precondition SKIPPED (not a plain \`pnpm run <script>\`): ${pkg.name}: ${seg}`)
+        continue
+      }
+      console.log(`  precondition: ${pkg.name}: ${m[1]} run ${m[2]}  (derived from its own scripts.test)`)
+      try {
+        execFileSync(m[1], ['run', m[2]], { cwd, stdio: 'inherit' })
+      } catch (err) {
+        console.error(
+          `check-vitest-projects: HARNESS FAILURE — ${pkg.name}'s own test precondition \`${seg}\` failed; ` +
+            'the run below would blame the package for a setup this script could not perform',
+        )
+        console.error(err?.message ?? err)
+        process.exit(2)
+      }
+    }
+  }
+}
+runDerivedPreconditions(join(process.cwd(), 'packages'))
 
 let vitest
 let exitCode = 0
