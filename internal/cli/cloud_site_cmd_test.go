@@ -32,6 +32,12 @@ import (
 // fleet list call.
 const testSiteID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+// testSiteSlug is the SAME site addressed the way an operator types it. The
+// control plane resolves a team-scoped slug itself (Registry.get_team_site/2),
+// so `/v1/sites/blog/...` and `/v1/sites/<uuid>/...` are the same row there —
+// the fake below routes them together while recording the path bp ACTUALLY sent.
+const testSiteSlug = "blog"
+
 // --instance is MANDATORY on create; the package-level testInstanceID (declared in
 // cloud_webhook_cmd_test.go) is a valid UUID, so resolveOpenBarkparkID passes it
 // through without a fleet-list call.
@@ -137,6 +143,11 @@ func (cp *siteCP) serve() *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 		cp.wireLog = append(cp.wireLog, r.Method+" "+path)
+		// Route the slug form onto the uuid form, exactly as the control plane's
+		// own `Registry.get_team_site/2` does. The wireLog above is appended
+		// BEFORE this rewrite, so a test still asserts the literal path bp put on
+		// the wire — the rewrite decides which case answers, never what was seen.
+		path = strings.Replace(path, "/v1/sites/"+testSiteSlug, "/v1/sites/"+testSiteID, 1)
 		switch {
 		// GET /v1/sites is the list-ALL read that `resolveOpenSiteID` issues when
 		// the ref is not already a uuid. It is a real round trip on every
@@ -1706,11 +1717,14 @@ func TestRunCloudSiteRollback(t *testing.T) {
 // overhead" is wrong about the word unavoidable: most of it is one discretionary
 // list-ALL read, not a floor.
 //
-// It is discretionary only in principle today: `Registry.get_team_site/2` runs
-// the ref through `uuid_or_nil/1`, so POST /v1/sites/:id/rollback accepts a uuid
-// and NOTHING else. Until the control plane resolves a slug itself, the CLI has
-// to make this read — so the test pins the count at its true present value of
-// two rather than pretending it can be one.
+// IT IS NO LONGER DISCRETIONARY IN PRINCIPLE ONLY, AND THAT IS WHY THIS TEST
+// FLIPPED. The note above was written when `Registry.get_team_site/2` ran the
+// ref through `uuid_or_nil/1`, so POST /v1/sites/:id/rollback accepted a uuid
+// and NOTHING else, and the test pinned the count at its true value of two.
+// PR #18797 gave that function a `(team_id, slug)` arm, so the control plane
+// resolves the slug itself; `resolveOpenSiteID` hands a slug-shaped ref straight
+// through and the list read is gone. The count is now ONE, and this assertion is
+// the arm that reds if the passthrough is reverted.
 //
 // Why a count and not a clock: a `< 1s` assertion passes on every developer
 // machine regardless of the code and reds under CI load regardless of the code.
@@ -1728,11 +1742,10 @@ func TestRunCloudSiteRollbackBySlugCostsExactlyOneExtraRoundTrip(t *testing.T) {
 		t.Fatalf("exit=%d want 0\n%s", code, stderr)
 	}
 	want := []string{
-		"GET /v1/sites",
-		"POST /v1/sites/" + testSiteID + "/rollback",
+		"POST /v1/sites/" + testSiteSlug + "/rollback",
 	}
 	if len(cp.wireLog) != len(want) {
-		t.Fatalf("slug rollback must cost exactly %d round trips, got %d:\n%v",
+		t.Fatalf("slug rollback must cost exactly %d round trip(s), got %d:\n%v",
 			len(want), len(cp.wireLog), cp.wireLog)
 	}
 	for i, w := range want {
@@ -1740,9 +1753,11 @@ func TestRunCloudSiteRollbackBySlugCostsExactlyOneExtraRoundTrip(t *testing.T) {
 			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
 		}
 	}
-	// Named separately so a regression says WHICH leg grew.
-	if cp.sitesListHits != 1 {
-		t.Fatalf("slug resolve must read GET /v1/sites exactly once, got %d", cp.sitesListHits)
+	// Named separately so a regression says WHICH leg grew. Zero, not one: the
+	// slug went to the control plane unresolved.
+	if cp.sitesListHits != 0 {
+		t.Fatalf("a slug-addressed rollback must not read GET /v1/sites at all, got %d hits (log %v)",
+			cp.sitesListHits, cp.wireLog)
 	}
 	if cp.rollHits != 1 {
 		t.Fatalf("rollback must POST exactly once, got %d", cp.rollHits)
@@ -1778,6 +1793,71 @@ func TestRunCloudSiteRollbackByIDIsASingleRoundTrip(t *testing.T) {
 	want := []string{"POST /v1/sites/" + testSiteID + "/rollback"}
 	if len(cp.wireLog) != 1 || cp.wireLog[0] != want[0] {
 		t.Fatalf("id rollback must be exactly one round trip %v, got %v", want, cp.wireLog)
+	}
+}
+
+// TestRunCloudSiteRollbackByDisplayNameStillPaysTheListRead is the FAILURE
+// DIRECTION arm of the slug passthrough, and it is the assertion that would have
+// caught the regression an unconditional passthrough would have shipped.
+//
+// The control plane resolves a uuid or a team-scoped SLUG. It cannot resolve a
+// display NAME — `Registry.get_team_site/2` has exactly two arms — and the list
+// read that `resolveOpenSiteID` used to make unconditionally matched names too.
+// So the saving is gated on SHAPE: a ref with a capital or a space is not a slug
+// the CP could look up, it keeps the list read, and it must still work. A ref
+// this test addresses (`Blog Site`) resolves through GET /v1/sites to the uuid,
+// costing the two round trips the slug path no longer pays.
+func TestRunCloudSiteRollbackByDisplayNameStillPaysTheListRead(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	// A site whose NAME is not its slug — the only shape the list read still owns.
+	cp.sitesListResp = fakeResp{200,
+		`{"sites":[{"id":"` + testSiteID + `","name":"Blog Site","slug":"blog","kind":"static"}]}`}
+	cp.serve()
+
+	_, stderr, code := runSite(t, "table", "rollback", "Blog Site")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if cp.sitesListHits != 1 {
+		t.Fatalf("a display-name ref must still resolve through GET /v1/sites exactly once, got %d (log %v)",
+			cp.sitesListHits, cp.wireLog)
+	}
+	want := []string{"GET /v1/sites", "POST /v1/sites/" + testSiteID + "/rollback"}
+	if len(cp.wireLog) != len(want) {
+		t.Fatalf("name rollback must cost exactly %d round trips, got %d:\n%v",
+			len(want), len(cp.wireLog), cp.wireLog)
+	}
+	for i, w := range want {
+		if cp.wireLog[i] != w {
+			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
+		}
+	}
+}
+
+// TestLooksLikeSiteSlug pins the predicate against the control plane's own rule
+// (registry/site.ex @slug_format + the 63-char length validation) rather than
+// against a vibe: everything the CP would accept as a slug must pass, and every
+// shape it would refuse must fall back to the list read.
+func TestLooksLikeSiteSlug(t *testing.T) {
+	for _, ok := range []string{"blog", "b", "my-site-2", "0", "a-b-c", strings.Repeat("a", 63)} {
+		if !looksLikeSiteSlug(ok) {
+			t.Errorf("looksLikeSiteSlug(%q) = false, want true (the CP resolves this by slug)", ok)
+		}
+	}
+	for _, bad := range []string{
+		"",                      // no ref at all
+		"Blog",                  // a capital: a NAME, never a slug
+		"Blog Site",             // spaces
+		"my_site",               // underscore
+		"my.site",               // dot
+		"-leading",              // the CP requires [a-z0-9] first
+		"has/slash",             // would forge a path segment
+		strings.Repeat("a", 64), // one past validate_length max: 63
+	} {
+		if looksLikeSiteSlug(bad) {
+			t.Errorf("looksLikeSiteSlug(%q) = true, want false (the CP cannot resolve this)", bad)
+		}
 	}
 }
 
