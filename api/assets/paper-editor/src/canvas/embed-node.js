@@ -62,6 +62,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
 import { isStatsType, wireStatsInline } from "./stats-inline.js";
+import { canvasScope, coercePickerValue } from "./field-node.js";
 import { wireCardsInline } from "./cards-inline.js";
 
 // The TipTap node NAMES are `bpSheet` / `bpEmbed` (the canvas naming convention, like
@@ -144,6 +145,131 @@ export function sheetChipLabel(block) {
 export function embedChipLabel(block) {
   const target = (block && block.target) || "";
   return target ? `↪ ${target}` : "↪ (untitled)";
+}
+
+// ── pd-ee-sheet-embed-retarget: the sheet REFERENCE retarget affordance ───────
+//
+// A sheet block's `ref` is the ONE thing about it an author authors. Everything else
+// — the cells, the merges, the styles — is the Sheets plugin's surface and stays
+// read-only here (the read-only-atom contract above is unchanged for the cells). So
+// the atom gains EXACTLY one control: the EXISTING <bp-reference-picker> Web
+// Component, scoped by `ref-type` to sheet documents. There is no second picker and
+// no bespoke search — the same element the field control-atom mounts for
+// field-reference (see buildPickerNodeView in field-node.js), seeded and read the
+// same way, so a scope/permission change lands on both surfaces at once.
+//
+// THE PERMISSION BOUNDARY. The picker browses `/v1/data/search/<dataset>?type=sheet`
+// with `credentials: "same-origin"` — the server decides what the acting member may
+// READ, and the client asserts nothing. Retargeting writes ONLY the paper's own
+// block; it issues no write to the sheet document and confers no grant on it. Where
+// the host denies dataset browse (`data-picker-browse="false"` — the item-share edit
+// grant, which authorizes this ONE paper, not discovery) no picker is mounted at
+// all, exactly as the field picker behaves. A template-locked block and a
+// non-editable editor likewise mount no control.
+//
+// THE SNAPSHOT DECISION (the data hazard the row names). `snapshot` is a CACHED
+// projection of the OLD sheet. Carrying it under a new `ref` would render the old
+// sheet's cells beneath the new sheet's name — a silent lie — so a retarget CLEARS
+// it: the node drops the key and run-convert emits `snapshot: null` alongside the
+// new `ref`. Nothing is lost by clearing it: Barkpark.Content.Sheets'
+// hydrate_sheet_embed_snapshots runs PRE-WRITE on every document save (see
+// content/writer.ex) and re-projects the grid for the new ref in the SAME save; and
+// if the ref resolves to nothing, the reader's `Map.get(b, "snapshot") || %{}` in
+// PortableDoc.Render.Compose paints an empty grid rather than stale cells.
+const SHEET_RETARGET_REF_TYPE = "sheet";
+const SHEET_RETARGET_TEST_ID = "paper-sheet-retarget";
+
+// The carried block with a NEW `ref` and the OLD ref's cached grid dropped. Pure —
+// it never mutates the block it is given (the node's attr object is shared with the
+// PM document; mutating it in place would edit history).
+export function sheetBlockRetargeted(block, nextRef) {
+  const next = { ...(block || {}) };
+  next.ref = nextRef;
+  delete next.snapshot;
+  return next;
+}
+
+// Does this atom offer a retarget control at all? Four independent nos: a non-sheet
+// atom, a read-only editor, a template-locked block, and a host that denies dataset
+// browse. Exported so a test can assert each no separately rather than inferring the
+// absence from one mounted case.
+export function sheetRetargetAllowed({ bpType, editor, block, scope }) {
+  if (bpType !== SHEET_RETARGET_REF_TYPE) return false;
+  if (!editor || editor.isEditable !== true) return false;
+  if (isBlockLocked(block)) return false;
+  if (!scope || scope.pickerBrowse === false) return false;
+  return true;
+}
+
+// Mount the retarget picker into a sheet atom's chrome and wire its commit. Returns
+// null when the affordance is not offered (see sheetRetargetAllowed), and otherwise
+// { picker, paint, destroy } so the node-view can keep it in lockstep with echoes /
+// undo and tear its listener down.
+function mountSheetRetarget({ dom, node, editor, getPos, bpType }) {
+  const block = (node && node.attrs && node.attrs.bpBlock) || {};
+  const scope = canvasScope(editor);
+  if (!sheetRetargetAllowed({ bpType, editor, block, scope })) return null;
+
+  // The EXISTING reference picker — same element, same attrs, same events as the
+  // field control-atom's picker branch. `ref-type` narrows the browse to sheets.
+  const picker = document.createElement("bp-reference-picker");
+  picker.className = "bp-canvas-readonly-retarget";
+  picker.setAttribute("contenteditable", "false");
+  picker.setAttribute("data-test-id", SHEET_RETARGET_TEST_ID);
+  picker.setAttribute("ref-type", SHEET_RETARGET_REF_TYPE);
+  picker.setAttribute("value", block.ref == null ? "" : String(block.ref));
+  if (scope.dataset) picker.setAttribute("dataset", scope.dataset);
+  if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
+  dom.appendChild(picker);
+
+  // Write the new ref back onto the carried block. setNodeMarkup changes ONLY the
+  // bpBlock attr (the node stays the same atom in the same place), so onUpdate ->
+  // run-convert emits ONE patch-block carrying { ref, snapshot }. Undebounced, like
+  // the field picker: a picker fires bp-change on a discrete selection, not per
+  // keystroke.
+  const commit = (nextRef) => {
+    if (!editor.isEditable) return;
+    if (typeof getPos !== "function") return;
+    // A CLEAR is not a retarget. Blanking the ref would leave a chip with no
+    // identity and no way back to the sheet it named, so an empty selection is a
+    // no-op here; removing the block is the affordance for "I do not want this".
+    if (!nextRef) return;
+    const pos = getPos();
+    if (pos == null) return;
+    const cur = editor.state.doc.nodeAt(pos);
+    if (!cur) return;
+    const curBlock = (cur.attrs && cur.attrs.bpBlock) || {};
+    if (curBlock.ref === nextRef) return; // same sheet — emit nothing
+    editor
+      .chain()
+      .command(({ tr }) => {
+        tr.setNodeMarkup(pos, undefined, {
+          ...cur.attrs,
+          bpBlock: sheetBlockRetargeted(curBlock, nextRef),
+        });
+        return true;
+      })
+      .run();
+  };
+
+  // LIFT the field picker's identity coercion: bp-change's detail.value IS the new
+  // reference (a doc id), forwarded unchanged.
+  const onChange = (e) => commit(coercePickerValue(e.detail));
+  picker.addEventListener("bp-change", onChange);
+
+  return {
+    picker,
+    // Keep the seeded picker in sync with an EXTERNAL attr change (an echo, an undo).
+    // The WC exposes a `value` property setter that re-renders its pill and does NOT
+    // re-emit bp-change; only write when it differs so a mid-interaction picker is
+    // never re-rendered under the user.
+    paint: (b) => {
+      const v = b && b.ref;
+      const str = v == null ? "" : String(v);
+      if (picker.value !== str) picker.value = str;
+    },
+    destroy: () => picker.removeEventListener("bp-change", onChange),
+  };
 }
 
 // Build a read-only atom Node.create config. Both sheet + embed share the SAME shape
@@ -240,6 +366,12 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
           getPos,
         });
 
+        // pd-ee-sheet-embed-retarget: the sheet atom's ONE control — the existing
+        // reference picker, scoped to sheets. null for `embed` (an embed's target is
+        // not a document reference the picker can browse) and null wherever the
+        // affordance is not offered (see sheetRetargetAllowed).
+        const retarget = mountSheetRetarget({ dom, node, editor, getPos, bpType });
+
         return {
           dom,
           // NO contentDOM — this is a read-only atom; there is no PM content hole and
@@ -257,6 +389,7 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
             dom.setAttribute("aria-label", atomAriaLabel(chipLabel(b), b));
             if (isBlockLocked(b)) dom.setAttribute("data-bp-locked", "true");
             else dom.removeAttribute("data-bp-locked");
+            if (retarget) retarget.paint(b);
             return true;
           },
 
@@ -267,6 +400,10 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
           // PM must NOT read the chip's DOM mutations back into the document (the chip
           // is outside any contentDOM; there is none on an atom).
           ignoreMutation: () => true,
+
+          destroy: () => {
+            if (retarget) retarget.destroy();
+          },
         };
       };
     },

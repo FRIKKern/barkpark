@@ -1157,9 +1157,17 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
       ? roleNodeToPatch(nextChild)
       : null;
   }
+  if (cls.isReadOnlyAtom && cls.bpType === "sheet") {
+    // A nested SHEET child can be retargeted exactly like a top-level one — the
+    // node-view is the same factory wherever the atom sits — so the one interior
+    // change it can report is diffed here too.
+    return sheetRefChanged(prevChild, nextChild)
+      ? sheetRetargetPatch(nextChild)
+      : null;
+  }
   if (cls.isAtom || cls.isReadOnlyAtom || cls.isFleet || cls.isOpaque) {
-    // No interior to patch — a divider / sheet / embed / fleet / opaque child never
-    // reports a content change (identical child-id sequence + verbatim carry).
+    // No interior to patch — a divider / embed / fleet / opaque child never reports a
+    // content change (identical child-id sequence + verbatim carry).
     return null;
   }
   // Prose child (paragraph / heading / list).
@@ -2735,6 +2743,43 @@ function readOnlyAtomNodeToBlock(node, id) {
   return { id, type: bpType };
 }
 
+// ── pd-ee-sheet-embed-retarget: the ONE op a read-only atom can emit ──────────
+//
+// The read-only-never-patches guarantee above holds for everything a read-only atom
+// RESOLVES (a sheet's cells, an embed's transclusion) and for `embed` entirely. It
+// gains exactly ONE exception: a SHEET's `ref`, the reference the author authors, now
+// editable in-canvas through the reference picker the node-view mounts
+// (embed-node.js, mountSheetRetarget). A retarget mutates the carried block, so the
+// diff below sees it and emits a single patch-block.
+//
+// THE PATCH CARRIES `snapshot: null` ALONGSIDE THE NEW REF, deliberately. `snapshot`
+// is a cached projection of the OLD sheet; shipping only `ref` would leave patch.ex's
+// shallow merge holding the previous sheet's cells under the new sheet's name — the
+// stale-snapshot hazard. Clearing costs nothing: Barkpark.Content.Sheets'
+// hydrate_sheet_embed_snapshots runs PRE-WRITE on the same save (content/writer.ex)
+// and re-projects the grid for the NEW ref, and PortableDoc.Render.Compose reads
+// `Map.get(b, "snapshot") || %{}`, so an unresolved ref paints an empty grid instead
+// of another sheet's numbers.
+
+// The sheet reference carried by a read-only atom node, as a comparable string ("" for
+// an absent/nulled ref).
+function readOnlyAtomRef(node) {
+  const block = (node && node.attrs && node.attrs.bpBlock) || {};
+  return block.ref == null ? "" : String(block.ref);
+}
+
+// True when the carried sheet reference changed — the ONLY interior change a
+// read-only atom can report. Any other difference in the carried block (a server
+// re-projected snapshot, say) is NOT an authored edit and emits nothing.
+function sheetRefChanged(prevNode, nextNode) {
+  return readOnlyAtomRef(prevNode) !== readOnlyAtomRef(nextNode);
+}
+
+// The retarget patch: the new ref plus the explicit clear of the old ref's cached grid.
+function sheetRetargetPatch(node) {
+  return { ref: readOnlyAtomRef(node), snapshot: null };
+}
+
 // ── fleet ⇄ canvas server-painted read-only atom node (pdd-t8) ────────────────
 //
 // The component-fleet blocks ({ id, type:"tasks"|"cards"|"pipeline"|"form"|…, … })
@@ -3706,19 +3751,33 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // A surviving opaque node is a no-op (opaque blocks just round-trip).
   // A surviving canvas ATOM (S3: divider) is likewise a no-op: a content-free leaf
   // has no interior to change, so it NEVER reports an interior patch.
-  // A surviving canvas READ-ONLY ATOM (S3.6: sheet / embed) is ALSO a no-op: it is a
-  // REFERENCE carrying the whole block verbatim — nothing is edited in the editor, so
-  // it NEVER emits a value/content patch (the read-only-never-patches guarantee).
+  // A surviving canvas READ-ONLY ATOM (S3.6: sheet / embed) carries the whole block
+  // verbatim and its RESOLVED content is never edited here. `embed` therefore stays a
+  // strict no-op. A `sheet` has ONE authored field — its `ref` — which the canvas now
+  // retargets through the reference picker, so a sheet whose ref CHANGED emits exactly
+  // one patch-block{ref, snapshot:null} and one whose ref did not emits nothing.
   for (const entry of nextSeq) {
-    if (
-      entry.isNew ||
-      entry.isOpaque ||
-      entry.isAtom ||
-      entry.isReadOnlyAtom
-    )
-      continue;
+    if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
+    // A read-only atom is a no-op with ONE exception: a SHEET, whose `ref` the canvas
+    // now authors (see the retarget note above). `embed` keeps the original
+    // zero-ops-by-construction guarantee.
+    if (entry.isReadOnlyAtom && entry.bpType !== "sheet") continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
+
+    if (entry.isReadOnlyAtom) {
+      // Sheet RETARGET: one patch-block carrying the new ref and the explicit clear of
+      // the old ref's cached grid. An untouched sheet emits NOTHING (the D3 byte
+      // stability guarantee is unchanged for every sheet nobody retargeted).
+      if (sheetRefChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: sheetRetargetPatch(entry.node),
+        });
+      }
+      continue;
+    }
 
     if (entry.isTable) {
       // Canvas table (nested node tree): diff the grid; emit one COARSE whole-table
