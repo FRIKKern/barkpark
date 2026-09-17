@@ -1254,6 +1254,11 @@
         "name": "partition invariants + dispatcher fixture matrix (incl. mutation arm)",
         "run": "bash scripts/shell-harnesses-dispatch.test.sh",
         "env": {}
+      },
+      {
+        "name": "check-run name census: the workflow publishes exactly the baselined set",
+        "run": "# THE COLLAPSE'S ONLY REAL SAFETY NET. 53 sibling jobs became one\n# matrix job; a matrix job without an explicit `name:` renders\n# `<job> (<leg>)` and would have renamed 53 check runs at once,\n# breaking every pin and watcher that names one. This arm enumerates\n# what the workflow publishes TODAY and diffs it against the committed\n# baseline taken from the pre-collapse tree. Offline: no second ref, no\n# network, so it runs on this shallow checkout.\nbash scripts/shell-harness-name-census.sh --compare-file .github/shell-harness-check-runs.txt\n",
+        "env": {}
       }
     ]
   },

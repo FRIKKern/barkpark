@@ -395,6 +395,16 @@ on:
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
       - "scripts/shell-harnesses-dispatch.test.sh"
+      # ── THE MATRIX COLLAPSE'S OWN INPUTS (task-1afb6eaf3a04b8ea). The legs
+      # file IS the job list now, the check-run baseline IS the name contract,
+      # and the three scripts are what turn one into the other. An edit to any
+      # of them must fire the dispatch-selftest leg, which is where the census
+      # and the partition guard both run.
+      - ".github/shell-harness-legs.json"
+      - ".github/shell-harness-check-runs.txt"
+      - "scripts/shell-harness-matrix.py"
+      - "scripts/shell-harness-run.sh"
+      - "scripts/shell-harness-name-census.sh"
       # ── MERGE-GATE AUTOSTAMP BRIDGE (task-8fb6aa7b6d57f737) ─────────────────
       # Per file, never a directory glob — D26. The controller and the App
       # manifest are INPUTS to the parity tripwire, not merely neighbours: the
@@ -1017,6 +1027,16 @@ on:
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
       - "scripts/shell-harnesses-dispatch.test.sh"
+      # ── THE MATRIX COLLAPSE'S OWN INPUTS (task-1afb6eaf3a04b8ea). The legs
+      # file IS the job list now, the check-run baseline IS the name contract,
+      # and the three scripts are what turn one into the other. An edit to any
+      # of them must fire the dispatch-selftest leg, which is where the census
+      # and the partition guard both run.
+      - ".github/shell-harness-legs.json"
+      - ".github/shell-harness-check-runs.txt"
+      - "scripts/shell-harness-matrix.py"
+      - "scripts/shell-harness-run.sh"
+      - "scripts/shell-harness-name-census.sh"
       # ── ORPHAN SWEEP II (cgsiw-s3) — mirrors the pull_request list above,
       # globs included. A lane wired on PRs only goes dark the moment a merge
       # lands, and these two lists staying set-equal is itself now guarded (by
@@ -1670,6 +1690,11 @@ jobs:
           undispatched-target scripts/*-path-escape-check.sh
           undispatched-target .github/workflows/*.yml
           dispatch-selftest scripts/shell-harnesses-dispatch.test.sh
+          dispatch-selftest .github/shell-harness-legs.json
+          dispatch-selftest .github/shell-harness-check-runs.txt
+          dispatch-selftest scripts/shell-harness-matrix.py
+          dispatch-selftest scripts/shell-harness-run.sh
+          dispatch-selftest scripts/shell-harness-name-census.sh
           orphan-harnesses scripts/local-update.sh
           orphan-harnesses scripts/local-update.test.sh
           orphan-harnesses scripts/pdf-efficiency-proof.sh
