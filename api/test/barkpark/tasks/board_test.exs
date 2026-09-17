@@ -355,7 +355,7 @@ defmodule Barkpark.Tasks.BoardTest do
     end
   end
 
-  describe "snapshot/1 twin collapse (canonical_twin/1 — published wins, unpaired draft is the row of record)" do
+  describe "snapshot/1 twin collapse (TwinCollapse.canonical/1 — published wins, unpaired draft is the row of record)" do
     # NAMED FAILURE MODE: `load_task_docs/1` groups the corpus by
     # `Content.published_id/1` and hands each bucket to `canonical_twin/1`. Before
     # the tie-break, that function was
@@ -475,6 +475,41 @@ defmodule Barkpark.Tasks.BoardTest do
 
       assert map_size(board.cards_by_id) == 2,
              "each bucket must collapse to exactly one card"
+    end
+
+    # ── the SEAM between this collapse and the draft label contract ────────
+    #
+    # These two changes land on the same projection from opposite sides:
+    # `TwinCollapse.canonical/1` decides WHICH twin becomes a card, and
+    # `to_card/4` then reads `draft: DraftId.draft?(doc.doc_id)` off THAT row's
+    # RAW doc_id. The arms above pin the choice and the draft-label arms pin the
+    # derivation, but neither watches the hand-off: in a COLLAPSED bucket both
+    # spellings exist, so a flag read off the losing twin — or off the bucket
+    # key, which `Content.published_id/1` has already stripped — is wrong while
+    # every single-row arm stays green. The two cases below disagree on the
+    # expected value, so no constant-valued flag satisfies both.
+
+    test "a collapsed bucket reports the SURVIVOR's own spelling, not its twin's" do
+      # Survivor is the BARE published row; the loser carries the `drafts.`
+      # spelling. A flag that leaked from the losing twin reads true here.
+      twin_task!("drafts.seam-bare", "Draft twin", "draft")
+      twin_task!("seam-bare", "Published twin", "published")
+
+      # Survivor is the `drafts.`-SPELLED published row (rule 1 over rule 2);
+      # the loser is the bare id. A flag read off the card's own (stripped)
+      # doc_id, or off the bare loser, reads false here.
+      twin_task!("seam-drafty", "Unpublished bare", "draft")
+      twin_task!("drafts.seam-drafty", "Published draft-spelled", "published")
+
+      cards = Board.snapshot(dataset: "production").cards_by_id
+
+      assert cards["seam-bare"].title == "Published twin"
+      assert cards["seam-bare"].draft == false
+
+      assert cards["seam-drafty"].title == "Published draft-spelled"
+
+      assert cards["seam-drafty"].draft == true,
+             "the surviving row is drafts.-spelled — the label must follow the row that WON"
     end
   end
 end

@@ -75,6 +75,7 @@ defmodule Barkpark.Tasks.Board do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.DraftId
   alias Barkpark.Plugins.Github.Link
   alias Barkpark.Repo
   alias Barkpark.Tasks
