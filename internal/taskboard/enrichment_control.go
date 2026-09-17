@@ -3,6 +3,7 @@ package taskboard
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Stratified enrichment control for ledger field-absence findings.
@@ -52,7 +53,9 @@ func (r Ratio) Rate() float64 {
 	return float64(r.Missing) / float64(r.Total)
 }
 
-func (r Ratio) String() string { return fmt.Sprintf("%d/%d (%.2f%%)", r.Missing, r.Total, r.Rate()*100) }
+func (r Ratio) String() string {
+	return fmt.Sprintf("%d/%d (%.2f%%)", r.Missing, r.Total, r.Rate()*100)
+}
 
 // StratumRatio pairs the suspect and baseline ratios inside one stratum.
 type StratumRatio struct {
@@ -193,4 +196,97 @@ func ControlEnrichment(rows []EnrichmentRow, suspectClass, baselineClass string,
 		v.Reason = fmt.Sprintf("CONFOUNDED by stratum: the marginal %.1fx collapses to %.1fx once pooled within %d comparable strata (%s vs %s) — the absence tracks the stratum, not the class", v.MarginalRatio(), v.PooledRatio(), v.Comparable, v.PooledSuspect, v.PooledBase)
 	}
 	return v
+}
+
+// ── the live-ledger adapter ────────────────────────────────────────────────
+//
+// Everything above is pure arithmetic over EnrichmentRow. The adapter below is
+// the ONE place the ledger's own vocabulary is spelled, so the control has
+// exactly one live consumer and cannot drift from the shape it is fed.
+
+// Disposition class names. The suspect class is the stale-disposition
+// population: a row that reached a terminal lifecycle while its durable
+// adjudication still says something other than "closed".
+const (
+	// ClassStale — terminal lifecycle, disposition authored and NOT "closed".
+	ClassStale = "stale"
+	// ClassClean — terminal lifecycle, disposition "closed".
+	ClassClean = "clean"
+	// ClassNoDisposition — terminal lifecycle, never adjudicated at all. It is
+	// neither suspect nor baseline for the stale-vs-clean comparison, but it is
+	// handed to the control anyway: the discrimination floor is a statement
+	// about the WHOLE corpus, and a field null across every terminal row is a
+	// broken instrument regardless of how two classes happen to split.
+	ClassNoDisposition = "noDisp"
+)
+
+// UnattributedStratum is the stratum a row lands in when the ledger records no
+// closing worker. It is a REAL stratum, not a discard: those rows are still
+// corpus, and lumping them under one name is honest about the fact that they
+// cannot separate class from confound. It will rarely be Comparable, which is
+// the correct outcome — a stratum that cannot separate should not vote.
+const UnattributedStratum = "«unattributed»"
+
+// CloseReasonRows projects terminal task details onto the control's input for
+// the close_reason absence finding: class from content.disposition, stratum
+// from claim.closed_by, Missing from an empty content.close_reason.
+//
+// Non-terminal rows are DROPPED rather than classed. An open row has no
+// close_reason by definition, so admitting them puts thousands of
+// definitionally-missing rows into the CORPUS DENOMINATOR — the population the
+// discrimination floor is computed over. On the live ledger that does not by
+// itself flip the floor, and it changes neither class rate, which is exactly
+// why the drop needs an arm asserting the projected corpus size rather than
+// the verdict: the verdict alone cannot see it.
+func CloseReasonRows(details []TaskDetail) []EnrichmentRow {
+	out := make([]EnrichmentRow, 0, len(details))
+	for _, d := range details {
+		if !IsTerminalLifecycle(d.Lifecycle) {
+			continue
+		}
+		out = append(out, EnrichmentRow{
+			ID:      BareID(d.DocID),
+			Class:   DispositionClass(d.Disposition),
+			Stratum: ClosingStratum(d.ClosedBy),
+			Missing: strings.TrimSpace(d.CloseReason) == "",
+		})
+	}
+	return out
+}
+
+// IsTerminalLifecycle reports whether a lifecycle_status is one the server can
+// only reach through a close. "closed" is accepted alongside the two stored
+// enum values because the board's own Task.Lifecycle comment documents it as a
+// value that can arrive as served.
+func IsTerminalLifecycle(lifecycle string) bool {
+	switch strings.ToLower(strings.TrimSpace(lifecycle)) {
+	case "done", "cancelled", "closed":
+		return true
+	}
+	return false
+}
+
+// DispositionClass maps content.disposition onto the three class names. An
+// unauthored disposition is ClassNoDisposition; "closed" (in any casing — the
+// server downcases, but a hand-written row may not have gone through it) is
+// ClassClean; everything else authored — "open", "parked", and any prose a
+// writer appended to the term — is ClassStale.
+func DispositionClass(disposition string) string {
+	d := strings.ToLower(strings.TrimSpace(disposition))
+	switch {
+	case d == "":
+		return ClassNoDisposition
+	case d == "closed":
+		return ClassClean
+	default:
+		return ClassStale
+	}
+}
+
+// ClosingStratum names the confound axis for one row.
+func ClosingStratum(closedBy string) string {
+	if s := strings.TrimSpace(closedBy); s != "" {
+		return s
+	}
+	return UnattributedStratum
 }
