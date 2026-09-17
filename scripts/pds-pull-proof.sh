@@ -48,7 +48,7 @@
 # draft row), and why step 4's clean scan is only ever reported next to a control
 # that FIRES.
 #
-# COST DISCIPLINE (PDS-D31/D44/D69). Two exports, at most, per run:
+# COST DISCIPLINE (PDS-D31/PDS-D44/PDS-D69). Two exports, at most, per run:
 #   · the DEV export of step 0a, re-used by step 1's pull;
 #   · exactly ONE full-fidelity export, shared by steps 3 and 4 and by nothing
 #     else. It is parked at a RUN-STABLE path with a .meta sidecar so the NEXT
@@ -141,7 +141,7 @@
 #   PDS_STEP6_GUARD_DEMO=0  skip step 6's guard-off control (same honesty)
 #   PDS_STEP1_GRAIN_DEMO=0  skip step 1's manifest-grain negative control — the
 #                        locally built mis-grained bundles that prove the
-#                        PDS-D61/D62 guard can REFUSE. On by default (it costs no
+#                        PDS-D61/PDS-D62 guard can REFUSE. On by default (it costs no
 #                        network, no export and no credentials); the pass then
 #                        says so, because the green is weaker without it.
 #   PDS_PROOF_LIB=1      load the rungs as a library without running any
@@ -226,7 +226,7 @@ ART_MARKER_NAME=".pds-proof-owner"
 ART_DIR_OWNED=""
 MAX_HOME_LEN=85
 
-# ── the ONE full-fidelity export (PDS-D69/D70/D71) ───────────────────────────
+# ── the ONE full-fidelity export (PDS-D69/PDS-D70/PDS-D71) ───────────────────
 #
 # ART_DIR is RUN_TAG-scoped: a bundle parked there is INVISIBLE to the next run,
 # which then spends a second attempt on a 3.8 GB box. So the one full export
@@ -935,7 +935,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
     "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
-    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/PDS-D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
     "source HTTP; for the target half, step 1's import" \
@@ -953,7 +953,7 @@ cmd_plan() {
     "step 1 imported blobs into the scratch target" \
     "RUNNABLE. Resolves from the TARGET's OWN /v1/media/:dataset (the flat /media index emits no originalUrl and ignores limit) and takes originalUrl and size VERBATIM per asset — originalUrl may be signed, so it is never rebuilt from a path. ASSERTS HTTP 200 AND content-length == the stored size for EVERY asset. FAILURE DEMO, run inline and reversed: one blob truncated to 100 bytes still serves 200 — only the stored size convicts it. SEPARATE ASSERTION: a missing blob answers the typed 404 'media blob missing', never a 500."
 
-  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)" \
+  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)" \
     "step 1's import, stamped" \
     "RUNNABLE. Reboot is \`bin/barkpark stop\` then \`up\` in the SAME BARKPARK_HOME — there is NO restart verb and teardown stops Postgres. ASSERTS the eight columns the boot-time schema upsert would otherwise revert (title, icon, visibility, owner_scoped, fields, cors_origins, desk_groups, list_preview) are byte-identical across the reboot, and the pull_provenance stamp survives. THEN — sequenced AFTER the convergence it demonstrates against — the guard is switched OFF by direct SQL (no CLI/HTTP surface exists) with the RETURNING value ASSERTED, because jsonb_set is a proven silent no-op when the parent path is absent, and the next boot must CLOBBER those columns. A demo that fails to clobber makes the convergence green uninterpretable and is reported as a FAIL."
 
@@ -1205,7 +1205,7 @@ step_0a() {
     info "last deploy run ${last_deploy:-none visible (auto-deploy may not be firing — see task-85eb87a30db908ec)}"
   fi
 
-  # The one budgeted export: DEV profile. Never :full here (PDS-D31/D44).
+  # The one budgeted export: DEV profile. Never :full here (PDS-D31/PDS-D44).
   art_dir_ensure
   local bundle hdr t0 t1 bytes elapsed fname
   bundle="$ART_DIR/dev-$SOURCE_WS-$SOURCE_DS.tar"
@@ -1517,7 +1517,7 @@ print(v)' "$d/manifest.json" 2>/dev/null)"
 
 # ── THE GRAIN VERDICT, AS ONE CALLABLE (PDS-D20) ─────────────────────────────
 #
-# The PDS-D61/D62 grain-hazard guard used to live INLINE in step_1, which is why
+# The PDS-D61/PDS-D62 grain-hazard guard used to live INLINE in step_1, which is why
 # it was the one asserting rung nobody could point a control at. It is the same
 # comparison, moved behind a name so a locally built bundle can be put through
 # the EXACT assertion the live bundle goes through. stdout and the exit code of
@@ -1625,7 +1625,7 @@ GRAIN_FIXTURES
   fi
   blk="$(grain_blocker no-dataset)"
   if [ "$blk" != "pds-w4-pull-dataset-flag" ]; then
-    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/D62). Nothing was exported and nothing was imported."
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/PDS-D62). Nothing was exported and nothing was imported."
     return 1
   fi
   info "  $n/$n classified as expected, and a workspace-grain manifest routes to ABORT $blk."
@@ -1770,7 +1770,7 @@ GRAIN_VERDICT
   info "manifest        profile='${m_profile:-$([ "$m_prc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' dataset='${m_ds:-$([ "$m_drc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' (asked for profile=dev dataset=$SOURCE_DS)$m_note"
   if [ "$m_verdict" = "no-dataset" ]; then
     abort 1 "$(grain_blocker "$m_verdict")" \
-      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
+      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/PDS-D62). The bundle is on disk at $tar if you want to look."
     return 0
   fi
   if [ "$m_verdict" = "dataset-mismatch" ]; then
@@ -2133,7 +2133,7 @@ step_2() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════════════════════
-# THE ONE FULL EXPORT (PDS-D69/D70/D71) — acquired once, consumed twice
+# THE ONE FULL EXPORT (PDS-D69/PDS-D70/PDS-D71) — acquired once, consumed twice
 # ═════════════════════════════════════════════════════════════════════════════
 #
 # Steps 3 and 4 both need a FULL-fidelity bundle: step 3 for the ticket control
@@ -3402,7 +3402,7 @@ GUARDED_DIGEST_SQL="SELECT md5(string_agg(dataset || '|' || name || '|' || coale
 # aggregate and would read as a clean control firing (PDS-D130).
 GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_groups list_preview"
 
-# ── THE 34 (PDS-D127/D128) ───────────────────────────────────────────────────
+# ── THE 34 (PDS-D127/PDS-D128) ───────────────────────────────────────────────
 #
 # `schema_definitions` on a pulled target holds 36 rows in three CLASSES, and
 # only one of them behaves the way the guard is about:
@@ -3413,7 +3413,7 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 #                          BEFORE register_all_schemas/0 and outside BOOTSTRAP's
 #                          registry walk — but NOT outside the guard. It goes
 #                          through the SAME `Tenancy.pulled_schema_row/2`
-#                          predicate as the 34 — PDS-D125/D126, in
+#                          predicate as the 34 — PDS-D125/PDS-D126, in
 #                          `Content.TagRegistry.register_attrs!/2` — so it
 #                          SURVIVES stamped and REVERTS cleared, exactly like
 #                          them. It is excluded for SCOPING reasons, not for
@@ -3589,7 +3589,7 @@ reboot_target() { # 0 = the target answered HTTP again
 }
 
 step_6() {
-  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)"
+  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)"
 
   say "  The Bootstrap clobber fires only on BOOT. A convergence proof that does not"
   say "  restart the target measures nothing: it re-reads rows from a process that"
@@ -3670,7 +3670,7 @@ step_6() {
   # only legal alternate. It does NOT hide rows from /api/schemas
   # (`Schema.list_schemas` has no visibility predicate) but it DOES 404
   # anonymous document reads. THAT IS CONTAINED ONLY BECAUSE STEP 6 IS TERMINAL
-  # AMONG TARGET-READING RUNGS (PDS-D101/D116) — steps 2 and 5 run BEFORE it and
+  # AMONG TARGET-READING RUNGS (PDS-D101/PDS-D116) — steps 2 and 5 run BEFORE it and
   # `--all`'s own order is the only safe one. Re-ordering this rung earlier
   # silently poisons every later read; do not.
   #
