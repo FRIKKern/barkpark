@@ -391,7 +391,6 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     |> Enum.find_value(fn {status, r} -> if r == role, do: status end)
   end
 
-
   # ── the off-ladder fail-open (task-c29e16374107fb10) ────────────────────────
   #
   # THE RULING: a row whose stored status the manifest does not know still reaches
