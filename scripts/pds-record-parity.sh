@@ -1646,12 +1646,55 @@ axis_b() {
 # LEDGER OF THE PAST and never compares any of them to origin/main's live blob;
 # that comparison is the preflight's job and this arm does not do it.
 #
-# THE WINDOW IS DERIVED, NOT ENUMERATED. The anchor is the OLDEST harness-moving
-# commit whose blob the charter records. A commit older than that predates the
-# charter's freeze doctrine and is EXEMPT; the exemption's mechanical test is
-# `git merge-base --is-ancestor <sha> <anchor>` and it is printed, not implied.
-# An enumeration of exempt shas would be a snapshot; this is a rule.
+# THE WINDOW BOUNDARY IS A FLOOR THAT ONLY RATCHETS BACK — IT IS NOT READ OUT OF
+# THE LEDGER THIS ARM GUARDS. The first cut derived the boundary entirely from the
+# charter: the anchor was the OLDEST harness-moving commit whose blob the charter
+# recorded, and everything older was EXEMPT. That is a guard whose expected value
+# is read from the thing it guards, and it is inert against exactly one edit —
+# DELETING THE OLDEST LEDGER ROW. The deleted commit did not become unrecorded; it
+# became the new anchor's elder and therefore EXEMPT, the window shrank by one to
+# match, and the arm printed PARITY rc 0. Measured: deleting `e219e97cc…` took the
+# window 20 -> 19 and stayed green; deleting the four oldest rows in one pass took
+# it 20 -> 16 and stayed green. Induction erases the ledger from the bottom, one
+# row per commit, with the arm green at every step. The realistic adversary is not
+# a malicious deletion but a charter SPLIT or REWRITE that drops the oldest rows
+# as historical noise — and that edit landed green.
+#
+# SO THE BOUNDARY IS NOW THE OLDER OF TWO VALUES:
+#
+#   1. AXIS_F_FLOOR_COMMIT — a LITERAL 40-hex commit in THIS FILE. It is the last
+#      harness edit before the freeze doctrine (#4686, 2026-07-20, "the last legal
+#      harness edit before the freeze"), so every thaw of the doctrine era is at or
+#      newer than it. A charter edit cannot move it: it does not live in the
+#      charter, it lives in scripts/, which is a different file, a different fence
+#      and a different review. Deleting every ledger row in the charter leaves this
+#      value untouched and the window at its full 21 commits, so the deletion shows
+#      up as N unrecorded rows and reds, naming each commit.
+#
+#   2. the oldest harness-moving commit the charter records, used ONLY when it is
+#      strictly OLDER than the floor.
+#
+# Direction is the whole point. The charter can still move the boundary BACK —
+# record an older thaw and the window widens by itself, which is the predicate
+# property the first cut was built for and which an enumeration of exempt shas
+# would have lost. It can never move it FORWARD. A ledger row is now a claim the
+# arm checks, never an input to the question it asks.
+#
+# The exemption's mechanical test is unchanged and still printed, not implied:
+# `git merge-base --is-ancestor <sha> <boundary>`.
+#
+# WHY A PINNED COMMIT AND NOT A MONOTONIC COUNT FLOOR. A count floor (the idiom in
+# scripts/pds-charter-anchors-check.sh's DEF_FLOOR) needs raising on every thaw and
+# reds in two directions; worse, it says a row went missing without saying WHICH.
+# A pinned boundary needs no maintenance as thaws land — new thaws are newer than
+# it by construction — and it names the exact commit whose record was dropped.
 axis_f_harness_path() { printf '%s\n' "scripts/pds-pull-proof.sh"; }
+
+# The last harness edit before the freeze doctrine: 1f15017bf, #4686, 2026-07-20.
+# OVERRIDABLE FOR FIXTURES ONLY, and a non-default value is printed loudly — a
+# fixture repo has no such commit, so a selftest must be able to say so.
+AXIS_F_FLOOR_COMMIT_DEFAULT="1f15017bf3d51ac85c34d3e4f5aa2f903a0815a6"
+AXIS_F_FLOOR_COMMIT="${AXIS_F_FLOOR_COMMIT:-$AXIS_F_FLOOR_COMMIT_DEFAULT}"
 
 axis_f() {
   local hp charter anchor anchor_blob sha blob n_total n_window n_resolved n_unrec
@@ -1687,26 +1730,60 @@ axis_f() {
   esac
   echo "  control grep .......... ${ctl} '${D_PREFIX}' hit(s) in ${charter} — the lens fires"
 
-  # WINDOW ANCHOR: the oldest harness-moving commit the charter records.
+  # THE PINNED FLOOR. A literal in this file, not a value read back out of the
+  # charter — see the block above axis_f_harness_path() for why. Absent from this
+  # checkout (a shallow clone, a fixture repo) the arm refuses to score rather
+  # than falling back to the ledger it is guarding: a fallback would reinstate the
+  # exact hole the floor exists to close, and would do it silently.
+  local floor_sha
+  floor_sha="$(git rev-parse --verify --quiet "${AXIS_F_FLOOR_COMMIT}^{commit}" 2>/dev/null || true)"
+  if [ -z "$floor_sha" ]; then
+    echo "  UNCHECKED: the pinned window floor ${AXIS_F_FLOOR_COMMIT} is not a commit in this" >&2
+    echo "             checkout. The arm will NOT fall back to deriving the boundary from the" >&2
+    echo "             charter — that is the defect this floor exists to close." >&2
+    raise 2; return 0
+  fi
+  if ! git merge-base --is-ancestor "$floor_sha" "$base" 2>/dev/null; then
+    echo "  UNCHECKED: the pinned window floor $(git rev-parse --short=9 "$floor_sha") is not an" >&2
+    echo "             ancestor of ${base}; history has been rewritten under the floor." >&2
+    raise 2; return 0
+  fi
+  if [ "$AXIS_F_FLOOR_COMMIT" != "$AXIS_F_FLOOR_COMMIT_DEFAULT" ]; then
+    echo "  !! FLOOR OVERRIDDEN via AXIS_F_FLOOR_COMMIT — this is a FIXTURE run, not the real ledger."
+  fi
+
+  # THE LEDGER MAY ONLY WIDEN THE WINDOW. The oldest harness-moving commit the
+  # charter records is consulted, but it replaces the floor ONLY when it is
+  # strictly older. Deleting ledger rows moves this value FORWARD, which the
+  # min() below discards — so a deletion can no longer shrink the window.
   anchor=""; anchor_blob=""
   while IFS= read -r sha; do
     blob="$(git rev-parse --verify --quiet "${sha}:${hp}" 2>/dev/null || true)"
     [ -n "$blob" ] || continue
     if grep -q -- "$blob" "$charter"; then anchor="$sha"; anchor_blob="$blob"; fi
   done <<< "$commits"
-  if [ -z "$anchor" ]; then
-    echo "  UNCHECKED: the charter records NO harness blob at all, so there is no window" >&2
-    echo "             anchor to derive and nothing here could be scored." >&2
-    raise 2; return 0
+
+  local boundary="$floor_sha" boundary_src="pinned floor (a literal in $(basename "$0"), not in the charter)"
+  if [ -n "$anchor" ] && [ "$anchor" != "$floor_sha" ] &&
+     git merge-base --is-ancestor "$anchor" "$floor_sha" 2>/dev/null; then
+    boundary="$anchor"
+    boundary_src="charter-recorded thaw OLDER than the floor, blob ${anchor_blob} — the ledger widened the window"
   fi
-  echo "  window anchor ......... $(git rev-parse --short=9 "$anchor") (oldest charter-recorded thaw, blob ${anchor_blob})"
-  echo "  exemption test ........ git merge-base --is-ancestor <sha> $(git rev-parse --short=9 "$anchor")  → EXEMPT (pre-doctrine)"
+
+  echo "  pinned window floor ... $(git rev-parse --short=9 "$floor_sha") (${AXIS_F_FLOOR_COMMIT})"
+  if [ -n "$anchor" ]; then
+    echo "  oldest ledger row ..... $(git rev-parse --short=9 "$anchor") (blob ${anchor_blob}) — may widen the window, never narrow it"
+  else
+    echo "  oldest ledger row ..... NONE — the charter records no harness blob at all; every in-window thaw below is unrecorded"
+  fi
+  echo "  window boundary ....... $(git rev-parse --short=9 "$boundary")  [${boundary_src}]"
+  echo "  exemption test ........ git merge-base --is-ancestor <sha> $(git rev-parse --short=9 "$boundary")  → EXEMPT (pre-doctrine)"
 
   local unrec; unrec="$(mktemp)"
   n_window=0; n_resolved=0
   while IFS= read -r sha; do
-    [ "$sha" = "$anchor" ] && continue
-    git merge-base --is-ancestor "$sha" "$anchor" 2>/dev/null && continue   # out of window: EXEMPT
+    [ "$sha" = "$boundary" ] && continue
+    git merge-base --is-ancestor "$sha" "$boundary" 2>/dev/null && continue   # out of window: EXEMPT
     blob="$(git rev-parse --verify --quiet "${sha}:${hp}" 2>/dev/null || true)"
     if [ -z "$blob" ]; then
       echo "  UNCHECKED: ${hp} has no blob at ${sha}; the walk cannot be scored." >&2
@@ -1724,7 +1801,7 @@ axis_f() {
   n_unrec="$(wc -l < "$unrec" | tr -d ' ')"
   # TWO NUMBERS, NEVER ONE VERDICT.
   echo "  harness-moving commits, all history .... ${n_total}"
-  echo "  harness-moving commits IN WINDOW ....... ${n_window}  (anchor itself excluded; older ones EXEMPT)"
+  echo "  harness-moving commits IN WINDOW ....... ${n_window}  (the boundary itself excluded; older ones EXEMPT)"
   echo "  ...of those, resolving to a ${D_PREFIX} record .. ${n_resolved}"
   echo "  ...unrecorded .......................... ${n_unrec}"
 
