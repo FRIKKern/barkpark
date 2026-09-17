@@ -56,15 +56,17 @@ jobs:
       # green having proven nothing at all. The floor reds on a zero-match
       # pattern, on a file that registers no tests, and prints the test count.
       #
-      # `--floor 5` IS THE POINT OF THE LITERAL. Every other assertion the
+      # `--floor 6` IS THE POINT OF THE LITERAL. Every other assertion the
       # runner makes is derived from this same glob, so deleting 4 of the 5
       # spec files shrinks the expectation along with the tree and the job
-      # stays green. Five is a committed number: it cannot shrink unless a
+      # stays green. Six is a committed number: it cannot shrink unless a
       # human edits this line, which is what makes a partial deletion visible.
-      # Adding a spec reds this with `raise the floor to 6` -- bump it here.
+      # Adding a spec reds this with `raise the floor to N+1` -- bump it here.
+      # Raised 5 -> 6 for src/lib/browse-request.test.ts (the build-time browse
+      # seed's route-and-bearer decision).
       - name: Run the finder contract tests
         working-directory: templates/astro-search-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 5 'src/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 6 'src/**/*.test.ts'
 
   token-guard:
     name: Browser-token build guard (both editions)

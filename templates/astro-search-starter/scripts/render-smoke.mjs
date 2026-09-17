@@ -25,7 +25,7 @@
 //  chromium, types, and asserts what a human would see.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-//  THE FOUR BEATS
+//  THE BEATS
 // ─────────────────────────────────────────────────────────────────────────────
 //    LAND    the island hydrates: >=1 [data-nav-result] row, no
 //            [data-search-error] banner.
@@ -36,6 +36,17 @@
 //    MULTI   a MULTI-character query ("bark"), typed on top of it — the debounced
 //            HTTP path, a second transition over an already-rendered list.
 //            After it: >=1 row, still no banner.
+//    GDESK   1440x900 CONTROL — bp-graph.js IS fetched and the pane mounts.
+//            Without it the two phone claims below are satisfied perfectly by a
+//            graph that is broken at every width.
+//    GWIDTH  CONTROL — the two arms really were different viewports.
+//    GPHONE  390x844 — ZERO bp-graph.js/graph.json requests. HIDDEN IS NOT
+//            UNDELIVERED: the slot is hidden below `md` with CSS, and
+//            `display:none` stops PAINT, not a mount effect appending a script
+//            tag. Measured live at 576,990 B delivered to an invisible pane.
+//    GMOUNT  390x844 — no `[data-bp-graph-mount]` in the DOM. The marker is
+//            carried by BOTH flagship editions' canvas host, so the claim is
+//            about the graph rather than about one template's selector.
 //    CLEAN   ZERO uncaught pageerrors and ZERO console errors across all three.
 //            This is the beat the FinderErrorBoundary makes necessary: it
 //            catches a throw and paints an on-brand fallback, so a page that
@@ -257,9 +268,10 @@ async function main() {
     die(2, `CANNOT MEASURE — chromium would not launch (${e.message.split('\n')[0]}).\n  Try: npx playwright install chromium`)
   }
   // 1280x900 is above the finder's `md` breakpoint, so this is the FULL desktop
-  // composition — rail plus the portalled corpus graph. The graph is not
-  // asserted here (journey-smoke owns it), but it MOUNTS, so a throw inside it
-  // still reaches the CLEAN beat rather than hiding behind a narrow viewport.
+  // composition — rail plus the portalled corpus graph. The finder beats below
+  // run here; the graph's own claims run on their own contexts (`graphArms`),
+  // because a phone arm sharing this session would answer out of the HTTP cache
+  // and a cache hit is not a request that never happened.
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const page = await ctx.newPage()
 
