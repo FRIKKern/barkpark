@@ -42,6 +42,14 @@ on:
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
+      # The Phoenix paper-surface stylesheet. @barkpark/react ships
+      # dist/paper-surface.css as a byte-for-byte COPY of it, and
+      # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
+      # that copy. An api-side edit to the stylesheet touches no js/ path, so
+      # without this entry the drift guard was never DISPATCHED on the exact
+      # change it exists to catch — the stylesheet could drift from the shipped
+      # asset and every js PR after it would stay green on the stale copy.
+      - "api/assets/paper-surface/**"
   pull_request:
     paths:
       - "js/**"
@@ -70,6 +78,14 @@ on:
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
+      # The Phoenix paper-surface stylesheet. @barkpark/react ships
+      # dist/paper-surface.css as a byte-for-byte COPY of it, and
+      # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
+      # that copy. An api-side edit to the stylesheet touches no js/ path, so
+      # without this entry the drift guard was never DISPATCHED on the exact
+      # change it exists to catch — the stylesheet could drift from the shipped
+      # asset and every js PR after it would stay green on the stale copy.
+      - "api/assets/paper-surface/**"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
