@@ -12,8 +12,10 @@
       ]
     },
     "test": {
+      "dependsOn": ["^build", "build"],
       "inputs": [
         "src/**",
+        "out/**",
         "tests/**",
         "vitest.config.ts",
         "vitest.browser.config.ts",

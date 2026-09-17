@@ -19,3 +19,10 @@ Three sibling stale-green shapes reported by #14338 and left unpatched:
 
 Every `inputs` override RESTATES the root globs verbatim — an override REPLACES
 the array, so an unrestated glob would silently narrow.
+
+The same own-dist shape turned up in three more packages while proving the fix:
+`@barkpark/astro-decoy` (`test` + `astro.config.mjs`), `@barkpark/next-parity`
+(`out/**`) and `@barkpark/react`'s `typecheck` (it type-checks the docs-example
+files against its own emitted `.d.ts`). A cold parallel
+`turbo run build test lint typecheck` is RED on `origin/main` for exactly this
+reason and is 51/51 green on this branch.
