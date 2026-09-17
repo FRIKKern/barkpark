@@ -10623,6 +10623,74 @@ test("OC25: usageMeterDisplay — an unmetered machine meter never reads a state
   assert.equal(dark.bar, null);
 });
 
+// ── am-w2-per-class-carriage: the ring's context reaches the EYE ─────────────
+// Two keys the beat carries off the instance request-stats ring used to die
+// before any surface: `err_5xx_per_s` was measured by the agent and decoded by
+// the control plane with nothing rendering it, and `window_s` was dropped at
+// the control plane's door. Neither is a meter (that would red the
+// three-runtime usage_meters.json vocabulary, and neither is a signal an
+// operator judges alone) — both ride the ring meters' sub-line.
+
+test("am-w2: the ring window renders in the meter sub-line, in human spans", () => {
+  const d = hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 60, measured_at: null });
+  assert.equal(d.window, "over 60s");
+  assert.match(hooks.usageMeterHtml(reqSpec(), { value: 12, window_s: 60, measured_at: null }), /over 60s/);
+  // Whole minutes/hours humanize; anything else stays in seconds rather than
+  // rounding the very denominator the window exists to pin.
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 300 }).window, "over 5m");
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 3600 }).window, "over 1h");
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 90 }).window, "over 90s");
+});
+
+test("am-w2: an unmeasured window renders nothing — never a borrowed 60s default", () => {
+  for (const w of [0, -1, null, undefined, "a minute", NaN]) {
+    assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: w }).window, "",
+      "window_s " + String(w) + " published a span nobody measured");
+  }
+  // And an unmetered VALUE never wears a window: "Not yet metered · over 60s"
+  // would claim a measurement window for a measurement nobody took.
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: "unmetered", window_s: 60 }).window, "");
+});
+
+test("am-w2/D103: the 5xx rate renders ON the request-rate meter, beside its denominator", () => {
+  const d = hooks.usageMeterDisplay(reqSpec(), { value: 12, err_5xx_per_s: 0.22, measured_at: null });
+  assert.equal(d.err5xx, "0.2 5xx/s");
+  const html = hooks.usageMeterHtml(reqSpec(), { value: 12, err_5xx_per_s: 0.22, window_s: 60, measured_at: null });
+  // The volume, the window and the error rate land in ONE sub-line, which is
+  // charter D103 made structural: the error rate cannot be read, screenshotted
+  // or escalated apart from the request rate that bounds it.
+  assert.match(html, /<strong>12\/s<\/strong>/);
+  assert.match(html, /over 60s · 0\.2 5xx\/s/);
+});
+
+test("am-w2: a measured 0.0 5xx/s RENDERS; an absent one renders nothing", () => {
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, err_5xx_per_s: 0 }).err5xx, "0 5xx/s");
+  for (const v of [null, undefined, "none", NaN, -1]) {
+    assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, err_5xx_per_s: v }).err5xx, "",
+      String(v) + " became a fabricated 5xx reading");
+  }
+});
+
+test("am-w2: an unbounded 5xx rate still renders, and SAYS it is unbounded", () => {
+  // An older instance can expose the error probe and not the request one.
+  // Suppressing the alarming number because its denominator is missing is the
+  // exact dishonesty D103 forbids — so it shows, worded.
+  const d = hooks.usageMeterDisplay(reqSpec(), { value: "unmetered", err_5xx_per_s: 0.9 });
+  assert.equal(d.err5xx, "0.9 5xx/s (no request rate to bound it)");
+});
+
+test("am-w2 CONTROL: the ring context attaches to ring meters only", () => {
+  // The display model is spec-driven, so nothing stops a caller passing these
+  // on a cpu meter — but the composer never does, and the SPA vocabulary must
+  // not have grown a meter for either key.
+  assert.ok(!hooks.usageMeters.some((m) => m.key === "window_s" || m.key === "err_5xx_per_s"),
+    "a ring qualifier became a meter — that reds the three-runtime vocabulary fixture");
+  // A plain count meter carrying neither renders neither (no phantom sub-line).
+  const plain = hooks.usageMeterDisplay(usageSpec("documents"), { value: 7, measured_at: null });
+  assert.equal(plain.window, "");
+  assert.equal(plain.err5xx, "");
+});
+
 // ── Wave 4 (OC19): Usage-tab sparklines — the 14-day history read path ────────
 // The pure surface: normalise the /usage/history envelope, extract one meter's
 // value|null array (null-is-gap preserved), thread it through the display model

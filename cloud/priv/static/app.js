@@ -25423,6 +25423,21 @@
     return (i === 0 ? String(v) : v.toFixed(1)) + " " + units[i];
   }
 
+  // Pure: a ring width in seconds as human span text ("60s", "5m", "1h"). Whole
+  // minutes/hours only — a 90-second ring reads "90s", never "1.5m", because a
+  // rounded window would misstate the very denominator it exists to pin.
+  //
+  // One minute stays "60s" deliberately: the instance ring IS 60 seconds, every
+  // comment and reason string in this system calls it "the 60s ring", and a
+  // surface that renders the fleet's most common window as "1m" reads as a
+  // DIFFERENT window to the operator who knows the number.
+  function usageWindowText(seconds) {
+    var s = Math.round(seconds);
+    if (s % 3600 === 0 && s >= 3600) return (s / 3600) + "h";
+    if (s % 60 === 0 && s >= 120) return (s / 60) + "m";
+    return s + "s";
+  }
+
   function c10FmtValue(fmt, value) {
     if (fmt === "bytes") return c10FmtBytes(value);
     if (fmt === "percent") return Math.round(value) + "%";
@@ -25475,6 +25490,32 @@
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
+    // dr-w14-bl: the ring window the request-stats rates were measured over,
+    // carried on the ring meters by Usage.compose/1 as the conditional
+    // `window_s`. It rides in the meter's sub-line beside the freshness because
+    // a rate an operator cannot bound is a number, not a reading — 0.22 5xx/s
+    // over 60s and over 1s are different facts. Rendered ONLY for a real
+    // positive span and ONLY when the meter reports a number: attaching "over
+    // 60s" to "Not yet metered" would claim a measurement window for a
+    // measurement nobody took.
+    var windowText = !unmetered && typeof meter.window_s === "number" && isFinite(meter.window_s) && meter.window_s > 0
+      ? "over " + usageWindowText(meter.window_s)
+      : "";
+    // charter D103 made structural: the 5xx rate off the same ring hangs on the
+    // REQUEST-RATE meter, never on one of its own, so it cannot be read — or
+    // screenshotted, or escalated — apart from the volume that bounds it. 0.22
+    // 5xx/s is 14.4% of traffic at the median observed request rate and 2.0% at
+    // the max; the row it sits in IS the denominator.
+    //
+    // A measured 0.0 renders ("no 5xx in this window" is the good news the
+    // carriage exists to deliver, and it is only news because somebody looked);
+    // an absent key renders nothing at all. When the meter itself is unmetered
+    // the rate still shows, worded as UNBOUNDED — an instance can expose the
+    // error probe and not the request one, and suppressing the alarming number
+    // because its denominator is missing is the exact dishonesty D103 forbids.
+    var errText = typeof meter.err_5xx_per_s === "number" && isFinite(meter.err_5xx_per_s) && meter.err_5xx_per_s >= 0
+      ? c10FmtValue("rate", meter.err_5xx_per_s).replace("/s", " 5xx/s") + (unmetered ? " (no request rate to bound it)" : "")
+      : "";
     // OC25 — the threshold state, computed independent of whether a bar draws.
     // "over" when the value reaches over_at OR the quota ceiling (both inclusive,
     // mirroring the create-time guard); "warn" once it crosses warn_at; "ok" for a
@@ -25517,12 +25558,12 @@
     var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
       ? history.slice()
       : null;
-    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
+    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, window: windowText, err5xx: errText, state: state, bar: bar, spark: spark };
   }
 
   function usageMeterHtml(spec, meter, history) {
     var d = usageMeterDisplay(spec, meter, history);
-    var sub = [d.freshness, d.pending].filter(Boolean).join(" · ");
+    var sub = [d.freshness, d.window, d.err5xx, d.pending].filter(Boolean).join(" · ");
     // Wave 4 (OC19): the quiet 14-day trend. Rendered ONLY when the meter has real
     // numeric history — an absent/all-null series draws nothing (honest absence).
     // sparklineSvg is reused VERBATIM (currentColor, null-is-gap, isolated-point
