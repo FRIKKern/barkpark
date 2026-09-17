@@ -2,13 +2,32 @@ defmodule BarkparkWeb.UndeclaredSuccessReceiptTest do
   @moduledoc """
   task-ef7f93eebba52fd3 — the three receipt sites where a failure path was said
   to reach the same `ok: true` as success with nothing on the record declaring
-  it. Re-derived at base `9a5936e09` by running
-  `elixir scripts/pds-elixir-receipt-census.exs --sites`; all three line numbers
-  still resolve to the clause the row describes.
+  it. Derived at base `9a5936e09` by running
+  `elixir scripts/pds-elixir-receipt-census.exs --sites`.
+
+  THE SITES ARE NAMED BY SYMBOL, NOT BY LINE, and the three below were converted
+  from `file.ex:<line>` form after one of them rotted (task-2e0ad8b4e06b9b40). A
+  line number is stale the moment anything is inserted above it; every one of
+  these three had something inserted above it, by the very SPELLING, DELIBERATE
+  comment blocks this suite's declaration arms require. A symbol moves with the
+  code and cannot rot.
+
+  WHY THE ROT WAS SILENT FOR SO LONG — the mechanism, written here because the
+  lane that finally trips the citation guard is almost never the lane that broke
+  the citation. `tooling/doc-truth/verify-docs.mjs` confirms a citation when ANY
+  harvested anchor word sits within ±3 lines of the cited line
+  (`verifyLinerefAgainst/2`, `const WINDOW = 3`). So an INCIDENTAL token — a
+  string literal, a comment word — that happens to land near a badly-wrong line
+  keeps that citation green. When an unrelated diff shifts the incidental token
+  out of the window, the guard reds, and it looks like that diff broke the
+  citation. It did not: it stopped HIDING a citation that was already wrong. The
+  window is not widened to fix this — widening confirms every citation against a
+  neighbour — so the repair is always to drop the number and keep the symbol.
 
   WHAT THE CENSUS ACTUALLY SAYS, and what this suite pins:
 
-    * `search_controller.ex:381` / `v1/media_controller.ex:223` —
+    * `SearchController.delete_search_synonym/2` /
+      `V1.MediaController.delete_search_synonym/2` —
       `CATCH-ALL-TO-SUCCESS, 2 undeclared of 3 fired`. The arm fires because the
       clause head is a discarding variable (`_ws_id`) whose body renders
       `ok: true`. That head is the NON-NIL half of the tenancy split, not a
@@ -16,7 +35,7 @@ defmodule BarkparkWeb.UndeclaredSuccessReceiptTest do
       every failure it can produce is answered 404 by the clause beside the
       receipt. Ruling: DECLARED-HONEST, declared in the code.
 
-    * `auth_controller.ex:562` — the `token_mint_failed` arm falls through to the
+    * `AuthController.request_magic_link/2` — the `token_mint_failed` arm falls through to the
       SAME anti-enumeration `ok: true`. Ruling: DECLARED-HONEST (PURE ECHO),
       declared in the code. The merge is required, not tolerated: a mint failure
       is reachable ONLY for an address that resolved to a user, so a
