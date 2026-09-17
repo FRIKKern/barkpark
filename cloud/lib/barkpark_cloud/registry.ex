@@ -777,6 +777,52 @@ defmodule BarkparkCloud.Registry do
   def get_barkpark(_), do: nil
 
   @doc """
+  Resolve a registered instance from the PUBLIC HOSTNAME it answers on — the
+  lookup key an instance-initiated "Sign in with Barkpark Cloud" has, and the
+  only one it has. The instance-side login page knows its own address; it does
+  NOT know its control-plane UUID (that id is never shipped to a box), so
+  `get_barkpark/1` cannot serve this door.
+
+  Accepts a bare hostname (`acme.example.com`) or a full origin
+  (`https://acme.example.com:443/login`) — `normalize_claim_host/1` is the SAME
+  normaliser the hostname-claim guard uses, so a name that is "taken" over there
+  resolves to the same row here. Matching is over the ONE hostname namespace a
+  box answers on:
+
+    * `custom_host` — the operator-attached name, stored already-normalised;
+    * `url` — the provisioning FQDN, stored as a full `https://<host>` origin,
+      so the candidate origins are reconstructed in Elixir rather than
+      normalised in SQL (both forms are index-served equality, not a `LIKE`).
+
+  NOT team-scoped: the caller has no team in hand at this door (the browser
+  arrives from the instance, not from a console team context). Resolution is
+  therefore deliberately separated from AUTHORIZATION — the router checks
+  `Accounts.get_membership/2` against the row's `team_id` before anything is
+  minted, and answers the same 404 for "no such host" and "not your instance"
+  so this function can never be used as an existence oracle.
+
+  Blank/non-binary input, and a host that normalises to `""`, are nil.
+  """
+  @spec get_barkpark_by_public_host(binary()) :: Barkpark.t() | nil
+  def get_barkpark_by_public_host(host) when is_binary(host) do
+    case normalize_claim_host(host) do
+      "" ->
+        nil
+
+      norm ->
+        origins = ["https://" <> norm, "https://" <> norm <> "/", "http://" <> norm]
+
+        Barkpark
+        |> where([b], b.custom_host == ^norm or b.url in ^origins)
+        |> order_by([b], asc: b.inserted_at)
+        |> limit(1)
+        |> Repo.one()
+    end
+  end
+
+  def get_barkpark_by_public_host(_), do: nil
+
+  @doc """
   azh-w6 (S14c): the team's existing Barkpark with this exact `name`, or nil —
   the resurrect live-twin guard. Because Remove (deprovision) DELETES the
   registry row, a still-present row named the same as an archive you're trying to

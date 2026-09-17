@@ -54,7 +54,7 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
 
   @router_source Path.expand("../../../lib/barkpark_cloud/web/router.ex", __DIR__)
 
-  # The ten suspended-refusal clause heads, by the SHAPE each one has in
+  # The eleven suspended-refusal clause heads, by the SHAPE each one has in
   # `router.ex`. Three shapes, because the refusal arrives three ways: a `cond`
   # leg on the row's own boolean, a `case` leg on a Registry error tuple, and a
   # `case` leg that pattern-matches the suspended row itself.
@@ -62,14 +62,14 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
     {~r/^\s*bp\.suspended( and [^-]*)? ->\s*$/,
      "a `cond` leg on the row's boolean (verify / self-update / rollback / instance-API :mutate)"},
     {~r/^\s*\{:error, :suspended\} ->\s*$/,
-     "a `case` leg on a Registry `{:error, :suspended}` (studio-link / app-token / push-relay / site-url)"},
+     "a `case` leg on a Registry `{:error, :suspended}` (studio-link / studio-signin / app-token / push-relay / site-url)"},
     {~r/^\s*%Barkpark\{team_id: tid, suspended: true\} = bp when tid == team\.id ->\s*$/,
      "a `case` leg matching the suspended row itself (credentials / bootstrap)"}
   ]
 
   # Equality, not a floor: a NEW suspended refusal that forgets the trace reds
   # here, and so does a deleted one (which would mean a refusal was loosened).
-  @refusal_site_count 10
+  @refusal_site_count 11
 
   ## Fixtures
 
