@@ -122,12 +122,29 @@
 # And the banner claims exactly what was read: "child is UP as of <t>" —
 # necessary, not sufficient. It never claims the climb finishes.
 #
+# ── A ZERO-SPEND REFUSAL NO LONGER ENDS THE POLL ────────────────────────────
+#
+# The launcher and the harness read MemAvailable at DIFFERENT moments, and
+# adjacent draws swing ~100 MiB, so a marginal FIRE can be refused by the
+# harness's own gate (b) the instant it looks. Such a refusal costs ZERO export
+# attempts but used to end the whole window. The child now re-enters the SAME
+# poll loop on exactly one proven shape — rc != 0 AND the harness's attempts
+# counter provably unmoved across the invocation — and terminates on every
+# other, including an unreadable counter. Same MAX_DRAWS, no extension, every
+# invocation stamped. The rationale and the three laws it satisfies sit above
+# refire_verdict() in the generated child.
+#
 # ── EXIT STATUS ─────────────────────────────────────────────────────────────
 #   arm       0 armed (child proven up, or liveness UNPERFORMABLE and said so)
 #             4 the child is NOT up (the named state is printed)
 #             3 refused/usage/environment
 #   collect   0 FINISHED or FINISHED-nosent · 2 STILL-RUNNING · 1 anything else
 #   selftest  0 every check held · 1 a check failed
+#
+# The CHILD's own sentinel (the transcript's last line) is the harness rc on a
+# spend, 5 on a draws-exhausted stand-down that never invoked the harness, and
+# 6 on a window exhausted after one or more proven ZERO-SPEND refusals. All of
+# them still classify as one of the six states (PDS-D247); 6 invents no seventh.
 #
 # bash 3.2 compatible (macOS system bash).
 
@@ -414,6 +431,9 @@ write_child_script() { # $1 = dest · $2 = run_tag
     printf 'SSH_HOST=%q\n'       "$SSH_HOST"
     printf 'SSH_KEY=%q\n'        "$SSH_KEY"
     printf 'DO_PREWARM=%q\n'     "${DO_PREWARM:-1}"
+    # The harness's OWN attempts counter, spelled by the launcher so the child
+    # reads the very file the harness writes. The child only ever READS it.
+    printf 'FULL_ATTEMPTS_FILE=%q\n' "$FULL_ATTEMPTS_FILE"
   } > "$dest"
 
   cat >> "$dest" <<'CHILD_BODY'
@@ -503,8 +523,65 @@ printf 'builds=%s\n' "${builds:-}"
 REMOTE
 }
 
+# ── A REFUSAL THAT COST NOTHING MUST NOT COST THE WINDOW ─────────────────────
+#
+# The launcher probes MemAvailable here; the harness re-reads it for its OWN
+# gate (b) seconds to tens of seconds later. Adjacent draws have been measured
+# swinging by ~100 MiB, so a marginal FIRE is roughly a coin flip to be refused
+# the instant the harness looks. That refusal costs ZERO export attempts — the
+# harness's gate (b) refuses ABOVE its spend — but this loop used to exit on the
+# harness rc regardless, burning the whole window and yielding neither a climb
+# transcript nor a full stand-down dataset.
+#
+# THE DISCRIMINATOR IS THE HARNESS'S OWN ATTEMPTS COUNTER, read immediately
+# before and immediately after the invocation. Not the rc, and not the refusal
+# text: only the counter is the thing the one-attempt law is actually written
+# about, so a harness that rewords a message or refuses for a reason nobody has
+# named yet is still classified correctly.
+#
+# THE ONLY CONTINUE-ABLE OUTCOME is rc != 0 with BOTH readings numeric and
+# EQUAL. Every other shape — rc 0, a moved counter, an unreadable or garbage
+# counter — exits exactly as this loop always did. Therefore:
+#
+#   * NO SECOND ATTEMPT CAN BE SPENT SILENTLY. The shape that spends is the
+#     shape that terminates, and an UNVERIFIABLE counter is read as a spend, not
+#     as a licence to re-fire. Being wrong in that direction costs a window;
+#     being wrong in the other direction costs a real export attempt.
+#   * NO UNBOUNDED RETRY AND NO EXTENDED WINDOW. A re-entry consumes the draw it
+#     sat in like any other draw, the budget stays the SAME $MAX_DRAWS, and the
+#     loop condition is untouched — which is what makes termination provable.
+#   * NOTHING IS SILENT. Every invocation stamps its before/after readings and
+#     its verdict, so `collect` and a human read the same fact.
+#
+# A MISSING counter file reads 0, mirroring the harness's own full_attempts();
+# a PRESENT but non-numeric one reads UNVERIFIABLE, which is stricter than the
+# harness on purpose — this is the read that decides whether to fire again.
+read_attempts() {
+  local v=""
+  [ -e "$FULL_ATTEMPTS_FILE" ] || { printf '0'; return 0; }
+  v="$(cat "$FULL_ATTEMPTS_FILE" 2>/dev/null || true)"
+  v="$(printf '%s' "$v" | tr -d '[:space:]')"
+  [ -n "$v" ] || v=0
+  printf '%s' "$v"
+}
+
+# $1 rc · $2 attempts-before · $3 attempts-after -> exactly one of
+#   ZERO-SPEND-REFUSAL · SPENT · SPENT-UNVERIFIED
+refire_verdict() {
+  local rc="${1:-}" before="${2:-}" after="${3:-}"
+  case "$before" in ''|*[!0-9]*) printf 'SPENT-UNVERIFIED\n'; return 0 ;; esac
+  case "$after"  in ''|*[!0-9]*) printf 'SPENT-UNVERIFIED\n'; return 0 ;; esac
+  if [ "$rc" = "0" ]; then printf 'SPENT\n'; return 0; fi
+  if [ "$after" -eq "$before" ]; then
+    printf 'ZERO-SPEND-REFUSAL\n'
+  else
+    printf 'SPENT\n'
+  fi
+}
+
 draw=0
 fired=0
+refusals=0
 while [ "$draw" -lt "$MAX_DRAWS" ]; do
   draw=$((draw + 1))
 
@@ -558,14 +635,30 @@ while [ "$draw" -lt "$MAX_DRAWS" ]; do
     "${builds:-<empty>}" "${rss_kb:-?}" "${elapsed:-?}" "$verdict"
 
   if [ "$verdict" = "FIRE" ]; then
-    fired=1
+    fired=$(( fired + 1 ))
     stamp "FIRE — draw $draw of $MAX_DRAWS qualified."
     stamp "  gated on: mem_mib=$mem_mib >= $MEM_FLOOR_MIB AND bp-site-build-* listing EMPTY"
     stamp "  recorded, NOT gated (PDS-D246): beam rss_kb=${rss_kb:-?} slot_uptime=${elapsed:-?}"
     stamp "  firing ONE unsplit --all (W6-C: --only across rungs 2-6 is forbidden)"
+    att_before="$(read_attempts)"
+    stamp "  attempts before this invocation: $att_before (read from $FULL_ATTEMPTS_FILE)"
     "$HARNESS" --all
     rc=$?
-    stamp "harness returned rc=$rc after $draw draw(s)"
+    att_after="$(read_attempts)"
+    refire="$(refire_verdict "$rc" "$att_before" "$att_after")"
+    stamp "attempts: before=$att_before after=$att_after rc=$rc verdict=$refire"
+    if [ "$refire" = "ZERO-SPEND-REFUSAL" ]; then
+      refusals=$(( refusals + 1 ))
+      stamp "ZERO-SPEND REFUSAL #$refusals — the harness refused with rc=$rc and its attempts counter"
+      stamp "  did NOT move ($att_before -> $att_after), so NO export attempt was spent. This is the"
+      stamp "  launcher/harness floor disagreement: two MemAvailable reads, seconds apart."
+      stamp "  Re-entering the SAME poll loop — draw $draw of $MAX_DRAWS spent, budget UNCHANGED,"
+      stamp "  window NOT extended. The next FIRE re-checks this counter before it exits."
+      sleep "$INTERVAL"
+      continue
+    fi
+    stamp "harness returned rc=$rc after $draw draw(s) — ATTEMPT SPENT ($refire). The launcher exits"
+    stamp "  here and NEVER re-fires: a spent attempt is the one outcome that must not be retried."
     sentinel "$rc"
     exit "$rc"
   fi
@@ -580,6 +673,19 @@ if [ "$fired" -eq 0 ]; then
   sentinel 5
   exit 5
 fi
+
+# Reached ONLY by the re-entry path above: the harness ran, every run was a
+# proven zero-spend refusal, and the draw budget ran out. It is neither a
+# stand-down (the harness WAS invoked) nor a spend (the counter never moved), so
+# it gets its own anchored stamp and its own sentinel rather than being folded
+# into either — `collect` reads this stamp to make the attempt-cost claim, and a
+# claim made on the FIRE stamp alone would call this a spent attempt.
+stamp "WINDOW-EXHAUSTED — $MAX_DRAWS draws taken. The harness was invoked $fired time(s) and"
+stamp "  EVERY invocation was a zero-spend refusal ($refusals of them): its attempts counter never"
+stamp "  moved, so ZERO export attempts were spent and re-arming is free. The refused draws and the"
+stamp "  refused invocations are both the dataset. Re-arm, or raise --max-draws for a longer window."
+sentinel 6
+exit 6
 CHILD_BODY
   chmod +x "$dest"
 }
@@ -1046,11 +1152,41 @@ cmd_collect() {
       sd_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] STAND-DOWN — ' || true)"
       fire_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] FIRE — draw ' || true)"
       pw_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] prewarm: FAILED rc=' || true)"
-      is_int "$sd_stamp"   || sd_stamp=0
-      is_int "$fire_stamp" || fire_stamp=0
-      is_int "$pw_stamp"   || pw_stamp=0
+      # A FIRE stamp no longer implies a spend. The child may invoke the harness,
+      # be refused at zero cost, and re-enter the poll loop; so the attempt-cost
+      # claim is made from the two stamps that actually READ the counter, and
+      # only falls back to the FIRE stamp when neither is present (a pre-re-arm
+      # transcript, or a child killed before it could stamp its readings — both
+      # of which must keep the conservative "an attempt WAS SPENT" reading).
+      #
+      # ORDER IS LOAD-BEARING: a spend stamp wins over an exhaustion stamp,
+      # because a window that exhausted BEFORE a later spend is not the verdict,
+      # and the spend stamp is the only one written after a counter moved.
+      spend_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] attempts: .* verdict=SPENT' || true)"
+      exh_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] WINDOW-EXHAUSTED — ' || true)"
+      zsr_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] ZERO-SPEND REFUSAL #' || true)"
+      is_int "$sd_stamp"    || sd_stamp=0
+      is_int "$fire_stamp"  || fire_stamp=0
+      is_int "$pw_stamp"    || pw_stamp=0
+      is_int "$spend_stamp" || spend_stamp=0
+      is_int "$exh_stamp"   || exh_stamp=0
+      is_int "$zsr_stamp"   || zsr_stamp=0
 
-      if [ "$fire_stamp" -gt 0 ]; then
+      if [ "$spend_stamp" -gt 0 ]; then
+        info "The harness RAN and its attempts counter MOVED (or could not be read)."
+        info "An export attempt WAS SPENT — re-arming is NOT free. The \`attempts:\`"
+        info "line above carries the before/after readings that prove it. Read"
+        info "$FULL_ATTEMPTS_FILE against the PDS-D224 budget of 5;"
+        info "a second arm burns a second real attempt."
+      elif [ "$exh_stamp" -gt 0 ]; then
+        info "WINDOW EXHAUSTED AFTER ZERO-SPEND REFUSALS — not a mid-rung abort."
+        info "The harness was invoked $fire_stamp time(s) and refused $zsr_stamp time(s)"
+        info "with its attempts counter UNMOVED across every invocation, then the"
+        info "draw budget ran out. ZERO export attempts were spent; re-arming is"
+        info "free. This is the launcher/harness floor disagreement — the two read"
+        info "MemAvailable seconds apart. Re-arm, or widen the window with"
+        info "\`--max-draws\`; the \`attempts:\` lines above are the proof."
+      elif [ "$fire_stamp" -gt 0 ]; then
         info "Sentinel present, no ^RESULT: — the harness died mid-rung under its"
         info "own \`set -euo pipefail\` (:85). This is NOT an OOM-kill (those keep"
         info "no sentinel at all) and the exit code below is the harness's own."
@@ -2198,6 +2334,215 @@ LEGACYPW
   case " $pw_legacy " in
     *" dev "*) bad "the extractor reports dev warmed by a prod-only body — it cannot detect this defect" ;;
     *)         ok  "the extractor reports the prod-only body as NOT warming dev (the defect is detectable)" ;;
+  esac
+
+  # ── 11. a zero-spend refusal re-enters the poll; a spend never does ───────
+  #
+  # This section RUNS the generated child end to end against a stub ssh and a
+  # stub harness — it arms nothing, touches no real host, and spends no real
+  # attempt (the whole mechanism is pointed at a scratch attempts file, and §7
+  # separately proves the real counter is untouched). Three legs drive the three
+  # verdicts refire_verdict can return, and a fourth MUTATES the generated child
+  # back to the one-shot form to prove these assertions discriminate.
+  say ""
+  say "11 · a zero-spend refusal re-enters the poll; a spend exits and never re-fires"
+
+  r11="$scratch/refire"
+  mkdir -p "$r11/bin" "$r11/full"
+
+  # The stub remote: swallows the heredoc program, answers with a reading that
+  # clears any floor and no running site builds, so EVERY draw verdicts FIRE.
+  cat > "$r11/bin/ssh" <<'STUB_SSH'
+#!/usr/bin/env bash
+cat >/dev/null 2>&1 || true
+printf 'mem_kb=99999999\n'
+printf 'rss_kb=1000\n'
+printf 'elapsed=10:00\n'
+printf 'builds=\n'
+STUB_SSH
+  chmod +x "$r11/bin/ssh"
+
+  # Stub harness A — REFUSES and never touches the counter (the cond_b shape).
+  cat > "$r11/bin/harness-refuse" <<STUB_REFUSE
+#!/usr/bin/env bash
+printf 'STUB: refusing --all, counter untouched\n'
+printf 'call\n' >> "$r11/calls-refuse"
+exit 1
+STUB_REFUSE
+  # Stub harness B — SPENDS an attempt, then fails (the mid-rung abort shape).
+  cat > "$r11/bin/harness-spend" <<STUB_SPEND
+#!/usr/bin/env bash
+printf 'STUB: spending one attempt, then failing\n'
+printf 'call\n' >> "$r11/calls-spend"
+n=\$(cat "$r11/full/attempts" 2>/dev/null || echo 0)
+printf '%s\n' "\$(( n + 1 ))" > "$r11/full/attempts"
+exit 1
+STUB_SPEND
+  # Stub harness C — refuses, but the counter is GARBAGE and cannot be read.
+  cat > "$r11/bin/harness-unverifiable" <<STUB_UNV
+#!/usr/bin/env bash
+printf 'STUB: refusing --all against an unreadable counter\n'
+printf 'call\n' >> "$r11/calls-unv"
+exit 1
+STUB_UNV
+  chmod +x "$r11/bin/harness-refuse" "$r11/bin/harness-spend" "$r11/bin/harness-unverifiable"
+
+  # $1 dest · $2 harness — write a child pointed entirely at scratch.
+  write_stub_child() {
+    (
+      HARNESS="$2"
+      FULL_ATTEMPTS_FILE="$r11/full/attempts"
+      API_DIR="$scratch/api-never-read"
+      INTERVAL=0
+      MAX_DRAWS=3
+      MEM_FLOOR_MIB=1
+      SSH_HOST=stub-host
+      SSH_KEY=/dev/null
+      DO_PREWARM=2
+      write_child_script "$1" "stub$$"
+    )
+  }
+
+  run_stub_child() { # $1 child · $2 log -> prints the rc
+    local c="$1" l="$2" rc
+    set +e
+    PATH="$r11/bin:$PATH" bash "$c" > "$l" 2>&1
+    rc=$?
+    set -e
+    printf '%s\n' "$rc"
+  }
+
+  # ── leg A: the zero-spend refusal ────────────────────────────────────────
+  printf '3\n' > "$r11/full/attempts"
+  a11_before="$(cat "$r11/full/attempts")"
+  write_stub_child "$r11/child-refuse.sh" "$r11/bin/harness-refuse"
+  a11_rc="$(run_stub_child "$r11/child-refuse.sh" "$r11/refuse.log")"
+  a11_after="$(cat "$r11/full/attempts")"
+  a11_calls="$(wc -l < "$r11/calls-refuse" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${a11_calls:-}" || a11_calls=0
+
+  check "$a11_calls" "3" "the refused harness is re-invoked once per remaining draw, capped at MAX_DRAWS=3"
+  check "$a11_rc" "6" "the child TERMINATES on its own with the window-exhausted status (the loop is bounded)"
+  check "$(tail -1 "$r11/refuse.log")" "EXIT: 6" "the last line is the sentinel — the transcript is still diagnosable"
+  check "$a11_before" "3" "PRECONDITION: the scratch attempts counter reads 3 before the run"
+  check "$a11_after" "3" "the attempts counter is UNCHANGED at 3 across three re-fires — no attempt was spent"
+  check "$(grep -c 'ZERO-SPEND REFUSAL #' "$r11/refuse.log" || true)" "3" "every re-entry is STAMPED, none is silent"
+  check "$(grep -c 'verdict=ZERO-SPEND-REFUSAL' "$r11/refuse.log" || true)" "3" "each invocation records its before/after counter readings and its verdict"
+  check "$(grep -c 'WINDOW-EXHAUSTED — ' "$r11/refuse.log" || true)" "1" "the exhausted window gets its own terminal stamp, exactly once"
+  check "$(grep -c 'ATTEMPT SPENT' "$r11/refuse.log" || true)" "0" "the zero-spend leg never claims an attempt was spent"
+
+  # ── leg B: a real spend must still end the run, on the FIRST invocation ───
+  printf '3\n' > "$r11/full/attempts"
+  write_stub_child "$r11/child-spend.sh" "$r11/bin/harness-spend"
+  b11_rc="$(run_stub_child "$r11/child-spend.sh" "$r11/spend.log")"
+  b11_after="$(cat "$r11/full/attempts")"
+  b11_calls="$(wc -l < "$r11/calls-spend" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${b11_calls:-}" || b11_calls=0
+
+  check "$b11_calls" "1" "a SPENT attempt invokes the harness exactly ONCE — no second, hidden attempt"
+  check "$b11_rc" "1" "the child exits on the harness rc, exactly as it always did"
+  check "$b11_after" "4" "CONTROL: the spend leg really did move the counter (3 -> 4), so leg A measured something"
+  check "$(grep -c 'ZERO-SPEND REFUSAL #' "$r11/spend.log" || true)" "0" "a moved counter never re-enters the poll"
+  check "$(grep -c 'ATTEMPT SPENT' "$r11/spend.log" || true)" "1" "the spend is named in the transcript"
+
+  # ── leg C: an UNREADABLE counter is read as a spend, never as a licence ──
+  printf 'not-a-number\n' > "$r11/full/attempts"
+  write_stub_child "$r11/child-unv.sh" "$r11/bin/harness-unverifiable"
+  c11_rc="$(run_stub_child "$r11/child-unv.sh" "$r11/unv.log")"
+  c11_calls="$(wc -l < "$r11/calls-unv" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${c11_calls:-}" || c11_calls=0
+  check "$c11_calls" "1" "a garbage counter stops the run after ONE invocation — unverifiable is treated as spent"
+  check "$c11_rc" "1" "the unverifiable leg exits on the harness rc rather than re-firing"
+  check "$(grep -c 'verdict=SPENT-UNVERIFIED' "$r11/unv.log" || true)" "1" "the unverifiable verdict is named in the transcript"
+
+  # ── the MUTATION: revert the child to the one-shot form and re-run leg A ──
+  #
+  # Deleting the re-entry branch from the GENERATED child reproduces the exact
+  # pre-fix behaviour (fire once, exit on rc). If leg A's assertions still pass
+  # against it, they are passing on their own shape and prove nothing.
+  awk '
+    /^    if \[ "\$refire" = "ZERO-SPEND-REFUSAL" \]; then$/ { skip=1 }
+    skip && /^    fi$/ { skip=0; next }
+    !skip { print }
+  ' "$r11/child-refuse.sh" > "$r11/child-oneshot.sh"
+  chmod +x "$r11/child-oneshot.sh"
+  m11_dropped="$(( $(wc -l < "$r11/child-refuse.sh") - $(wc -l < "$r11/child-oneshot.sh") ))"
+  if [ "$m11_dropped" -gt 0 ]; then
+    ok "the mutation APPLIED — $m11_dropped line(s) of the re-entry branch removed from the generated child"
+  else
+    bad "the mutation changed NOTHING — the anchor moved, and the control below is vacuous"
+  fi
+  if bash -n "$r11/child-oneshot.sh" 2>/dev/null; then
+    ok "the mutated child is still syntactically valid, so its result is behaviour, not a parse error"
+  else
+    bad "the mutated child does not parse — the control measures a syntax error, not the revert"
+  fi
+
+  printf '3\n' > "$r11/full/attempts"
+  : > "$r11/calls-refuse"
+  m11_rc="$(run_stub_child "$r11/child-oneshot.sh" "$r11/oneshot.log")"
+  m11_calls="$(wc -l < "$r11/calls-refuse" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${m11_calls:-}" || m11_calls=0
+
+  # Each assertion below is the NEGATION of one of leg A's — i.e. leg A goes RED
+  # on the reverted tree. Stated as the value leg A demanded, and what it is now.
+  if [ "$m11_calls" = "1" ] && [ "$m11_calls" != "$a11_calls" ]; then
+    ok "REVERTED: the one-shot child invokes the harness ONCE, not $a11_calls — leg A's call count goes RED"
+  else
+    bad "REVERTED: the one-shot child still invoked the harness $m11_calls time(s); leg A's count does not discriminate"
+  fi
+  if [ "$m11_rc" != "6" ]; then
+    ok "REVERTED: the one-shot child exits rc=$m11_rc, not 6 — leg A's exit-status check goes RED"
+  else
+    bad "REVERTED: the one-shot child still exits 6; leg A's exit status does not discriminate"
+  fi
+  m11_exh="$(grep -c 'WINDOW-EXHAUSTED — ' "$r11/oneshot.log" || true)"
+  if [ "${m11_exh:-0}" -eq 0 ]; then
+    ok "REVERTED: no WINDOW-EXHAUSTED stamp — leg A's terminal-stamp check goes RED"
+  else
+    bad "REVERTED: the one-shot child still printed WINDOW-EXHAUSTED; that check does not discriminate"
+  fi
+
+  # ── collect must not call an exhausted window a spent attempt ─────────────
+  {
+    printf '[2026-07-21T07:00:00Z] FIRE — draw 1 of 3 qualified.\n'
+    printf '[2026-07-21T07:00:10Z] attempts: before=3 after=3 rc=1 verdict=ZERO-SPEND-REFUSAL\n'
+    printf '[2026-07-21T07:00:10Z] ZERO-SPEND REFUSAL #1 — the harness refused with rc=1\n'
+    printf '[2026-07-21T07:01:00Z] WINDOW-EXHAUSTED — 3 draws taken. The harness was invoked 3 time(s) and\n'
+    printf 'EXIT: 6\n'
+  } > "$scratch/exhausted.log"
+  check "$(classify "$scratch/exhausted.log" "$scratch/dummy.pid")" "CRASHED" \
+    "an exhausted-after-refusals transcript classifies CRASHED (still six states, no seventh)"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/exhausted.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"ZERO export attempts were spent"*) ok "collect reads the exhausted window as costing ZERO attempts" ;;
+    *) bad "collect does not say the exhausted window spent zero attempts — it would hoard a budget still held" ;;
+  esac
+  case "$out" in
+    *"An export attempt WAS SPENT"*) bad "collect calls an unmoved counter a spent attempt (the FIRE-stamp misread)" ;;
+    *) ok "collect does NOT call the exhausted window a spent attempt" ;;
+  esac
+
+  # …and the spend shape must still read as spent, from the counter this time.
+  {
+    printf '[2026-07-21T07:00:00Z] FIRE — draw 1 of 3 qualified.\n'
+    printf '[2026-07-21T07:00:10Z] attempts: before=3 after=4 rc=2 verdict=SPENT\n'
+    printf 'EXIT: 2\n'
+  } > "$scratch/spent.log"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/spent.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"An export attempt WAS SPENT"*) ok "a MOVED counter still reads as a spent attempt" ;;
+    *) bad "a moved counter no longer reads as a spent attempt — re-arming would burn a second one" ;;
+  esac
+  case "$out" in
+    *"ZERO export attempts were spent"*) bad "the spend shape is called free to re-arm" ;;
+    *) ok "the spend shape is never called free to re-arm" ;;
   esac
 
   say ""
