@@ -3356,9 +3356,19 @@
   // providers page connects through its own inline card. With Back rewired to
   // the launch wizard the picker had no entry door at all, and a dead function
   // behind a fix is just the next slice's finding — so it is gone, not fenced.
-  // Its `.choice*` styles stay in app.css (out of this slice's file fence) and
-  // its `choice-ico ` allowlist entry stays live through the sheet's own
-  // `.modal-head` tile and the providers roster's mini-tile.
+  // Its `.choice*` styles OUTLIVED it in app.css for a whole epic, because
+  // app.css was out of this slice's file fence: #18991 finally retired the
+  // seven zero-producer heads it alone emitted — `.choice-list`, `.choice`,
+  // `.choice-main`, `.choice-name`, `.choice-sub`, `.choice-chev` and
+  // `.choice-tag`. Only the `.choice-ico` family survives there
+  // (`grep -n '\.choice' cloud/priv/static/app.css` shows `.choice-ico`,
+  // `.choice-ico.sm` and the `.modal-head .choice-ico` size override), and it
+  // still earns BOTH of its `__css_check.mjs` ALLOW_PREFIXES waivers —
+  // `"choice-ico "` and `"choice-ico sm "` — through the sheet's own
+  // `.modal-head` tile in `openProviderCredential` and the providers roster's
+  // mini-tile. The live arm is now `cloud/test/web/choice_family_producer_test.exs`,
+  // which DERIVES the declared `.choice*` heads from the stylesheet on every run
+  // and reds on any head with no producer, while asserting `.choice-ico` stays.
 
   // The per-kind credential inputs. hetzner: one API key (affixed eye toggle).
   // azure: the four service-principal fields, the secret one carrying its own eye
