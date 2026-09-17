@@ -119,6 +119,7 @@ defmodule BarkparkCloud.Web.WrapVocabularyHeaderTest do
   defp flat(text), do: Regex.replace(~r/\s+/, text, " ")
 
   defp num(nil), do: nil
+
   defp num(raw) do
     case Integer.parse(raw) do
       {i, ""} -> i
