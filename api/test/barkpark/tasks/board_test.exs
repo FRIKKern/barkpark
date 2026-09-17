@@ -253,6 +253,108 @@ defmodule Barkpark.Tasks.BoardTest do
     end
   end
 
+  describe "snapshot/1 draft label contract (PDS-D749)" do
+    # NAMED FAILURE MODE: `to_card/4` keys the card by
+    # `Content.published_id(doc.doc_id)`, which DESTROYS the `drafts.` prefix —
+    # the only signal a row is not published — and used to print nothing in its
+    # place. Every reader downstream of this projection therefore painted an
+    # unpaired draft as an ordinary card. The fix reads the spelling off the RAW
+    # `doc.doc_id`, through `DraftId.draft?/1` (the single owner of the prefix
+    # rule), and carries it as `:draft`.
+    #
+    # The two arms are deliberately asymmetric under the mutation "derive the
+    # flag from the card's own (already-stripped) doc_id instead of the raw one":
+    #
+    #   * the DRAFT arm goes RED (true → false),
+    #   * the PUBLISHED arm stays QUIET (false → false) — it reds only on the
+    #     other way to get this wrong, a flag that is true for everything.
+
+    defp label_task!(doc_id, title, status) do
+      Repo.insert!(%Document{
+        doc_id: doc_id,
+        type: "task",
+        dataset: "production",
+        status: status,
+        title: title,
+        rev: "rev-#{doc_id}",
+        content: %{"lifecycle_status" => "open"}
+      })
+    end
+
+    test "an unpaired drafts. row's card carries draft: true" do
+      label_task!("drafts.label-solo", "Solo draft", "draft")
+
+      card = Board.snapshot(dataset: "production").cards_by_id["label-solo"]
+
+      assert card != nil, "the unpaired draft must survive the collapse"
+
+      assert card.doc_id == "label-solo",
+             "the card's own doc_id is still the PUBLISHED id — the spelling is gone from it"
+
+      assert card.draft == true,
+             "the drafts. spelling must survive Content.published_id/1 as the :draft flag"
+    end
+
+    test "a published row's card carries draft: false, not a missing key" do
+      label_task!("label-pub", "Published row", "published")
+
+      card = Board.snapshot(dataset: "production").cards_by_id["label-pub"]
+
+      assert Map.has_key?(card, :draft),
+             "the card is a fixed-shape projection — :draft is always present"
+
+      assert card.draft == false
+    end
+
+    test "the flag follows the SPELLING, not the physical status" do
+      # A `drafts.`-spelled row that is physically `status: \"published\"` (the
+      # shape a mutate-created row can take) is STILL a draft row: PDS-D749 names
+      # the prefix as the sole discriminator, so a status read here would be a
+      # second, disagreeing rule.
+      label_task!("drafts.label-mixed", "Spelled draft, stored published", "published")
+
+      card = Board.snapshot(dataset: "production").cards_by_id["label-mixed"]
+
+      assert card.draft == true
+    end
+
+    test "card_from_broadcast/3 derives the flag from the RAW broadcast doc_id" do
+      # The realtime path never touches the DB, so it must read the spelling off
+      # the event itself — before its own `Content.published_id/1` call.
+      readable? = fn _ -> true end
+
+      draft =
+        Board.card_from_broadcast(
+          %{
+            doc_id: "drafts.bc-draft",
+            title: "Draft over the wire",
+            status: "draft",
+            content: %{"lifecycle_status" => "open"},
+            updated_at: DateTime.utc_now()
+          },
+          nil,
+          readable?
+        )
+
+      published =
+        Board.card_from_broadcast(
+          %{
+            doc_id: "bc-pub",
+            title: "Published over the wire",
+            status: "published",
+            content: %{"lifecycle_status" => "open"},
+            updated_at: DateTime.utc_now()
+          },
+          nil,
+          readable?
+        )
+
+      assert draft.doc_id == "bc-draft", "the card keys by the published id, as snapshot does"
+      assert draft.draft == true
+      assert published.draft == false
+    end
+  end
+
   describe "snapshot/1 twin collapse (canonical_twin/1 — published wins, unpaired draft is the row of record)" do
     # NAMED FAILURE MODE: `load_task_docs/1` groups the corpus by
     # `Content.published_id/1` and hands each bucket to `canonical_twin/1`. Before
