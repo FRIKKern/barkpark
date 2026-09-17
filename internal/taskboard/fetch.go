@@ -427,8 +427,28 @@ func bodyHint(body []byte) string {
 // overlay covers the top of the queue only, which composeSnapshot flags). The
 // context carries FetchSnapshotFull's shared snapshot budget, so both halves of
 // one snapshot expire together.
-func fetchPrime(ctx context.Context, c *apiclient.Client) (primeExtras, error) {
-	body, err := getJSONCtx(ctx, c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
+//
+// THE `brief` PROJECTION (task-ac9e7dd0d4e53d24). decodePrime reads exactly four
+// things out of this body — `ok`, `counts`, `recent_events` and each ready
+// entry's `doc_id` — and throws the entire rendered CARD away. At the default
+// (full) view the server renders `ready` and `in_progress` as full render_docs
+// with edge counts, which is where the money goes: measured against guerrilla
+// 2026-09-17, one and the same minute, `?limit=100` = 1,301,149 wire bytes and
+// `?limit=100&view=brief` = 41,762 — a 96.8% cut for a body the board consumes
+// IDENTICALLY, because the brief card still carries doc_id.
+//
+// WHAT BRIEF COSTS, stated rather than discovered: the controller ALSO trims
+// `recent_events` to 5 on the brief arm (tasks_controller.ex, `Enum.take(events,
+// 5)`), while the full arm returns `limit` of them — 100 here. s.Events is not
+// decoration: buildEvAt sorts the ready head on it and computeResumables finds
+// dropped claims in it. So the projection is asked for ONLY where the tail can be
+// rebuilt over time — see primeView and corpusCache.mergeEventTail.
+func fetchPrime(ctx context.Context, c *apiclient.Client, view string) (primeExtras, error) {
+	path := fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit)
+	if view != "" {
+		path += "&view=" + view
+	}
+	body, err := getJSONCtx(ctx, c, path)
 	if err != nil {
 		return primeExtras{}, err
 	}
