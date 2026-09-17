@@ -2205,7 +2205,19 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		// verbatim. But when the command has body-membership flags set (e.g.
 		// bulldocs.patch --if-rev), the file is the base object those flags merge
 		// into — parse it so the guard joins the payload instead of being dropped.
-		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) {
+		//
+		// A declared BODY-location arg that the caller actually supplied is the
+		// third reason to parse rather than ship verbatim. `bp bulldocs publish
+		// <slug> --file paper.json` posts to /v1/plugins/bulldocs/papers, whose
+		// path carries no :slug, so `slug` is a BODY arg — and shipping the file
+		// verbatim dropped it on the floor. The server then read the slug out of
+		// the file alone: a file with no slug answered "slug plus either blocks
+		// (list), body_html (string), or bpml (string) are required" on a command
+		// that had just been GIVEN one, and a file carrying a DIFFERENT slug
+		// published the paper under the file's slug with a receipt that never
+		// named it (BP-ONB-17). Parsing here routes the arg through the
+		// body-arg seeding loop below, where the user-given value lands.
+		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) && !commandHasSuppliedBodyArgs(cmd, args) {
 			return raw, nil, "application/json", nil
 		}
 		bodyKind := "mutation body"
@@ -2238,6 +2250,16 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 			continue
 		}
 		if v, ok := args[a.Name]; ok && v != "" {
+			// The typed arg wins over the same key in --file. That precedence is
+			// not new — TestBuildBodyDocCreateFileMergeAndDryRun has pinned it
+			// for `doc create <type>` since the flag was built (a file saying
+			// "type":"wrong" loses to the positional). What was missing is that
+			// the file-verbatim shortcut above returned before this loop ever
+			// ran, so on `bulldocs publish` the typed value did not merely lose
+			// a tie — it never reached the wire at all. The honesty half is the
+			// RECEIPT: renderMinimal names the slug the write landed on, so a
+			// file-vs-argument disagreement is visible in the output rather than
+			// settled in silence.
 			obj[a.Name] = v
 		}
 	}
@@ -2667,6 +2689,23 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 // flag on cmd. When true, a --file payload for a non-mutation write must be parsed
 // and merged (so e.g. bulldocs.patch's --if-rev joins the ops object at the body
 // head) rather than shipped verbatim.
+// commandHasSuppliedBodyArgs reports whether the caller supplied a value for any
+// declared arg that lands in the request BODY. Such an arg has to be merged into
+// a --file payload rather than dropped, so its presence disqualifies the
+// ship-the-file-verbatim shortcut in buildBodyWithStdinOwnership. Args that ride
+// the path or the query string are already on the wire and do not count.
+func commandHasSuppliedBodyArgs(cmd manifest.Command, args map[string]string) bool {
+	for _, a := range cmd.Args {
+		if cmd.ArgLocation(a) != "body" {
+			continue
+		}
+		if v, ok := args[a.Name]; ok && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) bool {
 	for _, f := range cmd.Flags {
 		if commandFlagBelongsInBody(cmd, f.Name) && len(flags[f.Name]) > 0 {
@@ -3457,10 +3496,24 @@ func renderMinimal(out *writer, payload []byte) {
 	if rev != "" {
 		out.outf("rev: %s", rev)
 	}
+	// A write that answers with a top-level `slug` and no id is addressed BY that
+	// slug — the paper-ingest receipt ({"ok":true,"slug":…,"rev":…}) is the
+	// case. Printing it is the only way a caller can see WHICH paper the write
+	// landed on: `bp bulldocs publish` used to answer a bare `rev: 2` while the
+	// paper went to a slug the caller never typed (BP-ONB-17). collectIDs is
+	// deliberately left alone — adding "slug" to its key list would re-key every
+	// slug-bearing LIST row too.
+	slugPrinted := false
+	if m, isMap := v.(map[string]any); isMap && len(ids) == 0 {
+		if slug, ok := m["slug"].(string); ok && slug != "" {
+			out.outf("slug: %s", slug)
+			slugPrinted = true
+		}
+	}
 	for _, id := range ids {
 		out.outf("id: %s", id)
 	}
-	if rev == "" && len(ids) == 0 {
+	if rev == "" && len(ids) == 0 && !slugPrinted {
 		out.outf("ok")
 	}
 }
