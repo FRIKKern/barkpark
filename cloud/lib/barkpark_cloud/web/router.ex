@@ -52,6 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
+      DELETE  /v1/account                 user  ERASE the account (password reconfirm; 409 sole_owner)
       PUT     /v1/account/password         user  change password ⇒ sign out everywhere
       GET     /v1/me/security-events       user  the caller's OWN security trail (password/2FA/session/email), newest first
       GET     /v1/subscription     user      {subscription | nil} — current plan
@@ -143,6 +144,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
       PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      DELETE  /v1/teams/:id owner    ERASE the team (409 instances_present while it owns a box or site)
       GET     /v1/teams/:id/tokens admin  list every PAT minted against the team (holder named; no secrets)
       DELETE  /v1/teams/:id/tokens/:token_id admin  revoke a team member's PAT (foreign id → 404)
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
