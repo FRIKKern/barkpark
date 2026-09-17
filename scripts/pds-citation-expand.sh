@@ -24,6 +24,14 @@
 # this script exists to remove, wearing the instrument's own clothes. Every
 # segment below is [0-9]+[a-z]?.
 #
+# A CAPTURE IS A RECORD, NOT A CITATION. A dated snapshot of the live board
+# (tooling/pds/fixtures/live-corpus-<date>.json and its kin) records what a row
+# ACTUALLY SAID on that date. Re-prefixing a citation inside one does not fix a
+# blind grep — it FALSIFIES the record, making the snapshot disagree with the
+# server it captured. Such files are skipped by path, and the skip is PRINTED
+# with a count so it cannot grow into a silent exception list. This is a rule
+# about provenance (captured vs authored), not a list of known offenders.
+#
 # THIS FILE GETS NO EXCEPTION. It is inside the guard's own fence, so it holds
 # no compressed literal anywhere — the forms above are described rather than
 # written, and the selftest fixtures are built from parts. An instrument that
@@ -42,6 +50,11 @@ readonly COMPRESSED="PDS-D${SEG}(/D?${SEG})+"
 # lanes' trees are routed to those lanes as rows, never reached across into.
 # The residue outside this scope is PRINTED by --check as a number, so a
 # shrinking fence cannot quietly hide a growing debt.
+# Captured data, never authored citations. A path predicate, not a name list.
+readonly -a CAPTURED=(
+  ':(exclude)*/fixtures/*'
+)
+
 readonly -a FENCE=(
   'deploy/'
   'scripts/pds-*'
@@ -152,7 +165,7 @@ mode_expand() {
       changed=$((changed + 1))
       echo "expanded: $f"
     fi
-  done < <(git grep -lE "$COMPRESSED" -- "${spec[@]}" 2>/dev/null || true)
+  done < <(git grep -lE "$COMPRESSED" -- "${spec[@]}" "${CAPTURED[@]}" 2>/dev/null || true)
 
   echo "expanded $changed file(s)"
   return 0
@@ -168,7 +181,16 @@ mode_check() {
   fi
 
   local hits
-  hits=$(git grep -nE "$COMPRESSED" -- "${spec[@]}" 2>/dev/null || true)
+  hits=$(git grep -nE "$COMPRESSED" -- "${spec[@]}" "${CAPTURED[@]}" 2>/dev/null || true)
+
+  # The captured-data skip, ALWAYS PRINTED with its count. An exclusion nobody
+  # can see is how a principled rule turns into a silent exception list.
+  local cap_files
+  cap_files=$(git grep -lE "$COMPRESSED" -- "${spec[@]}" 2>/dev/null \
+              | { grep -c '/fixtures/' || true; })
+  if [ "${cap_files:-0}" -gt 0 ]; then
+    echo "captured-data files skipped (a dated snapshot records what a row SAID; re-prefixing it falsifies the record): $cap_files"
+  fi
 
   # THE RESIDUE, ALWAYS PRINTED. A guard that reports only its own scope lets a
   # narrowing fence read as progress. This number is the debt still owed by
@@ -215,12 +237,26 @@ mode_selftest() {
     ( cd "$d" && git grep -nE "$pat" -- "$pathspec" >/dev/null 2>&1 ) || rc=$?
     echo "$rc"
   }
+  # Exercises the REAL --check path. ARM 7b first used a hand-rolled git grep
+  # and so measured the predicate while claiming to measure the guard — the
+  # captured-data skip lives in --check, and a raw grep cannot see it.
+  check_rc() {
+    local d="$1" pathspec="$2" rc=0
+    ( cd "$d" && "$SELF" --check "$pathspec" >/dev/null 2>&1 ) || rc=$?
+    echo "$rc"
+  }
   lit_rc() {
     local d="$1" lit="$2" pathspec="$3" rc=0
     ( cd "$d" && git grep -qF "$lit" -- "$pathspec" ) || rc=$?
     echo "$rc"
   }
-  commit() { git -C "$tmp" add -A && git -C "$tmp" -c user.email=t@t -c user.name=t commit -qm x; }
+  # Tolerates a no-op commit. Without the guard, a mutation that happens to
+  # leave a fixture unchanged aborts the whole harness under set -e, and the
+  # run prints nothing at all — a crash that reads exactly like a silent pass.
+  commit() {
+    git -C "$tmp" add -A
+    git -C "$tmp" -c user.email=t@t -c user.name=t commit -qm x >/dev/null 2>&1 || true
+  }
   chk() { # chk <expect-rc> <actual-rc> <label>
     if [ "$1" -eq "$2" ]; then pass=$((pass+1)); echo "  ok   $3"
     else fail=$((fail+1)); echo "  FAIL $3 (expected rc=$1, got rc=$2)"; fi
@@ -297,6 +333,30 @@ mode_selftest() {
   second=$( cd "$tmp" && "$SELF" --expand 'scripts/pds-*' )
   rc=0; grep -qE '^expanded 0 file\(s\)$' <<<"$second" || rc=1
   chk 0 "$rc" "ARM 6b --expand is idempotent (second pass expands 0 files)"
+
+  # ARM 7 — CAPTURED DATA. A compressed citation inside a dated snapshot is a
+  # RECORD of what a row said, not a citation this repo authored: --expand must
+  # leave it byte-identical and --check must not red on it. Both halves asserted,
+  # because a rule that only skips is indistinguishable from a rule that is broken.
+  mkdir -p "$tmp/tooling/pds/fixtures"
+  printf '{"title": "expand (%s69%s%s70) please"}\n' "$P" "$S" "$D" > "$tmp/tooling/pds/fixtures/live-corpus-2026-07-31.json"
+  commit
+  local cap_before cap_after
+  cap_before=$(cksum < "$tmp/tooling/pds/fixtures/live-corpus-2026-07-31.json")
+  ( cd "$tmp" && "$SELF" --expand 'tooling/pds/fixtures/*' >/dev/null )
+  cap_after=$(cksum < "$tmp/tooling/pds/fixtures/live-corpus-2026-07-31.json")
+  rc=0; [ "$cap_before" = "$cap_after" ] || rc=1
+  chk 0 "$rc" "ARM 7  --expand leaves a dated snapshot BYTE-IDENTICAL"
+  chk 0 "$(check_rc "$tmp" 'tooling/pds/fixtures/*')" \
+       "ARM 7b --check stays GREEN on captured data"
+
+  # ARM 7c (NEGATIVE CONTROL) — the same bytes in an AUTHORED path must still
+  # red. Without this, ARM 7b is satisfied by a predicate that skips everything.
+  mkdir -p "$tmp/scripts"
+  printf '# expand (%s69%s%s70) please\n' "$P" "$S" "$D" > "$tmp/scripts/pds-authored.sh"
+  commit
+  chk 1 "$(check_rc "$tmp" 'scripts/pds-authored.sh')" \
+       "ARM 7c --check REDS on the same citation in an authored path (skip is path-scoped, not blanket)"
 
   rm -rf "$tmp"
   echo
