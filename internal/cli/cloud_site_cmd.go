@@ -1666,7 +1666,15 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
+	// THE STOPWATCH BRACKETS THE POST AND NOTHING ELSE. It opens after the ref is
+	// resolved and closes on the reply, so the span it reports is the flip request
+	// itself — not `bp` starting up, and not the list-ALL read a display-name ref
+	// still pays. That is deliberate: the whole point of the number is to tell an
+	// operator whether the time they waited was spent server-side, and a span that
+	// swallowed client legs could not answer that.
+	started := siteClock()
 	res, rberr := cfg.CloudClient().RollbackSpawnSite(cloudCtx(), id)
+	flip := siteClock().Sub(started)
 	if rberr != nil {
 		return siteRefusalFail(out, siteRefusedRollback, ref, rberr)
 	}
@@ -1680,7 +1688,52 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 	renderSiteRolledBack(out, ref, res)
+	if line := siteRollbackOverBudgetLine(flip); line != "" {
+		out.outf("%s", line)
+	}
 	return exitOK
+}
+
+// siteRollbackBudget is the charter's instant-rollback budget, the same 1000 ms
+// `deploy/site-spawner-live-proof.sh` ships as its default ROLLBACK_BUDGET_MS.
+// It is named here so the CLI and the proof script cannot drift to two different
+// definitions of "instant".
+const siteRollbackBudget = 1000 * time.Millisecond
+
+// siteRollbackOverBudgetLine is the receipt's latency clause, and it is QUIET on
+// a rollback that met the budget — the empty string, not a fast-path brag.
+//
+// WHY IT PRINTS AT ALL. `bp cloud site rollback` used to answer a 3.8 s flip with
+// exactly the same checkmark as a 90 ms one (measured live on guerrilla
+// 2026-09-02: 1840 / 3021 / 3820 ms against a 1000 ms budget, task-b017df2fda0fe600).
+// An operator had no way to see the difference short of wrapping the command in
+// `time`, so the one number the safety property is sold on was invisible at the
+// exact moment it mattered.
+//
+// WHY IT IS SILENT UNDER BUDGET, and this is the failure direction: a duration
+// printed on every run is output that changes on every run, which makes the
+// receipt unstable for anything reading it and buys a reader nothing — "instant
+// was instant" is not news. Printing only the breach means the line's PRESENCE is
+// the finding. The cost of that choice is real and stated: a run at 999 ms leaves
+// no record, so this is a breach alarm, not a telemetry feed.
+//
+// The sentence names WHERE the time is, because that is what the operator cannot
+// work out alone: the span is the POST alone, so a breach is server-side by
+// construction — the control-plane route, the CP->box relay, or the box itself.
+func siteRollbackOverBudgetLine(flip time.Duration) string {
+	if flip <= siteRollbackBudget {
+		return ""
+	}
+	return fmt.Sprintf(
+		"  took %s for the flip request alone — over the %s budget. That span is the request and nothing else, so the wait is server-side: the control-plane route, the CP→box relay, or the box.",
+		siteRollbackSeconds(flip), siteRollbackSeconds(siteRollbackBudget))
+}
+
+// siteRollbackSeconds renders a sub-minute duration in seconds to two decimals.
+// Deliberately NOT siteShortDur, which floors at whole seconds ("3s") and would
+// erase the only digits a 1000 ms budget is decided on.
+func siteRollbackSeconds(d time.Duration) string {
+	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
 // renderSiteRolledBack writes the rollback receipt from the envelope the control

@@ -5295,3 +5295,134 @@ func TestCloudSitePrebuiltMintReadsTheSourceBack(t *testing.T) {
 		t.Fatalf("a genuinely prebuilt mint must still say it:\n%s%s", sout2, serr2)
 	}
 }
+
+// --- the rollback receipt's latency clause -----------------------------------
+
+// stubSiteClockSteps makes `siteClock` return t0, then t0+steps[0], then
+// t0+steps[1], … so a test can hand `runCloudSiteRollback` an exact flip
+// duration without sleeping. Past the end the last step repeats, so a caller
+// that reads the clock more times than a test predicted gets a stable answer
+// instead of a panic — the test would then be measuring the wrong span, which
+// the assertions below catch, rather than crashing on an off-by-one.
+func stubSiteClockSteps(t *testing.T, steps ...time.Duration) {
+	t.Helper()
+	orig := siteClock
+	t0 := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	n := -1
+	siteClock = func() time.Time {
+		n++
+		if n == 0 {
+			return t0
+		}
+		i := n - 1
+		if i >= len(steps) {
+			i = len(steps) - 1
+		}
+		return t0.Add(steps[i])
+	}
+	t.Cleanup(func() { siteClock = orig })
+}
+
+// THE RED ARM. A rollback that misses the 1 s budget must SAY SO on the receipt,
+// with the number and with where the time went. 3820 ms is not a made-up value:
+// it is the slowest of the three live guerrilla runs this row was filed on
+// (1840 / 3021 / 3820 ms, 2026-09-02), every one of which printed the same
+// unqualified checkmark a 90 ms flip prints.
+//
+// Proven by mutation: deleting the `siteRollbackOverBudgetLine` call from
+// `runCloudSiteRollback` reds this test and leaves the quiet arm below green.
+func TestRunCloudSiteRollbackOverBudgetSaysSoAndSaysWhere(t *testing.T) {
+	stubSiteClockSteps(t, 3820*time.Millisecond)
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The checkmark is unchanged — this clause is additive, not a replacement.
+	if !strings.Contains(stdout, "✓ site rolled back") {
+		t.Fatalf("the success receipt must survive the latency clause:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "3.82s") {
+		t.Fatalf("an over-budget rollback must print the measured flip duration:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "over the 1.00s budget") {
+		t.Fatalf("the clause must name the budget it missed:\n%s", stdout)
+	}
+	// The whole point of the sentence: a breach of a span that brackets the POST
+	// alone is server-side by construction, and the operator must be told that
+	// rather than left to suspect their own machine or link.
+	if !strings.Contains(stdout, "server-side") {
+		t.Fatalf("the clause must say the wait is server-side:\n%s", stdout)
+	}
+}
+
+// THE QUIET ARM, and the control for the test above. A rollback INSIDE the
+// budget must print exactly the receipt it always printed — no duration, no
+// budget word. It is what makes the red arm's failure attributable to the breach
+// and not merely to the clause existing, and it pins the failure direction of
+// the obvious "just always print the time" alternative: a number on every run is
+// output that changes on every run.
+func TestRunCloudSiteRollbackUnderBudgetPrintsNoLatencyClause(t *testing.T) {
+	stubSiteClockSteps(t, 90*time.Millisecond)
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "✓ site rolled back") {
+		t.Fatalf("the success receipt must be unchanged:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "budget") || strings.Contains(stdout, "0.09s") {
+		t.Fatalf("an in-budget rollback must print no latency clause:\n%s", stdout)
+	}
+}
+
+// The BOUNDARY, stated because "under 1000 ms" is the criterion's own wording and
+// an off-by-one here would make the CLI and
+// `deploy/site-spawner-live-proof.sh` disagree about the same run. Exactly at the
+// budget is NOT a breach; one millisecond past it is.
+func TestSiteRollbackOverBudgetLineBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want bool
+	}{
+		{999 * time.Millisecond, false},
+		{1000 * time.Millisecond, false},
+		{1001 * time.Millisecond, true},
+		{3820 * time.Millisecond, true},
+	} {
+		got := siteRollbackOverBudgetLine(tc.d) != ""
+		if got != tc.want {
+			t.Errorf("siteRollbackOverBudgetLine(%s) breach=%v, want %v", tc.d, got, tc.want)
+		}
+	}
+}
+
+// `-o json` and `-o yaml` return the control plane's envelope VERBATIM, and the
+// latency clause must not leak into either: a machine reader parses that body,
+// and a line of English in it is a parse error, not a warning. This is the arm
+// that would catch someone "helpfully" moving the clause above the format switch.
+func TestRunCloudSiteRollbackJSONCarriesNoLatencyClause(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			stubSiteClockSteps(t, 3820*time.Millisecond)
+			cp := newSiteCP(t)
+			cp.rollResp = fakeResp{200, rollbackEnvelope}
+			cp.serve()
+
+			stdout, stderr, code := runSite(t, format, "rollback", testSiteID)
+			if code != exitOK {
+				t.Fatalf("exit=%d want 0\n%s", code, stderr)
+			}
+			if strings.Contains(stdout, "budget") || strings.Contains(stdout, "3.82s") {
+				t.Fatalf("-o %s must carry the envelope alone:\n%s", format, stdout)
+			}
+		})
+	}
+}
