@@ -574,6 +574,158 @@ tmpl_to_regex() {
   printf '%s' "$t"
 }
 
+# ── FINITE EXPANSION of a matrix name template ───────────────────────────────
+# A job whose `name:` is NOTHING BUT `${{ … }}` renders one check run per matrix
+# leg, each carrying a LITERAL name the template never spells. tmpl_to_regex can
+# only turn that template into `^.+$`, which assert_no_catchall_job_names below
+# correctly refuses — a `.+` row is a takeover, not a match.
+#
+# The refusal's own prescription (static job name, interpolate in a STEP name)
+# is right for cp-ops.yml and WRONG for a job whose rendered names are a
+# committed contract: GitHub appends ` (leg)` to a matrix job that has no name
+# of its own, so taking the template away RENAMES every leg at once.
+# `.github/shell-harness-check-runs.txt` is exactly such a contract.
+#
+# So the resolution runs the other way. When the workflow DECLARES where its
+# legs come from — a committed file plus a jq filter, in a comment inside the
+# job block:
+#
+#     # required-checks: matrix-name-legs .github/shell-harness-legs.json .[].name
+#
+# the index is expanded at BUILD time into one row per leg carrying the leg's
+# LITERAL name. The index gets strictly MORE precise (N exact names with this
+# job's real continue-on-error / paths-filter / needs, instead of one pattern
+# with none), and the catch-all probe then never sees a catch-all because there
+# is no longer a `.+` row to see.
+#
+# WHAT SURVIVES, AND IT IS THE POINT: every template that CANNOT be resolved to
+# a finite literal set is still refused. No declaration, an unreadable or
+# missing file, a filter that yields nothing, a "literal" that is itself an
+# interpolation, a duplicate — each one leaves (or puts) the row back in front
+# of assert_no_catchall_job_names, or dies here by name. A declaration is a
+# promise to enumerate, never a licence to match anything. Expansion can only
+# ever produce LITERALS: no path through this function can widen a regex.
+MATRIX_NAME_LEGS_DIRECTIVE='required-checks: matrix-name-legs'
+
+# The `<file> <jq-filter>` a job declares, or empty. Scoped to the job BLOCK —
+# a comment above `  harness:` belongs to the job before it, not to this one.
+matrix_legs_directive() {
+  local file="$1" job="$2"
+  [ -f "$file" ] || return 0
+  awk -v want="$job" '
+    /^jobs:/ { injobs = 1; next }
+    injobs && /^[a-z]/ { injobs = 0 }
+    injobs && /^  [A-Za-z0-9_.-]+:/ {
+      j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); cur = j; next
+    }
+    injobs && cur == want && /^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]/ {
+      line = $0
+      sub(/^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]+/, "", line)
+      sub(/[ \t]+$/, "", line)
+      print line
+      exit
+    }
+  ' "$file"
+}
+
+# idx in, idx out. Rows that are not whole-template names pass through untouched.
+expand_matrix_name_legs() {
+  local idx="$1" file job tmpl matrixed coe pf launder needs
+  local bare d legsfile filter names nm seen
+  while IFS=$'\t' read -r file job tmpl matrixed coe pf launder needs; do
+    [ -n "$job" ] || continue
+
+    # Only a name that is ENTIRELY interpolation is the shape at issue. A
+    # partial template (`Test (${{ matrix.otp }})`) is already not a catch-all
+    # and is left exactly as it was — this function must not change any verdict
+    # it is not here to change.
+    bare="$(printf '%s' "$tmpl" | sed -E 's/\$\{\{[^}]*\}\}//g')"
+    if [ -n "$bare" ] || ! grep -q '\${{' <<<"$tmpl"; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$file" "$job" "$tmpl" "$matrixed" "$coe" "$pf" "$launder" "$needs"
+      continue
+    fi
+
+    d="$(matrix_legs_directive "$WORKFLOW_DIR/$file" "$job")"
+    if [ -z "$d" ]; then
+      # UNDECLARED: pass it through UNCHANGED so the catch-all refusal below
+      # says its own sentence about it. Silently dying here instead would move
+      # the guard's message and break every arm that greps for it.
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$file" "$job" "$tmpl" "$matrixed" "$coe" "$pf" "$launder" "$needs"
+      continue
+    fi
+
+    legsfile="${d%%[[:space:]]*}"
+    filter="${d#*[[:space:]]}"
+    [ -n "$legsfile" ] && [ -n "$filter" ] && [ "$filter" != "$d" ] \
+      || die "MATRIX LEG SOURCE IS INCOMPLETE: $file job '$job' declares \`# $MATRIX_NAME_LEGS_DIRECTIVE $d\`, which is not \`<committed-file> <jq-filter>\`. A declaration that cannot be read is not an enumeration, and the template it claims to resolve matches every name."
+    case "$legsfile" in
+      /*|*..*) die "MATRIX LEG SOURCE IS NOT REPO-RELATIVE: $file job '$job' declares \`$legsfile\` — the leg set must be a committed file inside the repo, so the index is derived from the tree under review and not from whatever the runner happens to have on disk." ;;
+    esac
+    # ANCHORED TO THE TREE UNDER REVIEW, not to this script's own checkout.
+    # `--workflows <dir>` is how every caller points the generator at a tree,
+    # and the mutation suite runs COPIES of this script out of a mktemp dir —
+    # where `$REPO_ROOT` is that temp dir and no leg file has ever existed. An
+    # anchor on $0 therefore turns "read the legs of the workflows you were
+    # given" into "read the legs of wherever the binary happens to live", and
+    # the whole suite reds with MATRIX LEG SOURCE IS MISSING. The workflow dir
+    # names its own root: `<root>/.github/workflows`.
+    local legsroot="" legspath=""
+    legsroot="$(cd "$WORKFLOW_DIR/../.." 2>/dev/null && pwd)" || legsroot=""
+    if [ -n "$legsroot" ] && [ -f "$legsroot/$legsfile" ]; then
+      legspath="$legsroot/$legsfile"
+    elif [ -f "$REPO_ROOT/$legsfile" ]; then
+      # A synthetic `--workflows` dir that is not inside a repo at all (the
+      # suite's own fixture trees): fall back to this checkout. Both anchors
+      # are committed files in a repo; neither can widen a regex.
+      legspath="$REPO_ROOT/$legsfile"
+    fi
+    [ -n "$legspath" ] \
+      || die "MATRIX LEG SOURCE IS MISSING: $file job '$job' declares its legs live in \`$legsfile\`, which exists under neither the workflow tree (\`${legsroot:-?}\`) nor this checkout (\`$REPO_ROOT\`). The template \`name: $tmpl\` therefore resolves to NOTHING and stays a catch-all — commit the leg file or take the declaration off."
+    # jq is handed the filter as ONE argv element, so there is no shell here to
+    # inject into; the charset guard is about keeping the declaration readable
+    # and reviewable, not about escaping.
+    # `]` leads the bracket expression on purpose: an ERE class ends at the
+    # first `]` that is not in leading position, and `\]` does NOT escape it.
+    grep -qE '^[]A-Za-z0-9_.@:|()[ "'"'"'-]+$' <<<"$filter" \
+      || die "MATRIX LEG FILTER IS NOT A PLAIN jq PATH: $file job '$job' declares filter \`$filter\` — keep it to a readable path expression (\`.[].name\`) so a reviewer can see the leg set it names."
+
+    # WRAPPED, not run bare. `jq -r .[].nope` over a 53-element array prints the
+    # WORD `null` 53 times — a filter that names a field the leg file does not
+    # have looks, to a bare read, like 53 successfully-enumerated names. The
+    # wrapper makes a non-string leg an ERROR instead of a string, which is the
+    # only way "this filter resolved nothing" and "this filter resolved" differ.
+    names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"leg name \" + tojson + \" is not a string\") end) | .[]" "$legspath" 2>&1)" \
+      || die "MATRIX LEG SOURCE DOES NOT RESOLVE: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, and jq refused it: $(head -1 <<<"$names"). A leg source that does not yield a list of strings resolves to no finite set, so \`name: $tmpl\` is still a catch-all."
+    [ -n "$names" ] \
+      || die "MATRIX LEG SOURCE IS EMPTY: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, which yielded ZERO names. An empty enumeration is not a finite resolution of \`name: $tmpl\` — it is a template with nothing behind it."
+
+    seen=""
+    while IFS= read -r nm; do
+      [ -n "$nm" ] \
+        || die "MATRIX LEG NAME IS EMPTY: $file job '$job' — \`$legsfile\` yielded a blank name through \`$filter\`. A blank row cannot be matched against a rendered check-run name."
+      case "$nm" in
+        *'${{'*) die "MATRIX LEG NAME IS ITSELF A TEMPLATE: $file job '$job' — \`$legsfile\` yielded \`$nm\`, which still interpolates. Expansion produces LITERALS or it produces nothing; a template here would re-introduce the catch-all one level down." ;;
+        *'	'*) die "MATRIX LEG NAME CONTAINS A TAB: $file job '$job' — \`$legsfile\` yielded \`$nm\`. The workflow index is tab-separated, so a tab inside a name would silently shift this job's continue-on-error / paths-filter / needs into the wrong columns." ;;
+      esac
+      case "$seen" in
+        *"$(printf '\001')$nm$(printf '\001')"*) die "MATRIX LEG NAME IS DUPLICATED: $file job '$job' — \`$legsfile\` yielded \`$nm\` more than once. Two index rows for one rendered name means job_for_name's verdict depends on row order, which is exactly the non-determinism the catch-all refusal exists to stop." ;;
+      esac
+      seen="$seen$(printf '\001')$nm$(printf '\001')"
+      # matrixed is forced to 0: the expanded row IS the rendered name, so the
+      # ` (tuple)` suffix branch in job_for_name must not also fire and let this
+      # job claim `<leg name> (anything)`.
+      printf '%s\t%s\t%s\t0\t%s\t%s\t%s\t%s\n' \
+        "$file" "$job" "$nm" "$coe" "$pf" "$launder" "$needs"
+    done <<INNER
+$names
+INNER
+  done <<EOF
+$idx
+EOF
+}
+
 # A name template that matches an ARBITRARY string is a CATCH-ALL, and a
 # catch-all is not a match — it is a takeover. `.github/workflows/cp-ops.yml`
 # declared `jobs.run.name: ${{ inputs.operation }}`, which tmpl_to_regex turns
@@ -799,6 +951,12 @@ main() {
   local idx
   idx="$(build_workflow_index)"
   [ -n "$idx" ] || die "the workflow index is empty — the parser is broken, not the repo"
+  # `|| exit 1` explicitly: `die` fires inside a COMMAND SUBSTITUTION, so its
+  # exit reaches this shell only through `set -e`. A copy of this script with
+  # `-e` weakened would otherwise carry on with an EMPTY index and a refusal
+  # that printed but did not stop anything.
+  idx="$(expand_matrix_name_legs "$idx")" || exit 1
+  [ -n "$idx" ] || die "the workflow index came back empty from matrix-name expansion — refusing to reason about a tree it can no longer see"
   assert_no_catchall_job_names "$idx"
   assert_no_laundered_jobs "$idx"
 

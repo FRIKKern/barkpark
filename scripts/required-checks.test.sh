@@ -2787,9 +2787,34 @@ jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" \
    "$SPEC" > "$SEEDX"
 # The synthetic workflows dir: every real workflow, plus ONE pull_request-only
 # workflow publishing the PR-only seed name. Used by §14b alone.
-mkdir -p "$TMP/workflows-14b"
-cp "$REPO_ROOT/.github/workflows"/*.yml "$TMP/workflows-14b/" 2>/dev/null || true
-cat >"$TMP/workflows-14b/zz-seeded-pr-only.yml" <<EOF
+#
+# REPO-SHAPED, NOT A FLAT BAG OF YML. A workflow may DECLARE a committed file
+# its job names are enumerated from (`# required-checks: matrix-name-legs <file>
+# <jq-filter>`, shell-harnesses.yml's `harness`), and the generator resolves
+# that declaration against the WORKFLOW TREE'S OWN ROOT -- `<root>/.github/
+# workflows/../..` -- falling back to its own $REPO_ROOT. A flat `$TMP/
+# workflows-14b` put that root at `/tmp` AND every mutation COPY of the
+# generator lives in $TMP, so its $REPO_ROOT was `/tmp` too: both anchors
+# missed, and the copies below died with `MATRIX LEG SOURCE IS MISSING` --
+# a refusal about legs, poisoning arms whose subject is exclusions. Shaping the
+# tree like a repo makes the first anchor land, and it is the honest fix: the
+# generator is SUPPOSED to read the tree under review, and a tree that cannot
+# answer for its own declarations is not a copy of this repo.
+SEEDWF="$TMP/tree-14b/.github/workflows"
+mkdir -p "$SEEDWF"
+cp "$REPO_ROOT/.github/workflows"/*.yml "$SEEDWF/" 2>/dev/null || true
+# DERIVED FROM THE TEXT, never listed here. Every file the copied workflows
+# declare is carried across, so a NEW declaration in any workflow arrives with
+# its own file instead of reddening this section months later.
+grep -rhoE '#[[:space:]]*required-checks:[[:space:]]*matrix-name-legs[[:space:]]+[^[:space:]]+' "$SEEDWF" \
+  | sed -E 's/^.*matrix-name-legs[[:space:]]+//' | sort -u \
+  | while IFS= read -r _declared; do
+      [ -n "$_declared" ] || continue
+      case "$_declared" in /*|*..*) continue ;; esac
+      mkdir -p "$TMP/tree-14b/$(dirname "$_declared")"
+      cp "$REPO_ROOT/$_declared" "$TMP/tree-14b/$_declared" 2>/dev/null || true
+    done
+cat >"$SEEDWF/zz-seeded-pr-only.yml" <<EOF
 name: zz-seeded-pr-only
 on:
   pull_request:
@@ -2802,7 +2827,7 @@ jobs:
     steps:
       - run: "true"
 EOF
-SEEDARGS=(--workflows "$TMP/workflows-14b" --fixture-dir "$FIXP"
+SEEDARGS=(--workflows "$SEEDWF" --fixture-dir "$FIXP"
           --merge-base "$SEEDX" --sha e34031104 --sha f69cfb1f6)
 
 X14_OUT="$(bash "$GEN" "${SEEDARGS[@]}" --expect-unrendered "Elixir gate" \
