@@ -8,8 +8,8 @@
         "tsup.config.ts",
         "package.json",
         "tsconfig.json",
-        "astro.config.mjs",
-        "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**"
+        "$TURBO_ROOT$/scripts/post-build-dts.mjs",
+        "$TURBO_ROOT$/../api/assets/paper-surface/**"
       ]
     },
     "test": {
@@ -17,13 +17,16 @@
       "inputs": [
         "src/**",
         "tests/**",
-        "dist/**",
-        "vitest.config.ts",
-        "vitest.browser.config.ts",
-        "vitest.workerd.config.ts",
+        "test/**",
+        "templates/**",
+        "vitest*.config.*",
         "wrangler.toml",
-        "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**",
-        "$TURBO_ROOT$/packages/react/tests/support/**"
+        "README.md",
+        "CHANGELOG.md",
+        "dist/**",
+        "$TURBO_ROOT$/.changeset/**",
+        "$TURBO_ROOT$/test-utils/**",
+        "$TURBO_ROOT$/../api/assets/paper-surface/**"
       ]
     }
   }
