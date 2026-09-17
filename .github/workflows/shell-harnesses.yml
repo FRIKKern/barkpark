@@ -1457,6 +1457,18 @@ jobs:
           # `git cat-file -e` miss it, which the step below treats as a hard
           # failure, never as "nothing changed".
           fetch-depth: 0
+          # `filter: blob:none` — a BLOBLESS partial clone, and it is NOT
+          # shallowness. It fetches every commit and every tree and omits only
+          # blob CONTENTS; `git cat-file -e <base>^{commit}`, `git merge-base`
+          # and `git diff --name-only` read commits and trees, so this job's
+          # verdict is bit-identical. `fetch-depth: 0` above STAYS: drop it and
+          # actions/checkout falls back to depth 1, which has no merge base
+          # whether blobless or not. Equivalence is provable, not asserted:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # MEASURED on merged head b71d22875b (2026-09-17): this checkout step
+          # took 36s here, while the already-blobless dispatchers on the
+          # same head (elixir/cloud/ci/console/compose) took 13-15s.
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set per harness
