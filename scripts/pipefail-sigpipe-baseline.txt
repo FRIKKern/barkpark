@@ -260,12 +260,16 @@
 #
 # THE MEASUREMENT, on a git archive SNAPSHOT of the commit — never a checkout:
 #
-#     git archive 22c02e98f | tar -x -C <scratch> && cd <scratch>
+#     git archive <this branch's head> | tar -x -C <scratch> && cd <scratch>
 #     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
 #     → pipefail-sigpipe-scan: 97 finding(s) — high 97 · medium 0 · low 0 — over 442 file(s)
 #     (all confidences on the same tree: 240 — high 97 · medium 139 · low 4)
-#     sha  22c02e98f1f7155e6dc3cabb0d005353ffa6086f   (origin/main b736382f6 + this change)
-#     utc  2026-09-17T16:50:00Z
+#     base    origin/main 7992ec348100bc7f690ca1b7ba20231fd5b27094 — which measures
+#             101 and banks 101 on its OWN scanner, so this is a −4 DELTA and not a
+#             re-baselining (verified with --verify-against-origin-main, below)
+#     change  a27ce4a9a — the scanner commit; every later commit on this branch is
+#             the baseline text and one workflow step, neither of which is a site
+#     utc     2026-09-17T17:02:00Z
 #
 # THE −4, AND WHY IT IS A DETECTOR FIX AND NOT A SITE FIX. Not one line of
 # cp-ops.yml changed. All four sites — 96, 97, 149, 406 as of b569033e2e — sit
