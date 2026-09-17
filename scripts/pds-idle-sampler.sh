@@ -294,7 +294,6 @@ IDLE_MEM_SAMPLER_PID=""
 # is set BEFORE the report is printed so that a second signal arriving mid-report
 # still lands on a preserving cleanup.
 TERMINATED_BY=""
-WORK_DIR_PRESERVED=""
 
 kill_samplers() {
   [ -n "$IDLE_SAMPLER_PID" ] && kill "$IDLE_SAMPLER_PID" 2>/dev/null || true
@@ -306,7 +305,6 @@ cleanup() {
   # Preserve on a signal, and on an explicit operator request. Otherwise tidy —
   # a cleanup that never cleans up is its own defect.
   if [ -n "$TERMINATED_BY" ] || [ "${PDS_IDLE_KEEP_WORK_DIR:-0}" = 1 ]; then
-    WORK_DIR_PRESERVED="$WORK_DIR"
     return 0
   fi
   rm -rf "$WORK_DIR" 2>/dev/null || true
