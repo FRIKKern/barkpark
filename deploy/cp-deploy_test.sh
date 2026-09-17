@@ -1159,7 +1159,9 @@ check "the pipe-less form answers TRUE (exit 0) on the same >64KB transcript" \
 # ===========================================================================
 # THE CUTOVER LEDGER (dr-w26-bl-cp-deploy-eats-a-scheduled-sampler-tick)
 # ===========================================================================
-# `deploy/cp-cutover-gaps.sh --self-test` is 46 offline checks over the ledger
+# `deploy/cp-cutover-gaps.sh --self-test` is an offline check suite over the ledger
+# (the count is published once, in deploy/README.md, and READ BACK by that engine
+# itself — naming it a second time here is how the two copies drift)
 # cp-deploy.sh writes and the analyzer that reads it. It is CHAINED here rather
 # than registered as its own step because `.github/workflows/deploy-harnesses.yml`
 # names each harness explicitly and this harness is already in that list — a
@@ -1418,6 +1420,56 @@ check "deploy/README.md points operators at the script, not a hand-typed recipe"
   "grep -q 'cp-deploy.sh --rollback' '$HERE/README.md'"
 check "deploy/README.md still keeps the INSTANCE path (systemd re-reads EnvironmentFile on start)" \
   "grep -q 'systemctl start' '$HERE/README.md'"
+
+# ===========================================================================
+# THE COUNT-READBACK PREDICATE (deploy/README.md's "every count is read back")
+# ===========================================================================
+# deploy/README.md asserts a property OF ITSELF: that every `<engine> … <N>
+# checks` count on the page is read back by the engine it describes. That
+# sentence used to name a number ("the three check counts") while the page
+# carried FIVE, and one of the five — cp-cutover-gaps.sh's — was read back by
+# nothing at all; the only thing near it was a `>= 38` floor in THIS file, which
+# is a non-vacuity floor, not a measurement of the published number.
+#
+# An enumeration is a snapshot; this is the predicate. It does not list the
+# engines — it DERIVES them from the page, so engine number six is judged the
+# day its count is published, without anyone remembering to extend a list.
+#
+# The window is `[^0-9]{1,24}` rather than a line-based context: the page's
+# pipeline table is one ~900-character line per target, so a line window lies
+# here. Measured in characters.
+README_MD="$HERE/README.md"
+if [ ! -r "$README_MD" ]; then
+  check "deploy/README.md is readable (the count-readback predicate needs the page)" "false"
+else
+  _anchor_re='deploy/[A-Za-z0-9_.-]+\.sh[^0-9]{1,24}[0-9]+ checks'
+  _anchors="$(grep -oE "$_anchor_re" "$README_MD" || true)"
+  # shellcheck disable=SC2034  # read inside check()'s eval string
+  _anchor_n="$(printf '%s' "$_anchors" | grep -c . || true)"
+  # Non-vacuity: a page whose anchors stopped matching would make every
+  # assertion below pass by having nothing to judge.
+  check "deploy/README.md publishes at least 5 '<engine> ... <N> checks' anchors (found $_anchor_n; a zero here is a broken extractor, not a clean page)" \
+    "[ \"\$_anchor_n\" -ge 5 ]"
+  while IFS= read -r _a; do
+    [ -n "$_a" ] || continue
+    _eng="${_a%%.sh*}.sh"                 # deploy/<name>.sh
+    _engfile="$HERE/${_eng#deploy/}"
+    _base="$(basename "$_eng" .sh)"
+    check "the engine behind '$_a' exists ($_eng)" "[ -r '$_engfile' ]"
+    if [ -r "$_engfile" ]; then
+      # A readback guard is self-anchored: it greps the README for its OWN
+      # script path. Both halves are required — a file that merely mentions
+      # README.md is not reading its own published number back.
+      check "$_eng reads deploy/README.md back" \
+        "grep -qi 'README' '$_engfile'"
+      check "$_eng anchors that readback on its OWN published count (the regex-escaped '${_base}\\.sh')" \
+        "grep -qF '${_base}\\.sh' '$_engfile'"
+    fi
+  done <<EOF
+$_anchors
+EOF
+fi
+
 cleanup_flip
 
 echo

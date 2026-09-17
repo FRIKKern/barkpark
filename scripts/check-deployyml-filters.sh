@@ -1005,6 +1005,143 @@ EOF
   return 0
 }
 
+# ── the README arm: the PUBLISHED routing must equal the classifier ──────────
+#
+# THE HOLE THIS ARM CLOSES
+#
+# `deploy/README.md` is `canonical-for: cd-pipeline`. It published the trigger
+# paths for both deploy jobs in TWO hand-maintained enumerations (an ASCII
+# routing diagram and a table column), and NOTHING read either of them. Measured
+# on origin/main before this arm existed: the page omitted `deploy/**` from BOTH
+# jobs, omitted `cmd/**`, `templates/**` and `scripts/connectors/**` from the
+# instance job, and never mentioned the `api/test/**` exclusion at all. Every one
+# of those prefixes was added to deploy.yml deliberately, with a task id; not one
+# of them moved the README. The page's third sentence asserted that "a docs-only
+# commit never rebuilds a server" while `deploy/README.md` itself classifies
+# cp=true instance=true — editing the claim deploys two boxes.
+#
+# The other arms in this file hold deploy.yml's two internal lists to each other.
+# This one holds the PUBLISHED copy to the same predicate, so the doc cannot
+# drift from the workflow in either direction.
+#
+# DIRECTION: the workflow is the truth, the README is the asserted value. This
+# arm only ever READS the README — it never rewrites it, and it never learns its
+# expected set from the page it is judging.
+#
+# The README rows are DERIVED FROM, not enumerated against, the job list: the
+# arm walks whatever job flags the `changes` step dispatches, so a third deploy
+# job demands a third published row the day it lands.
+README_DEFAULT="deploy/README.md"
+README_ROWS=0
+
+# The backticked `x/**` globs published after "deploys on" on one README row.
+# Measured in CHARACTERS off the matched row, never with a line-based context
+# window: this page's pipeline table is one ~900-character line per target.
+readme_globs_of_row() {
+  printf '%s\n' "$1" | sed -E 's/^.*deploys on //' \
+    | { grep -oE '`[^`]+`' || true; } | tr -d '`' | sort -u
+}
+
+# set_minus <a> <b> — the lines of <a> absent from <b>, one per line.
+#
+# Written with a single awk stream rather than `comm <(…) <(…)`: process
+# substitution is bash-only, and scripts/posix-vacuous-green-census.sh reds an
+# unguarded procsub in this tree because a script that dies on `(` under `sh`
+# exits having compared NOTHING and still reads as a pass. No procsub, no guard
+# needed, and the comparison runs wherever this file does.
+set_minus() {
+  printf '%s\n\x01\n%s\n' "$2" "$1" | awk '
+    !seen && $0 == "\001" { seen = 1; next }
+    !seen { b[$0] = 1; next }
+    length($0) && !($0 in b) { print }'
+}
+
+# check_readme_routing <yml> <readme> <label>
+check_readme_routing() {
+  local yml="$1" readme="$2" label="$3"
+  local failures=0 jr_job jr_re row rows n derived published
+
+  if [ ! -r "$readme" ]; then
+    echo "FAIL[$label]: cannot read $readme — the published routing cannot be judged, so this arm fails CLOSED rather than reporting a clean page." >&2
+    return 1
+  fi
+
+  README_ROWS=0
+  while IFS=$'\t' read -r jr_job jr_re; do
+    [ -n "$jr_job" ] || continue
+
+    # EXACTLY ONE row per job. Zero is a reworded heading that silently disarms
+    # the arm; two is an enumeration that can disagree with itself.
+    rows="$({ grep -E "^- \`$jr_job\` " "$readme" || true; })"
+    n="$(printf '%s' "$rows" | grep -c . || true)"
+    if [ "$n" != 1 ]; then
+      echo "  UNANCHORED  $jr_job  ->  expected exactly ONE '- \`$jr_job\` … deploys on …' row in $readme, found $n. The arm reads that row to learn the published prefix set; restore it (a list item opening with the backticked job flag) in the SAME commit." >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    row="$rows"
+
+    if ! derived="$(prefixes_of "$jr_re")"; then
+      echo "  UNDECOMPOSABLE  $jr_job  ->  the filter '$jr_re' is not the '^(a|b|c)/' alternation this arm can decompose; fail CLOSED rather than judge a shape we cannot read." >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    derived="$(printf '%s\n' "$derived" | sed 's:$:/**:' | sort -u)"
+    published="$(readme_globs_of_row "$row")"
+
+    if [ "$derived" != "$published" ]; then
+      echo "  PUBLISHED  $jr_job  ->  $readme publishes a prefix set the '$jr_job' classifier does not use." >&2
+      echo "          workflow (truth):  $(printf '%s' "$derived"   | tr '\n' ' ')" >&2
+      echo "          README (asserted): $(printf '%s' "$published" | tr '\n' ' ')" >&2
+      echo "          only in the workflow: $(set_minus "$derived" "$published" | tr '\n' ' ')" >&2
+      echo "          only in the README:   $(set_minus "$published" "$derived" | tr '\n' ' ')" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    echo "  readme   $jr_job  ->  $(printf '%s' "$published" | tr '\n' ' ') (published set equals the classifier's)"
+    README_ROWS=$((README_ROWS + 1))
+  done <<EOF
+$(extract_job_regexes "$yml")
+EOF
+
+  # Non-vacuity. A run that judged no row at all must not read as a clean page.
+  if [ "$README_ROWS" -eq 0 ] && [ "$failures" -eq 0 ]; then
+    echo "FAIL[$label]: the README arm judged ZERO job rows — the job extractor returned nothing, so this arm measured nothing. A silent pass here is the vacuous green the rest of this file exists to refuse." >&2
+    return 1
+  fi
+
+  # The exclusion, published too: it is the single highest-traffic routing fact
+  # on the page and the README never mentioned it.
+  local ex_re ex_derived ex_rows ex_n ex_published
+  ex_re="$(deploy_yaml_job_lines "$yml" changes | { grep -oE "grep -vE '[^']+'" || true; } | sed -E "s/^grep -vE '//; s/'\$//" | sed -n '1p')"
+  if [ -n "$ex_re" ]; then
+    ex_derived="$(printf '%s\n' "${ex_re#^}" | sed -E 's:/?$:/**:' | sort -u)"
+    ex_rows="$({ grep -E '^- excluded from both: ' "$readme" || true; })"
+    ex_n="$(printf '%s' "$ex_rows" | grep -c . || true)"
+    if [ "$ex_n" != 1 ]; then
+      echo "  UNANCHORED  exclusion  ->  expected exactly ONE '- excluded from both: …' row in $readme, found $ex_n." >&2
+      failures=$((failures + 1))
+    else
+      ex_published="$(printf '%s\n' "$ex_rows" | sed -E 's/^- excluded from both: //' | { grep -oE '`[^`]+`' || true; } | tr -d '`' | sort -u)"
+      if [ "$ex_derived" != "$ex_published" ]; then
+        echo "  PUBLISHED  exclusion  ->  the classifier drops '$ex_derived' before either job runs; $readme publishes '$ex_published'." >&2
+        failures=$((failures + 1))
+      else
+        echo "  readme   exclusion  ->  $ex_published (published exclusion equals the classifier's)"
+      fi
+    fi
+  fi
+
+  if [ "$failures" -gt 0 ]; then
+    echo "FAIL[$label]: $failures published routing row(s) in $readme disagree with the 'changes' classifier in $yml." >&2
+    echo "Fix: the WORKFLOW is the truth. Update the README rows to the prefix set printed above, in the SAME" >&2
+    echo "commit that changed the regex — or, if the README is right and the regex is wrong, fix the regex." >&2
+    echo "Never edit this gate's expectation: it derives the set from deploy.yml and has no list of its own." >&2
+    return 1
+  fi
+  return 0
+}
+
 # check_exclusions <yml> <label> — 0 if every listed exclusion narrows a real
 # positive entry and the classifier agrees with it on real input.
 check_exclusions() {
@@ -1300,12 +1437,50 @@ EOF
     return 2
   fi
 
-  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ] || [ "$exclusion_rc" -ne 0 ]; then
+  # The README arm: the PUBLISHED copy of the same predicate. Runs
+  # unconditionally alongside the others so ONE run reports every drift it can
+  # see. $README_FOR_CHECK exists only so --selftest can point the arm at a
+  # mutated copy; the real run always judges the tree's own page.
+  local readme_rc=0
+  check_readme_routing "$yml" "${README_FOR_CHECK:-$REPO_ROOT/$README_DEFAULT}" "$label" || readme_rc=$?
+
+  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ] || [ "$exclusion_rc" -ne 0 ] || [ "$readme_rc" -ne 0 ]; then
     return 1
   fi
 
-  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded; $excluded exclusion(s) not judged here); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row; exclusions: $EXCLUSIONS_CHECKED judged behaviourally (negative shallow+deep, control, mixed)."
+  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded; $excluded exclusion(s) not judged here); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row; exclusions: $EXCLUSIONS_CHECKED judged behaviourally (negative shallow+deep, control, mixed); README: $README_ROWS published routing row(s) equal the classifier, exclusion included."
   return 0
+}
+
+# fixture_readme <yml> <out> — the real page with its routing rows REWRITTEN to
+# match <yml>'s classifier, printed as a path.
+#
+# FIXTURE PLUMBING ONLY, and deliberately unreachable from the real run. Every
+# --selftest mutation below edits deploy.yml; a classifier mutation makes the
+# published page genuinely wrong, so without this the README arm would red in
+# every one of those fixtures and each fixture's isolation claim ("only arm X
+# reds") would quietly stop being true. Pointing each fixture at a page
+# consistent with its OWN workflow keeps those claims exactly as strong as they
+# were, and keeps this arm's own three cases the only place the README is
+# judged against a DIFFERENT workflow.
+#
+# This writes only to a caller-supplied temp path. The real run judges
+# $REPO_ROOT/$README_DEFAULT and never calls this.
+fixture_readme() {
+  local yml="$1" out="$2" jr_job jr_re globs
+  cp "$REPO_ROOT/$README_DEFAULT" "$out"
+  while IFS=$'\t' read -r jr_job jr_re; do
+    [ -n "$jr_job" ] || continue
+    globs="$(prefixes_of "$jr_re" 2>/dev/null | sed 's:^:`:; s:$:/**`:' | sort | tr '\n' ' ')" || continue
+    [ -n "$globs" ] || continue
+    globs="${globs% }"
+    awk -v job="$jr_job" -v g="$globs" '
+      $0 ~ "^- `" job "` " { sub(/deploys on .*$/, "deploys on " g) }
+      { print }' "$out" > "$out.tmp" && mv "$out.tmp" "$out"
+  done <<EOF
+$(extract_job_regexes "$yml")
+EOF
+  printf '%s\n' "$out"
 }
 
 # ── selftest ─────────────────────────────────────────────────────────────────
@@ -1333,7 +1508,7 @@ selftest() {
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
     rc=1
-  elif check_file "$tmp/mutated.yml" "mutated" >/dev/null 2>&1; then
+  elif README_FOR_CHECK="$(fixture_readme "$tmp/mutated.yml" "$tmp/mutated.readme.md")" check_file "$tmp/mutated.yml" "mutated" >/dev/null 2>&1; then
     echo "SELFTEST FAIL: a templates-less regex read GREEN — the gate cannot fail" >&2
     rc=1
   else
@@ -1349,7 +1524,7 @@ selftest() {
     echo "SELFTEST FAIL: the orphan-path injection changed nothing" >&2
     rc=1
   else
-    out="$(check_file "$tmp/orphan.yml" "orphan" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/orphan.yml" "$tmp/orphan.readme.md")" check_file "$tmp/orphan.yml" "orphan" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an unrouted path read GREEN" >&2
       rc=1
@@ -1382,7 +1557,7 @@ YML
   if ! grep -q 'selftest-recorder' "$tmp/disarm.yml"; then
     echo "SELFTEST FAIL: the recorder job was not appended" >&2
     rc=1
-  elif check_file "$tmp/disarm.yml" "disarm" >/dev/null 2>&1; then
+  elif README_FOR_CHECK="$(fixture_readme "$tmp/disarm.yml" "$tmp/disarm.readme.md")" check_file "$tmp/disarm.yml" "disarm" >/dev/null 2>&1; then
     echo "SELFTEST FAIL: a non-dispatching job's regex greened the gate — it is disarmable again" >&2
     rc=1
   else
@@ -1414,7 +1589,7 @@ YML
   if assert_parseable_yaml "$tmp/badyaml.yml" "yaml-fail" >/dev/null 2>&1; then
     echo "SELFTEST FAIL: an unparseable workflow read GREEN — the YAML arm cannot fail" >&2
     rc=1
-  elif check_file "$tmp/badyaml.yml" "yaml-fail" >/dev/null 2>&1; then
+  elif README_FOR_CHECK="$(fixture_readme "$tmp/badyaml.yml" "$tmp/badyaml.readme.md")" check_file "$tmp/badyaml.yml" "yaml-fail" >/dev/null 2>&1; then
     echo "SELFTEST FAIL: the arm red but check_file still certified the file — the arm is not wired in" >&2
     rc=1
   else
@@ -1433,7 +1608,7 @@ YML
   if cmp -s "$real" "$tmp/nopath.yml"; then
     echo "SELFTEST FAIL: the path-strip mutation changed nothing — scripts/connectors/** is not listed as expected" >&2
     rc=1
-  elif check_file "$tmp/nopath.yml" "nopath" >/dev/null 2>&1; then
+  elif README_FOR_CHECK="$(fixture_readme "$tmp/nopath.yml" "$tmp/nopath.readme.md")" check_file "$tmp/nopath.yml" "nopath" >/dev/null 2>&1; then
     echo "SELFTEST FAIL: a copy missing scripts/connectors/** read GREEN — the presence allowlist cannot fail" >&2
     rc=1
   else
@@ -1451,7 +1626,7 @@ YML
     echo "SELFTEST FAIL: the reverse mutation changed nothing — the cp filter no longer looks as expected" >&2
     rc=1
   else
-    out="$(check_file "$tmp/unreachable.yml" "unreachable" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/unreachable.yml" "$tmp/unreachable.readme.md")" check_file "$tmp/unreachable.yml" "unreachable" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an unreachable job-filter prefix read GREEN — the reverse arm cannot fail" >&2
       rc=1
@@ -1500,7 +1675,7 @@ YML
     echo "SELFTEST FAIL: the both-halves mutation changed nothing" >&2
     rc=1
   else
-    out="$(check_file "$tmp/bothgone.yml" "bothgone" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/bothgone.yml" "$tmp/bothgone.readme.md")" check_file "$tmp/bothgone.yml" "bothgone" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: both halves deleted read GREEN — the presence allowlist cannot fail" >&2
       rc=1
@@ -1532,7 +1707,7 @@ YML
     echo "SELFTEST FAIL: the shape mutation changed nothing — the cp filter no longer looks as expected" >&2
     rc=1
   else
-    out="$(check_file "$tmp/badshape.yml" "badshape" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/badshape.yml" "$tmp/badshape.readme.md")" check_file "$tmp/badshape.yml" "badshape" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an undecomposable dispatch filter read GREEN — the arm fails OPEN" >&2
       rc=1
@@ -1579,7 +1754,7 @@ PYMUT
     rc=1
   else
     sub_rc=0
-    out="$(check_file "$tmp/prefix-producer.yml" "prefix-producer" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/prefix-producer.yml" "$tmp/prefix-producer.readme.md")" check_file "$tmp/prefix-producer.yml" "prefix-producer" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: the PRE-FIX producer read GREEN — the behaviour arm cannot fail" >&2
       printf '%s\n' "$out" >&2
@@ -1639,7 +1814,7 @@ PYMUT
     rc=1
   else
     sub_rc=0
-    out="$(check_file "$tmp/nocmd.yml" "nocmd" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/nocmd.yml" "$tmp/nocmd.readme.md")" check_file "$tmp/nocmd.yml" "nocmd" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: a cmd-less instance regex read GREEN — the target arm cannot fail" >&2
       printf '%s\n' "$out" >&2
@@ -1704,7 +1879,7 @@ PYMUT
     rc=1
   else
     sub_rc=0
-    out="$(check_file "$tmp/mutation-c.yml" "mutation-c" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/mutation-c.yml" "$tmp/mutation-c.readme.md")" check_file "$tmp/mutation-c.yml" "mutation-c" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: Mutation C read GREEN — a tree exempt from every job passed the gate again" >&2
       printf '%s\n' "$out" >&2
@@ -1752,7 +1927,7 @@ PYMUT
     rc=1
   else
     sub_rc=0
-    out="$(check_file "$tmp/unbounded.yml" "unbounded" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/unbounded.yml" "$tmp/unbounded.readme.md")" check_file "$tmp/unbounded.yml" "unbounded" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an unbounded exemption read GREEN" >&2
       printf '%s\n' "$out" >&2
@@ -1794,7 +1969,7 @@ PYMUT
     rc=1
   else
     sub_rc=0
-    out="$(check_file "$tmp/undeclared.yml" "undeclared" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/undeclared.yml" "$tmp/undeclared.readme.md")" check_file "$tmp/undeclared.yml" "undeclared" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: a routed tree with no TARGET_PAIRS row read GREEN — the table is an unchecked enumeration again" >&2
       printf '%s\n' "$out" >&2
@@ -1840,7 +2015,7 @@ PYMUT
     rc=1
   else
     sub_rc=0
-    out="$(check_file "$tmp/stale-exempt.yml" "stale-exempt" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/stale-exempt.yml" "$tmp/stale-exempt.readme.md")" check_file "$tmp/stale-exempt.yml" "stale-exempt" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: a false exemption read GREEN — the bound is not checked" >&2
       printf '%s\n' "$out" >&2
@@ -1864,7 +2039,7 @@ PYMUT
     echo "SELFTEST FAIL: the exclusion-strip mutation changed nothing — !api/test/** is not listed as expected" >&2
     rc=1
   else
-    out="$(check_file "$tmp/noexcl.yml" "noexcl" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/noexcl.yml" "$tmp/noexcl.readme.md")" check_file "$tmp/noexcl.yml" "noexcl" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: a copy missing !api/test/** read GREEN — the exclusion allowlist cannot fail" >&2
       rc=1
@@ -1889,7 +2064,7 @@ PYMUT
     echo "SELFTEST FAIL: the classifier-neuter mutation changed nothing — the grep -vE line is not shaped as expected" >&2
     rc=1
   else
-    out="$(check_file "$tmp/leak.yml" "leak" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/leak.yml" "$tmp/leak.readme.md")" check_file "$tmp/leak.yml" "leak" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: a classifier that still dispatches api/test-only merges read GREEN" >&2
       rc=1
@@ -1918,7 +2093,7 @@ PYMUT
     echo "SELFTEST FAIL: the over-exclusion mutation changed nothing" >&2
     rc=1
   else
-    out="$(check_file "$tmp/overexcl.yml" "overexcl" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/overexcl.yml" "$tmp/overexcl.readme.md")" check_file "$tmp/overexcl.yml" "overexcl" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an exclusion that swallows all of api/ read GREEN" >&2
       rc=1
@@ -1953,7 +2128,7 @@ PY
     echo "SELFTEST FAIL: the whole-diff-drop mutation changed nothing" >&2
     rc=1
   else
-    out="$(check_file "$tmp/mixdrop.yml" "mixdrop" 2>&1)" || sub_rc=$?
+    out="$(README_FOR_CHECK="$(fixture_readme "$tmp/mixdrop.yml" "$tmp/mixdrop.readme.md")" check_file "$tmp/mixdrop.yml" "mixdrop" 2>&1)" || sub_rc=$?
     if [ "$sub_rc" -eq 0 ]; then
       echo "SELFTEST FAIL: an exclusion that drops the whole diff read GREEN" >&2
       rc=1
@@ -2016,6 +2191,112 @@ PY
     rc=1
   else
     printf '%s\n' "$out" | grep -oE 'target: [0-9]+ declared \(prefix -> job\) pair\(s\)' | sed 's/^/  ok: /'
+  fi
+
+  # ── the README arm, both directions plus the anchor ───────────────────────
+  #
+  # Three mutations, each ISOLATING this arm: the WORKFLOW gains a prefix the
+  # page does not publish, the PAGE loses a prefix the workflow uses, and the
+  # page's row is reworded so the anchor matches nothing. A doc guard that can
+  # only catch drift from one side is a guard against one author's habits.
+  local real_readme="$REPO_ROOT/$README_DEFAULT"
+
+  echo
+  echo "selftest: the README arm must be NON-VACUOUS on the real page"
+  sub_rc=0
+  out="$(check_file "$real" "readme-count" 2>&1)" || sub_rc=$?
+  if [ "$sub_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the real deploy.yml did not pass with the README arm wired in" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -qE 'README: [1-9][0-9]* published routing row\(s\)' <<<"$out"; then
+    echo "SELFTEST FAIL: no non-zero README row count — the arm ran vacuously" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  elif ! grep -q '  readme   exclusion  ->  api/test/\*\*' <<<"$out"; then
+    echo "SELFTEST FAIL: the README arm did not judge the published exclusion" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  else
+    printf '%s\n' "$out" | grep -oE 'README: [0-9]+ published routing row\(s\)' | sed 's/^/  ok: /'
+  fi
+
+  echo
+  echo "selftest: a prefix added to the WORKFLOW but not to the README must FAIL"
+  # `cloud` is already in on.push.paths and already declared for cp, so adding it
+  # to the instance regex leaves forward/reverse/presence/target clean — the
+  # README arm is the only thing that can see it. An isolated red is the proof.
+  python3 - "$real" "$tmp/readme-wf.yml" <<'PYX'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+old = "^(api|internal|cmd|deploy|connectors|templates|scripts/connectors)/"
+new = "^(api|internal|cmd|deploy|connectors|templates|scripts/connectors|cloud)/"
+assert s.count(old) == 1, "readme-wf anchor count=%d" % s.count(old)
+open(dst, "w").write(s.replace(old, new, 1))
+PYX
+  sub_rc=0
+  # NOT fixture_readme: this case exists to judge the mutated workflow against the
+  # REAL page, which is the drift a workflow-side edit actually produces.
+  out="$(README_FOR_CHECK="$real_readme" check_file "$tmp/readme-wf.yml" "readme-wf" 2>&1)" || sub_rc=$?
+  if [ "$sub_rc" -eq 0 ]; then
+    echo "SELFTEST FAIL: a workflow prefix the README does not publish read GREEN" >&2
+    rc=1
+  elif ! grep -q 'only in the workflow: cloud/\*\*' <<<"$out"; then
+    echo "SELFTEST FAIL: it red, but without naming the prefix only the workflow has" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds, naming cloud/** as present in the workflow and absent from the README"
+  fi
+
+  echo
+  echo "selftest: a prefix deleted from the README but not from the workflow must FAIL"
+  mkdir -p "$tmp/readme-doc"
+  python3 - "$real_readme" "$tmp/readme-doc/README.md" <<'PYX'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+old = "`connectors/**` `deploy/**` `internal/**`"
+new = "`connectors/**` `internal/**`"
+assert s.count(old) == 1, "readme-doc anchor count=%d" % s.count(old)
+open(dst, "w").write(s.replace(old, new, 1))
+PYX
+  sub_rc=0
+  out="$(README_FOR_CHECK="$tmp/readme-doc/README.md" check_file "$real" "readme-doc" 2>&1)" || sub_rc=$?
+  if [ "$sub_rc" -eq 0 ]; then
+    echo "SELFTEST FAIL: a README missing a prefix the classifier uses read GREEN" >&2
+    rc=1
+  elif ! grep -q 'only in the workflow: deploy/\*\*' <<<"$out"; then
+    echo "SELFTEST FAIL: it red, but without naming the prefix the README dropped" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds, naming deploy/** as dropped from the README"
+  fi
+
+  echo
+  echo "selftest: a REWORDED README row must FAIL on the anchor, not skip silently"
+  python3 - "$real_readme" "$tmp/readme-doc/anchor.md" <<'PYX'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+old = "- `instance` \u2192"
+new = "- the content instance \u2192"
+assert s.count(old) == 1, "anchor mutation count=%d" % s.count(old)
+open(dst, "w").write(s.replace(old, new, 1))
+PYX
+  sub_rc=0
+  out="$(README_FOR_CHECK="$tmp/readme-doc/anchor.md" check_file "$real" "readme-anchor" 2>&1)" || sub_rc=$?
+  if [ "$sub_rc" -eq 0 ]; then
+    echo "SELFTEST FAIL: a README whose routing row no longer matches the anchor read GREEN" >&2
+    rc=1
+  elif ! grep -q 'expected exactly ONE' <<<"$out"; then
+    echo "SELFTEST FAIL: it red, but not on the missing anchor" >&2
+    printf '%s\n' "$out" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds on a reworded routing row rather than matching nothing and passing"
   fi
 
   rm -rf "$tmp"

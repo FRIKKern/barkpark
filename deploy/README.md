@@ -3,30 +3,54 @@
 
 A merge to `main` updates the affected **production** host automatically.
 `.github/workflows/deploy.yml` runs after the merge (CI/merge-gates already
-vetted the change) and is **path-filtered** so a docs-only commit never rebuilds
-a server.
+vetted the change) and is **path-filtered by TREE, not by file type**: there is
+no "docs are exempt" rule. A commit touching only trees absent from the routing
+list below rebuilds nothing — but `deploy/**` is in BOTH rows of that list, so a
+merge that edits only *this file* deploys BOTH production hosts. That is
+deliberate (a `deploy/**` change should roll the boxes); it is written down here
+because the page used to claim the opposite.
+
+**Routing — published here, DERIVED from the workflow.** The prefixes below are
+the `changes` job's classifier regexes, one row per job flag.
+`scripts/check-deployyml-filters.sh` extracts those regexes from
+`.github/workflows/deploy.yml`, extracts these rows from this page, and fails
+naming the difference if they are not the same set — in either direction. So
+this is a checked copy of the predicate, not a hand-maintained memory of it.
+
+- `cp` → **CONTROL PLANE** (barkpark.cloud / barkpark-cp, `deploy/cp-deploy.sh`) — deploys on `cloud/**` `cmd/**` `deploy/**` `internal/**`
+- `instance` → **CONTENT INSTANCE** (guerrilla, `deploy/instance-deploy.sh`) — deploys on `api/**` `cmd/**` `connectors/**` `deploy/**` `internal/**` `scripts/connectors/**` `templates/**`
+- excluded from both: `api/test/**` — dropped from the diff BEFORE either classifier runs, so a test-only merge starts the workflow and deploys nothing
+
+`internal/**` and `cmd/**` ride the control plane because bp-provisioner is
+cross-built from `./cmd/barkpark-provisioner`. `cmd/**` rides the content
+instance too — the one prefix both jobs claim, because `instance-deploy.sh` is
+the only thing that rebuilds `barkpark-agent`. `templates/**` and
+`scripts/connectors/**` ride it because the box builds sites, and the
+cloud-sandbox-runner, FROM those trees.
 
 ```
-merge to main
-   ├─ cloud/** | internal/** | cmd/** changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
-   │    (internal/ + cmd/ because bp-provisioner is cross-built from
-   │     ./cmd/barkpark-provisioner — an internal-only worker fix must roll the CP)
-   └─ api/** | internal/** | connectors/** changed → deploy CONTENT INSTANCE (guerrilla)
-        every deploy: build the IDLE blue/green slot (active one keeps serving)
-        → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
-        Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
+every deploy: build the IDLE blue/green slot (active one keeps serving)
+   → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
+   Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
 ```
 
 The path filter diffs from the **last successful run of this workflow**, not the
-previous push: the concurrency group keeps one pending run, so burst merges cancel
-intermediate runs before they deploy — anchoring to the last success makes the
-surviving run deploy the UNION of every push since (no cancelled range is ever
-skipped), while a docs-only stretch still resolves to a no-op.
+previous push, so a surviving run deploys the UNION of every push since that
+success and no range is ever skipped. Every push now gets its OWN concurrency
+group with `cancel-in-progress: false` (deploy.yml, `task-8e5eae5c71635a5e`):
+nothing is evicted and the oldest queued deploy keeps the FIFO position it
+earned. The retired single-group model evicted a pending run on every merge and
+reset its queue position, which starved deploys under a merge storm — so do NOT
+read a queued run here as one that GitHub will discard. Serialisation now lives on the box:
+`instance-deploy.sh` and `cp-deploy.sh` each take the deploy `flock` (waiting up
+to 30 min), then pull `origin/main`'s TIP under the lock, so a run whose tree a
+predecessor already shipped exits at the coalesce arm instead of deploying
+twice. A stretch of merges touching no listed tree still resolves to a no-op.
 
-| Target | Trigger paths | Script | Mechanism |
+| Target | Job flag | Script | Mechanism |
 |---|---|---|---|
-| Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for `cp-deploy.sh --rollback`, which RECREATES it — never `docker start`, which would replay the env baked in at creation) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `api/**`, `internal/**`, `connectors/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
+| Control plane | `cp` (trigger paths: the routing list above) | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for `cp-deploy.sh --rollback`, which RECREATES it — never `docker start`, which would replay the env baked in at creation) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
+| Content instance | `instance` (trigger paths: the routing list above) | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
 
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
@@ -50,9 +74,15 @@ auto-reverting; port-flip-safe). Reference block + manual arming:
 script: `bash deploy/instance-deploy_test.sh` — 494 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
-and their install guards, and the on-box-compile ruling below. Each of the three check counts on this page is READ
-BACK and asserted by the engine it describes, which fails naming both numbers
-when they disagree — so a count here cannot drift silently again.
+and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
+<N> checks` count on this page is READ BACK and asserted by the engine it
+describes, which fails naming both numbers when they disagree — so a count here
+cannot drift silently again. The sentence names no total on purpose: it used to
+say "the three check counts" while the page carried five, and the fifth
+(`cp-cutover-gaps.sh`) was read back by nothing. `deploy/cp-deploy_test.sh` now
+holds the claim as a PREDICATE — it derives the anchor set from this page and
+asserts each named engine carries a self-anchored readback — so engine number
+six is judged the day its count is published.
 
 **Remote MCP endpoint (`/mcp`).** `instance-deploy.sh` arms an idempotent
 path-based Caddy route (`handle /mcp /mcp/*` → `localhost:4010`, marker
