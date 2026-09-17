@@ -12774,8 +12774,17 @@ test("cch-r21-w22: no comment in this file types a scenario denominator the corp
   // CONTROL, INSIDE THE MEASUREMENT — the scan can say YES. Run on a COPY, so
   // CI's existing invocation of this suite wires it and no separate test can be
   // stopped or filtered out.
-  const planted = SRC.replace("// The classifier both sweeps share:",
-    "// measured across all " + (names.length - 1) + " scenarios\n// The classifier both sweeps share:");
+  // Through replaceUnique (the file's own import), never a bare `.replace`: a
+  // bare string needle takes the first match anywhere and is SILENT when it
+  // drifts, so a control that mutated nothing would look exactly like one that
+  // passed. replaceUnique REFUSES a drifted or ambiguous needle instead.
+  // The anchor is SPELLED IN TWO PIECES on purpose: written whole, this literal
+  // would itself be a second occurrence of the line it targets, and replaceUnique
+  // would refuse the ambiguity it exists to catch.
+  const anchor = "const CORPUS" + ' = await import("./__preview__/scenarios.mjs");';
+  const planted = replaceUnique(SRC, anchor,
+    "// measured across all " + (names.length - 1) + " scenarios\n" + anchor,
+    { what: "cch-r21-w22 CONTROL: plant a typed denominator" });
   assert.notEqual(planted, SRC, "the control must actually mutate the source");
   assert.ok(planted.split("\n").some((l) => /^\s*\/\//.test(l) && /\b\d+\s+scenarios\b/.test(l)),
     "CONTROL: a typed denominator planted in a comment must be caught by this scan");
