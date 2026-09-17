@@ -24,6 +24,7 @@
 .github/workflows/deploy.yml	CONDITIONAL
 .github/workflows/doc-gates.yml	CONDITIONAL
 .github/workflows/elixir.yml	ALWAYS
+.github/workflows/gh-retry-selftest.yml	CONDITIONAL
 .github/workflows/go-format.yml	CONDITIONAL
 .github/workflows/go-tests.yml	CONDITIONAL
 .github/workflows/grip-suite.yml	CONDITIONAL
