@@ -222,6 +222,12 @@ normalize() {
 
 save_frame()      { snap "$1"  | normalize >"$EVID/$2"; }
 save_row()        { snap "$1"  | sed -n "$2p" >"$EVID/$3"; }
+# save_row's normalized twin. A raw row save is only byte-stable if the row
+# carries no churn — a CLAIMED row paints a live braille spinner, so saving one
+# raw makes two otherwise identical hermetic runs differ by one glyph (measured:
+# ⠧ vs ⠦ on the same assert). Any row save that can land on a claimed task goes
+# through normalize().
+save_row_norm()   { snap "$1"  | sed -n "$2p" | normalize >"$EVID/$3"; }
 save_row_styled() { snape "$1" | sed -n "$2p" >"$EVID/$3"; }
 
 # 1-based line number of the compose header row. The header sheds its
@@ -242,6 +248,29 @@ arrow_col() {
 
 # 1-based line number of the ▎ selection marker
 marker_line() { snap "$1" | grep -n '▎' | head -1 | cut -d: -f1; }
+
+# 1-based line numbers of the BOARD spine's COUNTED overflow affordances —
+# windowSpine's "↑ N more above" / "↓ N more below" (render.go). The count is
+# what distinguishes them from the reading/preview pane's COUNTLESS "↑ more
+# above" / "↓ more below" affordance (rightPaneMarkerAt), which is a different
+# thing entirely: the counted board markers are click-targets that step the
+# cursor (D119, wideBoardMarkerAt -> moveCursor), the countless ones are not.
+# The `^ *` anchor keeps the match on the board side of the gutter — the reader
+# pane's marker is always indented past the divider.
+board_down_marker_line() { snap "$1" | grep -nE '^ *↓ [0-9]+ more below' | head -1 | cut -d: -f1; }
+board_up_marker_line()   { snap "$1" | grep -nE '^ *↑ [0-9]+ more above' | head -1 | cut -d: -f1; }
+
+# press a key literally and let the board settle
+key() { sgr "$1" "$2"; sleep 0.4; }
+
+# drive the cursor to the very top: moveCursor clamps at row 0, so N k-presses
+# for any N past the spine length is an idempotent "go home" — used to restore
+# the pre-gesture state so the asserts that follow see the same board.
+cursor_home() {
+  local i=0
+  while [ "$i" -lt 60 ]; do sgr "$1" "k"; i=$((i+1)); done
+  sleep 0.6
+}
 
 # 1-based line number of the first child task row (├─ / └─ spine row)
 leaf_line() { snap "$1" | grep -n '^ *[├└]─' | head -1 | cut -d: -f1; }
@@ -402,6 +431,114 @@ fi
 save_frame "$WIDE" baseline-wide.txt
 HL=$(header_line "$WIDE")
 note "wide header located on line $HL"
+
+# ── G9+G10 (hermetic): the COUNTED spine overflow markers paint, and a click
+# ── on one steps the cursor exactly one row (D119, D130) ─────────────────────
+# PRECONDITION, not decoration: windowSpine paints these affordances only while
+# len(spineLines) > avail. The 11-doc fixture corpus did not overflow the wide
+# spine at 130x40, so before ttw22-fixture-overflow-enrichment grew it these
+# asserts could not have fired AT ALL — and a gesture class that cannot fire is
+# indistinguishable from one that passes. The enriched corpus (fixture/main.go,
+# floors in auditCorpus) makes the overflow a boot-time fact, and the first
+# assert below is the tripwire that says so out loud if it ever stops being one.
+#
+# "Exactly one step" is measured DIFFERENTIALLY, against the keyboard: one `j`
+# is the definition of one step, so the marker click is required to land on the
+# SAME task one `j` lands on — no line arithmetic, no assumption about which row
+# follows which, and immune to the window scrolling under the gesture.
+if [ "$MODE" = hermetic ]; then
+  MK_DOWN=$(board_down_marker_line "$WIDE")
+  MK_UP=$(board_up_marker_line "$WIDE")
+  if [ -n "$MK_DOWN" ]; then
+    save_row_norm "$WIDE" "$MK_DOWN" g9-marker-down-boot.txt
+    ok "G9 wide spine OVERFLOWS at 130x40: counted '$(snap "$WIDE" | sed -n "${MK_DOWN}p" | sed 's/│.*$//; s/^ *//; s/ *$//')' painted on board line $MK_DOWN"
+  else
+    bad "G9 no counted '↓ N more below' on the wide board — the fixture corpus no longer overflows the spine, so every marker assert below is measuring nothing"
+  fi
+  # At boot the window is pinned at the top (slideTop top=0), so the UP marker
+  # must be ABSENT. This is the quiet arm: it says the markers track the window
+  # rather than being unconditional chrome.
+  if [ -z "$MK_UP" ]; then
+    ok "G9 no counted '↑ N more above' at boot (window pinned at top=0 — the markers track the window, they are not unconditional chrome)"
+  else
+    bad "G9 counted up-marker painted at boot on line $MK_UP (window should be pinned at top=0)"
+  fi
+
+  # ── G10: click the DOWN marker == one `j` ──────────────────────────────────
+  M0=$(marker_line "$WIDE"); T0=$(row_ident "$WIDE" "$M0")
+  key "$WIDE" "j"
+  MJ=$(marker_line "$WIDE"); TJ=$(row_ident "$WIDE" "$MJ")
+  key "$WIDE" "k"
+  MB=$(marker_line "$WIDE"); TB=$(row_ident "$WIDE" "$MB")
+  if [ -n "$TJ" ] && [ "$TJ" != "$T0" ] && [ "$TB" = "$T0" ]; then
+    note "G10 calibrated one keyboard step: \"$T0\" -j-> \"$TJ\" -k-> \"$TB\""
+  else
+    bad "G10 keyboard calibration failed (\"$T0\" -j-> \"${TJ:-none}\" -k-> \"${TB:-none}\") — the click comparison below would be vacuous"
+  fi
+  MK_DOWN=$(board_down_marker_line "$WIDE")
+  if [ -n "$MK_DOWN" ] && [ -n "$TJ" ] && [ "$TJ" != "$T0" ]; then
+    click "$WIDE" 8 "$MK_DOWN"
+    MC=$(marker_line "$WIDE"); TC=$(row_ident "$WIDE" "$MC")
+    save_row_norm "$WIDE" "$MC" g10-marker-click-selected-row.txt
+    if [ "$TC" = "$TJ" ]; then
+      ok "G10 click on the counted ↓ overflow marker (line $MK_DOWN) stepped the cursor EXACTLY one row: \"$T0\" -> \"$TC\", the same task one \`j\` selects (D119 wideBoardMarkerAt -> moveCursor)"
+    else
+      bad "G10 ↓ marker click did not step exactly one row (\"$T0\" -> \"${TC:-none}\", one \`j\` gives \"$TJ\")"
+    fi
+  else
+    bad "G10 could not run: down-marker line '${MK_DOWN:-none}', keyboard step \"$T0\" -> \"${TJ:-none}\""
+  fi
+
+  # ── G10b: scroll the window off the top, then click the UP marker == one `k` ─
+  # Walk DOWN from the top one row at a time until the window first slides —
+  # the instant the ↑ marker appears, top has just left 0 while the spine tail
+  # is still hidden, so BOTH counted markers are on screen. Walking to the
+  # condition is a PREDICATE; a hard-coded press count would be a guess that
+  # silently lands on the wrong window the moment the corpus or the pane
+  # geometry changes (and at the spine's bottom only the ↑ marker paints, so
+  # "press a lot" is not the same gesture at all).
+  cursor_home "$WIDE"
+  i=0
+  MK_UP=$(board_up_marker_line "$WIDE")
+  while [ "$i" -lt 60 ] && [ -z "$MK_UP" ]; do
+    sgr "$WIDE" "j"; sleep 0.2; i=$((i+1))
+    MK_UP=$(board_up_marker_line "$WIDE")
+  done
+  MK_DOWN=$(board_down_marker_line "$WIDE")
+  note "G9 walked $i rows down from the top before the window first slid"
+  if [ -n "$MK_UP" ] && [ -n "$MK_DOWN" ]; then
+    save_row_norm "$WIDE" "$MK_UP" g9-marker-up-scrolled.txt
+    ok "G9 both counted markers paint once the window has scrolled off the top (↑ line $MK_UP, ↓ line $MK_DOWN)"
+  else
+    bad "G9 scrolled window did not paint both counted markers (↑ '${MK_UP:-none}', ↓ '${MK_DOWN:-none}')"
+  fi
+  MS=$(marker_line "$WIDE"); TS=$(row_ident "$WIDE" "$MS")
+  key "$WIDE" "k"
+  MK=$(marker_line "$WIDE"); TK=$(row_ident "$WIDE" "$MK")
+  key "$WIDE" "j"
+  MK_UP=$(board_up_marker_line "$WIDE")
+  if [ -n "$MK_UP" ] && [ -n "$TK" ] && [ "$TK" != "$TS" ]; then
+    click "$WIDE" 8 "$MK_UP"
+    MU=$(marker_line "$WIDE"); TU=$(row_ident "$WIDE" "$MU")
+    if [ "$TU" = "$TK" ]; then
+      ok "G10b click on the counted ↑ overflow marker (line $MK_UP) stepped the cursor EXACTLY one row BACK: \"$TS\" -> \"$TU\", the same task one \`k\` selects"
+    else
+      bad "G10b ↑ marker click did not step exactly one row back (\"$TS\" -> \"${TU:-none}\", one \`k\` gives \"$TK\")"
+    fi
+  else
+    bad "G10b could not run: up-marker line '${MK_UP:-none}', keyboard step \"$TS\" -> \"${TK:-none}\""
+  fi
+
+  # Restore the pre-gesture board: every assert after this one was written
+  # against the boot cursor position.
+  cursor_home "$WIDE"
+  MH=$(marker_line "$WIDE"); TH=$(row_ident "$WIDE" "$MH")
+  if [ "$TH" = "$T0" ]; then
+    ok "G10 board restored to its boot cursor row (\"$T0\") — the asserts that follow see the baseline board"
+  else
+    bad "G10 board not restored after the marker gestures (▎ on \"${TH:-none}\", want \"$T0\")"
+  fi
+fi
 
 # ── G5+G7: divider hover accent + exact 2-col gutter bounds ──────────────────
 # The ↔ affordance recolors and the gutter │ lights on hover; the responding
