@@ -333,6 +333,30 @@ scripts/prod-build-cache-guard.sh'
 #   notes above refuse. The two lists cannot silently drift apart either -- the
 #   test's third arm asserts every capped path is matched by a dispatched glob,
 #   so a new cap row landing without its path here REDS the Elixir gate.
+#   THE UNDECLARED-INDEX CENSUS (2026-09-17, task-a5dc3c755ee33c92) is
+#   deploy/db-undeclared-index-census.sh, the DETECTION half of the read-only-
+#   sweep control (charter D614). It landed wired to no workflow at all, which
+#   is the same shape as the self-attested control it replaces. Its rider is
+#   api/test/barkpark/db_undeclared_index_census_test.exs, riding the already-
+#   required `Elixir gate`; this entry is the other leg, and neither leg is
+#   worth anything alone. Without it a PR touching ONLY the census computes
+#   changes.outputs.test == 'false', mix-test is LEGITIMATELY skipped, and the
+#   required context goes green on the one PR that changed the detector.
+#   TEST_ONLY, not COMPILE: the rider shells it as a subprocess at runtime, so
+#   the compile set would assert a recompile dependency that does not exist.
+#
+#   THE LIVE-VS-SELFTEST DECISION, RECORDED BESIDE THE GATE IT GOVERNS: the
+#   GATED ARM IS `--selftest` ONLY. CI NEVER RUNS `--check`. The live arm reads
+#   pg_indexes on a credentialed production database, which no ordinary runner
+#   has; a gate that needs a credential it lacks either fails OPEN or flakes,
+#   and a flapping guard is defeatable by retry. The hermetic arm is not a
+#   stand-in for the live read and is not named as one -- it covers the PARSER,
+#   which is where both of this detector's shipped defects lived (a
+#   CREATE INDEX quoted in a @moduledoc entering the manifest; a `name:` on a
+#   continuation line missed, making the live repair read UNDECLARED). So:
+#   nothing in CI ever reads pg_indexes. A stray hand-created index on prod is
+#   caught by `--check` run out of band on a credentialed box, never here. The
+#   rider's @moduledoc states the same decision at the other end.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 CLAUDE.md
 js/CLAUDE.md
@@ -377,6 +401,7 @@ api/assets/sheet-grid/**
 apps/mobile/src/papers/portabledoc/blocks/sheet.tsx
 cloud/test/**
 cmd/barkpark/testdata/**
+deploy/db-undeclared-index-census.sh
 deploy/site-deploy-node.sh
 deploy/site-deploy.sh
 docs/api-v1.md
