@@ -200,10 +200,17 @@ if [ ! -f "$DOC" ]; then
   echo "  this arm exists to prevent."
   exit 1
 fi
+# An EMPTY stand-down has nothing to document, and bash 3.2 (the macOS default)
+# expands "${arr[@]}" of an empty array as an unbound variable under `set -u` —
+# which killed this arm mid-run instead of letting the violation report below
+# print. Found by the revert arm of task-859a0dbc8ab0583e: the clean path exits
+# earlier and never reaches here, so only a REAL violation ever hit it.
 undocumented=()
-for s in "${standdown_paths[@]}"; do
-  grep -qF -- "$s" "$DOC" || undocumented+=("$s")
-done
+if [ "${#standdown_paths[@]}" -gt 0 ]; then
+  for s in "${standdown_paths[@]}"; do
+    grep -qF -- "$s" "$DOC" || undocumented+=("$s")
+  done
+fi
 if [ "${#undocumented[@]}" -gt 0 ]; then
   echo "[handle_errors-scope] FAIL — $DOC does not name ${#undocumented[@]} stood-down site(s):"
   for s in "${undocumented[@]}"; do echo "    UNDOCUMENTED  $s"; done
@@ -212,7 +219,11 @@ if [ "${#undocumented[@]}" -gt 0 ]; then
   echo "  stand-down by fixing it."
   exit 1
 fi
-echo "[handle_errors-scope] doc truth arm OK — $DOC names all ${#standdown_paths[@]} stood-down site(s)."
+if [ "${#standdown_paths[@]}" -eq 0 ]; then
+  echo "[handle_errors-scope] doc truth arm OK — the stand-down is EMPTY, so there is nothing $DOC must name."
+else
+  echo "[handle_errors-scope] doc truth arm OK — $DOC names all ${#standdown_paths[@]} stood-down site(s)."
+fi
 
 if [ "$hard" -gt 0 ]; then
   echo "[handle_errors-scope] FAIL — $hard un-stood-down bare handle_errors emission(s)."
