@@ -27,6 +27,7 @@
 //     control and zero mutable attr. PROVEN NON-VACUOUS by a positive control:
 //     the SAME query finds the figure atom's caption control in the SAME document.
 // §3  SELECT → DELETE → UNDO restores the block with its reference VERBATIM.
+// §3b POINTER parity — a real click on the chip mutates nothing and opens nothing.
 // §4  ROUND TRIP IS NOT EDITABILITY — the mounted doc's carried block is
 //     BYTE-identical (JSON.stringify, key order included) to the seed, and the
 //     canvas emits no path that could have changed it.
@@ -279,6 +280,41 @@ try {
         JSON.stringify(restored.attrs.bpBlock),
         before,
         `undo restored the ${label} atom but NOT byte-identically — the ${key} was altered or dropped`,
+      );
+    });
+  }
+
+  // ── §3b POINTER: a click reaches no affordance either ───────────────────────
+  //
+  // The row asks for pointer checks alongside the keyboard ones. A mouse cannot
+  // reach an affordance the keyboard cannot, because there is none to reach: the
+  // node-view's `stopEvent: () => true` means PM never turns a click inside the
+  // chip into a transaction. Driven with real MouseEvents, asserted on the live
+  // document — the pointer twin of §2/§3.
+
+  for (const [label, testId] of [
+    ["sheet", "paper-readonly-sheet"],
+    ["embed", "paper-readonly-embed"],
+  ]) {
+    check(`§3b ${label}: a real click on the chip mutates nothing and opens no control`, () => {
+      const el = byTestId(testId);
+      const chip = el.querySelector(".bp-canvas-readonly-chip");
+      assert.ok(chip, `precondition: the ${label} chip is in the DOM to be clicked`);
+      const before = JSON.stringify(editor.getJSON());
+
+      for (const type of ["mousedown", "mouseup", "click", "dblclick"]) {
+        chip.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true }));
+      }
+
+      assert.equal(
+        JSON.stringify(editor.getJSON()),
+        before,
+        `clicking the ${label} chip changed the document — the read-only atom is not inert to a pointer`,
+      );
+      assert.equal(
+        el.querySelectorAll(CONTROL_SELECTOR).length,
+        0,
+        `clicking the ${label} chip revealed a control — a click-to-reveal retarget affordance exists and §2 missed it`,
       );
     });
   }
