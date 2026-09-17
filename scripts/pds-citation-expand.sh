@@ -205,13 +205,13 @@ mode_selftest() {
 
   # grep_rc <dir> <pattern> <pathspec> -> echoes the rc, never inherits set -e
   grep_rc() {
-    local d="$1" pat="$2" spec="$3" rc=0
-    ( cd "$d" && git grep -nE "$pat" -- "$spec" >/dev/null 2>&1 ) || rc=$?
+    local d="$1" pat="$2" pathspec="$3" rc=0
+    ( cd "$d" && git grep -nE "$pat" -- "$pathspec" >/dev/null 2>&1 ) || rc=$?
     echo "$rc"
   }
   lit_rc() {
-    local d="$1" lit="$2" spec="$3" rc=0
-    ( cd "$d" && git grep -qF "$lit" -- "$spec" ) || rc=$?
+    local d="$1" lit="$2" pathspec="$3" rc=0
+    ( cd "$d" && git grep -qF "$lit" -- "$pathspec" ) || rc=$?
     echo "$rc"
   }
   commit() { git -C "$tmp" add -A && git -C "$tmp" -c user.email=t@t -c user.name=t commit -qm x; }
@@ -264,17 +264,20 @@ mode_selftest() {
   chk 0 "$(lit_rc "$tmp" 'PDS-D336' 'scripts/pds-suffix.sh')" \
        "ARM 4b a letter-suffixed PREFIX (D391b/D336) is expanded, not skipped"
 
+  # Assertions below read with a herestring, never `printf | grep -q`: under
+  # `set -o pipefail` grep -q exits on the first match, printf takes SIGPIPE,
+  # and the pipeline returns 141 — an arm that fails only under load.
   # ARM 5 — the counter separates its denominators. One line carrying two
   # tokens is exactly this row's defect wearing a different hat.
   printf '# %s10%s%s11 and %s12%s%s13 on ONE line\n' "$P" "$S" "$D" "$P" "$S" "$D" > "$tmp/scripts/pds-twoline.sh"
   commit
   local out rc
   out=$( cd "$tmp" && "$SELF" --count 'scripts/pds-twoline.sh' )
-  rc=0; printf '%s\n' "$out" | grep -qE '^  lines      1 ' || rc=1
+  rc=0; grep -qE '^  lines      1 ' <<<"$out" || rc=1
   chk 0 "$rc" "ARM 5  --count reports 1 LINE for two tokens on one line"
-  rc=0; printf '%s\n' "$out" | grep -qE '^  matches    2 ' || rc=1
+  rc=0; grep -qE '^  matches    2 ' <<<"$out" || rc=1
   chk 0 "$rc" "ARM 5b --count reports 2 MATCHES for the same line"
-  rc=0; printf '%s\n' "$out" | grep -qE '^  citations  4 ' || rc=1
+  rc=0; grep -qE '^  citations  4 ' <<<"$out" || rc=1
   chk 0 "$rc" "ARM 5c --count reports 4 CITATIONS — the number lines and matches both hide"
 
   # ARM 6 — --expand is IDEMPOTENT. The FIRST pass here absorbs the fixtures
@@ -283,10 +286,10 @@ mode_selftest() {
   # pass alone would have measured whichever fixtures happened to be left.
   local first second
   first=$( cd "$tmp" && "$SELF" --expand 'scripts/pds-*' ); commit
-  rc=0; printf '%s\n' "$first" | grep -qE '^expanded [1-9][0-9]* file\(s\)$' || rc=1
+  rc=0; grep -qE '^expanded [1-9][0-9]* file\(s\)$' <<<"$first" || rc=1
   chk 0 "$rc" "ARM 6  the pre-pass expands the remaining fixtures (setup asserted, not assumed)"
   second=$( cd "$tmp" && "$SELF" --expand 'scripts/pds-*' )
-  rc=0; printf '%s\n' "$second" | grep -qE '^expanded 0 file\(s\)$' || rc=1
+  rc=0; grep -qE '^expanded 0 file\(s\)$' <<<"$second" || rc=1
   chk 0 "$rc" "ARM 6b --expand is idempotent (second pass expands 0 files)"
 
   rm -rf "$tmp"
