@@ -2680,6 +2680,33 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   @doc """
+  `--clear-rerun`: the SUBTRACTION door on `content.disposition_rerun`
+  (task-fcc590f205433209). Read the same way as the two supersession overrides
+  and kept separate from both — removing the probe and replacing the reason are
+  different acts, and a caller must say which one they mean. Absent → `nil`, so
+  `put_opt/3` leaves the opt off and `Tasks.Stage` leaves the field alone.
+  """
+  @spec stage_clear_rerun(map()) :: true | nil
+  def stage_clear_rerun(params) do
+    flag = Map.get(params, "clear_rerun") || Map.get(params, "clear-rerun")
+
+    if stamp_flag?(flag), do: true, else: nil
+  end
+
+  @doc """
+  `--keep-rerun`: the deliberate-KEEP door. The caller stating that the
+  `content.disposition_rerun` already on the row still binds the reason they are
+  writing — the shared/kept shape PDS-D391b(b) and PDS-D336(a) rule honest.
+  Writes nothing; it only satisfies `rerun_would_orphan`. Absent → `nil`.
+  """
+  @spec stage_keep_rerun(map()) :: true | nil
+  def stage_keep_rerun(params) do
+    flag = Map.get(params, "keep_rerun") || Map.get(params, "keep-rerun")
+
+    if stamp_flag?(flag), do: true, else: nil
+  end
+
+  @doc """
   The `--supersede-instruction` flag, read the same way and kept DELIBERATELY
   SEPARATE from `stage_supersede/1` (task-bd7476eecdede252): the note override
   and the instruction override are two locks, and one key to both would let a

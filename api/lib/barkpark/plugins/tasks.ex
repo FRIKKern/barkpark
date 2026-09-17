@@ -1438,7 +1438,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "supersede",
             type: "bool",
             summary:
-              "Allow --note to REPLACE a different non-blank content.disposition_reason already on the row. Without it that write is refused (409 note_would_supersede) and nothing changes — the refusal shows you the text you would have destroyed. Opt-in PER CALL, never sticky: the flag is you saying you read what is there and are replacing it on purpose. The displaced text stays recoverable from `bp task events --payload` as `payload.staged.superseded_note`. No effect without --note, over a blank/absent reason, or on a re-stage with the same text — none of those destroy anything, so none of them are refused."
+              "Allow --note to REPLACE a different non-blank content.disposition_reason already on the row. Without it that write is refused (409 note_would_supersede) and nothing changes — the refusal shows you the text you would have destroyed. Opt-in PER CALL, never sticky: the flag is you saying you read what is there and are replacing it on purpose. The displaced text stays recoverable from `bp task events --payload` as `payload.staged.superseded_note`. No effect without --note, over a blank/absent reason, or on a re-stage with the same text — none of those destroy anything, so none of them are refused. IT DOES NOT REACH THE RERUN: if the row carries a content.disposition_rerun, superseding its reason under that probe is separately refused (409 rerun_would_orphan) until the same call also says --rerun '<command>', --clear-rerun, or --keep-rerun. Two slots with one key to both locks is one slot wearing a costume."
           },
           %{
             name: "worker",
@@ -1463,6 +1463,12 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/D336(a)): a SHARED rerun over distinct rows is the honest shape."
+          },
+          %{
+            name: "clear-rerun",
+            type: "bool",
+            summary:
+              "REMOVE content.disposition_rerun: after this stage the key is ABSENT (not null). The ONLY door that can subtract this field — `--rerun ''` is blank-is-absent, i.e. a no-op, and /v1/data/mutate refuses the key by name — and the precondition for PDS-D750's REMOVE arm, where a reason that is a pure ruling nothing can check is made honest by taking the probe away rather than by inventing one. It is also one of the three ways past the 409 rerun_would_orphan door (see --supersede). Sending it together with --rerun is a 422 (contradictory_rerun) and NOTHING is written: one re-binds the probe, the other removes it, and the writer must not pick for you. The removal is recoverable — the task.staged event carries disposition_rerun_cleared."
           },
           %{
             name: "instruction",

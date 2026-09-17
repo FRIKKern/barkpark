@@ -1594,6 +1594,14 @@ defmodule BarkparkWeb.TasksController do
         # disposition_reason is refused; the caller has to say they read what
         # is there. `stage_supersede/1` reads both wire spellings.
         |> Params.put_opt(:supersede, Params.stage_supersede(params))
+        # The rerun's OWN two doors (task-fcc590f205433209). Forwarded
+        # separately from `:supersede` for the reason the instruction override
+        # is: a caller saying "I read the reason I am replacing" has not said
+        # anything about the probe that reason hangs on, and one key to both
+        # locks is one slot wearing a costume. Absent → nil → `Tasks.Stage`
+        # defaults to refusing the orphan.
+        |> Params.put_opt(:clear_rerun, Params.stage_clear_rerun(params))
+        |> Params.put_opt(:keep_rerun, Params.stage_keep_rerun(params))
         # THE SECOND DURABLE SLOT (task-bd7476eecdede252). Standing guidance
         # and its OWN override, forwarded separately from the note's — one
         # flag for both would license a verdict-replacer to destroy guidance
@@ -1772,6 +1780,51 @@ defmodule BarkparkWeb.TasksController do
                 "rather than guidance, use --note instead — it lands on " <>
                 "content.disposition_reason, a different durable slot, and leaves this " <>
                 "instruction byte-identical."
+          })
+
+        # A NOTE THAT WOULD STRAND A PROBE (task-fcc590f205433209, PDS-D750).
+        # 409, the twin of the two supersession refusals, and NOTHING was
+        # written — the row is byte-identical on BOTH keys. The rerun is quoted
+        # IN FULL and deliberately NOT bounded the way a note is: a truncated
+        # command cannot be judged, and judging whether it still binds the new
+        # reason is the entire decision this refusal asks for. Reruns are
+        # single commands, not prose.
+        {:error, {:rerun_would_orphan, existing}} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "rerun_would_orphan",
+            field: Tasks.Stage.disposition_rerun_key(),
+            existing_rerun: existing,
+            message:
+              "refusing to replace the disposition_reason on this row while it carries a " <>
+                "disposition_rerun this call says nothing about — replacing the reason under " <>
+                "the probe would leave a green, recent, symbol-specific check attached to a " <>
+                "claim the row no longer makes, and nothing was written. " <>
+                "THE RERUN THAT WOULD HAVE BEEN STRANDED, IN FULL: #{inspect(existing)}. " <>
+                "--supersede is you saying you read the REASON you are replacing; it is not " <>
+                "you saying you read the rerun. Pick one on purpose: --rerun '<command>' " <>
+                "re-binds the probe to the reason you are writing, --clear-rerun removes it " <>
+                "(for a reason that is a pure ruling nothing can check), --keep-rerun states " <>
+                "that the existing probe still binds the new reason — a SHARED rerun across " <>
+                "distinct rows is the honest shape (PDS-D391b(b), PDS-D336(a)) and is never " <>
+                "refused here."
+          })
+
+        # Two intentions about one key. 422, and nothing was written — the
+        # writer must not pick one of them on the caller's behalf.
+        {:error, :contradictory_rerun} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "contradictory_rerun",
+            field: Tasks.Stage.disposition_rerun_key(),
+            message:
+              "--rerun and --clear-rerun in the same call say two incompatible things about " <>
+                "content.#{Tasks.Stage.disposition_rerun_key()} — one re-binds the probe, the " <>
+                "other removes it. Send exactly one. Nothing was written."
           })
 
         {:error, :not_found} ->
