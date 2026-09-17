@@ -130,6 +130,10 @@ on:
       # Its four subjects already ride the globs above; the test itself matched
       # nothing, the design/mirror-fence.test.mjs shape again.
       - "design/graph-palette-authority.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the LIGHT/DARK half — runs the
+      # renderer and records what it paints, so a swapped light/dark arm cannot
+      # hide behind three static gates. Its four subjects ride the globs above.
+      - "design/graph-theme-runtime.test.mjs"
       - "templates/barkpark.template.schema.json"
       - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
@@ -519,6 +523,10 @@ on:
       # Its four subjects already ride the globs above; the test itself matched
       # nothing, the design/mirror-fence.test.mjs shape again.
       - "design/graph-palette-authority.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the LIGHT/DARK half — runs the
+      # renderer and records what it paints, so a swapped light/dark arm cannot
+      # hide behind three static gates. Its four subjects ride the globs above.
+      - "design/graph-theme-runtime.test.mjs"
       - "templates/barkpark.template.schema.json"
       - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
@@ -1171,6 +1179,15 @@ jobs:
           # tokens.json; Canvas 2D never consumes var(), so no CSS gate sees it.
           # Enrols by PREDICATE (every bp-graph.js the walk finds).
           node design/graph-palette-authority.test.mjs
+          # stw-backlog-theme-matrix c2 (partial): the LIGHT/DARK half of the same
+          # criterion. Every gate above reads bp-graph.js STATICALLY, so none can
+          # see WHICH arm of a light/dark token pair the paint path selects —
+          # swap `theme === "light" ? BG_LIGHT : BG_DARK` and mirror-drift,
+          # emit --check and the authority gate all stay green. This one RUNS the
+          # renderer in a node:vm realm against a recording Canvas 2D context and
+          # asserts the painted colour set against design/tokens.json across
+          # explicit theme, setTheme() and "auto". Enrols by the same PREDICATE.
+          node design/graph-theme-runtime.test.mjs
           # cloud-console-hardening wave-5 (D41): the emit --write attribution
           # fence's standing regression test. Drives the real emit.mjs CLI against
           # a throwaway copy of the tree and asserts the fence REFUSES an
