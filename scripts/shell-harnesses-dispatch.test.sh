@@ -28,6 +28,11 @@
 #               copy (anchor matched EXACTLY ONCE, diff non-empty) and the named
 #               refusal must DISAPPEAR — a mutation the harness cannot see is
 #               not a catch
+#   G  ARM NAME  every leg arm whose `run` invokes `--axis`/`--check-alloc` is
+#               NAMED for exactly the set it runs. Both sides come from the same
+#               regex over the same JSON (comments stripped from the body), so a
+#               new axis added to a loop alone reds here; mutation-proved by
+#               adding a fifth axis `q` to one loop in a scratch copy
 #
 # bash 3.2 compatible (macOS runs it too): no associative arrays, no mapfile.
 # python3 + PyYAML are the only unstubbed dependencies; their absence is exit 2
@@ -442,6 +447,120 @@ if ! grep -q 'is not resolvable in this checkout' "$TMP/f.log"; then
   ok "F: with the guard deleted the named refusal DISAPPEARS (mutant rc=$mrc) — the guard is load-bearing"
 else
   bad "F: the mutant still printed the unresolvable-base refusal — the anchor no longer covers the guard"
+fi
+
+# ── G: ARM NAME ↔ ARM LOOP — an arm is named for every axis it runs ─────────
+#
+# THE DEFECT (measured 2026-09-18 on probe PR #19286, task-b183f790876ad00f c3).
+# The pds-harnesses arm named "…: --check-alloc and --axis a over the merged
+# tree" ran FOUR arms — `for arm in --check-alloc "--axis a" "--axis d"
+# "--axis f"` — because #19093 added d and f to the loop and left the name
+# where it was. A planted defect reddened --axis f; the FAILED-arms line still
+# said check-alloc/axis a, and a lead reading it would go to two green arms.
+#
+# THE GUARD IS A PREDICATE, NOT A LIST. Both sides are derived from the same
+# JSON with the SAME regex, so no arm is special-cased and a SIXTH axis added
+# tomorrow to the loop alone reds here with nothing to update but the name:
+#
+#   RUN SIDE   the arm's `run` body with whole-line `#` comments stripped (the
+#              body's prose names --axis a/d/f while explaining WHY they joined;
+#              counting prose would make the guard agree with itself), then
+#              every `--axis <tok>` plus `--check-alloc` if present.
+#   NAME SIDE  the same two patterns over the arm's `name`.
+#   VERDICT    the sets must be EQUAL for every arm whose RUN side is non-empty.
+#
+# An arm that invokes neither pattern is out of the corpus, and G0 refuses a run
+# where the corpus came out empty — an empty corpus compares equal to anything.
+
+arm_token_guard() {  # <legs.json> → 0 equal · 1 drift (named) · 2 cannot measure
+  python3 - "$1" <<'PYG'
+import json, re, sys
+path = sys.argv[1]
+try:
+    legs = json.load(open(path))
+except Exception as exc:
+    sys.stderr.write("cannot read %s: %s\n" % (path, exc)); sys.exit(2)
+
+AXIS = re.compile(r'--axis\s+([A-Za-z0-9]+)')
+def tokens(text):
+    t = set(AXIS.findall(text))
+    if '--check-alloc' in text:
+        t.add('--check-alloc')
+    return t
+
+corpus = 0
+drift = 0
+for leg in legs:
+    for arm in leg.get("arms") or []:
+        name = str(arm.get("name", ""))
+        body = "\n".join(ln for ln in str(arm.get("run", "")).split("\n")
+                         if not ln.lstrip().startswith("#"))
+        run_t, name_t = tokens(body), tokens(name)
+        if not run_t:
+            continue
+        corpus += 1
+        if run_t == name_t:
+            continue
+        drift += 1
+        sys.stderr.write(
+            "DRIFT in leg %r arm %r:\n  the loop RUNS   %s\n  the name SAYS   %s\n"
+            "  missing from the name: %s\n  named but not run:     %s\n"
+            % (leg.get("slug"), name,
+               ", ".join(sorted(run_t)) or "<none>",
+               ", ".join(sorted(name_t)) or "<none>",
+               ", ".join(sorted(run_t - name_t)) or "<none>",
+               ", ".join(sorted(name_t - run_t)) or "<none>"))
+if corpus == 0:
+    sys.stderr.write("CANNOT MEASURE: no arm invokes --axis or --check-alloc — "
+                     "an empty corpus compares equal to anything\n")
+    sys.exit(2)
+if drift:
+    sys.stderr.write("RED: %d of %d arm(s) are named for a different axis set than they run. "
+                     "Rename the arm to list every axis its loop runs.\n" % (drift, corpus))
+    sys.exit(1)
+print("arm name/loop parity: %d arm(s) checked, every name lists exactly the axes it runs" % corpus)
+PYG
+}
+
+LEGS_JSON="$(dirname "$WORKFLOW")/../shell-harness-legs.json"
+if [ ! -f "$LEGS_JSON" ]; then
+  bad "G: $LEGS_JSON not found"
+else
+  if arm_token_guard "$LEGS_JSON" >"$TMP/g1.out" 2>"$TMP/g1.err"; then
+    ok "G1 arm name/loop parity holds: $(cat "$TMP/g1.out")"
+  else
+    bad "G1 arm name/loop parity: $(cat "$TMP/g1.err")"
+  fi
+
+  # G2 MUTATION. A fifth axis joins the LOOP ONLY, in a scratch copy. If the
+  # guard still greens, it is not reading the loop and G1 proved nothing.
+  MUTLEGS="$TMP/legs-mut.json"
+  if python3 - "$LEGS_JSON" "$MUTLEGS" <<'PYM'
+import json, sys
+legs = json.load(open(sys.argv[1]))
+hits = 0
+for leg in legs:
+    for arm in leg.get("arms") or []:
+        run = str(arm.get("run", ""))
+        if 'for arm in --check-alloc' in run:
+            arm["run"] = run.replace('"--axis f"', '"--axis f" "--axis q"', 1)
+            hits += 1
+if hits != 1:
+    sys.stderr.write("mutation anchor matched %d arms (want 1)\n" % hits); sys.exit(2)
+json.dump(legs, open(sys.argv[2], "w"), indent=2)
+PYM
+  then
+    ok "G2 mutation applied to exactly one arm's loop (a fifth axis q, name untouched)"
+    if arm_token_guard "$MUTLEGS" >"$TMP/g2.out" 2>"$TMP/g2.err"; then
+      bad "G2 the mutant PASSED — the guard does not read the loop, so G1 is vacuous"
+    elif grep -q 'missing from the name: q' "$TMP/g2.err"; then
+      ok "G2 the mutant REDS and names the drift: $(grep -m1 'missing from the name' "$TMP/g2.err" | sed 's/^ *//')"
+    else
+      bad "G2 the mutant failed for the wrong reason: $(head -3 "$TMP/g2.err" | tr '\n' ' ')"
+    fi
+  else
+    bad "G2 could not build the mutant legs file"
+  fi
 fi
 
 echo ""
