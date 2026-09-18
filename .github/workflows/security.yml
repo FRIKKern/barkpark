@@ -26,9 +26,12 @@ name: security
 #
 #   ── BASELINE CENSUS — DERIVED AND MACHINE-COMPARED ───────────────────────
 #   The rows below are re-derived from api/.sobelow-skips and compared against
-#   this table by `scripts/security-gate-shape.test.sh` (case 7), which runs in
-#   the BLOCKING `gate-shape` job on every head. Edit the baseline, and this
-#   table must move with it or the gate reds and names the class that drifted.
+#   this table by `scripts/security-gate-shape.test.sh` (case 7), which the
+#   unfiltered `gate-shape` job below runs on every head. Edit the baseline, and
+#   this table must move with it or that job reds and names the class that
+#   drifted. (`gate-shape` is not a required context — see the floor in
+#   .github/required-checks.json — so this is a ratchet a reviewer reads, not
+#   merge authority.)
 #
 #   WHY IT IS A CHECK AND NOT A COMMENT. This integer read 57, then 41, then 35
 #   — each true when written, each rotted in place. The wave-that-wrote-35
