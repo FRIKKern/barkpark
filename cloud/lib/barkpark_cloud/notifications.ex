@@ -1823,6 +1823,25 @@ defmodule BarkparkCloud.Notifications do
   is matched literally and therefore returns nothing. Silently DROPPING an
   unrecognised filter would widen the result set behind the caller's back, which
   is the one failure mode a delivery log must not have.
+
+  ## THE EMPTY/RARE RESULT WAS THE EXPENSIVE ONE (cch-w32-bl), and it is indexed
+
+  A filter that matches PLENTY is cheap: `(team_id, inserted_at)` carries the
+  ORDER BY and the scan stops at the LIMIT. A filter that matches NOTHING — or
+  almost nothing — never fills the LIMIT, so the planner abandons that index and
+  bitmap-scans the team's ENTIRE partition to return zero rows. Re-measured on
+  this tree with EXPLAIN (ANALYZE, BUFFERS) over a seeded 250k-row corpus with a
+  50k-row hot team: `?status=bogus`, `?event=bogus`, `?channel=bogus` and the
+  in-vocabulary-but-empty `?status=suppressed` each cost ~1153 shared buffers and
+  report `Rows Removed by Filter: 50000`, against 7 buffers unfiltered.
+
+  `20260918110000_index_notification_delivery_filter_axes` adds one
+  `(team_id, <axis>, inserted_at)` index per filter axis and takes those to 3-12
+  buffers, with the common-value and unfiltered plans unchanged. THE VOCABULARY
+  WAS NOT THE FIX: rejecting an unknown value at the door would have rescued only
+  the `bogus` line and neither the RARE-but-real one (`?status=pending`, 50 real
+  rows, 1153 → 54 buffers) nor the OPEN-vocabulary `event` axis. The literal-match
+  contract above therefore stands unchanged.
   """
   @spec list_deliveries(Team.t() | binary(), keyword() | pos_integer()) :: [Delivery.t()]
   def list_deliveries(team, opts \\ [])
