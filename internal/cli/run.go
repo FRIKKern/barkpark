@@ -900,6 +900,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// byte of `-o json` stay unchanged (doc_get_draft_perspective.go).
 	emitDocGetDraftPerspective(out, g, ctx, m, cmd, tail, status)
 
+	// A claimed row's draft twin can never be published, and the refusal that
+	// says so prescribes `patch, then publish` — the one path the twin has
+	// already closed, so the two refusals point at each other. The wall is
+	// correct and stays; the SENTENCE is api/'s (lifecycle.ex, tracked as
+	// task-922e616cb9b99243). This adds the sequence that actually lands, read
+	// from the body the dispatch already holds — no probe — and keyed on the
+	// broken remedy phrase so it goes silent the day api/ stops printing it.
+	// stderr only, after the render, so the exit code and every byte of
+	// `-o json` stay unchanged (stale_draft_publish_remedy.go).
+	emitStaleDraftPublishRemedy(out, cmd, tail, status, respBody)
+
 	// The flag only ever overrides the HONEST success path (code == exitOK,
 	// meaning handleResponse's 2xx branch rendered it, not a screen's own
 	// refusal above with its own exit code). Rendering is byte-identical
