@@ -85,6 +85,18 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
     Registry.collect_edge_extractors(baseline: [], ctx: %{doc: doc, dataset: @dataset})
   end
 
+  # The FULL union the projector actually writes: core reference-field edges
+  # PLUS every plugin's projected edges, deduped on {from_id, to_id, kind}.
+  # `project_edges/1` above seeds `baseline: []`, so it sees ONLY the plugin
+  # half — which is exactly the wrong lens for `parent_id`, whose edge is
+  # projected by the CORE extractor off the schema's `reference` declaration.
+  defp project_union(doc) do
+    {:ok, %{edges: edges}} =
+      Barkpark.EdgeProjector.Projector.project(@dataset, [doc], dataset: @dataset)
+
+    edges
+  end
+
   describe "task_edges is the authoritative source (gap #1)" do
     test "a real blocks task_edges row surfaces as a blocks content edge", %{scope: scope} do
       src = publish_task!("t-a", scope)
@@ -186,7 +198,7 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
       {:ok, _} = Tasks.add_dep(src.id, b.id, :blocks)
 
       hydrated = TasksPlugin.hydrate_edges(src)
-      edges = project_edges(hydrated)
+      edges = project_union(hydrated)
 
       to_parent = Enum.filter(edges, &(&1[:to_id] == "t-parent"))
 
@@ -318,7 +330,7 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
       kinds =
         src
         |> TasksPlugin.hydrate_edges()
-        |> project_edges()
+        |> project_union()
         |> Enum.map(& &1[:kind])
         |> Enum.sort()
 
