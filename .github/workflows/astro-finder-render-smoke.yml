@@ -201,4 +201,4 @@ jobs:
       # matches nothing prints "# tests 0" and exits 0.
       - name: Seed-shape control
         working-directory: templates/astro-search-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 5 'src/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 6 'src/**/*.test.ts'

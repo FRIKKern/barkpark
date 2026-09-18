@@ -263,7 +263,7 @@ Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots t
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 497 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 547 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
 retire protecting both live slots, the warm-rollback flip, and the fleet build
 admission gate (below) — including the hazard specific to THIS engine: HEALTH
@@ -744,6 +744,41 @@ The box says this too, in the build log the deployment names: a prebuilt deploy
 runs no build, so `DeployRunner` writes the run's provenance there itself —
 the digest, the staged path, and this unreproducible-release warning — instead of
 leaving the deployment pointing at an empty file.
+
+#### The node runtime target: the same arm, plus a declared ABI
+
+`deploy/site-deploy-node.sh` now carries the same `PLAN_MODE=prebuilt` arm — an
+uploaded tree is staged into `releases/<build_id>/`, `.bp-prebuilt-sha256`
+records the digest the control plane verified, no npm runs on the box, and a
+health-failed prebuilt release fails closed with "re-upload" instead of being
+rebuilt from the provisioned template.
+
+Two things differ, because a node release is a **process**, not a directory of
+files served by Caddy:
+
+* **The uploaded tree IS the release root.** Pack from `.next/standalone`, with
+  `.next/static` and `public/` already folded in (there is no `$SITE_SRC` on the
+  box to take them from). `server.js` must sit at its top; a tree without one is
+  refused with exit 11 before anything is staged.
+* **The artifact must DECLARE the node ABI it was built against**, in a
+  `.bp-node-abi` file at the root of the packed tree:
+
+      node_major=22
+      libc=glibc
+
+  Both keys are required; unknown keys are ignored. A traced `node_modules` can
+  carry compiled native addons bound to one `NODE_MODULE_VERSION` and one C
+  library — cross-machine, those do not 404, they abort at `require()`. Caught at
+  HEALTH that costs a full boot **and** leaves a release the box has no source to
+  rebuild, so the engine refuses a mismatch **before STAGE** (exit 17, zero
+  release dir, no slot booted). `node_major` must match exactly; a `libc`
+  mismatch refuses only when both sides name a real libc — `unknown` on either
+  side is undecided, and an undecided probe must not manufacture a refusal.
+
+**`bp cloud site deploy <site> --prebuilt <dir>` still refuses a non-static
+site** (`internal/cli/cloud_site_cmd.go`, `prebuiltStaticOnlyRefusal`). The box
+half is ready; the CLI packer that emits `.bp-node-abi` and the refusal's
+retirement are a separate change in the CLI fence.
 
 ### The fresh-box push-to-live acceptance run
 

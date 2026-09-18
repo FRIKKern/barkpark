@@ -98,10 +98,17 @@ func TestPrebuiltRefusesEveryNonStaticKindTheServerDeclares(t *testing.T) {
 	if !sawStatic {
 		t.Fatalf("floor guard: %q is not among the kinds read (%v) — the guard's ALLOWED value is missing, so every enrolment below would pass for the wrong reason", "static", kinds)
 	}
+	// NODE IS NO LONGER ENROLLED HERE, and the exclusion is a fact about the
+	// box: deploy/site-deploy-node.sh carries a PLAN_MODE=prebuilt arm, so the
+	// node kinds ("node", and "container" — the server's enum for it) have an
+	// engine to hand bytes to. What this test still measures is the axis it was
+	// built for: a kind the server declares that NO engine serves.
+	enrolled := 0
 	for _, k := range kinds {
-		if k == "static" {
+		if k == "static" || siteIsNode(k, "") {
 			continue
 		}
+		enrolled++
 		t.Run(k, func(t *testing.T) {
 			stdout, stderr, code, cp := runPrebuiltAgainstRuntime(t, k, "")
 			if code == exitOK {
@@ -112,24 +119,47 @@ func TestPrebuiltRefusesEveryNonStaticKindTheServerDeclares(t *testing.T) {
 			}
 		})
 	}
+	// The exclusions above are two of three known kinds, so without this the
+	// day the registry holds only static + node this test would print a green
+	// having enrolled nobody. It is allowed to enrol zero — it must SAY so.
+	if enrolled == 0 {
+		t.Logf("NOTICE: every kind the registry declares (%v) is either static or served by the node engine — this arm enrolled nothing and measured nothing", kinds)
+	}
 }
 
-// TestPrebuiltNodeRefusalNamesTheMarkerCollapse: the node arm is not "we have
-// not got round to it". The ruling of record (2026-09-02) says HEALTH certifies
-// the INJECTION — bp-build-id reaches the served page out of the slot env this
-// deploy writes, never out of the uploaded bytes — and that is the sentence an
-// operator needs in order to understand why the digest, not HEALTH, would be
-// carrying the whole of the integrity claim.
-func TestPrebuiltNodeRefusalNamesTheMarkerCollapse(t *testing.T) {
-	stdout, stderr, code, _ := runPrebuiltAgainstRuntime(t, "node", "node-slot")
-	if code == exitOK {
-		t.Fatalf("a node site must not accept --prebuilt")
+// TestPrebuiltNodeRefusalIsRetiredAndItsCLAUSEIsSilent records the retirement at
+// the level this file owns: the PREDICATE.
+//
+// The refusal it replaces was never "we have not got round to it" — the ruling
+// of record (2026-09-02) said HEALTH certifies the INJECTION (bp-build-id
+// reaches the served page out of the slot env this deploy writes, never out of
+// the uploaded bytes) and told the lane to declare a node ABI instead. Both
+// halves now exist: the engine's PLAN_MODE=prebuilt arm refuses an ABI mismatch
+// before STAGE, and the packer emits .bp-node-abi. So the clause goes quiet for
+// node while staying loud for everything with no engine.
+//
+// This is the predicate-level RED-WHEN-REVERTED arm: restore the node arm of
+// prebuiltUnservableClause and the first two cases below fail.
+func TestPrebuiltNodeRefusalIsRetiredAndItsCLAUSEIsSilent(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, target string
+	}{
+		{"node by target", "node", "node-slot"},
+		{"container, the server's node enum", "container", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if clause := prebuiltUnservableClause(tc.kind, tc.target); clause != "" {
+				t.Fatalf("node has an engine arm now; the clause must be silent, got %q", clause)
+			}
+		})
 	}
-	all := stdout + stderr
-	for _, want := range []string{"HEALTH certifies the injection", "declare a node ABI", "node/SSR"} {
-		if !strings.Contains(all, want) {
-			t.Fatalf("the node refusal must state the ruling of record (%q):\n%s", want, all)
-		}
+	// The QUIET arm of the retirement: the sentence itself must be gone from the
+	// binary, not merely unreached on one path.
+	if clause := prebuiltUnservableClause("bun", ""); !strings.Contains(clause, "bun") {
+		t.Fatalf("a kind with no engine must still be refused by name, got %q", clause)
+	}
+	if strings.Contains(prebuiltUnservableClause("bun", ""), "node/SSR") {
+		t.Fatalf("the retired node sentence is still being printed for other runtimes")
 	}
 }
 

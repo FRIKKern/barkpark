@@ -28,7 +28,10 @@ defmodule BarkparkWeb.UndeclaredSuccessReceiptTest do
 
     * `SearchController.delete_search_synonym/2` /
       `V1.MediaController.delete_search_synonym/2` —
-      `CATCH-ALL-TO-SUCCESS, 2 undeclared of 3 fired`. The arm fires because the
+      `CATCH-ALL-TO-SUCCESS, 0 undeclared of 3 fired` — it read `2 undeclared of
+      3 fired` for two waves AFTER these rulings shipped, because a code comment
+      does not reach the census's `@declared` register; the rows landed under
+      task-477972989335da51. The arm fires because the
       clause head is a discarding variable (`_ws_id`) whose body renders
       `ok: true`. That head is the NON-NIL half of the tenancy split, not a
       failure sink, and `Synonyms.delete/4` is `:ok | {:error, :not_found}` —

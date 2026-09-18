@@ -10,19 +10,9 @@ name: security
 # Jobs:
 #   1. sobelow    — Phoenix-aware static analysis. Surfaces NEW insecure
 #                   patterns: the pre-existing findings on main are captured
-#                   in api/.sobelow-skips (the reviewed baseline — 35 rows at
-#                   628b88afe on 2026-09-11: 28 AST-anchored (Traversal.FileModule
-#                   18 + DOS.StringToAtom 6 + XSS.Raw 3 + XSS.SendResp 1) + 6
-#                   Config.CSRF + 1 Config.HTTPS. DERIVATION, so the next reader
-#                   re-measures instead of trusting this line:
-#                   `awk 'NF{n++} END{print n}' api/.sobelow-skips` — the file
-#                   carries ONE leading blank line and NO comment rows, so a bare
-#                   `wc -l` under-counts by one (35 rows, 36 lines, no trailing
-#                   newline) and must not be used. Per-class:
-#                   `grep -v '^[[:space:]]*$' api/.sobelow-skips | sed 's/:.*//' |
-#                   sort | uniq -c`. This integer read 41 until 2026-09-11 and 57
-#                   before that; each was true when written and rotted in place,
-#                   which is why the command now travels with the number.); `--exit Low`
+#                   in api/.sobelow-skips (the reviewed baseline; the census is
+#                   the `census:` table below, and it is COMPARED, not trusted).
+#                   `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
 #                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
 #                   derived from compiled AST and are NOT stable across Elixir
@@ -33,6 +23,40 @@ name: security
 #                   the baseline is regenerated IN CI (matched toolchain) or the
 #                   30 real high/medium findings are remediated (task-c9d6d29cc0059d2a),
 #                   then flip to blocking.
+#
+#   ── BASELINE CENSUS — DERIVED AND MACHINE-COMPARED ───────────────────────
+#   The rows below are re-derived from api/.sobelow-skips and compared against
+#   this table by `scripts/security-gate-shape.test.sh` (case 7), which the
+#   unfiltered `gate-shape` job below runs on every head. Edit the baseline, and
+#   this table must move with it or that job reds and names the class that
+#   drifted. (`gate-shape` is not a required context — see the floor in
+#   .github/required-checks.json — so this is a ratchet a reviewer reads, not
+#   merge authority.)
+#
+#   WHY IT IS A CHECK AND NOT A COMMENT. This integer read 57, then 41, then 35
+#   — each true when written, each rotted in place. The wave-that-wrote-35
+#   remedy was to publish the derivation command beside the number so "the next
+#   reader re-measures instead of trusting this line". Nobody did: measured at
+#   6c4b904f9 the real file is 24 rows, and the per-class split had drifted in
+#   three of six classes (Traversal.FileModule 18->9, DOS.StringToAtom 6->4,
+#   AST-anchored 28->17). The old note's `wc -l` advice had inverted too — the
+#   file now ends WITH a newline, so `wc -l` OVER-counts by the one leading
+#   blank line rather than under-counting. A derivation command in a comment is
+#   not an instrument; nothing executes it. This table is executed.
+#
+#   DERIVATION (the same two commands the checker runs):
+#     total     — `awk 'NF{n++} END{print n}' api/.sobelow-skips`
+#     per-class — `grep -v '^[[:space:]]*$' api/.sobelow-skips |
+#                  sed 's/:.*//' | sort | uniq -c`
+#
+#     census: total=24
+#     census: Config.CSRF=6
+#     census: Config.HTTPS=1
+#     census: DOS.StringToAtom=4
+#     census: Traversal.FileModule=9
+#     census: XSS.Raw=3
+#     census: XSS.SendResp=1
+#
 #   2. mix-audit  — dependency CVE scan over mix.lock. No continue-on-error, so
 #                   a red DOES fail `Security gate` — but `Security gate` is not
 #                   a required context, so no merge is stopped by it anywhere.

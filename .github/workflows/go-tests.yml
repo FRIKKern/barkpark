@@ -127,6 +127,16 @@ on:
       # very PR that grows the vocabulary (same rule as stage.ex above).
       - "api/lib/barkpark/tasks/close.ex"
       - "api/lib/barkpark/tasks/stamp.ex"
+      # internal/cli/tasks_brief_strip_server_pin_test.go reads this module
+      # (const serverBriefMirrorPath) as the CROSS-FENCE TRIPWIRE on the
+      # purpose-copy strip: the Go reader-side tolerance
+      # briefPurposeStripLegacyThreePass is a COPY of BriefMirror's three-pass
+      # strip_markdown/1, and the arm reds when the shape it imitates changes
+      # (task-8ba550b59141bccb; the remedy lands under task-b641646addba4bdf).
+      # The whole point is that a strip change here with NO .go diff must
+      # dispatch the Go leg, or the tripwire cannot fire on the very PR that
+      # trips it (same rule as stage.ex / close.ex / stamp.ex above).
+      - "api/lib/barkpark/tasks/brief_mirror.ex"
       # internal/cli/mcp_serve_test.go reads these two Studio-loopback spawn
       # sites (studioLoopbackSpawnSites) and pushes the `--tools <word>` they
       # build through the REAL Go parseToolsSelector — the cross-surface lock on
@@ -283,6 +293,10 @@ on:
       # build emits. Exact files, never deploy/**.
       - "deploy/site-runtime-install.sh"
       - "deploy/systemd/barkpark-agent.service"
+      # deploy/site-deploy-node.sh: internal/cli/cloud_site_prebuilt_node_abi_test.go
+      # extracts the engine's own abi_decl_value awk reader out of it and runs it
+      # over the packer's emitted .bp-node-abi bytes (task-486a81da02b65557).
+      - "deploy/site-deploy-node.sh"
       # Starter manifests: internal/template/template_test.go's TestRealManifests
       # loads and validates every checked-in barkpark.template.json and asserts
       # its referenced schema/seed paths exist. templates/place-directory is
