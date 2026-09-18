@@ -188,6 +188,13 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     {"* * * * *", BarkparkCloud.Workers.OAuthStateReaper},
     {"* * * * *", BarkparkCloud.Workers.SseTicketReaper},
     {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
+    # cch-bl-lifecycle-token-reaper: the per-minute sweep that deletes dead
+    # `reset` / `confirm` / `change_email` `user_tokens` rows. UNRELATED to every
+    # `:crontab_absent` verdict in this register — no row here promises a
+    # lifecycle-token reap, and this actor touches no billing promise, no team
+    # suspension and no box: it deletes credential residue. Pinned in the same
+    # commit that adds it, per the classification rule in `crontab_agrees/0`.
+    {"* * * * *", BarkparkCloud.Workers.LifecycleTokenReaper},
     {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
     # ssw9-bl-artifact-retention-quota (19 -> 20 rows): the per-minute sweep that
     # deletes `site_artifacts` bytes whose deployment has reached a terminal
