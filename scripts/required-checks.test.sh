@@ -2634,6 +2634,16 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Finder unit specs (dep-free, no browser)"
         --expect-unrendered "Journey smoke — self-test (fixtures, no network)"
         --expect-unrendered "Journey smoke — live demo (report mode, never gates)"
+        # ── 2026-09-18 (task-9f431629b01a4024): search-starter-smoke.yml gained
+        # a fourth job, `graph-smoke` — the browser eye over the Next starter's
+        # corpus graph (templates/search-starter/scripts/graph-smoke.mjs, which
+        # shipped in #18895 proven to MEASURE and invoked by nothing). Same
+        # mechanism as its three siblings directly above: the workflow is
+        # paths-filtered on its `pull_request` arm, so the frozen fixture pair
+        # cannot render it. DERIVED, not remembered:
+        # scripts/required-checks-ack-derive.sh named exactly this one as
+        # MISSING ACK_EX before it was typed here.
+        --expect-unrendered "Corpus graph renders, and a phone gets none of it (headless chromium)"
         # ── 2026-09-12 (task-32fe5f327e91f23d), SECOND pass: four more paths-filtered
         # leaf names the first census pass (25 heads, up to #17963) never sampled —
         # each renders on 1-2 of the 40 most recent merged PR heads (#17966, #17977,
