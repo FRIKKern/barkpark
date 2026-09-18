@@ -15042,3 +15042,14 @@ only shape that rules out a flake being read as a control.**
 by `doc-gates.yml` on `**/*.md` and by the unfiltered task gates, and those were always firing. The measured defect
 was narrower and is the one fixed: **no workflow ran the ARBITER**, and the single workflow that owns the shared
 implementation did not trigger on this charter at all.
+
+### A SIDE-FINDING THE DEMONSTRATION TURNED UP: THE RED'S PRINTED REMEDY DOES NOT WORK
+
+The `UNRESERVED-MINT` failure tells the reader to run `bash deploy/d-number-arbiter.sh --allocate-d 1 --for …`.
+**Running exactly that does not clear the red.** `--allocate-d` mints `max(charter_high_water, ledger_high_water) + 1`,
+and the offending number is *already* the charter high-water — so reserving `D619` allocated `D620`, and the arbiter
+stayed `DIVERGENT` with one more unusable row in the ledger. The remedy is only correct for the ordering the ledger
+exists to enforce (reserve, *then* write); for the violation it is actually printed on, the fix is a hand-edited row
+carrying the offending number, which is what was done here. **A guard that names a violation should not print a
+remedy it has never been run against.** Filed, not fixed here: the arbiter lives in `deploy/`, but the wording and
+an `--allocate-d <n>`-style explicit-number arm are a change to the shared implementation both charters use.
