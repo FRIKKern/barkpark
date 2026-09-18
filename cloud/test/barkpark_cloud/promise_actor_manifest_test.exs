@@ -1659,7 +1659,8 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     # dr-w11: 17 -> 18 (ContentWebhookReconciler).
     # dr-bl-rate-notice: 18 -> 19 (DeployRateAlertWorker).
     # ssw9-bl-artifact-retention-quota: 19 -> 20 (Sites.ArtifactReaper).
-    assert detail =~ "20 rows"
+    # cch-bl-lifecycle-token-reaper: 20 -> 21 (Workers.LifecycleTokenReaper).
+    assert detail =~ "21 rows"
     assert length(configured_crontab()) == length(@scheduled_crontab)
   end
 
