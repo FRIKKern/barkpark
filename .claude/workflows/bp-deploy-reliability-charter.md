@@ -14756,13 +14756,23 @@ footnote.**
 
 ### WHAT IS NOT DONE HERE, NAMED RATHER THAN IMPLIED
 
-The `--check-alloc` arm is not yet wired to run on a PR that touches only this charter. That wiring lives in
-`.github/workflows/shell-harnesses.yml` — the `pds-harnesses` job's `paths:` filter lists
-`.claude/workflows/bp-pds-charter.md` and the `scripts/pds-*` doors, and this charter appears in **no** workflow
-path filter anywhere. `.github/workflows/**` is outside this lane's fence, so it is **routed, not faked**: until
-that filter carries `.claude/workflows/bp-deploy-reliability-charter.md` and `deploy/d-number-reservations.tsv`,
-and the job gains the deploy arm, the mechanism exists and is runnable by hand but **a guard that does not watch the
-file it guards is not yet a guard.** Stated so the next reader does not mistake a ledger for enforcement.
+**THE SENTENCE THAT STOOD HERE WAS FALSE ON THE DAY IT WAS WRITTEN. IT IS CORRECTED IN PLACE, NOT DELETED (D620).**
+It read: *"The `--check-alloc` arm is not yet wired to run on a PR that touches only this charter. That wiring lives
+in `.github/workflows/shell-harnesses.yml` — the `pds-harnesses` job's `paths:` filter lists
+`.claude/workflows/bp-pds-charter.md` and the `scripts/pds-*` doors, and this charter appears in no workflow path
+filter anywhere."* The first two clauses were true of their moment. **THE LAST CLAUSE IS RETRACTED:**
+`doc-gates.yml` selected this charter on BOTH the `pull_request` and the `push` arm, and twice over on each
+(`**/*.md` AND `.claude/workflows/**`), on every day D616 stood — and thirty-odd further arms carry no `paths:`
+filter at all and so matched it too. A downstream row was filed off the retracted clause and inherited it as its own
+premise. The measured set, by workflow and by arm, is D620 below, and `deploy/charter-adoption-check.sh` re-derives
+it on every run so this sentence cannot come back.
+
+**WHAT WAS ACTUALLY NOT DONE, which is narrower and was entirely real:** nothing anywhere ran the `--check-alloc`
+ARM, and `shell-harnesses.yml` — the single workflow that owns the shared arbiter — did not trigger on this charter
+at all. `.github/workflows/**` is outside this lane's fence, so that wiring was **routed, not faked**; it landed in
+`7028ed2d8` (#18884) and was demonstrated red-then-green on a charter-only PR by D619. **A guard that does not watch
+the file it guards is not yet a guard** stands as written. Stated so the next reader does not mistake a ledger for
+enforcement — nor, in the other direction, a doc-gates trigger for an arbiter run.
 
 **HISTORICAL CONTEXT FOR WHY THIS IS URGENT.** The same strict lens counts **16 numbers in this charter defined
 more than once** (633 definitions, 615 distinct — 18 excess definitions): `D14 D30 D31 D66 D68 D142 D206 D214 D256
@@ -15053,3 +15063,68 @@ exists to enforce (reserve, *then* write); for the violation it is actually prin
 carrying the offending number, which is what was done here. **A guard that names a violation should not print a
 remedy it has never been run against.** Filed, not fixed here: the arbiter lives in `deploy/`, but the wording and
 an `--allocate-d <n>`-style explicit-number arm are a change to the shared implementation both charters use.
+
+## D620 — THE ADOPTION CLAIM IS NOW A MEASURED SET WITH A GUARD BEHIND IT. D616'S "NO WORKFLOW PATH FILTER ANYWHERE" WAS FALSE THE DAY IT WAS WRITTEN, AND IS CORRECTED IN PLACE. (2026-09-18)
+
+D616 asserted this charter "appears in no workflow path filter anywhere". **It never did.** `doc-gates.yml` has
+selected it on both arms, by two different globs, since long before D616 was written. `task-8f908f721d054032` was
+filed off that clause and carried it forward as its own premise; D619 corrected the *conclusion* in passing
+("it is matched by `doc-gates.yml` on `**/*.md` and by the unfiltered task gates, and those were always firing")
+but left the false sentence standing at its own site, where the next reader meets it first. **A correction that
+lives in a later block does not repair the earlier one — a grep lands on the falsehood, and the reader who greps is
+exactly the reader the sentence misleads.** D616's paragraph is now corrected in place, with the retracted clause
+quoted verbatim so this ruling is reachable from the words it retracts.
+
+### THE MEASUREMENT, BY WORKFLOW AND BY ARM, RE-DERIVED AND NOT INHERITED
+
+Every `on.pull_request` and `on.push` arm of all 78 files in `.github/workflows/` was evaluated against the path
+`.claude/workflows/bp-deploy-reliability-charter.md` under GitHub's own filter semantics — `**` crosses `/`, `*`
+does not, the last matching pattern wins, and a list with no matching pattern selects only when it holds no
+positive pattern at all. **Four path-filtered arms select this charter, across two workflows:**
+
+<!-- CHARTER-ADOPTION-SET BEGIN — the declared set. `deploy/charter-adoption-check.sh` reds if it stops matching the real `paths:` lists. -->
+```
+doc-gates.yml pull_request
+doc-gates.yml push
+shell-harnesses.yml pull_request
+shell-harnesses.yml push
+```
+<!-- CHARTER-ADOPTION-SET END -->
+
+`doc-gates.yml` matches it twice on each arm (`**/*.md` and `.claude/workflows/**`) and always did.
+`shell-harnesses.yml` matches it by its explicit literal path on both arms, and only since `7028ed2d8` (#18884) —
+that is the one line of this table D616 could have written truthfully, in the negative. **A further 35 arms carry no
+`paths:` filter at all** and therefore match every change to this file, `pr-task-gate.yml` and `task-lease-renew.yml`
+among them. Those 35 are deliberately NOT in the declared set: they change for reasons that have nothing to do with
+this charter, and pinning their roster would buy a red on every unrelated workflow addition. The guard counts them
+and asserts the count is non-zero, which is the only claim about them worth enforcing.
+
+### THE GUARD, AND WHY THE DECLARED SET LIVES IN THIS FILE
+
+`deploy/charter-adoption-check.sh` derives the OBSERVED set from `.github/workflows/` and the DECLARED set from the
+marker block above, and reds on either direction of disagreement: `UNDECLARED` when a filter selects the charter and
+the charter does not say so, `STALE` when the charter claims a watcher that no longer watches. It REFUSES — exit 2,
+never a pass — on a missing charter, a missing marker block, an unparseable workflow, or an absent PyYAML.
+
+**Both drift directions are live, and only one of them touches this file.** The sentence D616 got wrong did not rot;
+it was wrong on arrival. The *next* one will rot, because a `paths:` list somewhere else moves. So the guard is
+wired into `doc-gates.yml`, not into `shell-harnesses.yml`: doc-gates is the only job that triggers on BOTH
+`**/*.md` (this charter) AND `.github/workflows/**` (the filters), so it is the only place the check runs on the
+edit that breaks it. Wiring it to the charter alone would have produced a guard blind to its own commonest failure.
+
+`--selftest` proves it in both directions over `mktemp` fixtures, 7 cases, no network and no token: the true tree is
+GREEN (a guard that cannot be quiet is noise), a dropped row reds `UNDECLARED`, an invented row reds `STALE`, **a
+widened filter in an untouched-charter tree reds** — that is the drift case, and it is the reason the guard exists —
+a missing marker block REFUSES rather than passing, a genuinely unwatched charter reds `NO-WATCHER`, and a mixed
+positive-plus-negative `paths:` list does not select a path none of its positives match.
+
+### A SIDE-FINDING: THE REPO'S OTHER PATH MATCHER GETS THE MIXED-NEGATION CELL WRONG
+
+`scripts/lib/dispatch-filter-census.py`'s `matches()` falls back, when no pattern matched, to
+`any(p.startswith("!") for p in patterns)` — GitHub's rule for a negation-ONLY list, applied to any list. On
+`origin/main` that makes `deploy.yml`'s `push` arm select **every** path: its `paths:` carries eight positives and
+one `!api/test/**`, so a path matching none of them is returned as selected. The first cut of this census inherited
+the same fallback and reported `deploy.yml push` as a watcher of this charter; the corrected rule drops it, which is
+why the table above says four arms and not five. **The bug is in the gates fence and is filed, not fixed here** —
+but the lesson is this lane's: *a matcher copied for its shape carries the cell you did not test.* This guard's case
+G exists to hold that cell down for good.

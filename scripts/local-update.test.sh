@@ -46,7 +46,10 @@ git push -q -u origin main 2>/dev/null
 # The subject runs `cd "$(dirname $0)/.."`, so place it at <repo>/scripts/.
 cp "$SCRIPT" scripts/local-update.sh
 chmod +x scripts/local-update.sh
-git add scripts/local-update.sh; git commit -qm harness
+# …and it SOURCES scripts/lib/bp-staleness.sh, so the fixture carries that too.
+mkdir -p scripts/lib
+cp "${BP_STALENESS_SH:-$HERE/lib/bp-staleness.sh}" scripts/lib/bp-staleness.sh
+git add scripts/local-update.sh scripts/lib/bp-staleness.sh; git commit -qm harness
 
 run() { # run [env...] -> prints "rc=<n>"; stdout+stderr captured
   ( cd "$TMP/work" && "$@" bash scripts/local-update.sh >"$TMP/out.txt" 2>&1 )
@@ -113,6 +116,95 @@ check "no git pull carries --autostash"        0 "$(grep -E '^[[:space:]]*git[[:
 # named in the file — so the check above is looking at something real.
 check "  (a git pull line exists at all)"      1 "$(grep -cE '^[[:space:]]*git[[:space:]]+pull' "$SCRIPT" | awk '{print ($1>0)?1:0}')"
 check "  (the file still explains the flag)"   1 "$(grep -c -- '--autostash' "$SCRIPT" | awk '{print ($1>0)?1:0}')"
+
+echo ""
+echo "== 6. OLD==NEW must STILL rebuild a bp that is behind origin/main =="
+# THE DEFECT. The rebuild used to be decided purely from this invocation's pull
+# delta, and the OLD==NEW arm exited 0 before reaching it — so when another
+# session had already pulled this shared checkout (or the operator ran a bare
+# `git pull` first), `make update` printed "Already up to date" and left the
+# stale binary installed. `make doctor` reds on exactly that binary, so the
+# gauge could see what the prescribed fixer could not fix.
+#
+# HERMETIC: its own origin+clone, a fake `bp` whose `version` prints an OLD
+# commit, and a fake `make` whose cli-build writes a recognisable dist/bp.
+# BP_INSTALL points AT the fake bp, so "was it reinstalled" is a file read.
+B="$TMP/behind"; mkdir -p "$B/bin"
+GITQ="git -c user.email=t@t -c user.name=t -c commit.gpgsign=false -c init.defaultBranch=main"
+$GITQ init -q --bare "$B/origin.git"
+$GITQ clone -q "$B/origin.git" "$B/work" 2>/dev/null
+mkdir -p "$B/work/scripts/lib"
+cp "$SCRIPT" "$B/work/scripts/local-update.sh"
+cp "${BP_STALENESS_SH:-$HERE/lib/bp-staleness.sh}" "$B/work/scripts/lib/bp-staleness.sh"
+printf 'package main\n\nfunc main() {}\n' > "$B/work/main.go"
+$GITQ -C "$B/work" add -A; $GITQ -C "$B/work" commit -qm A
+$GITQ -C "$B/work" branch -M main
+$GITQ -C "$B/work" push -q -u origin main 2>/dev/null
+OLD_SHA="$($GITQ -C "$B/work" rev-parse HEAD)"     # the commit the fake bp was built at
+# origin/main moves on with a GO change, and this checkout pulls it — so the
+# checkout is ALREADY current and the run below has OLD==NEW.
+printf 'package main // v2\n\nfunc main() {}\n' > "$B/work/main.go"
+$GITQ -C "$B/work" add -A; $GITQ -C "$B/work" commit -qm 'B: go change'
+$GITQ -C "$B/work" push -q origin main 2>/dev/null
+$GITQ -C "$B/work" fetch -q origin 2>/dev/null
+
+make_fake_bp() { # <path> <sha>
+  cat > "$1" <<EOF
+#!/bin/sh
+[ "\$1" = version ] && { printf '{"cli_version":"fixture","commit": "%s"}\n' "$2"; exit 0; }
+exit 0
+EOF
+  chmod +x "$1"
+}
+cat > "$B/bin/make" <<'EOF'
+#!/bin/sh
+if [ "$1" = cli-build ]; then
+  mkdir -p dist
+  printf 'FRESHLY-BUILT %s
+' "$(git rev-parse HEAD)" > dist/bp
+  chmod +x dist/bp
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$B/bin/make"
+
+run_behind() { ( cd "$B/work" && env PATH="$B/bin:$PATH" BP_INSTALL="$B/bin/bp" \
+    bash scripts/local-update.sh >"$TMP/out6.txt" 2>&1 ); printf 'rc=%s' "$?"; }
+
+make_fake_bp "$B/bin/bp" "$OLD_SHA"
+got="$(run_behind)"
+check "already-current checkout: run succeeds"        "rc=0" "$got"
+check "  ...and REPORTS it was already up to date"    1 "$(grep -c 'Already up to date' "$TMP/out6.txt" | awk '{print ($1>0)?1:0}')"
+# THE LOAD-BEARING ASSERTION: the stale binary was actually replaced on disk.
+check "  ...and the STALE bp was rebuilt+installed"   1 "$(grep -c '^FRESHLY-BUILT ' "$B/bin/bp" | awk '{print ($1>0)?1:0}')"
+check "  ...and says WHY (it predates origin/main)"   1 "$(grep -c 'predates Go changes on origin/main' "$TMP/out6.txt" | awk '{print ($1>0)?1:0}')"
+
+echo ""
+echo "== 6b. NON-VACUITY — a CURRENT bp must NOT be rebuilt =="
+# Without this, a script that rebuilt unconditionally would pass 6 outright.
+TIP_SHA="$($GITQ -C "$B/work" rev-parse origin/main)"
+make_fake_bp "$B/bin/bp" "$TIP_SHA"
+got="$(run_behind)"
+check "current bp: run succeeds"                      "rc=0" "$got"
+check "  ...and bp was NOT rebuilt"                   0 "$(grep -c '^FRESHLY-BUILT ' "$B/bin/bp" | tr -d ' ')"
+check "  ...and says the installed bp is current"     1 "$(grep -c 'is current with origin/main' "$TMP/out6.txt" | awk '{print ($1>0)?1:0}')"
+
+echo ""
+echo "== 6c. a DIVERGED bp is warned about, never rebuilt (a rebuild loops) =="
+# `make cli-build` compiles THIS checkout — the same off-history tree the
+# binary came from — so rebuilding reinstalls the identical binary. doctor.sh
+# says the remedy is a rebase; the fixer must not contradict the gauge.
+$GITQ -C "$B/work" checkout -q -b diverge "$OLD_SHA"
+printf 'sibling\n' > "$B/work/SIBLING.md"
+$GITQ -C "$B/work" add -A; $GITQ -C "$B/work" commit -qm 'E: divergent sibling'
+DIV_SHA="$($GITQ -C "$B/work" rev-parse HEAD)"
+$GITQ -C "$B/work" checkout -q main
+make_fake_bp "$B/bin/bp" "$DIV_SHA"
+got="$(run_behind)"
+check "diverged bp: run WARNS (exit 1, not silent)"   "rc=1" "$got"
+check "  ...and bp was NOT rebuilt"                   0 "$(grep -c '^FRESHLY-BUILT ' "$B/bin/bp" | tr -d ' ')"
+check "  ...and prescribes the rebase, not a rebuild" 1 "$(grep -c 'git pull --rebase' "$TMP/out6.txt" | awk '{print ($1>0)?1:0}')"
 
 echo ""
 echo "---"

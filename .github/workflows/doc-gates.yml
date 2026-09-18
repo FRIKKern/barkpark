@@ -1984,11 +1984,39 @@ jobs:
           echo "selftest exit=$st_rc  gate exit=$gate_rc"
           if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
+      # Charter adoption census (deploy-reliability D620). D616's "WHAT IS NOT
+      # DONE HERE" asserted the deploy-reliability charter "appears in no
+      # workflow path filter anywhere" — false on the day it was written, since
+      # THIS workflow selected it on both arms and by two globs. A downstream row
+      # was filed off the clause. The guard compares the charter's own declared
+      # adoption set against the set derived from .github/workflows/, and reds in
+      # both directions. It lives HERE and not in shell-harnesses.yml (which now
+      # triggers on the charter) for one reason: drift comes from BOTH sides, and
+      # this is the only job whose paths carry `**/*.md` AND `.github/workflows/**`,
+      # so it is the only one that runs on the edit that breaks the claim. Wiring
+      # it to the charter alone buys a guard blind to its commonest failure.
+      # --selftest FIRST (distrust vacuous green): 7 cases over mktemp fixtures,
+      # no network, no token, plants nothing in this repo.
+      - name: Charter adoption census (fails this job)
+        id: s42
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs.
+          # Capture both statuses, run BOTH, adjudicate after.
+          st_rc=0; bash deploy/charter-adoption-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash deploy/charter-adoption-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\", \"s40\": \"Doc drift self-test (tripwire)\", \"s41\": \"Doc drift \u2014 links, routes, placeholders, runnable examples (fails this job)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\", \"s40\": \"Doc drift self-test (tripwire)\", \"s41\": \"Doc drift \u2014 links, routes, placeholders, runnable examples (fails this job)\", \"s42\": \"Charter adoption census (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}

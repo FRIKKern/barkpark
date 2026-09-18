@@ -547,6 +547,107 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
     end
   end
 
+  describe "the REMAINDER of the member relation-by-verb matrix (cch-w44-bl)" do
+    # The describe above pins the cells where the two verbs DISAGREE. These are
+    # the cells where they AGREE and nothing asserted them: a census of
+    # cloud/test/** at cab3bf2fe found each of the five below reachable by no
+    # assertion in the tree, so the server could change its answer and every
+    # cloud test would stay green while the console's MEMBER_AUTHORITY_MATRIX
+    # went on mirroring the old law.
+    #
+    # Each test names the ARM it covers, because each one is mutation-proved
+    # against a DIFFERENT mutation of that arm — two tests that die to the same
+    # edit have proved one thing, not two.
+
+    test "owner on an ADMIN: removal is allowed — the outranks? conjunct" do
+      # ARM: remove_member_as/3's `outranks?(actor_role, target_role)`. The owner
+      # ESCAPE HATCH is not what carries this cell — owner strictly outranks
+      # admin, so the rank conjunct answers on its own. Narrowing that conjunct
+      # to "…and the target is a plain member" is the regression this catches.
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, admin)
+      assert is_nil(Accounts.get_membership(team, admin))
+    end
+
+    test "owner on an ADMIN: demotion to member is allowed — the current-role outranks? arm" do
+      # ARM: update_member_role_as/4's `not self? and not outranks?(actor, current_role)`.
+      # The SIBLING of the cell above, in the verb that has no owner hatch: here
+      # the owner's authority comes from the rank comparison alone, exactly as it
+      # does for removal, which is why these two cells agree while the
+      # owner-on-peer-OWNER pair (the describe above) does not.
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role_as(owner, team, admin, "member")
+
+      assert %TeamMembership{role: "member"} = Accounts.get_membership(team, admin)
+    end
+
+    test "admin on a MEMBER: promotion to ADMIN is allowed — can_grant?'s EQUAL-RANK rule" do
+      # ARM: Authz.can_grant?/3's `rank(target_role) > actor_rank`, a STRICT `>`,
+      # so minting a PEER of your own rank is permitted. Coolify's own guard is
+      # the stricter form and Authz's own @doc calls this an OPEN POLICY
+      # QUESTION, which is precisely why the shipped answer needs a witness: if
+      # the comparison is ever tightened to `>=`, an admin loses the ability to
+      # mint another admin and this cell must be the thing that says so.
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(admin, team, member, "admin")
+    end
+
+    test "MEMBER as actor: removal is refused on EVERY in-ladder target" do
+      # ARM: remove_member_as/3's rank comparison. The one member-as-actor cell
+      # already in this file uses an OFF-LADDER target (the actor-tier floor),
+      # and that test cannot see this arm: an off-ladder target ranks 0, so it is
+      # the `admin?(actor_role)` conjunct that refuses there. On an IN-LADDER
+      # target the floor and the ladder agree, and this pins the ladder half —
+      # loosening `outranks?/2` from `>` to `>=` flips the peer cell below while
+      # leaving the off-ladder test perfectly green.
+      {owner, team} = owned_team()
+      peer = user_fixture()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, peer, "member")
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, peer)
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, admin)
+      assert {:error, :forbidden} = Accounts.remove_member_as("member", team, owner)
+
+      # CONTROL — the refusals above are about the ACTOR, not about these three
+      # rows being unremovable: the very same target falls to an admin.
+      assert {:ok, :removed} = Accounts.remove_member_as("admin", team, peer)
+    end
+
+    test "MEMBER as actor on THEMSELVES: a self role-change is refused — can_grant?'s floor" do
+      # ARM: Authz.can_grant?/3's `not team_admin?(actor, team)` clause, and this
+      # is the ONLY cell in the matrix that can see it. A self role-change takes
+      # update_member_role_as/4's `self?` bypass, so the outranks? clause never
+      # runs and the actor-tier floor is the whole guard. On any OTHER target a
+      # member is refused twice over, and deleting this floor there changes
+      # nothing observable — which is exactly how a floor rots unseen.
+      {owner, team} = owned_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:error, :forbidden} = Accounts.update_member_role_as(member, team, member, "member")
+      assert {:error, :forbidden} = Accounts.update_member_role_as(member, team, member, "admin")
+
+      # CONTROL — the row is not frozen: an owner may change the very same row.
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(owner, team, member, "admin")
+    end
+  end
+
   describe "invite_member/4 — expired re-invite (M5)" do
     test "an EXPIRED unaccepted invite no longer blocks re-inviting the same email" do
       {owner, team} = owned_team()

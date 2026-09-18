@@ -129,6 +129,11 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # doctor.sh section 2 sources its staleness ladder from this library,
+      # and scripts/local-update.sh — the FIXER doctor points at — calls the
+      # same function. An edit here can flip BOTH harnesses below, so it must
+      # be able to trigger this workflow.
+      - "scripts/lib/bp-staleness.sh"
       # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
       # input: its 243 frozen rows and its pinned ledger IDF table ARE the
       # calibration, so an edit there changes what the known pairs score without
@@ -741,11 +746,55 @@ on:
       - "scripts/workflow-owner-check.sh"
       - "scripts/ci-pr-checkrun-floor.sh"
       - ".github/workflow-owners.json"
+      # ── THE PDS CHARTER'S OWN CONTENT ANCHORS (task-ceada0e53f6d2f1d) ──────
+      # Not neighbours, not harnesses: the fifteen files the PDS charter CITES
+      # as content anchors. scripts/pds-charter-anchors-check.sh (arm A of the
+      # pds-harnesses job) resolves each citation against the LINE it names, so
+      # an edit to any of them can ROT an anchor without touching one line of
+      # PDS shell — bp-pds-charter.md's input relationship, read backwards.
+      # Eleven of the fifteen could reach NEITHER half of this file. The cost was
+      # measured: api/lib/barkpark/tasks/board.ex rotted THREE times on
+      # 2026-09-17 (#18909, #18986, the repair between them), each time in
+      # SILENCE on the PR that rotted it, each time surfacing later as a red on
+      # an unrelated PDS PR (#18949's rollup) that could neither have caused it
+      # nor repaired it from its own fence.
+      #
+      # FIVE GLOBS, NOT ELEVEN FILES, AND D26 IS OVERRULED BY A HARD CAP, not by
+      # taste. Every roster row must be a VERBATIM entry of this list (clause A
+      # of scripts/shell-harnesses-dispatch.test.sh), and the roster lives inside
+      # the `changes` job's `run:` block, which GitHub parses as ONE expression
+      # capped at 21000 characters. That block is ~19.7k on main: eleven
+      # per-file rows plus explanatory comments inside the string pushed it to
+      # 21k and GitHub refused the WHOLE FILE — `Invalid workflow file … Exceeded
+      # max expression length 21000`, a startup failure with zero jobs, which
+      # means EVERY harness in this workflow goes dark, not just pds. The globs
+      # cost five rows instead of eleven and leave the block ~1.1k under.
+      #
+      # scripts/pds-*.py is its own entry because `scripts/pds-*.sh` above misses
+      # it ON ITS EXTENSION ALONE — a path in a lane that believes itself covered.
+      #
+      # This WIDENS a trigger, it does not add a gate: shell-harnesses.yml is not
+      # one of main's four required contexts.
+      #
+      # THE PREDICATE, NOT THIS LIST, IS THE GUARD. Arm E of
+      # scripts/pds-charter-anchors-check.sh re-derives the cited set from the
+      # charter on every run, ceiling now locked at 0, so the NEXT anchor pointed
+      # at an untriggerable file reds when it is WRITTEN, not in a later sweep.
+      - "api/lib/barkpark/tasks/*.ex"
+      - "internal/taskboard/*.go"
+      - "internal/cli/tasks_next_cmd.go"
+      - "docs/contracts/canonical-impl-markers.md"
+      - "scripts/pds-*.py"
   push:
     branches: [main]
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # doctor.sh section 2 sources its staleness ladder from this library,
+      # and scripts/local-update.sh — the FIXER doctor points at — calls the
+      # same function. An edit here can flip BOTH harnesses below, so it must
+      # be able to trigger this workflow.
+      - "scripts/lib/bp-staleness.sh"
       # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
       # input: its 243 frozen rows and its pinned ledger IDF table ARE the
       # calibration, so an edit there changes what the known pairs score without
@@ -1312,6 +1361,14 @@ on:
       - "scripts/workflow-owner-check.sh"
       - "scripts/ci-pr-checkrun-floor.sh"
       - ".github/workflow-owners.json"
+      # ── THE PDS CHARTER'S OWN CONTENT ANCHORS (task-ceada0e53f6d2f1d) —
+      # mirrors the pull_request list above. A lane wired on PRs only goes dark
+      # the moment a merge lands, and arm E needs the two lists set-equal.
+      - "api/lib/barkpark/tasks/*.ex"
+      - "internal/taskboard/*.go"
+      - "internal/cli/tasks_next_cmd.go"
+      - "docs/contracts/canonical-impl-markers.md"
+      - "scripts/pds-*.py"
 
 permissions:
   contents: read
@@ -1512,6 +1569,7 @@ jobs:
           task-dup-sweep scripts/fixtures/task-dup-sweep-selftest.json
           doctor-matrix scripts/doctor.sh
           doctor-matrix scripts/doctor.test.sh
+          doctor-matrix scripts/lib/bp-staleness.sh
           merge-verb-table scripts/bp-merge.sh
           merge-verb-table scripts/bp-merge.test.sh
           merge-verb-table scripts/merge-check.sh
@@ -1577,6 +1635,11 @@ jobs:
           pds-harnesses scripts/pds-personal-local-smoke_test.sh
           pds-harnesses docs/setup/personal-local.md
           pds-harnesses scripts/pr-task-gate.sh
+          pds-harnesses api/lib/barkpark/tasks/*.ex
+          pds-harnesses internal/taskboard/*.go
+          pds-harnesses internal/cli/tasks_next_cmd.go
+          pds-harnesses docs/contracts/canonical-impl-markers.md
+          pds-harnesses scripts/pds-*.py
           ci-failure-issue-filer scripts/file-ci-failure-issue.sh
           ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
           distribution-harnesses scripts/install-cli.sh
@@ -1709,6 +1772,7 @@ jobs:
           dispatch-selftest scripts/shell-harness-name-census.sh
           orphan-harnesses scripts/local-update.sh
           orphan-harnesses scripts/local-update.test.sh
+          orphan-harnesses scripts/lib/bp-staleness.sh
           orphan-harnesses scripts/pdf-efficiency-proof.sh
           orphan-harnesses scripts/pdf-efficiency-proof.test.sh
           orphan-harnesses scripts/refute-on-absence-capture-log-check.sh
