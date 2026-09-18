@@ -2000,7 +2000,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # at 176 and the co-edit arm printed only this one moved pin, which is the
   # measurement that the router's 422 bodies are outside the emit scanner's
   # corpus.
-  @go_tag_pinned 381
+  # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18 on this
+  # branch rebased onto origin/main: 381 -> 383. box_error.go is a new source in
+  # the corpus, and `boxErrorEnvelope` carries `hint` and `request_id` — of the
+  # envelope's four keys, `code` and `message` were already in the package union
+  # and ride free, so exactly TWO new NAMES land. MEASURED by the PIN CO-EDIT arm
+  # ("@go_tag_pinned 381 -> 383"), never by arithmetic from the diff.
+  @go_tag_pinned 383
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2085,7 +2091,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "basis" => 7,
     "became_live_at" => 2,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytesRefusal.BoxLogState` joins the single existing declaration — the box-side state the refusal reports verbatim.
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # NEWLY DUPLICATED, 1 -> 2. `box_error` was declared once
+    # (SiteBuildLogRecord, where it was typed `string` and hard-failed the whole
+    # record on the envelope shape the box actually sends); SiteBuildLogBytes now
+    # declares it too. The bytes route had NEVER declared the key, though
+    # BuildLogBytes has merged it all along from the byte-for-byte identical
+    # box_error/1 clause — json.Unmarshal dropped it in silence, which is the
+    # quieter half of the same fault. This register is the only guard that can
+    # notice either site dying.
+    "box_error" => 2,
     "box_log_state" => 2,
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # NEWLY DUPLICATED, 1 -> 2, and born alongside `box_error` for the same
+    # reason — SiteBuildLogBytes declared neither of the 502 arm's own two keys.
+    "box_status" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.BuildID` joins
     # the single existing declaration — the recorder's key, echoed on EVERY
     # answer including the refusals. It rides free on the NAME union.
@@ -2120,7 +2140,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "clock" => 3,
     # 2026-09-10 #17479: 3 -> 4, retry.go added. The throttle envelope's
     # `details.code` — an existing name at a new site.
-    "code" => 4,
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # 4 -> 5. `boxErrorEnvelope.Code` in box_error.go — the box's OWN error code,
+    # a fifth declaration of a name the package already had, so it rides free on
+    # the NAME union and only this row moves.
+    "code" => 5,
     "content_rev" => 2,
     # MetricsSpaceSites.Count joined the five existing `count` declarations
     # — the deployed-sites walk (host-space report, W6 S4). ssw8 (PR #14610)
@@ -2210,6 +2234,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # NEWLY DUPLICATED, 1 -> 2. `boxErrorEnvelope.Hint` joins the single existing
+    # declaration — the box's own "retry shortly" advice, relayed rather than
+    # reworded.
+    "hint" => 2,
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
     # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
     # /v1/tokens PAT surface). `PAT.ID`, 14 -> 15.
@@ -2441,7 +2470,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
+  @cloudclient_sources ~w(box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

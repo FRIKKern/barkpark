@@ -112,6 +112,23 @@ defmodule BarkparkCloud.Accounts do
   @confirm_throttle {1, 300}
   @change_email_throttle {3, 3600}
 
+  # cch-bl-lifecycle-token-reaper: the GRACE WINDOW `reap_lifecycle_tokens/0`
+  # applies to EXPIRED-but-unrevoked `reset` / `confirm` / `change_email` rows,
+  # and the reason it exists at all. `throttled?/3` above implements BOTH
+  # throttles by COUNTING rows: `is_nil(revoked_at) and inserted_at >= since`.
+  # It never looks at `expires_at`. So an expired-but-unrevoked row is STILL a
+  # live vote against the throttle, and deleting it at `expires_at <= now` (the
+  # no-grace shape `reap_sse_tickets/0` and `reap_oauth_exchange_codes/0` use)
+  # would hand the caller back a resend slot early — a spam-DELIVERY regression,
+  # not a hygiene win. `change_email` is the tight case: a 10-minute TTL under a
+  # 3600s throttle window, so the row stops counting 3000s AFTER it expires.
+  #
+  # The bound: a row stops counting at `inserted_at + window`, and
+  # `expires_at >= inserted_at` for every mint here (TTL is non-negative), so
+  # `expires_at + grace >= inserted_at + grace`. Any grace >= the LARGEST window
+  # (3600s) is therefore safe for every context. 7200s is that bound doubled.
+  @lifecycle_reap_grace_seconds 7200
+
   ## Users
 
   @doc """
@@ -1569,6 +1586,28 @@ defmodule BarkparkCloud.Accounts do
   @spec accept_invitation(binary(), User.t()) ::
           {:ok, TeamMembership.t()} | {:error, atom()}
   def accept_invitation(raw_token, %User{} = user) when is_binary(raw_token) do
+    case do_accept_invitation(raw_token, user) do
+      {:ok, %TeamMembership{} = membership} ->
+        dispatch_member_joined(membership, user)
+        {:ok, membership}
+
+      other ->
+        other
+    end
+  end
+
+  def accept_invitation(_, _), do: {:error, :invalid_token}
+
+  # cch-w30-bl-member-joined-alert — THE TRANSACTION, AND ONLY THE TRANSACTION.
+  # Split out so the alert below can fire AFTER the commit, the wave-28
+  # discipline `Registry.transition_deployment_with_site_update/5` follows: the
+  # private function owns `Repo.transaction/1`, the public wrapper matches its
+  # `{:ok, _}` and dispatches outside it. Inside, a notification send would run
+  # on the same connection as an uncommitted write — a recipient read, an SMTP
+  # round-trip and a `notification_deliveries` insert all held inside a row lock
+  # (`lock: "FOR UPDATE"` on the invitation), and a rollback after the mail left
+  # would have told a team about a member who was never added.
+  defp do_accept_invitation(raw_token, %User{} = user) do
     hash = TeamInvitation.hash_token(raw_token)
 
     Repo.transaction(fn ->
@@ -1609,7 +1648,27 @@ defmodule BarkparkCloud.Accounts do
     end)
   end
 
-  def accept_invitation(_, _), do: {:error, :invalid_token}
+  # The team-facing half of an acceptance. `dispatch_event/3` fans to every team
+  # member and never raises into its caller, so a mail problem cannot fail an
+  # acceptance that already committed; a team that has the toggle off (the
+  # default — a join is a success, and successes are opt-in) sends nothing.
+  #
+  # The payload names WHO joined and AT WHAT ROLE, and `Render.joined_clause/1`
+  # is the single owner of that sentence for both rails. `:name` is the key
+  # `Render.render/2` and `EventEmail` already read for the alert's subject, so
+  # the team name rides under it rather than under a tenth spelling.
+  defp dispatch_member_joined(%TeamMembership{} = membership, %User{} = user) do
+    case Repo.get(Team, membership.team_id) do
+      %Team{} = team ->
+        payload = %{name: team.name, email: user.email, role: membership.role}
+        Notifications.dispatch_event(team, :member_joined, payload)
+
+      # The team vanished between the commit and this read. Nothing to name and
+      # nobody to name it to — the acceptance still stands.
+      nil ->
+        :ok
+    end
+  end
 
   @doc "Pending (unaccepted, unexpired) invitations for a team, newest first."
   @spec list_invitations(Team.t()) :: [TeamInvitation.t()]
@@ -3066,6 +3125,101 @@ defmodule BarkparkCloud.Accounts do
       |> Repo.delete_all()
 
     %{reaped: count}
+  end
+
+  ## Account-lifecycle token hygiene (cch-bl-lifecycle-token-reaper)
+
+  @lifecycle_reap_contexts ["reset", "confirm", "change_email"]
+
+  @doc """
+  Delete the DEAD `"reset"` / `"confirm"` / `"change_email"` rows —
+  `revoked_at` stamped immediately, `expires_at` only after a
+  #{@lifecycle_reap_grace_seconds}s GRACE window. Hygiene only; returns
+  `%{reaped: count}`, and `BarkparkCloud.Workers.LifecycleTokenReaper` calls it
+  per minute.
+
+  Same accretion defect the `"sse"` and `"oauth_exchange"` sweeps already paid
+  for, in the last three short-lived contexts that had no owner. None of the
+  three ever DELETEs: `revoke_reset_tokens/2` soft-stamps `revoked_at` both on
+  supersede and on consume; `confirm_user/1` revokes via `Multi.update_all`;
+  `update_user_email/2` stamps `revoked_at` on success AND on lockout. So every
+  password-reset link a user ever requested, and every confirm/change code, was
+  still a row.
+
+  ## WHY THIS DIVERGES FROM THE NO-GRACE RULING
+
+  `reap_sse_tickets/0` and `reap_oauth_exchange_codes/0` delete at
+  `revoked_at IS NOT NULL OR expires_at <= now` exactly, and that ruling is
+  CORRECT THERE: nothing downstream reads a lapsed `"sse"` or
+  `"oauth_exchange"` row. It is WRONG here, and copying it unexamined would have
+  shipped a regression. `throttled?/3` implements `@confirm_throttle` (1/300s)
+  and `@change_email_throttle` (3/3600s) by COUNTING
+  `is_nil(revoked_at) and inserted_at >= since` rows. It does not filter
+  `expires_at`. An expired-but-unrevoked row therefore still counts, so deleting
+  it on expiry alone would silently return a resend slot to the caller ahead of
+  the throttle — spam email delivery, which is precisely the outbound side
+  effect those throttles exist to bound.
+
+  Hence the SPLIT condition, not one uniform one:
+
+    * `revoked_at IS NOT NULL` → delete NOW, no grace. `throttled?/3` already
+      excludes revoked rows from its count, so removing one cannot move the
+      count. Nothing else reads them either: the lockout that
+      `update_user_email/2` enforces persists as `pending_email = NULL` on the
+      USER, not as the burned token row, and every reader here
+      (`user_by_valid_lifecycle_token/2`, `live_lifecycle_tokens/2`, the
+      `FOR UPDATE` change-code lookup) already filters `is_nil(revoked_at)`.
+    * `expires_at <= now - #{@lifecycle_reap_grace_seconds}s` → delete after the
+      grace. See `@lifecycle_reap_grace_seconds` for the arithmetic: the grace
+      is double the LARGEST throttle window, and a row stops counting at
+      `inserted_at + window <= expires_at + window`, so the throttle has always
+      released the row before this clause can reach it.
+
+  STRICTLY these three contexts. `user_tokens` is polymorphic and `session`,
+  `pat`, `2fa_pending`, `device`, `sse`, `oauth_exchange` each have their own
+  lifecycle owner — a revoked `session` row is the tombstone the
+  active-sessions UI renders. `reap_sse_tickets/0` is deliberately NOT widened
+  to cover this: its `context == "sse"` clause is pinned by its own test, and
+  its no-grace ruling is a different (correct) answer to a different question.
+
+  A row with a NULL `expires_at` and no `revoked_at` survives — `NULL <= x` is
+  NULL and `false OR NULL` is NULL — which is right: it is still live.
+  """
+  @spec reap_lifecycle_tokens() :: %{reaped: non_neg_integer()}
+  def reap_lifecycle_tokens do
+    cutoff = DateTime.add(lifecycle_now(), -@lifecycle_reap_grace_seconds, :second)
+    contexts = @lifecycle_reap_contexts
+
+    {count, _} =
+      from(t in UserToken,
+        where: t.context in ^contexts,
+        where: not is_nil(t.revoked_at) or t.expires_at <= ^cutoff
+      )
+      |> Repo.delete_all()
+
+    %{reaped: count}
+  end
+
+  @doc """
+  The grace window `reap_lifecycle_tokens/0` applies to expired-but-unrevoked
+  rows, in seconds. Exposed so the reaper's test can assert the invariant that
+  makes the sweep safe — grace > the largest mint-throttle window — rather than
+  hard-coding a number that could drift away from `@change_email_throttle`.
+  """
+  @spec lifecycle_reap_grace_seconds() :: pos_integer()
+  def lifecycle_reap_grace_seconds, do: @lifecycle_reap_grace_seconds
+
+  @doc """
+  The mint-throttle windows `reap_lifecycle_tokens/0`'s grace must outlive,
+  as `%{context => window_seconds}`. Paired with
+  `lifecycle_reap_grace_seconds/0` so the safety margin is a TESTED relation
+  between the two, not a comment.
+  """
+  @spec lifecycle_throttle_windows() :: %{binary() => pos_integer()}
+  def lifecycle_throttle_windows do
+    {_, confirm_window} = @confirm_throttle
+    {_, change_window} = @change_email_throttle
+    %{"confirm" => confirm_window, "change_email" => change_window}
   end
 
   ## OAuth exchange codes

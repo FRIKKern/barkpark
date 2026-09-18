@@ -1721,6 +1721,7 @@ defmodule Barkpark.Plugins.Tasks do
       # invariant).
     ]
     |> Enum.map(&declare_dataset_on_doc_id_route/1)
+    |> Enum.map(&declare_dataset_on_index_scope_route/1)
   end
 
   # ── THE `?dataset=` DISAMBIGUATOR, DECLARED FROM THE ROUTE ──────────────
@@ -1762,27 +1763,98 @@ defmodule Barkpark.Plugins.Tasks do
   # bare `bp task get <ambiguous-id>` still sends no `?dataset=` and still gets
   # the honest 409. The refusal is what this makes followable, not what it
   # replaces.
-  @doc_id_dataset_flag %{
+  # THE RULE ITSELF NOW LIVES AT THE ASSEMBLY POINT (task-4968634c648cda54).
+  # `Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route/1` applies
+  # the same route predicate over the ASSEMBLED manifest — every plugin's
+  # `cli_commands/0`, not just this one's. That closes the escape hatch this
+  # per-list map left open: `session.link-task` targets
+  # `POST /v1/tasks/:doc_id/sessions` but is declared in
+  # `Barkpark.Plugins.Bulldocs`, so the map below never saw it, while its route
+  # (`TasksController.sessions/2` → `find_task_by_doc_id/2`) can answer the very
+  # 409 the flag exists to make followable.
+  #
+  # This call is KEPT, delegating to that one definition rather than repeating
+  # it, so `Barkpark.Plugins.Tasks.cli_commands/0` stays self-consistent when
+  # read on its own (tests and tooling do read it directly). The shared clause
+  # is idempotent, so applying it here and again at assembly appends nothing
+  # twice.
+  defp declare_dataset_on_doc_id_route(cmd),
+    do: Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route(cmd)
+
+  # ── THE `?dataset=` SCOPE SELECTOR, DECLARED FROM THE ROUTE ─────────────
+  # (task-052c01b723ce1006)
+  #
+  # A SECOND rule, deliberately not folded into the one above. The predicate
+  # there is "this route can answer a 409 `ambiguous_dataset`, so the refusal's
+  # own remedy must be typeable". `GET /v1/tasks` can never answer that: it
+  # COLLAPSES/withholds cross-dataset twins (`Tasks.Query`
+  # `collapse_cross_dataset_twins/1`) instead of refusing. Bolting task.ls onto
+  # the `:doc_id` clause would have needed a hand-written exception, which is
+  # the same stale-by-construction shape both rules exist to avoid.
+  #
+  # THE RULE HERE IS: a command whose ROUTE READS `?dataset=` AS A SCOPE
+  # SELECTOR declares it. "Reads it as a scope selector" means the action binds
+  # the param and it changes WHICH ROWS come back — not that the param merely
+  # reaches the action.
+  #
+  # MEASURED, route by route, against that rule (api/lib/barkpark_web/
+  # controllers/tasks_controller.ex on the commit this landed):
+  #
+  #   * `GET /v1/tasks` (task.ls) — YES. `do_index/4` binds
+  #     `dataset = dataset_param(params)` and hands it to
+  #     `maybe_scope_index_dataset/2`: NAMED narrows the page to that dataset
+  #     (an empty dataset yields an EMPTY page), ABSENT spans every dataset in
+  #     scope and withholds twins. The envelope then NAMES the scope through
+  #     `put_dataset_scope/4` — `page.dataset` / `page.datasets` /
+  #     `page.dataset_scope` ("named" vs "all-datasets-in-scope") /
+  #     `page.dataset_ambiguous`. That is #18531's half; it has been unreachable
+  #     from `bp` because `globalQueryForwards` (internal/cli/globals.go) puts a
+  #     typed `-d` on the wire only for a command that DECLARES the flag
+  #     (`commandDeclaresFlag`, internal/cli/run.go) — so `bp task ls -d x`
+  #     silently returned the same global page. No Go change is needed; this
+  #     declaration IS the wiring.
+  #
+  #   * `GET /v1/tasks/prime` (task.prime) — NO, measured not assumed.
+  #     `prime/2` passes only `scope_opts(conn)` (workspace/project) to
+  #     `Tasks.prime/1` and `Tasks.ready/1`; nothing narrows by dataset. The one
+  #     place `prime` touches the param is `seal_docs/2` → `seal_ctx/1` →
+  #     `request_dataset/1`, which resolves the "task" SCHEMA for the
+  #     field-visibility redaction — it selects which schema redacts, never
+  #     which rows return. Declaring a flag there would advertise a narrowing
+  #     the route does not perform, which is the defect wearing the opposite
+  #     sign. task.prime therefore stays undeclared until its action binds the
+  #     param as a selector.
+  #
+  #   * `POST /v1/tasks/claim` (task.next) — NO. The queue picks by rank, never
+  #     by id or dataset.
+  #
+  #   * `GET /v1/tasks/ready` and `GET /v1/tasks/:doc_id/events` — already
+  #     declare their own dataset flag; the clause below is idempotent and
+  #     leaves an existing declaration exactly as written.
+  @index_dataset_flag %{
     name: "dataset",
     type: "string",
     summary:
-      "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 " <>
-        "`ambiguous_dataset` refusal names: one doc_id may live in two datasets of a " <>
-        "single workspace+project, and the task doors REFUSE such an id rather than " <>
-        "picking a dataset you did not name. Omit it and nothing is picked for you — " <>
-        "an unambiguous id reads normally and an ambiguous one is still refused."
+      "Narrow the listing to ONE dataset — THE INDEX SCOPE SELECTOR. Absent: the page " <>
+        "spans every dataset in the caller's workspace/project scope (`page.datasets` says " <>
+        "which) and a doc_id living in more than one of them is WITHHELD and named once in " <>
+        "`page.dataset_ambiguous`. Named: only that dataset's rows, `page.dataset_scope` " <>
+        "reads \"named\", and a dataset holding no rows answers with an EMPTY page rather " <>
+        "than the global one."
   }
 
-  defp declare_dataset_on_doc_id_route(%{http: %{path_template: path}, flags: flags} = cmd)
-       when is_binary(path) and is_list(flags) do
-    if String.contains?(path, ":doc_id") and not Enum.any?(flags, &(&1.name == "dataset")) do
-      %{cmd | flags: flags ++ [@doc_id_dataset_flag]}
-    else
+  defp declare_dataset_on_index_scope_route(
+         %{http: %{method: "GET", path_template: "/v1/tasks"}, flags: flags} = cmd
+       )
+       when is_list(flags) do
+    if Enum.any?(flags, &(&1.name == "dataset")) do
       cmd
+    else
+      %{cmd | flags: flags ++ [@index_dataset_flag]}
     end
   end
 
-  defp declare_dataset_on_doc_id_route(cmd), do: cmd
+  defp declare_dataset_on_index_scope_route(cmd), do: cmd
 
   @doc """
   Projects a task document's dependency + hierarchy edges into the content

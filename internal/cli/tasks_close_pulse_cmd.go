@@ -103,6 +103,19 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	if code, refused := refuseAnchorlessCloseReason(out, cmd, tail); refused {
 		return code
 	}
+	// THE FLIGHT RECORDER'S CLOSING FRAME (task-a42dccec2fe4a406).
+	// `--context-compact <file>` is CLIENT-SIDE and undeclared, in the shape
+	// tasks_stamp_cmd.go's `--expect` established: consumed here and never
+	// forwarded, so no server has to declare it. Its contents ride as
+	// `--set context_compact=<text>`, the body escape hatch this verb already
+	// declares. A file that cannot be read, or one over the ledger bound,
+	// REFUSES before the POST rather than sealing the row and dropping the
+	// record the agent asked to attach.
+	forward, inject, code, refused := consumeContextCompact(out, tail)
+	if refused {
+		return code
+	}
+	tail = append(forward, inject...)
 
 	rc := runCommand(out, g, ctx, m, cmd, tail)
 

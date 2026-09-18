@@ -186,6 +186,23 @@ defmodule BarkparkCloud.Notifications.EventEmail do
        "A content publish for #{name(payload)} did not deploy — it was refused." <>
          "#{identity(payload)}#{detail(payload)}"}
 
+  # cch-w30-bl-member-joined-alert — the team learns somebody ACCEPTED.
+  #
+  # THE SUBJECT SAYS JOINED, and that is the whole point of the name. Wave 30
+  # deleted a `member_invited` toggle whose only honest message would have
+  # duplicated the invitee's own transactional invite letter
+  # (`Transactional.deliver_invite/1`); the fact nothing reported was the
+  # ACCEPTANCE. A subject saying "invited" here would re-introduce exactly the
+  # wrong event under the right column.
+  #
+  # `Render.joined_clause/1` writes the sentence, the same way
+  # `Render.abandonment_clause/1` writes its own, so the inbox and Slack cannot
+  # disagree about who joined or at what role. No `detail/1`: the producer
+  # sends name/email/role and no `:detail` key, and the arm states that absence
+  # rather than rendering an empty interpolation that implies a gap.
+  defp render(:member_joined, payload, _owner?),
+    do: {"A new member joined your team", "#{Render.joined_clause(payload)} on #{name(payload)}."}
+
   defp render(:agent_reachable, payload, _owner?),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
 

@@ -940,6 +940,18 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "widening it by one context would delete other people's evidence.",
       anchor: ~r/Accounts\.reap_oauth_exchange_codes\(\)/
     },
+    "barkpark_cloud/accounts.ex|reap_lifecycle_tokens" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the same shape three contexts over: revoked or long-lapsed reset / confirm / " <>
+          "change_email credential rows, swept on a schedule with no actor. Each row was " <>
+          "already unusable to every reader. The where clause is deliberately narrow AND " <>
+          "deliberately graced — the expiry clause waits out a window longer than the " <>
+          "@change_email_throttle, because throttled?/3 counts unrevoked rows without " <>
+          "filtering expires_at, so a no-grace sweep would return a resend slot early.",
+      anchor: ~r/Accounts\.reap_lifecycle_tokens\(\)/
+    },
     "barkpark_cloud/workers/agent_retention_worker.ex|perform" => %{
       kind: :allowlisted,
       count: 4,

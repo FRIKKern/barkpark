@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Notifications do
     DigestRun,
     EmailSettings,
     EventEmail,
+    ReceiptLoss,
     SafeUrl,
     SitePublishWaitingAlert,
     Transactional,
@@ -2070,8 +2071,7 @@ defmodule BarkparkCloud.Notifications do
           {"failed", DeliveryReason.summarize(why)}
       end
 
-    %Delivery{}
-    |> Delivery.changeset(%{
+    attrs = %{
       team_id: team_id,
       recipient: recipient,
       event: event,
@@ -2095,7 +2095,10 @@ defmodule BarkparkCloud.Notifications do
       # nothing else.
       content_subject: Delivery.content_subject(email),
       content_counts: Delivery.content_counts(email)
-    })
+    }
+
+    %Delivery{}
+    |> Delivery.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, delivery} ->
@@ -2105,13 +2108,17 @@ defmodule BarkparkCloud.Notifications do
       # not mistaken for a withhold: the send above already happened, and a
       # `suppressed` row would assert the opposite of what occurred. What is
       # lost is the RECEIPT, not the notification. It is NOT routed through
-      # `Withhold` and it is NOT absorbed by this row; it keeps its own filed
-      # backlog task `cch-w32-bl-receipt-loss-branches-have-no-trace`, which
-      # needs a trace of its own class (the same species as
-      # `cch-w31-bl-auto-deploy-refusal-row-failure-leaves-no-trace`).
+      # `Withhold`.
+      # ADJUDICATED, cch-w32-bl: the Logger line that used to be the whole
+      # handling is now the FIRST step of `ReceiptLoss.rescue_receipt/3`, which
+      # re-writes the narrowest TRUE receipt still available so the send stays
+      # visible in the delivery log. A `:lost` here is a named, counted residue,
+      # not a silence — see that module's moduledoc for the ladder.
       {:error, changeset} ->
-        Logger.error("Notifications: failed to record delivery: #{inspect(changeset.errors)}")
-        nil
+        case ReceiptLoss.rescue_receipt(:record_delivery, attrs, changeset) do
+          {:reduced, delivery} -> delivery
+          :lost -> nil
+        end
     end
   end
 
@@ -2532,8 +2539,7 @@ defmodule BarkparkCloud.Notifications do
 
     last_error = DeliveryReason.summarize(reason)
 
-    %Delivery{}
-    |> Delivery.changeset(%{
+    attrs = %{
       team_id: team_id,
       recipient: type,
       channel: type,
@@ -2543,22 +2549,25 @@ defmodule BarkparkCloud.Notifications do
       http_status: http_status,
       attempts: 1,
       last_error: last_error
-    })
+    }
+
+    %Delivery{}
+    |> Delivery.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, delivery} ->
         delivery
 
-      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/5`'s arm
+      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/7`'s arm
       # above, and adjudicated identically: the POST already returned, so this
       # is a lost receipt, not a withheld notification. Not routed through
-      # `Withhold`; still owned by `cch-w32-bl-receipt-loss-branches-have-no-trace`.
+      # `Withhold`.
+      # ADJUDICATED, cch-w32-bl — the chat twin, same funnel and same ladder.
       {:error, changeset} ->
-        Logger.error(
-          "Notifications: failed to record chat delivery: #{inspect(changeset.errors)}"
-        )
-
-        nil
+        case ReceiptLoss.rescue_receipt(:log_chat_delivery, attrs, changeset) do
+          {:reduced, delivery} -> delivery
+          :lost -> nil
+        end
     end
   end
 

@@ -102,6 +102,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.FlightRecorder
   alias Barkpark.Tasks.WorkDigest
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
@@ -161,6 +162,11 @@ defmodule Barkpark.Tasks.Close do
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
     session = Keyword.get(opts, :session)
+    # THE FLIGHT RECORDER'S CLOSING FRAME (task-a42dccec2fe4a406). Agent-written
+    # prose, already BOUNDED and already refused by the controller if it is over
+    # the wall — by the time it reaches here it is either a validated binary or
+    # `nil`, and `nil` writes NO key (see FlightRecorder.put_context_compact/2).
+    context_compact = Keyword.get(opts, :context_compact)
     # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
@@ -205,7 +211,8 @@ defmodule Barkpark.Tasks.Close do
           landed,
           caller_token_id,
           session,
-          overrides
+          overrides,
+          context_compact
         )
     end
   end
@@ -470,7 +477,8 @@ defmodule Barkpark.Tasks.Close do
          landed,
          caller_token_id,
          session,
-         overrides
+         overrides,
+         context_compact
        ) do
     result =
       Repo.transaction(fn ->
@@ -620,7 +628,8 @@ defmodule Barkpark.Tasks.Close do
                            worker_id
                          ),
                          caller_token_id,
-                         session
+                         session,
+                         context_compact
                        ) do
                   # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
                   #
@@ -1346,7 +1355,8 @@ defmodule Barkpark.Tasks.Close do
          landed,
          override_record,
          caller_token_id,
-         session
+         session,
+         context_compact
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -1371,6 +1381,12 @@ defmodule Barkpark.Tasks.Close do
             |> then(fn c ->
               if is_binary(session), do: Map.put(c, "closed_session", session), else: c
             end)
+            # Beside `closed_by` / `closed_at` because it IS close metadata: the
+            # compact of what this lease learned, stamped on the lease it
+            # learned it under. A close that carries none leaves the claim map
+            # byte-identical — there is no empty-compact arm, for the same
+            # reason there is no empty-override arm two functions down.
+            |> FlightRecorder.put_context_compact(context_compact)
 
           doc.content
           |> Map.put("lifecycle_status", new_status)

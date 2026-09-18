@@ -2409,7 +2409,6 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
-        --expect-unrendered "Format (mix format --check-formatted, advisory) (27.0, 1.18.1)"
         --expect-unrendered "gofmt drift ceiling (blocking)"
         --expect-unrendered "PR task gate self-test"
         --expect-unrendered "Dependabot PRs carry the standing task trailer"
@@ -2634,6 +2633,16 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Finder unit specs (dep-free, no browser)"
         --expect-unrendered "Journey smoke — self-test (fixtures, no network)"
         --expect-unrendered "Journey smoke — live demo (report mode, never gates)"
+        # ── 2026-09-18 (task-9f431629b01a4024): search-starter-smoke.yml gained
+        # a fourth job, `graph-smoke` — the browser eye over the Next starter's
+        # corpus graph (templates/search-starter/scripts/graph-smoke.mjs, which
+        # shipped in #18895 proven to MEASURE and invoked by nothing). Same
+        # mechanism as its three siblings directly above: the workflow is
+        # paths-filtered on its `pull_request` arm, so the frozen fixture pair
+        # cannot render it. DERIVED, not remembered:
+        # scripts/required-checks-ack-derive.sh named exactly this one as
+        # MISSING ACK_EX before it was typed here.
+        --expect-unrendered "Corpus graph renders, and a phone gets none of it (headless chromium)"
         # ── 2026-09-12 (task-32fe5f327e91f23d), SECOND pass: four more paths-filtered
         # leaf names the first census pass (25 heads, up to #17963) never sampled —
         # each renders on 1-2 of the 40 most recent merged PR heads (#17966, #17977,
@@ -2697,7 +2706,17 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # see it. This is the EIGHTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
         # exactly this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "a red on main's tip gets an owner")
+        --expect-unrendered "a red on main's tip gets an owner"
+        # shell-harnesses.yml job `harness`, matrix leg `breaker-measure-precondition`,
+        # landed in #18655 (d288448d9) and its .exclusions row is added BY HAND in this
+        # commit (task-6eb8290021afb0e4): the row postdates the frozen fixture pair and
+        # the pair cannot render it — the generator reports it LOST. The workflow is
+        # paths-filtered at the workflow level, which is also WHY the row was missing:
+        # no settled main head renders the name, so the census only reds on a PR that
+        # touches .github/** or scripts/**. This is the SIXTH place, paid in the same commit.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
+        # this name as MISSING ACK_EX (and nothing else) on this tree.
+        --expect-unrendered "the breaker measurement's preconditions can still be UNMET")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

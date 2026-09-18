@@ -50,7 +50,6 @@ import (
 // snapshot that is wrong the moment the next row closes; the vocabularies below
 // are rules that keep classifying rows nobody has read.
 //
-// @canonical capability:runtime-claim-audit aka:false-done-detector,code-presence-is-not-runtime-presence,unverified-at-runtime
 
 // RuntimeVerdict is the classification of ONE criterion.
 type RuntimeVerdict int
@@ -222,6 +221,7 @@ func (f RuntimeFinding) Ref() string { return fmt.Sprintf("%s#%d", f.DocID, f.In
 //
 // Non-terminal rows are skipped: a live row's criteria are still being worked,
 // and "nobody re-checked" is not yet a defect on a row nobody has finished.
+// @canonical capability:runtime-claim-audit aka:false-done-detector,code-presence-is-not-runtime-presence,unverified-at-runtime
 func RuntimeClaimFindings(details []TaskDetail) []RuntimeFinding {
 	var out []RuntimeFinding
 	for _, d := range details {

@@ -129,6 +129,11 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # doctor.sh section 2 sources its staleness ladder from this library,
+      # and scripts/local-update.sh — the FIXER doctor points at — calls the
+      # same function. An edit here can flip BOTH harnesses below, so it must
+      # be able to trigger this workflow.
+      - "scripts/lib/bp-staleness.sh"
       # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
       # input: its 243 frozen rows and its pinned ledger IDF table ARE the
       # calibration, so an edit there changes what the known pairs score without
@@ -795,6 +800,11 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # doctor.sh section 2 sources its staleness ladder from this library,
+      # and scripts/local-update.sh — the FIXER doctor points at — calls the
+      # same function. An edit here can flip BOTH harnesses below, so it must
+      # be able to trigger this workflow.
+      - "scripts/lib/bp-staleness.sh"
       # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
       # input: its 243 frozen rows and its pinned ledger IDF table ARE the
       # calibration, so an edit there changes what the known pairs score without
@@ -1579,6 +1589,7 @@ jobs:
           task-dup-sweep scripts/fixtures/task-dup-sweep-selftest.json
           doctor-matrix scripts/doctor.sh
           doctor-matrix scripts/doctor.test.sh
+          doctor-matrix scripts/lib/bp-staleness.sh
           merge-verb-table scripts/bp-merge.sh
           merge-verb-table scripts/bp-merge.test.sh
           merge-verb-table scripts/merge-check.sh
@@ -1783,6 +1794,7 @@ jobs:
           dispatch-selftest scripts/shell-harness-name-census.sh
           orphan-harnesses scripts/local-update.sh
           orphan-harnesses scripts/local-update.test.sh
+          orphan-harnesses scripts/lib/bp-staleness.sh
           orphan-harnesses scripts/pdf-efficiency-proof.sh
           orphan-harnesses scripts/pdf-efficiency-proof.test.sh
           orphan-harnesses scripts/refute-on-absence-capture-log-check.sh
