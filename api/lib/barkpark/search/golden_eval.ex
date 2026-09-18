@@ -1,6 +1,13 @@
 defmodule Barkpark.Search.GoldenEval do
   @moduledoc """
   Golden-query evaluation harness (Phase 7). Loads JSONL fixtures and scores retrieval.
+
+  ## The rank budget
+
+  Each fixture entry may declare `"max_rank": N` (default 10). N is the SCORING
+  WINDOW, not a hint: `expect_ids` must appear within the first N results and
+  `must_exclude` ids are only looked for there. A tighter budget is a stricter
+  assertion, so the harness must never widen one.
   """
 
   alias Barkpark.Content
@@ -103,7 +110,14 @@ defmodule Barkpark.Search.GoldenEval do
     expect = spec["expect_ids"] || []
     exclude = spec["must_exclude"] || []
     max_rank = spec["max_rank"] || 10
-    ranked = Enum.take(ids, max(10, max_rank))
+
+    # THE DECLARED BUDGET IS THE WINDOW. This was `Enum.take(ids, max(10, max_rank))`,
+    # which silently raised every budget to a floor of 10. Every max_rank declared in
+    # the repo is <= 10, so NO fixture's budget bound: deleting the arm entirely and
+    # honouring it produced the same green (task-edebad9d62514545). A fixture that
+    # says `"max_rank": 3` is asserting "this id must be in the top THREE"; scoring it
+    # in the top ten makes that sentence unsayable.
+    ranked = Enum.take(ids, max_rank)
 
     missing =
       expect
@@ -114,6 +128,17 @@ defmodule Barkpark.Search.GoldenEval do
       |> Enum.filter(&(&1 in ranked))
 
     mrr = reciprocal_rank(expect, ranked)
+
+    # k stays a FIXED 10 while the window is per-query, and that is deliberate.
+    # `ranked` is already truncated to max_rank above, so DCG can never see past
+    # the budget — the window governs, here as everywhere. The 10 survives only as
+    # the metric's REPORTING DEPTH: `ndcg_at_10` is the field name the committed
+    # baseline.json keys on and the number `compare/2` regresses against, and a
+    # figure whose depth moved per query would not be comparable across queries or
+    # across two saved snapshots. Honest caveat: for a fixture declaring MORE
+    # expect_ids than its max_rank, the IDCG counts ideal gains the window cannot
+    # hold, so its NDCG has a ceiling below 1.0. That fixture is already a hard
+    # failure via `missing`, which is the louder signal; no such fixture exists today.
     ndcg = ndcg_at_k(expect, ranked, 10)
     zero_hit? = ranked == []
 
