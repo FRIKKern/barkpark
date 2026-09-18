@@ -61,7 +61,10 @@ if (process.argv.slice(2).includes("--selftest")) {
 // Part A's hook says more: Part A prints a per-ARTIFACT ok line and gates no
 // part-summary, so it is the one injectable part whose fault withholds no ok. That
 // exemption is declared AT THE HOOK, where a reader of either file meets it, and
-// is read back by the selftest instead of being hand-listed there.
+// is read back by the selftest instead of being hand-listed there. Part 0's hook
+// says more too, for the opposite reason: its real failure path exits the process
+// immediately, so its hook deliberately does NOT — an injected fault there must
+// leave the run standing for the Parts the arm judges beside it.
 const FAULT = new Set(
   (process.env.BP_DESIGN_CHECK_FAULT || "").split(",").map((s) => s.trim()).filter(Boolean),
 );
@@ -87,21 +90,46 @@ const fail = (msg) => { console.error(msg); failed++; };
 // instead of the one sentence that says which row is wrong and why. The predicate
 // is auditActions() itself, so this gate and the emitter cannot disagree about
 // what "well-formed" means.
-try {
-  const rows = auditActions();
-  const nulls = rows.filter((r) => r.label === null);
-  console.log(
-    `design/check.mjs — Part 0: ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
-    `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
-  );
-} catch (e) {
-  console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
-  console.error(`
+//
+// Its verdict is a HEADER line plus a separately-gated `ok` line, the same shape
+// every Part below prints, rather than the one fused sentence it printed until
+// r21d. The fusion made Part 0 the last Part the selftest could say nothing
+// about: the selftest reads a Part's claim off its `  ok   ` lines, and a Part
+// with none has nothing for a fault to withhold, so it was named UNEXERCISED on
+// every green run. Splitting the sentence costs one line of output and buys the
+// arm.
+console.log(`design/check.mjs — Part 0: the audit verb table's own shape (${AUDIT_ACTIONS_PATH})`);
+{
+  const failedBefore0 = failed;
+  let rows;
+  try {
+    rows = auditActions();
+  } catch (e) {
+    console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
+    console.error(`
   ${AUDIT_ACTIONS_PATH} is the ONE table both audit vocabularies read. Until it is
   well-formed nothing downstream can be trusted: the console's ACTION_LABELS region is
   built from it and AuditEvent's @actions allowlist is derived from it at compile time.
 `);
-  process.exit(1);
+    process.exit(1);
+  }
+  const nulls = rows.filter((r) => r.label === null);
+
+  // Part 0's hook is the one that does NOT share the real failure path's exit.
+  // A genuinely malformed table exits(1) right here, because everything below
+  // reads it; an INJECTED fault must leave the run standing so the selftest can
+  // still watch every later Part keep its own ok lines. So the hook records its
+  // failure through `fail` — the verdict arm at the bottom still reds the gate on
+  // the count — and asks exactly the question the arm is for: does Part 0's ok
+  // line answer for Part 0's own failures? The exit path needs no hook: it
+  // withholds this ok line by never reaching it.
+  if (FAULT.has("0")) fail("  Part 0 FAIL: injected fault (--selftest)");
+  if (failed === failedBefore0) {
+    console.log(
+      `  ok   ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
+      `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
+    );
+  }
 }
 
 // ── Part A: per-artifact byte-compare against committed ──────────────────────
