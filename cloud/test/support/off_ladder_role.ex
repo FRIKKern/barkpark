@@ -48,10 +48,18 @@ defmodule BarkparkCloud.OffLadderRole do
 
   The drop is scoped to the caller's sandbox transaction; nothing is restored by
   hand because nothing outside that transaction ever saw it go.
+
+  `IF EXISTS` is load-bearing, not defensive: ARM C of the role census calls
+  this once PER off-ladder role inside a single test, so the second call would
+  hit an already-dropped constraint. The existence of the constraint is proved
+  where it belongs — the drift arm of
+  `BarkparkCloud.Accounts.TeamMembershipRoleConstraintTest` — and every caller
+  here asserts the off-ladder write actually LANDED, so a no-op drop cannot make
+  a caller vacuous.
   """
   @spec without_role_constraint((-> result)) :: result when result: term()
   def without_role_constraint(fun) when is_function(fun, 0) do
-    Repo.query!("ALTER TABLE team_memberships DROP CONSTRAINT #{@constraint}")
+    Repo.query!("ALTER TABLE team_memberships DROP CONSTRAINT IF EXISTS #{@constraint}")
     fun.()
   end
 end
