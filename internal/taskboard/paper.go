@@ -1,3 +1,6 @@
+// PROBE ONLY (task-ceada0e53f6d2f1d): a comment-only edit to prove this file,
+// a PDS charter content anchor, now DISPATCHES the pds-harnesses job. This
+// branch and its draft PR are closed and deleted once the check run is read.
 package taskboard
 
 import (
