@@ -178,9 +178,9 @@ func emitStaleDraftPublishRemedy(out *writer, cmd manifest.Command, tail []strin
 	if !ok {
 		return
 	}
-	out.errf("bp: THE REMEDY IN THAT REFUSAL DOES NOT WORK — `patch, then publish` is the one path this draft twin has already closed: while `%s%s` exists, the bare-id patch is refused too, by the published-first fork fence, and the publish then refuses identically. Measured both ways on one row (task-bff844cc812f0fe4). The sequence that LANDS, and leaves the claim byte-identical:\n  bp doc discard-draft %s %s\n  bp doc patch %s %s --set <field>=<value>\nThe first drops the unlandable twin; the second is published-first for a task, so it edits the published row in place and the worker/epoch ride through untouched. To keep the twin's bytes instead, read them with `bp doc get %s %s%s --perspective drafts` before discarding.",
+	out.errf("bp: THE REMEDY IN THAT REFUSAL DOES NOT WORK — `patch, then publish` is the one path this draft twin has already closed: while `%s%s` exists, the bare-id patch is refused too, by the published-first fork fence, and the publish then refuses identically. Measured both ways on one row (task-bff844cc812f0fe4). The sequence that LANDS, and leaves the claim byte-identical:\n  bp doc discard-draft %s %s\n  bp doc patch %s %s --set <field>=<value>\nThe first drops the unlandable twin; the second is published-first for a task, so it edits the published row in place and the worker/epoch ride through untouched. To keep the twin's bytes instead, read them with `bp doc get %s %s --perspective drafts` before discarding — `bp doc get` reads the published lens by default.",
 		draftIDPrefix, bareID,
 		typeName, bareID,
 		typeName, bareID,
-		typeName, draftIDPrefix, bareID)
+		typeName, bareID)
 }
