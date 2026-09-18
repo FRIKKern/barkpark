@@ -542,7 +542,7 @@ prose that preceded it.
   not a wave failure.
 
 - **PDS-D72 — A closing re-pin rung is MANDATORY.** `DEPLOYED_SHA` is captured once at
-  `pds-pull-proof.sh:382` and read by every later step without ever being re-queried; the box
+  `scripts/pds-pull-proof.sh`@`DEPLOYED_SHA="$(ssh_src 'cd /opt/barkpark && git rev-parse HEAD'` and read by every later step without ever being re-queried; the box
   redeployed three times inside one 15-minute survey and once inside a three-minute read-only probe
   (`d220c53e → b7d6ce8e`, Caddy's upstream flipping `:4000 → :4001` mid-command). The rung re-reads
   the sha over SSH and compares, with `status.json`'s process-relative `uptime_seconds` as the
@@ -572,7 +572,7 @@ prose that preceded it.
 
 - **PDS-D75 — Criterion 7 of `pds-w1-crown-proof` is REWRITTEN, not word-patched.** The criterion
   said "the scratch target is REBOOTED between the two pulls and the second pull converges
-  byte-identically." The shipped step 6 (`scripts/pds-pull-proof.sh:1910-2006`) runs ONE pull —
+  byte-identically." The shipped step 6 (`scripts/pds-pull-proof.sh`@`step_6() {`) runs ONE pull —
   it ABORTs naming step 1 if `PULL_BUNDLE` is empty — then a real reboot (`bin/barkpark stop`
   then `up` in the same `BARKPARK_HOME`; there is no restart verb), an md5 digest over the EIGHT
   guarded columns (`title, icon, visibility, owner_scoped, fields, cors_origins, desk_groups,
@@ -734,6 +734,20 @@ prose that preceded it.
   checkable by machine and has no snapshot in it — `bash scripts/pds-charter-anchors-check.sh` reds
   when any such anchor stops resolving or starts matching two lines, and refuses any NEW bare
   `pds-pull-proof.sh:NNN` citation. Prefer it for every future charter citation.*
+
+  *Sweep completed 2026-09-18 under the same row and the same law. The fifteen surviving bare
+  `pds-pull-proof.sh` line citations — D72, D75, D113, D148, D172, D179, D211, D245, D251, D258,
+  D262, D270, D356, D375 and the cond_d thaw sanction — are all now content anchors, so the legacy
+  ratchet in `scripts/pds-charter-anchors-check.sh` measures ZERO and its ceiling of 15 is owed a
+  lowering to 0 by whoever holds that file's fence. Every claim above is byte-identical; only the
+  anchor text moved. TWO of the fifteen are DISCLOSED as historical records rather than live
+  citations, because the bytes they described were later corrected and no live line can carry them:
+  D113's `pgrep -f beam.smp | head -1` selector was replaced under PDS-D135, and D356's
+  `""|full) return 0` permissive accept was replaced under PDS-D261. Both now anchor the harness's
+  OWN record of the byte they describe, which is the only anchor that can resolve; read them as
+  incident history, never as law about today's harness. The cond_d thaw sanction's stale citation
+  was not re-pointed at all — the sentence exists to say that a line number was WRONG, so it now
+  says so without quoting one.*
 
 - **PDS-D94 — Step 0c FAILED its first-ever live execution: `mix run --no-start` starts no dep apps.**
   Measured inside the BEAM: `db_connection started? nil · postgrex started? nil · Watcher alive? nil`,
@@ -902,7 +916,7 @@ prose that preceded it.
   window" design is DROPPED as over-engineered; PDS-D92's check-and-go is the climb procedure.**
 
 - **PDS-D113 — THE REAL BLOCKER IS THE FROZEN INSTRUMENT'S OWN SAMPLER, and its fix is
-  ENVIRONMENTAL, not a harness edit.** `pds-pull-proof.sh:1382` selects the sampled process with
+  ENVIRONMENTAL, not a harness edit.** `scripts/pds-pull-proof.sh`@`run sampled a monitoring shell (pid 619341) instead of the real BEAM` selects the sampled process with
   `pgrep -f beam.smp | head -1`. `-f` matches the FULL COMMAND LINE, so any process whose args merely
   contain the string matches, and `head -1` takes the LOWEST PID. Verified live at 02:36:39Z by three
   independent verifiers and again by Decide: `head -1` → **619341, a sampler shell, RSS 1844 kB**;
@@ -1246,7 +1260,7 @@ stranded in an unpushed commit against the ROTATING slot and are rescued here ve
   already spent is the one outcome the wave cannot recover from.*
 
 - **PDS-D148 — Phase isolation is by EXPLICIT distinct exported roots, never by a fresh RUN_ID.**
-  `pds-pull-proof.sh:113` is `export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"` —
+  `scripts/pds-pull-proof.sh`@`export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"` is `export BARKPARK_HOME="${BARKPARK_HOME:-/tmp/pds-proof.$RUN_TAG}"` —
   the RUN_TAG default fires **only when the var is unset**, and the reclimb brief *mandates*
   exporting it. The claim that a fresh RUN_ID structurally forces a fresh target is **refuted in
   code**. *Why: without this, phase B boots into the target phase A's rung 6 deliberately clobbered,
@@ -1404,7 +1418,7 @@ _PDS-D160–PDS-D177 are this cycle's, bought with eight verifier runs against l
   lets both dispatch in round 1 instead of deferring the shot for a fourth wave.*
 
 - **PDS-D172 — Step 0b asserts ANCESTRY, not sha equality; the WORKTREE drifting ahead is a real
-  failing direction too.** `pds-pull-proof.sh:655` equality is a fast path; `:660`
+  failing direction too.** `scripts/pds-pull-proof.sh`@`if [ "$DEPLOYED_SHA" = "$worktree_sha" ]; then` equality is a fast path; `:660`
   `merge-base --is-ancestor DEPLOYED worktree` is the assertion. Guerrilla serves `65541e2d4`,
   origin/main is `c30d4a2d2` — 1 ahead, 0 code-ahead — so 0b passes on the ancestry branch today.
   *Why: the wish's restatement is looser than the code, and 0b never checks a dirty tree at all
@@ -1463,7 +1477,7 @@ question it was built to answer had been settled by evidence three hours earlier
 - **PDS-D179 — STANDING LAW ALREADY ANSWERED THE MOSAIC QUESTION, AND THE ANSWER WAS MOSAIC.** Had
   the cheap leg been needed, D101's heading ("anything touching rungs 2–6 runs as a full `--all`")
   and D116's title ("ONE `--all` INVOCATION, NEVER SPLIT") forbid it outright, and the frozen
-  harness states the principle in its own bytes at `pds-pull-proof.sh:1694-1699`: *"a target
+  harness states the principle in its own bytes at `scripts/pds-pull-proof.sh`@`--only 1,2); a target populated by an earlier run is not evidence for this one.`: *"a target
   populated by an earlier run is not evidence for this one."* Because `step_6` aborts unless step 1
   ran in the same invocation (`:2094-2097`), any rung-6 climb necessarily imports into a fresh
   target, so wave 7's rung 4 could never have been evidence for a wave-9 transcript. *Why: the
@@ -1831,7 +1845,7 @@ D203 are new — findings the build round produced that the Decide phase could n
   the floor moves ONLY AFTER the spill is merged AND deployed, ONLY off a fresh peak-minus-baseline
   measurement against the deployed engine with a PDS-D104 paired idle control, in kB/1024. At no
   instant does a gate sit below the demand of the engine running. No thaw is required and none is
-  permitted: `pds-pull-proof.sh:131` is a bare bash default with **zero validation**, no anti-loosening
+  permitted: `scripts/pds-pull-proof.sh`@`FULL_MIN_MEM_MB="${PDS_FULL_EXPORT_MIN_MEM_MB:-2200}"` is a bare bash default with **zero validation**, no anti-loosening
   guard for this knob exists in code anywhere, the window sentinel's `check_predicate_integrity` guards
   a DIFFERENT private knob (`PDS_SENTINEL_MEM_FLOOR_MIB`) and disclaims this one in its own header, and
   D193 already set the env-only precedent by TIGHTENING it. The frozen blob stays
@@ -2304,7 +2318,7 @@ was planned: **the wall was never the floor. The wall was the TURN.**
   objection stands; its D221 objection was itself a unit-class error.
 
 - **PDS-D245 — cond_b IS A GATE, NOT A WATCHDOG, SO DETACH-ONLY IS PAYABLE AT 76.2%.** MemAvailable
-  is read **ONCE**, at `pds-pull-proof.sh:1301`, via a single `ssh_src` inside the precondition block,
+  is read **ONCE**, at `scripts/pds-pull-proof.sh`@`mem_probe="$(ssh_src`, via a single `ssh_src` inside the precondition block,
   and is **never re-read during the export**; D218 already established there is no abort-during-export
   mechanism. Therefore "the longest contiguous build-idle run is ~90 s against a ~150 s export" is a
   **SAFETY** argument about OOM risk, **not a GATE argument** — a qualifying draw fires and the export
@@ -5750,7 +5764,7 @@ answer was worse than any prior wave's estimate.
   detached-launcher era**: `grep -nE 'CONTROL_PG|AMMO'` over `pds-crown-launch.sh` returns NOTHING,
   `pds-climb-preflight.sh` and `pds-crown-stamp.sh` likewise, and neither appears in
   `pds-w14-crown-fire`'s eight criteria. The degradation is silent by construction —
-  `pds-pull-proof.sh:1730` gates the control on `[ -n "${PDS_CONTROL_PG:-}" ]` and the else-branch at
+  `scripts/pds-pull-proof.sh`@`if [ -n "${PDS_CONTROL_PG:-}" ]; then` gates the control on `[ -n "${PDS_CONTROL_PG:-}" ]` and the else-branch at
   `:1743` prints **`instrument control: NOT RUN`** at INFO level with **no `return`**, so step 4
   reaches a terminal PASS anyway. The practice died with the operator: `crown-transcript.txt:758` and
   `-w8.txt:705` both carry `instrument control: PASSED`; the w10 transcript carries neither string.
@@ -5961,7 +5975,7 @@ override is needed and none is granted; the level-skip the digest warned about i
   `pds-climb-preflight.sh` and BOTH crown runbooks returns **zero** matches in all three files. Nor can
   it be dodged by firing from the one deps-warm checkout — `spill-janitor-wt` sits on
   `fix/spill-engine-test-raciness` @ `ac1fb3beb` and `git merge-base --is-ancestor 515f14fdd
-  ac1fb3beb` FAILS, so rung 0b (`pds-pull-proof.sh:660`) would abort. A fresh origin/main worktree is
+  ac1fb3beb` FAILS, so rung 0b (`scripts/pds-pull-proof.sh`@`is NOT an ancestor of the worktree`) would abort. A fresh origin/main worktree is
   at exact sha parity with the deployed box and passes. **RULING:** the fire worktree runs `mix
   deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile` to completion
   BEFORE arming, and then arms with **`--prewarm-now`** — which compiles synchronously in the arming
@@ -6019,7 +6033,7 @@ override is needed and none is granted; the level-skip the digest warned about i
 - **PDS-D262 — THE LAUNCHER IS ONE-SHOT, SO A MARGINAL FIRE THE HARNESS THEN REFUSES IS A THIRD
   OUTCOME.** On a FIRE verdict `pds-crown-launch.sh:362-366` runs `"$HARNESS" --all; rc=$?; sentinel
   "$rc"; exit "$rc"` — no re-arm, no loop continue. The harness then re-reads MemAvailable ONCE for
-  `cond_b` (`pds-pull-proof.sh:1359-1361`), seconds to tens of seconds after the launcher's own probe,
+  `cond_b` (`scripts/pds-pull-proof.sh`@`cond_b="$(gate_b_verdict`), seconds to tens of seconds after the launcher's own probe,
   and the paired series shows consecutive 20-second draws swinging up to **~100 MiB** (2205.9 → 2163.6
   → 2225.9 → 2124.4). So a fire at ~2201 is roughly a coin flip to be refused immediately. That
   refusal costs **ZERO attempts** (the `return 1` at `:1363` sits above the spend at `:1365-1371`) but
@@ -6196,7 +6210,7 @@ scratch c7528814 ALIVE (`curl 37576` → 200), guerrilla `34b9b25d` an ANCESTOR 
 
 - **PDS-D270 — 0b's TREE COMES FROM `$0`, NOT PDS_SCRATCH_TREE: INVOKE BY PATH.** Correction to any
   "re-point PDS_SCRATCH_TREE" framing. rung 0b's `worktree_sha` = `git -C "$REPO_ROOT" rev-parse HEAD`
-  where `REPO_ROOT` derives purely from `$0` (`pds-pull-proof.sh:88-89`). `PDS_SCRATCH_TREE` (stale at
+  where `REPO_ROOT` derives purely from `$0` (`scripts/pds-pull-proof.sh`@`REPO_ROOT="$(cd -P -- "$SCRIPT_DIR/.." && pwd)"`). `PDS_SCRATCH_TREE` (stale at
   `barkpark-w18-fire` in `scratch.env`) is INERT for 0b — it only feeds the target reboot machinery.
   So there is NO env fix and NO re-point: the ONLY lever is invoking `scripts/pds-crown-launch.sh`
   **BY PATH from inside the fresh worktree** so `$0`'s dir → `REPO_ROOT` → the fresh HEAD. Wave-18's 0b
@@ -7779,7 +7793,7 @@ the last closure write was `lead-merge` at 16:55:00Z sealing wave 24, not a live
   export > backup.ndjson` puts the count on stderr, so a cron box keeps a partial file BYTE-
   INDISTINGUISHABLE from a complete one. S7 ships a SIDECAR (`FILE.meta` with
   `{documents,bytes,sha256,scope,completed_at}` written only on clean completion, plus `--verify`),
-  copying `internal/backup/backup.go`'s proven pattern and `scripts/pds-pull-proof.sh:1232-1245`'s
+  copying `internal/backup/backup.go`'s proven pattern and `scripts/pds-pull-proof.sh`@`full_meta_ok() {`'s
   precedent — **and it must FAIL CLOSED on a missing sidecar**, unlike that precedent's
   `""|full) return 0`. Zero body-shape change, so every existing consumer keeps working.
 - **PDS-D357 — D342's MERGE-GATE SPLIT HAS NO CHOKEPOINT AND IS CUT FROM WAVE 25.** The premise "one
@@ -8253,7 +8267,7 @@ mean something. `hzResDone` stays cut (PDS-D367).
   md5-distinctness, so every stale row can be given a beautiful, unique, byte-distinct reason that is
   FALSE and the census will pass — the precise failure wave 25 caught going the other way. Named:
   (1) `pds-bl-cond-b-nonnumeric-floor-fail-direction` is **REFUTED BY EXPERIMENT** — the
-  `pds-pull-proof.sh:1304-1310` shape under `set -euo pipefail` with a non-numeric floor prints
+  `scripts/pds-pull-proof.sh`@`if [ "$avail_mb" -lt "$floor_mb" ]; then` shape under `set -euo pipefail` with a non-numeric floor prints
   `[: abc: integer expression expected` and lands `cond_b=FAILED ok=0`. **It fails CLOSED.** The row's
   entire premise does not exist; it adjudicates `closed`, and leaving it `open` is the wave-25 defect
   pointed the other way. (2) `pds-bl-github-linkput-auto-publish-erasure`'s headline defect was fixed
@@ -15623,7 +15637,7 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
 
   **RE-FREEZE:** derived, per PDS-D732 — the preflight reads the freeze from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` at run time, so THE MERGE ITSELF IS THE RE-FREEZE and the harness is frozen again from attempt 1. The PR body quotes the POST-MERGE OID read with `git rev-parse origin/main:scripts/pds-pull-proof.sh` — `git rev-parse`, never `shasum` (PDS-D154) — and that OID is the evidence stamped on the row's thaw criterion (c4). No hand-typed hash is introduced anywhere.
 
-  PAYS: `pds-bl-cond-d-job-blind-false-abort` c0, c1, c2, c3 and c4. Its own anchors are stale and were re-derived by symbol, not line: `cond_d` is NOT at `pds-pull-proof.sh:1327` (it is inside `acquire_full_bundle`, some 1000 lines later), and the job split is NOT at `deploy.yml:44-70` (that range is the `on: push: paths:` filter; the jobs are the `control-plane:` and `instance:` keys under `jobs:`). SOURCE: this PR (branch `deploy/r17-cond-d-thaw`).
+  PAYS: `pds-bl-cond-d-job-blind-false-abort` c0, c1, c2, c3 and c4. Its own anchors are stale and were re-derived by symbol, not line: `cond_d` is NOT where the row cited it by line (that bare line number resolves to unrelated code; `cond_d` is inside `acquire_full_bundle`, some 1000 lines later), and the job split is NOT at `deploy.yml:44-70` (that range is the `on: push: paths:` filter; the jobs are the `control-plane:` and `instance:` keys under `jobs:`). SOURCE: this PR (branch `deploy/r17-cond-d-thaw`).
 
 ## LATE ADJUDICATION — THE DRAFT-TWIN POLICY SPLIT, RULED (decided 2026-09-16, task `pds-w29-bl-twin-policy-split`)
 
