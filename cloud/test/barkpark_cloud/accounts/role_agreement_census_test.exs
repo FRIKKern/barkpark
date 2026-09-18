@@ -28,9 +28,14 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
       through Accounts — and nothing asserted they agree. ARM C walks the FULL
       role domain, not just the three canonical roles: the schema roles, `nil`
       (non-member), and off-ladder strings. The off-ladder half is not
-      hypothetical — there is NO CHECK constraint on `team_memberships.role` in
-      any migration, so a migration or a hand-edit puts an unknown string in
-      that column, and a third test proves that write survives.
+      hypothetical: rows written before `team_memberships_role_check`
+      (migration 20260918120000) closed the vocabulary carry whatever string
+      was put there, and the CHECK is not a law of physics — a later migration
+      widens `@roles`, a superuser drops it, a restore predates it. Charter
+      D493 rules such a role ranks 0, and this is what proves both encodings
+      agree on that. The fixture reaches the shape through
+      `BarkparkCloud.OffLadderRole.without_role_constraint/1`, and a third test
+      proves the write still survives that drop.
 
     * ARM D — THE TWO `can_grant?` ARE ONE POLICY. The invitation path carries
       its OWN private literal triple (`Accounts.can_grant?/2`, reached from
@@ -61,9 +66,15 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
   Plus the ratified behaviour change the rank drop makes reachable: an
   owner→admin demotion now ends the demoted user's sessions.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — `team_with_role_in_domain/1`'s off-ladder branch DROPS
+  # `team_memberships_role_check` inside this test's sandbox transaction (see
+  # `BarkparkCloud.OffLadderRole`), which takes ACCESS EXCLUSIVE on
+  # `team_memberships`. ExUnit runs sync suites serially and only after every
+  # async suite, so that lock cannot stall a concurrent test.
+  use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.OffLadderRole
   alias BarkparkCloud.Accounts.{Authz, TeamInvitation, TeamMembership, UserToken}
 
   # The census's OWN pinned allowlist of authz actions — a same-file pin, not a
@@ -71,14 +82,16 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
   # owner probe below reds if any of these stops being a real action.
   @actions ~w(read launch delete_barkpark connect_provider manage_members billing delete_team)a
 
-  # The OFF-LADDER half of ARM C's domain: role strings no changeset accepts
-  # but the COLUMN does. Physically reachable —
-  # `grep -rn role priv/repo/migrations/*.exs | grep -i 'check\|constraint'`
-  # returns ZERO, so nothing in Postgres refuses these. Two of them ("OWNER",
+  # The OFF-LADDER half of ARM C's domain: role strings neither the changeset
+  # nor (since `team_memberships_role_check`) the COLUMN accepts. Still
+  # physically reachable — pre-constraint rows hold them, and the fixture
+  # reaches them by dropping the CHECK inside the test's own sandbox
+  # transaction. Two of them ("OWNER",
   # "Admin") are case variants of real roles, which is exactly where a
   # "hardening" edit that downcases one side and not the other splits the two
   # predicates. These are this file's OWN pinned domain, not a foreign count:
-  # the persistence test below proves each one is still writable.
+  # the persistence test below proves each one is still writable once the CHECK
+  # is out of the way.
   @off_ladder ["wizard", "OWNER", "Admin", "root", ""]
 
   ## Fixtures
@@ -148,6 +161,7 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
 
   # A team plus a user standing at `role` in it. Canonical roles go through the
   # public `add_member/3`; off-ladder roles are written straight to the column
+  # with `team_memberships_role_check` dropped for this transaction
   # (the changeset would refuse them — the DATABASE does not), which is the
   # whole point of the off-ladder half. `nil` yields a user who is simply not a
   # member.
@@ -164,10 +178,12 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
       {user, team} = team_with_member_at("member")
 
       {1, _} =
-        Repo.update_all(
-          from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
-          set: [role: role]
-        )
+        OffLadderRole.without_role_constraint(fn ->
+          Repo.update_all(
+            from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
+            set: [role: role]
+          )
+        end)
 
       {user, team}
     end
@@ -320,13 +336,13 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
                "ARM C must see both an admin and a non-admin verdict"
     end
 
-    test "an off-ladder role string really persists (no CHECK constraint guards the column)" do
+    test "an off-ladder role string really persists once the CHECK is dropped" do
       for role <- @off_ladder do
         {user, team} = team_with_role_in_domain(role)
 
         assert %TeamMembership{role: ^role} = Accounts.get_membership(team, user),
                "UNREACHABLE DOMAIN: #{inspect(role)} no longer survives a write to " <>
-                 "team_memberships.role — if a CHECK constraint now guards the column, " <>
+                 "team_memberships.role even with team_memberships_role_check dropped — " <>
                  "ARM C's off-ladder half is dead weight and should be re-cut"
       end
     end

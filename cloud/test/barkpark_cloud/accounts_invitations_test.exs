@@ -5,11 +5,16 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
   Kept in its own module (not folded into accounts_test.exs) so the invitation
   surface is reviewable in isolation.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — `off_ladder!/3` DROPS `team_memberships_role_check` inside this
+  # test's sandbox transaction (see `BarkparkCloud.OffLadderRole`), which takes
+  # ACCESS EXCLUSIVE on `team_memberships`. ExUnit runs sync suites serially and
+  # only after every async suite, so that lock cannot stall a concurrent test.
+  use BarkparkCloud.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.OffLadderRole
   alias BarkparkCloud.Accounts.{TeamInvitation, TeamMembership}
   alias BarkparkCloud.Repo
 
@@ -48,9 +53,12 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
 
   # Put an OFF-LADDER role string straight into `team_memberships.role`.
   # `TeamMembership.changeset/2` refuses it (`validate_inclusion` against
-  # `@roles`); the DATABASE does not — no migration puts a CHECK on that column,
-  # proven independently by `Accounts.RoleAgreementCensusTest`'s "an off-ladder
-  # role string really persists". Writing it HERE, past the changeset, is what
+  # `@roles`), and since `team_memberships_role_check` (migration
+  # 20260918120000) so does the DATABASE — so the write goes through
+  # `OffLadderRole.without_role_constraint/1`, which drops the CHECK inside this
+  # test's own sandbox transaction. The shape is still real: rows written before
+  # that migration hold such strings, and charter D493 rules they rank 0.
+  # Writing it HERE, past the changeset, is what
   # makes the assertions that use it independent of `validate_inclusion` ever
   # having run: the guard under test must hold on a row the changeset would
   # never have produced.
@@ -60,14 +68,15 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
              "the caller would no longer be measuring the off-ladder branch"
 
     {1, _} =
-      Repo.update_all(
-        from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
-        set: [role: role]
-      )
+      OffLadderRole.without_role_constraint(fn ->
+        Repo.update_all(
+          from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
+          set: [role: role]
+        )
+      end)
 
-    # Non-vacuity: if a CHECK constraint ever guards the column, the write stops
-    # landing and every off-ladder assertion below would pass for the wrong
-    # reason. Asserted through `match?/2` so the message is live — a bare
+    # Non-vacuity: if the write ever stops landing (a second guard, a failed
+    # drop), every off-ladder assertion below would pass for the wrong reason. Asserted through `match?/2` so the message is live — a bare
     # `assert pattern = expr, msg` raises MatchError before assert/2 can speak.
     assert match?(%TeamMembership{role: ^role}, Accounts.get_membership(team, user)),
            "the off-ladder write did not survive — `team_memberships.role` now refuses " <>
