@@ -335,10 +335,34 @@ defmodule Barkpark.Content.Edges do
     end
   end
 
+  # ── `"refTypeTolerant" => true` — a declared refType that does NOT gate
+  # dangling.
+  #
+  # `refType` does two jobs at once: it tells `expand.ex` / the Studio typeahead
+  # which type to offer, and it picks the TYPED arm of
+  # `resolve_target_existence/4` (a `get_document(to_id, refType, …)`), so a
+  # target of any OTHER type is reported dangling even though the document
+  # exists. The task schema's `parent_id` is the measured case: it declares
+  # `refType: "task"` and is legitimately used to hang a task off a PAPER as an
+  # epic anchor. On the live corpus (2026-09-18) `GET /v1/graph/dangling`
+  # returned 54 rows with `via_field: "parent_id"` over 11 distinct targets,
+  # every one of them an existing document of another type.
+  #
+  # A field may therefore declare `"refTypeTolerant" => true`: the refType is
+  # kept for expand/typeahead, but the emitted edge carries `ref_type = nil`, so
+  # BOTH resolution paths — the per-target `resolve_target_existence/4` and the
+  # batched `resolvable_targets/3` — take their type-AGNOSTIC arm and the edge
+  # resolves against any published document with that id. The two arms share the
+  # `:published` lens, so the gap-#2 contract (a typed and an untyped ref to the
+  # same target never disagree) is unaffected. Absent or false, nothing changes.
+  defp dangling_ref_type(field) do
+    if field["refTypeTolerant"] == true, do: nil, else: field["refType"]
+  end
+
   # Scalar reference field → at most one {raw_target, field_name, ref_type}.
   defp extract_field_edges(%{"type" => "reference"} = field, content) do
     field_name = field["name"]
-    ref_type = field["refType"]
+    ref_type = dangling_ref_type(field)
 
     case Map.get(content, field_name) do
       value when is_binary(value) and value != "" ->
@@ -356,7 +380,11 @@ defmodule Barkpark.Content.Edges do
          content
        ) do
     field_name = field["name"]
-    ref_type = of["refType"]
+    # Tolerance may be declared on the arrayOf wrapper or on its `of` leaf.
+    ref_type =
+      if field["refTypeTolerant"] == true,
+        do: dangling_ref_type(Map.put(of, "refTypeTolerant", true)),
+        else: dangling_ref_type(of)
 
     content
     |> Map.get(field_name)

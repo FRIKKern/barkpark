@@ -1808,8 +1808,16 @@ defmodule Barkpark.Plugins.Tasks do
       real `:kind` (`"blocks"` | `"discovered-from"`) which is mapped STRAIGHT
       THROUGH — never hardcoded `"blocks"`. Both kinds are whitelisted in
       `Barkpark.Content.Edge`, so they pass changeset validation.
-    * `content.parent_id` — the hierarchy parent → one `parent` edge
-      (`from_id` = child, `to_id` = parent).
+    * `content.parent_id` — NOT projected here. The task schema declares
+      `parent_id` as a `"reference"` field, so the CORE extractor
+      (`Barkpark.Content.Edges.extract_edges/2`) already projects it as kind
+      `parent_id` — the source-field-name convention every reference edge
+      follows. This callback used to emit a SECOND edge for the same
+      relationship under kind `parent`, so every parented task carried two
+      rows to one parent (measured 2026-09-18: 7062 published tasks carry
+      `parent_id`). That clause is GONE; do not reintroduce it. The core edge
+      is the one with reach — it also drives `?expand=parent_id`, the Studio
+      typeahead and the dangling report.
     * `content.wave_paper` and `content.papers` — the paper this task cites →
       one edge per distinct target, `kind` = the source field name. Neither key
       reaches the CORE extractor as an edge (`wave_paper` is undeclared;
@@ -1824,8 +1832,8 @@ defmodule Barkpark.Plugins.Tasks do
   When `doc.task_edges` is absent (an un-hydrated payload — e.g. a task saved
   outside the projector worker, or a non-task doc), NO dependency edge is
   emitted: the dead `content.dependencies` key is NEVER read, so an un-hydrated
-  task simply contributes only its `parent` edge until the worker re-hydrates it
-  on the next rebuild. The core Projector pass resolves dangling targets; this
+  task simply contributes only its paper-citation edges until the worker
+  re-hydrates it on the next rebuild. The core Projector pass resolves dangling targets; this
   callback never does. Guards a `nil` `ctx.doc` (the `{nil, nil, nil, :none}`
   entry skips the registration-time fingerprint, so a nil-doc crash would only
   surface at collection time) → returns `prev` unchanged.
@@ -1849,10 +1857,9 @@ defmodule Barkpark.Plugins.Tasks do
       from_id = Barkpark.Content.published_id(doc_id)
 
       dep_edges = dep_edges_from_task_edges(doc, from_id)
-      parent_edges = parent_edge(content, from_id)
       paper_edges = paper_citation_edges(content, from_id)
 
-      dep_edges ++ parent_edges ++ paper_edges
+      dep_edges ++ paper_edges
     else
       []
     end
@@ -1893,27 +1900,10 @@ defmodule Barkpark.Plugins.Tasks do
     end
   end
 
-  defp parent_edge(content, from_id) do
-    case Map.get(content, "parent_id") do
-      parent when is_binary(parent) and parent != "" ->
-        [
-          %{
-            from_id: from_id,
-            to_id: Barkpark.Content.published_id(parent),
-            kind: "parent",
-            plugin_source: "tasks"
-          }
-        ]
-
-      _ ->
-        []
-    end
-  end
-
   # ── Paper citations: `wave_paper` + `papers` (graph-papers) ────────────────
   #
-  # A task cites the Paper that drives it through THREE keys, and until this
-  # function existed only ONE of them reached the graph:
+  # A task points at a Paper through FOUR keys, not three. Any census that
+  # enumerates three is wrong — this is the list:
   #
   #   * `design_doc` — declared `"type" => "reference"` on the task schema, so
   #     `Content.Edges.extract_edges/2` projects it. Untouched here.
@@ -1923,6 +1913,18 @@ defmodule Barkpark.Plugins.Tasks do
   #   * `wave_paper` — not declared on the task schema at all, so it is never in
   #     the `fields` list the core extractor folds over. The epic-cycle harness
   #     is its only writer.
+  #   * `parent_id` — the FOURTH channel, and the one every earlier census
+  #     missed. It is a declared `"reference"` (kind `parent_id`, projected by
+  #     the core extractor, NOT here), nominally `refType: "task"`, but it is
+  #     legitimately used to hang a task off a PAPER as an epic anchor.
+  #     MEASURED on the live corpus 2026-09-18: of 293 distinct `parent_id`
+  #     targets, 7 are published papers — `authoring-excellence` (54 children),
+  #     `theme-system` (20), `preview-contract` (8), `sp-cond-format` (6),
+  #     `important-paper-quality-wave-2-paper-2026-07-31` (5), `sp-sort-filter`
+  #     (3), `barkpark-chronicle` (2). Five of those seven doc_ids ALSO name a
+  #     published task, so only two are paper-ONLY targets; the schema field
+  #     carries `"refTypeTolerant" => true` so neither shape false-flags
+  #     dangling (see `Barkpark.Content.Edges`).
   #
   # MEASURED on the live corpus (2026-08-24, 7249 published tasks / 1015
   # published papers): 213 tasks carry `design_doc`, 412 carry `papers`, 4320
@@ -1930,15 +1932,16 @@ defmodule Barkpark.Plugins.Tasks do
   # 24; the three keys together cite 564. Every wave paper the epic-cycle
   # harness has written was disconnected from its own wave.
   #
-  # WHY HERE AND NOT ON THE SCHEMA. `parent_id` is the precedent directly above:
-  # a plain content key the plugin knows names a document, projected by this
-  # pure callback rather than by a schema `reference` declaration. Taking that
-  # route keeps two properties the schema route would break — `papers` stays the
+  # WHY HERE AND NOT ON THE SCHEMA. Taking the plugin-callback route keeps two
+  # properties the schema route would break — `papers` stays the
   # v1 read-only array whose sole writer is `POST /v1/tasks/:id/papers` (and its
   # `check_optional_string_list` validation), and `wave_paper` stays undeclared,
   # so declaring it does not hand 4320 rows an editable Studio input on a field
   # the harness owns. `design_doc` also stays the ONE single-reference field, so
-  # `?expand=design_doc` is unaffected.
+  # `?expand=design_doc` is unaffected. `parent_id` went the OTHER way for the
+  # opposite reason: it is already a schema `reference` whose declaration buys
+  # `?expand=parent_id` and the Studio typeahead, so the plugin's duplicate
+  # clause was the one to retire.
   #
   # `kind` IS the source field name, matching the graph-edge-seam convention the
   # core extractor follows, so `Tasks.Expectations.driven_tasks/2` reports the
