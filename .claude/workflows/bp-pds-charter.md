@@ -15607,7 +15607,6 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
 
   It is stated this way precisely because comment-only is decidable over every added and removed line rather than argued. A judgement admits a PR that "only touched comments" and also happened to add a function; the predicate does not, because a single non-matching line answers `1` and the exemption is gone.
 
-  **APPLIED TO #17728 (merge `4d5a8400114db05d7ddfcddd7c9bb76b5cf2fcd1`, an ancestor of `origin/main`), THE PREDICATE SAYS NOT COMMENT-ONLY, AND THE RULING FOR THAT BLOB MOVE IS THEREFORE A RETROACTIVE THAW, NOT THIS EXEMPTION.** Run at this sha: 75 added/removed lines in `scripts/pds-pull-proof.sh`, 47 matching the comment/blank pattern, **28 not** — the PR added `rss_reuse_attribution()`, `pin_triple_line()`, `PIN_TRIPLE_PREFIX=`, the `FULL_RSS_LINE=` / `info "RSS ATTRIBUTION"` call sites, and several `say`/`info` lines. Its own subject names three changes ("correct the tag-exclusion comment, caveat the RSS peak, emit the cross-invocation pin triple") and only the first was comment-only; `pds-bl-step6-tag-exclusion-stale-comment`'s c2 evidence measured that ONE hunk and was then read as describing the whole PR. So `task-373ca724b4f37257`'s premise is refuted by its own proposed test, and this entry records the move as a **RETROACTIVE THAW** of `scripts/pds-pull-proof.sh`, sanctioned after the fact on its merits (the three changes are honesty corrections to transcript wording plus the pin-triple emitter, none of which weakens an assertion): pre-blob `012e3232b8986dbe0bc516249363e7f3298c3b31`, post-blob `97d9cbb86afe6910d7a49bd712ca3348084f4fb0`, BOTH read with `git rev-parse` (`git rev-parse 4d5a84001^:scripts/pds-pull-proof.sh` and `git rev-parse 4d5a84001:scripts/pds-pull-proof.sh`) and never with `shasum` (PDS-D154).
 
   **SCOPE.** This entry sanctions NO new edit. It states a standing predicate for future diffs and records one past blob move. **RE-FREEZE:** derived, per PDS-D732 — since PR #16311 `scripts/pds-climb-preflight.sh` reads the freeze from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` at run time, so #17728's own merge WAS its re-freeze and no literal was or is edited. `FREEZE_BLOB_HISTORICAL` is not touched.
 
@@ -16339,7 +16338,6 @@ name unrelated code.
   | b67d67f9e | 2026-09-13 | #18113 | `0ac6d5d98fd67ae13298abe48874af616d5e8f3d` |
   | 36db8df8b | 2026-09-13 | #18078 | `9745ff1f793ba89962828cd631a7d4a0e34e53d3` |
   | 1ca9b5749 | 2026-09-13 | #18026 | `f47c825200058dec2f34e141fca7ddd6347b0c38` |
-  | 4d5a84001 | 2026-09-11 | #17728 | `97d9cbb86afe6910d7a49bd712ca3348084f4fb0` |
   | bb8e98f78 | 2026-09-11 | #17710 | `012e3232b8986dbe0bc516249363e7f3298c3b31` |
   | f16ac8dc8 | 2026-09-11 | #17618 | `21a8f195dbd03eb42e901510cfeab0d766508ad8` |
   | a2deecc1f | 2026-09-11 | #17562 | `9a7618d40fba58db949c29a29e56c9b0eef5ab9c` |
