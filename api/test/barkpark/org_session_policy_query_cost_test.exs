@@ -76,7 +76,7 @@ defmodule Barkpark.OrgSessionPolicyQueryCostTest do
     user
   end
 
-  defp org!(slug, policy \\ nil) do
+  defp org!(slug, policy) do
     {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
 
     if policy do
