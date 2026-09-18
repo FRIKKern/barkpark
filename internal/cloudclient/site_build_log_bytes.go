@@ -80,6 +80,15 @@ type SiteBuildLogBytes struct {
 	Detail      string `json:"detail"`
 	Reason      string `json:"reason"`
 	BoxLogState string `json:"box_log_state"`
+
+	// THE SECOND ROUTE, MEASURED NOT ASSUMED. BuildLogBytes' 502 arm merges
+	// box_status and box_error exactly as BuildLog's does (the two box_error/1
+	// clauses are byte-identical), but this struct declared NEITHER — so the
+	// bytes route never crashed and never relayed the box's own diagnosis
+	// either. json.Unmarshal drops unmodelled keys silently, which is the
+	// quieter half of the same fault.
+	BoxStatus int      `json:"box_status"`
+	BoxError  BoxError `json:"box_error"`
 }
 
 // Scrubbed reports whether the control plane said these bytes were folded

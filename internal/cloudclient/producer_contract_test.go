@@ -442,6 +442,10 @@ func buildLogBytesAllowlist(t *testing.T) map[string]bool {
 var buildLogBytesEnvelopeKeys = []string{
 	"deployment_id", "build_id", "available",
 	"error", "detail", "reason", "box_log_state",
+	// The 502 arm's own two keys. Added 2026-09-18 with task-3468f99ad5a4e9b8:
+	// the producer has merged them since the route was written, and the Go
+	// struct simply never declared them.
+	"box_status", "box_error",
 }
 
 // expectedBuildLogBytesTags is the pinned json tag list of SiteBuildLogBytes, IN
@@ -458,7 +462,7 @@ var expectedBuildLogBytesTags = []string{
 	"slug", "record", "log_state", "log_scrub", "log_path", "log_bytes",
 	"tail_bytes", "truncated", "tail", "evicted_at",
 	// the refusal envelope
-	"error", "detail", "reason", "box_log_state",
+	"error", "detail", "reason", "box_log_state", "box_status", "box_error",
 }
 
 // THE ORDER LOCK. Not merely a set: the row asks for serializer ORDER, and order
