@@ -341,6 +341,12 @@ func pickResumeRecord(io resumeIO, live resumeLive, dir, docID string) (resumeRe
 		if local.State != resumeNoRecord || !asked {
 			return local, true
 		}
+		// BOTH places were looked at and BOTH are empty. Say both, or the
+		// brief's "no manifest names this row at the ledger" quietly drops the
+		// fact that the local directory was checked too — and a successor
+		// deciding whether to go looking on the dead host needs that.
+		srv.Source = serverPrimingSource + " — and " + local.Path
+		return srv, true
 	}
 	if asked {
 		return srv, true
