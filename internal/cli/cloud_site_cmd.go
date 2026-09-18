@@ -485,7 +485,12 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		if waitForLive > 0 {
 			return useError(out, "usage", "--wait-for-live is not wired for the --prebuilt lane: a prebuilt deploy switches on upload rather than riding the box's build queue, so the deferral this flag waits past does not occur there (usage: "+usage+")", exitUsage)
 		}
-		if _, verr := validatePrebuiltDir(prebuilt); verr != nil {
+		// The UNION arm, deliberately: no network has been touched yet, so the
+		// site's runtime target is unknown and a guard that demanded one lane's
+		// root file would refuse the other lane's legitimate tree. Everything
+		// that does not depend on the runtime (exists, non-empty, no symlinks,
+		// no unpackable entries) still refuses here, before any mint.
+		if _, verr := validatePrebuiltDirFor(prebuilt, prebuiltRuntimeUnknown); verr != nil {
 			return useError(out, "usage", verr.Error(), exitUsage)
 		}
 	} else if deploymentID != "" {
@@ -692,6 +697,16 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	if code := prebuiltStaticOnlyRefusal(out, ref, site, siteRead); code != exitOK {
 		return code
 	}
+	// THE RUNTIME-SPECIFIC ROOT GUARD, STILL PRE-MINT. The pre-mint arm in
+	// runCloudSiteDeploy could only ask the union question (it had not read the
+	// row yet); this is the same walk's strict half, and it runs here — after the
+	// one site read this lane already makes, and still before resolvePrebuiltDeployment
+	// spends the nonce. A node tree packed from the repo root instead of
+	// .next/standalone is refused here rather than by the box's exit 11.
+	runtime := prebuiltRuntimeFor(site, siteRead, dir)
+	if _, verr := validatePrebuiltDirFor(dir, runtime); verr != nil {
+		return useError(out, "failed", verr.Error(), exitGeneric)
+	}
 	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
@@ -702,9 +717,22 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 		return useError(out, "failed", "the control plane minted a prebuilt deployment with no build_id — nothing to stamp the bytes with, so the upload would fail at HEALTH; re-run without --prebuilt to build on the box, or upgrade the control plane", exitGeneric)
 	}
 
-	marker, merr := prebuiltBuildMarker(dir)
-	if merr != nil {
-		return useError(out, "failed", merr.Error(), exitGeneric)
+	// THE BUILD-ID MARKER CHECK IS STATIC-ONLY, AND THAT IS THE RULING OF RECORD,
+	// NOT A SHORTCUT. On a node slot the marker HEALTH asserts is not resident in
+	// the uploaded bytes at all: write_slot_env (deploy/site-deploy-node.sh) puts
+	// BARKPARK_BUILD_ID into the slot EnvironmentFile and D71's force-dynamic makes
+	// the served page echo process.env. There is no index.html in a standalone
+	// release root to read a <meta> out of, and reading one would be asserting a
+	// property of the wrong artifact. What binds the node lane instead is the
+	// artifact digest (100% load-bearing, per the same ruling) and the ABI
+	// declaration packed below.
+	marker := buildID
+	if runtime != prebuiltRuntimeNode {
+		var merr error
+		marker, merr = prebuiltBuildMarker(dir)
+		if merr != nil {
+			return useError(out, "failed", merr.Error(), exitGeneric)
+		}
 	}
 	if marker != buildID {
 		out.progressf("  export BARKPARK_BUILD_ID=%s", buildID)
@@ -727,12 +755,15 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 			dir, have, buildID, ref, dir, dep.ID), exitGeneric)
 	}
 
-	art, perr := packPrebuiltDir(dir)
+	art, perr := packPrebuiltDirFor(dir, runtime)
 	if perr != nil {
 		return useError(out, "failed", perr.Error(), exitGeneric)
 	}
 	defer art.Cleanup()
 	out.progressf("→ packed %s — %d bytes on the wire, sha256 %s", dir, art.WireBytes, art.SHA256)
+	if runtime == prebuiltRuntimeNode {
+		out.progressf("  the artifact carries %s — the box compares it against its own node major before STAGE and refuses a mismatch with nothing staged and no slot booted", nodeABIMarkName)
+	}
 
 	f, oerr := os.Open(art.Path)
 	if oerr != nil {
@@ -902,16 +933,50 @@ func prebuiltStaticOnlyRefusal(out *writer, ref string, site cloudclient.SpawnSi
 // binary has never heard of, and they quote the unrecognised value back so the
 // operator can see WHICH field refused them rather than reading a generic no.
 func prebuiltUnservableClause(kind, runtimeTarget string) string {
+	// NODE IS RETIRED FROM THIS REFUSAL, and the reason is a fact about the box,
+	// not a change of mind: deploy/site-deploy-node.sh now carries a
+	// PLAN_MODE=prebuilt arm that stages an uploaded standalone tree, records
+	// .bp-prebuilt-sha256, runs no npm, and refuses an ABI mismatch BEFORE STAGE
+	// (exit 17). The engine arm this guard was waiting for exists, so the CLI has
+	// a lane to hand these bytes to. The rest of the guard STAYS: it is still a
+	// closed question about the runtimes this binary has an arm for, and a
+	// runtime nobody has built an engine for is still refused before the nonce.
 	if siteIsNode(kind, runtimeTarget) {
-		return "runs a long-running node/SSR process"
+		return ""
 	}
 	if rt := strings.ToLower(strings.TrimSpace(runtimeTarget)); rt != "" && !prebuiltTargetIsStatic(rt) {
-		return fmt.Sprintf("declares runtime target %q, and this bp knows only one target the prebuilt lane can serve (%s)", sanitizeCell(rt), cloudclient.RuntimeTargetStatic)
+		return fmt.Sprintf("declares runtime target %q, and this bp knows only two targets the prebuilt lane can serve (%s, %s)", sanitizeCell(rt), cloudclient.RuntimeTargetStatic, cloudclient.RuntimeTargetNode)
 	}
 	if k := strings.ToLower(strings.TrimSpace(kind)); k != "" && k != "static" {
-		return fmt.Sprintf("declares kind %q, and the prebuilt lane serves only kind \"static\"", sanitizeCell(k))
+		return fmt.Sprintf("declares kind %q, and the prebuilt lane serves kinds \"static\" and \"node\"", sanitizeCell(k))
 	}
 	return ""
+}
+
+// prebuiltRuntimeFor decides WHICH lane this deploy packs for.
+//
+// The site row is the truth when it was read. When it was NOT (the opt-in
+// preflight has already said out loud that the read failed and that the control
+// plane's own refusal is the backstop), the tree's root file is the only
+// evidence left — and it is real evidence, because the two lanes have different
+// root files by contract: a static dist/ has index.html, a node standalone
+// release root has server.js. A tree carrying BOTH is read as static, which is
+// the status quo this change must not move.
+func prebuiltRuntimeFor(site cloudclient.SpawnSite, siteRead bool, dir string) prebuiltRuntime {
+	if siteRead {
+		if siteIsNode(site.Kind, site.RuntimeTarget) {
+			return prebuiltRuntimeNode
+		}
+		return prebuiltRuntimeStatic
+	}
+	regular := func(name string) bool {
+		st, err := os.Stat(filepath.Join(dir, name))
+		return err == nil && st.Mode().IsRegular()
+	}
+	if !regular("index.html") && regular("server.js") {
+		return prebuiltRuntimeNode
+	}
+	return prebuiltRuntimeStatic
 }
 
 // prebuiltTargetIsStatic is the CLOSED half of the runtime-target vocabulary:
