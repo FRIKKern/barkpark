@@ -653,6 +653,35 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1495 — bumped 2026-09-17 from 1492 on console-r21-w22-scenario-denominators:
+      # +3 tests. Two headers in cloud/priv/static/__app.test.mjs declined a
+      # corpus-level guard on the strength of a sweep and each typed its own
+      # denominator; the two disagreed with each other and both were behind the
+      # corpus, so neither was the sweep it claimed to be. (1) A denominator
+      # scan over this file's own comments demands ZERO typed scenario counts,
+      # with a control planted in a COPY of the source inside the same test so
+      # CI's existing invocation wires it. (2) A vercel sweep re-establishes
+      # cch-r16-w11's blind spot BY MEASUREMENT over every scenario the corpus
+      # declares — its argument survives the corrected denominator — with a
+      # probe floor so a sweep that probed nothing cannot read as proof and a
+      # positive control on the predicate itself. (3) cch-w48-s3's argument does
+      # NOT survive: scenarios.mjs does answer GET /v1/github/installation and
+      # committed fixtures paint the connected arm, so the declined corpus-level
+      # guard is owed and is paid — the GitHub card's authority arms are now
+      # driven off the SHIPPED fixture bodies, with a non-empty floor so an
+      # emptied corpus reds instead of sweeping nothing. RE-MEASURED, never
+      # arithmetic: RE-MEASURED AGAIN after the rebase onto 1492 (the combined
+      # figure is decided by the instrument, never by adding 1492 + 3).
+      # `bash scripts/console-harness.sh` on the rebased branch printed
+      # `# tests 1495 / # pass 1495 / # fail 0`; with a typed denominator
+      # re-planted in a comment it printed `# tests 1495 / # pass 1494 /
+      # # fail 1`, and with githubCardHtml's canWrite ternary removed so a
+      # member is offered Disconnect it printed `# tests 1495 / # pass 1492 /
+      # # fail 3` (the new corpus guard, cch-w48-s3's seam arm and
+      # cch-w49-bl's member fence). `bash scripts/console-pins.sh --selftest` was run after the
+      # bump — it reads the step `name:` slot a grep from inside the shell step
+      # cannot see.
+      #
       # PIN 1492 — bumped 2026-09-17 from 1491 on console-r21-w22-operator-prose:
       # +1 test. The operator console's comments stated its card and route count
       # as a typed numeral, one short of what operatorRefresh issues, and the
@@ -862,7 +891,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1492-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1495-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -878,14 +907,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1492 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1492 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1495 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1495 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1492 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1492 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1492 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1495 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1495 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1495 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1492 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1495 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -898,6 +927,49 @@ jobs:
       # Chrome, no network, no goldens.
       - name: Run preview smoke harness
         run: node cloud/priv/static/__preview__/smoke.mjs
+
+      # ── THE FILES-TO-INSTRUMENTS RULE'S OWN GUARD (studio-r21f-w7) ─────────
+      #
+      # scripts/preview-census-gate-check.mjs mechanises the rule the step above
+      # depends on: cloud/priv/static/__preview__/scenarios.mjs is the ONE fixture
+      # corpus, several instruments keep a TWO-WAY census over it, and its
+      # CENSUS_OWNERS table names each owner by path together with the census
+      # literal that makes it an owner. The table is re-read against the tree on
+      # every run, so an owner that vanished, stopped importing the corpus, or
+      # lost its literal is a REFUSAL rather than a quietly shorter answer.
+      #
+      # IT WAS REACHED BY NO `run:` STEP. Before this, the only line naming the
+      # file anywhere in the merge path was the `paths:` entry on this workflow's
+      # push arm — a dispatch trigger for a script nothing dispatched. The honest
+      # predicate finds it:
+      #
+      #   git grep -nE '(node|bash|sh)[[:space:]]+[^|;&]*preview-census-gate-check' \
+      #     -- .github/ scripts/ Makefile package.json
+      #
+      # printed only the script's own two usage strings, while the same search for
+      # breakpoint-sweep.test.mjs (a wired control) printed this file's `node --test`
+      # line. So the table could rot through any merge and nothing would say so.
+      #
+      # BOTH ARMS RUN, on this branch, against the REAL tree — the table arm is what
+      # has no other guard, so the mutation is a real owner losing its real literal:
+      #   RED   — `perl -pi -e 's/\bEXPECTATIONS\b/XPCTNS/g'` on the real
+      #           cloud/priv/static/__preview__/smoke.mjs (EXPECTATIONS occurrences
+      #           29 -> 0) makes this step exit 1 with
+      #           "SELF-TEST FAILED (1 of 20 assertion(s)) — the files-to-instruments
+      #           rule no longer holds."
+      #   QUIET — the tree unmutated, the same command exits 0 with
+      #           "self-test: 20/20 — the rule fires on a census move, stays quiet
+      #           otherwise, and refuses when its table rots."
+      # A WEAKER MUTATION DOES NOT COUNT, and this is why the arm is quoted with its
+      # regex: renaming the literal to `EXPECTATIONS_RENAMED` leaves it a SUBSTRING,
+      # the table arm still finds it, and the run stays 20/20 green. The first attempt
+      # at this red arm did exactly that and read as a guard that could not lose.
+      #
+      # No paths change is needed: this workflow's push arm already lists both
+      # `scripts/preview-census-gate-check.mjs` and `cloud/priv/static/**`, so every
+      # edit that can move the table already dispatches the run that now reads it.
+      - name: Preview census gate — the files-to-instruments rule still holds (20-check self-test)
+        run: node scripts/preview-census-gate-check.mjs --selftest
 
       # ── THE MEMBER-ACTOR RENDERED-STATE AUTHORITY SWEEP (cch-w46-s7) ────────
       #

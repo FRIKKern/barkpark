@@ -8,6 +8,34 @@ PDS-D448, or from the owning doc. The counts the row carried are refuted below b
 The owning doc is `docs/decisions/success-claim-census.md`; this file is its per-site
 appendix, and the doc carries only the totals and the ruling.
 
+**AMENDMENT, 2026-09-18 (task-477972989335da51).** The `d8bd23c1d` figures below are left
+exactly as they were re-derived; this note records what moved after them, because a
+HISTORICAL RECORD is amended, never re-typed. Three of the sites this file names as
+undeclared have since been ruled on IN THE CODE (#18899, merge sha `16606806`) and
+REGISTERED in the census's `@declared` (this task):
+
+| site | fn | was | now |
+|---|---|---|---|
+| `search_controller.ex` | `delete_search_synonym/2` | CATCH-ALL-TO-SUCCESS, undeclared — a live defect in §"only 2 sites are live defects" below | DECLARED-HONEST, registered; basis token `NO FAILURE REACHES THIS RECEIPT` |
+| `v1/media_controller.ex` | `delete_search_synonym/2` | CATCH-ALL-TO-SUCCESS, undeclared — the other of those 2 | DECLARED-HONEST, registered; same token, its own span |
+| `auth_controller.ex` | `request_magic_link/2` | PURE ECHO — DECLARED, with a **named exposure** and no row of its own (see the Corner 2 table) | the exposure now has its own ruling and its own register row; basis token `WHY IT MUST MERGE` |
+
+The class line the census prints moved with it: `CATCH-ALL-TO-SUCCESS FINDINGS  2
+undeclared of 3 fired` → `0 undeclared of 3 fired`, and the `@declared` register went 5
+rows → 8. **The count is not the point and a green census alone does not discharge this.**
+A register row that silences a finding while the api-side ruling is absent is the exact
+inversion the register exists to catch, so each of the three rows is anchored on a token
+that occurs ONLY inside the block #18899 added: deleting any one of those blocks reds
+`DECLARED-BASIS-INTACT` at rc 1 and the fail line names that site. Proved by deletion,
+one site at a time, on the filing branch — and the fourth CATCH-ALL row
+(`github_webhook_controller.ex:100`, declared since wave 35) stayed SUPPRESSED and
+unnamed through all three.
+
+The §"only 2 sites are live defects" argument below is therefore SPENT, not refuted: it
+was the correct reading of the tree at `d8bd23c1d`, and the repair order it issued has
+been filled. The ruling it supports (PDS-D454 — no number-shaped gate over this
+population) is untouched by that.
+
 ## The population, and why it is 81 and not 64
 
 `scripts/pds-elixir-receipt-census.exs` prints its own depth sweep. At base sha

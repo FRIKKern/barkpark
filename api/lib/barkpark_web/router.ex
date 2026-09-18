@@ -1909,6 +1909,17 @@ defmodule BarkparkWeb.Router do
 
     get("/meta", MetaController, :index)
 
+    # THE canonical public readout of the deployed build: `version` + `commit`,
+    # the same two values /status.json already publishes unauthenticated, under
+    # the `/v1` path every deploy verifier probes first (this used to 404 —
+    # task-bl-v1-version-route-gap). Same posture as /v1/meta: no auth, not
+    # rate-limit-charged, because a deploy gate polls it while the box is still
+    # coming up. It does NOT relax the capabilities contract — anonymous
+    # /v1/capabilities still withholds `build`. See VersionController's
+    # @moduledoc for the disclosure decision and BarkparkWeb.VersionControllerTest
+    # for the pinned key set.
+    get("/version", VersionController, :index)
+
     # The published OpenAPI 3.1 descriptor of the /v1 surface. Public, no token
     # (SDK generators / procurement fetch it before any caller has a token) and
     # not rate-limit-charged — same posture as /v1/meta and Coolify's
