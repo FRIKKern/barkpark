@@ -181,7 +181,7 @@ defmodule BarkparkCloud.Web.RouterProviderIdentityTest do
       # nothing. One real call through the same fake, in the same process, and
       # the log is no longer empty.
       assert {:ok, %{status: _}} = Cloudflare.verify_token(@api_token)
-      assert Fake.verified() == [@api_token]
+      assert [%{token: @api_token}] = Fake.verified()
     end
   end
 
