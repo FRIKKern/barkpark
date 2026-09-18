@@ -356,11 +356,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       ]
 
       for doc <- skeleton_only do
-        assert {:unfixable, reason} = DoctrineBackfill.plan(doc),
-               "expected a refusal for #{inspect(doc.content["blocks"])}"
-
-        assert reason == DoctrineBackfill.hollow_reason(),
-               "expected the HOLLOW reason for #{inspect(doc.content["blocks"])}, got #{reason}"
+        assert DoctrineBackfill.plan(doc) == {:unfixable, DoctrineBackfill.hollow_reason()},
+               "expected the HOLLOW refusal for #{inspect(doc.content["blocks"])}"
       end
     end
 
@@ -384,9 +381,12 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       ]
 
       for doc <- still_fixable do
-        assert {:change, blocks, _meta} = DoctrineBackfill.plan(doc),
-               "expected a plan for #{inspect(doc.content["blocks"])}"
+        result = DoctrineBackfill.plan(doc)
 
+        assert match?({:change, _blocks, _meta}, result),
+               "expected a plan for #{inspect(doc.content["blocks"])}, got #{inspect(result)}"
+
+        {:change, blocks, _meta} = result
         refute Hollow.hollow?(blocks)
       end
     end
