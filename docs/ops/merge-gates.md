@@ -733,10 +733,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-eight)
+### The doc-gates roster (it is not two scripts — it is twenty-nine)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **28 steps labelled `(fails this job)`** plus 10
+undersells it: it runs **29 steps labelled `(fails this job)`** plus 10
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -755,11 +755,12 @@ stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
 (The count read 17 until 2026-08-07, two steps short; it read 26 until #18707
-added the doc-drift pair. The 28 is derived by
+added the doc-drift pair, and 28 until #19266 added the charter adoption
+census. The 29 is derived by
 running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 28
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 29
 grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml   # → 10
 ```
 
@@ -803,6 +804,7 @@ so its verdict is unaffected.) In workflow order:
 | 26 | Paper dialect ratchet | `scripts/paper-dialect-ratchet.sh` (+ its `(tripwire)` self-test step; shrink-only counts of text-keyed inline leaves and malformed widget items per in-repo paper corpus, with a non-vacuity floor that REFUSES rather than greens) |
 | 27 | Doc drift — links, routes, placeholders, runnable examples | `scripts/doc-drift-check.sh` (+ its `(tripwire)` self-test step; diff-scoped, landed by #18707 — see *When your PR touches a doc* below) |
 | 28 | Charter-corpus marker hygiene | `scripts/charter-corpus-hygiene-check.sh` (`--selftest`, then the check) over the `.claude/workflows/*-charter.md` corpus |
+| 29 | Charter adoption census | `deploy/charter-adoption-check.sh` (`--selftest`, then the check; the deploy-reliability charter's declared adoption set vs the set derived from `.github/workflows/`, red in both directions — D620) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
