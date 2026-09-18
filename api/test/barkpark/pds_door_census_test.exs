@@ -320,40 +320,54 @@ defmodule Barkpark.PdsDoorCensusTest do
     # this bump are paid together, and the count below reads 13 ON PURPOSE.
     # RE-DERIVED by running the census on this tree: it prints
     # `harnesses : 13` and names all three files.
-    assert out =~ ~r/harnesses\s+: 13 /,
-           "the derived harness count moved off 13. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a fourteenth harness landed (or one left), " <>
+    #
+    # A FOURTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-18):
+    # scripts/pds-citation-expand.test.sh, the 4-arm harness for the
+    # slash-compressed PDS-D citation counter and guard (#19227, 847e94c0b). It is
+    # a harness by the same derived *_test.sh / *.test.sh rule; it is wired into
+    # the pds-harnesses leg of .github/workflows/shell-harnesses.yml, which is NOT
+    # a required context, so its disposition row is PRICE, not THROUGH — and it
+    # belongs in the WITH-HARNESSES denominator. LIKE the tenth and UNLIKE the
+    # seventh, eighth, eleventh, twelfth and thirteenth, it did NOT red main
+    # first: it arrives with its own PRICE row in scripts/pds-door-census.sh in
+    # the same landing, and this bump is stacked on that head so the two move
+    # together in either direction. RE-DERIVED by running the census on this
+    # tree: it prints `harnesses : 14` and names the file.
+    assert out =~ ~r/harnesses\s+: 14 /,
+           "the derived harness count moved off 14. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a fifteenth harness landed (or one left), " <>
              "say so on purpose.\n#{out}"
 
     for named <- [
           "pds-artifact-retention.test.sh",
           "pds-charter-anchors-check_test.sh",
+          "pds-citation-expand.test.sh",
           "pds-citation-precedes-merge_test.sh"
         ] do
       assert out =~ named,
              "the census stopped naming #{named} among its derived harnesses. The count " <>
-               "above would still read 13 if a DIFFERENT harness had replaced it, so the " <>
+               "above would still read 14 if a DIFFERENT harness had replaced it, so the " <>
                "count alone does not pin which files it counted.\n#{out}"
     end
 
     assert out =~ "pds-threshold-move-guard_test.sh",
            "the census stopped naming pds-threshold-move-guard_test.sh among its derived " <>
-             "harnesses. The count above would still read 13 if a DIFFERENT harness had " <>
+             "harnesses. The count above would still read 14 if a DIFFERENT harness had " <>
              "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-personal-local-smoke_test.sh",
            "the census stopped naming pds-personal-local-smoke_test.sh among its derived " <>
-             "harnesses. The count above would still read 13 if a DIFFERENT harness had " <>
+             "harnesses. The count above would still read 14 if a DIFFERENT harness had " <>
              "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-live-hetzner-placement-group_test.sh",
            "the census stopped naming pds-live-hetzner-placement-group_test.sh among its " <>
-             "derived harnesses. The count above would still read 13 if a DIFFERENT harness " <>
+             "derived harnesses. The count above would still read 14 if a DIFFERENT harness " <>
              "had replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-read-preflight-audit_test.sh",
            "the census stopped naming pds-read-preflight-audit_test.sh among its derived " <>
-             "harnesses. The count above would still read 13 if a DIFFERENT harness had " <>
+             "harnesses. The count above would still read 14 if a DIFFERENT harness had " <>
              "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-pull-proof_test.sh",
