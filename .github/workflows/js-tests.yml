@@ -52,6 +52,13 @@ on:
       # makes `vitest run tests/filter-op-parity.test.ts` fail 2 of 7 — the guard
       # works; only its trigger was missing.
       - "api/test/fixtures/filter_ops.json"
+      # Two more cross-tree fixtures js/ tests read DIRECTLY (same class as
+      # filter_ops.json above): packages/react/tests/table-typed-cols.parity.test.ts
+      # reads table-col-types.json; status-manifest-parity.test.ts and
+      # taskboard-cancel-lane.test.ts read design/status-manifest.json. Neither
+      # matched any entry here, so an engine-side regen never dispatched js-tests.
+      - "api/test/support/fixtures/table-col-types.json"
+      - "design/status-manifest.json"
       # The Phoenix paper-surface stylesheet. @barkpark/react ships
       # dist/paper-surface.css as a byte-for-byte COPY of it, and
       # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
@@ -98,6 +105,13 @@ on:
       # makes `vitest run tests/filter-op-parity.test.ts` fail 2 of 7 — the guard
       # works; only its trigger was missing.
       - "api/test/fixtures/filter_ops.json"
+      # Two more cross-tree fixtures js/ tests read DIRECTLY (same class as
+      # filter_ops.json above): packages/react/tests/table-typed-cols.parity.test.ts
+      # reads table-col-types.json; status-manifest-parity.test.ts and
+      # taskboard-cancel-lane.test.ts read design/status-manifest.json. Neither
+      # matched any entry here, so an engine-side regen never dispatched js-tests.
+      - "api/test/support/fixtures/table-col-types.json"
+      - "design/status-manifest.json"
       # The Phoenix paper-surface stylesheet. @barkpark/react ships
       # dist/paper-surface.css as a byte-for-byte COPY of it, and
       # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
