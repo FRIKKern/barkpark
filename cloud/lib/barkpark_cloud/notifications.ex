@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Notifications do
     DigestRun,
     EmailSettings,
     EventEmail,
+    ReceiptLoss,
     SafeUrl,
     SitePublishWaitingAlert,
     Transactional,
@@ -567,10 +568,31 @@ defmodule BarkparkCloud.Notifications do
   deploys and how often it fails — an instance-count-shaped disclosure through
   the back door, in the same email whose per-instance list is partitioned
   precisely to prevent one. Half a rule is not a rule.
+
+  ## WHO ASKED FOR THIS RUN (gr-backlog-operator-digest-send)
+
+  `opts` carries the CAUSE onto the accounting row and nothing else: `:trigger`
+  (`"scheduled"`, the default and the 06:00Z cron tick, or `"operator"`) and
+  `:actor_user_id` (the operator's id, NULL on a scheduled run because there is
+  nobody — not because nobody was recorded). It changes no audience, no payload
+  and no branch; `DailyDigestWorker` keeps calling the /1 form and keeps writing
+  the word it always meant.
+
+  It is NOT a second send path and NOT a new producer (D14). The operator route
+  calls THIS function, so the recipient resolution, the per-team payload
+  tenancy, the transport seam and the `Delivery` receipt (with its
+  `content_sha256` / `content_subject` / `content_counts`, dr-w34/dr-w29) are the
+  same bytes on both causes. A manual send that recorded less than the cron send
+  would be a send nobody could prove.
   """
-  @spec deliver_fleet_digest([term()]) ::
+  @spec deliver_fleet_digest([term()], keyword()) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
-  def deliver_fleet_digest(barkparks) when is_list(barkparks) do
+  def deliver_fleet_digest(barkparks, opts \\ []) when is_list(barkparks) do
+    cause = %{
+      trigger: Keyword.get(opts, :trigger, "scheduled"),
+      actor_user_id: Keyword.get(opts, :actor_user_id)
+    }
+
     fleet = DigestEmail.summary(barkparks)
 
     # WHO gets what, resolved before anything is sent. Two reasons this is a
@@ -653,7 +675,8 @@ defmodule BarkparkCloud.Notifications do
             covered: 0,
             reason: "no_team_recipients",
             withheld: withheld
-          }
+          },
+          cause
         )
 
         {:ok, :no_admins}
@@ -690,7 +713,8 @@ defmodule BarkparkCloud.Notifications do
 
         account_fleet_digest(
           %{recipients: length(recipients), sent: sent},
-          %{instances: fleet.total, covered: covered, reason: reason}
+          %{instances: fleet.total, covered: covered, reason: reason},
+          cause
         )
 
         {:ok, %{sent: sent, recipients: recipients}}
@@ -1444,7 +1468,7 @@ defmodule BarkparkCloud.Notifications do
   # `safely/1` around each: accounting is a side path on a best-effort operator
   # email. It must never be able to break the send it is counting — and that
   # holds for the row too, so a DB failure loses the record, never the digest.
-  defp account_fleet_digest(measurements, metadata) do
+  defp account_fleet_digest(measurements, metadata, cause) do
     metadata = Map.put(metadata, :phase, :settled)
 
     safely(fn ->
@@ -1455,7 +1479,7 @@ defmodule BarkparkCloud.Notifications do
       )
     end)
 
-    safely(fn -> record_digest_run(measurements, metadata) end)
+    safely(fn -> record_digest_run(measurements, metadata, cause) end)
 
     safely(fn -> log_fleet_digest(measurements, metadata) end)
 
@@ -1470,7 +1494,7 @@ defmodule BarkparkCloud.Notifications do
   # funnel through `Withhold.record/4` carry the key, and the column is NULLABLE
   # precisely so its absence is not silently written as a zero — the same rule
   # the log line follows by omitting the key entirely.
-  defp record_digest_run(m, meta) do
+  defp record_digest_run(m, meta, cause) do
     %DigestRun{}
     |> DigestRun.changeset(%{
       event: "fleet_digest",
@@ -1480,7 +1504,13 @@ defmodule BarkparkCloud.Notifications do
       instances: meta.instances,
       covered: Map.get(meta, :covered, 0),
       reason: meta.reason,
-      withheld: Map.get(meta, :withheld)
+      withheld: Map.get(meta, :withheld),
+      # gr-backlog-operator-digest-send — the cause, on the ONE sink a container
+      # recreate cannot take with it. A `digest_runs` row that says `operator`
+      # without saying WHICH operator would leave "who mailed the fleet at
+      # 14:07?" unanswerable on the only durable record there is.
+      trigger: cause.trigger,
+      actor_user_id: cause.actor_user_id
     })
     |> Repo.insert()
     |> case do
@@ -1794,6 +1824,25 @@ defmodule BarkparkCloud.Notifications do
   is matched literally and therefore returns nothing. Silently DROPPING an
   unrecognised filter would widen the result set behind the caller's back, which
   is the one failure mode a delivery log must not have.
+
+  ## THE EMPTY/RARE RESULT WAS THE EXPENSIVE ONE (cch-w32-bl), and it is indexed
+
+  A filter that matches PLENTY is cheap: `(team_id, inserted_at)` carries the
+  ORDER BY and the scan stops at the LIMIT. A filter that matches NOTHING — or
+  almost nothing — never fills the LIMIT, so the planner abandons that index and
+  bitmap-scans the team's ENTIRE partition to return zero rows. Re-measured on
+  this tree with EXPLAIN (ANALYZE, BUFFERS) over a seeded 250k-row corpus with a
+  50k-row hot team: `?status=bogus`, `?event=bogus`, `?channel=bogus` and the
+  in-vocabulary-but-empty `?status=suppressed` each cost ~1153 shared buffers and
+  report `Rows Removed by Filter: 50000`, against 7 buffers unfiltered.
+
+  `20260918110000_index_notification_delivery_filter_axes` adds one
+  `(team_id, <axis>, inserted_at)` index per filter axis and takes those to 3-12
+  buffers, with the common-value and unfiltered plans unchanged. THE VOCABULARY
+  WAS NOT THE FIX: rejecting an unknown value at the door would have rescued only
+  the `bogus` line and neither the RARE-but-real one (`?status=pending`, 50 real
+  rows, 1153 → 54 buffers) nor the OPEN-vocabulary `event` axis. The literal-match
+  contract above therefore stands unchanged.
   """
   @spec list_deliveries(Team.t() | binary(), keyword() | pos_integer()) :: [Delivery.t()]
   def list_deliveries(team, opts \\ [])
@@ -2022,8 +2071,7 @@ defmodule BarkparkCloud.Notifications do
           {"failed", DeliveryReason.summarize(why)}
       end
 
-    %Delivery{}
-    |> Delivery.changeset(%{
+    attrs = %{
       team_id: team_id,
       recipient: recipient,
       event: event,
@@ -2032,8 +2080,25 @@ defmodule BarkparkCloud.Notifications do
       attempts: 1,
       last_error: last_error,
       carrier: carrier,
-      content_sha256: Delivery.content_digest(email)
-    })
+      content_sha256: Delivery.content_digest(email),
+      # dr-w29 — and the two things a fingerprint structurally cannot give a
+      # reader who does not already hold a candidate render: the SUBJECT the
+      # transport was handed, verbatim, and the NUMERIC BLOCK parsed back OUT of
+      # that rendered subject. Same `email`, same seam, same honest default: a
+      # caller with no message in hand leaves both NULL.
+      #
+      # THE BODY IS STILL NOT STORED. The ruling is
+      # `Delivery.content_retention_ruling/0` and it is a function rather than a
+      # comment so a test can quote it — a digest BODY names sites, environments
+      # and deploy volume, and this table is read cross-team by
+      # /v1/operator/deliveries; the SUBJECT names one team's own rung counts and
+      # nothing else.
+      content_subject: Delivery.content_subject(email),
+      content_counts: Delivery.content_counts(email)
+    }
+
+    %Delivery{}
+    |> Delivery.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, delivery} ->
@@ -2043,13 +2108,17 @@ defmodule BarkparkCloud.Notifications do
       # not mistaken for a withhold: the send above already happened, and a
       # `suppressed` row would assert the opposite of what occurred. What is
       # lost is the RECEIPT, not the notification. It is NOT routed through
-      # `Withhold` and it is NOT absorbed by this row; it keeps its own filed
-      # backlog task `cch-w32-bl-receipt-loss-branches-have-no-trace`, which
-      # needs a trace of its own class (the same species as
-      # `cch-w31-bl-auto-deploy-refusal-row-failure-leaves-no-trace`).
+      # `Withhold`.
+      # ADJUDICATED, cch-w32-bl: the Logger line that used to be the whole
+      # handling is now the FIRST step of `ReceiptLoss.rescue_receipt/3`, which
+      # re-writes the narrowest TRUE receipt still available so the send stays
+      # visible in the delivery log. A `:lost` here is a named, counted residue,
+      # not a silence — see that module's moduledoc for the ladder.
       {:error, changeset} ->
-        Logger.error("Notifications: failed to record delivery: #{inspect(changeset.errors)}")
-        nil
+        case ReceiptLoss.rescue_receipt(:record_delivery, attrs, changeset) do
+          {:reduced, delivery} -> delivery
+          :lost -> nil
+        end
     end
   end
 
@@ -2470,8 +2539,7 @@ defmodule BarkparkCloud.Notifications do
 
     last_error = DeliveryReason.summarize(reason)
 
-    %Delivery{}
-    |> Delivery.changeset(%{
+    attrs = %{
       team_id: team_id,
       recipient: type,
       channel: type,
@@ -2481,22 +2549,25 @@ defmodule BarkparkCloud.Notifications do
       http_status: http_status,
       attempts: 1,
       last_error: last_error
-    })
+    }
+
+    %Delivery{}
+    |> Delivery.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, delivery} ->
         delivery
 
-      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/5`'s arm
+      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/7`'s arm
       # above, and adjudicated identically: the POST already returned, so this
       # is a lost receipt, not a withheld notification. Not routed through
-      # `Withhold`; still owned by `cch-w32-bl-receipt-loss-branches-have-no-trace`.
+      # `Withhold`.
+      # ADJUDICATED, cch-w32-bl — the chat twin, same funnel and same ladder.
       {:error, changeset} ->
-        Logger.error(
-          "Notifications: failed to record chat delivery: #{inspect(changeset.errors)}"
-        )
-
-        nil
+        case ReceiptLoss.rescue_receipt(:log_chat_delivery, attrs, changeset) do
+          {:reduced, delivery} -> delivery
+          :lost -> nil
+        end
     end
   end
 

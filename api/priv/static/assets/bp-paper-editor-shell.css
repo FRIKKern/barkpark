@@ -1100,6 +1100,32 @@
       font-weight: 500;
       line-height: 1.2;
     }
+    /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
+       <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
+       names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
+       BESIDE the summary chip, not inside it: the chip still says what this block
+       resolves to, the picker says which document that is. Three overrides the
+       read-only atom's own rules make necessary: user-select (the atom sets `none`;
+       a typeahead input IS text to select, so the island opts back in), overflow (the
+       atom clips horizontally — pdd-t17, cards under the sidebar — but the picker's
+       dropdown hangs BELOW the input, so an atom carrying one must not clip, or the
+       affordance is dead the moment you type in it), and cursor/caret (the atom is a
+       selectable read-only unit; the input is not).
+       MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-readonly:has(.bp-canvas-readonly-retarget) {
+      overflow: visible;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .bp-canvas-readonly-retarget {
+      display: inline-block;
+      flex: 1 1 220px;
+      min-width: 0;
+      user-select: text;
+      cursor: auto;
+    }
     /* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
        inheriting the atom margin/overflow guard, focus ring, selectednode wash, and
        loading chip. Restore the reader figure margin (figure_html article

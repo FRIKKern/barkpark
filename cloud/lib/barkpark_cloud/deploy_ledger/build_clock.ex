@@ -15,10 +15,10 @@ defmodule BarkparkCloud.DeployLedger.BuildClock do
   INCLUDES the fleet build-slot queue wait, because the engine emits the
   `started` line BEFORE it queues for the slot:
 
-      deploy/site-deploy-node.sh:2997   emit BUILD started
-      deploy/site-deploy-node.sh:3015   if ! build_gate_acquire; then
-      deploy/site-deploy.sh:3494        emit BUILD started
-      deploy/site-deploy.sh:3510        if ! build_gate_acquire; then
+      deploy/site-deploy-node.sh   emit BUILD started
+      deploy/site-deploy-node.sh   if ! build_gate_acquire; then
+      deploy/site-deploy.sh        emit BUILD started
+      deploy/site-deploy.sh        if ! build_gate_acquire; then
 
   (Re-derive with `git grep -n 'emit BUILD started\\|build_gate_acquire' -- deploy/`;
   the line numbers move, the ORDER is the invariant.)

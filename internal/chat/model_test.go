@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
 // model_test.go — the shell proofs, driven against a fake Transport (no
@@ -33,12 +35,19 @@ type fakeTransport struct {
 	approvals   []approvalCall
 	answers     []answerCall
 	answerErr   error
-	approveErr  error
-	uploads     []uploadCall
-	uploadRef   Attachment
-	uploadErr   error
-	listErr     error
-	getErr      error
+
+	// joinTasks is the agent↔task join's candidate corpus; joinTaskCalls counts
+	// the fetches so the "once, lazily" contract is assertable rather than
+	// asserted-about.
+	joinTasks     []taskboard.Task
+	joinTasksErr  error
+	joinTaskCalls int
+	approveErr    error
+	uploads       []uploadCall
+	uploadRef     Attachment
+	uploadErr     error
+	listErr       error
+	getErr        error
 
 	archived     []string
 	unarchived   []string
@@ -114,6 +123,10 @@ func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFr
 func (f *fakeTransport) FleetEvents(ctx context.Context, lastEventID string, onFrame func(string, []byte)) error {
 	<-ctx.Done()
 	return nil
+}
+func (f *fakeTransport) JoinTasks() ([]taskboard.Task, error) {
+	f.joinTaskCalls++
+	return f.joinTasks, f.joinTasksErr
 }
 
 func newTestModel(f *fakeTransport) Model {
@@ -894,7 +907,7 @@ func TestWorkflowCursorReachesPinnedRunning(t *testing.T) {
 	if got.wfAgent != 7 {
 		t.Fatalf("the cursor must clamp at the projection's last row (7), got %d", got.wfAgent)
 	}
-	pane := strings.Join(renderWorkflowAgentDetail(80, journeyOf(got.st.Workflow), got.now(), 0, got.wfAgent, true), "\n")
+	pane := strings.Join(renderWorkflowAgentDetail(80, journeyOf(got.st.Workflow), got.now(), 0, got.wfAgent, true, nil), "\n")
 	if !strings.Contains(pane, "agent-17") {
 		t.Fatalf("the landed cursor must name the pinned running agent at wire 17, got:\n%s", pane)
 	}

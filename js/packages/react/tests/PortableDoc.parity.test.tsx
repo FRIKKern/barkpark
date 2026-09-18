@@ -45,6 +45,7 @@ import {
   parseGoldenShape,
   type GoldenShapeNode,
 } from './support/dom-shape'
+import { ELIXIR_MIRROR, goldenNames } from './support/pd-golden-mirrors'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SURFACE = 'bp-paper-surface' // wrapper both sides may (or may not) carry — unwrapped for per-block compare
@@ -294,7 +295,7 @@ interface GoldenFixture {
 
 const armed = fixtureFiles.length > 0 && typeof PortableDoc === 'function'
 
-describe('PortableDoc × Elixir golden parity (46 non-plugin types)', () => {
+describe(`PortableDoc × Elixir golden parity (${fixtureFiles.length} non-plugin types)`, () => {
   if (!armed) {
     it.skip(
       `ARMED, awaiting upstream — ${fixtureFiles.length} golden fixture(s) present, ` +
@@ -333,7 +334,17 @@ describe('PortableDoc × Elixir golden parity (46 non-plugin types)', () => {
     })
   }
 
+  // DERIVED, not pinned. This was `toBeGreaterThanOrEqual(46)` while 65 fixtures
+  // sat on disk — a floor 19 behind the corpus, which is to say no floor at all:
+  // the Elixir mint could gain a type, fail to mirror it here, and 65 >= 46 would
+  // still be true. The expectation now IS the canonical mint, so a type minted
+  // into api/test/support/fixtures/pd-parity/ and not mirrored REDs with no edit
+  // to this file. (Freshness in both directions, including content, is asserted
+  // in tests/pd-golden-mirror-parity.test.ts; this line keeps THIS suite from
+  // reporting parity over a corpus smaller than the one that exists.)
   it('covers every frozen golden fixture (no silent gaps)', () => {
-    expect(fixtureFiles.length).toBeGreaterThanOrEqual(46)
+    const minted = goldenNames(ELIXIR_MIRROR)
+    expect(minted.length, `the canonical mint at ${ELIXIR_MIRROR} read as empty`).toBeGreaterThan(30)
+    expect(fixtureFiles.length).toBe(minted.length)
   })
 })

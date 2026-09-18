@@ -244,10 +244,49 @@ the headline trap. The env census numbers quoted at epic open were grep artifact
   on Compose v5.2.0: a bare line with the host var unset is ABSENT in the container (not empty).
   A boot log line naming the active kill switch is backlog, not a refusal.
 
+- **D25 — D21's fence widening is SUPERSEDED, and the enumeration is replaced by a
+  predicate.** *What D21 got wrong:* it fenced `cloud/.env.example` to LIMIT_* only, which
+  froze the file at a snapshot. *What the backlog row got wrong:* it named "the 24 newly-passed
+  vars", a hand-written count. **Both numbers are false.** Derived on 2026-09-16 by diffing the
+  D14 census (`census ∩ compose-passed`, 61 names) against every `NAME=` / `#  NAME=` head-of-line
+  in the file (30 names): the true gap was **37**, not 24 — the row double-counted six names the
+  file ALREADY documented (`APNS_*` ×5 and `FCM_SERVICE_ACCOUNT_JSON`, landed with the push-relay
+  gate) and omitted nineteen it never mentioned (the OAuth SSO four + `OAUTH_STATE_SECRET` +
+  `OAUTH_BASE_URL`, `STRIPE_PRICE_*` ×2, `ARTIFACT_QUOTA_BYTES`, `TRIAL_DAYS`,
+  `CLOUDFLARE_ORIGIN_CA_KEY`, `ORIGIN_CA_CERT_DIR`, `VERCEL_PLATFORM_TOKEN`, `VERCEL_TEAM_ID`,
+  `PLATFORM_BASE_DOMAIN`, `TEMPLATES_REPO_URL`, `TRUSTED_PROXY_PEERS`, `BARKPARK_GIT_SHA`,
+  `BARKPARK_PROVISIONER_SHA`, `PORT`).
+
+  *The widening:* `cloud/.env.example` is in fence for the WHOLE control-plane env surface, not a
+  named subset, and `scripts/env-census.py` (already in fence per D17) carries the assertion that
+  keeps it there. **This is the last widening that can go stale**, because the successor is a rule
+  rather than a list: the census now fails when a name is read by `cloud/lib` + `cloud/config` AND
+  passed by the `x-control-plane` anchor AND absent from `cloud/.env.example`. Both arms proven by
+  run — clean tree PASS "documents 60 of 61 passed-and-read (1 exempt)"; a planted
+  `System.get_env("SOMETHING_NEW")` + compose line FAILs exit 1 naming `SOMETHING_NEW`.
+
+  *One exempt, dated:* `PORT`. The compose anchor hardcodes `- PORT=4100`, not `${PORT}`, so the
+  listen port is not reachable from `cloud/.env` at all; documenting it would advertise a knob
+  that does nothing.
+
+  *Authoring rule applied (extends D16/D24 from the root file to this one):* a name whose EMPTY
+  value differs in effect from its ABSENT value is whole-line commented, never shipped blank. That
+  covers three shapes measured in `cloud/config/runtime.exs` — `if x = System.get_env(…)` (the
+  empty string is truthy in Elixir, so a blank OVERRIDES the default with `""`:
+  `PLATFORM_BASE_DOMAIN`, `TEMPLATES_REPO_URL`, `PUBLIC_URL`, `CONTROL_PLANE_URL`, `DASHBOARD_URL`,
+  `TRUSTED_PROXY_PEERS`, `AUDIT_RETENTION_DAYS`), `String.to_integer/1` on the raw value (a blank
+  RAISES at boot: `TRIAL_DAYS`, `AUDIT_RETENTION_DAYS`, `ARTIFACT_QUOTA_BYTES`), and a blank that
+  passes a presence test it should fail (`STRIPE_PRICE_*` survive `Enum.reject(is_nil)` and read as
+  a WIRED price; `GITHUB_APP_ID` is truthy in the `app_id && key && key != ""` gate). A blank also
+  defeats a compose `${X:-default}`, which is why `OAUTH_BASE_URL` and `TRUSTED_PROXY_PEERS` are
+  commented rather than blanked. Names with an explicit `!= ""` check keep the bare-line form the
+  file already uses for secrets.
+
 ## Fence
 
 **In fence:** `docker-compose.yml` · `.env.example` (new, root) · `cloud/docker-compose.yml`
-(LIMIT_* passthrough only) · `cloud/.env.example` (LIMIT_* documentation only, D21) ·
+(LIMIT_* passthrough only) · `cloud/.env.example` (the WHOLE control-plane env surface,
+D25 — D21's LIMIT_*-only scope is superseded) ·
 `api/entrypoint.sh` · `api/config/runtime.exs` (secret-refusal region) · `api/Dockerfile` +
 `api/Dockerfile.dockerignore` + `api/config/config.exs` `:229` `/E` only + `scripts/env-census.py`
 + `scripts/compose-smoke.sh` (D17) · `api/lib/barkpark/application.ex` (floor-probe beside

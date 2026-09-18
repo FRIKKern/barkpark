@@ -391,6 +391,105 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     |> Enum.find_value(fn {status, r} -> if r == role, do: status end)
   end
 
+  # ── the off-ladder fail-open (task-c29e16374107fb10) ────────────────────────
+  #
+  # THE RULING: a row whose stored status the manifest does not know still reaches
+  # the board, and it homes in `open` — the fail-open lane. Giving `cancel` its own
+  # lane (task-881952f8d8417f4b) removed the last LIFECYCLE status that could reach
+  # that default, so this behaviour became UNMEASURED on every surface at once.
+  # Go covers it (TestTaskBoardOffLadderStatusHomesInOpen); react covers it
+  # (js/packages/react/tests/taskboard-cancel-lane.test.ts). This is the Elixir arm.
+  #
+  # MEASURED ASYMMETRY — this is NOT a transcription of the react arm. React has a
+  # COLUMN-level fallback (`BOARD_ROLES.includes(role) ? role : 'open'`) plus a
+  # JS-only `unknown` glyph sentinel, so its arm asserts the row lands in `open`
+  # while painting the UNKNOWN glyph. Elixir has neither: the fail-open sits one
+  # level EARLIER, in `StatusVocab.role_for_status/1`, which answers @default_role
+  # ("open") for any unmapped status. So here the row lands in the open lane AND
+  # paints the OPEN glyph — the react arm's "not the open glyph" assertion has no
+  # Elixir counterpart and must not be copied over.
+  #
+  # PRECONDITIONS ARE DELIBERATELY NOT LANE-EXISTENCE CHECKS. "an open lane exists"
+  # is destroyed by the very mutations this test exists to catch (drop the row ->
+  # no open lane; widen the fallback -> no ready lane), so it would fire FIRST and
+  # the board-level assertion would never be reached. The two used instead — the
+  # derived status is not a manifest status, and a board rendered lanes at all —
+  # survive every mutation below.
+  #
+  # MUTATIONS RUN IN ISOLATION against api/lib/barkpark/portable_doc/render/status_vocab.ex:
+  #   M1 LOUD, row dropped — `Map.get(@statuses, status, status)` (no fail-open):
+  #      reds "the off-ladder row VANISHED from the board", both preconditions green.
+  #   M2 LOUD, wrong lane — `Map.get(@statuses, status, "cancel")`:
+  #      reds "did not home in the open lane".
+  #   M3 QUIET, fallback widened — `ready` folded into @default_role:
+  #      reds "a READY row was swept into the open fallback lane".
+  test "task-board homes an off-ladder status in the open lane, and the fallback does not widen" do
+    # DERIVED BY PREDICATE, never typed: grow a seed until the manifest's own
+    # `statuses` map disowns it. A pinned literal goes vacuous the day the ladder
+    # adopts that word, and the arm would keep passing while measuring a known rung.
+    off_ladder = off_ladder_status("offladder")
+
+    # PRECONDITION A: the subject really is off the ladder. Mutation-proof — no
+    # edit to the role fallback can put this string into the manifest.
+    refute Map.has_key?(StatusVocab.statuses(), off_ladder)
+
+    html =
+      Components.task_board_html(%{
+        "snapshot" => [
+          %{"title" => "row-offladder", "status" => off_ladder},
+          %{"title" => "row-ready", "status" => "ready"},
+          %{"title" => "row-cancelled", "status" => "cancelled"}
+        ]
+      })
+
+    # PRECONDITION B: a board rendered lanes at all. Mutation-proof — `ready` and
+    # `cancelled` are manifest rungs, so no fallback edit can empty the board.
+    assert html =~ ~s(<div class="bp-board__col),
+           "no board rendered at all — the assertions below would measure nothing"
+
+    open_col = board_col_slice(html, "open")
+
+    # LOUD 1 — never dropped. This is the BOARD-level assertion: it reads the whole
+    # emitted markup, not a lane, so it survives a missing open column and reds on
+    # the real symptom.
+    assert html =~ "row-offladder",
+           "the off-ladder row VANISHED from the board — an unknown status must fail " <>
+             "OPEN, never silently disappear"
+
+    # LOUD 2 — and it homes in `open`, the lane the fail-open default names.
+    assert open_col =~ "row-offladder",
+           "the off-ladder row did not home in the open lane — the fail-open fallback is gone"
+
+    # QUIET — the fallback did not WIDEN. A rung that resolves to its own role must
+    # never be swept into the fallback lane, and must keep a lane of its own.
+    refute open_col =~ "row-ready",
+           "a READY row was swept into the open fallback lane — the fallback widened"
+
+    refute open_col =~ "row-cancelled",
+           "a CANCELLED row was swept into the open fallback lane — `bp task ready` serves that lane"
+
+    assert board_col_slice(html, "ready") =~ "row-ready"
+    assert board_col_slice(html, "cancel") =~ "row-cancelled"
+  end
+
+  # Grow a seed status until the manifest disowns it. Recursion, not a literal:
+  # the predicate is the rule, so the arm cannot go vacuous when the ladder grows.
+  defp off_ladder_status(seed) do
+    if Map.has_key?(StatusVocab.statuses(), seed),
+      do: off_ladder_status(seed <> "-x"),
+      else: seed
+  end
+
+  # One board column's markup: from its class to the start of the NEXT column.
+  # Answers "" when the lane is absent, so a missing lane reds the assertion that
+  # names the symptom rather than raising inside the slice.
+  defp board_col_slice(html, role) do
+    case String.split(html, ~s(<div class="bp-board__col bp-board__col--#{role}">), parts: 2) do
+      [_, rest] -> rest |> String.split(~s(<div class="bp-board__col), parts: 2) |> hd()
+      _ -> ""
+    end
+  end
+
   test "task-board groups into columns by lifecycle, omits empty ones" do
     html =
       Components.task_board_html(%{

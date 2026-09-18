@@ -67,9 +67,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # KEEPING `-e` OFF THIS PIPELINE IS LOAD-BEARING (task-3b5edb3d1f5990e3).
+          # A `run:` block's shell is `/usr/bin/bash -e {0}`, and `set -o pipefail`
+          # makes this pipeline carry the SCRIPT's status, so `-e` aborted the step
+          # the moment scheduled-arm-health.sh exited 1 (at least one red arm) or 2
+          # (cannot measure) — which are this script's two INTERESTING outcomes. The
+          # step summary below was therefore written only when there was nothing to
+          # report.
+          #
+          # BUT `|| :` WAS THE WRONG WAY TO DO IT, AND IT MADE THIS WORKFLOW LIE
+          # (task-0a48c7b64d5ab0f1, 2026-09-17). `:` is itself a pipeline, so
+          # running it on the right of `||` REPLACES PIPESTATUS with its own
+          # status: `(exit 1) | tee f || :` then reads `${PIPESTATUS[0]}` as 0.
+          # The capture below was not merely reachable, it was DEAD — always 0 —
+          # so `exit "$rc"` concluded SUCCESS on a red arm and on cannot-measure
+          # alike. The comment above claimed "`exit "$rc"` still fails the step
+          # exactly as before"; it did not, and had not since the `|| :` landed.
+          # `set +e` is the form grip-suite.yml and research-coverage-suite.yml
+          # already use: `-e` cannot steal the diagnosis, and nothing runs between
+          # the pipeline and the capture to overwrite PIPESTATUS. Do NOT put the
+          # `|| :` back — scripts/workflow-errexit-capture-check.sh now refuses it.
           set -o pipefail
+          set +e
           bash scripts/scheduled-arm-health.sh 2>&1 | tee "$RUNNER_TEMP/arm-health.txt"
           rc=${PIPESTATUS[0]}
+          set -e
           {
             echo '## scheduled-arm-health'
             echo

@@ -156,6 +156,7 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
   require Logger
 
   alias BarkparkCloud.Registry
+  alias BarkparkCloud.Sites.RollbackAttribution
 
   @path "/v1/admin/site-deploy"
 
@@ -280,9 +281,9 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
       case reply do
         {:ok, status, body} when status in 200..299 ->
           if to_string(body["state"]) == "done" do
-            {settle_flip(body), split}
+            {settle_flip(body), box_done_by(split)}
           else
-            await_flip(bp, slug, deadline, nap(deadline, split))
+            await_flip(bp, slug, deadline, nap(deadline, box_still_running(split)))
           end
 
         other ->
@@ -350,9 +351,9 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
       case reply do
         {:ok, status, body} when status in 200..299 ->
           if to_string(body["state"]) == "done" do
-            {settle_teardown(body), split}
+            {settle_teardown(body), box_done_by(split)}
           else
-            await_teardown(bp, slug, deadline, nap(deadline, split))
+            await_teardown(bp, slug, deadline, nap(deadline, box_still_running(split)))
           end
 
         other ->
@@ -367,7 +368,47 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
 
   defp expired?(deadline), do: System.monotonic_time(:millisecond) >= deadline
 
-  defp zero_split, do: %{polls: 0, poll_wire_ms: 0, sleep_ms: 0}
+  # THE SPLIT, opened the instant the accept came back. `accept_done_at` is the
+  # zero of the BOX's clock as this plane can observe it: everything the box does
+  # for this run happens after that mark, so every poll answer brackets the box's
+  # execution against it.
+  defp zero_split,
+    do: %{
+      polls: 0,
+      poll_wire_ms: 0,
+      sleep_ms: 0,
+      accept_done_at: System.monotonic_time(:millisecond),
+      poll_sent_at: nil,
+      poll_back_at: nil,
+      box_min_ms: 0,
+      box_max_ms: nil
+    }
+
+  # THE BOX'S OWN EXECUTION, BRACKETED — not guessed from a residue
+  # (rollback-latency c0). The relay's accept/poll/sleep legs say how much of the
+  # wait was THIS plane; they say nothing about how long `site-deploy.sh
+  # --rollback` actually ran, because the box works CONCURRENTLY with the wait
+  # loop. Two facts each poll answer carries settle it without a new wire field:
+  #
+  #   * an answer of `running` proves the box was still working when that answer
+  #     was PRODUCED — a lower bound;
+  #   * an answer of `done` proves it had finished before that read was SENT — an
+  #     upper bound.
+  #
+  # A `box_max_ms` far under `total_ms` acquits the box; a `box_min_ms` near it
+  # convicts it. The old residue could do neither, because it also carried this
+  # loop's own sleep.
+  defp box_still_running(%{accept_done_at: a, poll_back_at: back} = split)
+       when is_integer(a) and is_integer(back),
+       do: %{split | box_min_ms: max(split.box_min_ms, back - a)}
+
+  defp box_still_running(split), do: split
+
+  defp box_done_by(%{accept_done_at: a, poll_sent_at: sent} = split)
+       when is_integer(a) and is_integer(sent),
+       do: %{split | box_max_ms: max(sent - a, 0)}
+
+  defp box_done_by(split), do: split
 
   # One CP->box status read, with its WIRE time charged to the split. This is the
   # component `@rollback_poll_ms` never accounted for.
@@ -377,9 +418,16 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
     # 3-arity poll contract without inventing a build we do not have.
     at = System.monotonic_time(:millisecond)
     reply = poll_deploy(bp, slug, "")
-    wire = System.monotonic_time(:millisecond) - at
+    back = System.monotonic_time(:millisecond)
 
-    {reply, %{split | polls: split.polls + 1, poll_wire_ms: split.poll_wire_ms + wire}}
+    {reply,
+     %{
+       split
+       | polls: split.polls + 1,
+         poll_wire_ms: split.poll_wire_ms + (back - at),
+         poll_sent_at: at,
+         poll_back_at: back
+     }}
   end
 
   # Sleep the poll interval, but never PAST the deadline: overshooting it is how a
@@ -432,8 +480,22 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
     Logger.info(fn ->
       "site #{mode} attribution slug=#{slug} total_ms=#{total_ms} " <>
         "accept_ms=#{accept_ms} polls=#{split.polls} " <>
-        "poll_wire_ms=#{split.poll_wire_ms} sleep_ms=#{split.sleep_ms}"
+        "poll_wire_ms=#{split.poll_wire_ms} sleep_ms=#{split.sleep_ms} " <>
+        "box_min_ms=#{split.box_min_ms} box_max_ms=#{inspect(split.box_max_ms)}"
     end)
+
+    # Hand the same numbers UP to the request-scoped accumulator, which owns the
+    # two ends this module cannot see: the route work either side of the box
+    # call. A no-op outside a route (a worker, a test calling the relay directly).
+    RollbackAttribution.record_relay(%{
+      relay_ms: total_ms,
+      accept_ms: accept_ms,
+      polls: split.polls,
+      poll_wire_ms: split.poll_wire_ms,
+      sleep_ms: split.sleep_ms,
+      box_min_ms: split.box_min_ms,
+      box_max_ms: split.box_max_ms
+    })
 
     reply
   end

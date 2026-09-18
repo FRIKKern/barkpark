@@ -1,0 +1,35 @@
+# D RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.
+#
+# FOR .claude/workflows/bp-deploy-reliability-charter.md. Enforced by the SAME
+# arbiter the PDS charter uses, behind a prefix argument — there is exactly one
+# implementation:
+#
+#     bash deploy/d-number-arbiter.sh --allocate-d <n> --for <label>   # MINT
+#     bash deploy/d-number-arbiter.sh --check-alloc                     # ENFORCE
+#
+# WHY THIS FILE EXISTS. On 2026-09-16 two PRs in flight the same hour both read
+# the charter, both correctly found the highest number defined was D613, and
+# both minted D614. #18700 merged and kept it; #18701 rebased and renumbered.
+# Neither reader was careless: a document is a lagging record of what has
+# LANDED and cannot express what is IN FLIGHT. Two correct readers a minute
+# apart get the same answer. Only a claim written down BEFORE the charter edit
+# closes that window, and that is what a row here is.
+#
+# THE SEED IS 615, DERIVED WITH THE STRICT UNION LENS — bold-lead bullet UNION
+# own-line heading, charter_defined_numbers() in scripts/pds-record-parity.sh —
+# which reads 633 definitions over 615 distinct numbers, contiguous 1..615.
+# A NAIVE `\bD[0-9]+\b` SCAN READS 716 AND IS WRONG: the charter's prose cites
+# PDS-D716 (the PDS charter's fence adjudication) six times, and a loose lens
+# reads that cross-charter citation as this charter's high-water. That is the
+# same trap the PDS ledger warns about with its PDS-D777/PDS-D999 fixtures.
+#
+# Numbers at or below the SEED predate the arbiter and are not scored — a
+# retroactive reservation would be a claim about history nobody measured.
+#
+# number	reserved_at	for
+SEED	615	2026-09-17T00:16:49Z	high-water mark at adoption; numbers at or below it predate the arbiter
+D616	2026-09-17T00:16:49Z	task-a312c1496c51209c dw34 — the deploy charter adopts the PDS arbiter
+D617	2026-09-17T01:04:38Z	dr-w24-bl-census-names-the-door-population dw35 — ruling: two of three claims already discharged on main
+D618	2026-09-17T02:13:30Z	dr-w10-f1-zombied-run-remediation dw37 — zombied-run remediation policy: who may re-dispatch, dead-head ruling
+D619	2026-09-18T02:38:38Z	task-a312c1496c51209c dw48 — arbiter wiring demonstrated on a charter-only PR (#19223)
+D620	2026-09-18T03:49:47Z	task-fcc819ae8323c377 dw51 — charter adoption census + guard; D616's no-path-filter sentence corrected

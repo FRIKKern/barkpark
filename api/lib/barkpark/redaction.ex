@@ -21,7 +21,30 @@ defmodule Barkpark.Redaction do
 
   NOTE: this is transport/log secret redaction — distinct from
   `Barkpark.Content.Envelope`'s field-visibility redaction (name overlap only).
+
+  ## Two entry points, one owner
+
+    * `redact/3` — allowlist-driven, exact key match, plus a best-effort regex
+      scrub of JSON-looking binaries. Used by the plugin error modules.
+    * `redact_sensitive/1` / `sensitive_key?/1` — predicate-driven over a
+      BUILT-IN table (normalised + `_`-compacted exact names and suffixes),
+      structural only (no binary scrub). Used by
+      `Barkpark.EpicFleet.Benchmark`, which previously carried a
+      character-identical private fork of this predicate.
   """
+
+  @sensitive_exact ~w(
+    token api_token access_token refresh_token auth_token id_token session_token api_key apikey secret
+    client_secret webhook_secret secret_key password authorization cookie set_cookie private_key
+    signing_key bearer credential credentials dsn database_url database_uri connection_string
+  )
+  @sensitive_suffixes ~w(
+    _api_token _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
+    _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
+    _dsn _database_url _database_uri _connection_string
+  )
+  @sensitive_exact_compact Enum.map(@sensitive_exact, &String.replace(&1, "_", ""))
+  @sensitive_suffixes_compact Enum.map(@sensitive_suffixes, &String.replace(&1, "_", ""))
 
   @doc """
   Recursively redact the VALUES under `header_keys` / `json_keys` out of `value`.
@@ -75,5 +98,40 @@ defmodule Barkpark.Redaction do
         "\\1\"[REDACTED]\""
       )
     end)
+  end
+
+  @doc """
+  Recursively replace the VALUES under built-in sensitive keys with
+  `"[REDACTED]"`, walking maps and lists only.
+
+  Deliberately does NOT scrub JSON-looking binaries — callers of this arm store
+  already-decoded terms and must round-trip non-sensitive strings byte-for-byte.
+  Use `redact/3` when you need the binary scrub and your own allowlists.
+  """
+  @spec redact_sensitive(any()) :: any()
+  def redact_sensitive(map) when is_map(map) do
+    Map.new(map, fn {key, value} ->
+      if sensitive_key?(key), do: {key, "[REDACTED]"}, else: {key, redact_sensitive(value)}
+    end)
+  end
+
+  def redact_sensitive(list) when is_list(list), do: Enum.map(list, &redact_sensitive/1)
+  def redact_sensitive(value), do: value
+
+  @doc """
+  True when `key` names a secret under the built-in table.
+
+  Normalises separators to `_` and also checks a `_`-stripped ("compact") form,
+  so `"api-key"`, `"apiKey"` and `"runnerAccess-Token"` all match.
+  """
+  @spec sensitive_key?(String.t()) :: boolean()
+  def sensitive_key?(key) when is_binary(key) do
+    normalized = key |> String.downcase() |> String.replace(~r/[^a-z0-9]+/u, "_")
+    compact = String.replace(normalized, "_", "")
+
+    normalized in @sensitive_exact or
+      Enum.any?(@sensitive_suffixes, &String.ends_with?(normalized, &1)) or
+      compact in @sensitive_exact_compact or
+      Enum.any?(@sensitive_suffixes_compact, &String.ends_with?(compact, &1))
   end
 end

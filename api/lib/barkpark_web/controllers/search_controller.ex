@@ -375,6 +375,32 @@ defmodule BarkparkWeb.SearchController do
       nil ->
         nil_workspace_write_error(conn)
 
+      # CATCH-ALL-TO-SUCCESS — DECLARED-HONEST (task-ef7f93eebba52fd3).
+      #
+      # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
+      # space. The census counts that literal substring corpus-wide and its
+      # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
+      # be counted AS a receipt. Re-spacing it here reds the census.
+      # `scripts/pds-elixir-receipt-census.exs` fires its CATCH-ALL-TO-SUCCESS
+      # arm on THIS clause: the head is a discarding variable (`_ws_id`) and the
+      # body renders an `ok:true` literal. The shape is real; the accusation the
+      # shape carries is not, and this comment is the basis a reader gets instead
+      # of an argument.
+      #
+      # THE HEAD IS NOT A FAILURE SINK. It is the non-nil half of an explicit
+      # two-way split on `token_workspace_id/1`, whose `nil ->` half one line up
+      # REFUSES the write (422, `nil_workspace_write_error/1`). Nothing falls
+      # here that was not already named there.
+      #
+      # NO FAILURE REACHES THIS RECEIPT. `Synonyms.delete/4` is @spec'd
+      # `:ok | {:error, :not_found}` and returns nothing else: a non-UUID id, an
+      # absent row, a surface/scope mismatch, a sibling workspace's row, and a
+      # lost `Ecto.StaleEntryError` double-DELETE race are ALL folded into
+      # `{:error, :not_found}` by `api/lib/barkpark/search/synonyms.ex`, and the
+      # clause beside this one answers that 404. `ok:true` is emitted only from
+      # the `:ok` clause, which means the row was found, tenant-checked and
+      # deleted. The case is closed, so a future return tag CaseClauseErrors
+      # rather than passing as success.
       _ws_id ->
         case Synonyms.delete(id, "documents", dataset, workspace_id(conn)) do
           :ok ->

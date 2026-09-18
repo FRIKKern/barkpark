@@ -681,6 +681,69 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert after_repeat == after_two
     end
 
+    # The echo set is fed by the DATASET-GLOBAL topic `documents:production`, so
+    # before the bound every task write anywhere in the dataset left a permanent
+    # `{doc_id, updated_at}` tuple on this socket's heap, and `:refresh` walked
+    # past it. These two tests hold the bound AND the feature it must not eat.
+    test "the seen-set is bounded — many dataset writes cannot grow it past the cap",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      [cap] = BoardLive.__info__(:attributes)[:seen_cap]
+
+      # Well past the cap, each event a DISTINCT key (a fresh doc_id), which is
+      # exactly the shape the global topic delivers under campaign write load.
+      for i <- 1..(cap * 3) do
+        send(view.pid, claimed_event("flood-#{i}", "Flood #{i}"))
+      end
+
+      _ = render(view)
+
+      assert Process.alive?(view.pid)
+
+      seen = :sys.get_state(view.pid).socket.assigns.seen
+
+      # RED-BEFORE (unbounded MapSet): size == cap * 3.
+      assert seen.size <= cap,
+             "echo set grew to #{seen.size}, past the #{cap} cap"
+
+      # Non-vacuity: the flood really did reach the seen-set — a bound that
+      # holds because nothing was ever recorded would prove nothing.
+      assert seen.size == cap
+
+      # The bookkeeping is self-consistent: the FIFO and the lookup set never
+      # drift, or eviction would delete a key that is still current.
+      assert MapSet.size(seen.set) == seen.size
+      assert :queue.len(seen.order) == seen.size
+    end
+
+    test "echo suppression survives the bound — a repeat inside the window is still dropped",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      _ = render(view)
+      send(view.pid, closed_event("rt-wip", "Already working"))
+      _ = render(view)
+
+      # A handful of unrelated dataset writes — nowhere near the cap, so the
+      # rt-open key is still held.
+      for i <- 1..10, do: send(view.pid, claimed_event("noise-#{i}", "Noise #{i}"))
+      _ = render(view)
+
+      seen = :sys.get_state(view.pid).socket.assigns.seen
+      assert seen_has?(seen, "rt-open")
+
+      # Re-sending the FIRST event verbatim is still dropped: the flash does not
+      # jump back to rt-open. Compare only the board region that the echo would
+      # disturb — the noise above legitimately changed the rest of the render.
+      before_repeat = render(view)
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      after_repeat = render(view)
+
+      assert after_repeat == before_repeat
+    end
+
     test "the periodic :refresh re-snapshots without crashing", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/admin/projects")
 
@@ -2654,6 +2717,57 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "the DRAFT marker on the live board (PDS-D749)" do
+    # NAMED FAILURE MODE: measured at origin/main, `grep -i draft` over this
+    # LiveView returned only twin-RESOLUTION code and ZERO display code (control:
+    # 28 `blocked` lines in the same file). An unpaired `drafts.<id>` row — the
+    # row of record for the whole mutate-created population — therefore painted
+    # as an ordinary card, indistinguishable from a published one.
+    #
+    # `Board`'s card now carries `:draft` (its DRAFT LABEL CONTRACT); these arms
+    # prove this reader PAINTS it. They are asymmetric under "delete the
+    # `:if={card[:draft]}` badge": the draft arm reds, the published arm stays
+    # quiet — that one reds instead on a badge painted unconditionally.
+    setup do
+      task("drafts.dl-solo", "Unpublished draft row", lifecycle: "open")
+      task("dl-pub", "An ordinary published row", lifecycle: "open")
+      task("drafts.dl-flight", "Draft in flight", lifecycle: "in_progress")
+      :ok
+    end
+
+    test "a drafts. card paints a visible DRAFT marker in the column grid", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="dl-solo"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      assert card =~ ~s(data-role="draft"), "the draft row painted no marker"
+      assert card =~ "DRAFT", "the marker must be READABLE text, not a bare hook attribute"
+    end
+
+    test "an ordinary published card paints NO marker", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="dl-pub"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      refute card =~ ~s(data-role="draft"),
+             "a published row must not be labelled a draft"
+    end
+
+    test "the deck phone paints the marker too", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      deck = deck |> String.split("</main>", parts: 2) |> hd()
+
+      [_, phone] = String.split(deck, ~s(data-doc-id="dl-flight"), parts: 2)
+
+      assert phone =~ ~s(data-role="draft"),
+             "the deck is the DEFAULT view — it must label a draft too"
+    end
+  end
+
   describe "peek roles fail open dim (tlv-s5)" do
     setup do
       t = task("pr-task", "The peeked task", lifecycle: "open")
@@ -2738,6 +2852,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       content: Keyword.get(opts, :content, %{}),
       updated_at: Keyword.get(opts, :updated_at, ~U[2026-07-07 12:00:00Z])
     }
+  end
+
+  defp seen_has?(seen, doc_id) do
+    Enum.any?(seen.set, fn {id, _updated_at} -> id == doc_id end)
   end
 
   # A full `{:document_changed, msg}` tuple as it arrives on the PubSub topic.

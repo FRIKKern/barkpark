@@ -44,6 +44,11 @@
 #     the lead trims the list. A closed row left in the list is how a lead pulses ghosts.
 #   * Second channel: with --tee FILE every line is appended there too, so a scripted run's
 #     verdict is readable by another lane.
+#   * THE PULSE LOG'S STAMP IS A CONTRACT WITH pulse-loop.sh (task-9afe7e0d6c901dbc). Two shapes
+#     are accepted: `%Y-%m-%dT%H:%M:%SZ` (what pulse-loop.sh's say() writes today) and the legacy
+#     `%H:%M:%SZ` (what it wrote before 2026-09-18 — and what every loop ALREADY RUNNING then
+#     keeps writing, because a loop is never edited in place). A line in neither shape is a
+#     refusal that NAMES both formats; it is never silently "stale".
 #
 # USAGE
 #   held-liveness.sh "$ORCH/lead-security" --expect-worker lead-security \
@@ -85,16 +90,69 @@ iso_epoch() {
   return 1
 }
 
+# ---- THE PULSE LOG'S OWN STAMP (task-9afe7e0d6c901dbc) ---------------------------------------
+# A log line's LEADING stamp -> epoch seconds. TWO shapes are accepted, deliberately:
+#
+#   full-iso   2026-09-18T08:39:57Z   what pulse-loop.sh's say() emits today.
+#   time-only  08:39:57Z              what pulse-loop.sh emitted before 2026-09-18.
+#
+# The legacy shape is NOT dead weight: a pulse loop is never edited in place, so every loop that
+# was already running when the format changed keeps writing time-only stamps for the whole of its
+# life -- and those are exactly the long-lived loops this helper exists to measure. Refusing that
+# shape re-creates the defect this task cured: from 2026-09-10 to 2026-09-18 the parser accepted
+# only full ISO while the loop wrote time-only, so EVERY real run printed STALE LOG about a loop
+# that was pulsing every 18 minutes. A uniform verdict discriminates nothing.
+#
+# A time-only stamp carries NO DATE, so today's UTC date is assumed. MIDNIGHT ROLLOVER: a
+# 23:59:12Z line read at 00:04Z would date to ~24 h in the FUTURE, and a future instant would
+# compute a NEGATIVE age and read as "fresh" -- a silent green on the one line that proves
+# nothing. Any result more than ROLLOVER_GRACE seconds ahead of now is therefore pulled back one
+# day.
+#
+# It reports through GLOBALS (LOGSTAMP_EPOCH, LOGSTAMP_SHAPE), not stdout, on purpose: called as
+# `e=$(log_stamp_epoch ...)` the shape would be set inside a SUBSHELL and lost, and the caller
+# would print a time-only age with no note saying the date was assumed. Returns 1 and clears both
+# globals when neither shape is present -- never 0, never a guessed time.
+LOGSTAMP_SHAPE=""
+LOGSTAMP_EPOCH=""
+ROLLOVER_GRACE=120
+LOGSTAMP_FORMATS="%Y-%m-%dT%H:%M:%SZ (full ISO, what pulse-loop.sh emits) or %H:%M:%SZ (the legacy time-only stamp)"
+log_stamp_epoch() {
+  local line="${1:-}" now="${2:-}" stamp e
+  LOGSTAMP_SHAPE=""; LOGSTAMP_EPOCH=""
+  [ -n "$now" ] || now=$(date -u +%s)
+  stamp=$(printf '%s' "$line" | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}')
+  if [ -n "$stamp" ]; then
+    e=$(iso_epoch "$stamp") || return 1
+    LOGSTAMP_SHAPE="full-iso"; LOGSTAMP_EPOCH="$e"; return 0
+  fi
+  stamp=$(printf '%s' "$line" | grep -oE '^[0-9]{2}:[0-9]{2}:[0-9]{2}')
+  [ -n "$stamp" ] || return 1
+  e=$(iso_epoch "$(date -u +%Y-%m-%d)T$stamp") || return 1
+  [ "$e" -gt $((now + ROLLOVER_GRACE)) ] && e=$((e - 86400))
+  LOGSTAMP_SHAPE="time-only"; LOGSTAMP_EPOCH="$e"; return 0
+}
+
 # ------------------------------------------------------------------ SELFTEST (no network) ----
 # Drives the helper against a stub `bp` on PATH, from a NON-REPO cwd, with real clock arithmetic
 # (every fixture timestamp is computed from `date` at run time, so no arm can pass by matching a
 # frozen string). Seven arms:
 #   1 all-held green                     2 a row whose ledger worker DIFFERS  -> named, exit 1
 #   3 a lease inside the warning window  4 a pulse log older than the interval -> named, exit 1
+#   4b the log pulse-loop.sh ACTUALLY WROTE (that helper is RUN, one round, stub bp) is measured
+#   4c every `date -u +<fmt>` READ OUT OF pulse-loop.sh's source is accepted, both directions
+#   4d CONTROL: the legacy time-only stamp is parsed, fresh and old, never silently STALE
+#   4e the midnight-rollover guard: a future-dated time-only stamp cannot read as fresh
+#   4f a log with no readable stamp REFUSES with a line naming both accepted formats
 #   5 a dead pid                         6 an unreadable ledger -> CANNOT READ, exit 3, and the
 #                                          output contains no "held"/"OK" reassurance
 #   7 an EMPTY held.txt -> exit 2 with its own line (an empty list is not "all held")
 # Each arm asserts the LAST line, the exit code, and that the failing ROW is NAMED.
+# Arms 4b-4f exist because arm 4's fixture is written by THIS file's own _ago(): it could only
+# ever prove the parser reads the shape this file imagines, and for eight days it did exactly
+# that while every real run printed STALE LOG about a live loop.
+# MUTATION that must red 4d: drop the time-only branch of log_stamp_epoch(). MUTATION that must
+# red 4e: delete the `-gt now+ROLLOVER_GRACE` pull-back (the future stamp then reads as fresh).
 # MUTATION that must red it: in the per-row loop, replace the ledger read's worker with the
 # expected worker (`w="$EXPECT"`), i.e. trust the local list instead of the ledger. Arm 2 goes
 # red and no other arm does — which is precisely the defect this helper exists to catch.
@@ -198,6 +256,110 @@ EOF
     _last "arm4 verdict is a problem count" 'liveness: [0-9]+ PROBLEM'
     _want "arm4 names the stale log"        1 'STALE LOG'
     _want "arm4 prints the log age"         1 'STALE LOG.*55 min'
+  fi
+  printf '%s ok task-aaa\n' "$(_ago 4)" > "$d/lane/pulse.log"
+
+  echo "== arm 4b: a log line pulse-loop.sh ACTUALLY WROTE is measurable (cross-helper lock)"
+  # The arm-4 fixture above is written by THIS file's _ago, so it can only prove the parser reads
+  # the shape this file IMAGINES. task-9afe7e0d6c901dbc: from 2026-09-10 to 2026-09-18
+  # pulse-loop.sh wrote %H:%M:%SZ while this parser wanted ^YYYY-MM-DDT..., and every real run
+  # printed STALE LOG "no parseable ISO timestamp" about a loop pulsing every 18 minutes -- a
+  # uniform verdict the self-made fixture never saw.
+  #
+  # So this arm does not type a stamp at all. It RUNS pulse-loop.sh (one round, stub bp, no
+  # network) and hands held-liveness.sh the log THAT run wrote, through pulse-loop's own say().
+  local PL
+  PL="$(dirname "$SELF")/pulse-loop.sh"
+  if [ ! -f "$PL" ]; then
+    echo "FAIL arm4b: $PL is not there — the cross-helper lock cannot see its subject"; fails=$((fails+1))
+  else
+    mkdir -p "$d/pl"
+    cat > "$d/bin/bp-pulse-stub" <<'PSTUB'
+#!/usr/bin/env bash
+echo '{"ok":true,"doc":{"claim":{"epoch":1}}}'
+PSTUB
+    chmod +x "$d/bin/bp-pulse-stub"
+    # pulse-loop.sh calls `bp` by name; give it one that always answers ok, ahead of the row stub.
+    mkdir -p "$d/plbin"; cp "$d/bin/bp-pulse-stub" "$d/plbin/bp"
+    printf '%s\n' task-aaa > "$d/pl/held.txt"
+    : > "$d/pl/pulse.log"
+    ( PATH="$d/plbin:$PATH" PULSE_LOOP_ALLOW_FAST=1 bash "$PL" --interval 0 --passes 1 \
+        lead-x "$d/pl/held.txt" "$d/pl/pulse.log" >/dev/null 2>&1 )
+    if [ ! -s "$d/pl/pulse.log" ]; then
+      echo "FAIL arm4b: pulse-loop.sh wrote no log line — the lock has no subject to measure"; fails=$((fails+1))
+    else
+      echo "     pulse-loop.sh wrote: $(tail -1 "$d/pl/pulse.log")"
+      cp "$d/pl/pulse.log" "$d/lane/pulse.log"
+      if _run "arm4b runs (log written BY pulse-loop.sh)" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+        _last "arm4b verdict is OK"     'liveness: OK'
+        _want "arm4b measured the age"  1 'pulse log: newest line [0-9]+ min old'
+        _want "arm4b saw no STALE LOG"  0 'STALE LOG'
+      fi
+    fi
+  fi
+  printf '%s ok task-aaa\n' "$(_ago 4)" > "$d/lane/pulse.log"
+
+  echo "== arm 4c: EVERY stamp format pulse-loop.sh emits is a format this parser accepts"
+  # A PREDICATE, not a two-item list: the formats are read out of pulse-loop.sh's source at run
+  # time, so a NEW `date -u +<fmt>` added there tomorrow is checked tomorrow without editing this
+  # arm. Each format is exercised in BOTH directions -- fresh must not say STALE, old must.
+  if [ -f "$PL" ]; then
+    local fmts nfmt=0 f
+    fmts=$(grep -oE 'date -u \+[^)"'"'"' ]+' "$PL" | sed 's/^date -u +//' | sort -u)
+    if [ -z "$fmts" ]; then
+      echo "FAIL arm4c: no 'date -u +<fmt>' found in $PL — the lock cannot see its subject"; fails=$((fails+1))
+    fi
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      nfmt=$((nfmt+1))
+      printf '%s ok task-aaa\n' "$(date -u -v-4M +"$f" 2>/dev/null || date -u -d '4 minutes ago' +"$f")" > "$d/lane/pulse.log"
+      if _run "arm4c fresh '$f'" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+        _want "arm4c '$f' fresh is measured"  1 'pulse log: newest line [0-9]+ min old'
+        _want "arm4c '$f' fresh is not STALE" 0 'STALE LOG'
+      fi
+      printf '%s ok task-aaa\n' "$(date -u -v-55M +"$f" 2>/dev/null || date -u -d '55 minutes ago' +"$f")" > "$d/lane/pulse.log"
+      if _run "arm4c old '$f'" 1 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" --pulse-interval-minutes 18; then
+        _want "arm4c '$f' old is STALE with its age" 1 'STALE LOG.*55 min'
+      fi
+    done <<EOF
+$fmts
+EOF
+    echo "     arm4c checked $nfmt distinct pulse-loop.sh stamp format(s)"
+  fi
+  printf '%s ok task-aaa\n' "$(_ago 4)" > "$d/lane/pulse.log"
+
+  echo "== arm 4d CONTROL: the LEGACY time-only stamp is PARSED, never silently STALE"
+  # A loop is never edited in place. Every pulse loop that was already running on 2026-09-18
+  # keeps writing `08:39:57Z` for the rest of its life, and those are the long-lived loops this
+  # helper exists to measure. Fresh must read fresh; old must read old, with the age.
+  printf '%s ok task-aaa\n' "$(date -u -v-4M +%H:%M:%SZ 2>/dev/null || date -u -d '4 minutes ago' +%H:%M:%SZ)" > "$d/lane/pulse.log"
+  if _run "arm4d legacy fresh" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+    _last "arm4d legacy fresh verdict is OK"  'liveness: OK'
+    _want "arm4d legacy fresh is measured"    1 'pulse log: newest line [0-9]+ min old'
+    _want "arm4d legacy fresh names the shape" 1 'legacy time-only stamp'
+    _want "arm4d legacy fresh is not STALE"   0 'STALE LOG'
+  fi
+  printf '%s ok task-aaa\n' "$(date -u -v-55M +%H:%M:%SZ 2>/dev/null || date -u -d '55 minutes ago' +%H:%M:%SZ)" > "$d/lane/pulse.log"
+  if _run "arm4d legacy old" 1 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" --pulse-interval-minutes 18; then
+    _want "arm4d legacy old is STALE with its age" 1 'STALE LOG.*55 min'
+  fi
+
+  echo "== arm 4e: the midnight-rollover guard — a time-only stamp cannot read as FUTURE-fresh"
+  # 23:59:12Z read at 00:04Z dates to ~24 h ahead if today's date is pasted on blindly; a future
+  # instant computes a NEGATIVE age and passes the freshness test. The guard pulls it back a day,
+  # so the line reads ~1 day old -- STALE, loudly, which is the honest answer for a stamp whose
+  # date nobody wrote down. Simulated here by stamping 30 min in the FUTURE.
+  printf '%s ok task-aaa\n' "$(date -u -v+30M +%H:%M:%SZ 2>/dev/null || date -u -d '30 minutes' +%H:%M:%SZ)" > "$d/lane/pulse.log"
+  if _run "arm4e future-dated time-only" 1 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" --pulse-interval-minutes 18; then
+    _want "arm4e did NOT read it as fresh" 0 'newest line [0-9]+ min old \(cadence'
+    _want "arm4e pulled it back one day"   1 'STALE LOG.*1[34][0-9][0-9] min old'
+  fi
+
+  echo "== arm 4f: a log with NO readable stamp REFUSES with a line that NAMES both formats"
+  printf 'pulse-loop: something happened\nanother unstamped line\n' > "$d/lane/pulse.log"
+  if _run "arm4f unstamped log" 1 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+    _want "arm4f names the full-ISO format"  1 'Accepted:.*%Y-%m-%dT%H:%M:%SZ'
+    _want "arm4f names the legacy format"    1 'Accepted:.*%H:%M:%SZ'
   fi
   printf '%s ok task-aaa\n' "$(_ago 4)" > "$d/lane/pulse.log"
 
@@ -397,17 +559,22 @@ if [ -n "$PULSELOG" ]; then
     say "STALE LOG: $PULSELOG is missing or empty — the loop has never written a line. A loop that has produced no output is not a running loop."
     PROBLEMS=$((PROBLEMS+1))
   else
-    newest=$(grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' "$PULSELOG" | tail -1)
-    if [ -z "$newest" ] || ! ne=$(iso_epoch "$newest"); then
-      say "STALE LOG: the newest line of $PULSELOG carries no parseable ISO timestamp, so its age cannot be measured. This is NOT a pass."
+    # The newest line that CARRIES a stamp in either accepted shape. Matching on the stamp (not
+    # on `tail -1`) means a trailing stack trace or a bare continuation line cannot hide a fresh
+    # pulse -- and a log of nothing BUT such lines still refuses below, by name.
+    newest=$(grep -E '^([0-9]{4}-[0-9]{2}-[0-9]{2}T)?[0-9]{2}:[0-9]{2}:[0-9]{2}' "$PULSELOG" | tail -1)
+    if [ -z "$newest" ] || ! log_stamp_epoch "$newest" "$NOW"; then
+      say "STALE LOG: the newest line of $PULSELOG carries no stamp this helper can read, so its age cannot be measured. Accepted: $LOGSTAMP_FORMATS. This is NOT a pass."
       PROBLEMS=$((PROBLEMS+1))
     else
-      age=$(( (NOW - ne) / 60 ))
+      shape_note=""
+      [ "$LOGSTAMP_SHAPE" = time-only ] && shape_note=" [legacy time-only stamp — today's UTC date assumed]"
+      age=$(( (NOW - LOGSTAMP_EPOCH) / 60 ))
       if [ "$age" -gt $((INTERVAL + GRACE)) ]; then
-        say "STALE LOG: the newest line of $PULSELOG is $age min old, past the ${INTERVAL}-min cadence (+${GRACE} grace). A loop that stops running prints NOTHING — the log just stops growing."
+        say "STALE LOG: the newest line of $PULSELOG is $age min old, past the ${INTERVAL}-min cadence (+${GRACE} grace).${shape_note} A loop that stops running prints NOTHING — the log just stops growing."
         PROBLEMS=$((PROBLEMS+1))
       else
-        say "pulse log: newest line $age min old (cadence ${INTERVAL} min) — fresh."
+        say "pulse log: newest line $age min old (cadence ${INTERVAL} min) — fresh.${shape_note}"
       fi
     fi
   fi

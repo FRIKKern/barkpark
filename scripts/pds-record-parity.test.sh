@@ -239,12 +239,49 @@ run 1 "a D merely MENTIONED inside a heading is NOT defined" -- --axis a --chart
 says "UNRESOLVED-CITATION PDS-D640" "the union lens anchors on the number at the START of the heading text"
 
 # RULING 1 — the LOOSE heading lens is a LENS ARTIFACT, and the arm says so
-# instead of gating on it. The fixture charter defines PDS-D1/2/3 as bullets and
+# instead of gating on it. The fixture charter defines PDS-D1/PDS-D2/PDS-D3 as bullets and
 # only PDS-D404 as a heading, so the loose lens loses all three bullet forms.
 run 0 "--heading-lens does NOT fold its red into the exit code" -- --axis a --charter "$CH" --commits-file "$CM_OK" --heading-lens
 says "defined:    1 distinct PDS-D" "the loose heading lens sees only the one heading-defined D"
 says "unresolved: 3" "the loose heading lens reports every bullet-defined D as unresolved"
 says "LENS ARTIFACT" "the loose heading lens labels its own red as an artifact"
+
+# ══ AXIS A RESOLVES THE LETTERED SHAPE THE SAME WAY AXIS D DOES ══════════════
+#
+# A commit message cites clause (a) of a ruling as `PDS-D220a` exactly as a
+# script does. An axis that reds on what its sibling greens is a lens artifact
+# wearing a finding's clothes, so the rule here is the SAME rule, not a softer
+# one: the base's definition block must carry the literal marker, and a letter
+# that is a typo still reds.
+CHLA="$TMP/charter-lettered-a.md"
+cat > "$CHLA" <<'EOF'
+# A charter with lettered rulings
+
+- **PDS-D448 — THE BASE RULING.** A digits-only extractor credits every
+  PDS-D448x citation to this entry.
+- **PDS-D448a — A LETTERED RULING IN ITS OWN RIGHT.** Separately defined.
+- **PDS-D220 — A RULING WITH CLAUSES.** (a) the first clause. (b) the second.
+
+## PDS-D404 a decision defined as a HEADING
+
+Nothing else defines a D.
+EOF
+CM_LET="$TMP/commits-lettered"
+printf 'fix: per PDS-D448a and PDS-D220a and PDS-D220b
+' > "$CM_LET"
+run 0 "axis A resolves a real lettered ruling AND a clause reference" -- --axis a --charter "$CHLA" --commits-file "$CM_LET"
+says "clauses:    2 lettered citation(s) resolved as a CLAUSE" "the clause path is PRINTED on axis A too"
+says "unresolved: 0" "and nothing was left over"
+
+printf 'fix: a lettered typo, per PDS-D448z
+' > "$CM_LET"
+run 1 "axis A REDS on a phantom lettered ruling whose base exists" -- --axis a --charter "$CHLA" --commits-file "$CM_LET"
+says "UNRESOLVED-CITATION PDS-D448z" "the red names the phantom by its FULL name, not its numeric base"
+
+printf 'fix: a letter its base has no clause for, per PDS-D220z
+' > "$CM_LET"
+run 1 "axis A does not let the clause path decay into a base path" -- --axis a --charter "$CHLA" --commits-file "$CM_LET"
+says "UNRESOLVED-CITATION PDS-D220z" "220s block carries (a) and (b) and no (z)"
 
 # A missing charter is UNCHECKED, never a pass — an arm that cannot read the
 # charter has resolved exactly zero citations.
@@ -289,12 +326,83 @@ rm "$DROOT/scripts/pds-phantom.sh"
 run 0 "removing the phantom citation greens axis D again" -- --axis d --charter "$CH" --citation-root "$DROOT"
 says_not "UNDEFINED-CITATION" "the red is gone with the citation, not sticky"
 
-# THE SENTINELS. PDS-D777/999/1000 are this harness's own synthetic numbers and
+# THE SENTINELS. PDS-D777/PDS-D999/PDS-D1000 are this harness's own synthetic numbers and
 # must never red — but they must be COUNTED, not silently dropped.
 printf '#!/usr/bin/env bash\n# the fixtures PDS-D777 PDS-D999 PDS-D1000 are sentinels\n' > "$DROOT/scripts/pds-sentinel.sh"
 run 0 "the synthetic sentinels do not red axis D" -- --axis d --charter "$CH" --citation-root "$DROOT"
 says "sentinels:  3 occurrence(s) skipped" "the exclusion is PRINTED, so it cannot hide a growing skip list"
 rm "$DROOT/scripts/pds-sentinel.sh"
+
+# ══ THE LETTERED RULING — BOTH ARMS ══════════════════════════════════════════
+#
+# THE DEFECT THESE PIN. Every scan in the arm used to read the prefix followed
+# by DIGITS ONLY, so `PDS-D448a` was extracted as `PDS-D448` — a different
+# ruling. All 34 lettered rulings on main collide with a separately-defined
+# numeric base, so the collapse was SILENT, and a lettered TYPO could not red at
+# all: the base resolved on the phantom's behalf. Reproduced against this same
+# fixture shape before the widening: the phantom exited 0 and printed PARITY,
+# while a numeric phantom in the same tree exited 1.
+#
+# TWO ARMS, AND NEITHER IS SUFFICIENT ALONE. The phantom arm alone is satisfied
+# by an arm that reds on every letter; the positive arm alone is satisfied by
+# the old blind one. Together they say the lens discriminates.
+CHL="$TMP/charter-lettered.md"
+cat > "$CHL" <<'EOF'
+# A charter with lettered rulings
+
+- **PDS-D448 — THE BASE RULING.** It exists, which is the whole trap: a
+  digits-only extractor credits every PDS-D448x citation to THIS entry.
+- **PDS-D448a — A LETTERED RULING IN ITS OWN RIGHT.** Separately defined.
+- **PDS-D220 — A RULING WITH CLAUSES.** (a) the first clause. (b) the second.
+
+## PDS-D404 a decision defined as a HEADING
+
+Nothing else defines a D.
+EOF
+
+LROOT="$TMP/lroot"
+mkdir -p "$LROOT/scripts"
+
+# ARM 1 — THE PHANTOM. A letter the charter does not carry, on a base it does.
+printf '#!/usr/bin/env bash\n# a lettered typo the base used to absorb: PDS-D448z\n' > "$LROOT/scripts/pds-lettered.sh"
+run 1 "a phantom LETTERED ruling REDS axis D" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "cites PDS-D448z" "the red names the phantom by its FULL name, not its numeric base"
+says_not "cites PDS-D448
+" "the red is not the numeric base wearing the phantom's place"
+says "undefined:  1 firing" "exactly one citation fired"
+
+# ARM 2 — THE POSITIVE CONTROL. A real lettered ruling must still resolve, and
+# resolve QUIETLY: present-in-the-file is not fires-when-it-should, and an arm
+# that reds on every letter would pass arm 1 on its own.
+printf '#!/usr/bin/env bash\n# a REAL lettered ruling: PDS-D448a\n' > "$LROOT/scripts/pds-lettered.sh"
+run 0 "a REAL lettered ruling resolves QUIETLY on axis D" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says_not "UNDEFINED-CITATION" "the real lettered citation raises nothing"
+says "citations:  1 occurrence(s), 1 distinct PDS-D" "it was READ — a green over an unread corpus is the vacuous pass"
+says "undefined:  0 firing" "and it resolved"
+
+# ARM 3 — THE CLAUSE. `PDS-D220a` names clause (a) inside PDS-D220 and resolves
+# against the base's definition BLOCK carrying the literal `(a)`. This is the
+# one path a letter may take through its base, and it is NOT "the base exists":
+# arm 1's PDS-D448z has a defined base too and still reds.
+printf '#!/usr/bin/env bash\n# a CLAUSE reference: PDS-D220a and PDS-D220b\n' > "$LROOT/scripts/pds-lettered.sh"
+run 0 "a CLAUSE reference resolves through its base's (x) marker" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "clauses:    2 lettered citation(s) resolved as a CLAUSE" "the clause path is PRINTED, never a silent skip"
+says_not "UNDEFINED-CITATION" "neither clause reds"
+
+# ARM 3b — AND THE CLAUSE PATH IS NOT A BASE PATH. PDS-D220z shares 220's base,
+# whose block carries (a) and (b) and no (z).
+printf '#!/usr/bin/env bash\n# a letter its base has no clause for: PDS-D220z\n' > "$LROOT/scripts/pds-lettered.sh"
+run 1 "a letter its base carries no clause marker for still REDS" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "cites PDS-D220z" "the clause lens did not become a base lens"
+rm "$LROOT/scripts/pds-lettered.sh"
+
+# ARM 4 — THE DEFINITION SIDE. The charter above defines PDS-D448 AND PDS-D448a
+# as two rulings; a digits-only definition scan merges them into one.
+printf '#!/usr/bin/env bash\n# every citation here resolves: PDS-D448 PDS-D448a PDS-D220 PDS-D404\n' > "$LROOT/scripts/pds-lettered.sh"
+run 0 "the definition lens counts a lettered ruling SEPARATELY from its base" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "defined:    4 distinct PDS-D in the charter" "448, 448a, 220 and 404 — four, not the three a digits-only lens sees"
+says "citations:  4 occurrence(s), 4 distinct PDS-D" "and the citing side kept 448 and 448a apart too"
+rm "$LROOT/scripts/pds-lettered.sh"
 
 # A corpus root with nothing in it is UNCHECKED. An arm that printed PARITY here
 # would be certifying a corpus it never opened.
@@ -949,6 +1057,77 @@ else
   says_not "PDS-D406" "the reverted pointer cannot see the reservation, so it cannot move past it"
 fi
 
+# ── THE SAME ARBITER OVER A SECOND CHARTER (--prefix) ───────────────────────
+#
+# The allocation arms were PDS-specific in exactly one token. The deploy
+# charter had the same defect and paid for it on 2026-09-16 (two PRs, both
+# correct readers, both minted D614), so that token is a parameter and there is
+# still ONE implementation. These arms hold the parameter honest in BOTH
+# directions: the non-default prefix must refuse an unreserved mint by NAME,
+# and the default must stay byte-identical to what every existing caller sees.
+echo
+echo "AXIS A — one arbiter, a second charter (--prefix)"
+
+PFX_CH="$TMP/deploy-charter.md"
+PFX_LED="$TMP/deploy-ledger.tsv"
+rm -f "$PFX_LED"
+# Both numbering styles this charter family uses, PLUS the trap: a CROSS-CHARTER
+# citation of a much higher number from the OTHER charter's namespace. The real
+# deploy charter cites PDS-D716 six times while its own high-water is 615; a
+# lens that counted citations as definitions would jump the pointer by a hundred.
+{
+  printf '## D613 — a decision, heading form.\n\nbody\n\n'
+  printf -- '- **D614** a decision, bold-lead bullet form.\n\n'
+  printf 'Prose that cites **PDS-D716** and PDS-D716 again, from the OTHER charter.\n'
+} > "$PFX_CH"
+
+PFX_HIGH="$(grep -oE 'D[0-9]+' "$PFX_CH" | sed 's/^D//' | sort -n | tail -1)"
+CHECKS=$((CHECKS + 1))
+if [ "$PFX_HIGH" = "716" ]; then
+  echo "ok    the fixture charter CITES 716 from the other namespace (the lens must not mint 717)"
+else
+  FAILURES=$((FAILURES + 1)); echo "FAIL  FIXTURE PRECONDITION: expected 716 to be the highest bare-D token, got ${PFX_HIGH}"
+fi
+
+run 0 "--prefix D seeds and mints from the DEFINED high-water of the second charter" \
+  -- --prefix D --charter "$PFX_CH" --alloc-ledger "$PFX_LED" --allocate-d 1 --for "deploy adoption"
+says "D615" "it mints 615 — one past the DEFINED 614, across BOTH numbering styles"
+says_not "D717" "the cross-charter PDS-D716 citation does not move the pointer"
+says_not "PDS-D615" "the reservation carries the REQUESTED prefix, not the default one"
+
+PFX_MINTED="$TMP/deploy-charter-minted.md"
+cp "$PFX_CH" "$PFX_MINTED"
+printf '\n## D615 — written into the charter after being reserved.\n' >> "$PFX_MINTED"
+run 0 "--prefix D --check-alloc greens when the number above the seed was reserved first" \
+  -- --prefix D --charter "$PFX_MINTED" --alloc-ledger "$PFX_LED" --check-alloc
+says "every charter number above the seed was reserved first" "the green says what it measured"
+
+printf -- '\n- **D620** minted by reading the charter, exactly as D614 was.\n' >> "$PFX_MINTED"
+run 1 "--prefix D --check-alloc REDS on a number minted without a reservation" \
+  -- --prefix D --charter "$PFX_MINTED" --alloc-ledger "$PFX_LED" --check-alloc
+says "UNRESERVED-MINT      D620" "the bypass is named, by number, in the REQUESTED namespace"
+says_not "UNRESERVED-MINT      D613" "a number at or below the SEED is not scored"
+
+# THE DEFAULT MUST NOT MOVE. Every existing PDS caller, fixture and CI arm calls
+# this script with no --prefix at all; if the parameter changed what they see,
+# the reuse would have cost more than a second arbiter.
+CHECKS=$((CHECKS + 1))
+# Plain temp files, NOT process substitution: scripts/posix-vacuous-green-census.sh
+# refuses an unguarded `<(…)` in this tree, and it is right to — under `sh` the
+# construct is a syntax error and a harness that dies there can still exit 0.
+bash "$ARM" --print-defs --charter "$CH" > "$TMP/defs-default.txt" 2>/dev/null
+bash "$ARM" --print-defs --charter "$CH" --prefix PDS-D > "$TMP/defs-explicit.txt" 2>/dev/null
+if [ -s "$TMP/defs-default.txt" ] && diff -q "$TMP/defs-default.txt" "$TMP/defs-explicit.txt" >/dev/null 2>&1; then
+  echo "ok    the default prefix IS PDS-D — omitting --prefix and passing it explicitly agree ($(wc -l < "$TMP/defs-default.txt" | tr -d " ") defs)"
+else
+  FAILURES=$((FAILURES + 1)); echo "FAIL  the default prefix is not PDS-D (or the lens read nothing) — every existing caller's lens moved"
+fi
+
+run 3 "an empty --prefix is a USAGE error (it would match every bare integer)" \
+  -- --prefix "" --charter "$CH" --alloc-ledger "$PFX_LED" --check-alloc
+run 3 "a --prefix carrying a regex metacharacter is a USAGE error" \
+  -- --prefix 'D.*' --charter "$CH" --alloc-ledger "$PFX_LED" --check-alloc
+
 # ── the arm's own hygiene ───────────────────────────────────────────────────
 echo
 echo "HYGIENE"
@@ -1001,11 +1180,46 @@ fi
 # edit that hoists `walk_truncation` to top level would UNCHECK `--axis b` on every
 # shallow CI checkout and this harness would stay GREEN. Position is the behaviour,
 # so position is what is asserted (the PACE-sleep idiom above, same reason).
+# ══ THE ANTI-NARROWING PREDICATE ═════════════════════════════════════════════
+#
+# A PREDICATE OVER THE WHOLE FILE, NOT A LIST OF SITES. Widening eighteen
+# regexes by hand is a snapshot; the next person adds a nineteenth. So the arm
+# routes every D-number scan through a NAMED shape (D_NUM_RE / D_BASE_RE /
+# D_NAIVE_NUM_RE) and this check asserts the only thing that keeps that true:
+# a digit class must never appear beside the prefix again, in any quoting, in
+# any tool. `scripts/pds-citation-expand.sh` carries the same arm (4b) for the
+# same reason — this is that shape, not a new one.
+CHECKS=$((CHECKS + 1))
+NARROW="$(grep -nE '(PDS-D|\$\{D_PREFIX\})[^ ]{0,4}\[0-9\]' "$ARM" || true)"
+if [ -z "$NARROW" ]; then
+  echo "ok    no bare digit class survives beside the D prefix — every scan reads a named shape"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  a D-number scan was narrowed back to digits-only — this is the blind spot returning"
+  echo "      a lettered ruling would be extracted as its numeric base, and a lettered typo could not red:"
+  printf '%s\n' "$NARROW" | sed 's/^/        /'
+fi
+
+# …and the shapes themselves must still carry the suffix. The check above is
+# satisfied by a constant redefined to '[0-9]+', which is the narrowing wearing
+# the widening's clothes.
+CHECKS=$((CHECKS + 1))
+if grep -qE "^D_NUM_RE='\[0-9\]\+\[a-z\]\?'" "$ARM" && grep -qE "^D_BASE_RE='\[0-9\]\+'" "$ARM"; then
+  echo "ok    D_NUM_RE still carries the optional letter suffix, and the allocation base still does not"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  the named shapes drifted — D_NUM_RE must be '[0-9]+[a-z]?' and D_BASE_RE '[0-9]+'"
+  grep -nE "^D_(NUM|BASE|NAIVE_NUM)_RE=" "$ARM" | sed 's/^/        /'
+fi
+
 CHECKS=$((CHECKS + 1))
 WT_CALLS="$(grep -cE '^[[:space:]]*walk_truncation$' "$ARM")"
 WT_CALL="$(grep -nE '^[[:space:]]*walk_truncation$' "$ARM" | head -1 | cut -d: -f1)"
 WT_WORKTREE="$(grep -n 'UNCHECKED: not inside a git work tree' "$ARM" | head -1 | cut -d: -f1)"
-WT_LOG="$(grep -n "git log --format=%B | grep -oE 'PDS-D" "$ARM" | head -1 | cut -d: -f1)"
+# Located by the PIPELINE, not by the citation regex: the regex is a named
+# shape now (D_NUM_RE) and a locator spelled `PDS-D[0-9]+` would both go stale
+# on a widening AND quietly re-pin the narrow shape it is not here to police.
+WT_LOG="$(grep -nF 'git log --format=%B | grep -oE' "$ARM" | head -1 | cut -d: -f1)"
 WT_AXISB="$(grep -n '^axis_b()' "$ARM" | head -1 | cut -d: -f1)"
 if [ "$WT_CALLS" = "1" ] && [ -n "$WT_CALL" ] && [ -n "$WT_WORKTREE" ] && [ -n "$WT_LOG" ] &&
    [ -n "$WT_AXISB" ] && [ "$WT_WORKTREE" -lt "$WT_CALL" ] && [ "$WT_CALL" -lt "$WT_LOG" ] &&
@@ -1016,6 +1230,126 @@ else
   echo "FAIL  walk_truncation must be called exactly once, between the work-tree check and the git log walk"
   echo "      (calls=${WT_CALLS} call=${WT_CALL:-none} worktree=${WT_WORKTREE:-none} log=${WT_LOG:-none} axis_b=${WT_AXISB:-none})"
   echo "      hoisted out of that branch it UNCHECKS --axis b and --commits-file on every shallow checkout"
+fi
+
+# ── AXIS F — THE WINDOW BOUNDARY IS NOT READ OUT OF THE LEDGER IT GUARDS ──────
+#
+# THE DEFECT THESE FIXTURES EXIST TO REFUSE, STATED AS THE RUN THAT PASSED. The
+# first cut derived the window anchor from the charter: the OLDEST harness-moving
+# commit whose blob the charter recorded. So deleting that row did not make its
+# commit unrecorded — it promoted the next row to anchor, made the deleted commit
+# pre-doctrine and EXEMPT, shrank the window 20 -> 19 to match, and printed
+# PARITY rc 0. Deleting the four oldest in one pass took it 20 -> 16, rc 0 every
+# time. A guard whose expected value is read from the thing it guards cannot see
+# that thing being erased from the bottom.
+#
+# THE MID-ROW CONTROL ALREADY PASSED THROUGHOUT, WHICH IS WHY THIS NEEDED ITS OWN
+# FIXTURE. An arm that reds on a mid-row deletion and greens on an anchor-row
+# deletion looks exactly like a working arm from the mid-row fixture alone. Both
+# deletions are pinned below, and so is the count that must NOT move: under the
+# pinned floor the window stays 21 on EVERY deletion. A deletion that shrank the
+# window while still reporting some other row would be a different arm passing
+# for the wrong reason.
+
+CH_F=".claude/workflows/bp-pds-charter.md"
+FLOOR_F="1f15017bf3d51ac85c34d3e4f5aa2f903a0815a6"
+
+# THE STATIC HALF, which holds on any checkout including a shallow one: the floor
+# must be a LITERAL in the arm, and the window loop must key off the derived
+# boundary, never off the charter-read anchor. Position and provenance ARE the
+# behaviour here (the PACE-sleep and walk_truncation idioms above, same reason):
+# a future edit that pointed the loop back at $anchor would restore the defect
+# with every dynamic fixture below still green on a full checkout.
+CHECKS=$((CHECKS + 1))
+if grep -q "^AXIS_F_FLOOR_COMMIT_DEFAULT=\"${FLOOR_F}\"" "$ARM"; then
+  echo "ok    the axis-F window floor is a 40-hex literal in the arm, not a value read from the charter"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  AXIS_F_FLOOR_COMMIT_DEFAULT is missing or is no longer ${FLOOR_F}"
+  echo "      a boundary the charter can supply is a boundary a charter edit can move forward"
+fi
+
+CHECKS=$((CHECKS + 1))
+if [ "$(grep -c 'is-ancestor "\$sha" "\$boundary"' "$ARM")" = "1" ] &&
+   ! grep -q 'is-ancestor "\$sha" "\$anchor"' "$ARM"; then
+  echo "ok    axis F's window loop exempts against \$boundary, never against the charter-read \$anchor"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  axis F's exemption test must run against \$boundary — \$anchor is read out of the guarded charter"
+fi
+
+CHECKS=$((CHECKS + 1))
+if grep -q 'the charter records no harness blob at all; every in-window thaw below is unrecorded' "$ARM"; then
+  echo "ok    a charter recording NO harness blob now SCORES (every row unrecorded) instead of going UNCHECKED"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  an empty ledger must be scoreable now that the boundary no longer needs the charter to supply it"
+fi
+
+# A BOGUS FLOOR IS UNCHECKED, NOT A FALLBACK. This is the no-fallback rule as a
+# run: if the arm ever answered this by reverting to the charter-derived anchor
+# it would print PARITY here, which is precisely the silent hole. Holds on any
+# checkout, shallow included.
+CHECKS=$((CHECKS + 1))
+LAST_OUT="$(AXIS_F_FLOOR_COMMIT=0000000000000000000000000000000000000000 bash "$ARM" --axis f --charter "$CH_F" 2>&1)"
+AF_RC=$?
+if [ "$AF_RC" = "2" ]; then
+  echo "ok    an unreachable pinned floor is UNCHECKED (exit 2), never a fallback to the charter  (exit 2)"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  an unreachable pinned floor must exit 2; got ${AF_RC}"
+  printf '      | %s\n' "$LAST_OUT" | head -20
+fi
+says "will NOT fall back to deriving the boundary from the" "the refusal NAMES the fallback it is declining to make"
+says_not "PARITY" "an unreachable floor must never print PARITY"
+
+run 2 "axis F with a missing charter is UNCHECKED" -- --axis f --charter "$TMP/no-such-charter.md"
+says "UNCHECKED: no charter at" "the UNCHECKED names the missing charter"
+
+# THE DYNAMIC HALF needs the real history: the floor commit and the 25 harness-
+# moving commits. On a shallow checkout there is nothing here to measure, and a
+# harness that silently skipped would be the vacuous green this file exists to
+# refuse — so the skip is PRINTED and the reason is named.
+if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f "$CH_F" ]; then
+
+  run 0 "axis F is GREEN on this checkout's real charter" -- --axis f
+  says "window boundary ....... 1f15017bf" "the live boundary is the pinned floor, not the oldest ledger row"
+  says "IN WINDOW ....... 21" "the pinned floor puts the former anchor 58d1bd3a5 INSIDE the window"
+
+  # THE REGRESSION ARM. Delete the row that used to BE the anchor. Under the old
+  # derivation this printed `IN WINDOW 19 · unrecorded 0 · PARITY` rc 0.
+  sed '/e219e97ccf7f33797c86a2b84d998d599b6bda31/d' "$CH_F" > "$TMP/f-anchor.md"
+  run 1 "deleting the OLDEST ledger row REDS axis F (it used to print PARITY)" -- --axis f --charter "$TMP/f-anchor.md"
+  says "58d1bd3a5" "the red NAMES the commit whose record was deleted"
+  says "IN WINDOW ....... 21" "the window did NOT shrink to absorb the deletion — that shrink WAS the defect"
+  says "unrecorded .......................... 1" "exactly one row went missing and exactly one is reported"
+
+  # ITERATED. One row could be a special case; four rows in one pass is the shape
+  # of a charter split that drops the oldest block as historical noise.
+  sed -e '/e219e97ccf7f33797c86a2b84d998d599b6bda31/d' \
+      -e '/255c458ba2797321fcd2f2ac327bf87430a59d0e/d' \
+      -e '/7a703fd641f77b906dcbd40f004f7639cdc9b2ae/d' \
+      -e '/f99216471f9cd914064b9e6fc4bc3b6ee59a6da2/d' "$CH_F" > "$TMP/f-oldest4.md"
+  run 1 "deleting the FOUR oldest ledger rows in one pass REDS axis F" -- --axis f --charter "$TMP/f-oldest4.md"
+  says "unrecorded .......................... 4" "all four deletions are counted, not just the newest of them"
+  says "IN WINDOW ....... 21" "four deletions did not move the boundary either"
+  says "58d1bd3a5" "the oldest of the four is named"
+  says "13c379bcd" "the newest of the four is named"
+
+  # THE PRE-EXISTING CONTROL, RE-PINNED. The mid-row red must survive the change.
+  sed '/97d9cbb86afe6910d7a49bd712ca3348084f4fb0/d' "$CH_F" > "$TMP/f-mid.md"
+  run 1 "the mid-ledger control still REDS axis F" -- --axis f --charter "$TMP/f-mid.md"
+  says "4d5a84001" "the mid-row red still names its commit"
+
+  # THE QUIET SIDE OF THE SAME MUTATION SET. Without this, every red above is
+  # compatible with an arm that reds on any --charter that is not the default.
+  cp "$CH_F" "$TMP/f-verbatim.md"
+  run 0 "a verbatim COPY of the charter is still PARITY — the reds are about content, not about --charter" -- --axis f --charter "$TMP/f-verbatim.md"
+  says_not "DIVERGENT" "the copy does not red"
+else
+  CHECKS=$((CHECKS + 1))
+  echo "ok    axis F's history fixtures SKIPPED — ${FLOOR_F} is not in this checkout (shallow clone)"
+  echo "      the static and no-fallback checks above still ran; only the 25-commit walk is unmeasurable here"
 fi
 
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense

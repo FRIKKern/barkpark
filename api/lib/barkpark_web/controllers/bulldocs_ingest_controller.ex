@@ -610,15 +610,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   # The create precheck's title, derived the way the upsert wall will derive it
   # (`BlockOps.paper_title/2`: first heading's text wins) so the dry-run-shaped
-  # precheck walls the SAME title the authoritative wall sees.
+  # precheck walls the SAME title the authoritative wall sees. The heading
+  # derivation itself is DELEGATED to `BlockOps.heading_title/1` — the twin
+  # used to re-implement it with a `b["text"]`-only match, which is exactly how
+  # the two doors drifted apart on array-authored headings
+  # (bp-paper-ingest-title-trap).
   defp create_title(blocks, parsed, slug) do
-    heading_text =
-      Enum.find_value(blocks, fn b ->
-        if is_map(b) and b["type"] == "heading" and is_binary(b["text"]) and b["text"] != "",
-          do: b["text"]
-      end)
-
-    heading_text || parsed["title"] || slug
+    Barkpark.Content.Papers.BlockOps.heading_title(blocks) || parsed["title"] || slug
   end
 
   # The sync entry guard's probe: nil when every current block is printable,

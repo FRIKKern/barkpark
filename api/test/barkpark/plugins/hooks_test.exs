@@ -196,7 +196,13 @@ defmodule Barkpark.Plugins.HooksTest do
     prior = Application.get_env(:barkpark, :hooks_test_target)
     Application.put_env(:barkpark, :hooks_test_target, self())
 
-    ExUnit.Callbacks.on_exit(ctx, fn ->
+    # Module-scoped ref. THIS helper is the one that ate `with_plugins/2`'s
+    # restore when both keyed on the bare `ctx` (PR 14414): `on_exit/2` keys on
+    # its first argument, so the second registration replaced the first and the
+    # `:plugins` env escaped the file. `with_plugins/2` now keys on
+    # `{Barkpark.PluginEnv, ctx}`; this one keys on its own tuple so the two can
+    # never share a slot again.
+    ExUnit.Callbacks.on_exit({__MODULE__, :async_target, ctx}, fn ->
       if is_nil(prior),
         do: Application.delete_env(:barkpark, :hooks_test_target),
         else: Application.put_env(:barkpark, :hooks_test_target, prior)

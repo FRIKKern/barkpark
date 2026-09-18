@@ -24,15 +24,21 @@
 #   9  a lens that counts any PDS-D it sees               -> UNCHECKED (2)  probe control
 #   8  the charter is absent on the base ref              -> UNCHECKED (2)
 #
-# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
-# scripts/pds-citation-precedes-merge_test.sh` step on the `PDS census / parity /
-# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml (that
-# job already TRIGGERS on these files via its `scripts/pds-*.sh` glob; it just
-# runs an enumerated list this file is not on), and .github/ is the gates lane's
-# fence, not the deploy/PDS lane's. Same handoff, same job, same reason as
-# scripts/pds-charter-anchors-check_test.sh:12. This exemption is a HANDOFF, not
-# a verdict: until that line lands, a revert of this predicate is caught by
-# running this file BY HAND, and by nothing else. Wiring row: see the PR body.
+# WIRED (task-68c3064b51854cd3): this file runs on the `PDS census / parity /
+# scratch-target harnesses` job, as the arm named "PDS citation precedes merge"
+# in .github/shell-harness-legs.json (the matrix collapse moved the per-leg
+# `run:` bodies out of .github/workflows/shell-harnesses.yml and into that
+# file; the job's `scripts/pds-*.sh` workflow-level glob already DISPATCHES on
+# an edit to this file or to the predicate beside it, so both halves are now
+# executed by CI and not only by hand). It REPLACES the `MANUAL PROOF` census
+# exemption header this file carried from PR #18542 until the wiring landed —
+# that exemption was a handoff, and this arm is the line it was waiting for.
+# The exemption marker is deliberately not spelled in full anywhere below: it is
+# the exact string scripts/selftest-wiring-census.sh greps for over the first 60
+# lines, and a file that both RUNS in CI and still declares the exemption would
+# be counted EXEMPT rather than RUN — the census would stop measuring this file
+# on the very commit that wired it. Mirrors the WIRED header on
+# scripts/pds-charter-anchors-check_test.sh — same job, same fence, same shape.
 # Baseline at authoring: 10 passed, 0 failed.
 #
 # Cases 6, 7 and 9 are the mutations that matter: they break the READER, not the

@@ -377,8 +377,17 @@ jobs:
         # only the bare form, so the run that is ABOUT TO DEPLOY took the gate's
         # green on trust while never asking whether the gate could still lose.
         run: |
-          bash scripts/check-deploy-smoke.sh --selftest
-          bash scripts/check-deploy-smoke.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/check-deploy-smoke.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-deploy-smoke.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
   control-plane:
     needs: changes

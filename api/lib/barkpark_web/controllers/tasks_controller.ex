@@ -845,13 +845,18 @@ defmodule BarkparkWeb.TasksController do
   def claim(conn, params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+        with {:ok, order} <- Params.parse_ready_order(params["order"]),
+             {:ok, priming_start} <- flight_recorder_param(params, "priming_start") do
           opts =
             []
             |> Params.put_opt(:phase_id, params["phase_id"])
             |> Params.put_opt(:order, order)
             |> Params.put_opt(:caller_token_id, caller_token_id(conn))
             |> Params.put_opt(:session, session_id(conn, params))
+            # THREE-STATE: `put_opt/3` DROPS a nil, so an absent manifest never
+            # reaches Tasks.Claim as an opt at all and the claim it writes is
+            # byte-identical to one issued before this key existed.
+            |> Params.put_opt(:priming_start, priming_start)
             |> Keyword.merge(Params.execution_policy_opts(params))
             |> Keyword.merge(scope_opts(conn))
 
@@ -892,6 +897,9 @@ defmodule BarkparkWeb.TasksController do
         else
           {:error, :invalid_ready_order} ->
             bad_request(conn, "order must be closure_nearest when set")
+
+          {:error, code} when is_atom(code) ->
+            flight_recorder_refusal(conn, code)
         end
 
       _ ->
@@ -1061,110 +1069,118 @@ defmodule BarkparkWeb.TasksController do
   def claim_by_id(conn, %{"doc_id" => doc_id} = params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        # `resources` rides as a JSON list (curl) or a comma-separated string
-        # (the bp `--set resources=a.go,b.go` path) — Tasks normalizes both.
-        opts =
-          [resources: params["resources"] || []]
-          |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Params.put_opt(:session, session_id(conn, params))
-          |> Keyword.merge(Params.execution_policy_opts(params))
-          |> Keyword.merge(scope_opts(conn))
-          |> Params.put_opt(
-            :criteria_unstated_override,
-            params["criteria_unstated_override"] ||
-              get_in(params, ["set", "criteria_unstated_override"])
-          )
-          # `?dataset=` — the disambiguator the ambiguous_dataset refusal
-          # ADVERTISES (bp-task-verbs-500-on-cross-dataset-duplicate-slugs).
-          # `find_task_by_doc_id/2` has honoured it on every read door since the
-          # rule landed; this write door dropped it, so the claim refused and
-          # then refused its own escape hatch. Measured live on guerrilla
-          # 2026-09-16: GET `?dataset=production` -> 200 while POST
-          # `/claim?dataset=production` -> 409 (request_id GNW9zm1YCdlVXHsAADNB),
-          # which is what kept the eleven cross-dataset rows unclaimable — and
-          # therefore unstampable and uncloseable, every one of those verbs
-          # being claim-fenced.
-          |> Params.put_opt(:dataset, params["dataset"])
-
-        # Snapshot the rail BEFORE the claim so rail_changed compares
-        # observed_rail_rev against the rail the worker actually saw (not the
-        # rev its own claim produces). nil when the row is absent/parentless.
-        pre_task =
-          case find_task_by_doc_id(doc_id, conn) do
-            {:ok, %Document{} = pre} -> pre
-            _ -> nil
-          end
-
-        baseline_rev = if pre_task, do: pre_write_rail_rev(pre_task, conn), else: nil
-
-        case Tasks.claim_by_id(doc_id, worker_id, opts) do
-          {:ok, %Document{} = doc} ->
-            json(
-              conn,
-              with_rail_extras(
-                %{
-                  ok: true,
-                  doc: Params.render_doc(seal_doc(doc, conn)),
-                  help: Params.mutation_help(:claim_by_id, doc, worker_id),
-                  lease: Params.claim_lease(doc)
-                },
-                doc,
-                baseline_rev,
-                conn,
-                params
-              )
+        with {:ok, priming_start} <- flight_recorder_param(params, "priming_start") do
+          # `resources` rides as a JSON list (curl) or a comma-separated string
+          # (the bp `--set resources=a.go,b.go` path) — Tasks normalizes both.
+          opts =
+            [resources: params["resources"] || []]
+            # THE FLIGHT RECORDER'S OPENING FRAME (task-a42dccec2fe4a406). Absent
+            # is dropped by put_opt/3, so a claim with no manifest is byte-for-byte
+            # the claim this door wrote yesterday.
+            |> Params.put_opt(:priming_start, priming_start)
+            |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+            |> Params.put_opt(:session, session_id(conn, params))
+            |> Keyword.merge(Params.execution_policy_opts(params))
+            |> Keyword.merge(scope_opts(conn))
+            |> Params.put_opt(
+              :criteria_unstated_override,
+              params["criteria_unstated_override"] ||
+                get_in(params, ["set", "criteria_unstated_override"])
             )
+            # `?dataset=` — the disambiguator the ambiguous_dataset refusal
+            # ADVERTISES (bp-task-verbs-500-on-cross-dataset-duplicate-slugs).
+            # `find_task_by_doc_id/2` has honoured it on every read door since the
+            # rule landed; this write door dropped it, so the claim refused and
+            # then refused its own escape hatch. Measured live on guerrilla
+            # 2026-09-16: GET `?dataset=production` -> 200 while POST
+            # `/claim?dataset=production` -> 409 (request_id GNW9zm1YCdlVXHsAADNB),
+            # which is what kept the eleven cross-dataset rows unclaimable — and
+            # therefore unstampable and uncloseable, every one of those verbs
+            # being claim-fenced.
+            |> Params.put_opt(:dataset, params["dataset"])
 
-          {:error, :not_found} ->
-            not_found(conn, "task not found")
+          # Snapshot the rail BEFORE the claim so rail_changed compares
+          # observed_rail_rev against the rail the worker actually saw (not the
+          # rev its own claim produces). nil when the row is absent/parentless.
+          pre_task =
+            case find_task_by_doc_id(doc_id, conn) do
+              {:ok, %Document{} = pre} -> pre
+              _ -> nil
+            end
 
-          {:error, {:resource_conflict, conflicts}} ->
-            # 409 with the HOLDERS: each conflict names the in-progress task,
-            # its worker, and the overlapping resource strings — enough for
-            # the caller to wait, renegotiate, or pick other files.
-            conn
-            |> put_status(:conflict)
-            |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
+          baseline_rev = if pre_task, do: pre_write_rail_rev(pre_task, conn), else: nil
 
-          {:error, {:invalid_execution_policy, errors}} ->
-            bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
+          case Tasks.claim_by_id(doc_id, worker_id, opts) do
+            {:ok, %Document{} = doc} ->
+              json(
+                conn,
+                with_rail_extras(
+                  %{
+                    ok: true,
+                    doc: Params.render_doc(seal_doc(doc, conn)),
+                    help: Params.mutation_help(:claim_by_id, doc, worker_id),
+                    lease: Params.claim_lease(doc)
+                  },
+                  doc,
+                  baseline_rev,
+                  conn,
+                  params
+                )
+              )
 
-          # THE THREE-ARM SPLIT (task-eb2b6170e19f1611). `Tasks.claim_by_id/3`
-          # collapses three different refusals into one `:not_ready` atom, and
-          # the CLI turns that into one sentence covering all three: "someone
-          # else holds it or it isn't ready". Three different remedies, one
-          # word — the caller cannot tell which applies, and the filing that
-          # produced this fix spent hours chasing a phantom readiness bug on a
-          # row that was simply `human_gated` by its own author.
-          #
-          # The refusal atom is UNCHANGED (so is the wire `reason` token, which
-          # internal/cli/errors.go and pr-task-gate.sh both string-match) — the
-          # arm is DERIVED here from the pre-claim snapshot the rail baseline
-          # already fetched, and rides as additive fields + a `message` the bp
-          # CLI prints in place of the bare token.
-          {:error, :not_ready} ->
-            conn
-            |> put_status(:conflict)
-            |> json(not_ready_arm(pre_task, worker_id))
+            {:error, :not_found} ->
+              not_found(conn, "task not found")
 
-          # task-9554c64bf51a0f81: the refusal must carry its own remedy. ~30
-          # agents drive this verb daily, and a refusal that does not say what
-          # to type costs every one of them a round trip — which is what turns a
-          # good gate into a resented one.
-          {:error, :criteria_unstated} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{
-              ok: false,
-              reason: "criteria_unstated",
-              task: doc_id,
-              message: Params.criteria_unstated_message(doc_id, worker_id)
-            })
+            {:error, {:resource_conflict, conflicts}} ->
+              # 409 with the HOLDERS: each conflict names the in-progress task,
+              # its worker, and the overlapping resource strings — enough for
+              # the caller to wait, renegotiate, or pick other files.
+              conn
+              |> put_status(:conflict)
+              |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
 
-          {:error, reason} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+            {:error, {:invalid_execution_policy, errors}} ->
+              bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
+
+            # THE THREE-ARM SPLIT (task-eb2b6170e19f1611). `Tasks.claim_by_id/3`
+            # collapses three different refusals into one `:not_ready` atom, and
+            # the CLI turns that into one sentence covering all three: "someone
+            # else holds it or it isn't ready". Three different remedies, one
+            # word — the caller cannot tell which applies, and the filing that
+            # produced this fix spent hours chasing a phantom readiness bug on a
+            # row that was simply `human_gated` by its own author.
+            #
+            # The refusal atom is UNCHANGED (so is the wire `reason` token, which
+            # internal/cli/errors.go and pr-task-gate.sh both string-match) — the
+            # arm is DERIVED here from the pre-claim snapshot the rail baseline
+            # already fetched, and rides as additive fields + a `message` the bp
+            # CLI prints in place of the bare token.
+            {:error, :not_ready} ->
+              conn
+              |> put_status(:conflict)
+              |> json(not_ready_arm(pre_task, worker_id))
+
+            # task-9554c64bf51a0f81: the refusal must carry its own remedy. ~30
+            # agents drive this verb daily, and a refusal that does not say what
+            # to type costs every one of them a round trip — which is what turns a
+            # good gate into a resented one.
+            {:error, :criteria_unstated} ->
+              conn
+              |> put_status(:conflict)
+              |> json(%{
+                ok: false,
+                reason: "criteria_unstated",
+                task: doc_id,
+                message: Params.criteria_unstated_message(doc_id, worker_id)
+              })
+
+            {:error, reason} ->
+              conn
+              |> put_status(:conflict)
+              |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          end
+        else
+          {:error, code} when is_atom(code) -> flight_recorder_refusal(conn, code)
         end
 
       _ ->
@@ -1372,6 +1388,11 @@ defmodule BarkparkWeb.TasksController do
          # `files`, the same `check_files/1`) the `/landed` route runs: one
          # shared function, never a mirror this door could drift from.
          {:ok, landed} <- Params.parse_landed_digest(params["landed"]),
+         # THE BOUND RUNS BEFORE THE WRITE (task-a42dccec2fe4a406). An oversized
+         # compact is refused HERE, ahead of `find_task_by_doc_id/2` and every
+         # honesty gate, so a refused close touches no row and the rev is
+         # unchanged by construction rather than by inspection.
+         {:ok, context_compact} <- flight_recorder_param(params, "context_compact"),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch]
@@ -1401,6 +1422,10 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:close_reason_override, params["close_reason_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
         |> Params.put_opt(:session, session_id(conn, params))
+        # THE FLIGHT RECORDER'S CLOSING FRAME. nil is dropped by put_opt/3, so a
+        # close carrying no compact writes the byte-identical claim map it wrote
+        # before this key existed.
+        |> Params.put_opt(:context_compact, context_compact)
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
       # task) so rail_changed reflects only concurrent actors, not this close.
@@ -1484,6 +1509,17 @@ defmodule BarkparkWeb.TasksController do
           field: "landed",
           message: msg
         })
+
+      # The recorder's bound (task-a42dccec2fe4a406). Its own code, ahead of
+      # every write — see flight_recorder_refusal/2.
+      {:error, code}
+      when code in [
+             :context_compact_too_large,
+             :context_compact_invalid,
+             :priming_start_too_large,
+             :priming_start_invalid
+           ] ->
+        flight_recorder_refusal(conn, code)
 
       {:error, :not_found} ->
         not_found(conn, "task not found")
@@ -1594,6 +1630,14 @@ defmodule BarkparkWeb.TasksController do
         # disposition_reason is refused; the caller has to say they read what
         # is there. `stage_supersede/1` reads both wire spellings.
         |> Params.put_opt(:supersede, Params.stage_supersede(params))
+        # The rerun's OWN two doors (task-fcc590f205433209). Forwarded
+        # separately from `:supersede` for the reason the instruction override
+        # is: a caller saying "I read the reason I am replacing" has not said
+        # anything about the probe that reason hangs on, and one key to both
+        # locks is one slot wearing a costume. Absent → nil → `Tasks.Stage`
+        # defaults to refusing the orphan.
+        |> Params.put_opt(:clear_rerun, Params.stage_clear_rerun(params))
+        |> Params.put_opt(:keep_rerun, Params.stage_keep_rerun(params))
         # THE SECOND DURABLE SLOT (task-bd7476eecdede252). Standing guidance
         # and its OWN override, forwarded separately from the note's — one
         # flag for both would license a verdict-replacer to destroy guidance
@@ -1774,6 +1818,51 @@ defmodule BarkparkWeb.TasksController do
                 "instruction byte-identical."
           })
 
+        # A NOTE THAT WOULD STRAND A PROBE (task-fcc590f205433209, PDS-D750).
+        # 409, the twin of the two supersession refusals, and NOTHING was
+        # written — the row is byte-identical on BOTH keys. The rerun is quoted
+        # IN FULL and deliberately NOT bounded the way a note is: a truncated
+        # command cannot be judged, and judging whether it still binds the new
+        # reason is the entire decision this refusal asks for. Reruns are
+        # single commands, not prose.
+        {:error, {:rerun_would_orphan, existing}} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "rerun_would_orphan",
+            field: Tasks.Stage.disposition_rerun_key(),
+            existing_rerun: existing,
+            message:
+              "refusing to replace the disposition_reason on this row while it carries a " <>
+                "disposition_rerun this call says nothing about — replacing the reason under " <>
+                "the probe would leave a green, recent, symbol-specific check attached to a " <>
+                "claim the row no longer makes, and nothing was written. " <>
+                "THE RERUN THAT WOULD HAVE BEEN STRANDED, IN FULL: #{inspect(existing)}. " <>
+                "--supersede is you saying you read the REASON you are replacing; it is not " <>
+                "you saying you read the rerun. Pick one on purpose: --rerun '<command>' " <>
+                "re-binds the probe to the reason you are writing, --clear-rerun removes it " <>
+                "(for a reason that is a pure ruling nothing can check), --keep-rerun states " <>
+                "that the existing probe still binds the new reason — a SHARED rerun across " <>
+                "distinct rows is the honest shape (PDS-D391b(b), PDS-D336(a)) and is never " <>
+                "refused here."
+          })
+
+        # Two intentions about one key. 422, and nothing was written — the
+        # writer must not pick one of them on the caller's behalf.
+        {:error, :contradictory_rerun} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "contradictory_rerun",
+            field: Tasks.Stage.disposition_rerun_key(),
+            message:
+              "--rerun and --clear-rerun in the same call say two incompatible things about " <>
+                "content.#{Tasks.Stage.disposition_rerun_key()} — one re-binds the probe, the " <>
+                "other removes it. Send exactly one. Nothing was written."
+          })
+
         {:error, :not_found} ->
           not_found(conn, "task not found")
 
@@ -1826,6 +1915,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:merge_gated, merge_gated)
         |> Params.put_opt(:observed_rev, Params.stamp_observed_rev(params))
+        |> Params.put_opt(:ack_gate, Params.stamp_ack_gate(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
         |> Params.put_opt(:session, session_id(conn, params))
 
@@ -3830,6 +3920,61 @@ defmodule BarkparkWeb.TasksController do
       reason: "invalid_filter",
       message: Params.filter_message(reason),
       details: Params.filter_details(reason)
+    })
+  end
+
+  # ─── THE FLIGHT RECORDER'S TWO DOORS (task-a42dccec2fe4a406) ─────────────
+  #
+  # ONE reader for both keys, on all three verbs, so the three-state law cannot
+  # be honoured at one door and quietly dropped at another. An ABSENT key is
+  # `{:ok, nil}` — `Params.put_opt/3` then drops the opt entirely and the write
+  # is byte-identical to a pre-feature one. A present key is validated by
+  # `Barkpark.Tasks.FlightRecorder`, which owns the bound and the vocabulary.
+  #
+  # `--set` is a real wire path here: `bp task claim … --set priming_start:=<json>`
+  # lands the manifest at the body head, but an older bp (and the MCP bridge)
+  # can nest it under `set`, exactly as `criteria_unstated_override` is read two
+  # ways a few hundred lines up. Both spellings resolve to the same field.
+  defp flight_recorder_param(params, key) do
+    value = params[key] || get_in(params, ["set", key])
+
+    case key do
+      "priming_start" -> Barkpark.Tasks.FlightRecorder.validate_priming_start(value)
+      "context_compact" -> Barkpark.Tasks.FlightRecorder.validate_context_compact(value)
+    end
+  end
+
+  # A NAMED CODE, NEVER A GENERIC `bad_request` (the criterion's own word). A
+  # caller that hit the size wall must be able to tell it from every other 4xx
+  # without parsing prose, and must be told the bound and what it sent — the
+  # measured failure this repo keeps re-learning is a refusal that names no
+  # field, no bound and no unit (see the task.stamp URI note in the CLI's
+  # run.go). 422 because the request is well-formed and the VALUE is not.
+  defp flight_recorder_refusal(conn, code) do
+    limit = Barkpark.Tasks.FlightRecorder.max_bytes()
+
+    message =
+      case code do
+        :context_compact_too_large ->
+          "context_compact exceeds the #{limit}-byte bound; NOTHING was written and the task's rev is unchanged. Compact it further and close again."
+
+        :priming_start_too_large ->
+          "priming_start exceeds the #{limit}-byte bound; NOTHING was written and the task's rev is unchanged."
+
+        :context_compact_invalid ->
+          "context_compact must be a string."
+
+        :priming_start_invalid ->
+          "priming_start must be a JSON object (the schema=1 manifest bp writes locally)."
+      end
+
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      ok: false,
+      reason: Atom.to_string(code),
+      limit_bytes: limit,
+      message: message
     })
   end
 

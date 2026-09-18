@@ -150,6 +150,7 @@ on:
       - "web/lib/status-ladder.gen.ts"
       - "web/public/bp-graph.js"
       - "js/packages/react/src/status-vocab.gen.ts"
+      - "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
       - "templates/search-starter/public/bp-graph.js"
       - "templates/astro-search-starter/public/bp-graph.js"
       - "templates/search-starter/app/globals.css"
@@ -522,8 +523,17 @@ jobs:
 
       - name: Console runtime pin — the declaration and this workflow agree
         run: |
-          sh scripts/console-runtime-pin-check.sh --selftest
-          sh scripts/console-runtime-pin-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; sh scripts/console-runtime-pin-check.sh --selftest || st_rc=$?
+          gate_rc=0; sh scripts/console-runtime-pin-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # ── THE PIN RE-DERIVER'S OWN PREDICATE (task-cc6397fdbed50261) ─────────
       # scripts/console-pins.sh re-earns every EXACT two-sided pin in THIS file
@@ -543,6 +553,21 @@ jobs:
       # not only console ones. A PR that reworded a pin's red sentence in any
       # lane would otherwise blind the re-deriver silently and nothing would
       # say so until the next re-earn produced a vacuous clean run.
+      #
+      # EVERY FUNCTIONAL SLOT, NOT ONLY `-ne` (task-4a591a26279e7d24). A pin is
+      # hardcoded in FIVE places per step — the step NAME's `N-test`, two `-ne N`
+      # comparisons, the red sentence's `pin is N`, its `bump every N`
+      # instruction to the next author, and the green line's `exact pin N`. The
+      # predicate used to compare only the `-ne` literals, so a HALF-DONE bump
+      # (measured on this file at 1463: name, `bump every` and the green line
+      # left at the old 1459) passed every gate green while the workflow went on
+      # TELLING the next author to bump a number that was no longer the pin. The
+      # selftest now reads back the same slot set the rewriter writes, over the
+      # step NAME line through the run body, and reds naming the step.
+      # COMMENT LINES ARE EXCLUDED, deliberately: the PIN-history log below each
+      # step is the record of what the count USED to be, and gating bare
+      # `N tests` prose here would red ~20 lines that are correctly historical.
+      # That half of the filing is a WONTFIX — the history log IS the record.
       #
       # NOT the full `--check`: that would re-run every suite the console-unit
       # job below already runs, a second time. Those steps ARE the measurement
@@ -628,6 +653,146 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1495 — bumped 2026-09-17 from 1492 on console-r21-w22-scenario-denominators:
+      # +3 tests. Two headers in cloud/priv/static/__app.test.mjs declined a
+      # corpus-level guard on the strength of a sweep and each typed its own
+      # denominator; the two disagreed with each other and both were behind the
+      # corpus, so neither was the sweep it claimed to be. (1) A denominator
+      # scan over this file's own comments demands ZERO typed scenario counts,
+      # with a control planted in a COPY of the source inside the same test so
+      # CI's existing invocation wires it. (2) A vercel sweep re-establishes
+      # cch-r16-w11's blind spot BY MEASUREMENT over every scenario the corpus
+      # declares — its argument survives the corrected denominator — with a
+      # probe floor so a sweep that probed nothing cannot read as proof and a
+      # positive control on the predicate itself. (3) cch-w48-s3's argument does
+      # NOT survive: scenarios.mjs does answer GET /v1/github/installation and
+      # committed fixtures paint the connected arm, so the declined corpus-level
+      # guard is owed and is paid — the GitHub card's authority arms are now
+      # driven off the SHIPPED fixture bodies, with a non-empty floor so an
+      # emptied corpus reds instead of sweeping nothing. RE-MEASURED, never
+      # arithmetic: RE-MEASURED AGAIN after the rebase onto 1492 (the combined
+      # figure is decided by the instrument, never by adding 1492 + 3).
+      # `bash scripts/console-harness.sh` on the rebased branch printed
+      # `# tests 1495 / # pass 1495 / # fail 0`; with a typed denominator
+      # re-planted in a comment it printed `# tests 1495 / # pass 1494 /
+      # # fail 1`, and with githubCardHtml's canWrite ternary removed so a
+      # member is offered Disconnect it printed `# tests 1495 / # pass 1492 /
+      # # fail 3` (the new corpus guard, cch-w48-s3's seam arm and
+      # cch-w49-bl's member fence). `bash scripts/console-pins.sh --selftest` was run after the
+      # bump — it reads the step `name:` slot a grep from inside the shell step
+      # cannot see.
+      #
+      # PIN 1492 — bumped 2026-09-17 from 1491 on console-r21-w22-operator-prose:
+      # +1 test. The operator console's comments stated its card and route count
+      # as a typed numeral, one short of what operatorRefresh issues, and the
+      # census card is the one the numeral excluded. The remedy is not a
+      # corrected sentence: the new arm DERIVES the roster three independent
+      # ways out of the shipped source (the card body slot ids, operatorRefresh's
+      # operatorPaint targets, and the card renderers it hands the funnel),
+      # asserts the three agree, and scans the operator comment regions for a
+      # typed cardinal in front of cards/routes/reads with an expected set of
+      # zero. Four CONTROLS run INSIDE the same test, each on a mutated COPY of
+      # the shipped source, so this suite's existing CI invocation wires them and
+      # there is no separate test to stop: dropping a card's read breaks the
+      # slot/read agreement, renaming a renderer out of the funnel breaks
+      # one-renderer-per-read, a re-typed count is caught by the scan, and a lost
+      # anchor THROWS rather than answering an empty roster. The same commit
+      # makes cch-w36-s4's funnel roster derived rather than hand-listed, which
+      # is what puts the census card's 403 / 5xx / offline sentences under
+      # assertion for the first time. RE-MEASURED, never arithmetic: `bash
+      # scripts/console-harness.sh` on this branch printed `# tests 1492 /
+      # # pass 1492 / # fail 0`; the same command with the typed count restored
+      # in cloud/priv/static/app.js printed `# tests 1492 / # pass 1491 /
+      # # fail 1`, and with the census operatorPaint call deleted printed
+      # `# tests 1492 / # pass 1489 / # fail 3` (the new arm, the funnel arm and
+      # the census loading-line arm). `bash scripts/console-pins.sh --selftest`
+      # was run after the bump — it reads the step `name:` slot a grep from
+      # inside the shell step cannot see.
+      #
+      # PIN 1491 — bumped 2026-09-17 from 1485 on console-r21-w16-webhook-tab:
+      # +6 tests for the two halves of the webhook-tab authority defect. HALF 2
+      # (the copy): (1) the ROLE arm — a flat forbidden envelope carrying
+      # required/scope now renders the role the server named, with the deleted
+      # lossy rebuild re-implemented IN THE TEST as a control so the arm cannot
+      # pass vacuously; (2) the QUIET arm — the network_error shape the rebuild
+      # was written for, plus every crash shape the terminal line receives,
+      # pinned byte-for-byte as unmoved (this is the ONE new arm that stays green
+      # on a revert, which is its whole job); (3) the PREDICATE arm — a rule, not
+      # a hand-list, that finds every single-key `{ error: <ident> }` envelope
+      # rebuild reaching the copy ladder and demands zero, with a denominator
+      # floor so a green cannot mean "scanned nothing"; (4) the LOSSLESS arm —
+      # derives the sibling keys the ladder reads by following friendly()'s
+      # delegation one hop, then asserts the hand-off is identity for each.
+      # HALF 1 (the controls): (5) the card arm and (6) the shell arm — the six
+      # admin-gated card controls and the New webhook CTA are omitted for a
+      # DETERMINATE refusal only, "unknown" and the absent argument stay
+      # byte-identical to the shipped render, and the tab plus its two
+      # member-tier controls are asserted to SURVIVE. RE-MEASURED, never
+      # arithmetic: `bash scripts/console-harness.sh` on this branch printed
+      # `# tests 1491 / # pass 1491 / # fail 0`, and the same command with
+      # cloud/priv/static/app.js reverted to the branch's origin/main base
+      # printed `# tests 1491 / # pass 1486 / # fail 5` — the five reverting arms
+      # red, the quiet arm green. `bash scripts/console-pins.sh --selftest` was
+      # run after the bump, which is what reads the step `name:` slot a grep from
+      # inside the shell step cannot see.
+      #
+      # PIN 1485 — bumped 2026-09-17 from 1481 on console-r21-w14-studio-login:
+      # the "Log in with Barkpark Cloud" resume path moved from a client-side
+      # fleet match to POST /v1/auth/studio-signin. ONE test was DELETED (the
+      # studioLoginMatch host-equality pin — the function it tested no longer
+      # exists) and FIVE were added: the fail-open refusal table, the
+      # two-404s-say-two-things copy pin, the replaceUnique CONTROL that deletes
+      # the 200-and-url guard and watches every refusal start navigating, the
+      # resume-shell driver (recording transport: it asks the host-keyed door and
+      # navigates only on its 200), and the shape assertion that the resume body
+      # no longer reads the team-scoped fleet. RE-MEASURED, never arithmetic:
+      # `bash scripts/console-harness.sh` on this branch printed
+      # `# tests 1485 / # pass 1485 / # fail 0`, and the same command on a
+      # worktree at the branch's origin/main base printed
+      # `# tests 1481 / # pass 1481 / # fail 0`. `bash scripts/console-pins.sh
+      # --selftest` was run after the bump, which is what reads the step `name:`
+      # slot a grep from inside the shell step cannot see.
+      #
+      # PIN 1481 — bumped 2026-09-17 from 1479 on console-r21-w6-statusmeta:
+      # +2 tests finishing the gr-backlog-d24 sweep — (f) the PREDICATE arm, which
+      # brace-matches statusMetaPill's body and refuses any status-pill class
+      # literal authored outside it (with a vacuous-green guard and a
+      # replaceUnique reversion control), and (g) the RENDER arm over the four
+      # absorbed call sites that are node-pinned. RE-MEASURED ON THE REBASED
+      # TREE, never arithmetic: this branch first carried 1477, measured against
+      # a base that predates the erasure PR's 1479; 1477 + nothing and 1479 + 2
+      # are both derivations, not measurements, so `bash scripts/console-harness.sh`
+      # was run again after the rebase and printed `# tests 1481 / # pass 1481 /
+      # # fail 0` (exit 0). RE-MEASURED AGAIN after a second rebase onto
+      # origin/main 10565fc62 (the base moved twice while this PR was open; the
+      # number did not, and it was measured each time rather than carried).
+      # TWO CONTROLS: (1) the diff against origin/main 10565fc62 adds exactly 2
+      # top-level `test(` registrations to __app.test.mjs and removes none;
+      # (2) a detached worktree at that same origin/main ran the same command and
+      # printed `# tests 1479 / # pass 1479 / # fail 0`, so main's own committed
+      # 1479 is what main MEASURES and 1481 is that plus exactly these two arms.
+      # A FIRST RUN OF THAT SAME COMMAND READ `# pass 1480 / # fail 1` under
+      # fleet load — `cch-bl: the IMPORTED citationScanFiles() equals the set the
+      # GATE actually scans`, whose subprocess output came back truncated. It is
+      # LOAD, not this diff: the same test passes alone on this branch, passes on
+      # a clean origin/main worktree, and `node cloud/priv/static/__css_check.mjs
+      # --citation-inventory` prints the identical 146 lines on both trees.
+      # NOTE: the pin lives in more slots than a grep inside the shell step shows
+      # (the step NAME carries it too); `bash scripts/console-pins.sh --selftest`
+      # is the reader that sees all of them and it passes on this branch.
+      # PIN 1479 — bumped 2026-09-17 from 1475 on console-r21-w3-erasure
+      # (task-c161ba42b88805c0): +4 tests for the two erasure Danger zones —
+      # teamDangerZoneHtml's OWNER band with its admin/member/null controls,
+      # accountDangerZoneHtml's deliberate ABSENCE of a band (the route gates on
+      # the session alone, so a band would invent a refusal), and the two
+      # failure-copy functions (409 instances_present counts singular/plural and
+      # its zero-count fallback, 409 sole_owner team names, and the friendly()
+      # delegation control). MEASURED, never arithmetic: `node --test
+      # cloud/priv/static/__app.test.mjs` on this branch printed
+      # `# tests 1479 / # pass 1478 / # fail 1`, the single fail being the
+      # __node-version self-guard on a node-22 workstation — this job runs the
+      # DECLARED major, where that guard passes, so the CI-comparable tally is
+      # 1479.
       # PIN 1454 — bumped 2026-09-15 from 1453 on console/internal-tree-blocking-coverage.
       # PIN 1456 — bumped 2026-09-15 from 1454 on console/w57-s4-suspended-js-test:
       # PIN 1459 — bumped 2026-09-15 from 1456 on console/css-check-main-guard:
@@ -726,7 +891,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1463-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1495-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -742,14 +907,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1463 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1463 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1495 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1495 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1463 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1463 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1463 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1495 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1495 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1495 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1463 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1495 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -762,6 +927,49 @@ jobs:
       # Chrome, no network, no goldens.
       - name: Run preview smoke harness
         run: node cloud/priv/static/__preview__/smoke.mjs
+
+      # ── THE FILES-TO-INSTRUMENTS RULE'S OWN GUARD (studio-r21f-w7) ─────────
+      #
+      # scripts/preview-census-gate-check.mjs mechanises the rule the step above
+      # depends on: cloud/priv/static/__preview__/scenarios.mjs is the ONE fixture
+      # corpus, several instruments keep a TWO-WAY census over it, and its
+      # CENSUS_OWNERS table names each owner by path together with the census
+      # literal that makes it an owner. The table is re-read against the tree on
+      # every run, so an owner that vanished, stopped importing the corpus, or
+      # lost its literal is a REFUSAL rather than a quietly shorter answer.
+      #
+      # IT WAS REACHED BY NO `run:` STEP. Before this, the only line naming the
+      # file anywhere in the merge path was the `paths:` entry on this workflow's
+      # push arm — a dispatch trigger for a script nothing dispatched. The honest
+      # predicate finds it:
+      #
+      #   git grep -nE '(node|bash|sh)[[:space:]]+[^|;&]*preview-census-gate-check' \
+      #     -- .github/ scripts/ Makefile package.json
+      #
+      # printed only the script's own two usage strings, while the same search for
+      # breakpoint-sweep.test.mjs (a wired control) printed this file's `node --test`
+      # line. So the table could rot through any merge and nothing would say so.
+      #
+      # BOTH ARMS RUN, on this branch, against the REAL tree — the table arm is what
+      # has no other guard, so the mutation is a real owner losing its real literal:
+      #   RED   — `perl -pi -e 's/\bEXPECTATIONS\b/XPCTNS/g'` on the real
+      #           cloud/priv/static/__preview__/smoke.mjs (EXPECTATIONS occurrences
+      #           29 -> 0) makes this step exit 1 with
+      #           "SELF-TEST FAILED (1 of 20 assertion(s)) — the files-to-instruments
+      #           rule no longer holds."
+      #   QUIET — the tree unmutated, the same command exits 0 with
+      #           "self-test: 20/20 — the rule fires on a census move, stays quiet
+      #           otherwise, and refuses when its table rots."
+      # A WEAKER MUTATION DOES NOT COUNT, and this is why the arm is quoted with its
+      # regex: renaming the literal to `EXPECTATIONS_RENAMED` leaves it a SUBSTRING,
+      # the table arm still finds it, and the run stays 20/20 green. The first attempt
+      # at this red arm did exactly that and read as a guard that could not lose.
+      #
+      # No paths change is needed: this workflow's push arm already lists both
+      # `scripts/preview-census-gate-check.mjs` and `cloud/priv/static/**`, so every
+      # edit that can move the table already dispatches the run that now reads it.
+      - name: Preview census gate — the files-to-instruments rule still holds (20-check self-test)
+        run: node scripts/preview-census-gate-check.mjs --selftest
 
       # ── THE MEMBER-ACTOR RENDERED-STATE AUTHORITY SWEEP (cch-w46-s7) ────────
       #

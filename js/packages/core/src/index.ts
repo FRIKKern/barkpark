@@ -10,6 +10,7 @@ import type {
   BarkparkDocument,
   DocsBuilder,
   Perspective,
+  ResolveSpec,
 } from './types'
 
 // --- Client factory + handshake --------------------------------------------
@@ -160,11 +161,12 @@ export type TypedClient<TMap extends Record<string, object> = Record<string, Bar
         fields?: string | string[]
         signal?: AbortSignal
         perspective?: Perspective
+        resolve?: ResolveSpec
       },
     ): Promise<TMap[K] | null>
     docs<K extends keyof TMap & string>(
       type: K,
-      opts?: { perspective?: Perspective; signal?: AbortSignal },
+      opts?: { perspective?: Perspective; signal?: AbortSignal; resolve?: ResolveSpec },
     ): DocsBuilder<TMap[K]>
     getDocuments<K extends keyof TMap & string>(
       type: K,
@@ -289,6 +291,7 @@ export type {
   OrderSpec,
   PatchBuilder,
   Perspective,
+  ResolveSpec,
   ExportOptions,
   ListenFilter,
   QueryEnvelope,

@@ -484,7 +484,7 @@ else
 fi
 # pds-bl-step6-tag-exclusion-stale-comment: tag IS guarded, excluded for scope
 if grep -q 'outside the guard$' "$PROOF" || grep -q 'outside the guard entirely' "$PROOF"; then
-  bad 'the THE 34 block no longer says `tag` is outside the guard' "PDS-D125/D126 put TagRegistry behind the SAME Tenancy.pulled_schema_row/2 predicate (api/lib/barkpark/content/tag_registry.ex:101); the exclusion is a SCOPING decision and the comment must say so"
+  bad 'the THE 34 block no longer says `tag` is outside the guard' "PDS-D125/PDS-D126 put TagRegistry behind the SAME Tenancy.pulled_schema_row/2 predicate (api/lib/barkpark/content/tag_registry.ex:101); the exclusion is a SCOPING decision and the comment must say so"
 else
   ok 'the THE 34 block no longer claims `tag` is written outside the guard'
 fi
@@ -535,7 +535,7 @@ printf '\n'
 
 # ── RUNG 6's SENTINEL COVERAGE, AND THE TWO DEMOS THE THAW OWES ─────────────
 # (pds-bl-legb-visibility-control-n3 · pds-bl-rung6-percolumn-invisible-on-green
-#  · PDS-D742/D743/D744)
+#  · PDS-D742/PDS-D743/PDS-D744)
 #
 # PDS-D744 licenses the thaw only against a SHOWN failure, and neither demo may
 # be a live target mutation (PDS-D31: no guerrilla export is spent here). Both
@@ -609,7 +609,7 @@ old_verdict="$(columns_where same "$AGG_SENTINELLED" "$AGG_CLOBBERED_FULL")"
 if [ -z "$old_verdict" ]; then
   ok 'DEMO(i) OLD code PASSES on the same fixture — columns_where same finds NOTHING to complain about, so rung 6 went green with its visibility control proving nothing'
 else
-  bad 'DEMO(i) the OLD shape passes on the all-private fixture' "columns_where same named '$old_verdict' on a full clobber; if the pre-fix code already redded here there is no failure for this thaw to have fixed (PDS-D100/D743)"
+  bad 'DEMO(i) the OLD shape passes on the all-private fixture' "columns_where same named '$old_verdict' on a full clobber; if the pre-fix code already redded here there is no failure for this thaw to have fixed (PDS-D100/PDS-D743)"
 fi
 
 # ── DEMO (ii): a deliberately partial revert must NAME the missing columns ───

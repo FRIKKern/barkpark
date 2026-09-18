@@ -31,6 +31,15 @@ $ bp add block-type --var BlockName=timeline
 
 The fast path *is* the standard path — standards become executable.
 
+**Catalog-first.** Check the catalog — `ls scaffy/commands/`, or `bp scaffy ls --remote` for
+the served corpus — before hand-editing a shape the repo has already scaffolded once, and
+prefer `bp scaffy run` to a hand edit. The measured case is
+[`/papers/scaffy-benchmark`](/papers/scaffy-benchmark): the catalog-first arm applied 3 of 3
+chores with the tool, the arm without the instruction 2 of 2 by hand with the tool already on
+disk. Adoption is not automatic, so builder prompts for a catalog chore carry the
+`bp scaffy run` line explicitly. (This doctrine used to live in `docs/cards/cli.md`; it moved
+here when that card went over its byte budget.)
+
 ## Papers
 
 - **Masterplan** — the full design case: [`/papers/scaffy-commands-as-content`](/papers/scaffy-commands-as-content)
@@ -471,6 +480,49 @@ retirement of the idiom for the same reason: E-005's forced `REANCHOR` made the
 two-sibling scenario refuse or corrupt, and a plain insert makes it two independent
 clean applies); `INSERT BEFORE LAST` is grammar-legal with zero corpus instances, exercised
 by synthetic fixtures (the `SNIPPET`/`USE` precedent).
+
+## What `LAST_UPDATED` means
+
+**DECIDED (task-8559e07059a59583): `LAST_UPDATED` is the date the RECIPE last changed — not
+the date a byte in the file last changed.** A comment reword does not move it; any change to
+the recipe must move it in the same commit.
+
+**Why not "just derive the last-touched date from git".** That was the other candidate and it
+is refuted by a measurement, not a preference. `scaffy/seed` seeds the WHOLE file text as the
+catalog document's `source` field (`Source: string(src)` in `scaffy/seed/main.go`), and
+`source` is one of the eight `comparedFields` the drift check compares. So the `LAST_UPDATED`
+bytes are catalog-visible bytes. Bumping `add-migration`'s header and changing nothing else
+took `go run ./scaffy/seed --check` from **18/22 MATCH** to **17/22 MATCH**, with `source`
+named as the divergent field. A generated last-touched date would therefore demand an
+owner-only catalog republish on every commit that grazes a command file — including typo
+fixes. The header is hand-declared *because* it tracks the recipe.
+
+**The guard: `scaffy/lastupdated-check.sh`.**
+
+| Mode | Behaviour |
+|---|---|
+| `--diff <base>` | Enforcing. Reds when a command file changed in `<base>..HEAD` has recipe churn and a frozen header. An unresolvable base **refuses (exit 2)**, never passes. |
+| `--corpus` | Informational census of header vs last recipe-affecting commit. Never reds. |
+| `--self-test` | `scaffy/lastupdated-check.test.sh` — 10 assertions, hermetic (throwaway git repo under `mktemp`), both directions proven by mutation. |
+
+"Recipe bytes" = the file with full-line `#` comments dropped and the `LAST_UPDATED` value
+elided. Everything else — every other header field, every fenced block, every anchor — is
+recipe.
+
+**Why the enforcing mode is diff-scoped and not whole-corpus.** 8 of 22 command files on main
+declare a header older than their last recipe-affecting commit (`--corpus`, 2026-09-17; the
+figure was 7 when it was first filed on 2026-09-16 — the corpus moves). A whole-corpus arm
+would red main the minute it landed, and the only way to clear it would be bumping 8 headers,
+which by the paragraph above manufactures **5 new catalog DRIFT rows** that only an
+owner-only republish can clear. So this follows the precedent the repo already ratified for
+this exact shape (`docs/ops/merge-gates.md`, the `format` job): enforce on the files the PR
+itself touches, print inherited drift and stay neutral on it. The 8 get repaired by whoever
+next edits them — in a PR that was already going to re-seed the catalog.
+
+**Measured, 2026-09-17:** the comment-elision refinement discriminates *nothing* on today's
+corpus — every commit that has ever touched a command file also changed its recipe bytes, so
+"recipe-affecting" and "last-touched" name the same 8 files. The refinement is kept because it
+is what makes the rule a rule; it has simply never yet had a case to separate.
 
 ## Gate tiers
 

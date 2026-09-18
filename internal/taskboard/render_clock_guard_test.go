@@ -33,6 +33,7 @@ func TestRenderPathTakesItsClockFromTheCaller(t *testing.T) {
 	clockOwners := map[string]string{
 		"detail_data.go": "snapshot assembly stamps the fetch instant it then PASSES to renderers",
 		"events.go":      "measures elapsed time for the event-poll backoff; renders nothing",
+		"wirelog.go":     "timestamps each wire read for the byte counter; renders nothing and is off unless BARKPARK_TASKBOARD_WIRELOG is set",
 	}
 
 	wallClock := regexp.MustCompile(`\btime\.Now\(\)`)

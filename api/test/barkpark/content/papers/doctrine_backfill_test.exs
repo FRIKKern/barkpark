@@ -19,7 +19,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Content.Papers.{DoctrineBackfill, Template}
+  alias Barkpark.Content.Papers.{DoctrineBackfill, Hollow, Template}
 
   # A hand-built paper Document (no DB) for the pure `plan/1` surface.
   defp paper(title, blocks) do
@@ -210,10 +210,15 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       docs = [
         paper("T", [%{"id" => "p1", "type" => "paragraph", "text" => "x"}]),
         paper("T", [
-          %{"id" => "p1", "type" => "paragraph"},
+          %{"id" => "p1", "type" => "paragraph", "text" => "real body"},
           %{"id" => "img", "type" => "image", "src" => "https://c/x.png"}
         ]),
-        paper(nil, [%{"id" => "h", "type" => "heading", "text" => "H"}])
+        # A heading + real body: the heading is consumed into the title and the
+        # paragraph survives, so this plan is NOT hollow.
+        paper(nil, [
+          %{"id" => "h", "type" => "heading", "text" => "H"},
+          %{"id" => "b", "type" => "paragraph", "text" => "body"}
+        ])
       ]
 
       for doc <- docs do
@@ -303,6 +308,87 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
 
       assert {:unfixable, reason} = DoctrineBackfill.plan(doc)
       assert reason =~ "manual review"
+    end
+  end
+
+  # ── plan/1 — the would-be-HOLLOW refusal (p-hollow-backfill-guard) ────────
+
+  describe "plan/1 would-be-hollow refusal" do
+    # RED ARM. Revert the `Hollow.hollow?/1` clause in build_change and this
+    # test fails: the single-heading legacy paper plans to `{:change,
+    # [title_block], …}` — a title-only document, exactly the shape the
+    # authoring gate refuses at every write seam.
+    test "a single-heading legacy paper is unfixable, and the reason NAMES hollow" do
+      # doc.title blank → the first-heading heuristic CONSUMES the sole block.
+      doc = paper(nil, [%{"id" => "h", "type" => "heading", "text" => "Only A Heading"}])
+
+      assert {:unfixable, reason} = DoctrineBackfill.plan(doc)
+      assert reason == DoctrineBackfill.hollow_reason()
+      assert reason =~ "HOLLOW"
+
+      # And the refusal is honest about WHY: the plan it refused really is hollow.
+      assert Hollow.hollow?([hd(Template.template_blocks("Only A Heading"))])
+    end
+
+    test "a heading whose text equals doc.title (REPLACE branch) is also refused" do
+      doc = paper("Same Text", [%{"id" => "h", "type" => "heading", "text" => "Same Text"}])
+      assert {:unfixable, reason} = DoctrineBackfill.plan(doc)
+      assert reason == DoctrineBackfill.hollow_reason()
+    end
+
+    test "every other post-plan skeleton-only shape is refused with the SAME reason" do
+      skeleton_only = [
+        # title + promoted featured image and nothing else.
+        paper("T", [%{"id" => "img", "type" => "image", "src" => "https://c/x.png"}]),
+        # title + a divider (never content).
+        paper("T", [%{"id" => "d", "type" => "divider"}]),
+        # title + a whitespace-only paragraph (the maybe_seed shape).
+        paper("T", [%{"id" => "p", "type" => "paragraph", "text" => "   "}]),
+        # title + a punctuation-only paragraph (no letter/number/symbol).
+        paper("T", [%{"id" => "p", "type" => "paragraph", "text" => "..."}]),
+        # title + an image GHOST (blank src → never substantive, never promoted).
+        paper("T", [%{"id" => "img", "type" => "image", "src" => ""}]),
+        # title + featured image + a blank paragraph.
+        paper("T", [
+          %{"id" => "img", "type" => "image", "src" => "https://c/x.png"},
+          %{"id" => "p", "type" => "paragraph", "text" => ""}
+        ])
+      ]
+
+      for doc <- skeleton_only do
+        assert DoctrineBackfill.plan(doc) == {:unfixable, DoctrineBackfill.hollow_reason()},
+               "expected the HOLLOW refusal for #{inspect(doc.content["blocks"])}"
+      end
+    end
+
+    # CONTROL ARM. These plans survive the new clause untouched — reverting the
+    # change leaves every one of these assertions green, so a pass here is NOT
+    # evidence for the arms above.
+    test "CONTROL — a plan that keeps one real content block is still a {:change, …}" do
+      still_fixable = [
+        # heading consumed into the title, paragraph survives.
+        paper(nil, [
+          %{"id" => "h", "type" => "heading", "text" => "H"},
+          %{"id" => "p", "type" => "paragraph", "text" => "real body"}
+        ]),
+        # title prepended, the differing heading survives as content.
+        paper("Row Title", [%{"id" => "h", "type" => "heading", "text" => "Different"}]),
+        # title + featured image + a real paragraph.
+        paper("T", [
+          %{"id" => "img", "type" => "image", "src" => "https://c/x.png"},
+          %{"id" => "p", "type" => "paragraph", "text" => "body"}
+        ])
+      ]
+
+      for doc <- still_fixable do
+        result = DoctrineBackfill.plan(doc)
+
+        assert match?({:change, _blocks, _meta}, result),
+               "expected a plan for #{inspect(doc.content["blocks"])}, got #{inspect(result)}"
+
+        {:change, blocks, _meta} = result
+        refute Hollow.hollow?(blocks)
+      end
     end
   end
 
@@ -489,7 +575,9 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
             :featured_skipped,
             :dry_run,
             :changes,
-            :unfixable
+            :unfixable,
+            :would_be_hollow,
+            :would_be_hollow_count
           ] do
         assert Map.has_key?(stats, key), "stats missing #{key}"
       end
@@ -518,6 +606,93 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       assert repaired.workspace_id == ws.id
       assert [%{"role" => "title", "locked" => true} | _] = repaired.content["blocks"]
       assert Template.validate(repaired.content["blocks"]) == []
+    end
+  end
+
+  # ── run/1 — the would-be-hollow rows are reported, never persisted ────────
+
+  # Seed through the canonical write path, then STRIP the row back to a
+  # single-heading legacy shape with a direct Repo write (the real corpus shape;
+  # the interactive write seams refuse to author it).
+  defp seed_single_heading_paper(slug) do
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          style: "article",
+          blocks: [%{"id" => "p1", "type" => "paragraph", "text" => "temporary"}]
+        })
+      )
+
+    doc = Repo.get_by!(Document, doc_id: slug, type: "paper")
+
+    legacy =
+      Map.put(doc.content, "blocks", [
+        %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Lone Heading"}
+      ])
+
+    {:ok, stripped} =
+      doc
+      |> Document.changeset(%{"content" => legacy, "title" => "Lone Heading"})
+      |> Repo.update()
+
+    stripped
+  end
+
+  describe "run/1 would-be-hollow rows" do
+    test "the dry-run stats carry a DISTINCT would-be-hollow count and list" do
+      slug = "doctrine-hollow-#{System.unique_integer([:positive])}"
+      seed_single_heading_paper(slug)
+
+      {:ok, stats} = DoctrineBackfill.run(dry_run: true)
+
+      assert Enum.any?(stats.would_be_hollow, &(&1.slug == slug)),
+             "the would-be-hollow list must name the row"
+
+      assert stats.would_be_hollow_count == length(stats.would_be_hollow)
+      assert stats.would_be_hollow_count >= 1
+
+      # It is NOT counted as a change, and it also rides the general unfixable list.
+      refute Enum.any?(stats.changes, &(&1.slug == slug))
+      assert Enum.any?(stats.unfixable, &(&1.slug == slug))
+
+      hollow_entry = Enum.find(stats.would_be_hollow, &(&1.slug == slug))
+      assert hollow_entry.reason == DoctrineBackfill.hollow_reason()
+    end
+
+    test "log_report emits a distinct would-be-hollow line AND the per-row list" do
+      slug = "doctrine-hollow-log-#{System.unique_integer([:positive])}"
+      seed_single_heading_paper(slug)
+
+      {:ok, stats} = DoctrineBackfill.run(dry_run: true)
+
+      {:ok, agent} = Agent.start_link(fn -> [] end)
+      emit = fn line -> Agent.update(agent, fn acc -> [line | acc] end) end
+      :ok = DoctrineBackfill.log_report(stats, emit)
+      lines = agent |> Agent.get(&Enum.reverse/1) |> Enum.join("\n")
+
+      assert lines =~ "would-be-hollow:       #{stats.would_be_hollow_count}"
+      assert lines =~ "WOULD BE HOLLOW (refused, never written): #{stats.would_be_hollow_count}"
+      assert lines =~ slug
+    end
+
+    test "--apply NEVER persists a would-be-hollow row (byte-identical after the write run)" do
+      slug = "doctrine-hollow-apply-#{System.unique_integer([:positive])}"
+      before_doc = seed_single_heading_paper(slug)
+      before_bytes = Jason.encode!(before_doc.content)
+
+      {:ok, stats} = DoctrineBackfill.run(dry_run: false)
+      assert stats.dry_run == false
+      assert Enum.any?(stats.would_be_hollow, &(&1.slug == slug))
+
+      after_doc = Repo.get_by!(Document, doc_id: slug, type: "paper")
+
+      # Nothing was written: the content, both revs and the row title are intact.
+      assert Jason.encode!(after_doc.content) == before_bytes
+      assert after_doc.rev == before_doc.rev
+      assert after_doc.title == before_doc.title
+      # And the row is still the legacy shape, NOT a title-only document.
+      assert [%{"id" => "h1"}] = after_doc.content["blocks"]
     end
   end
 end

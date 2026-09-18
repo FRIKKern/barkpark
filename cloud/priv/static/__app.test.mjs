@@ -977,7 +977,17 @@ test("cch-w53-bl: init() actually calls bootEmailConfirm — the wiring tripwire
 //     literal spelling, so a rename or a reformat cannot make it vacuously
 //     green, and it throws by name if the call site disappears entirely.
 // Half 2 is the half that goes red on clean origin/main (3 args).
-const { route: previewRoute } = await import("./__preview__/scenarios.mjs");
+// The preview corpus module is bound ONCE here, at the FIRST top-level `await`.
+// Every later consumer reads this binding instead of issuing its own
+// `await import(...)`: a fresh depth-0 await mid-file is a new module
+// SUSPENSION POINT, and node:test may drain the tests registered above it
+// while it settles — which puts every `const` declared below it into the TDZ
+// for those tests (scripts/console-tdz-order-check.mjs is the guard that
+// catches exactly that). Keeping the count of depth-0 awaits unchanged is
+// what preserves the "declared above the second top-level await" invariant
+// the ME_OWNER / FORBIDDEN_GENERIC headers below depend on.
+const PREVIEW_SCENARIOS = await import("./__preview__/scenarios.mjs");
+const { route: previewRoute } = PREVIEW_SCENARIOS;
 const MOCK_JS_SRC = fs.readFileSync(new URL("./__preview__/mock.js", import.meta.url), "utf8");
 
 // Split the argument list of the FIRST call to `<needle>` in `src`, walking
@@ -3263,7 +3273,7 @@ test("cch-bl: the IMPORTED citationScanFiles() equals the set the GATE actually 
 // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ───────────────────────
 // THE crown surface: the #operator view rendered honest over the real rollout
 // machinery. Pinned here: the fail-closed ROUTE gate (applyRoute is not
-// hook-exported, so the predicate it consults is), the four cards' pure
+// hook-exported, so the predicate it consults is), the operator cards' pure
 // derivations against the PROBE-VERIFIED wire bytes, and the four anti-drift
 // source guards GR49 asks for (one route literal, one action emitter, zero
 // /v1/admin/autoupdate, zero fleetStrip* consumption).
@@ -3591,9 +3601,10 @@ test("gr-p5: operatorWarmPoolCardHtml renders ONE number — no bar, no percenta
   assert.match(hooks.operatorWarmPoolCardHtml({}), /Warm pool unavailable/, "a shapeless answer is unreadable, not zero");
 });
 
-// ── card 4: fleet digest (GR40 — no send-now route, so no send-now button) ───
+// ── card 4: fleet digest (the send-now route EXISTS now — gr-backlog-operator-
+// digest-send built POST /v1/operator/digest/send, so GR40's cut is spent) ────
 
-test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO Send-now button", () => {
+test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and the Send-now button RIDES A REAL ROUTE", () => {
   const empty = hooks.operatorDigestCardHtml([]);
   // cch-w55-s3 called the empty card a QUERY ARTIFACT and pinned copy that said
   // so ("every send is recorded against that team, so those receipts never land
@@ -3624,10 +3635,62 @@ test("gr-p5: operatorDigestCardHtml — empty is the TRUE state, and there is NO
   assert.ok(rows.includes("ops@barkpark.cloud"), "the recipient renders");
   assert.ok(rows.includes("Sent") && rows.includes("Failed"), "both delivery outcomes render");
   assert.ok(rows.includes("smtp timeout"), "a failure carries its verbatim last_error");
+  // RE-KEYED, not deleted (gr-backlog-operator-digest-send). This arm used to
+  // assert the button's ABSENCE, and its reason was never "a button is wrong" —
+  // it was GR28: no route called deliver_fleet_digest, so the control could not
+  // do anything. POST /v1/operator/digest/send now exists and this console posts
+  // to it, so the same rule that forbade the button now REQUIRES it, and the arm
+  // flips rather than disappearing. It still pins the property that mattered:
+  // the button and the route are one fact, so the path is asserted beside it.
   for (const html of [empty, rows, hooks.operatorDigestCardHtml(null)]) {
-    assert.ok(!/Send (one )?now/i.test(html), "no send-now button — no route calls deliver_fleet_digest (GR40)");
+    assert.match(html, /Send one now/, "the send-now button rides every arm — a log that failed to READ says nothing about sending");
+    assert.match(html, /data-digest-send="fleet"/, "the button names the EXPLICIT scope the route requires (there is no default)");
   }
   assert.match(hooks.operatorDigestCardHtml(null), /Digest log unavailable/);
+});
+
+test("digest-send: operatorDigestSendResultText reports the SERVER's counts and never upgrades them", () => {
+  // The honest full send.
+  assert.equal(
+    hooks.operatorDigestSendResultText({
+      scope: "fleet", recipients: 3, accepted: 3, failed: 0,
+      status_meaning: "Accepted by the mail transport — NOT confirmed delivered to the recipient.",
+    }),
+    "Accepted for 3 of 3 recipients. Accepted by the mail transport — NOT confirmed delivered to the recipient.");
+
+  // A PARTIAL send must not read as a success: the failure count is in the
+  // sentence, not only in the log below it.
+  assert.match(
+    hooks.operatorDigestSendResultText({ recipients: 3, accepted: 1, failed: 2 }),
+    /Accepted for 1 of 3 recipients, 2 failed\./);
+
+  // THE COUNTED ZERO. The route answers 200 with recipients:0 when no team in
+  // scope has a member; rendering that as "sent" would be the exact fiction
+  // GR40 cut the button to avoid.
+  assert.match(
+    hooks.operatorDigestSendResultText({ recipients: 0, accepted: 0, failed: 0 }),
+    /Nothing was mailed/);
+  assert.ok(!/Accepted for/.test(hooks.operatorDigestSendResultText({ recipients: 0, accepted: 0, failed: 0 })),
+    "a zero-recipient run is never dressed as an acceptance");
+
+  // An unreadable answer says so rather than inventing a number.
+  for (const bad of [null, undefined, "ok", 7])
+    assert.match(hooks.operatorDigestSendResultText(bad), /can't say what happened/);
+
+  // The console NEVER writes its own delivery claim — the trailing sentence is
+  // the server's status_meaning, so a payload without one carries none.
+  assert.ok(!/delivered/.test(hooks.operatorDigestSendResultText({ recipients: 1, accepted: 1, failed: 0 })),
+    "no delivery vocabulary is invented client-side");
+});
+
+test("digest-send: the control names the audience and the explicit scope", () => {
+  const html = hooks.operatorDigestSendControlHtml();
+  assert.match(html, /data-digest-send="fleet"/);
+  assert.match(html, /Send one now/);
+  // The button's own caption says WHO it mails, so the consequence is readable
+  // before the confirm dialog opens rather than only inside it.
+  assert.match(html, /Mails every team that owns an instance/);
+  assert.match(html, /06:00 UTC daily send/);
 });
 
 test("gr-p5: operatorPageHtml composes the five cards, each with its own body slot", () => {
@@ -3992,13 +4055,159 @@ test("cch-w36-s4: operatorReadFault tells FOUR classes apart — a 403 is an aut
   assert.equal(older.text, null, "an older control plane's 404 defers too");
 });
 
-test("cch-w36-s4: operatorCardBody is the ONE funnel — all four cards speak the allowlist under a 403 and their own line under a 500", () => {
-  const cards = {
-    brake: (d) => hooks.operatorBrakeCardHtml(d),
-    canary: (d) => hooks.operatorCanaryCardHtml(d),
-    warm: (d) => hooks.operatorWarmPoolCardHtml(d),
-    digest: (d) => hooks.operatorDigestCardHtml(d && d.deliveries),
-  };
+// ── cch-r21-w22: THE OPERATOR CARD ROSTER IS DERIVED, NOT TYPED ─────────────
+// The operator console's own comments used to state the card and route count
+// as a typed numeral, one short of what operatorRefresh actually issues. The
+// census card landed after those sentences were written, so a reader auditing
+// the funnel would have concluded the census was covered when nothing in this
+// file said it was — and the funnel test below really did drive one renderer
+// fewer than the console paints, which is where the stale prose stopped being
+// cosmetic. (The superseded numeral is deliberately NOT quoted here: a
+// correction that repeats the old number answers every grep hunting it.)
+//
+// The remedy is not a corrected sentence. Nothing reds when a sentence rots, so
+// the count stops being typed at all: these helpers read the roster out of the
+// SHIPPED source, three independent ways, and the arm below asserts the three
+// agree. Every helper THROWS when it cannot locate its subject — an anchor that
+// stops matching is a FAILURE here, never a silent zero that greens.
+function operatorRefreshSrc(src) {
+  const s = src === undefined ? APP_SRC : src;
+  const start = s.indexOf("function operatorRefresh() {");
+  if (start < 0) throw new Error("operatorRefresh() not found in app.js — this derivation has no subject");
+  const end = s.indexOf("\n  function operatorPaint(", start);
+  if (end <= start) throw new Error("operatorRefresh()'s end anchor (operatorPaint's own definition) not found — this derivation has no subject");
+  return s.slice(start, end);
+}
+// (a) THE MARKUP. Every card body slot id the shipped file mentions anywhere.
+function operatorSlotIds(src) {
+  const s = src === undefined ? APP_SRC : src;
+  const ids = [...new Set(s.match(/op-[a-z]+-body/g) || [])].sort();
+  if (ids.length < 2) throw new Error("no operator card slot ids found in app.js — this derivation has no subject");
+  return ids;
+}
+// (b) THE READS. Every operatorPaint target inside operatorRefresh.
+function operatorPaintTargets(src) {
+  const t = [...operatorRefreshSrc(src).matchAll(/operatorPaint\("#(op-[a-z]+-body)"/g)].map((m) => m[1]);
+  if (!t.length) throw new Error("operatorRefresh() issues no operatorPaint call this parse can see");
+  return t;
+}
+// (c) THE RENDERERS. Every card-body function operatorRefresh hands to the funnel.
+function operatorCardHtmlNames(src) {
+  const n = [...operatorRefreshSrc(src).matchAll(/return (operator[A-Za-z]+CardHtml)\(/g)].map((m) => m[1]);
+  if (!n.length) throw new Error("operatorRefresh() names no card renderer this parse can see");
+  return n;
+}
+// (d) THE PROSE. A typed cardinal in front of "cards"/"routes"/"reads" inside
+// the operator console's own comment regions — the exact shape that rotted.
+// "one" is excluded (a singular "one card's read" is a description, not a
+// roster count) and the numeric alternative is capped at twelve so a status
+// code ("a 500 reads …") is not read as a count.
+const OPERATOR_TYPED_COUNT_RE =
+  /\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[2-9]|1[0-2])\s+(?:operator\s+)?(?:cards?|routes?|reads?)\b/i;
+const OPERATOR_PROSE_CUTS = [
+  ["  // cch-w36-s4 — THE REFUSAL HAS A VOICE", "  function operatorConfirmBrake("],
+  ["      // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50)", "      // The ARMING roster"],
+];
+function operatorTypedCounts(src) {
+  const s = src === undefined ? APP_SRC : src;
+  const hits = [];
+  for (const [a, b] of OPERATOR_PROSE_CUTS) {
+    const i = s.indexOf(a);
+    if (i < 0) throw new Error("operator prose anchor not found in app.js: " + a.trim() + " — this scan has no subject");
+    const j = s.indexOf(b, i);
+    if (j <= i) throw new Error("operator prose end anchor not found in app.js: " + b.trim() + " — this scan has no subject");
+    for (const line of s.slice(i, j).split("\n")) {
+      if (/^\s*\/\//.test(line) && OPERATOR_TYPED_COUNT_RE.test(line)) hits.push(line.trim());
+    }
+  }
+  return hits;
+}
+
+test("cch-r21-w22: the operator card roster is DERIVED three ways and they agree — and no comment types the count", () => {
+  const slots = operatorSlotIds();
+  const targets = operatorPaintTargets();
+  const renderers = operatorCardHtmlNames();
+
+  // ── THE FLOOR. A derivation that found nothing must not read as agreement.
+  assert.ok(slots.length >= 4, "the roster derivation must find real slots, not an empty set: " + slots.join(","));
+
+  // ── THE AGREEMENT. A slot nobody reads paints its loading line forever; a
+  // read with no slot is a silent no-op (operatorPaint returns early on a
+  // missing slot); a read with no renderer cannot compile.
+  assert.deepEqual([...targets].sort(), slots,
+    "every card slot is read by operatorRefresh, and every read has a slot");
+  assert.equal(renderers.length, targets.length, "one renderer per read");
+  assert.ok(slots.includes("op-census-body"),
+    "the census card is IN the roster this file derives — it is the card the old typed four excluded");
+
+  // ── THE PROSE. Zero typed counts, measured, not asserted by eye.
+  assert.deepEqual(operatorTypedCounts(), [],
+    "an operator comment states a card/route/read count as a typed numeral; say it without the number, or derive it");
+
+  // ── THE CONTROLS, RUN INSIDE THE MEASUREMENT. Each goes through
+  // replaceUnique (the file's own import) rather than a bare `.replace`: a bare
+  // string needle takes the first match anywhere and is SILENT when it drifts,
+  // which would make a control that proves nothing look exactly like one that
+  // passed. replaceUnique REFUSES a drifted or ambiguous needle instead. Each mutates a COPY of the
+  // shipped source and re-runs the SAME derivation, so CI's existing
+  // invocation of this suite wires them and there is no separate test anyone
+  // could filter out or stop. Without these, every assertion above is a claim
+  // that the parse agrees with itself.
+  //
+  // CONTROL 1 — drop the census read: the slot survives in the markup, the
+  // read does not, and the agreement must break.
+  const dropped = APP_SRC.replace(/\n    operatorPaint\("#op-census-body"[\s\S]*?\n    \}\);/, "\n");
+  assert.notEqual(dropped, APP_SRC, "control 1 must actually mutate the source");
+  assert.notDeepEqual([...operatorPaintTargets(dropped)].sort(), operatorSlotIds(dropped),
+    "CONTROL: dropping a card's read must break the slot/read agreement");
+
+  // CONTROL 2 — rename one renderer out of the funnel: the read count is
+  // unchanged, the renderer count drops, and one-renderer-per-read must fail.
+  const renamed = replaceUnique(APP_SRC, "return operatorCensusCardHtml(data);", "return operatorCensusCardHtmlX(data);",
+    { what: "control 2 (a renderer leaves the funnel)" });
+  assert.notEqual(renamed, APP_SRC, "control 2 must actually mutate the source");
+  assert.notEqual(operatorCardHtmlNames(renamed).length, operatorPaintTargets(renamed).length,
+    "CONTROL: a read whose renderer left the funnel must break one-renderer-per-read");
+
+  // CONTROL 3 — re-type a count into the prose: the scan must see it.
+  const retyped = replaceUnique(APP_SRC, "// THE ONE FUNNEL, made pure so EVERY operator card",
+    "// THE ONE FUNNEL, made pure so all THREE cards", { what: "control 3 (a count re-typed into the prose)" });
+  assert.notEqual(retyped, APP_SRC, "control 3 must actually mutate the source");
+  assert.ok(operatorTypedCounts(retyped).length > 0,
+    "CONTROL: a typed count re-introduced into the operator prose must be caught");
+
+  // CONTROL 4 — the anchors are load-bearing. A source that no longer carries
+  // operatorRefresh must THROW, not answer an empty roster.
+  const unanchored = replaceUnique(APP_SRC, "function operatorRefresh() {", "function operatorRefreshRenamed() {",
+    { what: "control 4 (the roster anchor goes missing)" });
+  assert.throws(() => operatorPaintTargets(unanchored),
+    /no subject/, "CONTROL: a lost anchor is a FAILURE, never a silent zero");
+  const unanchoredProse = replaceUnique(APP_SRC, OPERATOR_PROSE_CUTS[0][0], "// gone",
+    { what: "control 4b (the prose anchor goes missing)" });
+  assert.throws(() => operatorTypedCounts(unanchoredProse),
+    /no subject/, "CONTROL: a lost prose anchor is a FAILURE, never a silent zero");
+});
+
+test("cch-w36-s4: operatorCardBody is the ONE funnel — EVERY operator card speaks the allowlist under a 403 and its own line under a 500", () => {
+  // cch-r21-w22 — THE ROSTER IS DERIVED, NOT TYPED. This map used to name its
+  // cards by hand and was written before the census card existed, so the census
+  // was the one card whose 403 / 5xx / offline sentences nothing in this file
+  // ever drove: the funnel's own proof had a hole exactly where the prose said
+  // there was none. operatorCardHtmlNames() reads the renderers out of
+  // operatorRefresh's shipped source, so a card added tomorrow is covered the
+  // day it lands and a card removed stops being asserted. Every renderer here
+  // takes ONE argument and is called with the fault paths' data (null under a
+  // 5xx, never reached under a 403/offline), which is byte-identical to what
+  // operatorPaint hands it — digest's `data && data.deliveries` is null when
+  // data is null.
+  const names = operatorCardHtmlNames();
+  const cards = {};
+  for (const n of names) {
+    assert.equal(typeof hooks[n], "function", n + " must be hook-exported to be driven here");
+    cards[n] = (d) => hooks[n](d);
+  }
+  assert.equal(Object.keys(cards).length, operatorSlotIds().length,
+    "one renderer per card slot — the funnel is only proven for the cards it drives");
   const forbidden = { ok: false, status: 403, data: { error: "forbidden" } };
   const boom = { ok: false, status: 500, data: {} };
   const offline = { ok: false, status: 0, data: { error: "network_error" }, transport: "unreachable" };
@@ -4021,7 +4230,7 @@ test("cch-w36-s4: operatorCardBody is the ONE funnel — all four cards speak th
   // An OK read is byte-identical to the old ternary: the card's own render, its
   // own data — the funnel adds no arm to the success path.
   assert.equal(
-    hooks.operatorCardBody({ ok: true, status: 200, data: { ready: 2 } }, cards.warm),
+    hooks.operatorCardBody({ ok: true, status: 200, data: { ready: 2 } }, cards.operatorWarmPoolCardHtml),
     hooks.operatorWarmPoolCardHtml({ ready: 2 }),
   );
 
@@ -7065,8 +7274,12 @@ test("vercelClaimHtml: UNDEPLOYED is unaffected — nothing to be unsure about",
 // scenario corpus: the control renders only when GET
 // /v1/barkparks/:id/bootstrap answers a `vercel` envelope, and THAT read is
 // itself require_team_admin, so a member's read 403s before the button is ever
-// composed and no committed fixture paints it for anyone (measured: zero
-// renders in all 132 scenarios). Here the band is an ARGUMENT, so the refusal
+// composed and no committed fixture paints it for anyone. That last clause used
+// to carry a typed denominator; it is now MEASURED on every run, over the whole
+// corpus as scenarios.mjs currently declares it, by the sweep arm named
+// "cch-r21-w22: the vercel deploy offer is corpus-unreachable" below — and if a
+// fixture ever mints a vercel envelope, that arm reds and this blind spot is
+// over. Here the band is an ARGUMENT, so the refusal
 // is a losable measurement rather than a consequence of a sibling read — which
 // is exactly why member-authority-sweep.mjs declares it as BLIND SPOT B6 and
 // points here instead of minting a fixture the server cannot serve a member.
@@ -8850,6 +9063,18 @@ test("C8: instanceDetailHtml leaves the Timeline panel blank (filled after mount
 
 // ── mergeTimeline: ordering / interleaving / dedup / empty (the table test) ──
 
+// EVERY `type` PASSED TO `EV` MUST BE ONE THE CONTROL PLANE CAN ACTUALLY WRITE —
+// i.e. a literal 2nd argument of some `Registry.record_event(` under cloud/lib.
+// Eight rows here manufactured "backup" and "tls" long after #14670 dropped both
+// from AgentEvent's @types, so this suite asserted timeline grammar over traffic
+// the plane can no longer emit, and a dead render branch looked exercised.
+// __agent_event_vocabulary_census.mjs's arm C now reads EVERY *.mjs under
+// cloud/priv/static and reds on rows like that (its
+// `fixture-manufactures-unproducible` failure mode); it used to read only
+// __preview__/scenarios.mjs, so the violation sat in the census's own declared
+// blind spot. Producible today: health, space, status, verify — re-derive with
+//   grep -rnoE 'Registry\.record_event\([^,()]+,[[:space:]]*"[a-z][a-z0-9_]*"' \
+//     --include='*.ex' cloud/lib
 const EV = (id, type, secs, payload) => ({
   id, type, payload: payload || {}, inserted_at: new Date(Date.UTC(2026, 6, 3, 12, 0, secs)).toISOString(),
 });
@@ -8868,7 +9093,7 @@ test("C8: mergeTimeline interleaves both feeds newest-first", () => {
 });
 
 test("C8: equal timestamps order stably — event before audit, then key (repaint-stable)", () => {
-  const events = [EV(2, "health", 10), EV(1, "backup", 10)];
+  const events = [EV(2, "health", 10), EV(1, "space", 10)];
   const audits = [AU("a1", "site.created", 10)];
   const once = hooks.mergeTimeline(events, audits).map((e) => e.key);
   const twice = hooks.mergeTimeline(events, audits).map((e) => e.key);
@@ -8905,7 +9130,7 @@ test("C8: dedup — same-second + action dot-suffix == event type drops the audi
 test("C8: mergeTimeline is total over junk — empty, null, garbled stamps", () => {
   assert.deepEqual([...hooks.mergeTimeline([], [])], []);
   assert.deepEqual([...hooks.mergeTimeline(null, undefined)], []);
-  const merged = hooks.mergeTimeline([EV(1, "health", 10), { id: 2, type: "backup", inserted_at: "garbage" }], []);
+  const merged = hooks.mergeTimeline([EV(1, "health", 10), { id: 2, type: "space", inserted_at: "garbage" }], []);
   assert.equal(merged.length, 2);
   assert.equal(merged[1].key, "e:2"); // garbled stamp sinks to the bottom, never NaN-throws
 });
@@ -8968,7 +9193,7 @@ test("C8: tlvRowHtml — badge + expandable detail honouring the expanded flag",
   assert.match(open, /aria-expanded="true"/);
   assert.match(open, /<pre class="tlv-detail">/);
   // A payload-less entry gets no dead Details button.
-  const bare = hooks.mergeTimeline([EV(2, "tls", 10, {})], [])[0];
+  const bare = hooks.mergeTimeline([EV(2, "space", 10, {})], [])[0];
   assert.doesNotMatch(hooks.tlvRowHtml(bare, false), /data-tlv-toggle/);
 });
 
@@ -9036,7 +9261,7 @@ test("C8: an audit 403 degrades to ONE quiet line, not an error state", () => {
 });
 
 test("C8: expandedKeys re-open exactly the remembered rows across a repaint", () => {
-  const entries = hooks.mergeTimeline([EV(1, "health", 10, { a: 1 }), EV(2, "backup", 20, { b: 2 })], []);
+  const entries = hooks.mergeTimeline([EV(1, "health", 10, { a: 1 }), EV(2, "space", 20, { b: 2 })], []);
   const html = hooks.timelineFeedHtml(entries, { expandedKeys: ["e:2"] });
   const rows = html.split('data-tlv-key="');
   assert.match(rows[1], /^e:2/); // newest first
@@ -9282,18 +9507,167 @@ test("instance-login: a malformed deep link degrades to null, never throws", () 
   assert.equal(hooks.studioLoginHost("https://"), null);
 });
 
-test("instance-login: fleet match is host equality, never substring", () => {
-  const fleet = [
-    { id: "a", url: "https://alpha.barkpark.cloud" },
-    { id: "b", url: "https://guerrilla.barkpark.cloud/" },
-    { id: "c", url: null },
+// The client-side fleet match this block used to pin (studioLoginMatch) is GONE
+// on purpose — it answered "is this instance mine?" from a team-scoped list and
+// compared against the provisioning FQDN only, so it was wrong for a
+// non-selected team and wrong for every custom host. The question now belongs to
+// POST /v1/auth/studio-signin. What is pinned below is the console's half: it
+// asks that door, and it navigates on ONE answer and no other.
+
+test("instance-login: only a 200 carrying a url navigates — every other answer refuses", () => {
+  // The fail-OPEN table. A login path must never turn an answer it did not
+  // understand into a redirect, so each of these must produce a toast.
+  const refusals = [
+    { status: 401, data: { error: "unauthorized" } },
+    { status: 403, data: { error: "forbidden" } },
+    { status: 404, data: { error: "not_found" } },
+    { status: 404, data: { error: "no_admin_token" } },
+    { status: 409, data: { error: "suspended" } },
+    { status: 409, data: { error: "not_live" } },
+    { status: 500, data: { error: "decrypt_failed" } },
+    { status: 502, data: { error: "instance_unreachable" } },
+    { status: 0, data: { error: "network_error" }, transport: "offline" },
+    // The shapes a careless guard lets through: a 200 with no url at all, a
+    // 200 whose url is empty, and a 200 whose url is not a string.
+    { status: 200, data: {} },
+    { status: 200, data: { url: "" } },
+    { status: 200, data: { url: { toString: () => "https://evil.example" } } },
+    { status: 200, data: null },
+    undefined,
   ];
-  assert.equal(hooks.studioLoginMatch(fleet, "https://guerrilla.barkpark.cloud").id, "b");
-  // A lookalike host must NOT match the real one.
-  assert.equal(hooks.studioLoginMatch(fleet, "https://evil-guerrilla.barkpark.cloud"), null);
-  assert.equal(hooks.studioLoginMatch(fleet, "https://guerrilla.barkpark.cloud.evil.example"), null);
-  assert.equal(hooks.studioLoginMatch([], "https://guerrilla.barkpark.cloud"), null);
-  assert.equal(hooks.studioLoginMatch(fleet, "garbage"), null);
+  for (const r of refusals) {
+    const out = hooks.studioSigninOutcome(r, "guerrilla.barkpark.cloud");
+    assert.equal(out.go, undefined, "navigated on " + JSON.stringify(r));
+    assert.ok(out.toast && out.toast.title && out.toast.body,
+      "refusal with no sentence for " + JSON.stringify(r));
+  }
+  // The one shape that DOES navigate.
+  const ok = hooks.studioSigninOutcome(
+    { status: 200, data: { url: "https://guerrilla.barkpark.cloud/studio?t=x" } },
+    "guerrilla.barkpark.cloud");
+  assert.equal(ok.go, "https://guerrilla.barkpark.cloud/studio?t=x");
+  assert.equal(ok.toast, undefined);
+});
+
+test("instance-login: the two 404s say two different things, and the 401 says neither", () => {
+  const host = "guerrilla.barkpark.cloud";
+  const notFound = hooks.studioSigninOutcome({ status: 404, data: { error: "not_found" } }, host);
+  const noToken = hooks.studioSigninOutcome({ status: 404, data: { error: "no_admin_token" } }, host);
+  const expired = hooks.studioSigninOutcome({ status: 401, data: { error: "unauthorized" } }, host);
+
+  assert.match(notFound.toast.body, /isn't managed by this account/);
+  // Same STATUS, different FACT: a registered box with no stored credential must
+  // not be told it belongs to somebody else. This is the accountEraseFailureCopy
+  // failure shape (branching on status alone), pinned so it cannot come back.
+  assert.doesNotMatch(noToken.toast.body, /isn't managed by this account/);
+  assert.match(noToken.toast.body, /No stored credentials/);
+  assert.notEqual(noToken.toast.title, notFound.toast.title);
+  // And an expired session is a session sentence, not a "not yours" sentence.
+  assert.doesNotMatch(expired.toast.body, /isn't managed by this account/);
+  assert.match(expired.toast.body, /session has expired/);
+
+  // The remaining refusals each carry their own subject too.
+  const suspended = hooks.studioSigninOutcome({ status: 409, data: { error: "suspended" } }, host);
+  const notLive = hooks.studioSigninOutcome({ status: 409, data: { error: "not_live" } }, host);
+  const titles = [notFound, noToken, expired, suspended, notLive].map((o) => o.toast.title);
+  assert.equal(new Set(titles).size, titles.length, "two refusals share one title: " + titles.join(" | "));
+  assert.match(suspended.toast.body, /suspension/);
+  assert.match(notLive.toast.body, /provisioning|live/i);
+});
+
+test("instance-login CONTROL: deleting the 200-and-url guard makes every refusal navigate", () => {
+  const src = fs.readFileSync(APP_PATH, "utf8");
+  const GUARD =
+    '    if (r.status === 200 && typeof data.url === "string" && data.url) return { go: data.url };\n';
+  assert.ok(src.includes(GUARD),
+    "studioSigninOutcome's 200-and-url guard is gone from the shipped app.js — " +
+    "grep -n 'function studioSigninOutcome' cloud/priv/static/app.js");
+  // Remove the CONDITION, keep the return: what is under test is whether the
+  // condition is load-bearing, not whether the function still returns something.
+  const mutant = evalApp(
+    replaceUnique(src, GUARD, "    return { go: data.url };\n",
+      { what: "instance-login CONTROL: drop the 200-and-url guard" })
+  ).hooks.studioSigninOutcome;
+
+  const refusal = { status: 404, data: { error: "not_found" } };
+  assert.equal(hooks.studioSigninOutcome(refusal, "h.example").go, undefined);
+  // Without the guard a 404 hands back a `go` — undefined, but a `go` — so the
+  // shell's `if (outcome.go)` is no longer what stands between a refusal and a
+  // navigation. If this ever stops differing, the guard has stopped being the
+  // thing that holds and this control must be re-derived.
+  assert.ok("go" in mutant(refusal, "h.example"),
+    "the mutant no longer differs — the 200-and-url guard is not load-bearing any more");
+  const leaky = { status: 403, data: { url: "https://evil.example/steal" } };
+  assert.equal(hooks.studioSigninOutcome(leaky, "h.example").go, undefined,
+    "a 403 that happens to carry a url must NOT navigate");
+  assert.equal(mutant(leaky, "h.example").go, "https://evil.example/steal",
+    "the mutant no longer navigates on a refusal — the control proves nothing");
+});
+
+test("instance-login: the resume shell asks the host-keyed door and navigates only on its 200", async () => {
+  // Drives the REAL path — api() over a stubbed fetch, no injected transport —
+  // because the write call site has to be spelled `api("POST", "/v1/auth/…"` in
+  // the shipped source for the elevated-write binding census to see it at all.
+  const realFetch = sandbox.fetch;
+  const realLocation = sandbox.location;
+  const seen = [];
+  const navs = [];
+  sandbox.location = Object.assign({}, realLocation, { replace: (u) => navs.push(u) });
+  const answer = (status, body) => (url, init) => {
+    seen.push({ url: String(url), method: init.method, body: init.body });
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  try {
+    sandbox.fetch = answer(200, { url: "https://g.example/studio?t=1" });
+    await hooks.resumeStudioLogin("https://g.example");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].method, "POST");
+    assert.equal(seen[0].url, "/v1/auth/studio-signin");
+    // The door is handed the arriving origin and nothing else — no instance id
+    // (the console has none here) and no team (the whole point of the door).
+    assert.deepEqual(JSON.parse(seen[0].body), { host: "https://g.example" });
+    assert.deepEqual(navs, ["https://g.example/studio?t=1"]);
+
+    // A refusal must not navigate. The toast is a no-op in this sandbox (there
+    // is no #toast-stack), which is exactly why the SENTENCES are pinned on
+    // studioSigninOutcome above and only the NAVIGATION is measured here.
+    seen.length = 0;
+    sandbox.fetch = answer(404, { error: "not_found" });
+    await hooks.resumeStudioLogin("https://g.example");
+    assert.equal(seen.length, 1);
+    assert.equal(navs.length, 1, "a 404 navigated — the login path failed OPEN");
+
+    // A deep link that is not a URL asks nothing at all.
+    seen.length = 0;
+    sandbox.fetch = answer(200, { url: "https://g.example/studio?t=2" });
+    assert.equal(hooks.resumeStudioLogin("garbage"), undefined);
+    assert.equal(seen.length, 0);
+    assert.equal(navs.length, 1);
+  } finally {
+    sandbox.fetch = realFetch;
+    sandbox.location = realLocation;
+  }
+});
+
+test("instance-login: the resume path no longer reads the team-scoped fleet", () => {
+  const src = fs.readFileSync(APP_PATH, "utf8");
+  const start = src.indexOf("function resumeStudioLogin(");
+  assert.ok(start !== -1, "resumeStudioLogin is gone — grep -n 'function resumeStudioLogin' cloud/priv/static/app.js");
+  const body = src.slice(start, src.indexOf("\n  }\n", start));
+  // THE TWO HOLES, as a shape assertion over the shipped body: the fleet read
+  // (GET /v1/barkparks, current_team-scoped) and the client-side match are both
+  // absent, and the host-keyed door is what is asked instead.
+  assert.doesNotMatch(body, /ensureFleet/, "resumeStudioLogin still reads the team-scoped fleet");
+  assert.doesNotMatch(body, /studioLoginMatch/, "resumeStudioLogin still matches client-side");
+  assert.match(body, /\/v1\/auth\/studio-signin/);
+  // And studioLoginMatch is gone from the whole file, not merely from this path.
+  assert.equal(src.includes("function studioLoginMatch("), false,
+    "studioLoginMatch still exists — a dead client-side authorization match is a trap for the next reader");
 });
 
 // ══ Rollback endgame — criteria-proof the shipped promote UI ═════════════════
@@ -10568,6 +10942,74 @@ test("OC25: usageMeterDisplay — an unmetered machine meter never reads a state
   assert.equal(dark.unmetered, true);
   assert.equal(dark.state, null);
   assert.equal(dark.bar, null);
+});
+
+// ── am-w2-per-class-carriage: the ring's context reaches the EYE ─────────────
+// Two keys the beat carries off the instance request-stats ring used to die
+// before any surface: `err_5xx_per_s` was measured by the agent and decoded by
+// the control plane with nothing rendering it, and `window_s` was dropped at
+// the control plane's door. Neither is a meter (that would red the
+// three-runtime usage_meters.json vocabulary, and neither is a signal an
+// operator judges alone) — both ride the ring meters' sub-line.
+
+test("am-w2: the ring window renders in the meter sub-line, in human spans", () => {
+  const d = hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 60, measured_at: null });
+  assert.equal(d.window, "over 60s");
+  assert.match(hooks.usageMeterHtml(reqSpec(), { value: 12, window_s: 60, measured_at: null }), /over 60s/);
+  // Whole minutes/hours humanize; anything else stays in seconds rather than
+  // rounding the very denominator the window exists to pin.
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 300 }).window, "over 5m");
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 3600 }).window, "over 1h");
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: 90 }).window, "over 90s");
+});
+
+test("am-w2: an unmeasured window renders nothing — never a borrowed 60s default", () => {
+  for (const w of [0, -1, null, undefined, "a minute", NaN]) {
+    assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, window_s: w }).window, "",
+      "window_s " + String(w) + " published a span nobody measured");
+  }
+  // And an unmetered VALUE never wears a window: "Not yet metered · over 60s"
+  // would claim a measurement window for a measurement nobody took.
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: "unmetered", window_s: 60 }).window, "");
+});
+
+test("am-w2/D103: the 5xx rate renders ON the request-rate meter, beside its denominator", () => {
+  const d = hooks.usageMeterDisplay(reqSpec(), { value: 12, err_5xx_per_s: 0.22, measured_at: null });
+  assert.equal(d.err5xx, "0.2 5xx/s");
+  const html = hooks.usageMeterHtml(reqSpec(), { value: 12, err_5xx_per_s: 0.22, window_s: 60, measured_at: null });
+  // The volume, the window and the error rate land in ONE sub-line, which is
+  // charter D103 made structural: the error rate cannot be read, screenshotted
+  // or escalated apart from the request rate that bounds it.
+  assert.match(html, /<strong>12\/s<\/strong>/);
+  assert.match(html, /over 60s · 0\.2 5xx\/s/);
+});
+
+test("am-w2: a measured 0.0 5xx/s RENDERS; an absent one renders nothing", () => {
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, err_5xx_per_s: 0 }).err5xx, "0 5xx/s");
+  for (const v of [null, undefined, "none", NaN, -1]) {
+    assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 12, err_5xx_per_s: v }).err5xx, "",
+      String(v) + " became a fabricated 5xx reading");
+  }
+});
+
+test("am-w2: an unbounded 5xx rate still renders, and SAYS it is unbounded", () => {
+  // An older instance can expose the error probe and not the request one.
+  // Suppressing the alarming number because its denominator is missing is the
+  // exact dishonesty D103 forbids — so it shows, worded.
+  const d = hooks.usageMeterDisplay(reqSpec(), { value: "unmetered", err_5xx_per_s: 0.9 });
+  assert.equal(d.err5xx, "0.9 5xx/s (no request rate to bound it)");
+});
+
+test("am-w2 CONTROL: the ring context attaches to ring meters only", () => {
+  // The display model is spec-driven, so nothing stops a caller passing these
+  // on a cpu meter — but the composer never does, and the SPA vocabulary must
+  // not have grown a meter for either key.
+  assert.ok(!hooks.usageMeters.some((m) => m.key === "window_s" || m.key === "err_5xx_per_s"),
+    "a ring qualifier became a meter — that reds the three-runtime vocabulary fixture");
+  // A plain count meter carrying neither renders neither (no phantom sub-line).
+  const plain = hooks.usageMeterDisplay(usageSpec("documents"), { value: 7, measured_at: null });
+  assert.equal(plain.window, "");
+  assert.equal(plain.err5xx, "");
 });
 
 // ── Wave 4 (OC19): Usage-tab sparklines — the 14-day history read path ────────
@@ -12209,12 +12651,28 @@ test("gr-p4: roster shows kind+label+connected-at, NEVER a live-validity badge; 
 // exported helper, and it emitted #github-disconnect with no authority input at
 // all while DELETE /v1/github/installation is team-admin-only.
 //
-// THE HONEST LIMIT: this card cannot paint its connected or its configured arm
-// in ANY of the 108 scenarios (scenarios.mjs declares no /v1/github handler, so
-// every actor falls to the catch-all and gets arm 3, "Not configured") or on the
-// live control plane (no ^GITHUB env). A corpus-level guard would therefore pass
-// on an EMPTY DOM. So the guard lives here, on a hand-built payload, where the
-// paired positive control below closes that vacuity at the seam itself.
+// RETRACTED 2026-09-17 (cch-r21-w22) — THE "HONEST LIMIT" WAS NOT ONE.
+// This block used to argue that the card cannot paint its connected or its
+// configured arm from any committed fixture, because scenarios.mjs declared no
+// handler for the installation read and every actor therefore fell to the
+// catch-all "Not configured" arm. Both halves are false against the corpus as
+// it stands: scenarios.mjs DOES answer that read (`grep -n
+// "/v1/github/installation" __preview__/scenarios.mjs`), and a sweep of the
+// whole corpus finds fixtures answering `connected: true` — including ones
+// whose actor is a plain member, which is exactly the authority arm the
+// argument said no fixture could reach.
+//
+// A guard declined because a sweep covers the corpus is void when the sweep
+// does not cover the corpus, so the corpus-level guard is owed and it is paid
+// below ("cch-r21-w22: the GitHub card's authority arm, driven off the CORPUS").
+// It drives the SHIPPED fixture bodies rather than a hand-built object, which
+// is the vacuity this block used to confess to and could not close.
+//
+// The seam-level test below STAYS. It is the only place the configured-but-
+// not-connected arm and the identical-bytes not-configured arm can be driven
+// against payloads the corpus does not happen to carry, and a hand-built
+// payload is the right instrument for an argument about a pure function.
+// What it may no longer do is stand in for corpus coverage.
 
 test("cch-w48-s3: the GitHub card omits Disconnect for a non-admin — and OFFERS it to an admin", () => {
   assert.equal(typeof hooks.githubCardHtml, "function", "githubCardHtml must be exported");
@@ -12270,6 +12728,142 @@ test("cch-w48-s3 (review): a late /v1/me re-enters loadGithub — the new fence 
     "the shipped roster seam must still be there");
   assert.ok(success.includes('if (currentView() === "providers") loadGithub();'),
     "…and the GitHub card is a separate mount that needs its own re-entry");
+});
+
+// ── cch-r21-w22: THE CORPUS DENOMINATOR IS DERIVED, AND THE OWED GUARD IS PAID ─
+// Two headers in this file declined a corpus-level guard on the strength of a
+// sweep, and each typed its own denominator. The denominators disagreed with
+// each other and both were behind the corpus, so neither sweep was the sweep it
+// claimed to be. Nothing reds when a typed denominator rots, which is why these
+// arms measure instead: every helper below derives the corpus size from
+// scenarios.mjs and THROWS when it cannot, so a corpus that stops loading is a
+// failure here, never a zero-length sweep reported as "no counterexample found".
+// NOT its own `await import(...)`: see PREVIEW_SCENARIOS above — a depth-0
+// await here would be a third module suspension point and would strand the
+// bindings declared below it (TDZ) for every test registered above.
+const CORPUS = PREVIEW_SCENARIOS;
+function corpusNames() {
+  const names = CORPUS.SCENARIO_NAMES;
+  if (!Array.isArray(names) || names.length < 2) {
+    throw new Error("scenarios.mjs exports no usable SCENARIO_NAMES — this sweep has no subject");
+  }
+  if (names.length !== Object.keys(CORPUS.SCENARIOS).length) {
+    throw new Error("SCENARIO_NAMES and SCENARIOS disagree on the corpus size — neither is a denominator");
+  }
+  return names;
+}
+// The classifier both sweeps share: does THIS response body paint the arm the
+// declining header said no fixture could reach?
+function githubPaintsAnAuthorityArm(body) {
+  return !!body && (body.connected === true || body.configured === true);
+}
+function vercelEnvelopePresent(body) {
+  const v = body && body.vercel;
+  return !!v && (v.configured === true || v.deployed === true || !!v.claim_url);
+}
+
+test("cch-r21-w22: no comment in this file types a scenario denominator the corpus can outgrow", () => {
+  const names = corpusNames();
+  const SRC = fs.readFileSync(new URL("./__app.test.mjs", import.meta.url), "utf8");
+  const typed = SRC.split("\n")
+    .map((l, i) => [i + 1, l])
+    .filter(([, l]) => /^\s*\/\//.test(l) && /\b\d+\s+scenarios\b/.test(l));
+  assert.deepEqual(typed.map(([, l]) => l.trim()), [],
+    "a comment states a scenario denominator as a typed numeral; derive it from SCENARIO_NAMES or name a SUBSET with its own derivation");
+
+  // CONTROL, INSIDE THE MEASUREMENT — the scan can say YES. Run on a COPY, so
+  // CI's existing invocation of this suite wires it and no separate test can be
+  // stopped or filtered out.
+  // Through replaceUnique (the file's own import), never a bare `.replace`: a
+  // bare string needle takes the first match anywhere and is SILENT when it
+  // drifts, so a control that mutated nothing would look exactly like one that
+  // passed. replaceUnique REFUSES a drifted or ambiguous needle instead.
+  // The anchor is SPELLED IN TWO PIECES on purpose: written whole, this literal
+  // would itself be a second occurrence of the line it targets, and replaceUnique
+  // would refuse the ambiguity it exists to catch.
+  const anchor = "const CORPUS" + " = PREVIEW_SCENARIOS;";
+  const planted = replaceUnique(SRC, anchor,
+    "// measured across all " + (names.length - 1) + " scenarios\n" + anchor,
+    { what: "cch-r21-w22 CONTROL: plant a typed denominator" });
+  assert.notEqual(planted, SRC, "the control must actually mutate the source");
+  assert.ok(planted.split("\n").some((l) => /^\s*\/\//.test(l) && /\b\d+\s+scenarios\b/.test(l)),
+    "CONTROL: a typed denominator planted in a comment must be caught by this scan");
+});
+
+test("cch-r21-w22: the vercel deploy offer is corpus-unreachable — MEASURED, not asserted", () => {
+  // cch-r16-w11's argument SURVIVES the corrected denominator, and this is what
+  // re-establishes it on every run rather than once, in prose, in the past.
+  const names = corpusNames();
+  let probes = 0;
+  const reachable = [];
+  for (const name of names) {
+    const data = (CORPUS.SCENARIOS[name] && CORPUS.SCENARIOS[name].data) || {};
+    const ids = (Array.isArray(data.barkparks) ? data.barkparks : []).map((b) => b && b.id).filter(Boolean);
+    // A scenario with no instance still gets one probe, so an empty fleet is
+    // swept rather than silently skipped.
+    for (const id of ids.length ? ids : ["b1"]) {
+      probes++;
+      const r = CORPUS.route(name, "GET", "/v1/barkparks/" + encodeURIComponent(id) + "/bootstrap", {});
+      if (vercelEnvelopePresent(r && r.body)) reachable.push(name + "/" + id);
+    }
+  }
+  // THE DENOMINATOR FLOOR. A sweep that probed nothing must not read as proof.
+  assert.ok(probes >= names.length,
+    "every scenario must contribute at least one bootstrap probe — probed " + probes + " over " + names.length + " scenarios");
+  assert.deepEqual(reachable, [],
+    "a committed fixture now paints the vercel deploy offer, so cch-r16-w11's blind spot is OVER and its guard belongs in the corpus: " + reachable.join(", "));
+
+  // CONTROL — the classifier can say YES. Without this, an empty `reachable`
+  // proves only that the predicate never returns true.
+  assert.equal(vercelEnvelopePresent({ vercel: { configured: true, deployed: false, claimed: false, claim_url: null } }), true,
+    "CONTROL: the reachability predicate must fire on a vercel envelope");
+  assert.equal(vercelEnvelopePresent({ vercel: {} }), false, "…and not on an empty one");
+});
+
+test("cch-r21-w22: the GitHub card's authority arm, driven off the CORPUS", () => {
+  // THE OWED GUARD. cch-w48-s3 declined a corpus-level guard on the grounds
+  // that no fixture paints this card's connected or configured arm. The corpus
+  // says otherwise, so the guard is paid here, on the SHIPPED fixture bodies.
+  const names = corpusNames();
+  const painted = [];
+  for (const name of names) {
+    const r = CORPUS.route(name, "GET", "/v1/github/installation", {});
+    if (r && r.status === 200 && githubPaintsAnAuthorityArm(r.body)) painted.push([name, r.body]);
+  }
+
+  // THE FLOOR, and the fact that voids the old decline: this set is NOT empty.
+  // If a future corpus edit empties it, THIS reds — a corpus-level guard that
+  // silently sweeps nothing is the exact failure the declining header feared,
+  // and it is now a red rather than a green.
+  assert.ok(painted.length > 0,
+    "no committed fixture paints the GitHub card's connected/configured arm — this guard would be sweeping an empty set");
+
+  for (const [name, body] of painted) {
+    // A MEMBER is offered nothing: not a disabled ghost, not a title=
+    // explanation, not a mount hook.
+    const member = hooks.githubCardHtml(body, false);
+    assert.ok(member.indexOf("github-disconnect") === -1, name + ": a member must see no Disconnect");
+    assert.ok(member.indexOf("Disconnect") === -1, name + ": not even the verb, drawn dead");
+    assert.ok(member.indexOf("disabled") === -1, name + ": no disabled ghost");
+    assert.ok(member.indexOf("title=") === -1, name + ": no title= explanation");
+    assert.ok(member.indexOf("installations/new") === -1, name + ": a member gets no install link");
+
+    // …and the READ survives for them: this is an authority fence, not a blackout.
+    if (body.connected === true && body.account_login) {
+      assert.ok(member.indexOf(body.account_login) !== -1 || member.indexOf("Connected") !== -1,
+        name + ": the member still sees the connection state");
+    }
+
+    // THE PAIRED POSITIVE CONTROL, per fixture. An admin is offered exactly one
+    // Disconnect on a connected body, so the omission above cannot pass because
+    // the card rendered nothing at all.
+    const admin = hooks.githubCardHtml(body, true);
+    if (body.connected === true) {
+      assert.equal(admin.split('id="github-disconnect"').length - 1, 1,
+        name + ": an admin is offered exactly one Disconnect");
+    }
+    assert.notEqual(admin, member, name + ": the two authority arms must differ on a painted fixture");
+  }
 });
 
 test("cch-w48-s3: the disconnect refusal renders friendly()'s sentence, never the slug `forbidden`", () => {
@@ -14157,8 +14751,16 @@ test("paletteMoveIndex clamps out-of-range and handles an empty list", () => {
   assert.equal(hooks.paletteMoveIndex(2, 5, "nudge"), 2); // unknown dir → clamp
 });
 
+// GR49 — the viewer envelopes both palette arms are measured against. OPERATOR_ME
+// is the exact shape operatorVisible accepts (nested under `user`, strictly ===
+// true); the rest are the near-misses that must NOT open the row.
+const PAL_OPERATOR_ME = { user: { id: "u1", email: "op@example.com", platform_operator: true } };
+const PAL_MEMBER_ME = { user: { id: "u2", email: "member@example.com", platform_operator: false } };
+
 test("paletteNavItems carries the frozen IA, the three Fleet lenses, and every Settings view", () => {
-  const nav = hooks.paletteNavItems();
+  // GR49: the registry is now a function of the viewer — a non-operator envelope
+  // is the baseline IA (the Operator arm is pinned in its own test below).
+  const nav = hooks.paletteNavItems(PAL_MEMBER_ME);
   const byId = Object.fromEntries(nav.map((n) => [n.id, n]));
   for (const id of ["nav-overview", "nav-fleet", "nav-fleet-attention",
     "nav-fleet-inflight", "nav-fleet-healthy", "nav-sites", "nav-activity"]) {
@@ -14172,6 +14774,81 @@ test("paletteNavItems carries the frozen IA, the three Fleet lenses, and every S
     assert.equal(n.kind, "nav");
     assert.equal(typeof n.run, "function");
   }
+});
+
+test("paletteNavItems offers Operator to a platform operator and to NOBODY else (GR49)", () => {
+  const ids = (me) => hooks.paletteNavItems(me).map((n) => n.id);
+
+  // ARM 1 — an operator GETS the row, pointed at #operator, in the Go to group.
+  const opNav = hooks.paletteNavItems(PAL_OPERATOR_ME);
+  const op = opNav.find((n) => n.id === "nav-operator");
+  assert.ok(op, "a platform operator must be offered the Operator row");
+  assert.equal(op.label, "Operator");
+  assert.equal(op.group, "Go to");
+  assert.equal(op.kind, "nav");
+  assert.equal(typeof op.run, "function");
+  // It is ONE row, and it does not displace the frozen IA.
+  assert.equal(opNav.filter((n) => n.id === "nav-operator").length, 1);
+  assert.equal(opNav.length, hooks.paletteNavItems(PAL_MEMBER_ME).length + 1);
+
+  // ARM 2 — the NEGATIVE arm, which is the one that matters: every envelope that
+  // is not a true platform operator gets NO Operator row, and no near-miss opens
+  // it. These are exactly operatorVisible's fail-closed cases.
+  for (const [name, me] of [
+    ["explicit false", PAL_MEMBER_ME],
+    ["absent flag", { user: { id: "u3", email: "x@example.com" } }],
+    ["no user key", {}],
+    ["truthy 1, not ===true", { user: { platform_operator: 1 } }],
+    ['string "true"', { user: { platform_operator: "true" } }],
+    ["FLAT platform_operator (the GR37 false-negative shape)", { platform_operator: true }],
+    ["team owner is a DIFFERENT axis", { role: "owner", user: { platform_operator: false } }],
+    ["null me", null],
+    ["me not loaded yet", undefined],
+  ]) {
+    assert.ok(!ids(me).includes("nav-operator"),
+      "Operator must NOT be offered for: " + name);
+    // And nothing else leaks the route either — no row targets #operator.
+    assert.ok(!hooks.paletteNavItems(me).some((n) => String(n.id).includes("operator")),
+      "no operator-shaped row may survive for: " + name);
+  }
+
+  // ONE GATE, NOT TWO: the palette's answer is operatorVisible's answer, row for
+  // row, over the same envelopes the sidebar gate is pinned against.
+  for (const me of [PAL_OPERATOR_ME, PAL_MEMBER_ME, {}, null, undefined,
+    { platform_operator: true }, { user: { platform_operator: 1 } }]) {
+    assert.equal(ids(me).includes("nav-operator"), hooks.operatorVisible(me),
+      "palette visibility must BE operatorVisible, not a second rule");
+  }
+});
+
+test("paletteNavItems refuses to be called argument-free — the GR49 anti-revert pin", () => {
+  // The whole defect was a registry that took no arguments and so could not see
+  // who was asking. If someone drops the parameter, THIS reds first.
+  assert.throws(() => hooks.paletteNavItems(), /requires the \/v1\/me envelope/,
+    "an argument-free call must throw, not silently answer for nobody");
+  assert.equal(hooks.paletteNavItems.length, 1,
+    "paletteNavItems must declare exactly one (identity) parameter");
+  // Passing the undefined a caller genuinely holds is NOT the error case — it is
+  // the fail-closed case, and it must answer.
+  assert.ok(Array.isArray(hooks.paletteNavItems(undefined)));
+});
+
+test("paletteRegistry carries the viewer's Operator row through to the palette rows (GR49)", () => {
+  const opReg = hooks.paletteRegistry({ me: PAL_OPERATOR_ME });
+  assert.ok(opReg.some((i) => i.id === "nav-operator"),
+    "an operator's palette registry must contain the Operator row");
+  const memberReg = hooks.paletteRegistry({ me: PAL_MEMBER_ME });
+  assert.ok(!memberReg.some((i) => i.id === "nav-operator"),
+    "a member's palette registry must NOT contain the Operator row");
+  // Exactly one row differs between the two viewers — the palette gains the
+  // Operator destination and nothing else changes shape.
+  assert.equal(opReg.length, memberReg.length + 1);
+  // Spread into THIS realm's Array — the hooks come out of a vm sandbox, so a
+  // sandbox array is never deepStrictEqual to a literal here.
+  const memberIds = [...memberReg.map((i) => i.id)];
+  assert.deepEqual(
+    [...opReg.map((i) => i.id).filter((id) => !memberIds.includes(id))],
+    ["nav-operator"]);
 });
 
 test("paletteActionItems are safe actions only, each with a run()", () => {
@@ -14215,10 +14892,11 @@ test("paletteSiteItems map primary domain + framework hint + drill-in run", () =
 
 test("paletteRegistry orders static nav + actions first, then instances, then sites", () => {
   const reg = hooks.paletteRegistry({
+    me: null, // GR49: pin the viewer so the nav block's size is not meCache's business
     instances: [{ id: "bp-1", name: "guerrilla", host: "h" }],
     sites: [{ id: "s1", domains: ["a.example.com"] }],
   });
-  const staticCount = hooks.paletteNavItems().length + hooks.paletteActionItems().length;
+  const staticCount = hooks.paletteNavItems(null).length + hooks.paletteActionItems().length;
   assert.equal(reg[staticCount].group, "Instances"); // instances immediately after the static block
   assert.equal(reg[reg.length - 1].group, "Sites"); // sites last
   // Every registry row has the full shape.
@@ -14231,10 +14909,17 @@ test("paletteRegistry orders static nav + actions first, then instances, then si
 });
 
 test("paletteRegistry with no data is the static slate — the instant-open guarantee", () => {
-  const reg = hooks.paletteRegistry();
-  const staticCount = hooks.paletteNavItems().length + hooks.paletteActionItems().length;
+  // `me: null` pins the VIEWER (GR49 made the nav block viewer-dependent); the
+  // point of the test is unchanged — no instances, no sites, no fetch.
+  const reg = hooks.paletteRegistry({ me: null });
+  const staticCount = hooks.paletteNavItems(null).length + hooks.paletteActionItems().length;
   assert.equal(reg.length, staticCount); // nav + actions only, no instance/site rows
   assert.ok(!reg.some((i) => i.group === "Instances" || i.group === "Sites"));
+  // And the truly argument-free call still answers (it falls back to the live
+  // /v1/me cache) — the instant-open path must never throw on an empty console.
+  const bare = hooks.paletteRegistry();
+  assert.ok(Array.isArray(bare) && bare.length > 0);
+  assert.ok(!bare.some((i) => i.group === "Instances" || i.group === "Sites"));
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -18163,7 +18848,7 @@ const BURST = Array.from({ length: 10 }, (_, i) =>
 
 test("D-04: coalesceEntries folds consecutive same-key runs; singletons pass through UNCHANGED", () => {
   const entries = hooks.mergeTimeline(
-    [...BURST, EV(5, "status", 30, { transition: "offline" }), EV(4, "backup", 20, { status: "ok" })],
+    [...BURST, EV(5, "status", 30, { transition: "offline" }), EV(4, "space", 20, { disk_used_pct: 61 })],
     [],
   );
   const items = hooks.coalesceEntries(entries);
@@ -18181,7 +18866,7 @@ test("D-04: coalesceEntries folds consecutive same-key runs; singletons pass thr
 test("D-04: a run of two folds; interleaving breaks the run (consecutive-only, never feed-wide)", () => {
   const entries = hooks.mergeTimeline(
     [EV(4, "health", 40, { health: "up" }), EV(3, "health", 30, { health: "up" }),
-     EV(2, "backup", 20, { status: "ok" }), EV(1, "health", 10, { health: "up" })],
+     EV(2, "space", 20, { disk_used_pct: 61 }), EV(1, "health", 10, { health: "up" })],
     [],
   );
   const items = hooks.coalesceEntries(entries);
@@ -18245,10 +18930,15 @@ test("D-04: worst-verdict summary — unanimous says 'all …', mixed states the
     [],
   );
   assert.equal(hooks.tlvGroupVerdictText(verifies), "1 of 3 failed");
-  // Verdict-less types (tls) omit the segment rather than inventing one.
-  const tls = hooks.mergeTimeline(
-    [EV(2, "tls", 20, { domain: "a" }), EV(1, "tls", 10, { domain: "b" })], []);
-  assert.equal(hooks.tlvGroupVerdictText(tls), "");
+  // Verdict-less types (space) omit the segment rather than inventing one.
+  // `space` is chosen because tlvVerdictOf returns null for it — the property
+  // under test — AND it is a type the control plane can actually write
+  // (router.ex's `Registry.record_event(..., "space", ...)`). This pair used to
+  // be typed `tls`, which #14670 removed from AgentEvent's @types: verdict-less,
+  // but only because no producer could ever send it.
+  const spaces = hooks.mergeTimeline(
+    [EV(2, "space", 20, { disk_used_pct: 61 }), EV(1, "space", 10, { disk_used_pct: 62 })], []);
+  assert.equal(hooks.tlvGroupVerdictText(spaces), "");
 });
 
 test("D-04: cadence copy — 'every ~1m for 9m' from the members' own stamps; same-second bursts stay silent", () => {
@@ -20142,7 +20832,7 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless ones stay gone", () => {
+test("cch-w30-s1: the matrix offers TEN toggles — the two still-producerless ones stay gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
   // Eight toggle rows × six columns = 48 cells, and not one of them names an
@@ -20150,14 +20840,21 @@ test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless 
   // this leg is the person-facing half — what the page actually draws.
   //
   // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48;
-  // dr-w13-bl-abandonment-splits-off-the-flood moved it 48 → 54. The count is
+  // dr-w13-bl-abandonment-splits-off-the-flood moved it 48 → 54;
+  // cch-w30-bl-member-joined-alert moved it 54 → 60. The count is
   // EXACT on purpose and the number is not the assertion: the two loops below
   // are. A row moves this number only together with its producer, because arm
   // (a) of the census below reds on an offer with nothing behind it.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 54, "9 events × 6 channels");
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 60, "10 events × 6 channels");
   // NOT OFFERED, FOR TWO DIFFERENT REASONS — and the difference matters.
   //
-  // `member_invited` is still the original case: no producer at all.
+  // `member_invited` is still the original case: no producer at all — and
+  // cch-w30-bl-member-joined-alert did NOT change that. It landed a producer for
+  // `member_joined`, the ACCEPTANCE, which is a different moment with a
+  // different dispatcher; the invite SEND still has no team-facing producer and
+  // still must not be offered, because the invitee's own letter already covers
+  // it. The two names sit one line apart on purpose: this loop is what refuses a
+  // future edit that "restores" the old row by renaming the new one.
   //
   // `token_expiring` is NOT. cch-w30-bl shipped its producer
   // (workers/token_expiry_warning_worker.ex), and it STILL must not appear
@@ -20185,8 +20882,12 @@ test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless 
   // `deployment_abandoned` is the given-up rebuild chain, branched off the one
   // `dispatch_deployment_failed/1` funnel in the same change — so arm (b) reds
   // while this row is absent, exactly as it did for the eighth.
+  // The tenth, drawn: cch-w30-bl-member-joined-alert. `member_joined` is the
+  // membership half — `Accounts.accept_invitation/2` dispatches it post-commit,
+  // so arm (b) reds while this row is absent, exactly as it did for the eighth
+  // and the ninth.
   for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded",
-                      "deployment_abandoned"]) {
+                      "deployment_abandoned", "member_joined"]) {
     assert.match(html, new RegExp(`data-event="${live}"`),
       `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }
@@ -25197,8 +25898,13 @@ test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu
       detail:
         "this site would build from nothing — post in production has no documents this site can read. " +
         "This site CAN read: task (12), paper (40). " +
-        "Re-run naming a type this site can read: `bp cloud site create <name> --kind static " +
-        "--framework astro --dataset acme/blog/production --doc-type <type>`",
+        "Name a content type this site can read.",
+      // cch-w69-bl: the terminal incantation is its OWN key now. The console
+      // never reads it, which is the whole point — it cannot leak into the modal
+      // however the server words it, and no strip has to notice it.
+      cli_hint:
+        "bp cloud site create <name> --kind static --framework astro " +
+        "--dataset acme/blog/production --doc-type <type>",
       readable_types: [{ type: "task", count: 12 }, { type: "paper", count: 40 }],
     },
   };
@@ -25210,12 +25916,14 @@ test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu
   assert.ok(f(r).indexOf("[object Object]") === -1, "readable_types is a list of MAPS — never String()'d");
   assert.ok(f(r).indexOf("bp cloud site create") === -1, "no CLI incantation in the modal");
   assert.ok(f(r).indexOf("--doc-type") === -1, "no CLI flag in the modal");
+  assert.ok(f(r).indexOf("cli_hint") === -1, "the hint KEY is not copy either");
   assert.ok(f(r).indexOf("422") === -1, "the status line is gone");
   // A type whose own probe reported no total is listed WITHOUT a number
   // (menu_row/1's second clause) — never with a fabricated one.
   assert.equal(f({ ok: false, status: 422, data: {
     error: "content_binding_empty",
-    detail: "this site would build from nothing — post in production has no documents this site can read. This site CAN read: paper. Re-run naming a type this site can read: `bp cloud site create …`",
+    detail: "this site would build from nothing — post in production has no documents this site can read. This site CAN read: paper. Name a content type this site can read.",
+    cli_hint: "bp cloud site create <name> --kind static --dataset acme/blog/production --doc-type <type>",
     readable_types: [{ type: "paper" }],
   } }),
     "This site would build from nothing — post in production has no documents this site can read. " +
@@ -25232,24 +25940,27 @@ test("cch-w66-bl: the empty-binding 422 renders the server's sentence and a menu
     "Check the workspace/project/dataset and content type above.");
 });
 
-test("cch-w66-bl: with no menu, the 422 keeps the server's whole refusal MINUS its CLI re-run clause", () => {
+test("cch-w69-bl: with no menu, the 422 relays the server's WHOLE detail — there is nothing left to cut", () => {
   const f = hooks.siteCreateFailureCopy;
   // The 404 arm: the menu call itself was :unavailable, so `readable_types` is
-  // omitted entirely. The server's second sentence is surface-neutral and is
-  // the most specific true thing anyone has — relay it; only the `bp cloud …`
-  // line is cut, and the console's own next step replaces it.
+  // omitted entirely. Every sentence of `detail` is surface-neutral now, so all
+  // of it is relayed VERBATIM and the console appends its own next step. The
+  // terminal re-run rides `cli_hint`, which this caller never reads.
   assert.equal(f({ ok: false, status: 422, data: {
     error: "content_binding_empty",
     detail:
       "this site would build from nothing — production/post answered 404 for this site's own read token — " +
       "that dataset or type does not exist, or the type is not readable by a public-read token. " +
       "The control plane could not list what IS readable in production. " +
-      "Re-run naming a type this site can read: `bp cloud site create <name> --kind static " +
-      "--framework astro --dataset acme/blog/production --doc-type <type>`",
+      "Name a content type this site can read.",
+    cli_hint:
+      "bp cloud site create <name> --kind static --framework astro " +
+      "--dataset acme/blog/production --doc-type <type>",
   } }),
     "This site would build from nothing — production/post answered 404 for this site's own read token — " +
     "that dataset or type does not exist, or the type is not readable by a public-read token. " +
     "The control plane could not list what IS readable in production. " +
+    "Name a content type this site can read. " +
     "Check the workspace/project/dataset and content type above.");
   // A payload with the slug and NOTHING else still reads as a refusal about the
   // binding, never as a status number.
@@ -25258,14 +25969,120 @@ test("cch-w66-bl: with no menu, the 422 keeps the server's whole refusal MINUS i
     "Check the workspace/project/dataset and content type above.");
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w69-bl — THE REWORD MUTATION. The row's whole claim is that the OLD
+// console could not survive a server reword, and that the new one can. So this
+// block runs the SAME mutation against both and shows them disagree.
+//
+// THE MUTATION: the control plane rewords its refusal. Every sentence still
+// says the same facts; not one literal the old strip keyed on survives —
+// "Re-run naming a type" is gone and, in the second payload below, so is the
+// backtick-`bp ` fallback marker, because the incantation no longer lives in
+// `detail` at all. This is an ordinary copy edit: the kind a writer makes
+// without opening app.js.
+//
+// RED BEFORE THE FIX, measured against origin/main's siteDetailWithoutCliReRun
+// (reproduced VERBATIM as retiredStrip below — it is the deleted code, kept
+// here only as the control): fed the reworded CLI-voiced detail, the strip finds
+// neither marker, cuts nothing, and `bp cloud site create …` lands in a web
+// modal. Nothing in the old suite noticed, because the old suite fed the old
+// wording back to itself.
+test("cch-w69-bl: a server REWORD cannot leak CLI voice into the modal any more — and the retired strip proves it could", () => {
+  const f = hooks.siteCreateFailureCopy;
+
+  // ── ARM 1: the shipped console, fed a REWORDED surface-neutral detail.
+  // Not one word matches the fixtures above. The output is still correct,
+  // because the console reads STRUCTURE (`readable_types`) and relays prose it
+  // does not parse.
+  const reworded = { ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail:
+      "nothing here to build from — the type post has no documents in production that this site may read. " +
+      "Readable right now: task (12), paper (40). " +
+      "Choose one of those instead.",
+    cli_hint: "bp cloud site create <name> --kind static --dataset acme/blog/production --doc-type task",
+    readable_types: [{ type: "task", count: 12 }, { type: "paper", count: 40 }],
+  } };
+  assert.equal(f(reworded),
+    "Nothing here to build from — the type post has no documents in production that this site may read. " +
+    "It can read: task (12), paper (40) — pick one of those as the content type above.");
+  assert.ok(f(reworded).indexOf("bp cloud site create") === -1,
+    "the reword cannot put the incantation in the modal — it is not in `detail` to begin with");
+  assert.ok(f(reworded).indexOf("--doc-type") === -1, "no CLI flag survives the reword");
+
+  // The no-menu path takes the same mutation and still relays the whole thing.
+  const rewordedNoMenu = { ok: false, status: 422, data: {
+    error: "content_binding_empty",
+    detail: "nothing here to build from — acme could not be reached, so the binding was never confirmed.",
+    cli_hint: "bp cloud site create <name> --kind static --dataset acme/blog/production --doc-type <type>",
+  } };
+  assert.equal(f(rewordedNoMenu),
+    "Nothing here to build from — acme could not be reached, so the binding was never confirmed. " +
+    "Check the workspace/project/dataset and content type above.");
+  assert.ok(f(rewordedNoMenu).indexOf("bp ") === -1, "no terminal voice in the modal");
+
+  // ── ARM 2: THE CONTROL. The retired implementation, verbatim, fed the SAME
+  // reword applied to the OLD (CLI-voiced) detail shape. It leaks.
+  function retiredStrip(detail) {
+    var s = String(detail || "");
+    var cut = s.indexOf("Re-run naming a type");
+    if (cut === -1) cut = s.indexOf("`bp ");
+    return (cut === -1 ? s : s.slice(0, cut)).trim();
+  }
+  // Control A: the OLD wording, OLD strip — it worked. This is what made the
+  // old green look earned.
+  const oldWording =
+    "this site would build from nothing — post in production has no documents this site can read. " +
+    "This site CAN read: task (12). " +
+    "Re-run naming a type this site can read: bp cloud site create <name> --doc-type <type>";
+  assert.ok(retiredStrip(oldWording).indexOf("bp cloud site create") === -1,
+    "control A: on the wording it was written against, the retired strip did cut");
+  // Control B: the SAME copy edit as arm 1, applied to the OLD shape. The strip
+  // finds neither marker (no "Re-run naming a type", and the incantation is not
+  // preceded by a backtick), cuts NOTHING, and the terminal line is relayed.
+  const rewordedOldShape =
+    "nothing here to build from — the type post has no documents in production that this site may read. " +
+    "Readable right now: task (12). " +
+    "Try again naming a type this site can read: bp cloud site create <name> --doc-type <type>";
+  assert.ok(retiredStrip(rewordedOldShape).indexOf("bp cloud site create") !== -1,
+    "control B: the retired strip LEAKS the incantation after an ordinary reword — this is the defect the row names");
+  assert.equal(retiredStrip(rewordedOldShape), rewordedOldShape,
+    "control B: it cut nothing at all");
+
+  // ── ARM 3: the code itself. No branch of the create-failure copy may key on
+  // server prose again. The two retired markers must not appear in app.js, and
+  // the console must not name `cli_hint` — reading that key IS relaying CLI
+  // voice, whatever the wording.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // COMMENTS ARE NOT CODE PATHS, and the retired names deliberately SURVIVE in
+  // app.js prose so the next reader can find this history by grepping the name
+  // that was removed. So the assertion runs over the source with whole-line `//`
+  // comments dropped — the same line-anchored rule the Elixir reader census uses.
+  const code = src.split("\n").filter((l) => l.trim().indexOf("//") !== 0).join("\n");
+  assert.ok(code.indexOf("Re-run naming a type") === -1,
+    "no code path may key on the server's prose marker");
+  assert.ok(code.indexOf("siteDetailWithoutCliReRun") === -1,
+    "the string-matching helper is deleted, not renamed around");
+  assert.ok(code.indexOf("cli_hint") === -1,
+    "the console never reads the terminal hint — that key belongs to the CLI");
+  // The stripper is LOAD-BEARING, so prove it removes something: the retired
+  // marker really is still in the file, in a comment. If this ever goes false,
+  // the three assertions above have gone vacuous for the wrong reason.
+  assert.ok(src.indexOf("Re-run naming a type") !== -1,
+    "control: the retired marker is still documented in an app.js comment");
+  assert.ok(code.length < src.length, "control: the comment stripper removed lines");
+});
+
 test("cch-w66-bl: the other four create refusals get console voice, and only the surface-neutral detail is relayed", () => {
   const f = hooks.siteCreateFailureCopy;
-  // content_binding_required — the server's detail is CLI-VOICED ("bind it with
-  // `--dataset <workspace>/<project>/<dataset>`", router.ex ~6894). The modal
-  // HAS that field: relaying the flag would send a person hunting a terminal.
+  // content_binding_required — the server's detail is SURFACE-NEUTRAL since
+  // cch-w69-bl (grep `content_binding_required` in router.ex); the `--dataset`
+  // flag rides `cli_hint`, which this console never reads. The modal AUTHORS its
+  // own line naming the three fields the person is looking straight at.
   const required = { ok: false, status: 422, data: {
     error: "content_binding_required",
-    detail: "a static site builds FROM your content — bind it with `--dataset <workspace>/<project>/<dataset>` (missing: dataset)",
+    detail: "a static site builds FROM your content — name the workspace, project and dataset it reads (missing: dataset)",
+    cli_hint: "--dataset <workspace>/<project>/<dataset>",
   } };
   assert.equal(f(required),
     "This site needs content to build from — fill in the workspace/project/dataset above.");
@@ -33676,4 +34493,403 @@ test("gr-backlog-d24 (d): every ledger status renders through the shared family,
     "an unlearned status must take the neutral role, never a borrowed colour");
   assert.match(unknown, /<span class="status-pill-label">Teleporting<\/span>/,
     "…and render its own word, never an invented one");
+});
+
+// ── ERASURE DANGER ZONES (task-c161ba42b88805c0) ────────────────────────────
+//
+// Four arms, each with the control that makes it mean something. The team zone
+// is OWNER-BANDED (the server refuses an admin, so a rendered button would be a
+// lie); the account zone is UNBANDED (the server gates on the session alone, so
+// a band would be an invented refusal). Getting either backwards is the defect
+// these tests exist to catch, so each render arm asserts its own negative.
+
+test("teamDangerZoneHtml: owner-only — an admin, a member and an absent ctx render NOTHING", () => {
+  const owner = hooks.teamDangerZoneHtml({ role: "owner", teamId: "t-1" });
+  assert.match(owner, /Danger zone/);
+  assert.match(owner, /data-team-erase="t-1"/);
+  // The instance refusal is named BEFORE the button, not after the attempt.
+  assert.match(owner, /Decommission every/);
+
+  // CONTROLS — every non-owner band renders the empty string, not a disabled
+  // button and not a partial section.
+  assert.equal(hooks.teamDangerZoneHtml({ role: "admin", teamId: "t-1" }), "");
+  assert.equal(hooks.teamDangerZoneHtml({ role: "member", teamId: "t-1" }), "");
+  assert.equal(hooks.teamDangerZoneHtml(null), "");
+  assert.equal(hooks.teamDangerZoneHtml({ teamId: "t-1" }), "");
+});
+
+test("accountDangerZoneHtml: unbanded, and it names the anonymisation rather than promising a full wipe", () => {
+  const html = hooks.accountDangerZoneHtml({ email: "a@example.com" });
+  assert.match(html, /Danger zone/);
+  assert.match(html, /id="account-erase"/);
+  // The honest half: the team's audit history SURVIVES, with the name removed.
+  assert.match(html, /audit history with your name removed/);
+  // CONTROL — an empty model still renders the affordance (the session is the
+  // authority; a cold /v1/me must not withhold a self-scoped control).
+  assert.match(hooks.accountDangerZoneHtml({}), /id="account-erase"/);
+  assert.match(hooks.accountDangerZoneHtml(null), /id="account-erase"/);
+});
+
+test("teamEraseFailureCopy: the 409 counts come from the SERVER's numbers, singular and plural", () => {
+  const one = hooks.teamEraseFailureCopy(409, { error: "instances_present", barkparks: 1, sites: 0 });
+  assert.match(one, /1 instance\b/);
+  assert.doesNotMatch(one, /1 instances/);
+  const many = hooks.teamEraseFailureCopy(409, { error: "instances_present", barkparks: 3, sites: 2 });
+  assert.match(many, /3 instances and 2 sites/);
+  // A 409 whose counts are both zero must not read as "still owns  ." — the
+  // sentence falls back rather than emitting an empty noun phrase.
+  assert.match(hooks.teamEraseFailureCopy(409, { error: "instances_present", barkparks: 0, sites: 0 }),
+    /live infrastructure/);
+  // CONTROLS — the other statuses keep their own sentences, and an unrecognised
+  // shape is DELEGATED to friendly() rather than guessing a cause.
+  assert.match(hooks.teamEraseFailureCopy(403, {}), /Only an owner/);
+  assert.match(hooks.teamEraseFailureCopy(404, {}), /no longer there/);
+  assert.match(hooks.teamEraseFailureCopy(500, {}), /try again/i);
+});
+
+test("accountEraseFailureCopy: 401 names the OAuth-only dead end; 409 names the teams", () => {
+  assert.match(hooks.accountEraseFailureCopy(401, { error: "invalid_password" }), /GitHub or Google/);
+  // CONTROL — a 401 that is NOT invalid_password (an expired session, say) must
+  // NOT be told their password did not match: that sends them to reset a
+  // password that was never the problem.
+  assert.doesNotMatch(hooks.accountEraseFailureCopy(401, { error: "unauthorized" }), /GitHub or Google/);
+  const sole = hooks.accountEraseFailureCopy(409, { error: "sole_owner", teams: ["acme", "beta"] });
+  assert.match(sole, /acme, beta/);
+  assert.match(sole, /Promote another owner/);
+  // A sole_owner 409 that named no team still reads as a sentence.
+  assert.match(hooks.accountEraseFailureCopy(409, { error: "sole_owner", teams: [] }),
+    /a team that still exists/);
+  // CONTROL — a 409 that is NOT sole_owner is not given the sole_owner story.
+  assert.doesNotMatch(hooks.accountEraseFailureCopy(409, { error: "something_else" }), /Promote another owner/);
+  assert.match(hooks.accountEraseFailureCopy(500, {}), /try again/i);
+});
+
+// ── gr-backlog-d24 (f+g): ONE EMITTER, STATED AS A PREDICATE ─────────────────
+//
+// WHAT THE FIRST PASS MISSED. The sweep retired the SECOND family (.dep-*) and
+// its own prose then asserted "there are no hand-written pill class attributes
+// left" — while SEVEN call sites still opened their own
+// `<span class="status-pill status-pill--…">`: the overview all-clear chip, the
+// update badge, operatorPillHtml, siteBindingPill, webhookCardHtml's two
+// branches and siteStatusPill. Nothing measured the assertion, because arms
+// (a)-(e) all ask about the RETIRED family and none of them asks whether the
+// surviving one re-forked inside itself.
+//
+// WHY THIS IS A PREDICATE AND NOT A LIST. A hand-listed set of "the sites to
+// fix" is a snapshot: it is always shorter than the real set (the filing said
+// two; the rule found seven) and it goes stale the moment someone adds a chip.
+// The rule below names no site at all — EVERY `class="status-pill…` literal in
+// app.js must live inside statusMetaPill's own brace-matched body, so the
+// eighth hand-built chip reds on its first commit. The gate-side twin is
+// __css_check.mjs E13 arm (f), which runs the same rule at merge time.
+function d24StatusMetaPillBody(src) {
+  const at = src.indexOf("function statusMetaPill(");
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+  }
+  return null;
+}
+const D24_PILL_LITERAL = /class="status-pill/g;
+
+test("gr-backlog-d24 (f): every `status-pill` class literal in app.js lives inside statusMetaPill — the PREDICATE arm", () => {
+  const body = d24StatusMetaPillBody(APP_SRC);
+  // VACUOUS-GREEN GUARD FIRST: if the emitter cannot be read, or has stopped
+  // emitting the family, "0 outside" would be an artefact and not a finding.
+  assert.ok(body !== null, "statusMetaPill() could not be located in app.js");
+  const inside = (body.match(D24_PILL_LITERAL) || []).length;
+  assert.ok(inside > 0,
+    "statusMetaPill() emits no `class=\"status-pill` literal — the reference the " +
+    "count below subtracts is empty, so the whole arm would measure nothing");
+  const total = (APP_SRC.match(D24_PILL_LITERAL) || []).length;
+  assert.equal(total - inside, 0,
+    "a hand-built status chip is emitted outside statusMetaPill() — render it " +
+    "through statusMetaPill(meta, extraClass, attrs), or through statusPill / " +
+    "deployStatusPill which delegate to it");
+  // CONTROL, so the arm is not green by construction: the same reader over a
+  // source with ONE call site hand-built again MUST see it. replaceUnique
+  // refuses on nought hits and on more than one, so an unapplied mutation is a
+  // loud refusal rather than a quiet green.
+  const reverted = replaceUnique(
+    APP_SRC,
+    "function operatorPillHtml(role, label) {\n    return statusMetaPill({ role: role, label: label });\n  }",
+    "function operatorPillHtml(role, label) {\n" +
+      "    return '<span class=\"status-pill status-pill--' + esc(role) + '\">' +\n" +
+      "      '<span class=\"status-pill-label\">' + esc(label) + \"</span>\" +\n" +
+      "    \"</span>\";\n  }",
+    { what: "gr-backlog-d24 (f) control: hand-build operatorPillHtml again" });
+  const revBody = d24StatusMetaPillBody(reverted);
+  assert.equal(
+    (reverted.match(D24_PILL_LITERAL) || []).length - (revBody.match(D24_PILL_LITERAL) || []).length,
+    2, "the reader cannot see a restored hand-built pill — this arm would be green over a revert");
+});
+
+test("gr-backlog-d24 (g): the absorbed call sites still render the shared family, attributes and all", () => {
+  // The four absorbed renderers that are node-pinned. Present-in-file is not
+  // fires-when-it-should: these assert the RENDERED chip, not the source.
+  const badge = hooks.updatePanelHtml(
+    { version: "1.2.3", update_latest_release: "1.2.4", channel: "stable" }, "grant");
+  const bm = /<span class="(status-pill[^"]*)"([^>]*)>/.exec(badge);
+  assert.ok(bm, "the update panel renders no status-pill at all");
+  assert.match(bm[1], /^status-pill status-pill--[a-z]+ update-badge$/,
+    "the update badge lost its extra class on the way through the shared emitter");
+  assert.match(bm[2], /\sdata-update-state="[a-z-]+"/,
+    "the update badge lost its data-update-state attribute");
+  assert.match(badge, /<span class="status-pill-dot" aria-hidden="true"><\/span>/,
+    "the update badge lost the family's dot");
+
+  const site = hooks.siteStatusPill({});
+  assert.match(site, /^<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Not deployed<\/span><\/span>$/,
+    "a never-deployed site no longer reads as the neutral shared chip: " + site);
+
+  const wh = hooks.webhookCardHtml({ url: "https://x.test/h", events: ["doc.created"], active: true }, {}, "production");
+  assert.match(wh, /<span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Active<\/span><\/span>/,
+    "an active webhook no longer reads as the shared ok chip");
+  const whOff = hooks.webhookCardHtml({ url: "https://x.test/h", events: ["doc.created"], active: false }, {}, "production");
+  assert.match(whOff, /<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Disabled<\/span><\/span>/,
+    "a disabled webhook no longer reads as the shared neutral chip");
+
+  const chip = hooks.siteBindingChip({ workspace: "w", project: "p", dataset: "d", token: "present" });
+  // Not conditional: a chip that came back "" would make the two asserts below
+  // vacuous, so the non-empty case is asserted rather than assumed.
+  assert.notEqual(chip, "", "siteBindingChip rendered nothing — the arm below would measure nothing");
+  assert.match(chip, /^<span class="status-pill status-pill--[a-z]+" title="[^"]*">/,
+    "the binding chip lost its title attribute through the shared emitter: " + chip);
+  assert.match(chip, /<span class="status-pill-dot" aria-hidden="true"><\/span>/,
+    "the binding chip lost the family's dot");
+});
+
+// ── cch-r21-w16: THE WEBHOOK TAB TELLS THE TRUTH ABOUT THE TIERS AS THEY STAND ─
+//
+// Two defects, one symptom, both reachable only since the instance-webhook
+// `:mutate` tier moved to team admin. Seven proxy verbs now answer a plain
+// member 403 (create, update — which is also the enable/disable toggle —
+// delete, rotate, test-send, the deliveries read, replay); `webhook.list` and
+// `webhook.show` stayed member-tier by the router's own written ruling.
+//
+//   HALF 1 — the console offered all seven anyway. No role branch existed
+//            anywhere in the tab.
+//   HALF 2 — and when one of them 403'd, the sentence claimed the refusal named
+//            no role, on a payload whose whole point was to name one.
+//
+// Nothing here changes a tier. Which role may call which verb is an owner
+// ruling; these arms only hold the console to what the server already does.
+
+test("cch-r21-w16: a webhook 403 renders the ROLE the server named, not the no-role generic", () => {
+  // The exact payload Auth.forbidden/2 sends for require_team_admin: FLAT, the
+  // evidence sitting beside the slug rather than nested under it.
+  const admin = hooks.webhookMutationError({ error: "forbidden", required: "admin", scope: "team" }, 403);
+  assert.match(admin, /admin role on this team/,
+    "a member's webhook 403 still hides the role the refusal named: " + admin);
+  assert.ok(!/didn't say which role/i.test(admin),
+    "the generic no-role sentence survived a refusal that DID say which role: " + admin);
+
+  // The other two evidence shapes the same gate family can send. Both were
+  // equally discarded, and each renders a DIFFERENT true sentence — so this arm
+  // cannot pass by hard-coding one string somewhere upstream.
+  const token = hooks.webhookMutationError({ error: "forbidden", required: "deploy", scope: "token" }, 403);
+  assert.match(token, /No team role grants it/,
+    "a token-ability refusal still reads as a grantable team role: " + token);
+  const noTeam = hooks.webhookMutationError({ error: "forbidden", reason: "no_team" }, 403);
+  assert.match(noTeam, /isn't on a team/,
+    "a teamless refusal still reads as the no-role generic: " + noTeam);
+
+  // The deliveries READ is admin-gated too, and it renders through the OTHER
+  // helper — the sibling the predicate arm below finds by rule.
+  const html = hooks.webhookErrorHtml({ error: "forbidden", required: "admin", scope: "team" }, "demo", 403);
+  assert.match(html, /admin role on this team/,
+    "the deliveries-read 403 panel still hides the role the refusal named: " + html);
+
+  // THE CONTROL. The rebuild that used to stand in both helpers, re-implemented
+  // here: if it were still there, every assert above would be unreachable. This
+  // proves the arms measure the hand-off and not some unrelated upstream string.
+  const err = { error: "forbidden", required: "admin", scope: "team" }.error;
+  const rebuilt = typeof err === "string" ? { error: err } : null;
+  assert.equal(hooks.faultCopy(403, rebuilt, "Please check the details and try again."),
+    hooks.friendly({ error: "forbidden" }, "Please check the details and try again."),
+    "the control no longer reproduces the old lossy rebuild — this test would pass vacuously");
+  assert.ok(!/admin role on this team/.test(
+    hooks.faultCopy(403, rebuilt, "Please check the details and try again.")),
+    "the OLD rebuild would have rendered the role — the defect is not what these arms describe");
+});
+
+test("cch-r21-w16 QUIET ARM: the shapes the deleted rebuild was written for still render unmoved", () => {
+  // The rebuild's stated reason for existing was `{error: "network_error"}` —
+  // api()'s fetch-catch shape. Deleting it must not move that sentence. (It
+  // never could: that shape returns at the TOP of webhookMutationError and has
+  // never reached the terminal line. This arm is what makes that claim checkable
+  // rather than asserted.)
+  assert.equal(hooks.webhookMutationError({ error: "network_error" }, 0),
+    hooks.friendly({ error: "network_error" }, "unused"),
+    "the network_error sentence moved when the rebuild was deleted");
+  assert.match(hooks.webhookMutationError({ error: "network_error" }, 0), /[Nn]etwork error/);
+  assert.match(hooks.webhookErrorHtml({ error: "network_error" }, "demo", 0), /Network error/,
+    "the read-panel's network_error branch moved");
+
+  // Every other flat-slug shape the terminal line actually receives, byte-for-
+  // byte as the shipped file rendered them before this change.
+  const unmoved = [
+    [{ error: "server_error" }, 500, "Something broke on our side — not your input. Try again in a moment."],
+    [{ error: "server_error", request_id: "0a1b2c3d4e5f6071" }, 500, "Something broke on our side — not your input. Try again in a moment."],
+    [{}, 502, "Something broke on our side — not your input. Try again in a moment."],
+    [{ error: "bad_gateway" }, 502, "Something broke on our side — not your input. Try again in a moment."],
+    [{}, 422, "Please check the details and try again."],
+    [{}, undefined, "Please check the details and try again."],
+  ];
+  for (const [data, status, want] of unmoved) {
+    assert.equal(hooks.webhookMutationError(data, status), want,
+      "a shape the rebuild covered moved: " + JSON.stringify(data) + " @" + status);
+  }
+  // And the specific branches ahead of the terminal line are untouched.
+  assert.equal(hooks.webhookMutationError({ ok: false, error: { code: "instance_unreachable" }, reachable: false }, 502),
+    "Couldn't reach the instance — the change is unconfirmed.");
+  assert.equal(hooks.webhookMutationError({ error: { code: "upstream_error", status: 422, detail: { error: { details: { url: ["must be https"] } } } } }, 502),
+    "url must be https");
+});
+
+test("cch-r21-w16 PREDICATE: no helper rebuilds a flat envelope and drops the keys friendly() reads", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // THE RULE, not a hand-list. A single-key object literal `{ error: <ident> }`
+  // built from another envelope and handed to the copy ladder is the defect
+  // SHAPE: friendly() reads more keys than `error`, so any such rebuild silently
+  // discards whatever else the server sent. Comment lines are excluded (this
+  // file's own prose quotes the form).
+  const rebuilds = [];
+  src.split("\n").forEach((line, i) => {
+    if (line.trimStart().startsWith("//")) return;
+    if (/\{ *error: *[A-Za-z_$][A-Za-z0-9_$]* *\}/.test(line)) rebuilds.push([i, line.trim()]);
+  });
+  // A rebuild is only a DEFECT if the thing it builds reaches the copy ladder.
+  // `{ error: true }` (the OAuth-return sentinel) is a boolean flag that never
+  // does, so the predicate's second clause is what excludes it — by rule.
+  const reaching = rebuilds.filter(([i, line]) => {
+    if (/\{ *error: *(true|false|null) *\}/.test(line)) return false;
+    const window = src.split("\n").slice(i, i + 3).join("\n");
+    return /\b(friendly|faultCopy)\(/.test(window);
+  });
+  assert.deepEqual(reaching.map(([, l]) => l), [],
+    "a lossy envelope rebuild reaches the copy ladder: " + JSON.stringify(reaching));
+
+  // THE DENOMINATOR, so a green above cannot mean "the predicate found nothing
+  // to look at". These are the helpers that take a raw envelope apart with
+  // `.error || {}` — the population the two fixed ones came out of.
+  const population = (src.match(/\.error \|\| \{\}/g) || []).length;
+  assert.ok(population >= 3,
+    "the envelope-splitting population collapsed to " + population + " — the predicate above may be scanning nothing");
+});
+
+test("cch-r21-w16 LOSSLESS: every sibling key friendly() reads survives the hand-off", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  // Derive the sibling keys BY RULE rather than listing them: a future rung that
+  // reads a sixth key is covered the day it lands, and a test that enumerated
+  // five would not have been. The rule FOLLOWS THE DELEGATION one hop — friendly()
+  // hands the whole envelope to helpers (the forbidden-evidence fence is one), so
+  // a derivation that read only friendly()'s own body would miss exactly the keys
+  // this row is about, and would have shipped green while blind to them.
+  const bodyOf = (name) => {
+    const at = src.indexOf("function " + name + "(");
+    assert.ok(at > 0, name + "() was renamed — this rule cannot find its body");
+    return src.slice(at, src.indexOf("\n  function ", at + 10));
+  };
+  const top = bodyOf("friendly");
+  const delegates = [...new Set([...top.matchAll(/\b([A-Za-z_$][\w$]*)\(data\)/g)].map((m) => m[1]))]
+    .filter((n) => n !== "Array" && n !== "String" && n !== "Boolean");
+  assert.ok(delegates.length > 0,
+    "friendly() no longer hands the envelope to any helper — re-check this rule before trusting it");
+  const keys = [...new Set(
+    [top, ...delegates.map(bodyOf)].flatMap((b) => [...b.matchAll(/\bdata\.([a-z_]+)/g)].map((m) => m[1]))
+  )].filter((k) => k !== "error");
+  assert.ok(keys.length >= 3,
+    "the ladder reads only " + keys.length + " sibling keys — the derivation broke: " + keys);
+
+  // The invariant: for a FLAT-slug envelope, both helpers must hand the whole
+  // thing to the ladder, so their answer is identical to calling the ladder
+  // directly. A rebuild of any kind breaks this for at least one key.
+  const probe = { forbidden: { required: "admin", scope: "team" }, invalid: { details: { url: ["must be https"] } } };
+  for (const slug of ["forbidden", "invalid", "server_error", "bad_gateway"]) {
+    for (const key of keys) {
+      const data = Object.assign({ error: slug }, probe[slug] || {}, { [key]: data_probe(key) });
+      for (const status of [0, 403, 422, 500]) {
+        assert.equal(hooks.webhookMutationError(data, status),
+          hooks.faultCopy(status, data, "Please check the details and try again."),
+          "webhookMutationError dropped a key on " + JSON.stringify(data) + " @" + status);
+      }
+    }
+  }
+  function data_probe(key) {
+    if (key === "details") return { url: ["must be https"] };
+    if (key === "required") return "admin";
+    if (key === "scope") return "team";
+    if (key === "reason") return "no_team";
+    return "probe";
+  }
+});
+
+test("cch-r21-w16: the webhook card offers no control a refused member's role cannot use", () => {
+  const row = { id: "wh1", url: "https://x.test/h", events: ["doc.created"], active: true };
+  // Every action in the bar drives an `Auth.require_team_admin` proxy verb.
+  // `data-wh-deliveries>` (with the closing angle) is the BUTTON; the hidden
+  // panel `data-wh-deliveries-box` is not a control and is not asserted on.
+  const controls = ["data-wh-edit", "data-wh-toggle", "data-wh-rotate", "data-wh-test",
+    "data-wh-delete", "data-wh-deliveries>"];
+
+  const grant = hooks.webhookCardHtml(row, "demo", "production", "grant");
+  for (const c of controls) assert.ok(grant.includes(c), "an admin lost a control: " + c);
+
+  const refuse = hooks.webhookCardHtml(row, "demo", "production", "refuse");
+  for (const c of controls) {
+    assert.ok(!refuse.includes(c), "a refused member is still offered a control that 403s: " + c);
+  }
+  // It says WHY, in the server's own words — not a fourth wording of one fact.
+  assert.match(refuse, /admin role on this team/,
+    "the refused card removed the controls and explained nothing: " + refuse);
+  // The row itself still renders: `webhook.list` is member-tier, so a member
+  // may SEE their team's configuration. Hiding the data would be a second lie.
+  assert.ok(refuse.includes("https://x.test/h") && refuse.includes("doc.created"),
+    "the refused card hid the configuration a member is allowed to read");
+
+  // "unknown" is /v1/me not having answered. It is not a refusal and claims
+  // nothing — the shipped card, matching every other band in this file.
+  assert.equal(hooks.webhookCardHtml(row, "demo", "production", "unknown"), grant,
+    "an unanswered /v1/me was treated as a determinate refusal");
+  // No argument at all is byte-identical to "grant", which is what keeps the
+  // pure call sites (and the harness arms above this one) unmoved.
+  assert.equal(hooks.webhookCardHtml(row, "demo", "production"), grant,
+    "the default authority stopped being 'grant'");
+
+  // The auto-disable banner's Re-enable is the same PUT, so it gates with it.
+  const dead = { id: "wh2", url: "https://x.test/h", active: false, auto_disabled_at: "2026-01-01T00:00:00Z" };
+  assert.ok(hooks.webhookCardHtml(dead, "demo", "production", "grant").includes("data-wh-reenable"),
+    "an admin lost Re-enable");
+  assert.ok(!hooks.webhookCardHtml(dead, "demo", "production", "refuse").includes("data-wh-reenable"),
+    "a refused member is still offered Re-enable, which is an admin-gated PUT");
+});
+
+test("cch-r21-w16: the webhooks tab keeps its member-tier reads and drops only the admin CTA", () => {
+  const grant = hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "grant");
+  const refuse = hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "refuse");
+
+  assert.ok(grant.includes("data-wh-new"), "an admin lost the New webhook CTA");
+  assert.ok(!refuse.includes("data-wh-new"),
+    "a refused member is still offered New webhook, which is an admin-gated POST");
+
+  // THE TAB IS NOT REMOVED, and neither are the two member-tier controls. The
+  // router rules `webhook.list`/`webhook.show` member-tier on purpose, so the
+  // dataset picker and Load must keep working for a member.
+  for (const keep of ["data-wh-load", "wh-dataset-input"]) {
+    assert.ok(refuse.includes(keep), "a refused member lost a member-tier control: " + keep);
+  }
+  assert.ok(hooks.instanceTabs.includes("webhooks"),
+    "the webhooks tab was removed — a member may still read their box's configuration");
+
+  assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production"), grant,
+    "the shell's default authority stopped being 'grant'");
+  assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "unknown"), grant,
+    "an unanswered /v1/me was treated as a determinate refusal in the shell");
 });

@@ -12,8 +12,9 @@
 // goldens through that artifact, so a pinned consumer could render a block
 // differently from Studio with every suite on both sides green.
 //
-// WHAT RUNS. `scripts/prepare-pinned.mjs` (a HARD prerequisite of `pnpm test`,
-// not an optional step) materialises the pinned artifact — by default `npm pack`
+// WHAT RUNS. `scripts/prepare-pinned.mjs` (a HARD prerequisite, run by
+// `vitest.globalSetup.ts` — this project's `globalSetup` — on every invocation
+// path, not an optional step) materialises the pinned artifact — by default `npm pack`
 // of the workspace package, or a vendored `.tgz` path, or a published npm spec,
 // via `BARKPARK_PINNED_REACT`. This suite then:
 //
@@ -33,7 +34,9 @@
 //
 // NO SKIPS. A missing `.pinned/` tree throws in the preflight rather than
 // skipping, so a cold checkout that never ran the prepare step reds instead of
-// reporting a green with no subject.
+// reporting a green with no subject. The globalSetup does not retire that
+// preflight: it guarantees the artifact for runs that go THROUGH this project's
+// config, and the preflight is what still reds for any run that does not.
 
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'

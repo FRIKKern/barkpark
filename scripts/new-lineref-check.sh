@@ -16,7 +16,10 @@
 # three times.
 #
 # tooling/doc-truth/lineref-sweep.mjs already sweeps the corpus for citations
-# that have ALREADY drifted, never-worse against a 542-entry baseline. That is
+# that have ALREADY drifted, never-worse against a frozen baseline — whose size
+# is not written down here, because a count in a comment has no producer and the
+# `542` that stood here read 385 the day it was checked. The sweep prints the
+# live figure on every run ("baseline: N frozen entrie(s)"). That is
 # the right gate for existing debt and it is not this one. Its findings come
 # from `runVerify`, which only reports a citation once the cited line no longer
 # holds what the comment says — so a citation that is ACCURATE TODAY produces no
@@ -32,8 +35,10 @@
 # exactly one new comment lineref each. About one PR in nine, one line to fix,
 # and each of those four is a future false alarm in the sweep.
 #
-# DIFF-SCOPED, NOT TREE-SCOPED — deliberately. The tree carries 547 pre-existing
-# citations. A tree-scoped clean-tree gate would red main on day one and get
+# DIFF-SCOPED, NOT TREE-SCOPED — deliberately. The tree carried 547 pre-existing
+# citations when this was written (a dated measurement, not a live property —
+# `node tooling/doc-truth/lineref-sweep.mjs` is the producer, and redirect it to
+# a file: piping it truncates under SIGPIPE and fabricates a clean read). A tree-scoped clean-tree gate would red main on day one and get
 # disabled, and a disabled gate still looks like coverage. Scoping to lines the
 # PR ADDS needs no baseline at all, and a gate with no baseline has nothing that
 # can rot, no regeneration ritual, and no `--write-baseline` escape to reach for
@@ -55,7 +60,7 @@
 # two gates over one corpus is how a check goes quietly vacuous.
 #
 #   lineref-sweep.mjs   UNCHANGED. It still walks the WHOLE tracked corpus via
-#                       git ls-files and still reds on any of its 542 baselined
+#                       git ls-files and still reds on any of its baselined
 #                       citations that DRIFTS. This gate removes nothing from
 #                       its input: it edits no file the sweep reads, filters
 #                       nothing ahead of it, and touches neither the baseline

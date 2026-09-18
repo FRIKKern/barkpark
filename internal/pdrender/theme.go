@@ -26,6 +26,16 @@ type Theme struct {
 	// left-bar style and a body style.
 	Callout func(tone string) (bar, body lipgloss.Style)
 
+	// Verdict maps the two-word VERDICT vocabulary ("loss"/"peace") to the ink a
+	// judgement is painted in, and reports whether the word was IN vocabulary.
+	// A verdict is not a system state: it answers "what should the reader
+	// conclude", which is why it is its own seam rather than a Callout tone key.
+	// Off-vocabulary or empty → (zero style, false), and the caller keeps the
+	// page voice — so a lineage authored before the vocabulary existed renders
+	// byte-identically. Mirror of data_viz.ex stat_html/1's verdict_mod and
+	// js/packages/react/src/blocks/dataviz.ts VERDICTS.
+	Verdict func(verdict string) (lipgloss.Style, bool)
+
 	// ── M1 additions ────────────────────────────────────────────────────────
 	// CodeBar styles the left accent bar of a `code` block; ChromaStyle is the
 	// chroma style-registry name picked by light/dark (the one piece of the
@@ -191,6 +201,24 @@ func buildTheme(themeID, mode string) Theme {
 	t.Heading[0] = lipgloss.NewStyle().Bold(true).Foreground(pal.ChromeInk)
 	t.Heading[1] = lipgloss.NewStyle().Bold(true).Foreground(pal.ChromeAccent)
 	t.Heading[2] = lipgloss.NewStyle().Bold(true).Foreground(pal.ChromeDim)
+
+	// The verdict inks. The terminal has no soft GROUND to wash, so a verdict
+	// reads here as the digits' ink alone — 'loss' on the palette's danger hue
+	// (terracotta-red, the number that went wrong), 'peace' on its ok hue (green,
+	// this one is fine). Those are the only red/green pair every emitted skin
+	// carries: design/tokens.json color.verdict is a WEB token (an AA walk against
+	// .bp-stat__v's paper ground) and has no twin in Palette, so threading it
+	// would mean a hand literal in the one file go-literal-check.sh watches.
+	// Per-skin like every other tone, so a theme change moves the verdict with it.
+	t.Verdict = func(verdict string) (lipgloss.Style, bool) {
+		switch verdict {
+		case "loss":
+			return lipgloss.NewStyle().Foreground(pal.ToneDanger), true
+		case "peace":
+			return lipgloss.NewStyle().Foreground(pal.ToneOK), true
+		}
+		return lipgloss.Style{}, false
+	}
 
 	t.Callout = func(tone string) (bar, bodyStyle lipgloss.Style) {
 		var c lipgloss.TerminalColor

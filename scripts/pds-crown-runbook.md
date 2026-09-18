@@ -34,6 +34,12 @@ scripts/pds-crown-launch.sh collect             # classifies the transcript; rea
 `--prewarm-now` is **not optional** — see §2(g), PDS-D258. The default pre-warm compiles
 inside the detached child, where its failure is invisible until `collect`.
 
+The pre-warm compiles **`MIX_ENV=dev` first, then `MIX_ENV=prod`** (PDS-D755), with
+`CC=/usr/bin/clang` on both legs. `dev` is the env the harness actually runs
+(`MIX_ENV=dev mix run --no-start` in `pds-pull-proof.sh`) and mix envs do not share a
+`_build` tree; the pre-warm used to warm `prod` alone and stamp OK while the climb still paid
+its dev compile inside the window. Every pre-warm stamp now names its env.
+
 `arm` hands the poll loop to a child process that outlives the arming turn. `collect`
 classifies that child's transcript into exactly **six** states (PDS-D247):
 
@@ -50,40 +56,38 @@ from anchored stamps in the transcript's own bytes rather than a substring (PDS-
 
 | stamp present | what it means | cost |
 |---|---|---|
-| `FIRE — draw N` | the harness RAN | an export attempt **was spent** — re-arming is **not** free |
-| terminal `STAND-DOWN — ` | draws exhausted, never invoked | zero attempts — re-arming is free |
-| `prewarm: FAILED rc=` | died at the D241 pre-warm, before draw 1 | zero attempts — free, but fix the compile first |
-| none of the three | not written by this launcher, or truncated | **UNDIAGNOSED** — read `/tmp/pds-full-export/attempts`, assume nothing |
+| `attempts: … verdict=SPENT` | the harness ran and its counter MOVED (or could not be read) | an export attempt **was spent** — re-arming is **not** free |
+| terminal `WINDOW-EXHAUSTED — ` | invoked ≥ 1×, every invocation a proven zero-spend refusal, draws then exhausted | zero attempts — re-arming is free |
+| `FIRE — draw N` with neither of those | pre-re-arm transcript, or killed before it stamped its readings | read as **spent** — `/tmp/pds-full-export/attempts` settles it |
+| terminal `STAND-DOWN — ` | draws exhausted, harness never invoked | zero attempts — re-arming is free |
+| `prewarm: FAILED rc=` | died at the D241 pre-warm, before draw 1 (the stamp names the failing `MIX_ENV`) | zero attempts — free, but fix that env's compile first |
+| none of these | not written by this launcher, or truncated | **UNDIAGNOSED** — read `/tmp/pds-full-export/attempts`, assume nothing |
 
+That order is `collect`'s own: a spend stamp beats an exhaustion stamp beats a bare `FIRE`.
 A per-draw line carries `verdict=STAND-DOWN:mem<floor` on *every* refusal; that is a draw,
 not the verdict, and it is why the unanchored substring could call a spent attempt free.
 
-The `FIRE — draw N` row has one exception, and it is PDS-D262's third outcome below: if the
-harness refused on its *own* precondition (b) after the launcher handed off, it returned
-above the spend increment and the attempt was **not** spent. `/tmp/pds-full-export/attempts`
-settles it; the stamp alone does not.
+### The THIRD outcome, NARROWED — `WINDOW-EXHAUSTED` after zero-spend refusals (PDS-D262)
 
-### The THIRD outcome — the launcher is ONE-SHOT (PDS-D262)
+A climb is usually described as ending as **FIRE** or **STAND-DOWN**. There is still a third,
+but it is no longer FIRED-AND-REFUSED: one refusal used to end the poll, and since the re-arm
+landed it does not. `refire_verdict()` in the generated child reads the harness's attempts
+counter before and after each invocation and returns exactly one of `ZERO-SPEND-REFUSAL` ·
+`SPENT` · `SPENT-UNVERIFIED`. Only `ZERO-SPEND-REFUSAL` — `rc != 0` AND both readings numeric
+AND equal — re-enters the SAME poll loop. `rc = 0`, a moved counter and an unreadable counter
+all exit as before: a spent attempt is the one outcome that must never be retried, so an
+unverifiable counter is read as a spend.
 
-An armed climb is usually described as ending as **FIRE** or **STAND-DOWN**. There is a
-third. A draw clears the launcher's gate, the launcher hands off, and `pds-pull-proof.sh`
-then refuses on its own precondition (b) because the box moved in the seconds between the
-two reads. The launcher does not loop back:
+What is left is the narrowed third outcome: **the harness was invoked at least once, EVERY
+invocation was a proven zero-spend refusal, and the draw budget then ran out.** That is
+neither a stand-down (the harness ran) nor a spend (the counter never moved), so it carries
+its own terminal stamp `WINDOW-EXHAUSTED — ` and its own sentinel **6** — zero attempts spent,
+re-arming free. **Eliminate that case and sentinel 6 and the stamp become unreachable and
+this passage is false**; it describes nothing else.
 
-```sh
-"$HARNESS" --all        # pds-crown-launch.sh:362-366
-rc=$?
-stamp "harness returned rc=$rc after $draw draw(s)"
-sentinel "$rc"
-exit "$rc"              # ← unconditional; the poll loop is over
-```
-
-**FIRED-AND-REFUSED costs zero export attempts and the entire window.** `--max-draws 2160`
-collapses to one draw and the remaining hours of polling never happen.
-
-**Do not add a re-arm loop.** Re-firing on a refusal is how a marginal window becomes the
-pounce §2(f) forbids, and the one-shot shape is what prevents it. The sanctioned response is
-the same as for a stand-down: `arm` again, deliberately, after re-reading the preflight.
+The re-entry buys no budget. It consumes the draw it sat in, `MAX_DRAWS` and the loop
+condition are untouched, and every invocation stamps its before/after readings — so
+`--max-draws 2160` no longer collapses to one draw on a marginal fire.
 
 ### (i) The two env lines that must be in the SAME shell as `arm` (PDS-D251)
 
@@ -276,28 +280,32 @@ Listed last, it bites **first** — before every precondition above, because it 
 
 `api/deps` and `api/_build` are **gitignored**, so the fresh `origin/main` worktree the climb
 is required to run from (PDS-D225) has neither. The launcher's pre-warm runs
-`CC=/usr/bin/clang MIX_ENV=prod mix compile` and **never** `mix deps.get`, in either form.
+`CC=/usr/bin/clang MIX_ENV=dev mix compile` and then `CC=/usr/bin/clang MIX_ENV=prod mix
+compile` (PDS-D755), and **never** `mix deps.get`, in either form.
 
 Under the **default** pre-warm the death is silent. Measured twice against `origin/main`:
 `arm` prints its complete `ARMED — the climb now outlives this turn.` banner with a pid and
 `armed in 0s`, and **returns 0** — while the detached child dies seconds later in its own
 log with `** (Mix) Can't continue due to errors on dependencies` →
-`prewarm: FAILED rc=1 — NOT firing.` → `EXIT: 1`. **Zero draws**, and nothing in the arming
+`prewarm: FAILED rc=1 MIX_ENV=dev — NOT firing.` → `EXIT: 1`. **Zero draws**, and nothing in the arming
 turn says so. You discover it at `collect`, possibly hours of window later.
 
-Pay it in the arming worktree, before the arm — **both** compiles:
+`mix deps.get` is the half the pre-warm has never run, and it is why this bites. Pay it in
+the arming worktree, before the arm:
 
 ```sh
-cd api && mix deps.get && MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
+cd api && mix deps.get && CC=/usr/bin/clang MIX_ENV=dev mix compile && CC=/usr/bin/clang MIX_ENV=prod mix compile
 ```
 
-The pre-warm only ever builds `MIX_ENV=prod`; the dev build is what
-`pds-scratch-target.sh up --verify` pays (§3) as a >10-minute cold compile once the climb is
-already running.
+The two compiles are now paid by the pre-warm as well (PDS-D755), so running them here only
+makes the arm fast. A cold `_build/dev` was **measured at 428 s** on the campaign host
+(warm: 3 s for the harness's own `mix run --no-start`) — that is what a prod-only pre-warm
+used to leave inside the window, since `pds-scratch-target.sh up --verify` (§3) and the
+harness both read the dev tree.
 
-Then arm with **`--prewarm-now`, always**. It does not fix a cold tree on its own — it still
-only runs `mix compile` — but it moves that compile into the **arming shell**, where a
-failure `die`s loudly at `pds-crown-launch.sh:441-444` instead of vanishing into a detached
+Then arm with **`--prewarm-now`, always**. It does not fetch deps — it still only runs
+`mix compile`, once per env — but it moves both compiles into the **arming shell**, where a
+failure `die`s loudly, naming the failing `MIX_ENV`, instead of vanishing into a detached
 child. The default form is **forbidden for a fresh worktree** for exactly that reason.
 
 `scripts/pds-climb-preflight.sh` check 5 asserts all of this, read-only, before you arm.

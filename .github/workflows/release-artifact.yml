@@ -34,6 +34,7 @@ on:
       - "api/**"
       - ".tool-versions"
       - "scripts/build-prebuilt.sh"
+      - "scripts/gh-retry.sh"
       - ".github/workflows/release-artifact.yml"
 
 concurrency:
@@ -73,14 +74,24 @@ jobs:
           SHA="${{ github.sha }}"
           TAG="build-$SHA"
           # Create the release (or upload into it if a re-run already made it).
+          # RETRY, BOUNDED, CLASSIFIED (task-86883bb93fe61df7). These two calls
+          # had no retry, so one transient GitHub upload-API fault reddened
+          # main's tip AND discarded the completed prod compile above:
+          #   run 35271553511 (0a3c99cc3) HTTP 500: Error saving asset
+          #   run 35255063820 (01f82c949) HTTP 403: API rate limit exceeded
+          # with run 35263849125 (8ba623ca5) green between them. gh-retry.sh
+          # retries ONLY 5xx / throttling / transport faults; a 401, 404, 422 or
+          # permission-denied 403 still fails on attempt 1 with gh's own status.
+          # The `gh release view` probe below is deliberately NOT wrapped: its
+          # 404 is the expected "no release yet" answer, not a fault.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
+            bash scripts/gh-retry.sh release create "$TAG" \
               --latest=false \
               --title "build $SHA" \
               --notes "Precompiled api/_build/prod for $SHA (elixir/otp pinned via .tool-versions). Consumed ONLY by scripts/fetch-prebuilt.sh, reached from scripts/apply-update.sh on the bp-cloud freshen/rebuild path for SINGLE-CHECKOUT boxes. Blue/green SLOT boxes (guerrilla included) NEVER consume it: fetch-prebuilt.sh exits 3 when the checkout has a .slots dir, and deploy/instance-deploy.sh has zero prebuilt references — the slot deployer compiles on-box into the inactive slot." \
               artifact/api-build.tar.zst artifact/api-build.tar.zst.sha256 artifact/stamp.json
           else
-            gh release upload "$TAG" \
+            bash scripts/gh-retry.sh release upload "$TAG" \
               artifact/api-build.tar.zst artifact/api-build.tar.zst.sha256 artifact/stamp.json --clobber
           fi
 

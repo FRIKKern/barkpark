@@ -133,6 +133,16 @@ on:
       - "scripts/check-vendor-freshness.mjs"
       - "scripts/recut-vendor-tarballs.sh"
       - "scripts/templates-literal-check.sh"
+      # THE SOURCE OF TRUTH THE bp-command JOB RESOLVES AGAINST. The gate reads
+      # internal/cli's own dispatch (switch arms, verb== intercepts and the verb
+      # TABLES) to decide whether a printed `bp …` command parses, and until this
+      # entry existed a CLI change matched NO pattern here. MEASURED: #18555
+      # turned runCloudSite()'s verb switch into siteVerbMatrix, this workflow
+      # did not run on it, and the first anyone heard was twelve UNRESOLVED
+      # commands on MAIN's tip — against templates/ docs nobody had touched. On
+      # the same argument as js/packages/**: a gate blind to the change it
+      # guards reports green forever.
+      - "internal/cli/**"
       - "tooling/doc-truth/verify-bp-commands.mjs"
       - "tooling/doc-truth/bp-cli-sources.mjs"
       - "tooling/doc-truth/verify-docs.mjs"
@@ -212,6 +222,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # The selftest is where this gate's MUTATION arms live — a verb dropped
+      # from internal/cli's dispatch table must RED a doc that still prints it,
+      # and a token the table never declares must RED too. Unrun, they prove
+      # nothing: #18555 turned runCloudSite()'s verb switch into a lookup table
+      # and the resolver went blind to every `bp cloud site` verb, which is
+      # exactly the drift these arms measure. Never piped — a gate piped through
+      # tail or grep -q reports the PIPE's exit code.
+      - name: Self-test the resolver (its negative half must red)
+        run: node tooling/doc-truth/verify-bp-commands.mjs --selftest
       # Repo-RELATIVE paths ONLY: the resolver does join(root, rel) which
       # concatenates, so an absolute path resolves to a non-existent file and
       # exits 2 (a false "target not found") instead of adjudicating. --offline
@@ -226,6 +245,31 @@ jobs:
           templates/search-starter/DEPLOYING.md
           templates/search-starter/README.md
 
+  astro-starter-content-link:
+    name: Astro starter content-link specs (dep-free, no browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Node 22 strips TypeScript types natively — no npm ci, no build step, so
+      # this job stays seconds-fast and cannot be broken by a dependency. The
+      # template's `@barkpark/core` value imports are resolved by
+      # src/lib/__test-stub-hooks.mjs, exactly as the search-starter's
+      # `finder-unit` job does it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Through the floor, never bare `node --test`: a bare run whose glob
+      # matches nothing prints "# tests 0" and exits 0, so this job would go
+      # green having proven nothing at all.
+      #
+      # `--floor 1` is a COMMITTED literal, not a derived one — one spec file
+      # today. Adding a second spec reds with `raise the floor to 2`; bump it
+      # here. Never piped: a gate piped through tail or grep -q reports the
+      # PIPE's exit code.
+      - name: Run the astro-starter content-link specs
+        working-directory: templates/astro-starter
+        run: node ../../scripts/node-test-floor.mjs --floor 1 'src/lib/**/*.test.ts'
+
   # THE READER FOR THE push:main ARM. Without this, a red on main lands in the
   # Actions tab that nobody opens — and this workflow was PR-only precisely
   # because a red with no reader is indistinguishable from no red at all.
@@ -239,6 +283,7 @@ jobs:
         vendor-sdk-freshness,
         contrast-focus-literals,
         bp-command-truth,
+        astro-starter-content-link,
       ]
     if: failure() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

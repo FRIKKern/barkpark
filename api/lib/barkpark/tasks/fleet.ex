@@ -89,6 +89,7 @@ defmodule Barkpark.Tasks.Fleet do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Tasks.LockKey
+  alias Barkpark.Tasks.TwinCollapse
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
@@ -247,17 +248,17 @@ defmodule Barkpark.Tasks.Fleet do
 
   # Workspace-scoped read (the 2026-09-01 ruling — see moduledoc): the same
   # clause `beat/3` stamps on the way in. Draft/published twins collapse to one
-  # canonical row (published wins), Board-style.
+  # canonical row (published wins), Board-style — the rule, its unpaired-draft
+  # carve-out and its total tie-break live in `Tasks.TwinCollapse`, the ONE home
+  # this module and `Tasks.Board` share (task-f7d389c21c68839f). Until that
+  # dedup, this file held THREE verbatim `Enum.find(twins, hd(twins), …)`
+  # copies whose default was answered by Postgres storage order.
   defp load_listeners(dataset, scope) do
     from(d in Document, where: d.type == @type_name and d.dataset == ^dataset)
     |> scope_to(scope)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
-    |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)
-  end
-
-  defp canonical_twin(twins) do
-    Enum.find(twins, hd(twins), fn d -> d.status == "published" end)
+    |> Enum.map(fn {_lid, twins} -> TwinCollapse.canonical(twins) end)
   end
 
   # Read-time join: worker -> the doc_id of its current in_progress task.
@@ -275,7 +276,7 @@ defmodule Barkpark.Tasks.Fleet do
     |> scope_to(scope)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
-    |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)
+    |> Enum.map(fn {_lid, twins} -> TwinCollapse.canonical(twins) end)
     |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
     |> Enum.reduce(%{}, fn doc, acc ->
       case task_worker(doc.content || %{}) do
@@ -500,7 +501,7 @@ defmodule Barkpark.Tasks.Fleet do
     |> Repo.all()
     |> case do
       [] -> nil
-      twins -> canonical_twin(twins)
+      twins -> TwinCollapse.canonical(twins)
     end
   end
 

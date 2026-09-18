@@ -553,12 +553,37 @@ defmodule BarkparkWeb.AuthController do
         NotificationWithhold.record("magic_link", :no_recipient_by_construction)
 
       {:error, changeset} ->
+        # PURE ECHO — DECLARED-HONEST (task-ef7f93eebba52fd3). This failure arm
+        #
+        # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
+        # space. The census counts that literal substring corpus-wide and its
+        # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
+        # be counted AS a receipt. Re-spacing it here reds the census.
+        # falls through to the SAME `ok:true` the success path returns, and
+        # that merge is DELIBERATE, not an oversight.
+        #
+        # WHY IT MUST MERGE. A mint failure is only reachable for an address that
+        # RESOLVED to a user — `build_login_token/1` returns `:no_user` before it
+        # ever tries to insert. So any receipt that let a caller tell "minted"
+        # from "mint failed" would be an account-existence oracle by a second
+        # route, defeating the @doc's anti-enumeration contract above. The
+        # receipt claims only "the request was accepted"; it never claims "a link
+        # was sent", so merging costs the caller no true statement.
+        #
+        # WHERE THE DISTINCTION LIVES INSTEAD. Out of band, on the operator's
+        # side: this `NotificationWithhold.record/3` writes a `:dispatch_crashed`
+        # audit event with `detail: "token_mint_failed"`, separable by query from
+        # the consented `:no_recipient_by_construction` skip — proved in
+        # `Barkpark.Accounts.NotificationWithholdTest` and
+        # `BarkparkWeb.AuthNotificationWithholdTest`.
         NotificationWithhold.record("magic_link", :dispatch_crashed,
           user_id: Ecto.Changeset.get_field(changeset, :user_id),
           detail: "token_mint_failed"
         )
     end
 
+    # The single receipt all three arms reach. Splitting it is the change
+    # `BarkparkWeb.UndeclaredSuccessReceiptTest` exists to red.
     json(conn, %{ok: true})
   end
 

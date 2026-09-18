@@ -368,6 +368,7 @@ func getJSONAttempt(ctx context.Context, c *apiclient.Client, path string) ([]by
 		retry := resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599
 		return nil, retry, &httpStatusError{Path: path, StatusCode: resp.StatusCode, Hint: bodyHint(body)}
 	}
+	recordWire(path, len(body))
 	return body, false, nil
 }
 
@@ -426,8 +427,28 @@ func bodyHint(body []byte) string {
 // overlay covers the top of the queue only, which composeSnapshot flags). The
 // context carries FetchSnapshotFull's shared snapshot budget, so both halves of
 // one snapshot expire together.
-func fetchPrime(ctx context.Context, c *apiclient.Client) (primeExtras, error) {
-	body, err := getJSONCtx(ctx, c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
+//
+// THE `brief` PROJECTION (task-ac9e7dd0d4e53d24). decodePrime reads exactly four
+// things out of this body — `ok`, `counts`, `recent_events` and each ready
+// entry's `doc_id` — and throws the entire rendered CARD away. At the default
+// (full) view the server renders `ready` and `in_progress` as full render_docs
+// with edge counts, which is where the money goes: measured against guerrilla
+// 2026-09-17, one and the same minute, `?limit=100` = 1,301,149 wire bytes and
+// `?limit=100&view=brief` = 41,762 — a 96.8% cut for a body the board consumes
+// IDENTICALLY, because the brief card still carries doc_id.
+//
+// WHAT BRIEF COSTS, stated rather than discovered: the controller ALSO trims
+// `recent_events` to 5 on the brief arm (tasks_controller.ex, `Enum.take(events,
+// 5)`), while the full arm returns `limit` of them — 100 here. s.Events is not
+// decoration: buildEvAt sorts the ready head on it and computeResumables finds
+// dropped claims in it. So the projection is asked for ONLY where the tail can be
+// rebuilt over time — see primeView and corpusCache.mergeEventTail.
+func fetchPrime(ctx context.Context, c *apiclient.Client, view string) (primeExtras, error) {
+	path := fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit)
+	if view != "" {
+		path += "&view=" + view
+	}
+	body, err := getJSONCtx(ctx, c, path)
 	if err != nil {
 		return primeExtras{}, err
 	}
@@ -607,6 +628,10 @@ type claimWire struct {
 	// are detail fields and ride the frozen tolerance contract.
 	PreviousWorker json.RawMessage `json:"previous_worker"`
 	ExpiredAt      json.RawMessage `json:"expired_at"`
+	// ClosedBy is claim.closed_by, read under the SAME tolerant coercion: it is
+	// a detail field feeding the enrichment control's stratification, so a
+	// malformed value must degrade to "" rather than fail the whole list decode.
+	ClosedBy json.RawMessage `json:"closed_by"`
 	// Now is the D9 pulse — content.claim.now {"text","ts","criterion"?}.
 	// RawMessage + decodePulse's tolerance so a malformed pulse degrades to
 	// no-pulse instead of failing the whole list decode.
@@ -681,7 +706,11 @@ type eventWire struct {
 
 func (w taskWire) toTask() Task {
 	t := Task{
-		DocID:           w.DocID,
+		DocID: w.DocID,
+		// THE DRAFT LABEL CONTRACT: derived HERE, off the RAW wire doc_id,
+		// before anything in this package strips the prefix. Carried from here
+		// on — never re-derived downstream, where the spelling may be gone.
+		Draft:           isDraftID(w.DocID),
 		Rev:             w.Rev,
 		Title:           w.Title,
 		Lifecycle:       w.Lifecycle,
@@ -934,6 +963,7 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	if w.Claim != nil {
 		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
+		d.ClosedBy = rawString(w.Claim.ClosedBy)
 	}
 	return d
 }

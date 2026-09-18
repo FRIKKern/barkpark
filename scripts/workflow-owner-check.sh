@@ -13,17 +13,37 @@
 #
 # THE POPULATION IS A PREDICATE, NOT A LIST (an enumeration is a snapshot; a
 # predicate is a rule). Membership is recomputed from the workflow files every
-# run: a workflow is OFF THE PR PATH iff it carries a `push:` arm and no
-# `pull_request:` arm. A curated list would go stale in the commit that moved the
-# next workflow -- and going stale SILENTLY is the exact failure mode here, since
-# the newly-moved workflow is precisely the one nobody is watching.
+# run: a workflow is OFF THE PR PATH iff it has NO `pull_request:` arm AND at
+# least one UNATTENDED arm -- `push`, `schedule`, `workflow_run` or `release`.
+# A curated list would go stale in the commit that moved the next workflow --
+# and going stale SILENTLY is the exact failure mode here, since the newly-moved
+# workflow is precisely the one nobody is watching.
+#
+# THE PREDICATE ITSELF WENT STALE ONCE, WHICH IS THE POINT (2026-09-18,
+# felix-w24-bl-workflows-ownership-gap). It used to read `push AND NOT
+# pull_request` -- one WAY of being unwatched, mistaken for the property. Every
+# schedule-only workflow has neither arm, so it fell into the "on the PR path"
+# bucket and the OK line below asserted, of all of them, "owned by their PR
+# author". That was false about THIRTEEN of this repo's 78 workflows, nine of
+# them cron'd; the registry held 10 rows and the hole was 13. Being a predicate
+# did not save it. Being a predicate about the wrong property is still a list,
+# written in regex.
+#
+# workflow_dispatch IS NOT AN UNATTENDED ARM: a dispatch-only workflow cannot
+# start without a person, and that person reads the result. That exclusion is
+# the rule, never a name -- give one of them a cron and this guard reds on the
+# same commit.
 #
 # FIVE REFUSALS, each naming the workflow:
 #   1 off the PR path but ABSENT from the registry   -> moved and unowned
 #   2 in the registry but no longer off the PR path  -> stale row, owner is fictional
 #   3 in the registry but the file does not exist    -> deleted workflow, dead row
 #   4 owner is not one of the six repo lanes          -> a name nobody can be pointed at
-#   5 a `push:` arm that does not include `main`      -> the watcher CANNOT SEE IT.
+#   5 a PUSH-ARMED row whose `push:` arm does not include `main` -> the watcher
+#     CANNOT SEE IT. Push-armed only: scripts/main-red-predicate.sh enumerates
+#     by push arm, so this refusal is a sentence about push arms. A cron'd row
+#     is read by scripts/scheduled-arm-health.sh instead, which derives its own
+#     population from every cron'd workflow in the tree.
 #     scripts/main-red-predicate.sh enumerates by push arm and asks for the most
 #     recent completed run ON MAIN. A push arm on some other branch renders the
 #     workflow invisible to the watcher while looking covered in this file.
@@ -52,7 +72,28 @@ _DEFAULT_ROOT="$(cd "$_DIR/.." && pwd)"
 LANES="api console deploy gates cli studio"
 
 # ---- the predicate, in one place so the guard and its selftest cannot disagree --
-# Prints, one per line: "<file>\t<off_pr:0|1>\t<push_main:0|1>"
+# Prints, one per line: "<file>\t<off_pr:0|1>\t<push_main:0|1>\t<has_push:0|1>\t<arms>"
+#
+# OFF THE PR PATH MEANS "CAN FAIL UNATTENDED", NOT "HAS A push ARM"
+# (felix-w24-bl-workflows-ownership-gap). The first version of this predicate
+# read `push AND NOT pull_request`, which silently classified every
+# schedule-only and workflow_run-only workflow as ON the PR path -- and the OK
+# line then asserted, of every one of them, "owned by their PR author". In this
+# repo that sentence was false about THIRTEEN files, nine of them on a cron:
+# paper-readers.yml fires at 05:17Z, elixir-nightly.yml at 03:17Z, and no pull
+# request appears anywhere in the causal chain, so there is no author to red and
+# nobody to tell. The registry covered 10 workflows and the gap was 13.
+#
+# So: a workflow is OFF THE PR PATH iff it has NO `pull_request:` arm AND at
+# least one UNATTENDED arm -- push, schedule, workflow_run, or release. Those
+# are the four ways this repo starts a run no human is waiting on.
+#
+# workflow_dispatch IS DELIBERATELY NOT AN UNATTENDED ARM, and that is a RULE,
+# not a skip list. A dispatch-only workflow (cp-ops.yml, deprecate.yml and
+# retag.yml are today's members -- recomputed every run, never enumerated)
+# cannot start without a person pressing the button, and that person is reading
+# the result. The hole this file exists to close is a red NOBODY SEES. Give any
+# of those three a cron tomorrow and the predicate pulls it in on that commit.
 _classify() {
   local wfdir="$1"
   python3 - "$wfdir" <<'PY'
@@ -60,6 +101,7 @@ import os, re, sys
 d = sys.argv[1]
 if not os.path.isdir(d):
     sys.exit(9)
+UNATTENDED = ('push', 'schedule', 'workflow_run', 'release')
 for f in sorted(os.listdir(d)):
     if not f.endswith(('.yml', '.yaml')):
         continue
@@ -68,7 +110,8 @@ for f in sorted(os.listdir(d)):
     blk = m.group(1) if m else ''
     has = lambda k: re.search(r'^\s{2}' + k + r':', blk, re.M) is not None
     push, pr = has('push'), has('pull_request')
-    off_pr = 1 if (push and not pr) else 0
+    arms = [k for k in UNATTENDED if has(k)]
+    off_pr = 1 if (arms and not pr) else 0
     # push arm reaches main? absent `branches:` under push == every branch == main.
     pm = 0
     if push:
@@ -78,7 +121,7 @@ for f in sorted(os.listdir(d)):
             pm = 1
         elif re.search(r'\bmain\b', body):
             pm = 1
-    print(f"{f}\t{off_pr}\t{pm}")
+    print(f"{f}\t{off_pr}\t{pm}\t{1 if push else 0}\t{','.join(arms) or '-'}")
 PY
 }
 
@@ -131,14 +174,20 @@ run_check() {
 
   # 1 + 5: every off-the-PR-path workflow is registered AND visible to the watcher.
   local f off pm
-  while IFS=$'\t' read -r f off pm; do
+  while IFS=$'\t' read -r f off pm haspush arms; do
     [ "$off" = "1" ] || continue
     if ! printf '%s\n' "$keys" | grep -qxF "$f"; then
-      echo "RED 1 unowned: $f is off the PR path (push, no pull_request) and has no row in .github/workflow-owners.json"
+      echo "RED 1 unowned: $f is off the PR path (unattended arm: $arms; no pull_request) and has no row in .github/workflow-owners.json"
       fails=$((fails + 1))
       continue
     fi
-    if [ "$pm" != "1" ]; then
+    # RED 5 IS A PUSH-ARM CLAIM AND ONLY A PUSH-ARM CLAIM. scripts/main-red-predicate.sh
+    # enumerates by `push:` arm, so "the watcher cannot see it" is a sentence about
+    # workflows that HAVE a push arm. A schedule-only workflow is not invisible to
+    # nothing — it is read by scripts/scheduled-arm-health.sh, which derives its own
+    # population from every cron'd workflow in the tree. Firing RED 5 at those would
+    # be a refusal about a watcher that was never the right one.
+    if [ "$haspush" = "1" ] && [ "$pm" != "1" ]; then
       echo "RED 5 invisible: $f is registered but its push arm does not include main — scripts/main-red-predicate.sh cannot see its red"
       fails=$((fails + 1))
     fi
@@ -165,7 +214,10 @@ run_check() {
   done <<< "$keys"
 
   if [ "$fails" -eq 0 ]; then
-    echo "OK: $n_off workflow(s) off the PR path, all named-owned and visible to the main-red watcher; $n_on on the PR path (owned by their PR author)."
+    local n_push n_sched
+    n_push=$(printf '%s\n' "$cls" | awk -F'\t' '$2==1 && $4==1' | wc -l | tr -d ' ')
+    n_sched=$(printf '%s\n' "$cls" | awk -F'\t' '$2==1 && $4==0' | wc -l | tr -d ' ')
+    echo "OK: $n_off workflow(s) off the PR path (no pull_request arm + an unattended arm), all named-owned — $n_push push-armed and visible to the main-red watcher, $n_sched reached only by schedule/workflow_run/release; $n_on on the PR path or dispatch-only."
     return 0
   fi
   echo "workflow-owner-check: $fails refusal(s)." >&2
@@ -250,6 +302,56 @@ EOF
     _ok "RED ARM 1: moved + unregistered" "refused by name"
   else _no "RED ARM 1: moved + unregistered" "exit $rc: $out"; fi
   rm -f "$tmp/.github/workflows/newly-moved.yml"
+
+  # RED ARM 1s — THE ARM THIS FIX EXISTS FOR. A cron'd workflow with no push arm
+  # and no pull_request arm: nothing about it is on the PR path, so nobody is
+  # told when it reds. Under the OLD predicate (`push AND NOT pull_request`) this
+  # arm goes QUIET -- that is the mutation proof. Revert the `arms and not pr`
+  # line in _classify to `push and not pr` and THIS is the arm that fails.
+  cat > "$tmp/.github/workflows/nightly.yml" <<'EOF'
+name: nightly
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+jobs: {}
+EOF
+  out=$(WOC_ROOT="$tmp" run_check 2>&1); rc=$?
+  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q 'RED 1 unowned: nightly.yml'; then
+    _ok "RED ARM 1s: cron'd + unregistered" "refused by name, arms named"
+  else _no "RED ARM 1s: cron'd + unregistered" "exit $rc: $out"; fi
+
+  # QUIET ARM — the same cron'd workflow, now registered, must PASS. Specifically
+  # it must not trip RED 5: it has no push arm at all, so "the push arm does not
+  # include main" is not a sentence about it, and firing there would be a refusal
+  # about the wrong watcher (scheduled-arm-health.sh reads the cron'd ones).
+  cat > "$tmp/.github/workflow-owners.json" <<'EOF'
+{"owners":{"offpr.yml":{"owner":"gates","why_off_pr":"fixture"},
+           "nightly.yml":{"owner":"api","why_off_pr":"fixture cron"}}}
+EOF
+  out=$(WOC_ROOT="$tmp" run_check 2>&1); rc=$?
+  if [ $rc -eq 0 ] && ! printf '%s' "$out" | grep -q 'RED 5'; then
+    _ok "QUIET ARM: cron'd + registered" "exit 0, no RED 5 — ${out}"
+  else _no "QUIET ARM: cron'd + registered" "exit $rc: $out"; fi
+
+  # QUIET ARM — a DISPATCH-ONLY workflow with no row must stay quiet. A person
+  # started it and is reading the result; demanding a registry row for it would
+  # widen the population past the property (a red nobody sees) and make the guard
+  # noisy exactly where it has nothing to say.
+  cat > "$tmp/.github/workflows/manual.yml" <<'EOF'
+name: manual
+on:
+  workflow_dispatch:
+jobs: {}
+EOF
+  out=$(WOC_ROOT="$tmp" run_check 2>&1); rc=$?
+  if [ $rc -eq 0 ] && ! printf '%s' "$out" | grep -q 'manual.yml'; then
+    _ok "QUIET ARM: dispatch-only unowned" "exit 0, never named"
+  else _no "QUIET ARM: dispatch-only unowned" "exit $rc: $out"; fi
+  rm -f "$tmp/.github/workflows/nightly.yml" "$tmp/.github/workflows/manual.yml"
+  cat > "$tmp/.github/workflow-owners.json" <<'EOF'
+{"owners":{"offpr.yml":{"owner":"gates","why_off_pr":"fixture"}}}
+EOF
 
   # RED ARM 5 — registered, but the push arm cannot reach main, so the watcher is
   # blind to it while this file reads as covered. The dangerous shape.

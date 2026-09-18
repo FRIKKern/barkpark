@@ -8,13 +8,16 @@
         "tsup.config.ts",
         "package.json",
         "tsconfig.json",
+        "astro.config.mjs",
         "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**"
       ]
     },
     "test": {
+      "dependsOn": ["^build", "build"],
       "inputs": [
         "src/**",
         "tests/**",
+        "dist/**",
         "vitest.config.ts",
         "vitest.browser.config.ts",
         "vitest.workerd.config.ts",

@@ -11,6 +11,23 @@
     "this file answers 'WHO'. Without it the watcher's issue is addressed to the repo,",
     "which is the same nobody one layer out.",
     "",
+    "THE INCIDENT WORKFLOW HAS NO ROW HERE ANY MORE, AND THAT IS THE GUARD WORKING.",
+    "posix-vacuous-green-census.yml was put BACK on the PR path on 2026-09-16 after the",
+    "same class recurred: 36 consecutive red census runs on main, from 9b9e26c23 onward,",
+    "for two freshly-landed unguarded scripts. On the PR path it has an owner by",
+    "construction again -- the author of the PR that adds the unguarded script -- so the",
+    "derived population no longer contains it, and workflow-owner-check.sh reds on a",
+    "STALE row for an on-PR workflow exactly as it reds on a MISSING row for an off-PR",
+    "one. It did, which is how this row came out.",
+    "",
+    "AND AGAIN, 2026-09-17: pipefail-sigpipe-scan.yml. Its row said a per-PR run would",
+    "re-scan the tree 'to re-derive an unchanged verdict'. The verdict was not unchanged.",
+    "Off the PR path it failed on FIFTEEN consecutive pushes to main (50 of its last 100",
+    "push runs red) with 'RATCHET BROKEN -- 104 finding(s) at confidence >= high, baseline",
+    "is 101': three new sites had landed through PRs that never ran it, and every red",
+    "named an author who had not written them. Back on the PR path, so the row is gone and",
+    "the guard reds on the stale row -- which is how it came out (task-4f360efc26a428f5).",
+    "",
     "THE POPULATION IS DERIVED, NEVER CURATED. A workflow belongs here iff it carries a",
     "`push:` arm and NO `pull_request:` arm -- i.e. it is off the PR path, so only the",
     "watcher can see its red. scripts/workflow-owner-check.sh recomputes that set from",
@@ -22,9 +39,43 @@
     "the unit a close-out can actually be pointed at. `owner` must be one of those six.",
     "",
     "`why_off_pr` IS LOAD-BEARING and is the one line the row demands for every move:",
-    "why the PR is the wrong place for this check, in a sentence a reader can dispute."
+    "why the PR is the wrong place for this check, in a sentence a reader can dispute.",
+    "",
+    "THE PREDICATE WIDENED ON 2026-09-18 (felix-w24-bl-workflows-ownership-gap).",
+    "It used to read `push: AND NOT pull_request:`, which is not the property that",
+    "matters -- it is one WAY of having it. A schedule-only workflow has no push arm",
+    "and no PR arm either, so the old predicate filed it under \"on the PR path\" and",
+    "the guard's own OK line then said, of all of them, \"owned by their PR author\".",
+    "That sentence was false about THIRTEEN of this repo's 78 workflows: nine cron'd",
+    "(paper-readers at 05:17Z, elixir-nightly at 03:17Z, absent-context-census every",
+    "six hours, ...), one workflow_run-driven (elixir-main-red-attribution), three",
+    "dispatch-only. The registry held 10 rows and the hole was 13.",
+    "",
+    "OFF THE PR PATH NOW MEANS \"CAN FAIL UNATTENDED\": no `pull_request:` arm, AND at",
+    "least one of `push`, `schedule`, `workflow_run`, `release`. Still derived, still",
+    "recomputed every run.",
+    "",
+    "DISPATCH-ONLY WORKFLOWS ARE OUT, BY RULE AND NOT BY NAME. cp-ops.yml,",
+    "deprecate.yml and retag.yml only start when a person presses the button, and",
+    "that person is reading the result -- the hole this file closes is a red NOBODY",
+    "SEES. The exclusion is the predicate (`workflow_dispatch` is not an unattended",
+    "arm), never a list: put a cron on any of the three tomorrow and the guard reds",
+    "for a missing row on that same commit.",
+    "",
+    "WHICH WATCHER SEES WHICH. A push-armed row is read by",
+    "scripts/main-red-predicate.sh, which enumerates by push arm -- that is what",
+    "RED 5 is about, and RED 5 therefore fires only on push-armed rows. A cron'd row",
+    "is read by scripts/scheduled-arm-health.sh, which derives its own population",
+    "from every cron'd workflow in the tree. elixir-main-red-attribution.yml is read",
+    "by NEITHER (it is workflow_run-driven, with no push arm and no cron); its row",
+    "names an owner, and the visibility half of that one is an open corner, stated",
+    "here rather than implied by a clean guard."
   ],
   "owners": {
+    "absent-context-census.yml": {
+      "owner": "gates",
+      "why_off_pr": "dates an ABSENCE across the whole open-PR population and the queue behind it -- a property of GitHub's run/check state at a moment in time, which no single diff changes and no PR head can reproduce."
+    },
     "cli-release-cadence.yml": {
       "owner": "cli",
       "why_off_pr": "asks whether the RELEASE CADENCE has slipped -- a property of the tag history over time, not of any one diff; a PR cannot make it true or false."
@@ -33,9 +84,21 @@
       "owner": "cli",
       "why_off_pr": "publishes a release from a tag; running it on a PR head would cut artifacts from unmerged code."
     },
+    "codebase-intel.yml": {
+      "owner": "gates",
+      "why_off_pr": "re-learns the scoring weights from the codebase's whole incident history on release and on a Monday cron; a PR head is one point in that history, not the subject."
+    },
     "deploy.yml": {
       "owner": "deploy",
       "why_off_pr": "ships merged code to real hosts; a PR head must never reach a box."
+    },
+    "elixir-main-red-attribution.yml": {
+      "owner": "api",
+      "why_off_pr": "answers 'did the PR that landed this actually RUN the test main just failed on' -- it is triggered BY the main elixir run completing, so the event it reports on does not exist on a PR."
+    },
+    "elixir-nightly.yml": {
+      "owner": "api",
+      "why_off_pr": "runs the ELEVEN tags test_helper.exs excludes from every PR and main push; putting that cost on each PR is the reason they are excluded in the first place."
     },
     "grip-suite.yml": {
       "owner": "gates",
@@ -45,25 +108,41 @@
       "owner": "gates",
       "why_off_pr": "records that a PR LANDED -- the event it reports does not exist until the merge commit does."
     },
-    "pipefail-sigpipe-scan.yml": {
+    "landed-open-report.yml": {
       "owner": "gates",
-      "why_off_pr": "a whole-tree census of shell scripts; its subject is the tree, so a per-PR run re-scans ~700 files to re-derive an unchanged verdict."
+      "why_off_pr": "walks the ledger for rows whose work merged and never closed -- a slowly-moving population in Barkpark, not a fact about any diff."
     },
-    "posix-vacuous-green-census.yml": {
-      "owner": "gates",
-      "why_off_pr": "whole-tree census of interpreter-guard vacuity; same shape as above. THIS IS THE INCIDENT WORKFLOW: it stood red on main for 11 hours unowned, which is why this file exists."
+    "paper-readers.yml": {
+      "owner": "api",
+      "why_off_pr": "inventories the LIVE production Paper corpus, which production can change without touching this repository, so a PR green would say nothing about it."
+    },
+    "pds-scratch-round-trip.yml": {
+      "owner": "deploy",
+      "why_off_pr": "boots a real scratch Postgres target, verifies and tears it down; it is a live-infrastructure round trip, not something a PR runner should be starting per push."
     },
     "release-artifact.yml": {
       "owner": "cli",
       "why_off_pr": "builds and uploads release artifacts for a pushed ref."
     },
+    "release-curator-draft.yml": {
+      "owner": "cli",
+      "why_off_pr": "opens or refreshes a draft Release once main has settled and CI on that head is green; the head it needs is main's, not the PR's."
+    },
     "release.yml": {
       "owner": "cli",
       "why_off_pr": "cuts the release itself; tag-shaped, not diff-shaped."
     },
+    "renew-mail-cert.yml": {
+      "owner": "deploy",
+      "why_off_pr": "renews the mail.barkpark.cloud LE cert via DNS-01 and reloads postfix on the CP box -- a monthly real-world side effect that must never fire from a PR head."
+    },
     "scaffy-catalog-drift.yml": {
       "owner": "cli",
       "why_off_pr": "compares the scaffy catalog against the templates on main; the comparand IS main, so on a PR it answers about the base, not the change."
+    },
+    "scheduled-arm-health.yml": {
+      "owner": "gates",
+      "why_off_pr": "reads every cron'd workflow's real scheduled-run history against GitHub; its subject is run history, which no diff changes, and on a PR it would cost ~90 gh api calls to re-derive an unchanged verdict."
     },
     "seal-reading.yml": {
       "owner": "gates",

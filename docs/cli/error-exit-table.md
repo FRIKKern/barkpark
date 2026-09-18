@@ -33,11 +33,10 @@ gateway/proxy page (nginx 502·503·504 HTML, a load-balancer banner) — carrie
 chars so an HTML page never spews to stderr. A JSON envelope whose `code` is
 merely unknown still falls to exit 1.
 
-**Compound reason tokens.** The tasks API mints reasons carrying their detail
-inline — `not_holder:<worker>`, `not_in_progress:<status>`, `criteria_unmet:<i,j>`,
-`acknowledgement_unposted:<issue>`, `invalid_lifecycle:<s>`,
-`sentinel_worker_id:<w>`. The CLI looks up the literal token first, then the
-family name before the first `:` (`reasonKey` / `lookupExit`,
+**Compound reason tokens.** Many tasks-API reasons carry their detail inline as
+`<family>:<detail>` (`not_holder:<worker>`, `criteria_unmet:<i,j>`, …); the rows
+below say which. Do not read that list as closed — the CLI looks up the literal
+token first, then the family name before the first `:` (`reasonKey` / `lookupExit`,
 `internal/cli/errors.go`) — a lookup on the reason STRING, never the status.
 `lookupExit` is the ONE consult, shared by the coded envelope, the
 `{"ok":false,"reason":…}` shape and the bare-string `{"error":"<token>"}` shape,
@@ -101,17 +100,16 @@ the API actually returns for that code.
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
 | `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string shape is handled too (below); both bucket to `6`. |
-| `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) the API does not currently emit; the other five are the confirmed server-side reasons. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
+| `fenced_off` · `stale_claim` · `stale_rev` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) the API does not currently emit; the others are confirmed server-side reasons. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
 | `not_holder` · `not_in_progress` | 409 | `6` | Stamp/close refused: the lease moved (another worker holds the claim) or the task left `in_progress`. Minted COMPOUND — `not_holder:<worker>`, `not_in_progress:<status>` (`tasks_controller/params.ex`); the CLI keys on the part before the first `:`. | `bp task get`, re-claim under your worker id, retry — RETRYABLE. |
 | `doc_changed_since_claim` · `claimed_has_worker` | 409 | `6` | The brief changed under your claim, or a named worker holds it. | Re-read / reconcile, then retry (the CLI hint names the recovery). |
 | `acknowledgement_unposted` | 409 | `5` | The task was born from an OUTSIDER's GitHub issue (`gh-<num>`) and its `ack_gate` criterion is unmet, so a `done`/`cancelled` close would end the row with the reporter never told. Compound: `acknowledgement_unposted:<issue>`. | Post the outcome on the issue and stamp the criterion with the comment URL — or `--set ack_override="<why not>"`. NOT retryable as sent; `criteria_override` does not discharge it. |
-| `criteria_mismatch` · `criteria_index_out_of_range` · `criterion_text_required` · `note_required` | 409/422 | `5` | Stamp payload guards: `--criterion-text` does not match the row at `--criterion N`, the index is off the end, a `--met` came without its text, or a `--miss` without a note. | Fix the flag and re-send — NOT retryable as sent. |
-| `criteria_unmet` | 409 | `5` | A `done` close over criteria unmet ON THE TASK AS STORED — criteria flipped in the same close do not count. Compound: `criteria_unmet:<i,j>` naming the 0-based indices. | `bp task stamp` each criterion, or close on the record with `--set criteria_override="<why anyway>"`. NOT retryable as sent: the fix is outside the request. |
-| `invalid_lifecycle` | 409 | `5` | The close names a terminal status the transition table disallows (`tasks/close.ex`). Compound: `invalid_lifecycle:<s>`. | Send an allowed status — a different status is a different request, so a verbatim retry never succeeds. |
-| `sentinel_worker_id` | 409 | `5` | The worker id is a placeholder, not an identity — `none`, `null`, `nil`, `-` (`tasks/internal.ex`). Compound: `sentinel_worker_id:<w>`. | Pass the worker id that holds the claim — NOT retryable as sent. |
+| `criteria_mismatch` · `criteria_index_out_of_range` · `criterion_text_required` · `note_required` · `invalid_criteria` · `evidence_required` · `observed_rev_required` | 409/422 | `5` | Stamp payload guards: `--criterion-text` mismatches the row at `--criterion N`, the index is off the end, a `--met` without its text or without evidence, a `--miss` without a note, a criteria payload of the wrong shape, or a withdrawal with no live claim to fence against. | Fix the flag and re-send (`observed_rev_required`: pin `--observed-rev <rev>`) — NOT retryable. |
+| `criteria_unmet` · `criteria_raised_on_abandon` | 409 | `5` | A `done` close over criteria unmet ON THE TASK AS STORED (flips in the same close do not count), or a `cancelled`/`blocked` close that would RAISE a `met` false→true — a cancel may ABANDON criteria, never assert them (`tasks/close.ex`). Both compound: `:<i,j>`, 0-based. | `bp task stamp` each criterion, or `--set criteria_override="<why anyway>"` — which does NOT discharge `criteria_raised_on_abandon`, the one gate here with no override flag: drop the `met` flips instead. NOT retryable as sent. |
+| `invalid_lifecycle` · `sentinel_worker_id` | 409 | `5` | A terminal status the transition table disallows (`tasks/close.ex`), or a placeholder worker id — `none`, `null`, `nil`, `-` (`tasks/internal.ex`). Both compound: `:<s>` / `:<w>`. | Send an allowed status, or the worker id holding the claim — a different value is a different request, so a verbatim retry never succeeds. |
 | `merge_gated_criterion` | 409 | `5` | A builder `--met` on a criterion the LEAD closes on merge (`tasks/stamp.ex`). Minted BARE, no `:<detail>` suffix. | `--merge-gated "<why>"`; bare → `merge_gated_reason_required`, or set `"merge_gate": false` if the match was on its prose. NOT retryable as sent. |
 | `illegal_transition` | 422 | `5` | A lifecycle stage the task cannot make from its current state (`tasks_controller.ex`). Also arrives BARE-STRING as `{"error":"illegal_transition"}` from the cloud router; both bucket to `5`. | `the transition is impossible from this state` — the one member of this family a retry can NEVER satisfy. |
-| `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone. |
+| `share_expired` · `unknown_task` | 410/409 | `4` | Media share link expired/gone; or the task row vanished between lookup and close. | `share expired` — gone; no retry brings it back. |
 | `rate_limited` | 429 | `7` | Throttled. | `rate limited; retry after <Retry-After>s`. |
 | `rate_limited` (+`details.retry_after`) | 429 | `7` | Throttled with an explicit hint. | Same; back off on `details.retry_after`. |
 | `internal_error` | 500 | `8` | Server-side failure. | `server error (<request_id>)` — surface it for support. |
@@ -136,9 +134,7 @@ This holds for EVERY refusal, the publish-wall rows included — even the two
 there, never zero bytes. A verb with a cleanup side effect (the create's refused
 publish leg discards the draft it just made) folds that outcome INTO the one
 envelope as `details.draft_discarded` / `details.discard_error` rather than
-emitting a second document — `json.load` reads the first value and stops. Worked
-consumer: `bp_probe` in `scripts/pds-charter-ledger-sweep.sh` runs
-`json.loads(p.stdout)` and reads `d["error"]["code"]`.
+emitting a second document — `json.load` reads the first value and stops.
 
 ## Codes that don't cleanly fit — proposed buckets
 
@@ -174,7 +170,9 @@ Two rules keep it closed:
 1. **`codeExit` must be a superset of `Barkpark.Content.Errors.known_codes/0`.**
    `TestCodeExitCoversKnownAPICodes` (`internal/cli/errors_api_parity_test.go`)
    parses the API source and reds when a code has neither a bucket nor a named
-   exclusion — so a new public code cannot land CLI-blind.
+   exclusion — so a new public code cannot land CLI-blind. It CANNOT see the
+   close/stamp refusal family (`tasks/{close,stamp}.ex` → `conflict/3`), whose
+   gate is `TestCodeExitCoversCloseRefusalVocabulary`; its fallback is `2`.
 2. **Bucket by the status the emitter actually returns**, never the code's name:
    `400`→`2`, `401`/`403`→`3`, `404`→`4`, `409`/`412`→`6`, `402`/`413`/`422`→`5`,
    `429`→`7`, `5xx`→`8`. Two live codes read against this rule —
@@ -191,19 +189,12 @@ Two members of `known_codes/0` are excluded on purpose, with reasons in
 `codeExitNotWireBucketable`: `hollow_paper` and `structure` are never a
 top-level `error.code` — they are violation entries nested in another body.
 
-The other exclusion kind is now **empty**, and that is the point. `export_failed`,
-`invalid_mode` and `session_unavailable` were each emitted at **two statuses**
-with opposite retryability, so no exit code could be honest about both arms. The
-API has since split each into one code per arm, so all six carry a real bucket:
-
-| Retired token | Retryable arm | Permanent arm |
-|---|---|---|
-| `export_failed` | `export_transport_failed` — 503, exit 8 | `export_build_failed` — 422, exit 5 |
-| `session_unavailable` | `session_restarting` — 503 + `retry-after`, exit 8 | `session_start_failed` — 422, exit 5 |
-| `invalid_mode` | *(neither arm is retryable)* `invalid_import_mode` — 422, exit 5 | `invalid_deploy_mode` — 400, exit 5 |
-
-If this exclusion kind ever reappears, the fix belongs in the API — split the
-token — not in a new entry here.
+The other exclusion kind — one token emitted at **two statuses** with opposite
+retryability, so no exit code could be honest about both arms — is now **empty**:
+`export_failed`, `invalid_mode` and `session_unavailable` were each split in the
+API into one code per arm, and all six halves carry a real bucket. If that kind
+ever reappears, the fix belongs in the API — split the token — not in a new
+entry here.
 
 ## Envelope-version note (does not change the table)
 

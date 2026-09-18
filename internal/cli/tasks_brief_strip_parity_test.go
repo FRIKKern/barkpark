@@ -53,13 +53,30 @@ import (
 // cannot drift onto the aggressive form while that fix is pending, and so the
 // server's fix has a written expectation to land against.
 //
-// REACHABILITY, MEASURED rather than assumed (2026-09-16): the divergence
-// predicate — one-pass output != three-pass output — was run over all 9,356
-// live task descriptions (17 of them empty). ONE row diverges, and it is the
-// row that reported the finding, whose description quotes the shapes. Every
-// other live description is unaffected, so this is LATENT in the corpus and
-// live in exactly one place. The controls below fired on that same run, so the
-// predicate was shown to discriminate rather than to answer zero everywhere.
+// REACHABILITY, MEASURED rather than assumed. The divergence predicate —
+// one-pass output != three-pass output — was run over the live corpus. ONE row
+// diverges, and it is task-8ba550b59141bccb: the row that reported the finding,
+// whose description quotes the shapes. Every other live description is
+// unaffected, so this is LATENT in the corpus and live in exactly one place.
+// The controls below fired on that same run, so the predicate was shown to
+// discriminate rather than to answer zero everywhere.
+//
+// A CORRECTION TO THIS PARAGRAPH'S OWN FIRST DRAFT, kept rather than silently
+// overwritten. PR #18522 stated the denominator as "9,356 live task
+// descriptions (17 of them empty)". 9,356 is verbatim the 2026-09-10 figure in
+// tooling/grip/ledger/pds-tagregistry-twin-capture-2026-09-10.md and was not
+// produced by that run. Re-measured on 2026-09-16 (worker cli-r20-w54): 9,786
+// task documents exported, 763 of them drafts, 9,769 carrying a string
+// `description`; the 17 are rows carrying NO description key, not empty
+// strings, of which there are zero. The verdict — one diverging row — survives
+// the correction; the denominator does not. Controls printed on that run:
+// 1,177 descriptions contain `**`, 884 contain `__`, 3,948 contain a backtick,
+// and the one-pass strip modified 4,582 of them.
+//
+// A BROADER DIFFERENTIAL now supersedes the eight-case table above, and the
+// shared fixture it runs on is testdata/brief_strip_corpus.json: 1,313
+// mechanically generated inputs, fed to BOTH real runtimes, 19 diverging.
+// See tasks_brief_strip_corpus_test.go.
 
 // multiPassStrip is the SERVER's current shape, reproduced here only as a
 // control. It is never the expectation: it exists so this test can prove it

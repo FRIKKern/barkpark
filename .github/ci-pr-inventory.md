@@ -355,12 +355,35 @@ workflow with no `pull_request` arm starts no run.
 | workflow | check runs it published per PR | fired on | moved from | moved to | reason, in its own words |
 |---|---|---|---|---|---|
 | `cli-release-cadence.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: *"a red here is cleared by an ACT OF RELEASE, not by a change to the PR"*. A verdict that no PR can change has no business rendering on every PR — and it is in DRIFT today (5 commits past `cli-v1.21.0`), so it has been publishing an unclearable advisory red on every unrelated PR. |
-| `posix-vacuous-green-census.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: the *"population is derived from the tree on every run"*. The subject is the tree; `push: main` sees every new member within minutes of its merge, named, by the same predicate. |
+| `posix-vacuous-green-census.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: the *"population is derived from the tree on every run"*. The subject is the tree; `push: main` sees every new member within minutes of its merge, named, by the same predicate. **REVERSED 2026-09-16 — see the note below the table; the `pull_request` arm is back and this row is HISTORY, not the current state.** |
 | `pipefail-sigpipe-scan.yml` | **2** | 10/10 heads | `pull_request` + `push: main` + weekly `schedule` + `workflow_dispatch` | `push: main` + weekly `schedule` + `workflow_dispatch` | Its own header: *"This gate asks a question about the REPO STATE, not about a diff, so its primary venue is push-to-main plus a schedule"*. The HIGH-confidence ratchet against `scripts/pipefail-sigpipe-baseline.txt` reds identically on a main push — a rise is a rise whichever side of the merge measures it. |
 
 All three already branch on `github.event_name != 'pull_request'` inside their
 dispatcher and **run everything** on that branch, so nothing below the dispatcher
 needed editing and no job silently stops running.
+
+### `posix-vacuous-green-census.yml` was moved BACK on 2026-09-16
+
+The move above cost more than it saved, and the cost is a measurement, not an
+argument. The last green census on main was `743ae6b85` (21:26:31 +02). The very
+next commit, `9b9e26c23` (#18662), added `scripts/charter-corpus-hygiene-check.sh`
+with a process substitution and no interpreter guard; `ee125c6ae` (#18707) then
+added `scripts/doc-drift-check.sh` the same way. **36 consecutive census runs on
+main failed**, across roughly three hours, and for all of them
+`sh scripts/charter-corpus-hygiene-check.sh` exited **0** having compared nothing
+— the exact vacuous green the census exists to catch, live on main.
+
+The reason given for the move — `push: main` "sees every new member within
+minutes of its merge, named" — is true, and it is the problem: the thing it sees
+is already merged. The two check runs per PR are the price of the offender's own
+PR owning the red instead of every lane inheriting it. The arm is back, still
+with no workflow-level `paths:` (the filter stays on the `census:` job's `if:`
+over the `changes` output, so the context skips rather than going absent), and it
+still blocks nothing — the workflow publishes no context in the required set.
+
+`cli-release-cadence.yml` and `pipefail-sigpipe-scan.yml` are NOT reversed: their
+reasons are about verdicts a PR cannot change, which is a different argument from
+this one. This reversal is not evidence against theirs.
 `.github/required-checks.json` is byte-unchanged.
 `.github/main-push-workflows.txt` is byte-unchanged: its tiers are derived from
 the `push:` arm, which no edit here touches.
@@ -434,3 +457,51 @@ rule's third clause keeps it and why it is NOT moved here: its harnesses are the
 only lane that runs them, and they are triggered by the very files a PR edits.
 Its 50 are a JOB-COUNT problem, not a venue problem — nearly all of them skip —
 and folding them is the same class of work as folding the required four.
+
+## RE-MEASURED 2026-09-17 (task-dee226be3107a98b, gates-r21-w8)
+
+Six PR heads merged 2026-09-17, counted as **distinct check-run names** with
+`gh api --paginate` and `sort -u` (a plain `per_page=100` read truncates: two of
+the six heads render more than 100 rows, and a fleet lead took a false
+"required context absent" off exactly that trap today):
+
+| head | PR | rows | distinct names |
+|---|---|---|---|
+| `1743cdd15b` | #18915 | 135 | **126** |
+| `a3536a1fab` | #18922 | 134 | **125** |
+| `ba5eaa906b` | #18921 | 79 | 68 |
+| `81a3da53bd` | #18912 | 77 | 68 |
+| `6492825f1e` | #18920 | 70 | 61 |
+| `4b1b658827` | #18916 | 70 | 61 |
+
+**The row's filing of "55 check runs from 46 workflows" is low by roughly 2x at
+the median and by more than 2x at the tail.** The distribution is bimodal and
+the split is entirely `shell-harnesses.yml`: the four heads it missed read
+61–68, the two it hit read 125–126.
+
+The required-four floor **re-confirms at 26** (`console-harness` 9 + `elixir` 8 +
+`cloud` 7 + `pr-task-gate` 2), so the §"under 20" verdict above stands unchanged:
+**UNREACHABLE BY TRIGGER EDITS.**
+
+### One committed claim above is CORRECTED, not re-confirmed
+
+The section above says of `shell-harnesses.yml`'s job count: *"nearly all of
+them skip"*. **That is true of some heads and false of others, and a one-head
+sample cannot tell which.** Measured per job conclusion:
+
+| head | PR | skipped | success |
+|---|---|---|---|
+| `a3536a1fab` | #18922 | 47 | 7 |
+| `1743cdd15b` | #18915 | **0** | **54** |
+
+On #18915 every one of the 54 jobs **executed** — 54 real runner boots over a
+15-minute wall clock (`09:02:10Z` → `09:17:21Z`), the largest single real-compute
+event on the PR path. The dispatcher's per-harness booleans do not narrow on a
+head that touches a broad path, and on such a head this one advisory workflow
+costs more than all four required workflows combined.
+
+So its 54 are **not** only a rollup-depth problem. `--skipped` split on one head
+is not a property of the workflow, and the sentence above should be read as
+describing #18922's shape, not the general one. Folding them remains the same
+class of work as folding the required four, and is filed separately — this
+amendment changes no trigger and moves no workflow.

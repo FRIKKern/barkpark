@@ -407,14 +407,45 @@ if [ "$MODE" = selftest ]; then
   #     (captured to a variable, never piped: `cmd | grep -q` closes the pipe
   #     early and pipefail then reports the WRITER's SIGPIPE as a failure — the
   #     exit-code trap this wave audits for.)
-  env_out=""
-  DOC_BUDGETS_SPAN_ONLY=1 bash "$SELF" >"$TMP/env-run.out" 2>&1 \
-    || fail_selftest "the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set"
+  #     ARM (i) IS A DIFFERENTIAL, NOT A TREE ASSERTION (task-1c8165ef0ada4fcd).
+  #     It used to run the full gate with the env var set and `|| fail_selftest
+  #     "the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set"`. That
+  #     asserts a property OF THE TREE — "no doc is over its cap" — which this
+  #     arm does not test and cannot fix. So the moment ONE document went over
+  #     cap, the arm redded, the whole --selftest exited 1 on a CONSTANT sentence
+  #     naming no document, and under the runner's `bash -e` the shipping gate on
+  #     the next line never ran. Its per-file `FAIL: <doc> is <n>B, cap is <m>B`
+  #     lines never reached the log, and scripts/main-red-breaker.sh — which
+  #     classifies on whether a red NAMES what it found — read the step as
+  #     OPAQUE-RED / OWNERSHIP-UNDETERMINED on every PR that inherited it
+  #     (PR #19081, run 35253987928, where the breaker diagnoses this exact cause
+  #     by name). A tripwire that reds on the corpus it is measuring is measuring
+  #     the corpus, not itself.
+  #
+  #     What arm (i) actually claims is that the RETIRED env var changes NOTHING.
+  #     That is a differential and it is tree-independent: run the full gate with
+  #     and without DOC_BUDGETS_SPAN_ONLY=1 and demand the SAME exit status and
+  #     the same presence of the sections the env var used to skip. On an
+  #     over-budget tree both runs exit 1 and the arm is still meaningful; if the
+  #     env var ever went back to disarming the caps loop, the ENV run would go
+  #     green (or lose the card-count line) while the control stayed red, and
+  #     this arm reds on the DIFFERENCE. Statuses are captured with `|| rc=$?`
+  #     because this script runs under `set -e` too.
+  env_rc=0
+  DOC_BUDGETS_SPAN_ONLY=1 bash "$SELF" >"$TMP/env-run.out" 2>&1 || env_rc=$?
+  ctl_rc=0
+  bash "$SELF" >"$TMP/ctl-run.out" 2>&1 || ctl_rc=$?
   env_out="$(cat "$TMP/env-run.out")"
+  if [ "$env_rc" -ne "$ctl_rc" ]; then
+    fail_selftest "DOC_BUDGETS_SPAN_ONLY=1 CHANGED the full gate's verdict (env run exit $env_rc, control exit $ctl_rc) — the retired env var is live again. ENV RUN OUTPUT: $env_out"
+  fi
   case "$env_out" in
     *"card count is exactly 7"*) ;;
-    *) fail_selftest "DOC_BUDGETS_SPAN_ONLY=1 still skipped the card-count section" ;;
+    *) fail_selftest "DOC_BUDGETS_SPAN_ONLY=1 still skipped the card-count section. ENV RUN OUTPUT: $env_out" ;;
   esac
+  if ! grep -q '^ok:   docs/cards/' "$TMP/env-run.out" && ! grep -q '^FAIL: docs/cards/' "$TMP/env-run.out"; then
+    fail_selftest "DOC_BUDGETS_SPAN_ONLY=1 still skipped the fixed-caps loop (no per-file line for any card). ENV RUN OUTPUT: $env_out"
+  fi
 
   # (j) THE FIXED-CAPS TABLE CANNOT GO DARK. Every arm above runs --span-only,
   #     which skips the caps loop entirely — so before this arm existed, a blind

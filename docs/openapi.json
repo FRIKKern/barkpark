@@ -11496,6 +11496,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Narrow the listing to ONE dataset — THE INDEX SCOPE SELECTOR. Absent: the page spans every dataset in the caller's workspace/project scope (`page.datasets` says which) and a doc_id living in more than one of them is WITHHELD and named once in `page.dataset_ambiguous`. Named: only that dataset's rows, `page.dataset_scope` reads \"named\", and a dataset holding no rows answers with an EMPTY page rather than the global one.",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -15500,9 +15509,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"
@@ -17665,9 +17683,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"

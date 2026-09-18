@@ -35,14 +35,48 @@ SELF="$(cd -P -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
 EXIT_VIOLATION=1
 EXIT_CORPUS=3
 
-DIRS=(
-  "packages/core/src"
-  "packages/nextjs/src/client"
-  "packages/nextjs/src/server"
-  "packages/nextjs/src/webhook"
-  "packages/nextjs/src/draft-mode"
-  "packages/nextjs/src/csp"
-)
+# THE CORPUS IS DERIVED, NOT LISTED.
+#
+# This used to be a hand-written list of five @barkpark/nextjs subpath dirs
+# (client, server, webhook, draft-mode, csp) plus packages/core/src. tsup builds
+# EIGHT subpath source dirs under packages/nextjs/src, so `actions`, `preload`
+# and `revalidate` were outside the scan — `actions` being the client bundle
+# every consumer of `useOptimisticDocument` ships.
+#
+# MEASURED, not argued: planting `import { createHmac } from 'node:crypto'` in
+# packages/nextjs/src/actions/index.ts left this script's report BYTE-IDENTICAL
+# — same one pre-existing draft-mode violation, same "44 file(s)" — because the
+# directory was never read. An enumeration cannot notice the entry it is missing,
+# and the list had already fallen three dirs behind the build.
+#
+# So: read the tree. Every immediate subdirectory of packages/nextjs/src is a
+# subpath source dir and is scanned; a new one is covered on its first run and
+# nothing here needs editing.
+#
+# KNOWN SCOPE (stated, not hidden): the loose *.ts files directly under
+# packages/nextjs/src (index.ts, metadata.ts, tag-prefix.ts) are barrels/helpers
+# and stay out of the corpus, as they were before.
+DIRS=("packages/core/src")
+for _d in packages/nextjs/src/*/; do
+  DIRS+=("${_d%/}")
+done
+unset _d
+
+# The one expectation that does NOT come from the tree it measures. A derived
+# corpus agrees with a gutted tree by construction: delete every subpath dir and
+# the derivation happily scans one directory and calls it clean. The literal is
+# what makes that a refusal. Below it is a HARNESS failure (exit 3), never a
+# clean read; above it is fine and needs no edit (a new subpath is covered
+# automatically) — only a DELIBERATE removal has to come here and lower it.
+CORPUS_FLOOR=9
+if [ "${#DIRS[@]}" -lt "$CORPUS_FLOOR" ]; then
+  echo "CANNOT READ: the derived corpus is ${#DIRS[@]} dir(s), floor is $CORPUS_FLOOR" >&2
+  echo "  Derived: ${DIRS[*]}" >&2
+  echo "  A subpath source dir was renamed, moved or deleted, or this script is running" >&2
+  echo "  from the wrong working directory (it must be js/). Refusing to scan a gutted" >&2
+  echo "  corpus and report it clean." >&2
+  exit "$EXIT_CORPUS"
+fi
 
 # The legacy un-prefixed specifier set (`import crypto from "crypto"`) needs the
 # Node builtin list. It is DERIVED at run time from the running Node, never

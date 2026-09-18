@@ -4,6 +4,7 @@ import {
   resolveEnv,
   createBarkparkClient,
   fetchFlagshipDoc,
+  flagshipMarkers,
 } from '../lib/barkpark'
 
 // All of this runs at BUILD time (Astro static output). A missing required env
@@ -11,7 +12,11 @@ import {
 // content link throws too — a broken build must never reach visitors.
 const env = resolveEnv()
 const bp = createBarkparkClient(env)
-const { doc } = await fetchFlagshipDoc(bp, env)
+const flagship = await fetchFlagshipDoc(bp, env)
+const { doc } = flagship
+// The deploy markers live in lib/barkpark.ts so the EMPTY case is assertable
+// without an Astro build — see `flagshipMarkers`.
+const markers = flagshipMarkers(flagship)
 
 const pageTitle = doc ? `${doc.title} · Barkpark Astro starter` : 'Barkpark Astro starter'
 ---
@@ -20,8 +25,8 @@ const pageTitle = doc ? `${doc.title} · Barkpark Astro starter` : 'Barkpark Ast
   title={pageTitle}
   buildId={env.buildId}
   contentRev={env.contentRev}
-  docId={doc?._id ?? ''}
-  docTitle={doc?.title ?? ''}
+  docId={markers.docId}
+  docTitle={markers.docTitle}
 >
   <header>
     <p style="margin:0 0 .25rem;color:var(--muted);font-size:.85rem;letter-spacing:.04em;text-transform:uppercase;">

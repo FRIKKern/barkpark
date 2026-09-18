@@ -59,13 +59,21 @@ defmodule Barkpark.Search.HitEnvelope do
   `(sort_key, id)` tuple to seek past; offset is the only continuation this
   surface can honestly mint.
 
-  ONE CALLER-SIDE GAP REMAINS, named rather than hidden: `SearchChannel`
-  clamps a `"offset"` param on its `"query"` message but never threads it into
-  `build/5`, so a WS page two computes both `hasMore` and `nextOffset` against
-  an assumed offset of `0`. That is a one-line fix in `search_channel.ex`,
-  which this builder does not own. The two fields stay CONSISTENT under it —
-  they are derived from the same `offset` — so the channel under-reports its
-  position rather than contradicting itself.
+  THE CALLER-SIDE GAP IS CLOSED (task-2fcfad0f92b49f6d). `SearchChannel` used
+  to clamp an `"offset"` param on its `"query"` message and never thread it
+  into `build/5`, so a WS page two computed `offset`, `nextOffset` AND
+  `hasMore` against an assumed offset of `0`. Because all three derive from the
+  same base they stayed mutually CONSISTENT under it — the channel
+  under-reported its position without ever contradicting itself, which is why
+  no self-consistency check ever caught it. `build_reply/9` now threads
+  `opts_base[:offset]` — the same clamped value handed to
+  `Content.search_documents/3` — at both the reply and the P5 live-push call
+  sites, and `search_channel_test.exs` asserts the envelope against the
+  REQUESTED offset rather than against itself.
+
+  `FederatedSearchController` remains the one caller that passes no `:offset`,
+  deliberately: `rekey_federated/1` below drops `hasMore`/`offset`/`nextOffset`
+  together, so that payload is silent about paging rather than mis-stating it.
   """
 
   alias Barkpark.Content.{CallerContext, Envelope}

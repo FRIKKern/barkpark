@@ -238,6 +238,7 @@ func runHetznerServerTypes(out *writer, g globals, args []string) int {
 	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(types))
 		for _, t := range types {
+			locs, known := hzServerTypeLocations(t)
 			rows = append(rows, map[string]any{
 				"id":           t.ID,
 				"name":         t.Name,
@@ -248,6 +249,13 @@ func runHetznerServerTypes(out *writer, g globals, args []string) int {
 				"storage_type": string(t.StorageType),
 				"cpu_type":     string(t.CPUType),
 				"architecture": string(t.Architecture),
+				// Per-location stock. `locations`/`available_at` are null (not
+				// []) when the API never measured it: an empty list is the
+				// MEASURED "in stock nowhere" answer, and the two facts must
+				// not collapse into one another.
+				"availability_known": known,
+				"locations":          locs,
+				"available_at":       hzAvailableAt(locs, known),
 			})
 		}
 		out.emitStructured(map[string]any{"server_types": rows})
@@ -255,6 +263,7 @@ func runHetznerServerTypes(out *writer, g globals, args []string) int {
 	}
 	rows := make([][]string, 0, len(types))
 	for _, t := range types {
+		locs, known := hzServerTypeLocations(t)
 		rows = append(rows, []string{
 			strconv.FormatInt(t.ID, 10),
 			hzCell(t.Name),
@@ -263,10 +272,78 @@ func runHetznerServerTypes(out *writer, g globals, args []string) int {
 			fmt.Sprintf("%d GB", t.Disk),
 			hzCell(string(t.CPUType)),
 			hzCell(string(t.Architecture)),
+			hzAvailableCell(locs, known),
 		})
 	}
-	renderHzTable(out, []string{"ID", "NAME", "CORES", "MEMORY", "DISK", "CPU", "ARCH"}, rows)
+	renderHzTable(out, []string{"ID", "NAME", "CORES", "MEMORY", "DISK", "CPU", "ARCH", "AVAILABLE"}, rows)
 	return exitOK
+}
+
+// hzServerTypeLocations projects ServerType.Locations — the per-location stock
+// signal — into JSON-ready rows, and reports whether the API measured it at all.
+//
+// Source discipline: this reads ServerType.Locations and ONLY that. The
+// Datacenter-side ServerTypes.Available list is deprecated (it sunsets
+// 2026-10-01) and must never feed this surface.
+//
+// The second return is the whole point of the function. hcloud-go leaves
+// ServerType.Locations nil when the response carried no `locations` key at all,
+// and gives a non-nil zero-length slice when it carried `"locations": []`.
+// Those are different facts — "nobody told us" versus "measured: in stock in
+// zero locations" — and a caller that renders both as an empty list turns an
+// absence into a false out-of-stock verdict. Callers MUST branch on known.
+func hzServerTypeLocations(t *hcloud.ServerType) ([]map[string]any, bool) {
+	if t == nil || t.Locations == nil {
+		return nil, false
+	}
+	locs := make([]map[string]any, 0, len(t.Locations))
+	for _, l := range t.Locations {
+		row := map[string]any{
+			"available":   l.Available,
+			"recommended": l.Recommended,
+			"deprecated":  l.IsDeprecated(),
+		}
+		if l.Location != nil {
+			row["id"] = l.Location.ID
+			row["name"] = l.Location.Name
+		}
+		locs = append(locs, row)
+	}
+	return locs, true
+}
+
+// hzAvailableAt lists the location names currently in stock. nil when
+// unmeasured; an empty (but non-nil) slice when measured and in stock nowhere.
+func hzAvailableAt(locs []map[string]any, known bool) []string {
+	if !known {
+		return nil
+	}
+	names := make([]string, 0, len(locs))
+	for _, l := range locs {
+		if avail, _ := l["available"].(bool); !avail {
+			continue
+		}
+		if name, _ := l["name"].(string); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// hzAvailableCell renders the AVAILABLE table column. Three distinct strings,
+// because there are three distinct facts: "?" (the API never measured it),
+// "none" (measured: out of stock everywhere) and the comma-joined location
+// names. "—" is deliberately NOT used here — hzCell spends that glyph on "empty
+// string", and an unmeasured signal must not look like an empty one.
+func hzAvailableCell(locs []map[string]any, known bool) string {
+	if !known {
+		return "?"
+	}
+	names := hzAvailableAt(locs, known)
+	if len(names) == 0 {
+		return "none"
+	}
+	return sanitizeCell(strings.Join(names, ","))
 }
 
 func runHetznerLocations(out *writer, g globals, args []string) int {
@@ -605,6 +682,10 @@ FLEET (control plane — needs 'bp login')
             source is quiet, never a fake zero          (bp cloud usage -h)
   members   your team's seats + pending invitations, the console's Members
             panel in the terminal                       (bp cloud members -h)
+  token     mint · ls · revoke the control-plane credential a CI job bears —
+            the console's API-tokens panel, from the terminal. The plaintext is
+            NEVER printed by default: --out writes a 0600 file, --reveal is the
+            explicit opt-in                              (bp cloud token -h)
   autoupdate pin · unpin · pause · resume one instance's self-update policy
                                                     (bp cloud autoupdate -h)
   rollout   the fleet-wide autoupdate brake: status · halt · resume
@@ -660,7 +741,9 @@ RESOURCES
                 (S3 credentials, not the API token — bp cloud hetzner storage -h)
   backup        Postgres backups to Object Storage: create · list · restore ·
                 prune                               (bp cloud hetzner backup -h)
-  server-types  the offered server types            (read-only)
+  server-types  the offered server types + per-location stock (read-only;
+                AVAILABLE is "?" when the API did not report stock at all,
+                "none" when it reported it and nothing is in stock)
   lb-types      the offered load-balancer types     (read-only)
   locations     the available locations             (read-only)
   datacenters   the available datacenters           (read-only)

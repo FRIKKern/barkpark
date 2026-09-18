@@ -156,7 +156,10 @@ defmodule Barkpark.PdsDoorCensusTest do
           "A RETIRED- PRICE IS REFUSED",
           "AN UNANCHORED PREFIX IN FRONT OF CPU= IS REFUSED",
           "THE PARTITION PRINTS THE FULL VOCABULARY INCLUDING ZEROES",
-          "THE SUM IS ASSERTED"
+          "THE SUM IS ASSERTED",
+          "WIRED-CLAIM FIRES",
+          "WIRED-CLAIM CONTROL",
+          "WIRED-CLAIM FAIL-CLOSED"
         ] do
       assert out =~ arm,
              "the `#{arm}` arm is gone from the selftest. It covers a silence that was live on " <>
@@ -570,6 +573,36 @@ defmodule Barkpark.PdsDoorCensusTest do
     assert ctx.check_rc == 0,
            "the census reds on this tree, so the freshness above was asserted against a run " <>
              "that already failed for some other reason.\n#{out}"
+  end
+
+  test "EVERY THROUGH price row is graded or explicitly stood down — no row is silently ungraded",
+       ctx do
+    out = ctx.check_out
+
+    # THE HOLE THIS PINS. Before the PRICE-UNGRADED ruling a THROUGH row with no
+    # `key=` was passed over without a word, so the freshness arm graded TWO
+    # rows of NINE while `ERRORS : 0` read as a verdict on all nine. The rule is
+    # now a PREDICATE and not a skip list: a row carries `arm=<argv> key=<12
+    # hex>` or `ungraded-until=<YYYY-MM-DD>` in the field after `load1=<n>`, and
+    # a row with neither reds. A NEW row pasted with neither reds on its first
+    # --check, which a list of known-unkeyed basenames could never do.
+    # MATCHED AS AN ERROR LINE, NEVER AS A BARE SUBSTRING, AND THAT IS A REPAIR
+    # RATHER THAN A STYLE: the census PRINTS each price cell, and a shipped cell
+    # explains its own tokens in trailing prose. The first version of this
+    # assertion was `refute out =~ "PRICE-UNGRADED"` and it reddened on a GREEN
+    # census — the pds-door-census.sh row says "the PRICE-UNGRADED ruling landed
+    # with seven arms" in the prose the table reproduces verbatim. It is the same
+    # defect price_key_token was rewritten to be positional for, arriving one
+    # layer up. The emitted shape is `  <basename>: PRICE-UNGRADED — …` at the
+    # head of a line; prose never is.
+    refute out =~ ~r/^\s+\S+: PRICE-UNGRADED/m,
+           "a THROUGH price row is neither keyed nor stood down with a dated " <>
+             "`ungraded-until=`. Re-take it on a quiet host with `--measure <basename> " <>
+             "<its gated arm>`, or stand it down explicitly.\n#{out}"
+
+    assert ctx.check_rc == 0,
+           "the census reds on this tree, so the assertion above was made against a run that " <>
+             "already failed for some other reason.\n#{out}"
   end
 
   test "the COUNTS block ACCOUNTS FOR every row of the column, zeroes included", ctx do

@@ -80,7 +80,7 @@
 # 127 distinct hashes (the 18-row boilerplate gap), 78 off-vocabulary
 # dispositions. Exit 1.
 #
-# CLAUSE 4 OF THE DONE-CONDITION — LIVE COVERAGE (wave 25, PDS-D346/D347).
+# CLAUSE 4 OF THE DONE-CONDITION — LIVE COVERAGE (wave 25, PDS-D346/PDS-D347).
 # Clauses 1-3 above are CLOSURE-scoped and they are correctly so: distinctness
 # and vocabulary are properties of everything ever written. But they are all
 # satisfiable by a board that says NOTHING. A live row with no disposition lands
@@ -97,7 +97,7 @@
 #   (c) a LIVE `parked` row with no STRUCTURED `reopen_trigger` — a park with
 #       no machine-evaluable way back out is a park nobody will ever revisit.
 #
-# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (wave 27, PDS-D372/D373).
+# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (wave 27, PDS-D372/PDS-D373).
 # Clause 4 asks whether a live row SAYS anything. It never asks whether what the
 # row says AGREES with what the queue does with it. Measured on the live board
 # 2026-07-31: THIRTEEN closure rows are simultaneously lifecycle-claimable and
@@ -139,7 +139,7 @@
 # 2026-07-30 that is 0 structured against 40 prose-only, and a summed counter
 # would have read 40 and called it coverage.
 #
-# CLAUSE 4(a) IS ROUND-ANCHORED (wave 26, PDS-D364/D365). Clause 4(a) as wave 25
+# CLAUSE 4(a) IS ROUND-ANCHORED (wave 26, PDS-D364/PDS-D365). Clause 4(a) as wave 25
 # shipped it is STRUCTURALLY UNREACHABLE by any round that discovers work: a row
 # is BORN with no disposition, so a round that files a single new row can never
 # satisfy "every live row carries a disposition" at the instant it wants to
@@ -2324,7 +2324,7 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     # worklist, and a count nobody can turn back into rows is not a worklist.
     #
     # 4(a) IS THE ONE ROUND-ANCHORED LINE, and this is the ONE place the anchor
-    # enters (PDS-D364/D365). A row born AFTER the round started cannot have been
+    # enters (PDS-D364/PDS-D365). A row born AFTER the round started cannot have been
     # adjudicated by it, so it is the NEXT round's inbox -- named, never merely
     # counted. Everything else here, including 4(b) and 4(c), stays whole-live: a
     # row that HAS a disposition owes a reason regardless of when it was born.
@@ -2353,7 +2353,7 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     live_parked = [r for r in live if disposition_of(r).lower() == PARKED_DISPOSITION]
     live_park_no_trigger = sorted(r["_id"] for r in live_parked if not structured_trigger(r))
 
-    # CLAUSE 6 (PDS-D372/D373): the row is CLAIMABLE and it is adjudicated
+    # CLAUSE 6 (PDS-D372/PDS-D373): the row is CLAIMABLE and it is adjudicated
     # CLOSED. Clause 4(a) counts it as satisfied and `bp task ready` hands it to
     # a worker; the two organs disagree and nothing looks. CLOSED-ONLY (a live
     # park is a park, and clause 4(c) already owns it) and CASE-EXACT against the
@@ -2892,7 +2892,7 @@ def round_done_predicate(report):
                         % (len(no_trigger),
                            ", ".join(no_trigger[:8]) + (", ..." if len(no_trigger) > 8 else "")))
 
-    # CLAUSE 6 -- the contradiction (PDS-D372/D373). Beside clause 4, never
+    # CLAUSE 6 -- the contradiction (PDS-D372/PDS-D373). Beside clause 4, never
     # inside it: 4 asks whether a live row SAYS anything, 6 asks whether what it
     # says agrees with the queue that is handing it out.
     lines.append("  live rows NOT dispositioned `%s`           %d/%d    %s   (CLAIMABLE and adjudicated shut)"

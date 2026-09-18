@@ -3,6 +3,7 @@ package taskboard
 import (
 	"context"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
@@ -107,6 +108,100 @@ type corpusBase struct {
 type corpusCache struct {
 	mu   sync.Mutex
 	base corpusBase
+	// flight is the corpus read currently out, or nil. It is what makes two
+	// concurrent asks cost ONE walk — see fetchTaskCorpus.
+	flight *corpusFlight
+	// live marks a cache that outlives one fetch — the board's, not a one-shot
+	// verb's. It is what makes the brief prime projection safe: see primeView.
+	live bool
+	// eventTail is the rolling union of every brief prime's `recent_events`,
+	// newest first, capped at primeEventTailDepth. Empty on a non-live cache.
+	eventTail []Event
+}
+
+// corpusFlight is one in-progress corpus read. Every caller that arrives while
+// it is out waits on done and reads the same answer instead of starting a
+// second walk of its own.
+type corpusFlight struct {
+	done       chan struct{}
+	tasks      []Task
+	details    DetailIndex
+	exhaustive bool
+	err        error
+}
+
+// primeViewBrief is the value fetchPrime sends as `?view=`. It is a CONSTANT
+// rather than a bool so the query string is written once, in one place.
+const primeViewBrief = "brief"
+
+// primeEventTailDepth is how deep the rebuilt event tail is allowed to grow: the
+// same 100 the FULL prime arm returns at primeReadyLimit, so a live board that
+// has been up for a few ticks sees the tail it saw before the brief projection.
+const primeEventTailDepth = 100
+
+// primeView reports the `?view=` fetchPrime should ask for through THIS cache.
+//
+// The discriminator is the cache's own lifetime, which is already the exact
+// distinction this needs (detail_data.go): every one-shot verb — `bp task next`,
+// `bp task frontier`, `bp task lint`, `bp cmux dispatch`, the chat transport —
+// reaches the fetch with a BARE, per-call corpusCache and gets exactly one prime
+// body, so a 5-row event tail there would be a silent narrowing of
+// computeResumables with nothing to refill it. Those callers keep the full view
+// and stay byte-identical. The LIVE board (newSnapshotFetcher) carries its cache
+// across every re-list of one long-lived process, so it can take the 96.8% cut
+// and rebuild the tail from the 5 newest rows each tick.
+func (cc *corpusCache) primeView() string {
+	if cc == nil || !cc.live {
+		return ""
+	}
+	return primeViewBrief
+}
+
+// mergeEventTail folds one prime's `recent_events` into the cache's rolling tail
+// and returns the merged tail, newest first, capped at primeEventTailDepth.
+//
+// WHY A RING AND NOT JUST THE 5. The brief arm answers with the 5 newest task
+// mutations; the full arm answered with 100. Since a live board asks every few
+// seconds and each answer OVERLAPS the last, the union across ticks is the same
+// tail — it just takes a few ticks to fill after launch, which is stated here
+// rather than hidden: the first brief frame carries 5 events where the old full
+// frame carried 100, and computeResumables on that FIRST frame sees less.
+//
+// Dedup is by (mutation, doc_id, at). prime's rows carry no `id` (Tasks.Prime's
+// select is event/doc_id/at only), so the triple is the whole identity there is;
+// two genuinely distinct mutations sharing all three are indistinguishable ON THE
+// WIRE and collapsing them is the honest answer, not a loss.
+func (cc *corpusCache) mergeEventTail(fresh []Event) []Event {
+	// A one-shot cache does not merge AT ALL — not even a sort or a dedup. The
+	// full arm already handed it the whole tail, and an identity claim that
+	// quietly reorders is not an identity claim.
+	if cc == nil || !cc.live {
+		return fresh
+	}
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	merged := make([]Event, 0, len(cc.eventTail)+len(fresh))
+	seen := make(map[string]bool, len(cc.eventTail)+len(fresh))
+	add := func(evs []Event) {
+		for _, e := range evs {
+			k := e.Mutation + "\x00" + e.DocID + "\x00" + e.At.UTC().Format(time.RFC3339Nano)
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			merged = append(merged, e)
+		}
+	}
+	add(fresh)
+	add(cc.eventTail)
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].At.After(merged[j].At) })
+	if len(merged) > primeEventTailDepth {
+		merged = merged[:primeEventTailDepth]
+	}
+	cc.eventTail = merged
+	out := make([]Event, len(merged))
+	copy(out, merged)
+	return out
 }
 
 func (cc *corpusCache) snapshot() corpusBase {
@@ -138,7 +233,111 @@ func watermarkOf(tasks []Task) time.Time {
 // the changed PREFIX when it safely can and the whole cursor when it cannot,
 // and it reports exhaustiveness with the same meaning fetchTaskPages always
 // did: true only when the returned corpus is the whole world.
+// fetchTaskCorpus is the corpus GET, made SINGLE-FLIGHT: while one read is out,
+// every other caller on the same cache waits for it and reads its answer.
+//
+// THE SECOND DEFECT THIS FILE EXISTS FOR (measured 2026-09-17, guerrilla,
+// 200x50 pty, the wirelog.go byte counter):
+//
+//	/v1/tasks  n=36  bytes=204,631,877  in the FIRST 60 seconds from launch
+//
+// against ~99.9 MB for ONE exhaustive walk on the same ledger in the same
+// minute. The board pays the cold walk TWICE, concurrently, because the
+// no-overlap guard the tick path enforces (tickRefetchCmd's fetchInFlight) is
+// not reachable from Init: Init calls refetchCmd DIRECTLY on a value receiver,
+// so nothing records that a fetch is out, and the first events poll's delta
+// — which arrives long before a ~16 s walk finishes — starts a second full
+// walk beside the first. Worse, neither can serve as the other's base: the
+// incremental path needs a STORED exhaustive corpus, and the first walk has
+// not stored one yet, so the second is full too.
+//
+// The guard therefore belongs where the walk is, not where the tick is. It is
+// the cache, not the model, that knows a walk is out, and it is the only place
+// that catches the race for EVERY caller (Init, the tick path, the post-action
+// reconcile) rather than for the one that happens to hold a mutable Model.
+//
+// A waiter gets a COPY of the leader's slice and map: the two callers go on to
+// compose separate snapshots, and a shared backing array that one of them sorts
+// is a data race that a byte saving does not justify.
 func fetchTaskCorpus(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
+	cc.mu.Lock()
+	if f := cc.flight; f != nil {
+		cc.mu.Unlock()
+		select {
+		case <-f.done:
+			if f.err != nil {
+				return nil, nil, false, f.err
+			}
+			return copyTasks(f.tasks), copyDetails(f.details), f.exhaustive, nil
+		case <-ctx.Done():
+			// This caller's own budget ran out. The leader is untouched.
+			return nil, nil, false, ctx.Err()
+		}
+	}
+	f := &corpusFlight{done: make(chan struct{})}
+	cc.flight = f
+	cc.mu.Unlock()
+
+	f.tasks, f.details, f.exhaustive, f.err = fetchTaskCorpusWalk(ctx, c, cc, now)
+
+	cc.mu.Lock()
+	cc.flight = nil
+	cc.mu.Unlock()
+	close(f.done)
+	// THE LEADER TAKES A COPY TOO — this is not symmetry for its own sake.
+	//
+	// f.tasks/f.details are the SAME containers fetchTaskCorpusWalk just stored
+	// as the cache's base, and they stay readable by every waiter parked on
+	// f.done. The leader's own caller goes on to mutate them in place:
+	// fetchSnapshotWith hands `details` to syncDetails, which re-embeds the
+	// composed board row into every entry. Handing the leader the originals
+	// therefore did two things at once —
+	//
+	//	fatal error: concurrent map iteration and map write
+	//	  taskboard.copyDetails(...)     <- the waiter's copy, in this file
+	//	  taskboard.fetchTaskCorpus(...) <- the waiter's return, in this file
+	//
+	// a waiter iterating the map while the leader's syncDetails writes it, which
+	// KILLED THE PROCESS about ten seconds after the cold walk landed (measured
+	// on guerrilla 2026-09-18: `bp tasks` died at 29.3 s from launch, twice out
+	// of two runs, both times immediately after the 9-page walk completed) — and,
+	// quietly, it let the board rewrite the stored base's rows behind the cache's
+	// back.
+	//
+	// The crash is why the incremental re-list of PR #18468 had never once armed
+	// in the field: arming needs a SECOND re-list in the same process, and the
+	// process did not survive its first one. Copying here is what lets a board
+	// live long enough to be cheap.
+	return copyTasks(f.tasks), copyDetails(f.details), f.exhaustive, f.err
+}
+
+// copyTasks / copyDetails hand a waiter its own containers. The Task values and
+// detail values themselves are treated as immutable once decoded — the board
+// replaces rows, it does not write through them.
+func copyTasks(in []Task) []Task {
+	if in == nil {
+		return nil
+	}
+	out := make([]Task, len(in))
+	copy(out, in)
+	return out
+}
+
+func copyDetails(in DetailIndex) DetailIndex {
+	if in == nil {
+		return nil
+	}
+	out := make(DetailIndex, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// fetchTaskCorpusWalk is the walk itself: the incremental prefix when it can
+// honestly answer, the exhaustive cursor when it cannot. It is what shipped as
+// fetchTaskCorpus before the single-flight wrapper above.
+func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
 	base := cc.snapshot()
 	if incrementalUsable(base, now) {
 		tasks, details, ok, err := fetchTaskHead(ctx, c, base)
@@ -170,11 +369,20 @@ func fetchTaskCorpus(ctx context.Context, c *apiclient.Client, cc *corpusCache, 
 			exhaustive: true,
 			lastFull:   now,
 		})
-	} else {
-		// A short walk must not become a base: the next incremental walk would
-		// stack a prefix on top of a hole and call the result complete.
-		cc.store(corpusBase{})
 	}
+	// A short walk must not become a base — the next incremental walk would
+	// stack a prefix on top of a hole and call the result complete — so the
+	// `exhaustive` arm above is the ONLY writer of a base.
+	//
+	// It must not DESTROY one either, which is what the `else cc.store(
+	// corpusBase{})` that stood here did. Losing state because a walk ran out of
+	// page budget is the defect, not the remedy: the wipe was self-perpetuating,
+	// since the base it threw away is precisely the thing that would have made
+	// the next walk cheap enough to finish. Keeping the old base is not serving
+	// a stale one — THIS call still returns the short walk with exhaustive=false,
+	// so nothing on screen is older than the read that produced it — and the
+	// base cannot go stale unnoticed because incrementalUsable refuses any base
+	// whose lastFull is older than fullResyncEvery.
 	return tasks, details, exhaustive, nil
 }
 

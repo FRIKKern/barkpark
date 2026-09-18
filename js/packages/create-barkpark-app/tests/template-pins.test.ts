@@ -27,7 +27,12 @@ function floorVersion(pin: string): string {
 }
 
 function parseSemver(version: string): { nums: number[]; prerelease: string[] } {
-  const [core, ...preParts] = version.split('-')
+  // `String.prototype.split` always yields at least one element, but
+  // `noUncheckedIndexedAccess` cannot know that: `core` is typed
+  // `string | undefined`. The `= ''` default is a real guard, not a silencer —
+  // an empty core parses to [0, 0, 0] below, the same answer the old code
+  // would have produced for `parseSemver('')`.
+  const [core = '', ...preParts] = version.split('-')
   const prerelease = preParts.length ? preParts.join('-').split('.') : []
   const nums = core.split('.').map((n) => Number.parseInt(n, 10) || 0)
   while (nums.length < 3) nums.push(0)
@@ -48,16 +53,25 @@ function compareVersions(a: string, b: string): number {
   const pa = parseSemver(a)
   const pb = parseSemver(b)
   for (let i = 0; i < 3; i++) {
-    if (pa.nums[i] !== pb.nums[i]) return pa.nums[i] - pb.nums[i]
+    // parseSemver pads `nums` to length 3, so `?? 0` never fires at runtime;
+    // it is the narrowing tsc needs, and it agrees with that padding.
+    const na = pa.nums[i] ?? 0
+    const nb = pb.nums[i] ?? 0
+    if (na !== nb) return na - nb
   }
   if (pa.prerelease.length === 0 && pb.prerelease.length === 0) return 0
   if (pa.prerelease.length === 0) return 1
   if (pb.prerelease.length === 0) return -1
   const len = Math.max(pa.prerelease.length, pb.prerelease.length)
   for (let i = 0; i < len; i++) {
-    if (pa.prerelease[i] === undefined) return -1
-    if (pb.prerelease[i] === undefined) return 1
-    const c = compareIdentifier(pa.prerelease[i], pb.prerelease[i])
+    // Bind once so the `undefined` checks actually NARROW the value handed to
+    // compareIdentifier. Re-indexing (as before) re-widens it to
+    // `string | undefined` on every read.
+    const ia = pa.prerelease[i]
+    const ib = pb.prerelease[i]
+    if (ia === undefined) return -1
+    if (ib === undefined) return 1
+    const c = compareIdentifier(ia, ib)
     if (c !== 0) return c
   }
   return 0
@@ -87,6 +101,59 @@ async function readWorkspacePackageVersion(pkgName: string): Promise<string | un
     return undefined
   }
 }
+
+/**
+ * Ordering arm for the hand-rolled comparator above. The four
+ * `noUncheckedIndexedAccess` faults in `parseSemver`/`compareVersions` are
+ * fixable in ways that satisfy tsc while QUIETLY changing precedence (an
+ * `?? 0` in the wrong loop, dropping an `undefined` check, an `any` cast that
+ * lets a typo through). Those cases stay invisible to the pin check below,
+ * which only ever compares a template pin against a workspace version. These
+ * assertions pin the semver-precedence contract itself, so a future edit to
+ * the comparator has to keep answering the same way.
+ */
+describe('compareVersions (semver precedence)', () => {
+  const sgn = (n: number) => (n < 0 ? -1 : n > 0 ? 1 : 0)
+
+  it('orders by major, then minor, then patch', () => {
+    expect(sgn(compareVersions('1.0.0', '2.0.0'))).toBe(-1)
+    expect(sgn(compareVersions('2.0.0', '1.9.9'))).toBe(1)
+    expect(sgn(compareVersions('1.2.0', '1.10.0'))).toBe(-1)
+    expect(sgn(compareVersions('1.2.3', '1.2.4'))).toBe(-1)
+    expect(sgn(compareVersions('1.2.3', '1.2.3'))).toBe(0)
+  })
+
+  it('pads missing components with zero', () => {
+    expect(sgn(compareVersions('1', '1.0.0'))).toBe(0)
+    expect(sgn(compareVersions('1.2', '1.2.0'))).toBe(0)
+    expect(sgn(compareVersions('1.2', '1.2.1'))).toBe(-1)
+  })
+
+  it('ranks a release above any prerelease of the same core', () => {
+    expect(sgn(compareVersions('1.0.0', '1.0.0-preview.1'))).toBe(1)
+    expect(sgn(compareVersions('1.0.0-preview.1', '1.0.0'))).toBe(-1)
+    expect(sgn(compareVersions('1.0.1-preview.1', '1.0.0'))).toBe(1)
+  })
+
+  it('compares prerelease identifiers left to right, numerically when both are numeric', () => {
+    expect(sgn(compareVersions('1.0.0-preview.1', '1.0.0-preview.2'))).toBe(-1)
+    expect(sgn(compareVersions('1.0.0-preview.2', '1.0.0-preview.10'))).toBe(-1)
+    expect(sgn(compareVersions('1.0.0-alpha.1', '1.0.0-beta.1'))).toBe(-1)
+    expect(sgn(compareVersions('1.0.0-preview.1', '1.0.0-preview.1'))).toBe(0)
+  })
+
+  it('ranks a numeric identifier below an alphanumeric one, and a shorter prerelease below its own prefix-extension', () => {
+    expect(sgn(compareVersions('1.0.0-1', '1.0.0-alpha'))).toBe(-1)
+    expect(sgn(compareVersions('1.0.0-alpha', '1.0.0-alpha.1'))).toBe(-1)
+    expect(sgn(compareVersions('1.0.0-alpha.1', '1.0.0-alpha'))).toBe(1)
+  })
+
+  it('is the ordering the pin check relies on: a preview.2 floor is above a preview.1 workspace version', () => {
+    // The shipped bug this file was written for.
+    expect(compareVersions(floorVersion('^1.0.0-preview.2'), '1.0.0-preview.1')).toBeGreaterThan(0)
+    expect(compareVersions(floorVersion('^1.0.0-preview.1'), '1.0.0-preview.1')).toBe(0)
+  })
+})
 
 describe('starter template @barkpark/* pins', () => {
   it('finds at least one template with a package.json.tmpl', async () => {

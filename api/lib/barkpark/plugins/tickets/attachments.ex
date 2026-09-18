@@ -349,7 +349,7 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
         @asset_type,
         attrs,
         dataset,
-        [source: :api] ++ Assets.file_scope_opts(file)
+        [source: :api] ++ Barkpark.Media.Storage.MediaFile.scope_opts(file)
       )
     end
   end

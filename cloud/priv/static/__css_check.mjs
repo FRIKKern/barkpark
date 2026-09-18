@@ -165,6 +165,16 @@
 //       ever returns, at which point the gate reports green over a family it has
 //       never checked. Compared against `allowlistedHits`, the walker's own
 //       record, so the arm and the waiver are judged on the same evidence.
+//   E20 a HOOK WAIVER THAT ABSOLVES NOTHING: an ALLOW_HOOK_CLASSES entry no
+//       emission in the scanned tree actually carries as a class. E19's exact
+//       shape, one list over — ALLOW_HOOK_CLASSES was the ONE of this file's
+//       four suppression lists with no decay arm at all, so a name deleted from
+//       the console left a standing consent nobody was ever told about and the
+//       run still printed `0 error(s)`. HARD, like E19 and unlike the
+//       report-only `stale` lines: see the block's own comment for why the four
+//       lists are not all the same severity. Judged against `hookHits`, the E2
+//       loop's own record, and it runs its own controls so it cannot pass by
+//       never having had a subject.
 //   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
 //
 //         A rule whose selector is WRAPPER-SCOPED onto the pill
@@ -748,13 +758,22 @@ function emittedDomainRungRoles(js) {
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
-// printed on every run; removing the hook from the markup should remove the
-// entry too.
+// printed on every run, and E20 below now REQUIRES each to fire: removing the
+// hook from the markup no longer merely "should" remove the entry, it reds the
+// gate until someone does.
+//
+// THE ENTRY THIS ARM FOUND ON ITS FIRST RUN: "notif-smtp", carrying the reason
+// `querySelector(".notif-smtp") — SMTP fieldset container`. The console never
+// emitted it as a class; notifEmailSectionHtml() writes `id="notif-smtp"` (grep
+// -n 'function notifEmailSectionHtml' app.js) and every reader is the ID
+// selector `$("#notif-smtp")` — `grep -n 'notif-smtp' app.js` shows every site
+// is `#notif-smtp` or a `notif-smtp-*` input id, and none is a class. So
+// the entry waived nothing and its stated reason was false in the same breath,
+// which is the whole reason a list needs an arm rather than a convention.
 const ALLOW_HOOK_CLASSES = [
   "view",              // section container app.js shows/hides per route ($$(".view"))
   "modal-body",        // openModal() innerHTML target (selected by #modal-body)
   "session-revoke",    // querySelectorAll(".session-revoke") — revoke button in the sessions panel
-  "notif-smtp",        // querySelector(".notif-smtp") — SMTP fieldset container in notifications
   "token-revoke",      // querySelectorAll(".token-revoke[data-id]") — per-token revoke button
   "token-ab",          // querySelectorAll(".token-ab") — ability checkboxes in the new-token modal
   "fleet-open-studio", // querySelectorAll(".fleet-open-studio") — Open Studio button per fleet row
@@ -1196,10 +1215,16 @@ export function wrapParityErrors(cssRawText, file = "app.css") {
 // survives any sibling shift a line number cannot.
 //
 // SCANS THE WHOLE SOURCE TEXT, not a comment subset. A comment-only walk was
-// prototyped and REJECTED: a {string, //, /* */} state machine over 893 KB of
-// app.js (template literals, regex literals) desyncs and MISSES real citations
+// prototyped and REJECTED: a {string, //, /* */} state machine over the ~1,651 KiB
+// of app.js (template literals, regex literals) desyncs and MISSES real citations
 // — a false-negative in a tripwire, the exact disease this epic removes. Full
 // text cannot desync and cannot miss a citation that migrates into a string.
+// THAT SIZE IS MEASURED, AND THE PREVIOUS ONE WAS NOT: this sentence said
+// "893 KB" long after the file had nearly doubled past it. Re-derive it, never
+// quote it forward — `wc -c cloud/priv/static/app.js` reads 1,690,235 bytes at
+// the commit that corrected this line. A justification carrying a number that
+// is half of reality is the same shape as an allowlist entry that waives
+// nothing: still persuasive, no longer true, and nothing in the run checks it.
 // The shape `app.js:<digits>` is citation-specific: measured on this tree every
 // one of the seven live occurrences is a comment citation, zero are in code, so
 // full-text scanning is both robust AND false-positive-free today.
@@ -1547,6 +1572,62 @@ export function citationScanSetRefusals(files, root = dir) {
 // only way to cite it is to re-derive it.
 const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?:js|mjs|sh))(?::~?|\s~))\d{2,}(?:-\d{2,})?/g;
 
+// ── SYNCHRONOUS OUTPUT FOR THE FOUR spawnSync-CONSUMED SUB-MODES ────────────
+//
+// THE DEFECT THIS DELETES (studio r21d, task-a510820f5b757050). Each of the
+// four targeted sub-modes below ends in `process.exit(...)`, and every one of
+// them is consumed by `__app.test.mjs` through a `spawnSync` whose stdout is a
+// PIPE. On this platform a child's stdout to a pipe is NON-BLOCKING and
+// ASYNCHRONOUS, so `console.log` does not write — it QUEUES. `process.exit()`
+// tears the process down without draining that queue, and every byte still
+// sitting on it is DISCARDED. The consumer sees a clean, well-formed,
+// SHORTER-THAN-TRUE report and cannot tell it apart from a real one.
+//
+// MEASURED, NOT ASSUMED. The pipe's buffer here is 8192 bytes: a child that
+// emits 9000+ bytes and then calls process.exit(0) delivers exactly 8192 to a
+// spawnSync parent, 8 runs out of 8, at every size from 9000 up to 660000.
+// Below the buffer size nothing is ever lost. The inventory sub-mode emits 9624
+// bytes over this tree — 1432 bytes MORE than the buffer — so it survives only
+// while the parent keeps draining mid-stream. It usually does, which is why 280
+// isolated spawns found nothing; under the full harness, where the parent is
+// busy, the observed rate was 1 red in 14 runs. The captured stdout of that red
+// stopped at 8154 bytes — the last whole row that fits under 8192. The cut is
+// the buffer boundary, not a scan that ended early.
+//
+// WHY THIS DRAINS RATHER THAN RACES. `fs.writeSync` hands the bytes to the
+// KERNEL before it returns, so when the loop finishes there is nothing left on
+// any JS-side queue for process.exit to throw away — no callback to schedule,
+// no event-loop turn to lose, no drain event to miss. The two ways a
+// non-blocking fd can decline are both handled as WAITING, never as dropping: a
+// PARTIAL write advances the offset and re-offers only the remainder, and
+// EAGAIN (the reader is behind) sleeps a millisecond and re-offers the SAME
+// remainder. The loop does not terminate until the kernel has accepted every
+// byte. EPIPE is the one honest stop: the reader is gone, so there is no
+// consumer left to shorten a report for.
+//
+// USE THESE, NOT console.log / console.error, inside any block that ends in
+// process.exit(). Mixing the two REORDERS output, because console.* queues on
+// the stream and these bypass it.
+const SUBMODE_BACKOFF = new Int32Array(new SharedArrayBuffer(4));
+const emitSync = (fd, text) => {
+  const buf = Buffer.from(text, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += fs.writeSync(fd, buf, off, buf.length - off);
+    } catch (e) {
+      if (e.code === "EAGAIN") {
+        Atomics.wait(SUBMODE_BACKOFF, 0, 0, 1);
+        continue;
+      }
+      if (e.code === "EPIPE") return;
+      throw e;
+    }
+  }
+};
+const outSync = (line) => emitSync(1, line + "\n");
+const errSync = (line) => emitSync(2, line + "\n");
+
 // Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
 // ONLY the E9 parse-completeness guard against one file and exits non-zero if it
 // fires — the committed #4251 regression proof (see __css_check.fixture.css).
@@ -1555,8 +1636,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const errs = swallowedTokenErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1574,8 +1655,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const errs = orphanCommentErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1592,8 +1673,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const { errors: errs, copies } = wrapParityErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(
       `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +
         `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
     );
@@ -1633,20 +1714,20 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
     const PV = "__preview__" + path.sep;
     let shippedTotal = 0;
     let ruledTotal = 0;
-    console.log(`__css_check --citation-inventory ${root}`);
+    outSync(`__css_check --citation-inventory ${root}`);
     for (const rel of files) {
       const src = readOrRefuse(path.join(root, rel), rel);
       const shipped = bannedSourceCitationErrors(src, rel).length;
       const hits = [...src.matchAll(CITATION_RULED_ALTERNATION)];
       shippedTotal += shipped;
       ruledTotal += hits.length;
-      console.log(
+      outSync(
         `  ruled=${String(hits.length).padStart(3)}  E11=${String(shipped).padStart(3)}  ${rel}`,
       );
-      for (const m of hits) console.log(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
+      for (const m of hits) outSync(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
     }
-    for (const e of refusals) console.error("FAIL  " + e);
-    console.log(
+    for (const e of refusals) errSync("FAIL  " + e);
+    outSync(
       `__css_check --citation-inventory ${root}: ${files.length} file(s) scanned ` +
         `(${files.filter((f) => !f.includes(path.sep)).length} at the root, ` +
         `${files.filter((f) => f.startsWith(PV)).length} under __preview__/, ` +
@@ -2737,6 +2818,29 @@ for (const b of badTokens) {
 // allowlist's prose. `css` is comment-stripped, so a selector that survives
 // only inside a comment does NOT count — which is what lets the retired
 // family's tombstone comment in app.css name `.dep-queued` without reviving it.
+// statusMetaPill()'s own body — the ONE sanctioned home of a `status-pill` class
+// literal in app.js. Brace-matched from the declaration rather than line-sliced,
+// so the arm that reads it cannot be fooled by the function growing or moving.
+// Returns null when the declaration is absent, which arm (f) treats as a FAILURE
+// and not as "nothing to check".
+function statusMetaPillBody(src) {
+  if (src == null) return null;
+  const at = src.indexOf("function statusMetaPill(");
+  if (at < 0) return null;
+  const open = src.indexOf("{", at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
 {
   const meta = deployStatusMetaTable(jsRaw);
 
@@ -2823,6 +2927,49 @@ for (const b of badTokens) {
         `Render the chip through deployStatusPill()/statusMetaPill() so there stays ` +
         `exactly one state grammar.`,
     );
+  }
+
+  // (f) ONE EMITTER, STATED AS A RULE AND NOT AS A LIST. Arm (e) retired the
+  //     SECOND family; this arm is what keeps the surviving one from re-forking
+  //     inside itself. The decision-24 prose claimed "there are no hand-written
+  //     pill class attributes left" while seven call sites still opened their own
+  //     `<span class="status-pill status-pill--…">` — the assertion was the false
+  //     part, and nothing measured it. The check is a PREDICATE, never an
+  //     enumeration of the sites that happened to exist on the day: EVERY
+  //     `class="status-pill…` literal in app.js must sit inside statusMetaPill's
+  //     own body. A new hand-built chip anywhere else reds here on its first
+  //     commit, with no skip list to go stale.
+  {
+    const body = statusMetaPillBody(jsRaw);
+    if (body === null) {
+      errors.push(
+        "E13 app.js  statusMetaPill() could not be located — this arm reads its body " +
+          "to decide which pill literals are the sanctioned ones, so a rename must " +
+          "come with an update to statusMetaPillBody() here, never a skipped check.",
+      );
+    } else {
+      const LIT = /class="status-pill/g;
+      const inside = (body.match(LIT) || []).length;
+      const total = (jsRaw.match(LIT) || []).length;
+      const outside = total - inside;
+      if (inside === 0) {
+        errors.push(
+          "E13 app.js  statusMetaPill()'s body emits no `class=\"status-pill` literal " +
+            "at all — the emitter this arm measures against no longer emits the family, " +
+            "so every count below would be vacuous.",
+        );
+      } else if (outside > 0) {
+        errors.push(
+          `E13 app.js  ${outside} \`class="status-pill…\` literal(s) are emitted OUTSIDE ` +
+            `statusMetaPill() — a hand-built status chip is a second grammar for the ` +
+            `same idea, which is exactly what decision 24 absorbed. Render it through ` +
+            `statusMetaPill(meta, extraClass, attrs) (or statusPill / deployStatusPill, ` +
+            `which delegate to it); \`extraClass\` carries an extra class and \`attrs\` a ` +
+            `pre-escaped title / data-* attribute string, so no call site needs its own ` +
+            `span.`,
+        );
+      }
+    }
   }
 }
 
@@ -3075,6 +3222,108 @@ for (const b of badTokens) {
   }
 }
 
+// E20 — a HOOK waiver must absolve something, same rule as E19 one list over.
+//
+// WHY THIS EXISTS. This file runs four suppression lists, and until this arm
+// landed only three could notice an entry going dead: ALLOW_PREFIXES has E19
+// (hard), KNOWN_GAPS computes `staleGaps`, ALLOW_RAW_COLORS computes
+// `staleRawAllows`. ALLOW_HOOK_CLASSES had neither — its only uses were the
+// membership test in the E2 loop and the `allow` print of the hits that DID
+// fire. MEASURED before the fix: inserting a fictional entry into the array
+// left the run at exit 0, the summary unchanged, and produced ZERO output
+// naming it. A class deleted from the console therefore left a standing consent
+// nobody was told about, and the next reader learned a class exists that does
+// not.
+//
+// HARD ERROR, NOT A `stale` LINE — the asymmetry between the four lists is a
+// DECISION, stated here so the next reader does not have to infer it:
+//   · KNOWN_GAPS and ALLOW_RAW_COLORS report-only because each DEMOTES a real,
+//     already-true violation that another slice owns. Their stale line asks a
+//     third party to prune; making that fatal would red this gate on someone
+//     else's cleanup, which is precisely backwards.
+//   · ALLOW_PREFIXES (E19) and ALLOW_HOOK_CLASSES are consent granted BY this
+//     gate's own owners over this gate's own files. Nothing outside the console
+//     can make one of these entries go stale, so the person who breaks it is
+//     the person who can fix it in the same commit. Hard.
+//   · And the failure mode is the worse one: an unfired hook entry silently
+//     PRE-EXEMPTS the class the day the name comes back, at which point E2
+//     reports green over a class it never checked.
+//
+// Judged against `hookHits` — the E2 loop's own record of the entries it really
+// used — so the arm and the waiver are decided on the same evidence, never on a
+// second, differently-shaped grep that could disagree with it.
+function hookAllowlistErrors(allowlist, hookHits, emittedCount) {
+  const errs = [];
+  // (a) PRECONDITION — the arm must HAVE a subject. Both of these would make
+  //     the (b) loop pass by measuring nothing, which is the exact disease the
+  //     arm was written to cure; a guard that can go vacuous is not a guard.
+  if (!emittedCount) {
+    errs.push(
+      "E20 __css_check.mjs  the class census produced ZERO emitted classes, so `hookHits` is " +
+        "empty for a reason that has nothing to do with the allowlist. Every ALLOW_HOOK_CLASSES " +
+        "entry would read as stale and the E2 loop reported on nothing at all — fix the walker " +
+        "or the scan root; do not read this run's class verdicts as a result.",
+    );
+  }
+  if (!allowlist.length) {
+    errs.push(
+      "E20 __css_check.mjs  ALLOW_HOOK_CLASSES is EMPTY, so this decay arm has nothing to " +
+        "check and would pass forever without measuring anything (KNOWN_GAPS' stale arm sits " +
+        "in exactly that state today). If the console genuinely has no ruleless hook classes " +
+        "left, delete this arm and its call in the same commit and say so — an emptied list " +
+        "under a live arm is an arm that cannot lose.",
+    );
+  }
+  if (errs.length) return errs;
+  // (b) STALENESS — one line per entry that waived nothing on this run.
+  const used = new Set(hookHits.map((h) => h.cls));
+  for (const cls of allowlist) {
+    if (used.has(cls)) continue;
+    errs.push(
+      `E20 __css_check.mjs  ALLOW_HOOK_CLASSES entry "${cls}" waived nothing on this run — ` +
+        `nothing under the scan root emits it as a class, so this consent can never fail and ` +
+        `is indistinguishable from an entry doing real work. It also PRE-EXEMPTS the class the ` +
+        `day the name returns, at which point E2 reports green over a class it never checked. ` +
+        `Delete the entry; re-add it with the emission. (An id selector is not a class: check ` +
+        `whether the reason on the entry says \`.${cls}\` while the code says \`#${cls}\`.)`,
+    );
+  }
+  return errs;
+}
+
+for (const e of hookAllowlistErrors(ALLOW_HOOK_CLASSES, hookHits, emitted.length)) errors.push(e);
+
+// E20's OWN CONTROLS, run inside the measurement rather than in a test that
+// could stop being run. The shipped call above can only ever print a clean
+// nothing; these three say whether that nothing was MEASURED. Each drives the
+// same function the gate uses, on this run's real `hookHits`.
+{
+  const probe = "zz-css-check-control-class-that-is-never-emitted";
+  const ctlStale = hookAllowlistErrors([probe], hookHits, emitted.length);
+  if (!(ctlStale.length === 1 && ctlStale[0].includes(probe))) {
+    errors.push(
+      `E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: a ` +
+        `fabricated entry "${probe}", which nothing emits, produced ${ctlStale.length} error(s) ` +
+        `instead of exactly one naming it. The clean ALLOW_HOOK_CLASSES verdict this run printed ` +
+        `is therefore not evidence of anything.`,
+    );
+  }
+  if (!hookAllowlistErrors([], hookHits, emitted.length).length) {
+    errors.push(
+      "E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: an EMPTY " +
+        "allowlist was accepted silently, so emptying the array would retire the arm without " +
+        "anyone deciding to.",
+    );
+  }
+  if (!hookAllowlistErrors([probe], [], 0).length) {
+    errors.push(
+      "E20 __css_check.mjs  the ALLOW_HOOK_CLASSES decay arm FAILED ITS OWN CONTROL: a census " +
+        "that emitted ZERO classes was accepted silently, so a walker that stopped finding its " +
+        "subject would read as a clean allowlist.",
+    );
+  }
+}
+
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
 
@@ -3296,7 +3545,24 @@ console.log(
 if (errors.length) {
   console.error("");
   for (const e of errors) console.error("FAIL  " + e);
-  process.exit(1);
+  // NOT process.exit(1) — THE FIFTH INSTANCE of the sub-mode defect documented
+  // beside the emitSync helper above, found by this row's own stability arm.
+  // This body prints ~9.5KB, well past the 8192-byte pipe buffer, and the
+  // mirror harness in __app.test.mjs reads it through a spawnSync. On the GREEN
+  // path the gate simply falls off the end, so Node drains stdout before the
+  // process dies and nothing is ever lost — which is why the clean leg has
+  // never flaked. On THIS path the old `process.exit(1)` tore the process down
+  // with bytes still queued, and the mutation leg went red 1 run in 22 with a
+  // truncated capture.
+  //
+  // `process.exitCode` states the SAME verdict without the teardown: the
+  // statement below is the last in runGate, `if (IS_CLI) runGate()` is the last
+  // statement in the file, and the gate holds no timers or open handles, so
+  // returning here ends the program with nothing left to run. Node then exits
+  // on its own — flushing stdout and stderr first — and reports 1. Exit code
+  // identical, output no longer a race.
+  process.exitCode = 1;
+  return;
 }
 
 } // end runGate

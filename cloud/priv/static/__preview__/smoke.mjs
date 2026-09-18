@@ -5223,7 +5223,9 @@ const EXPECTATIONS = {
       assert.ok(warm.includes("there's no total to compare against"), "the honest no-denominator caption renders");
       assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar and no percentage");
 
-      // 4. DIGEST — an EMPTY OPERATOR LIST and NO send-now button. cch-w55-s3
+      // 4. DIGEST — an EMPTY OPERATOR LIST, and the SEND-NOW button that GR40
+      // cut and gr-backlog-operator-digest-send restored once POST
+      // /v1/operator/digest/send existed to back it. cch-w55-s3
       // called this empty a query artifact, because the writer stamped a real
       // team_id while the reader filtered is_nil(team_id). cch-w56-s3 FIXED the
       // reader (event-only, notifications.ex:930), so the list can see the
@@ -5232,7 +5234,12 @@ const EXPECTATIONS = {
       assert.ok(!digest.includes("never land in this list"), "the receipts DO land here now — the reader filters on the event alone");
       assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty state renders");
       assert.ok(digest.includes("06:00 UTC"), "the one backed clock claim survives (config.exs:334)");
-      assert.ok(!/Send (one )?now/i.test(page + digest), "no send-now button anywhere (GR40)");
+      // RE-KEYED (gr-backlog-operator-digest-send): the absence assertion's whole
+      // reason was GR28 — no route, so no button. The route exists, so the same
+      // rule now requires the control, and the browser must actually MOUNT it.
+      assert.ok(/Send one now/.test(digest), "the send-now button mounts in the digest card");
+      assert.ok(digest.includes('data-digest-send="fleet"'),
+        "it carries the EXPLICIT scope the route requires — there is no default audience");
 
       // 5. DEPLOY LEDGER CENSUS (dr-w1-s2) — the READABLE arm: n=1840 clears
       // @min_sample, so the rate answers and must arrive WITH its denominator.

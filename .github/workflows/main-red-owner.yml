@@ -48,6 +48,7 @@ on:
     paths:
       - "scripts/main-red-owner.sh"
       - "scripts/main-red-predicate.sh"
+      - "scripts/main-red-window.sh"
       - ".github/workflows/main-red-owner.yml"
 
 permissions:
@@ -82,6 +83,207 @@ jobs:
       - name: arms (hermetic, no network)
         run: bash scripts/main-red-owner.sh --selftest
 
+      # THE PREDICATE'S OWN ARMS WERE NEVER RUN BY ANYTHING (gates-r21-w6,
+      # 2026-09-17). main-red-predicate.sh carries 33 hermetic arms and this
+      # workflow — the only thing in the repo that executes the file at all —
+      # ran the OWNER's arms and never the predicate's. A vendored selftest that
+      # nothing invokes is the same rot the selftest was written to prevent, one
+      # layer out. It costs ~4 minutes and it is the file every main-red verdict
+      # in this repo is read off.
+      - name: predicate arms (hermetic, no network)
+        run: bash scripts/main-red-predicate.sh --selftest
+
+      # The 24 h window accumulator's arms. Fast (synthetic ledgers, no network).
+      - name: window arms (hermetic, no network)
+        run: bash scripts/main-red-window.sh --selftest
+
+      # ══ THE 24 H WINDOW LEDGER MUST OUTLIVE THE RUNNER ════════════════════
+      # THE DEFECT (task-1f61db3eb910429e). scripts/main-red-window.sh shipped in
+      # PR #18922 complete and inert. --record appends one poll to a JSONL
+      # ledger and --verdict says whether a clean 24 h has actually been
+      # OBSERVED — but this workflow runs hourly on an EPHEMERAL runner, so a
+      # --record here wrote into a filesystem destroyed at the end of the job and
+      # the next run's --verdict correctly read an empty file and reported NOT
+      # YET MEASURED forever. task-0a48c7b64d5ab0f1 c0's "measured over 24 h"
+      # half was therefore not merely unmet, it was UNMEASURABLE.
+      #
+      # ── THE THREE CANDIDATES, ADJUDICATED ────────────────────────────────
+      # The discriminator is NOT durability. It is the one this repo has already
+      # used to decide this exact question twice, in OPPOSITE directions:
+      #
+      #     CAN A MISS BE MISTAKEN FOR A PASS?
+      #
+      # crown-reconcile.yml REFUSED actions/cache on it ("a cache miss is
+      # indistinguishable from an empty list — which is the exact defect being
+      # cured"). stale-verdict-watch.yml ACCEPTED actions/cache on it, because
+      # its script STATES the absence instead of reading it as an unchanged
+      # count. Same discriminator, opposite answers, both right.
+      #
+      # 1. actions/cache, rolling key.  ★ CHOSEN.
+      #    Here a miss CANNOT be mistaken for a pass, and that is not an opinion
+      #    — it is armed. A total loss leaves a ledger that no longer reaches
+      #    back past the window start: --verdict exits 2 NOT YET MEASURED (arm
+      #    "a ledger starting inside the window refuses"). A partial loss leaves
+      #    a hole mid-window: exit 2 again (arm "a store outage punched
+      #    mid-window refuses"). An absent ledger exits 4 (arm "a missing ledger
+      #    refuses"). NONE of those is 0, and 0 is the only pass. The silent
+      #    failure mode everyone rightly fears about cache eviction is, for THIS
+      #    consumer, the fail-closed one — and it is the cheapest: no new API
+      #    surface, no new secret, no bootstrap special case (a first run is
+      #    simply a short window), and a worked example forty lines away in
+      #    stale-verdict-watch.yml.
+      #
+      # 2. actions/upload-artifact + download-artifact.  REFUSED.
+      #    Nothing in this repo downloads an artifact across runs — grep for
+      #    download-artifact in .github/workflows/ returns NOTHING — so this is
+      #    a new mechanism, and a cross-run download needs the PREVIOUS run's
+      #    id, discovered by a paginated run-list query. That is the SAME
+      #    run-list feed whose intermittent, unmarked staleness the freshness
+      #    control in scripts/main-red-predicate.sh was written on 2026-09-17 to
+      #    defend against. Hanging the anti-stale instrument's own MEMORY off
+      #    the stale feed is a self-defeating dependency: the reading it is
+      #    meant to refuse would decide which history it reads it against. It
+      #    also needs a first-run bootstrap branch, which is precisely where a
+      #    false green would live. More machinery, more failure surface, and no
+      #    stronger a guarantee than the arms above already give.
+      #
+      # 3. Commit the ledger to main.  REFUSED, decisively, and not on noise.
+      #    This workflow carries `push: branches: [main]`. An hourly bot commit
+      #    to main would RETRIGGER THIS WORKFLOW, and with it every other
+      #    workflow in this repo carrying a push-on-main arm — the predicate
+      #    counted 56 of them. The instrument would become the dominant producer
+      #    of the main runs it exists to measure, which corrupts the measurement
+      #    whatever you do about the loop. Nothing in .github/workflows/ pushes
+      #    to main today and this is not the file to start with.
+      #
+      # STATED RESIDUALS, not papered over:
+      #   · Cache eviction (7 days idle, or the 10 GB repo cap) is SILENT. It
+      #     costs a window, never a false clean day. Hourly traffic keeps the
+      #     entry warm; the fixed prefix keeps one lineage.
+      #   · The save key is per-run-id because cache entries are IMMUTABLE — a
+      #     fixed key would be written once and never again. The restore falls
+      #     back to the newest main-red-window-* entry.
+      #   · Two concurrent runs (the hourly cron and a push on main) both
+      #     restore the same base and one save wins, so one poll can be LOST.
+      #     The hourly cron is the backbone and a lost push-run row leaves it
+      #     intact; a lost cron row shows up as a gap, which refuses.
+      #   · A cancellation that kills the VM before the always() save loses that
+      #     run's row. Same treatment: a gap, not a green.
+      #   · THE PREDICATE IS RUN TWICE PER HOUR — once by --record here and once
+      #     by the ownership step below — roughly doubling this job's GitHub
+      #     reads (~110 endpoints each; still far inside the 5000/h limit).
+      #     Sharing one reading would mean restructuring main-red-owner.sh, and
+      #     it is not obviously the right trade: the ledger row carries the
+      #     verdict line from ITS OWN run VERBATIM, so it can be audited against
+      #     the instrument rather than against a paraphrase of a sibling step's
+      #     output. Two independent readings of a feed with a known intermittent
+      #     staleness fault is a property, not only a cost.
+      - name: Restore the 24 h window ledger (best effort)
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/main-red-window.jsonl
+          key: main-red-window-${{ github.run_id }}
+          restore-keys: |
+            main-red-window-
+
+      # A RED POLL IS A DATUM, NOT A FAILURE OF THIS STEP. --record exits 1 when
+      # the poll it just took was not TRUE. Letting that red the step would stop
+      # the run before the save below and abandon recording at exactly the moment
+      # the record matters most. Only a genuine inability to APPEND (exit 4)
+      # fails here; the red itself is delivered by the ownership step, whose job
+      # that is.
+      - name: Record one poll into the 24 h window ledger
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          # `rc=0; … || rc=$?` IS THE FIX, AND IT IS NOT STYLE (task-3b5edb3d1f5990e3).
+          # The runner's shell for a `run:` block is `/usr/bin/bash -e {0}`.
+          # `set -uo pipefail` adds nofail/pipefail; it does NOT turn errexit OFF.
+          # So the bare `bash … --record` below, whose exit 1 this step's own next
+          # line calls DATA, ABORTED THE STEP at that line: `rc=$?` never ran, the
+          # `-gt 1` adjudication never ran, and the workflow whose whole job is to
+          # report a red on main was itself counted as one — stably, for four
+          # consecutive runs on main's tip (35244509820 at a2c6e3837 and three
+          # before it), with the script's own TERMINAL line printed and NONE of
+          # this step's echoes. `|| rc=$?` keeps the status a DATUM: `-e` never
+          # fires on the left of `||`, so the adjudication below runs and decides.
+          # Do NOT "simplify" this back to a bare call, and do NOT reach for
+          # `continue-on-error` or `|| true` — those make a real append failure
+          # green, which is the one outcome this step must still red on.
+          set -uo pipefail
+          L="$RUNNER_TEMP/main-red-window.jsonl"
+          rc=0
+          bash scripts/main-red-window.sh --record "$L" "$GITHUB_REPOSITORY" || rc=$?
+          echo "record exit=$rc  (0=poll was TRUE, 1=poll was not TRUE — both are DATA)"
+          if [ "$rc" -gt 1 ]; then
+            echo "TERMINAL: the ledger could not be appended to (exit $rc) — this run records NOTHING"
+            exit "$rc"
+          fi
+          echo "rows now: $(wc -l < "$L" | tr -d ' ')"
+          echo "TERMINAL: one poll recorded into the window ledger"
+
+      # ADVISORY ON PURPOSE, AND SAY SO. Reddening on a not-yet-clean window
+      # would red main's own watcher for the whole first day and for every day
+      # containing a single red — reproducing, one layer out, the "advisory red
+      # nobody owns" disease this workflow was written to cure. The verdict's
+      # consumer is a human stamping task-0a48c7b64d5ab0f1 c0, and it is
+      # published where that human can read it: the step summary.
+      - name: Has a clean 24 h actually been OBSERVED?
+        if: github.event_name != 'pull_request'
+        run: |
+          # SAME FAULT, SECOND SHAPE, AND IT MADE THE COMMENT ABOVE FALSE. Under
+          # `set -o pipefail` a pipeline carries the LEFT command's non-zero
+          # status, so `-e` aborted here on verdict exits 1/2/3/4 — and 2 (NOT
+          # YET MEASURED) is the NORMAL state of a fresh ledger. The step that
+          # says "this step never fails the run" was failing the run on its most
+          # common input, and the summary below — the verdict's only consumer —
+          # was never written.
+          #
+          # THEN THE REMEDY ITSELF WAS WRONG, AND IT PUBLISHED A FALSE CLEAN DAY.
+          # (task-0a48c7b64d5ab0f1, 2026-09-17.)
+          # `:` is itself a pipeline, so running it on the right of `||` REPLACES
+          # PIPESTATUS with its own status — `(exit 3) | cat || :` then reads
+          # `${PIPESTATUS[0]}` as 0. The capture below was therefore not merely
+          # reachable, it was DEAD: it read 0 on every interesting exit. This is
+          # not theoretical — it is the measured fault this edit was opened on.
+          # `set +e` around the pipeline is the form three other workflows in
+          # this repo already use (grip-suite.yml, research-coverage-suite.yml):
+          # `-e` cannot steal the diagnosis, and nothing overwrites PIPESTATUS
+          # between the pipeline and the capture. Do NOT put the `|| :` back.
+          # MEASURED: run 35276736665 printed `NOT YET MEASURED: no anchor poll
+          # at or before now-86400s` and, on the very next line, `window verdict
+          # exit=0` — and the summary this step writes labels exit 0 as `0
+          # CLEAN`. The one instrument c0 of task-0a48c7b64d5ab0f1 is stamped
+          # from was publishing CLEAN over an unmeasured ledger.
+          set -uo pipefail
+          L="$RUNNER_TEMP/main-red-window.jsonl"
+          set +e
+          bash scripts/main-red-window.sh --verdict "$L" | tee "$RUNNER_TEMP/mrw.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## 24 h window — has a clean day been OBSERVED?"
+            echo
+            echo "exit $rc — 0 CLEAN · 1 RED in the window · 2 NOT YET MEASURED · 3 UNMEASURABLE (blind spot) · 4 ledger unreadable"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/mrw.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "TERMINAL: window verdict exit=$rc (advisory — this step never fails the run)"
+
+      # always(): the save must run even when a step above red, because the row
+      # this run just recorded is the one the NEXT window needs.
+      - name: Save the 24 h window ledger
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/main-red-window.jsonl
+          key: main-red-window-${{ github.run_id }}
+
       # NEVER ON A PULL REQUEST. This step writes issues and reads ~110 GitHub
       # endpoints; a PR head is the wrong place for both, and a check name born
       # on a PR head is eligible for the required set, which this repo refuses
@@ -92,9 +294,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          # SAME FAULT, THIRD SHAPE. `-e` + `pipefail` aborted this step the
+          # instant main-red-owner.sh exited 3/4/5 — the COULD-NOT-DELIVER codes
+          # — so the step summary below, which is the whole diagnosis of a failed
+          # delivery, was written only on the path where nothing went wrong.
+          #
+          # AND THE `|| :` REMEDY DEFEATED THE FAIL-CLOSED GUARANTEE THIS FILE'S
+          # HEADER PROMISES. `:` overwrites PIPESTATUS, so `rc` read 0 on every
+          # could-not-deliver code and `exit "$rc"` below concluded SUCCESS —
+          # i.e. "ownership was delivered" — when the predicate could not read
+          # its inputs (4) or the issue API refused (5). A watcher that reports
+          # success when it could not deliver is the exact failure this workflow
+          # exists to stop. `set +e` keeps `-e` off the pipeline without letting
+          # anything run between it and the capture. Do NOT put the `|| :` back.
           set -o pipefail
+          set +e
           bash scripts/main-red-owner.sh "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/mro.txt"
           rc=${PIPESTATUS[0]}
+          set -e
           {
             echo "## main-red-owner"
             echo

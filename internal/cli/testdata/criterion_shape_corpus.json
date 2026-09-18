@@ -1,0 +1,212 @@
+[
+ {
+  "id": "S00",
+  "task_id": "akbr-feedback-2026-08-epic",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "THE 11 FEEDBACK POINTS MAP TO ROWS. The mapping from each of the 11 customer points of 2026-08-06 to the child row that discharged it is recorded on this epic. Nine child rows exist and the numbering skips 08, so any point with no child row is either filed as a new child or recorded here as intentionally not actioned, with the reason. Without this the epic cannot be said to have covered its own scope."
+ },
+ {
+  "id": "S01",
+  "task_id": "am-w2-s8-router-pipeline-lines",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "The router.ex:1603-1613 comment describes the 8-key per-class contract and cites the pinning test. Evidence: the diff."
+ },
+ {
+  "id": "S02",
+  "task_id": "bp-task-verbs-500-on-cross-dataset-duplicate-slugs",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "MUTATION PROOF: a test creates one type:task doc_id in two datasets and asserts the task-get path does NOT 500. Remove the fix and paste the RED showing the 500 (or the raise) that the test catches; restore and paste the green. A test that passes on the unfixed resolver does not count."
+ },
+ {
+  "id": "S03",
+  "task_id": "cch-bl-cloudflare-identity-echo-no-surface",
+  "index": 5,
+  "hand_checkable": true,
+  "criterion": "MERGE-GATED (the LEAD closes this criterion, never the builder): merged to `main`, MERGE sha from `gh pr view <n> --json mergeCommit`, containment confirmed by `gh api repos/FRIKKern/barkpark/compare/<merge-sha>...main --jq .status` returning `ahead` or `identical`, and the FOUR live required contexts (`Cloud gate`, `Console gate`, `Elixir gate`, `PR references an active task`) green on the PR HEAD \u2014 never on the merge commit. If outcome (c) was chosen this criterion is closed by the cancellation instead, naming it."
+ },
+ {
+  "id": "S04",
+  "task_id": "cch-w24-bl-word-break-alias-remaining-seven",
+  "index": 0,
+  "hand_checkable": true,
+  "criterion": "Each of the seven is disposed INDIVIDUALLY: either a fixture was built that makes it tear (paste the failing measurement, then the passing one), or a one-line reason sits in the code one line from the declaration. 'It has always been there' is not a reason."
+ },
+ {
+  "id": "S05",
+  "task_id": "dr-w11-payload-divergence-close",
+  "index": 1,
+  "hand_checkable": false,
+  "criterion": "The census stays green with zero KNOWN OPEN rows, or the remaining rows name a successor task"
+ },
+ {
+  "id": "S06",
+  "task_id": "dr-w15-s5-capability-reaches-bp-cloud-status",
+  "index": 3,
+  "hand_checkable": true,
+  "criterion": "git_commit renders in bp cloud status in BOTH the human table and -o json, proving the free win; paste both renderings"
+ },
+ {
+  "id": "S07",
+  "task_id": "dr-w20-bl-time-to-coverage-is-the-gauge-that-can-move",
+  "index": 0,
+  "hand_checkable": false,
+  "criterion": "An AGE OF LAST SUCCESSFUL DEPLOY reading exists per target and is reachable from a command a human runs, with volume beside it and its window pinned."
+ },
+ {
+  "id": "S08",
+  "task_id": "dr-w23-bl-decoded-but-unrendered-is-65-not-18",
+  "index": 3,
+  "hand_checkable": true,
+  "criterion": "The two name-collision proofs (NextCursor, BuildLogURL) are pinned by assertions that fail if the census reverts to identifier matching."
+ },
+ {
+  "id": "S09",
+  "task_id": "gr-blk-oracle-modal-callsite-coverage",
+  "index": 4,
+  "hand_checkable": false,
+  "criterion": "Stability is re-measured at the widened state count with consecutive clean runs and zero orphaned Chrome"
+ },
+ {
+  "id": "S10",
+  "task_id": "hg-bl-format-complete-and-promote",
+  "index": 2,
+  "hand_checkable": true,
+  "criterion": "The toolchain-skew question is answered with evidence: whether 1.19.x-formatted output actually differs from 1.18.1's on this tree"
+ },
+ {
+  "id": "S11",
+  "task_id": "jpf-bl-app-auth-clone-provider",
+  "index": 0,
+  "hand_checkable": false,
+  "criterion": "Clone-source provider seam exists with public (no-auth) and app-auth rungs; app tokens are repo-scoped and short-lived"
+ },
+ {
+  "id": "S12",
+  "task_id": "p-claim-forward",
+  "index": 3,
+  "hand_checkable": false,
+  "criterion": "Verified against the live guerrilla ready overlay in both the GUI and TUI representations."
+ },
+ {
+  "id": "S13",
+  "task_id": "pds-bl-stray-keys-on-acceptance-criteria",
+  "index": 3,
+  "hand_checkable": true,
+  "criterion": "The strays are cleaned from the corpus or explicitly left with a reason \u2014 and the count is re-derived after, not assumed, from a published-perspective walk rather than bp search (which caps at 500)."
+ },
+ {
+  "id": "S14",
+  "task_id": "pe-w2-bl-device6-panels-stat-tone",
+  "index": 2,
+  "hand_checkable": true,
+  "criterion": "reader_dark_token_parity and view_edit parity green; tone-fg-on-bg-deep contrast verified \u2014 evidence quotes the runs"
+ },
+ {
+  "id": "S15",
+  "task_id": "site-spawner-backlog-site-teardown",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "Teardown reaches the BOX: the site root is removed and its Caddy handle_path block de-armed with backup+validate+reload-or-revert; a validate failure reverts and does not leave Caddy broken."
+ },
+ {
+  "id": "S16",
+  "task_id": "task-0495a21db5e4ad41",
+  "index": 0,
+  "hand_checkable": true,
+  "criterion": "THE TWO VERBS JOIN THE REGISTRY. internal/cli/destroy_confirm.go's destroyTargets gains entries for access.revoke (DELETE /v1/access/:id) and ticket-key.revoke (DELETE /v1/plugins/tickets/keys/:id). Verified 2026-09-06 on origin/main: the registry still holds exactly two entries, token.revoke (~95) and workspace.member-rm (~108)."
+ },
+ {
+  "id": "S17",
+  "task_id": "task-0495a21db5e4ad41",
+  "index": 3,
+  "hand_checkable": true,
+  "criterion": "A TEST COVERS BOTH NEW ENTRIES. Go tests assert each verb prompts (and that --yes/non-interactive still bypasses as designed), shown failing before the entries are added."
+ },
+ {
+  "id": "S18",
+  "task_id": "task-1cfe5c90d3512b5d",
+  "index": 2,
+  "hand_checkable": false,
+  "criterion": "IT IS ONE CHANGE, NOT A HARNESS REWRITE. The row scopes this as a surgical prompt/doc change; an optional pre-flight guard or builder-prompt invariant may be added, but the acceptance is the prompt text in both workflow files."
+ },
+ {
+  "id": "S19",
+  "task_id": "task-6c16987821184fa3",
+  "index": 3,
+  "hand_checkable": true,
+  "criterion": "THE EXPOSURE IS RE-MEASURED RATHER THAN INHERITED FROM THIS ROW. The figures here -- worst window 36 minutes against a ~45-minute lease, two missed windows out of four deaths, no claim actually lapsed -- are one lane's shift on 2026-09-08 and are a measurement with a timestamp. Re-derive from the loop's own log or the ledger before sizing anything on them, and state whether the lease is still ~45 minutes and the interval still 18. A design tuned to a stale margin is tuned to nothing."
+ },
+ {
+  "id": "S20",
+  "task_id": "task-7597dc34e9eafc2e",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "The test is proven able to FAIL: restore the per-candidate `tokens(new_task)` call inside `Similarity.score/6` (or lower the dedup timeout), show the test RED, restore, show it GREEN. Paste both runs. A size test that has never seen the stall is a sentence with an exit code."
+ },
+ {
+  "id": "S21",
+  "task_id": "task-922e616cb9b99243",
+  "index": 0,
+  "hand_checkable": true,
+  "criterion": "THE REFUSAL PRINTS A REMEDY THAT WORKS. The stale-draft publish refusal in api/lib/barkpark/content/lifecycle.ex stops prescribing patch-then-publish and prescribes the sequence that actually lands: discard-draft, then a bare-id patch. Paste the OLD and NEW text, located by content not by line number."
+ },
+ {
+  "id": "S22",
+  "task_id": "task-ae7e5bdf0b7d412c",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "A FAILED OR WRONG-KEY READ CAN NO LONGER BE MISTAKEN FOR AN EMPTY FIELD. Whatever the ruling in criterion 0, the outcome is that a caller reading a task's description gets the text or an EXPLICIT error \u2014 never a clean `\"\"` that is indistinguishable from a genuinely empty field. The specific harm to close is the append-to-empty silent deletion: reproduce it against a fixture BEFORE the change (an append that destroys prose) and show it is refused or impossible AFTER. A note in a doc does not satisfy this; the read itself must stop lying."
+ },
+ {
+  "id": "S23",
+  "task_id": "task-b0a4a00046ea9254",
+  "index": 0,
+  "hand_checkable": true,
+  "criterion": "The sweep is a PREDICATE over PR state, not a hand-listed set of refs: it derives its candidate set at run time and a ref whose PR is not MERGED is refused, with a control run proving the refusal fires on a deliberately planted unmerged ref."
+ },
+ {
+  "id": "S24",
+  "task_id": "task-b2b871424bd184eb",
+  "index": 3,
+  "hand_checkable": true,
+  "criterion": "The P3 marking in the code is updated to point at whichever of the two outcomes was chosen, so a future reader is not told the workflow is unowned when it has an owner (or vice versa)."
+ },
+ {
+  "id": "S25",
+  "task_id": "task-c1ede6fc7a2a41f6",
+  "index": 0,
+  "hand_checkable": true,
+  "criterion": "A ruling is recorded choosing (a) required, (b) watched-but-not-required, or (c) hermetic-only, with the reason stated"
+ },
+ {
+  "id": "S26",
+  "task_id": "task-e428b30fb9b2d4c7",
+  "index": 1,
+  "hand_checkable": false,
+  "criterion": "the prose clause treats a sentence covered by a correction record as fenced, with a test"
+ },
+ {
+  "id": "S27",
+  "task_id": "task-fbe07378ff57fbf5",
+  "index": 0,
+  "hand_checkable": true,
+  "criterion": "RED ARM: a bp-graph.js copy the tree carries but scripts/check-bp-graph-drift.sh MIRRORS does not name must RED a gate \u2014 enrolment by predicate, not by list."
+ },
+ {
+  "id": "S28",
+  "task_id": "task-felix-w13-cyclecorrection-migration-growth-watch",
+  "index": 1,
+  "hand_checkable": false,
+  "criterion": "The precedent records table-size and lock-duration signals that require an online/batched migration plan before a future revision backfill is approved."
+ },
+ {
+  "id": "S29",
+  "task_id": "wb-bl-go-railrev-claim-plumbing",
+  "index": 1,
+  "hand_checkable": true,
+  "criterion": "TaskClaimN and TaskClaimResources include observed_rail_rev only when non-empty; an empty value keeps the request byte-identical to today; regression tests prove both."
+ }
+]

@@ -273,6 +273,7 @@ templates/search-starter/public/bp-graph.js
 templates/astro-search-starter/public/bp-graph.js
 js/packages/react/src/status-vocab.gen.ts
 web/lib/status-ladder.gen.ts
+apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts
 templates/search-starter/app/globals.css
 templates/astro-search-starter/src/styles/globals.css
 scripts/console-path-escape-check.sh

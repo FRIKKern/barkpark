@@ -485,7 +485,12 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		if waitForLive > 0 {
 			return useError(out, "usage", "--wait-for-live is not wired for the --prebuilt lane: a prebuilt deploy switches on upload rather than riding the box's build queue, so the deferral this flag waits past does not occur there (usage: "+usage+")", exitUsage)
 		}
-		if _, verr := validatePrebuiltDir(prebuilt); verr != nil {
+		// The UNION arm, deliberately: no network has been touched yet, so the
+		// site's runtime target is unknown and a guard that demanded one lane's
+		// root file would refuse the other lane's legitimate tree. Everything
+		// that does not depend on the runtime (exists, non-empty, no symlinks,
+		// no unpackable entries) still refuses here, before any mint.
+		if _, verr := validatePrebuiltDirFor(prebuilt, prebuiltRuntimeUnknown); verr != nil {
 			return useError(out, "usage", verr.Error(), exitUsage)
 		}
 	} else if deploymentID != "" {
@@ -692,6 +697,16 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	if code := prebuiltStaticOnlyRefusal(out, ref, site, siteRead); code != exitOK {
 		return code
 	}
+	// THE RUNTIME-SPECIFIC ROOT GUARD, STILL PRE-MINT. The pre-mint arm in
+	// runCloudSiteDeploy could only ask the union question (it had not read the
+	// row yet); this is the same walk's strict half, and it runs here — after the
+	// one site read this lane already makes, and still before resolvePrebuiltDeployment
+	// spends the nonce. A node tree packed from the repo root instead of
+	// .next/standalone is refused here rather than by the box's exit 11.
+	runtime := prebuiltRuntimeFor(site, siteRead, dir)
+	if _, verr := validatePrebuiltDirFor(dir, runtime); verr != nil {
+		return useError(out, "failed", verr.Error(), exitGeneric)
+	}
 	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
 	if code != exitOK {
@@ -702,9 +717,22 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 		return useError(out, "failed", "the control plane minted a prebuilt deployment with no build_id — nothing to stamp the bytes with, so the upload would fail at HEALTH; re-run without --prebuilt to build on the box, or upgrade the control plane", exitGeneric)
 	}
 
-	marker, merr := prebuiltBuildMarker(dir)
-	if merr != nil {
-		return useError(out, "failed", merr.Error(), exitGeneric)
+	// THE BUILD-ID MARKER CHECK IS STATIC-ONLY, AND THAT IS THE RULING OF RECORD,
+	// NOT A SHORTCUT. On a node slot the marker HEALTH asserts is not resident in
+	// the uploaded bytes at all: write_slot_env (deploy/site-deploy-node.sh) puts
+	// BARKPARK_BUILD_ID into the slot EnvironmentFile and D71's force-dynamic makes
+	// the served page echo process.env. There is no index.html in a standalone
+	// release root to read a <meta> out of, and reading one would be asserting a
+	// property of the wrong artifact. What binds the node lane instead is the
+	// artifact digest (100% load-bearing, per the same ruling) and the ABI
+	// declaration packed below.
+	marker := buildID
+	if runtime != prebuiltRuntimeNode {
+		var merr error
+		marker, merr = prebuiltBuildMarker(dir)
+		if merr != nil {
+			return useError(out, "failed", merr.Error(), exitGeneric)
+		}
 	}
 	if marker != buildID {
 		out.progressf("  export BARKPARK_BUILD_ID=%s", buildID)
@@ -727,12 +755,15 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 			dir, have, buildID, ref, dir, dep.ID), exitGeneric)
 	}
 
-	art, perr := packPrebuiltDir(dir)
+	art, perr := packPrebuiltDirFor(dir, runtime)
 	if perr != nil {
 		return useError(out, "failed", perr.Error(), exitGeneric)
 	}
 	defer art.Cleanup()
 	out.progressf("→ packed %s — %d bytes on the wire, sha256 %s", dir, art.WireBytes, art.SHA256)
+	if runtime == prebuiltRuntimeNode {
+		out.progressf("  the artifact carries %s — the box compares it against its own node major before STAGE and refuses a mismatch with nothing staged and no slot booted", nodeABIMarkName)
+	}
 
 	f, oerr := os.Open(art.Path)
 	if oerr != nil {
@@ -834,21 +865,128 @@ func prebuiltOptInRefusal(out *writer, ref, id string, site cloudclient.SpawnSit
 // server for — a deploy that burns a nonced mint and ships bytes no visitor can
 // be served.
 //
+// WHY IT IS A PREDICATE AND NOT A LIST (ssw9-bl-node-prebuilt). This guard used
+// to ask `siteIsNode`, i.e. "is this one of the runtimes I know are NOT static?"
+// — an enumeration of the OPEN side. `Barkpark.Registry.Site` today declares
+// `@kinds ~w(container static node)` and the CLI names `node`/`container`, so
+// the list is complete AT THIS COMMIT and completeness is the only thing holding
+// it up. Add a fourth kind server-side (or a runtime target that does not spell
+// "node" — `RuntimeTargetIsNode` matches on that substring) and this guard
+// returns false for it: the site mints a nonced row, packs its tree, and uploads
+// bytes nothing serves, in silence. The STATIC side is the CLOSED one — one kind
+// ("static") and one runtime target (`RuntimeTargetStatic`) — so the question
+// asked below is "did the control plane tell me this is the static
+// symlink-swap?" and everything else it NAMES is refused. An ABSENT kind and an
+// absent runtime target are still waved through: the control plane said nothing,
+// and refusing on no information is not the same as refusing on a fact.
+//
+// THE RULING OF RECORD (ssw9-bl-node-prebuilt, RULED by team-lead 2026-09-02,
+// recorded on the ledger row by lead-triage — written here because a ruling made
+// in a message is invisible to git grep):
+//
+//	HEALTH certifies the injection. Declare a node ABI.
+//
+// What that settles: on a node slot the markers HEALTH asserts are NOT resident
+// in the uploaded bytes. `write_slot_env` (deploy/site-deploy-node.sh) writes
+// BARKPARK_BUILD_ID into the slot EnvironmentFile, the unit loads it, and D71's
+// force-dynamic makes the served page echo `process.env` — so ANY bundle that
+// boots and echoes it passes the by-value marker assertion. HEALTH therefore
+// certifies that the injection arrived, never that these bytes are the ones the
+// deployment minted; the artifact digest is 100% load-bearing for that. The
+// ruling ACCEPTS that split rather than repairing it, and adds the ABI
+// declaration as the second half. Neither half is built: the node engine has no
+// prebuilt arm at all (`grep -c prebuilt deploy/site-deploy-node.sh` = 0, while
+// the static engine's PLAN_MODE=prebuilt path is ~20 sites), so the refusal
+// below remains the whole of the node prebuilt lane and the sentence it prints
+// is where an operator learns why.
+//
 // It refuses BEFORE the mint for the same reason its sibling does: a prebuilt
 // mint is nonced on purpose, so a row burned by learning late cannot be re-used
 // by re-running the command.
 //
-// A FAILED READ IS NOT A REFUSAL, and neither is an absent runtime_target.
-// siteIsNode already fails closed to static when the control plane says nothing,
-// and an unreadable row is handled by the opt-in preflight above, which has
-// already said the check did not run. This guard fires only on a DEFINITE node.
+// A FAILED READ IS NOT A REFUSAL. An unreadable row is handled by the opt-in
+// preflight above, which has already said the check did not run.
 func prebuiltStaticOnlyRefusal(out *writer, ref string, site cloudclient.SpawnSite, siteRead bool) int {
-	if !siteRead || !siteIsNode(site.Kind, site.RuntimeTarget) {
+	if !siteRead {
 		return exitOK
 	}
+	clause := prebuiltUnservableClause(site.Kind, site.RuntimeTarget)
+	if clause == "" {
+		return exitOK
+	}
+	why := "the box stages the uploaded tree and flips a symlink, so nothing would start a server for these bytes and nothing would serve them."
+	if siteIsNode(site.Kind, site.RuntimeTarget) {
+		why += " Node prebuilt is not merely unbuilt: a node slot reads bp-build-id out of the env this deploy injects at boot, so HEALTH would certify the injection rather than the uploaded bytes (RULED 2026-09-02: HEALTH certifies the injection; declare a node ABI)."
+	}
 	return useError(out, "failed", fmt.Sprintf(
-		"%s runs a long-running node/SSR process, and --prebuilt is static-only: the box stages the uploaded tree and flips a symlink, so nothing would start a server for these bytes and nothing would serve them. Build it on its box instead: bp cloud site deploy %s\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
-		hzCell(ref), hzCell(ref)), exitGeneric)
+		"%s %s, and --prebuilt is static-only: %s Build it on its box instead: bp cloud site deploy %s\n\n(nothing was packed and no deployment was minted: a prebuilt mint is nonced, so a burned row could not be re-used by re-running this command.)",
+		hzCell(ref), clause, why, hzCell(ref)), exitGeneric)
+}
+
+// prebuiltUnservableClause is the predicate behind prebuiltStaticOnlyRefusal: it
+// names, in the refusal's own grammar, the thing the control plane SAID that
+// rules `--prebuilt` out — or "" when nothing it said does.
+//
+// Order matters only for the wording. The node arm is checked first so a node
+// site keeps the sentence it has always had ("runs a long-running node/SSR
+// process"); the two arms under it are the ones that catch a runtime this
+// binary has never heard of, and they quote the unrecognised value back so the
+// operator can see WHICH field refused them rather than reading a generic no.
+func prebuiltUnservableClause(kind, runtimeTarget string) string {
+	// NODE IS RETIRED FROM THIS REFUSAL, and the reason is a fact about the box,
+	// not a change of mind: deploy/site-deploy-node.sh now carries a
+	// PLAN_MODE=prebuilt arm that stages an uploaded standalone tree, records
+	// .bp-prebuilt-sha256, runs no npm, and refuses an ABI mismatch BEFORE STAGE
+	// (exit 17). The engine arm this guard was waiting for exists, so the CLI has
+	// a lane to hand these bytes to. The rest of the guard STAYS: it is still a
+	// closed question about the runtimes this binary has an arm for, and a
+	// runtime nobody has built an engine for is still refused before the nonce.
+	if siteIsNode(kind, runtimeTarget) {
+		return ""
+	}
+	if rt := strings.ToLower(strings.TrimSpace(runtimeTarget)); rt != "" && !prebuiltTargetIsStatic(rt) {
+		return fmt.Sprintf("declares runtime target %q, and this bp knows only two targets the prebuilt lane can serve (%s, %s)", sanitizeCell(rt), cloudclient.RuntimeTargetStatic, cloudclient.RuntimeTargetNode)
+	}
+	if k := strings.ToLower(strings.TrimSpace(kind)); k != "" && k != "static" {
+		return fmt.Sprintf("declares kind %q, and the prebuilt lane serves kinds \"static\" and \"node\"", sanitizeCell(k))
+	}
+	return ""
+}
+
+// prebuiltRuntimeFor decides WHICH lane this deploy packs for.
+//
+// The site row is the truth when it was read. When it was NOT (the opt-in
+// preflight has already said out loud that the read failed and that the control
+// plane's own refusal is the backstop), the tree's root file is the only
+// evidence left — and it is real evidence, because the two lanes have different
+// root files by contract: a static dist/ has index.html, a node standalone
+// release root has server.js. A tree carrying BOTH is read as static, which is
+// the status quo this change must not move.
+func prebuiltRuntimeFor(site cloudclient.SpawnSite, siteRead bool, dir string) prebuiltRuntime {
+	if siteRead {
+		if siteIsNode(site.Kind, site.RuntimeTarget) {
+			return prebuiltRuntimeNode
+		}
+		return prebuiltRuntimeStatic
+	}
+	regular := func(name string) bool {
+		st, err := os.Stat(filepath.Join(dir, name))
+		return err == nil && st.Mode().IsRegular()
+	}
+	if !regular("index.html") && regular("server.js") {
+		return prebuiltRuntimeNode
+	}
+	return prebuiltRuntimeStatic
+}
+
+// prebuiltTargetIsStatic is the CLOSED half of the runtime-target vocabulary:
+// `RuntimeTargetStatic` plus any value CONTAINING "static", mirroring
+// cloudclient.RuntimeTargetIsNode's substring tolerance so a control plane that
+// spells the field differently ("static_symlink_swap") is not refused for its
+// punctuation. Everything else — including every target that has not been
+// invented yet — is NOT static, which is the whole point.
+func prebuiltTargetIsStatic(rt string) bool {
+	return rt == cloudclient.RuntimeTargetStatic || strings.Contains(rt, "static")
 }
 
 // mintedSourceClause is the "no build started on the box" half of the mint
@@ -1593,7 +1731,15 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
+	// THE STOPWATCH BRACKETS THE POST AND NOTHING ELSE. It opens after the ref is
+	// resolved and closes on the reply, so the span it reports is the flip request
+	// itself — not `bp` starting up, and not the list-ALL read a display-name ref
+	// still pays. That is deliberate: the whole point of the number is to tell an
+	// operator whether the time they waited was spent server-side, and a span that
+	// swallowed client legs could not answer that.
+	started := siteClock()
 	res, rberr := cfg.CloudClient().RollbackSpawnSite(cloudCtx(), id)
+	flip := siteClock().Sub(started)
 	if rberr != nil {
 		return siteRefusalFail(out, siteRefusedRollback, ref, rberr)
 	}
@@ -1607,7 +1753,52 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 	renderSiteRolledBack(out, ref, res)
+	if line := siteRollbackOverBudgetLine(flip); line != "" {
+		out.outf("%s", line)
+	}
 	return exitOK
+}
+
+// siteRollbackBudget is the charter's instant-rollback budget, the same 1000 ms
+// `deploy/site-spawner-live-proof.sh` ships as its default ROLLBACK_BUDGET_MS.
+// It is named here so the CLI and the proof script cannot drift to two different
+// definitions of "instant".
+const siteRollbackBudget = 1000 * time.Millisecond
+
+// siteRollbackOverBudgetLine is the receipt's latency clause, and it is QUIET on
+// a rollback that met the budget — the empty string, not a fast-path brag.
+//
+// WHY IT PRINTS AT ALL. `bp cloud site rollback` used to answer a 3.8 s flip with
+// exactly the same checkmark as a 90 ms one (measured live on guerrilla
+// 2026-09-02: 1840 / 3021 / 3820 ms against a 1000 ms budget, task-b017df2fda0fe600).
+// An operator had no way to see the difference short of wrapping the command in
+// `time`, so the one number the safety property is sold on was invisible at the
+// exact moment it mattered.
+//
+// WHY IT IS SILENT UNDER BUDGET, and this is the failure direction: a duration
+// printed on every run is output that changes on every run, which makes the
+// receipt unstable for anything reading it and buys a reader nothing — "instant
+// was instant" is not news. Printing only the breach means the line's PRESENCE is
+// the finding. The cost of that choice is real and stated: a run at 999 ms leaves
+// no record, so this is a breach alarm, not a telemetry feed.
+//
+// The sentence names WHERE the time is, because that is what the operator cannot
+// work out alone: the span is the POST alone, so a breach is server-side by
+// construction — the control-plane route, the CP->box relay, or the box itself.
+func siteRollbackOverBudgetLine(flip time.Duration) string {
+	if flip <= siteRollbackBudget {
+		return ""
+	}
+	return fmt.Sprintf(
+		"  took %s for the flip request alone — over the %s budget. That span is the request and nothing else, so the wait is server-side: the control-plane route, the CP→box relay, or the box.",
+		siteRollbackSeconds(flip), siteRollbackSeconds(siteRollbackBudget))
+}
+
+// siteRollbackSeconds renders a sub-minute duration in seconds to two decimals.
+// Deliberately NOT siteShortDur, which floors at whole seconds ("3s") and would
+// erase the only digits a 1000 ms budget is decided on.
+func siteRollbackSeconds(d time.Duration) string {
+	return fmt.Sprintf("%.2fs", d.Seconds())
 }
 
 // renderSiteRolledBack writes the rollback receipt from the envelope the control
@@ -2155,32 +2346,40 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 	case "content_binding_empty":
 		// The create door refused because the site's read token sees nothing at the
 		// bound dataset, and it shipped the STRUCTURED menu of types it CAN read.
-		// The console renders that menu from the array and STRIPS the CLI re-run
-		// line (it is CLI-voiced); the CLI is that line's home, so it keeps it.
 		// When the array survived, compose the receipt from the parts the CLI
 		// controls — the verdict, the menu rendered in the console grammar, and the
 		// re-run incantation the server built with the real dataset triple — so the
 		// menu the user reads is the machine-readable list, not a prose copy that a
 		// terser server might not send. With no usable array, the server's own
 		// sentence is the most specific true thing, so relay it whole.
+		//
+		// cch-w69-bl — THE RE-RUN IS A FIELD NOW, NOT A SENTENCE TO FIND. This
+		// branch used to locate the incantation with
+		// strings.Index(detail, "Re-run naming a type") — a match on the control
+		// plane's PROSE, the terminal twin of the console strip the same row
+		// deleted. A reword on the server made this search miss and the line
+		// vanish from the receipt, with no test on either side failing. The plane
+		// now sends it as `cli_hint` (CloudRefusal.CLIHint), so the CLI reads a
+		// key and the console reads none.
+		hint := strings.TrimSpace(re.CLIHint)
 		if menu := siteReadableTypesMenu(re.ReadableTypes); menu != "" {
 			verdict := detail
 			if i := strings.Index(detail, ". "); i != -1 {
 				verdict = detail[:i+1]
 			}
-			reRun := ""
-			if i := strings.Index(detail, "Re-run naming a type"); i != -1 {
-				reRun = strings.TrimSpace(detail[i:])
-			}
 			msg := fmt.Sprintf("%s It can read: %s.", siteRefusalDetail(verdict, "this site would build from nothing."), menu)
-			if reRun != "" {
-				msg += " " + reRun
+			if hint != "" {
+				msg += " Re-run: " + sanitizeCell(hint)
 			}
 			return msg + " " + kind.nothingClause()
 		}
 		if detail != "" {
-			return fmt.Sprintf("the control plane refused %s %q (%s): %s %s",
-				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingClause())
+			msg := fmt.Sprintf("the control plane refused %s %q (%s): %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail))
+			if hint != "" {
+				msg += " Re-run: " + sanitizeCell(hint)
+			}
+			return msg + " " + kind.nothingClause()
 		}
 		return fmt.Sprintf("the control plane refused %s %q (%s) — nothing there is readable by this site's token. %s",
 			kind.noun(), ref, sanitizeCell(re.Code), kind.nothingClause())

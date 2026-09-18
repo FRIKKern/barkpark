@@ -339,6 +339,17 @@ defmodule BarkparkWeb.WebhookController do
       consecutive_failures: wh.consecutive_failures,
       auto_disabled_at: wh.auto_disabled_at,
       disable_reason: wh.disable_reason,
+      # The AUTOMATIC exit, made visible. Without these two an operator reading
+      # a disabled endpoint sees a dead stop and clicks re-enable — taking by
+      # hand the action the system was already scheduled to take, and blind to
+      # whether that was 60s away or had walked out to the 1h cap. Both are pure
+      # functions of columns already on the row. Named to match
+      # `Barkpark.Audit.Export.sink_health/1` so the two latch surfaces read alike;
+      # `next_probe_at` carries the webhook latch's own verb (a half-open PROBE,
+      # not a queued retry). Both nil for an endpoint a PERSON disabled — only the
+      # automatic latch has an automatic exit.
+      next_probe_at: Webhooks.next_probe_at(wh),
+      dark_for_seconds: Webhooks.dark_for_seconds(wh),
       created_at: wh.inserted_at,
       updated_at: wh.updated_at
     }

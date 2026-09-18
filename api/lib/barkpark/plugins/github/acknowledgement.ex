@@ -87,6 +87,8 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
           lifecycle_status: String.t() | nil,
           criteria_total: non_neg_integer(),
           has_criterion: boolean(),
+          sealed: boolean(),
+          seal_reason: String.t() | nil,
           created_at: NaiveDateTime.t() | nil
         }
 
@@ -96,6 +98,7 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
           closed: non_neg_integer(),
           open: non_neg_integer(),
           no_criterion: non_neg_integer(),
+          sealed: non_neg_integer(),
           rows: [census_row()]
         }
 
@@ -106,6 +109,14 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
   # Terminal lifecycle states. A row in one of these has stopped moving, so a
   # reporter still waiting on it is waiting forever — this is the URGENT bucket.
   @closed_lifecycle_statuses ~w(done cancelled blocked)
+
+  # Mirror-link states in which the UPSTREAM issue is no longer a live
+  # conversation. `InboundEvents.detach/6` flips the link to "detached" on a
+  # deleted, transferred or author-closed intake issue, and that flip is the
+  # only durable ledger record that the place the reporter would look has gone
+  # away. A row in one of these states cannot be answered by the normal flow:
+  # nothing upstream will ever prompt again.
+  @sealed_link_states ~w(detached)
 
   # How many census rows to hand a console/CLI caller. The COUNTS are exact
   # (computed over every matched row); only the row list is capped.
@@ -276,6 +287,32 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
     * `no_criterion` — born before the criterion existed, so the row carries NO
       record of the obligation at all. These are the audit blind spot in its pure
       form and each one needs the criterion added by hand.
+    * `sealed` — of `total`, rows the loop can no longer answer on its own:
+      either terminal (`closed`) OR the mirror link is `detached`, meaning the
+      upstream issue was deleted, transferred or closed. THIS is the act-first
+      bucket, and it is strictly wider than `closed`.
+
+  ## Why `closed` alone was not the act-first bucket
+
+  Measured against the live ledger 2026-09-17, all ELEVEN intake-born rows and
+  the SEVEN unacknowledged among them carried a NON-terminal `lifecycle_status`.
+  So `closed` was `0` and `open` was `7`: the census said every waiting reporter
+  was merely "pending, not overdue-forever", and the bucket documented as the
+  one to act on FIRST was empty and therefore inert.
+
+  Four of those seven — `gh-8463`, `gh-8461`, `gh-6290`, `gh-11555` — carry
+  `github.state == "detached"`. Their issues are gone from GitHub while the
+  obligation on this side is still unmet. `#8463` is the worked case: an outside
+  contributor reported it 2026-07-31, the fix shipped 2026-08-02, the issue was
+  CLOSED 2026-08-24 carrying only the bridge bot's "Updates will be posted
+  here", and the row stayed `lifecycle_status: "open"` throughout. A terminal
+  lifecycle was never going to find it.
+
+  `sealed` is a PREDICATE over the two seal directions, not a list of the four
+  rows that satisfy it today; a fifth detaching tomorrow joins it with no edit.
+  A row whose acknowledgement IS met is never sealed — being answered outranks
+  both seal directions, which is why the acknowledged-and-detached `gh-6681` is
+  absent from the bucket.
     * `rows` — the oldest-first row list (the longest-waiting reporter leads),
       capped. The COUNTS above are exact over the whole population; only this
       list is capped.
@@ -311,6 +348,7 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
       closed: Enum.count(rows, &(&1.lifecycle_status in @closed_lifecycle_statuses)),
       open: Enum.count(rows, &(&1.lifecycle_status not in @closed_lifecycle_statuses)),
       no_criterion: Enum.count(rows, &(not &1.has_criterion)),
+      sealed: Enum.count(rows, & &1.sealed),
       rows: Enum.take(rows, cap)
     }
   end
@@ -351,17 +389,45 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
   defp to_census_row(%{doc_id: doc_id, dataset: dataset, content: content, created_at: created}) do
     github = Map.get(content || %{}, "github") || %{}
 
+    lifecycle = Map.get(content || %{}, "lifecycle_status")
+    link_state = Map.get(github, "state")
+    reason = seal_reason(lifecycle, link_state)
+
     %{
       doc_id: published_id(doc_id),
       issue: issue_number(content),
       repo: Map.get(github, "repo"),
       dataset: dataset,
-      state: Map.get(github, "state"),
-      lifecycle_status: Map.get(content || %{}, "lifecycle_status"),
+      state: link_state,
+      lifecycle_status: lifecycle,
       criteria_total: length(criteria_list(content)),
       has_criterion: has_criterion?(content),
+      sealed: reason != nil,
+      seal_reason: reason,
       created_at: created
     }
+  end
+
+  @doc """
+  Why this waiting reporter can no longer be reached by the normal flow, or
+  `nil` when they still can.
+
+    * `"terminal_lifecycle"` — the row has stopped moving on this side
+    * `"upstream_detached"` — the ISSUE has gone on GitHub's side
+
+  Both are checked because they seal the loop from opposite ends and neither
+  implies the other: every unacknowledged row measured on 2026-09-17 was
+  non-terminal, so a lifecycle-only test saw none of them. Lifecycle is reported
+  first when both hold, because a terminal row is the stronger statement about
+  this ledger — the side the reader can actually act on.
+  """
+  @spec seal_reason(String.t() | nil, String.t() | nil) :: String.t() | nil
+  def seal_reason(lifecycle_status, link_state) do
+    cond do
+      lifecycle_status in @closed_lifecycle_statuses -> "terminal_lifecycle"
+      link_state in @sealed_link_states -> "upstream_detached"
+      true -> nil
+    end
   end
 
   defp maybe_dataset(query, dataset) when is_binary(dataset) do

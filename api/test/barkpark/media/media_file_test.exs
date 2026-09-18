@@ -20,6 +20,50 @@ defmodule Barkpark.Media.Storage.MediaFileTest do
   alias Barkpark.Tenancy
 
   # ---------------------------------------------------------------------------
+  # scope_opts/1 — the CORE row-scope accessor (task-6bc5e1025154b6fb)
+  # ---------------------------------------------------------------------------
+  #
+  # This is the mapping that used to live in the Media PLUGIN as
+  # `Barkpark.Plugins.Media.Assets.file_scope_opts/1` and needed a per-file
+  # sanction in `@coupling_guarded_runtime` for every host caller. It is pure
+  # over two struct fields — no DB, no fixtures, no Repo — so it is asserted
+  # directly here on bare structs.
+  describe "scope_opts/1" do
+    test "emits both scope keys when the row carries both" do
+      opts = MediaFile.scope_opts(%MediaFile{workspace_id: "ws-1", project_id: "pr-1"})
+
+      assert Keyword.fetch!(opts, :workspace_id) == "ws-1"
+      assert Keyword.fetch!(opts, :project_id) == "pr-1"
+      assert Enum.sort(Keyword.keys(opts)) == [:project_id, :workspace_id]
+    end
+
+    # THE NIL-DROP IS LOAD-BEARING. A pre-tenancy blob must emit NOTHING so
+    # `Content.put_scope_attrs` falls back to its Default-scope behaviour —
+    # emitting `workspace_id: nil` instead would re-home legacy uploads.
+    test "drops a nil workspace_id and a nil project_id rather than emitting nil" do
+      assert MediaFile.scope_opts(%MediaFile{workspace_id: nil, project_id: nil}) == []
+
+      assert MediaFile.scope_opts(%MediaFile{workspace_id: "ws-1", project_id: nil}) == [
+               workspace_id: "ws-1"
+             ]
+
+      assert MediaFile.scope_opts(%MediaFile{workspace_id: nil, project_id: "pr-1"}) == [
+               project_id: "pr-1"
+             ]
+    end
+
+    # The whole point of the move: the accessor is reachable from CORE without
+    # naming a removable plugin namespace. If someone re-homes it back into
+    # `Barkpark.Plugins.Media.Assets`, this fails to compile/resolve here.
+    test "lives in the core Media.Storage namespace, not a plugin one" do
+      assert function_exported?(MediaFile, :scope_opts, 1) or
+               (Code.ensure_loaded?(MediaFile) and function_exported?(MediaFile, :scope_opts, 1))
+
+      refute function_exported?(Barkpark.Plugins.Media.Assets, :file_scope_opts, 1)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
 

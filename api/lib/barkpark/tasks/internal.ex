@@ -47,7 +47,7 @@ defmodule Barkpark.Tasks.Internal do
   # those, hiding genuinely available work from reconciliation sweeps.
   #
   # THE RETAINED EPOCH IS LOAD-BEARING, NOT RESIDUE. `Tasks.Claim` computes the
-  # next lease as `current_epoch(doc) + 1` (claim.ex:481), reading it straight
+  # next lease as `current_epoch(doc) + 1` (claim.ex, `current_epoch/1` call sites), reading it straight
   # off the released row, so the epoch is what keeps the fence MONOTONIC across
   # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex:741-742)
   # refuses `:fenced_off` whenever a claim map carries an epoch that does not
@@ -595,12 +595,47 @@ defmodule Barkpark.Tasks.Internal do
         {:error, :criterion_seed_not_met}
 
       true ->
-        base = %{"criterion" => text, "met" => false, "evidence" => ""}
+        base =
+          %{"criterion" => text, "met" => false, "evidence" => ""}
+          |> maybe_mint_ack_gate(update)
 
         case apply_entry_update(base, update) do
           {:ok, entry} -> {:ok, list ++ [entry], MapSet.put(seeded, index)}
           {:error, reason} -> {:error, reason}
         end
+    end
+  end
+
+  # THE ACKNOWLEDGEMENT FLAG, MINTED ON THE SEED AND NOWHERE ELSE
+  # (task-66cc8ad999fa5a24).
+  #
+  # `Github.Acknowledgement` recognises the reporter-loop criterion by
+  # `"ack_gate" => true` and *by nothing else* — the merge_gate lesson taken as
+  # law, so wording is free to be re-authored without changing what the gate
+  # reads. `Intake` mints the flag on the birth path. But the ELEVEN rows born
+  # BEFORE that gate existed carry no such criterion, and every writer with a
+  # `bp` verb built the newborn entry from a fixed base and then wrote only
+  # `met` / `evidence` / `attempts` — so a hand-added criterion came out
+  # UNFLAGGED. It read like an acknowledgement to a human and was invisible to
+  # the census and the close gate: the exact wording-versus-flag drift the flag
+  # exists to refuse, reproduced on the flag itself.
+  #
+  # Three properties make this safe to accept from a caller:
+  #
+  #   * SEED ONLY. A stored criterion cannot be retro-flagged — an in-range
+  #     update never reaches here — so the flag on any row is either `Intake`'s
+  #     or was minted with that row, never attached to someone else's criterion
+  #     after the fact.
+  #   * MINT ONLY, never release. Nothing here (or in `apply_entry_update/2`,
+  #     which `Map.put`s onto the stored entry) can clear the flag, so the door
+  #     opens in the direction that ADDS an obligation and in no other.
+  #   * THE LITERAL `true` AND NOTHING ELSE, matching `flagged?/1`'s own test. A
+  #     truthy-ish value silently minting a gate is how a guard starts lying.
+  defp maybe_mint_ack_gate(entry, update) do
+    if Map.get(update, "ack_gate") == true do
+      Map.put(entry, "ack_gate", true)
+    else
+      entry
     end
   end
 

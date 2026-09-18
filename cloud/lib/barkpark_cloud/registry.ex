@@ -777,6 +777,52 @@ defmodule BarkparkCloud.Registry do
   def get_barkpark(_), do: nil
 
   @doc """
+  Resolve a registered instance from the PUBLIC HOSTNAME it answers on — the
+  lookup key an instance-initiated "Sign in with Barkpark Cloud" has, and the
+  only one it has. The instance-side login page knows its own address; it does
+  NOT know its control-plane UUID (that id is never shipped to a box), so
+  `get_barkpark/1` cannot serve this door.
+
+  Accepts a bare hostname (`acme.example.com`) or a full origin
+  (`https://acme.example.com:443/login`) — `normalize_claim_host/1` is the SAME
+  normaliser the hostname-claim guard uses, so a name that is "taken" over there
+  resolves to the same row here. Matching is over the ONE hostname namespace a
+  box answers on:
+
+    * `custom_host` — the operator-attached name, stored already-normalised;
+    * `url` — the provisioning FQDN, stored as a full `https://<host>` origin,
+      so the candidate origins are reconstructed in Elixir rather than
+      normalised in SQL (both forms are index-served equality, not a `LIKE`).
+
+  NOT team-scoped: the caller has no team in hand at this door (the browser
+  arrives from the instance, not from a console team context). Resolution is
+  therefore deliberately separated from AUTHORIZATION — the router checks
+  `Accounts.get_membership/2` against the row's `team_id` before anything is
+  minted, and answers the same 404 for "no such host" and "not your instance"
+  so this function can never be used as an existence oracle.
+
+  Blank/non-binary input, and a host that normalises to `""`, are nil.
+  """
+  @spec get_barkpark_by_public_host(binary()) :: Barkpark.t() | nil
+  def get_barkpark_by_public_host(host) when is_binary(host) do
+    case normalize_claim_host(host) do
+      "" ->
+        nil
+
+      norm ->
+        origins = ["https://" <> norm, "https://" <> norm <> "/", "http://" <> norm]
+
+        Barkpark
+        |> where([b], b.custom_host == ^norm or b.url in ^origins)
+        |> order_by([b], asc: b.inserted_at)
+        |> limit(1)
+        |> Repo.one()
+    end
+  end
+
+  def get_barkpark_by_public_host(_), do: nil
+
+  @doc """
   azh-w6 (S14c): the team's existing Barkpark with this exact `name`, or nil —
   the resurrect live-twin guard. Because Remove (deprovision) DELETES the
   registry row, a still-present row named the same as an archive you're trying to
@@ -2453,14 +2499,31 @@ defmodule BarkparkCloud.Registry do
 
   defp console_line_meta(_), do: %{}
 
-  # Keep only the last @max_console_lines entries (oldest dropped) — the append-only
-  # cap that bounds the row size — and DISCLOSE the drop: the oldest SURVIVING
-  # entry carries `"dropped_before" => <cumulative count>`, so a reader can tell a
-  # complete narration from the tail of one. The count is cumulative because the
-  # entry being dropped is itself the previous oldest survivor and carries the
-  # running total; below the cap nothing is dropped and no key is written (an
-  # absent key reads as 0).
-  defp cap_console(entries) when is_list(entries) do
+  @doc """
+  dwb-18: THE canonical console cap — keep only the last `@max_console_lines`
+  entries (oldest dropped), the append-only bound on the row size, and DISCLOSE
+  the drop: the oldest SURVIVING entry carries `"dropped_before" => <cumulative
+  count>`, so a reader can tell a complete narration from the tail of one. The
+  count is cumulative because the entry being dropped is itself the previous
+  oldest survivor and carries the running total; below the cap nothing is
+  dropped and no key is written (an absent key reads as 0).
+
+  PUBLIC because it has a caller outside this module.
+  `BarkparkCloud.Sites.Deploy.record_stage/2` writes `console` directly inside
+  the same fenced CAS as the stage transition — it cannot route through
+  `append_deployment_console/2` without splitting that atomicity — and until
+  dwb-18 it was the ONE console writer whose bound held by ARITHMETIC (six
+  stages x three statuses = eighteen entries against a cap of 300) rather than
+  by enforcement. Arithmetic is not a bound: nothing noticed the cap being
+  lowered, and appending onto a console another path had already capped silently
+  overflowed it and lost the `dropped_before` disclosure — a console that had
+  dropped its head became indistinguishable from a complete one. Re-deriving the
+  ring at the call site would have bought the bound with a silent `Enum.take/2`,
+  committing that very defect, so the one canonical implementation is promoted
+  instead of copied.
+  """
+  @spec cap_console([map()]) :: [map()]
+  def cap_console(entries) when is_list(entries) do
     case length(entries) - @max_console_lines do
       drop when drop > 0 ->
         entries
@@ -2481,6 +2544,54 @@ defmodule BarkparkCloud.Registry do
   # console that has never been capped, and on a non-map/absent head).
   defp dropped_before([%{"dropped_before" => count} | _]) when is_integer(count), do: count
   defp dropped_before(_), do: 0
+
+  # dwb-18: the CONTROL PLANE'S OWN console entry for a builder transition it
+  # performs — the deploy-side twin of `append_provision_step/4`'s narration,
+  # written in the SAME changeset as the transition it describes.
+  #
+  # WHY THIS EXISTS. `console` only ever filled from the OUTSIDE: the builder
+  # POSTs lines via `append_deployment_console/2`. So a container deploy that
+  # was minted by a GitHub push and then claimed by a builder narrated NOTHING
+  # until the builder's first line landed — the row moved `queued -> building`
+  # with an empty console, and the dashboard's build console (`deployConsoleHtml`,
+  # fed from `deployment_json/1`'s `console` key) rendered an empty panel beside
+  # a spinning pill. The moment a build STARTS, and which worker started it, was
+  # the one transition nothing recorded.
+  #
+  # BEST-EFFORT AND NON-RAISING BY CONSTRUCTION: a claim must never fail because
+  # its narration could not be composed. An unusable line degrades to the console
+  # the row already had, so the claim proceeds with exactly the pre-dwb-18 array.
+  #
+  # BOUNDED AND ORDERED like every other console writer: the line is chopped at
+  # `@max_console_line_chars` with a `truncated_from` disclosure, the array is
+  # `cap_console/1`-capped at `@max_console_lines` with a `dropped_before`
+  # disclosure, and the timestamp is the SERVER clock (never a worker's).
+  # `"source" => "control-plane"` marks the entry as authored HERE rather than
+  # relayed from a build, which is the distinction a reader needs to tell the
+  # narration of the pipeline from the output of the build.
+  defp narrate_transition(%Deployment{} = deployment, line) when is_binary(line) do
+    existing = deployment.console || []
+
+    case validate_console_line(line) do
+      {:ok, text} ->
+        entry =
+          %{
+            "line" => text,
+            "at" => DateTime.to_iso8601(DateTime.utc_now()),
+            "source" => "control-plane"
+          }
+          |> Map.merge(console_line_meta(line))
+
+        cap_console(existing ++ [entry])
+
+      :error ->
+        existing
+    end
+  end
+
+  # The one place the builder-claim narration's wording is composed, so both
+  # container claim paths (fleet-wide and box-scoped) cannot drift apart.
+  defp builder_claim_line(worker_id), do: "BUILD — claimed by builder #{worker_id}"
 
   # Keep only the last @max_step_entries entries (oldest dropped) — the append-only
   # cap that bounds the step-transition array.
@@ -7523,20 +7634,35 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Fetch a Site by id only if it belongs to `team` — the team-scoped read for the
-  user-facing API. Returns `nil` if the site exists but is owned by another
-  team (an existence leak protection: callers cannot distinguish "wrong team"
-  from "no such site").
+  Fetch a Site by id OR by team-scoped slug, only if it belongs to `team` — the
+  team-scoped read for the user-facing API. Returns `nil` if the site exists but
+  is owned by another team (an existence leak protection: callers cannot
+  distinguish "wrong team" from "no such site").
+
+  `ref` is a UUID or a slug. A non-UUID `ref` falls back to a `(team_id, slug)`
+  lookup, which the schema's unique index makes unambiguous — that pair names at
+  most one row, so the slug arm can never widen the tenancy fence the uuid arm
+  holds: BOTH arms filter on `team_id`, so a slug belonging to another team is
+  `nil` (→ 404) exactly like a foreign uuid.
+
+  This is what lets `POST /v1/sites/:id/rollback` (and every other
+  `with_team_site` route — status, deploy, delete, settings, promote) accept the
+  slug the user typed. Before it, the CLI had to resolve slug → uuid itself with
+  a list-ALL `GET /v1/sites` first, a measured ~0.4 s round trip (Apple M4,
+  N=10, live api.barkpark.cloud, 2026-09-16) paid by EVERY slug-addressed verb
+  before its real request was even issued.
   """
   @spec get_team_site(Team.t() | binary(), binary()) :: Site.t() | nil
-  def get_team_site(team, id) when is_binary(id) do
-    case uuid_or_nil(id) do
+  def get_team_site(team, ref) when is_binary(ref) do
+    tid = team_id(team)
+
+    case uuid_or_nil(ref) do
       nil ->
-        nil
+        Site
+        |> where([s], s.slug == ^ref and s.team_id == ^tid)
+        |> Repo.one()
 
       uuid ->
-        tid = team_id(team)
-
         Site
         |> where([s], s.id == ^uuid and s.team_id == ^tid)
         |> Repo.one()
@@ -9567,7 +9693,11 @@ defmodule BarkparkCloud.Registry do
               status: "building",
               claim_worker: worker_id,
               claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-              claim_epoch: d.claim_epoch + 1
+              claim_epoch: d.claim_epoch + 1,
+              # dwb-18: narrate the transition the control plane is performing,
+              # in the SAME changeset — atomic with the claim, so a console entry
+              # for a claim that rolled back can never exist.
+              console: narrate_transition(d, builder_claim_line(worker_id))
             })
             |> Repo.update()
 
@@ -9645,7 +9775,11 @@ defmodule BarkparkCloud.Registry do
               status: "building",
               claim_worker: worker_id,
               claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
-              claim_epoch: d.claim_epoch + 1
+              claim_epoch: d.claim_epoch + 1,
+              # dwb-18: narrate the transition the control plane is performing,
+              # in the SAME changeset — atomic with the claim, so a console entry
+              # for a claim that rolled back can never exist.
+              console: narrate_transition(d, builder_claim_line(worker_id))
             })
             |> Repo.update()
 

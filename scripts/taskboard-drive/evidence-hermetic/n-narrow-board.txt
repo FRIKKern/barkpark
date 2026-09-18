@@ -5,7 +5,7 @@
  │    C4/7 · P1 · 1/2 · fixture-worker · T · T
  ├─ ○ Paint the pier bollards                       C4/7 P2 0/1 T
  ├─ ○ Replace the fog bell                          C4/7 P3 0/1 T
- └─ ✓ Retire the old winch                              C4/7 1/1 T
+ └─ ✓ Retire the old winch                             C4/7 1/1 T
 
    Orchard rows epic ·········································· 0/3
  ├─ ⠿ Mulch the seedling beds
@@ -13,11 +13,11 @@
  ├─ ! Net the cherry rows                   C5/7 P2 0/1 T blocked
  └─ ○ Graft the pear stock                          C4/7 P1 0/2 T
 
-   (no epic) ·················································· 1/2
-
-
-
-
- ▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
- ⠿ 2 in flight · ○ 4 ready · ✓ 2 done · 4/18 criteria · 9 stale 18%
+   Salt marsh epic ············································ 1/6
+ ├─ ○ Recalibrate the tide counter                  C4/7 P2 0/1 T
+ ├─ ○ Reseed the upper saltings                     C4/7 P1 0/1 T
+ ├─ ⠿ Rebuild the birdwatcher hide
+   ↓ 23 more below
+ ▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+ ⠿ 5 in flight · ○ 16 ready · ✓ 5 done · 27 stale               16%
  jk move · enter open · esc back · c claim · x close · o studio

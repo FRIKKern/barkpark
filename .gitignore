@@ -138,3 +138,4 @@ api/priv/static/assets/bp-pdrender.wasm.gz
 # lineref-sweep --selftest writes a throwaway probe at the repo root and removes
 # it in a finally block; this covers a run killed between the write and the cleanup.
 __lineref_selftest_probe_*.ex
+.pr-comment.md

@@ -1,0 +1,167 @@
+name: taskboard-drive
+
+# ADVISORY — the hermetic tmux drive for the Go task-board TUI (charter D129,
+# task ttw22-hermetic-ci-gate). It runs the committed harness
+# scripts/taskboard-drive/drive.sh in DRIVE_MODE=hermetic (fixture-served, no
+# network, no user config) and then scripts/taskboard-drive/hermetic-proof.sh
+# (two back-to-back runs, normalized transcripts must diff empty).
+#
+# WHY A NEW WORKFLOW AND NOT AN EXISTING ONE
+#   go-tests.yml is heavily contended (one paths list, many lanes) and
+#   shell-harnesses.yml's tenants are pure-shell, token-free and second-scale;
+#   this one builds two Go binaries, spawns a tmux server and drives it for
+#   ~25s. It gets its own file so a red here names the board, not "the Go
+#   suite".
+#
+# WHY ADVISORY (continue-on-error: true)
+#   The drive asserts painted terminal frames produced by a real scheduler.
+#   Determinism is PROVEN on Darwin/arm64 (hermetic-proof.sh, two byte-identical
+#   runs) but has never been observed on a GitHub linux runner, where CPU
+#   contention moves the queueHover settle timer. Until one green run on a real
+#   runner demonstrates scheduler-latency determinism, this job MUST NOT be able
+#   to stop a merge.
+#
+#   PROMOTION (lead's call, not a builder's): when this job has gone green on
+#   ubuntu-latest across a handful of unrelated PRs, drop `continue-on-error`
+#   from the job below and add the check-run name `taskboard hermetic drive
+#   (ADVISORY)` — renamed without the suffix — to the required set in
+#   .github/required-checks.json. Do not promote on one green run.
+#
+# KNOWN WART (carried deliberately, documented in scripts/taskboard-drive/README.md)
+#   drive.sh pins CC=/usr/bin/clang for both `go build` invocations — a Darwin
+#   workaround for a shadowing `cc` on the maintainer's PATH. On a linux runner
+#   that path is not guaranteed, so the "C toolchain guard" step below makes
+#   /usr/bin/clang exist (installing clang if the image lacks it) rather than
+#   letting the build die inside the harness with an opaque message.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "internal/taskboard/**"
+      - "scripts/taskboard-drive/**"
+      - "cmd/barkpark/**"
+      - ".github/workflows/taskboard-drive.yml"
+  push:
+    branches: [main]
+    paths:
+      - "internal/taskboard/**"
+      - "scripts/taskboard-drive/**"
+      - "cmd/barkpark/**"
+      - ".github/workflows/taskboard-drive.yml"
+
+permissions:
+  contents: read
+
+# Per-SHA on main, so a merge cannot evict the pending main run before a runner
+# picks it up (scripts/main-run-concurrency-check.sh measured 37 of 40 main runs
+# cancelled under merge cadence); PR runs still collapse to the newest push.
+concurrency:
+  group: taskboard-drive-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  hermetic-drive:
+    name: taskboard hermetic drive (ADVISORY)
+    runs-on: ubuntu-latest
+    # ADVISORY until promoted — see the header block. A red here is a signal to
+    # read, never a merge blocker.
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # LOUD tmux guard. drive.sh launches DETACHED sessions with
+      # `tmux new-session -d -x 130 -y 40`; on tmux 3.2a the detached -x/-y
+      # geometry does not stick and the pane comes up 80x24. Every assert in the
+      # harness is column-located, so a mis-geometried frame does not error — it
+      # quietly judges the WRONG columns. That failure mode must be a named red
+      # here, never a silent pass. (drive.sh itself only WARNs; a CI lane cannot
+      # afford a warning.)
+      - name: tmux >= 3.4 guard (LOUD — a mis-geometried frame is never judged)
+        run: |
+          set -euo pipefail
+
+          if ! command -v tmux >/dev/null 2>&1; then
+            echo "tmux not present on this image — installing"
+            # Non-fatal on purpose: a failed install must fall through to the
+            # NAMED red below, never abort the step under `set -e` with no reason.
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq tmux || true
+          fi
+
+          if ! command -v tmux >/dev/null 2>&1; then
+            echo "::error title=taskboard-drive: tmux ABSENT::REASON: tmux is not installed on this runner and 'apt-get install tmux' did not produce one. drive.sh drives detached tmux sessions at pinned -x/-y geometry; with no tmux there is nothing to drive. This is a RED, not a skip — a skipped drive is indistinguishable from a passing one."
+            exit 1
+          fi
+
+          ver=$(tmux -V)              # e.g. "tmux 3.4", "tmux 3.2a", "tmux next-3.5"
+          echo "tmux version string: ${ver}"
+          num=${ver#tmux }
+          num=${num#next-}            # a dev build reports "tmux next-3.5"; it is NEWER, never older
+          maj=${num%%.*}
+          rest=${num#*.}
+          min=$(printf '%s' "$rest" | sed 's/[^0-9].*$//')
+
+          case "$maj$min" in
+            ''|*[!0-9]*)
+              echo "::error title=taskboard-drive: tmux version UNPARSEABLE::REASON: could not read a major.minor out of '${ver}'. The guard refuses to guess: an unparseable version is treated exactly like an old one, because a mis-geometried detached pane silently relocates every column the harness asserts on."
+              exit 1
+              ;;
+          esac
+
+          if [ "$maj" -lt 3 ] || { [ "$maj" -eq 3 ] && [ "$min" -lt 4 ]; }; then
+            echo "::error title=taskboard-drive: tmux ${num} is older than 3.4::REASON: detached '-x/-y' geometry silently breaks before tmux 3.4 (3.2a comes up 80x24 regardless), and every assert in drive.sh is located by COLUMN. A run on this tmux would judge the wrong cells and report a verdict about a frame the app never painted. Refusing to run."
+            exit 1
+          fi
+
+          echo "tmux ${num} >= 3.4 — detached -x/-y geometry is honoured"
+
+      # drive.sh pins CC=/usr/bin/clang (a Darwin workaround). Make that path
+      # real on linux before the harness needs it, so a missing compiler is a
+      # named red HERE and not an opaque "go build failed" three steps later.
+      - name: C toolchain guard (drive.sh pins CC=/usr/bin/clang)
+        run: |
+          set -euo pipefail
+
+          if [ ! -x /usr/bin/clang ]; then
+            echo "/usr/bin/clang absent on this image — installing clang"
+            # Non-fatal on purpose — see the tmux guard above.
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq clang || true
+          fi
+
+          if [ ! -x /usr/bin/clang ]; then
+            echo "::error title=taskboard-drive: /usr/bin/clang ABSENT::REASON: scripts/taskboard-drive/drive.sh invokes both of its go builds with CC=/usr/bin/clang, and this runner has no such file even after 'apt-get install clang'. The harness would die inside the fixture build with an opaque message. Refusing to run."
+            exit 1
+          fi
+
+          # NO PIPE. `clang --version | head -1` is the pipefail/SIGPIPE shape
+          # scripts/pipefail-sigpipe-scan.sh hunts: this step runs under the
+          # runner's default `bash -e {0}` PLUS the `set -euo pipefail` above, so
+          # head closing the pipe makes clang die 141 and ABORTS the step on a
+          # perfectly good toolchain. Capture, then trim to the first line in the
+          # shell — a substitution with no pipeline has no producer to kill.
+          CLANG_VERSION="$(/usr/bin/clang --version 2>/dev/null || true)"
+          printf '%s\n' "${CLANG_VERSION%%$'\n'*}"
+
+      - name: hermetic drive (18 asserts, fixture-served)
+        run: DRIVE_MODE=hermetic bash scripts/taskboard-drive/drive.sh
+
+      - name: hermetic-proof (two runs, normalized transcripts must diff empty)
+        run: bash scripts/taskboard-drive/hermetic-proof.sh
+
+      - name: upload hermetic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskboard-drive-hermetic-evidence
+          path: scripts/taskboard-drive/evidence-hermetic/
+          if-no-files-found: warn

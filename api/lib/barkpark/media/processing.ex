@@ -76,7 +76,7 @@ defmodule Barkpark.Media.Processing do
            @asset_type,
            attrs,
            file.dataset,
-           [source: :worker] ++ Assets.file_scope_opts(file)
+           [source: :worker] ++ MediaFile.scope_opts(file)
          ) do
       {:ok, updated} ->
         updated
@@ -101,7 +101,7 @@ defmodule Barkpark.Media.Processing do
            @asset_type,
            attrs,
            file.dataset,
-           [source: :worker] ++ Assets.file_scope_opts(file)
+           [source: :worker] ++ MediaFile.scope_opts(file)
          ) do
       {:ok, updated} ->
         updated

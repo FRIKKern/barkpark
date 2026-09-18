@@ -23,6 +23,11 @@ name: search-starter-smoke
 #     OUTPUT is the signal. This job IS the rot alarm — the thing whose absence
 #     let a broken demo sit unnoticed for nine days.
 #
+# Two more jobs joined them since: `finder-unit` (dep-free specs over the pure
+# helpers the journey depends on) and `graph-smoke` (the corpus graph's own eye —
+# is it RENDERED on a desktop, and is a phone sent none of its ~131 KB? — see
+# that job's own header for why it is a sibling here and not a new workflow).
+#
 # The strict live run (`--strict`, exit 1 on any non-PASS beat) is deliberately
 # NOT wired here. It is the wave-seal evidence, run by hand after a redeploy;
 # scheduling it would red the repo daily for as long as any known defect is
@@ -106,14 +111,176 @@ jobs:
       # matches nothing prints "# tests 0" and exits 0, so this job would go
       # green having proven nothing at all.
       #
-      # `--floor 4` is a COMMITTED literal, not a derived one. Everything else
+      # `--floor 12` is a COMMITTED literal, not a derived one. Everything else
       # the runner checks comes out of this same glob, so a partial deletion --
-      # 3 of the 4 spec files removed -- shrinks the expectation with the tree
-      # and stays green. Four cannot shrink without an edit to this line.
-      # Adding a spec reds with `raise the floor to 5`; bump it here.
+      # 11 of the 12 spec files removed -- shrinks the expectation with the tree
+      # and stays green. Twelve cannot shrink without an edit to this line.
+      # Adding a spec reds with `raise the floor to 13`; bump it here.
+      # Raised 4 -> 12 (measured 2026-09-18: 12 files, 93 tests). The stale 4
+      # let 8 files and 51 tests be deleted with this job still green.
       - name: Run the finder unit specs
         working-directory: templates/search-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 4 'lib/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 12 'lib/**/*.test.ts'
+
+  graph-smoke:
+    name: Corpus graph renders, and a phone gets none of it (headless chromium)
+    # THE GAP THIS CLOSES (task-9f431629b01a4024). templates/search-starter/
+    # scripts/graph-smoke.mjs landed in #18895 PROVEN TO MEASURE — its own header
+    # records both mutation arms (remove the desktop graph → GDESK fails; drop
+    # <DesktopOnly> → GPHONE and GMOUNT fail) — and then fired on nothing,
+    # because no workflow invoked it. `git grep graph-smoke origin/main --
+    # .github/workflows` was empty. The Astro twin has had its eye since #18872
+    # (astro-finder-render-smoke.yml); this is the Next edition's.
+    #
+    # WHY A SIBLING JOB HERE AND NOT A NEW WORKFLOW FILE. This workflow's
+    # triggers already fit: its `on.*.paths:` are templates/search-starter/**,
+    # tooling/search-smoke/** and this file — a strict SUPERSET of the graph
+    # surface below, so no path this job cares about can be filtered away from
+    # it. A new file would buy nothing the filter does not already give and
+    # would cost a new row in the shared .github/required-checks.json registry
+    # plus a fresh entry in scripts/unaccounted-workflow-ratchet.sh's baseline
+    # population. The Next starter's browser coverage belongs next to the
+    # journey self-test that is already here.
+    #
+    # WHY THE SURFACE IS A STEP-LEVEL DECISION, NOT A SECOND `surface` JOB.
+    # astro-finder-render-smoke.yml splits surface/smoke across two jobs for a
+    # property it buys with its deliberate ABSENCE of any `on.*.paths:` key: the
+    # `surface` check renders on EVERY PR, so a reader always sees the gate
+    # answer. This workflow is paths-filtered at the workflow level (three other
+    # jobs and four rows in .github/required-checks.json already depend on that),
+    # so a second job here would be just as absent on a non-matching PR as this
+    # one is — it would buy the cost of the split without the visibility. The
+    # skip is therefore a named `::notice::` from a step, inside a check that
+    # renders wherever the filter lets anything render at all.
+    #
+    # ADVISORY. `.github/required-checks.json`'s required set is Cloud gate /
+    # Console gate / Elixir gate / PR references an active task; this name is in
+    # none of them and in no required aggregator's `needs:`, so a red here reds
+    # the PR page and blocks no merge.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The full history a three-dot diff against the base needs. A shallow
+          # clone makes `merge-base` unresolvable and the decision below would
+          # silently degrade to "everything changed".
+          fetch-depth: 0
+          # BLOBLESS, not shallow: every commit and tree, blob CONTENTS omitted.
+          # `git merge-base` and `git diff --name-only` read commits and trees,
+          # so the verdict is bit-identical — and the later steps need real
+          # blobs, which a partial clone fetches on demand when they are read.
+          filter: blob:none
+
+      - name: Does this diff touch the corpus-graph surface?
+        id: decide
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASE_SHA" ]; then
+            files=$(git diff --name-only "$BASE_SHA...HEAD")
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            files=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
+          else
+            # workflow_dispatch, or a first push with no `before`: run it.
+            files=""
+          fi
+
+          # THE SURFACE. Every path whose change can break what the graph
+          # delivers or withholds: the page and the components that mount it
+          # (<DesktopOnly>/<GraphLanding>/<GraphView>), the lib the page reads
+          # its corpus through, the harness itself and its stub API, `public/`
+          # (bp-graph.js, the ~131 KB renderer whose delivery IS the phone
+          # claim), the build config, the lockfile pair, and `vendor/*.tgz` —
+          # a re-vendored @barkpark tarball is client code wearing a binary's
+          # face. Plus this workflow, so editing the job re-runs the job.
+          pattern='^templates/search-starter/(app|components|lib|scripts|public|next\.config\.mjs|package(-lock)?\.json|vendor/)|^\.github/workflows/search-starter-smoke\.yml$'
+
+          if [ -z "$files" ]; then
+            echo "no base to diff against — running the smoke"
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changed files considered:"
+          echo "$files" | sed 's/^/  /'
+
+          # `grep -c` through a pipe returns grep's code, not the pipeline's,
+          # and under `set -o pipefail` a legitimate no-match would fail the
+          # step. Capture first, test second.
+          hits=$(printf '%s\n' "$files" | grep -E "$pattern" || true)
+          if [ -n "$hits" ]; then
+            echo "graph surface touched:"
+            echo "$hits" | sed 's/^/  /'
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no corpus-graph surface path in this diff — the smoke is skipped, deliberately"
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # D377/D378: a job that concludes success having measured nothing must SAY
+      # SO on a surface an API can read. A `::notice::` from a succeeding step is
+      # the one thing that reaches the annotations endpoint.
+      - name: Announce a skip
+        if: steps.decide.outputs.touched != 'true'
+        run: echo "::notice title=search-starter graph-smoke::SKIPPED — this diff touches no corpus-graph surface path. Nothing was rendered."
+
+      # Node 22: the template's `engines` pins >=22, and graph-smoke.mjs boots
+      # the BUILT `.next/standalone/server.js` that Next 16 emits.
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.touched == 'true'
+        with:
+          node-version: "22"
+
+      - name: Install the template
+        if: steps.decide.outputs.touched == 'true'
+        working-directory: templates/search-starter
+        # `npm ci`, not `npm install`: the lockfile is committed and the
+        # @barkpark/* dependencies are committed tarballs under vendor/, so this
+        # resolves without reaching npm for them and cannot drift the lockfile.
+        run: npm ci
+
+      # Same cache path, shape and pin the astro twin and paper-rig.yml use.
+      # Keyed on the version pinned in the next step rather than on a lockfile:
+      # playwright is installed OUTSIDE any package.json (see below), so the pin
+      # IS the dependency declaration.
+      - name: Cache Playwright browsers
+        if: steps.decide.outputs.touched == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.59.1
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # GLOBAL, deliberately. templates/search-starter/package.json is the file
+      # a user copies to start their own search site; a browser-automation
+      # devDependency in it would hand every one of them a ~100MB download in
+      # order to gate a defect in THIS repo. graph-smoke.mjs's loadPlaywright()
+      # resolves BP_PLAYWRIGHT → js/node_modules → bare specifier → the global
+      # root, so a global install is a supported route and the template's own
+      # tree is untouched.
+      - name: Install Playwright + chromium
+        if: steps.decide.outputs.touched == 'true'
+        run: |
+          set -eu
+          npm install --global playwright@1.59.1
+          npx playwright install --with-deps chromium
+          # The global root is NOT a fixed path under actions/setup-node (it
+          # moves with the toolcache). Ask npm where it put the package.
+          echo "BP_PLAYWRIGHT=$(npm root -g)/playwright" >> "$GITHUB_ENV"
+
+      # Exit 1 = a beat FAILED, the finding. Exit 2 = CANNOT MEASURE (no
+      # playwright, no chromium, the build failed, a port was taken) — ALSO a
+      # red, and that is the load-bearing half: a gate that could not run must
+      # never read as a pass. No `|| true`, no pipe to `tee`/`head` — either
+      # would hand this step the pipeline's last exit code and launder both
+      # codes into a green.
+      - name: Graph smoke (build → serve → chromium at 1440px and 390px)
+        if: steps.decide.outputs.touched == 'true'
+        working-directory: templates/search-starter
+        run: node scripts/graph-smoke.mjs
 
   live-journey:
     name: Journey smoke — live demo (report mode, never gates)

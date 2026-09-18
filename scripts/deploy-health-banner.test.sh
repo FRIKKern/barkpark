@@ -250,6 +250,42 @@ check "(e) the probe URL is built from \$APP_PORT" \
 check "(e) APP_PORT is re-read from the .env the service sources" \
   'grep -q "sed -n .s/\^PORT=//p" "$DEPLOY"'
 
+# ── (f) UNIT COUPLING — the banner names the unit this script INSTALLS ───────
+#
+# D378: `journalctl -u barkpark` on a blue/green `.slots` box prints
+# `-- No entries --`, because that topology serves from `barkpark-slot@blue` /
+# `barkpark-slot@green` (deploy/instance-deploy.sh). An empty journal reads as
+# "clean" and means "I could not look".
+#
+# deploy.sh is NOT that topology: it writes /etc/systemd/system/barkpark.service
+# itself and `systemctl enable barkpark`, so `-u barkpark` in its banner is the
+# RIGHT unit — this site looks like D378 and is not. What would make it wrong is
+# DRIFT: the installed unit renamed, or slot units taught to this installer,
+# while the banner keeps pointing at the old name. So assert the coupling
+# instead of the literal, and refuse the slot names outright.
+echo "== (f) static: banner journalctl unit == installed unit =="
+INSTALLED_UNIT="$(sed -n 's#^cat > /etc/systemd/system/\([a-z0-9@.-]*\)\.service .*#\1#p' "$DEPLOY" | sed -n '1p')"
+check "(f) deploy.sh installs exactly one named systemd unit" \
+  '[ -n "$INSTALLED_UNIT" ] && [ "$(grep -c "^cat > /etc/systemd/system/" "$DEPLOY")" -eq 1 ]'
+check "(f) the failure banner journalctls THAT unit" \
+  'grep -q "journalctl -u $INSTALLED_UNIT " "$DEPLOY"'
+check "(f) the banner names no unit this installer does not create" \
+  '[ "$(grep -o "journalctl -u [A-Za-z0-9@._-]*" "$DEPLOY" | sort -u | wc -l | tr -d " ")" = "1" ]'
+check "(f) this installer creates no blue/green slot unit (if it ever does, the banner must name both)" \
+  '! grep -q "barkpark-slot@" "$DEPLOY"'
+
+# The runbook half of D378: a docs/ops recipe that journalctls a LONE `barkpark`
+# unit silently returns nothing on a slot box. Every such recipe must name the
+# slot units on the SAME line (directly, or via a `$U` whose definition line
+# carries them). `-u barkpark-connectors` is a different unit and not matched.
+# No `| grep -q` here: this file runs under `set -o pipefail`, and a -q that
+# closes the pipe SIGPIPEs the producer (141), which would make a negated
+# pipeline report PASS on a real hit. Capture, then test for emptiness.
+LONE_UNIT_RE='journalctl[^|]*-u barkpark[^-[:alnum:]_]'
+LONE_UNIT_HITS="$(grep -rnE "$LONE_UNIT_RE" "$ROOT/docs/ops" 2>/dev/null | grep -v 'barkpark-slot@' || true)"
+check "(f) no docs/ops recipe journalctls a lone 'barkpark' unit (D378)" \
+  '[ -z "$LONE_UNIT_HITS" ] || { printf "%s\n" "$LONE_UNIT_HITS"; false; }'
+
 echo ""
 if [ "$fails" -eq 0 ]; then
   echo "deploy-health-banner: ALL CHECKS PASSED"

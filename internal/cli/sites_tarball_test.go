@@ -10,10 +10,16 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -992,5 +998,92 @@ func TestTarballIgnoreSetVerbatimDifferential(t *testing.T) {
 				t.Fatalf("%s: key %q kept its trailing slash — isIgnored compares against basenames and path SEGMENTS, which never carry one", tc.label, k)
 			}
 		}
+	}
+}
+
+// TestAcceptedTypeflagSetHasExactlyOneDefinition is the anti-re-split arm.
+//
+// The defect it exists for is not a wrong list — it is TWO lists. Wave 11 landed
+// prebuiltAcceptedTypeflags (production) and paxAcceptedTypeflags (the raw-block
+// tripwire in sites_tarball_pax_test.go) as independent transcriptions of one
+// table, authored on separate branches; the production copy shipped refusing 'x'
+// while the tripwire accepted it, which would have left our own client unable to
+// deploy an accented filename. Two hand-maintained copies of one rule drift
+// SILENTLY, because nothing compares them.
+//
+// So this test counts DEFINITIONS, by SHAPE rather than by name: any composite
+// literal or switch case in package cli that enumerates byte literals including
+// both '5' (directory) and 'x' (pax header) IS an accepted-typeflag table,
+// whatever it is called. A copy reintroduced under a fresh name is still caught.
+//
+// Exactly TWO are legitimate, and the second is deliberate, not an oversight:
+//
+//   - internal/cli/sites_tarball.go — prebuiltAcceptedTypeflags, THE definition.
+//     Every consumer (preflightPrebuiltEntries, the pax tripwire) reads it.
+//   - internal/cli/sites_tarball_test.go — the independent transcription inside
+//     TestPrebuiltAcceptedTypeflagsMatchTheExtractor, which pins the definition
+//     to `type/1` in api/lib/barkpark/sites/prebuilt_artifact.ex. It MUST stay
+//     independent: a guard that reads its expected value from the thing it
+//     guards asserts nothing.
+//
+// Widening the accept list legitimately (the extractor starts staging a new
+// typeflag) edits those two sites and this test stays QUIET — it counts sites,
+// never members.
+func TestAcceptedTypeflagSetHasExactlyOneDefinition(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse package cli: %v", err)
+	}
+
+	// litValues returns the byte-literal tokens an accept-set-shaped node
+	// enumerates: a map literal's KEYS, a slice/array literal's ELEMENTS, or a
+	// switch case's values.
+	litValues := func(exprs []ast.Expr, keyed bool) map[string]bool {
+		out := map[string]bool{}
+		for _, e := range exprs {
+			if kv, ok := e.(*ast.KeyValueExpr); ok {
+				if !keyed {
+					continue
+				}
+				e = kv.Key
+			} else if keyed {
+				continue
+			}
+			if bl, ok := e.(*ast.BasicLit); ok && (bl.Kind == token.CHAR || bl.Kind == token.INT) {
+				out[bl.Value] = true
+			}
+		}
+		return out
+	}
+	isAcceptSet := func(vals map[string]bool) bool { return vals["'5'"] && vals["'x'"] }
+
+	var sites []string
+	for _, pkg := range pkgs {
+		for name, file := range pkg.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				switch v := n.(type) {
+				case *ast.CompositeLit:
+					if isAcceptSet(litValues(v.Elts, true)) || isAcceptSet(litValues(v.Elts, false)) {
+						sites = append(sites, fmt.Sprintf("%s:%d (composite literal)", filepath.Base(name), fset.Position(v.Pos()).Line))
+					}
+				case *ast.CaseClause:
+					if isAcceptSet(litValues(v.List, false)) {
+						sites = append(sites, fmt.Sprintf("%s:%d (switch case)", filepath.Base(name), fset.Position(v.Pos()).Line))
+					}
+				}
+				return true
+			})
+		}
+	}
+	sort.Strings(sites)
+
+	files := map[string]int{}
+	for _, s := range sites {
+		files[strings.SplitN(s, ":", 2)[0]]++
+	}
+	want := map[string]int{"sites_tarball.go": 1, "sites_tarball_test.go": 1}
+	if len(sites) != 2 || !reflect.DeepEqual(files, want) {
+		t.Fatalf("the extractor accept list must exist as exactly ONE definition (sites_tarball.go) plus ONE independent cross-check transcription (sites_tarball_test.go); found %d accept-set-shaped enumerations: %v\n\nA third copy drifts silently — that pair (prebuiltAcceptedTypeflags vs the deleted paxAcceptedTypeflags) already shipped disagreeing once. Read prebuiltAcceptedTypeflags instead of re-transcribing it.", len(sites), sites)
 	}
 }

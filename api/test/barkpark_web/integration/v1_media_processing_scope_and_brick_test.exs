@@ -24,7 +24,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingScopeAndBrickTest do
   moving the row out of its own tenancy.
 
   The near-identical sibling write, `Media.patch_asset_metadata/3`
-  (`media.ex:Media.patch_asset_metadata/3`), already threads `Assets.file_scope_opts(file)`. So does
+  (`media.ex:Media.patch_asset_metadata/3`), already threads `MediaFile.scope_opts(file)`. So does
   the sibling READ at `v1/media_controller.ex:599`. This door was the odd one
   out; the fix is to match them.
 
@@ -33,7 +33,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingScopeAndBrickTest do
   (`RequireMediaProcessingCallbackToken`, ONE instance-wide shared secret) on a
   FLAT route with no `/w/:ws/p/:proj` prefix, so the conn carries no tenant to
   clamp to. The blob id IS the tenant resolver here, exactly as it is for a
-  webhook; `file_scope_opts(file)` then confines everything downstream to what
+  webhook; `MediaFile.scope_opts(file)` then confines everything downstream to what
   that resolution produced.
 
   ## 2. A poisoned metadata key permanently 500s the callback for that asset
@@ -73,7 +73,7 @@ defmodule BarkparkWeb.Integration.V1MediaProcessingScopeAndBrickTest do
 
   # A workspace + project + a `production` dataset, a blob stamped into it, and
   # the companion asset doc created through the SAME helper the upload path uses
-  # (`Assets.ensure_for_upload/1` → `create_draft/1` → `file_scope_opts/1`), so
+  # (`Assets.ensure_for_upload/1` → `create_draft/1` → `MediaFile.scope_opts/1`), so
   # the doc carries this tenant's workspace_id/project_id/dataset_id exactly as
   # a real upload would.
   defp tenant(label) do

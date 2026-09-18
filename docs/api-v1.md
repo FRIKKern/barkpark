@@ -33,6 +33,8 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header is a DIFFERENT value, a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
+**Read-envelope `syncTags` are metadata-only IN THIS REPO** — nothing in it caches on them; webhook `sync_tags` do (pin: `js/packages/core/tests/synctags-read-envelope-pin.test.ts`).
+
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
 **Document envelope keys** (in `result` for a single doc; each `result.documents[]` for queries): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, changes on every write · `_draft` bool · `_publishedId` `_id` minus `drafts.` · `_createdAt`/`_updatedAt` ISO 8601 UTC `Z` (all strings but `_draft`).

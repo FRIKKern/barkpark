@@ -23,6 +23,19 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
     3. `journey_side_of/1`'s `cond` collapsed to `_ -> :pre` — dropping the
        boundary split. Reds `every figure is reported per side of the regime
        boundary`: post-door and straddling runs land in the pre-door figure.
+    4. The run key back to `site_id` alone (`Enum.group_by` and the window
+       `partition by`) — dropping the environment from the SEGMENTATION. Reds
+       `a PREVIEW live row does not close a PRODUCTION run` and nothing else:
+       the deferred-only population reads 0 where the truth is 1.
+    5. `superseding_live/2` back to `group_by: d.site_id` with `superseded?/2`
+       looking up by `site_id` — dropping the environment from the D212 probe.
+       Reds `a later PREVIEW live row is NOT benign supersession`: a
+       stranded production publish is credited as benignly superseded by a
+       preview build that never touched `sites.current_deployment_id`.
+
+  Mutations 4 and 5 both leave `a same-environment live row still closes the run
+  AND still supersedes` GREEN — that arm is the control proving the environment
+  key narrows the population rather than switching supersession off.
 
   ## What this file does NOT assert, on purpose
 
@@ -589,6 +602,135 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
                  "(0 superseded by a later live row — D212 benign; 1 unsuperseded); " <>
                  "0 not yet settled at 2026-08-07T12:00:00Z, EXCLUDED as right-censored " <>
                  "— ABSOLUTE counts, never a rate"
+    end
+  end
+
+  describe "the ENVIRONMENT key (a preview deploy is a DIFFERENT publish queue)" do
+    # `deployments_active_site_env_index` is keyed `(site_id, environment)`, so
+    # production and preview are two INDEPENDENT queues on one site: a preview
+    # build never contends with a production build and never touches
+    # `sites.current_deployment_id`. A run keyed on `site_id` alone therefore
+    # splices two queues into one journey.
+    test "a PREVIEW live row does not close a PRODUCTION run — the stranded publish stays visible" do
+      site = site_fixture()
+
+      deployments!(site, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "b1b1b1b1b1b1",
+          environment: "production"
+        },
+        %{
+          inserted_at: ~U[2026-08-06 10:01:00Z],
+          status: "deferred",
+          content_rev: "b1b1b1b1b1b1",
+          environment: "production"
+        },
+        # A preview build for the same site, AFTER both production deferrals. It
+        # answers on its own host and says NOTHING about whether the production
+        # content reached the web.
+        %{
+          inserted_at: ~U[2026-08-06 10:02:00Z],
+          status: "live",
+          content_rev: "b2b2b2b2b2b2",
+          environment: "preview"
+        }
+      ])
+
+      side = d223_side([site])
+
+      # THE PRODUCTION PUBLISH IS DEFERRED-ONLY AND SETTLED. Keyed on `site_id`
+      # alone the preview row TERMINATES the run: both production deferrals land
+      # in a `live`-terminated journey and the D223 population reads ZERO on a
+      # site whose production content never reached the web.
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.settled.unsuperseded == 1
+      assert side.deferred_only.settled.superseded == 0
+    end
+
+    test "a later PREVIEW live row is NOT benign supersession — the production site is still not serving" do
+      site = site_fixture()
+
+      deployments!(site, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "c1c1c1c1c1c1",
+          environment: "production"
+        },
+        # Beyond `@to`, exactly like the real D212 probe expects — but on the
+        # OTHER queue. Crediting it as supersession reads loss as safe, which is
+        # the comforting direction and therefore the forbidden one.
+        %{
+          inserted_at: ~U[2026-08-07 06:00:00Z],
+          status: "live",
+          content_rev: "c2c2c2c2c2c2",
+          environment: "preview"
+        }
+      ])
+
+      side = d223_side([site])
+
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.settled.superseded == 0
+      assert side.deferred_only.settled.unsuperseded == 1
+    end
+
+    # THE QUIET ARM. The environment key must not become a blanket refusal to
+    # supersede: a later live row on the SAME environment is still D212 benign
+    # supersession, and a same-environment live row still closes its run.
+    test "a same-environment live row still closes the run AND still supersedes" do
+      closed = site_fixture()
+
+      deployments!(closed, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "d1d1d1d1d1d1",
+          environment: "production"
+        },
+        %{
+          inserted_at: ~U[2026-08-06 10:01:00Z],
+          status: "live",
+          content_rev: "d1d1d1d1d1d1",
+          environment: "production"
+        }
+      ])
+
+      overtaken = site_fixture()
+
+      deployments!(overtaken, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "d2d2d2d2d2d2",
+          environment: "preview"
+        },
+        %{
+          inserted_at: ~U[2026-08-07 06:00:00Z],
+          status: "live",
+          content_rev: "d3d3d3d3d3d3",
+          environment: "preview"
+        }
+      ])
+
+      side = d223_side([closed, overtaken])
+
+      # `closed` contributes NO deferred-only publish (its run is live-terminated
+      # on its own queue); `overtaken` contributes one, SUPERSEDED.
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.settled.superseded == 1
+      assert side.deferred_only.settled.unsuperseded == 0
+    end
+
+    test "the segmentation and the supersession rule both NAME the environment key" do
+      node = DeployLedger.journeys(@from, @to, as_of: @as_of, site_ids: [])
+
+      assert node.segmentation =~ "environment"
+
+      side = side(node, :pre)
+      assert side.deferred_only.supersession_rule =~ "environment"
     end
   end
 

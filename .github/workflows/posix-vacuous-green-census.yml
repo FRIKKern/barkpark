@@ -40,16 +40,40 @@ name: POSIX vacuous-green census
 # Task: cch-w53-fu-posix-vacuous-green-census-across-scripts
 
 on:
+  # ── THE `pull_request:` ARM, RESTORED (2026-09-16) ───────────────────────────
+  # It was removed on 2026-09-15 (task-dee226be3107a98b) on the argument that
+  # "the `push: main` arm sees every new member within minutes of its merge,
+  # named", so the PR arm only bought "a few minutes of earliness".
+  #
+  # THAT ARGUMENT IS RIGHT ABOUT WHAT THE push ARM SEES AND WRONG ABOUT WHAT IT
+  # COSTS, and the cost was MEASURED on 2026-09-16, not argued:
+  #
+  #   last GREEN census on main   743ae6b85, 21:26:31 +02
+  #   the very next commit        9b9e26c23 (#18662) adds
+  #                               scripts/charter-corpus-hygiene-check.sh,
+  #                               unguarded — RED
+  #   and then                    ee125c6ae (#18707) adds
+  #                               scripts/doc-drift-check.sh, unguarded
+  #   census runs on main since   36, every single one FAILED
+  #
+  # For those ~3 hours `sh scripts/charter-corpus-hygiene-check.sh` exited 0
+  # having compared NOTHING — the exact vacuous green this census exists to
+  # catch, live on main, while main's own census was red and no PR owned it.
+  # "A few minutes of earliness" is what this arm buys on a QUIET day. On a busy
+  # one it is the difference between the author guarding their own new file and
+  # a red main tip that every other lane inherits and none of them caused.
+  #
+  # The arm is deliberately UNFILTERED at the workflow level. The path filter
+  # stays on the JOB, as the `census:` job's `if:` over the `changes` job's
+  # output: a workflow-level `paths:` list is how a check-run goes ABSENT rather
+  # than skipped, and absent is the failure mode that leaves a context
+  # "expected" forever. This still BLOCKS nothing — the workflow publishes no
+  # context in .github/required-checks.json's required set. It makes the census
+  # RUN on the PR that adds the member, named, which is the only place the fix
+  # is one line and one person's.
+  pull_request:
   push:
     branches: [main]
-  # ── NO `pull_request:` ARM (2026-09-15, task-dee226be3107a98b) ───────────────
-  # Removed. The header above calls this a census whose "population is derived
-  # from the tree on every run" — the subject is the tree, not a diff, and the
-  # `push: main` arm sees every new member within minutes of its merge, named,
-  # by the same predicate. The PR arm bought a few minutes of earliness for two
-  # check runs on every pull request (measured 2026-09-15: fires 10/10 of the
-  # last 10 merged heads), and it could block nothing: this workflow publishes
-  # no context in the required set.
   schedule:
     # Weekly. A latent class needs a loop that never stops, not a fast one.
     # Offset off the hour because GitHub queues cron under load — read this as
@@ -76,6 +100,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # `filter: blob:none` — a BLOBLESS partial clone, and it is NOT
+          # shallowness. It fetches every commit and every tree and omits only
+          # blob CONTENTS; `git cat-file -e <base>^{commit}`, `git merge-base`
+          # and `git diff --name-only` read commits and trees, so this job's
+          # verdict is bit-identical. `fetch-depth: 0` above STAYS: drop it and
+          # actions/checkout falls back to depth 1, which has no merge base
+          # whether blobless or not. Equivalence is provable, not asserted:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # MEASURED on merged head b71d22875b (2026-09-17): this checkout step
+          # took 28s here, while the already-blobless dispatchers on the
+          # same head (elixir/cloud/ci/console/compose) took 13-15s.
+          filter: blob:none
       - id: f
         name: compare the PR against the census's own targets
         run: |

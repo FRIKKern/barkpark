@@ -619,3 +619,191 @@ func TestRunWebhookUpsertsByName(t *testing.T) {
 		t.Errorf("endpoint secret %q != reported %q — they must agree", wh.secret, second.Env["BARKPARK_WEBHOOK_SECRET"])
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-type seed (stw-backlog-multitype-seed)
+//
+// bootstrap used to publish EVERY seeded document under the manifest's single
+// seed.publishType, so a connected posts/authors graph was impossible: half the
+// batch would be published under the wrong type and the instance rolls the whole
+// mutation back. Each document now publishes under its OWN "_type", with
+// seed.publishType left as the fallback for a document that omits one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// multiTypeSpec builds a Spec from a hand-written two-schema manifest and a
+// CONNECTED multi-type corpus: two posts that reference an author, plus the
+// author itself. seedTypes controls each document's "_type" (an empty string
+// omits the field entirely, exercising the seed.publishType fallback), and
+// schemaNames controls which types the manifest's schemas DECLARE.
+func multiTypeSpec(t *testing.T, publishType string, schemaNames []string, seedTypes []string) Spec {
+	t.Helper()
+	tpl := &template.Template{
+		ManifestVersion: "1",
+		Name:            "multi-type-fixture",
+		Title:           "Multi type",
+		Description:     "two connected types",
+		Framework:       "nextjs",
+		Schemas:         make([]string, 0, len(schemaNames)),
+		Seed:            &template.Seed{Path: "seed.json", Publish: true, PublishType: publishType},
+	}
+	schemaFiles := make([][]byte, 0, len(schemaNames))
+	for _, n := range schemaNames {
+		tpl.Schemas = append(tpl.Schemas, "schemas/"+n+".json")
+		schemaFiles = append(schemaFiles, []byte(fmt.Sprintf(`{"name":%q,"title":%q,"fields":[]}`, n, n)))
+	}
+
+	docs := make([]string, 0, len(seedTypes))
+	for i, ty := range seedTypes {
+		typeField := ""
+		if ty != "" {
+			typeField = fmt.Sprintf(`"_type":%q,`, ty)
+		}
+		docs = append(docs, fmt.Sprintf(
+			`{"createOrReplace":{"_id":"doc-%d",%s"title":"Doc %d","author":{"_ref":"doc-0"}}}`, i, typeField, i))
+	}
+	seed := []byte(`{"mutations":[` + strings.Join(docs, ",") + `]}`)
+
+	return Spec{
+		Template:      tpl,
+		SchemaFiles:   schemaFiles,
+		SeedFile:      seed,
+		WorkspaceName: "Acme Co",
+		WorkspaceSlug: "acme",
+	}
+}
+
+// publishTypesByID reads the publish pass out of the fake and returns id→type.
+func publishTypesByID(t *testing.T, raw json.RawMessage) map[string]string {
+	t.Helper()
+	var pub struct {
+		Mutations []struct {
+			Publish map[string]string `json:"publish"`
+		} `json:"mutations"`
+	}
+	if err := json.Unmarshal(raw, &pub); err != nil {
+		t.Fatalf("parse publish payload: %v", err)
+	}
+	got := map[string]string{}
+	for _, m := range pub.Mutations {
+		got[m.Publish["id"]] = m.Publish["type"]
+	}
+	return got
+}
+
+// TestRunPublishesEachDocumentUnderItsOwnType is the multi-type acceptance arm:
+// a connected author+post+post corpus publishes each document under the type it
+// declares, NOT under the manifest's single seed.publishType. Reverting
+// publishPayload to the global type reds this.
+func TestRunPublishesEachDocumentUnderItsOwnType(t *testing.T) {
+	inst := newFakeInstance()
+	srv := httptest.NewServer(inst.handler())
+	defer srv.Close()
+
+	spec := multiTypeSpec(t, "post", []string{"post", "author"}, []string{"author", "post", "post"})
+	want := map[string]string{"doc-0": "author", "doc-1": "post", "doc-2": "post"}
+
+	// CONTROL on the fixture itself: if every document carried the SAME type the
+	// assertion below would pass even under the old global-type behaviour, so the
+	// test would measure nothing. Prove the corpus really is mixed.
+	distinct := map[string]bool{}
+	for _, ty := range want {
+		distinct[ty] = true
+	}
+	if len(distinct) < 2 {
+		t.Fatalf("fixture is not multi-type (%d distinct types) — the assertion would be vacuous", len(distinct))
+	}
+	// CONTROL on the direction of the finding: doc-0's own type must DIFFER from
+	// the manifest's publishType, else "own type" and "manifest type" agree.
+	if want["doc-0"] == spec.Template.Seed.PublishType {
+		t.Fatalf("doc-0 type %q == manifest publishType — the fixture cannot discriminate", want["doc-0"])
+	}
+
+	c := Client{BaseURL: srv.URL, AdminToken: "bp_admin_test", HTTPClient: srv.Client()}
+	if _, err := Run(context.Background(), c, spec); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(inst.mutates) != 2 {
+		t.Fatalf("mutate posts = %d, want 2 (seed + publish)", len(inst.mutates))
+	}
+	got := publishTypesByID(t, inst.mutates[1])
+	if len(got) != len(want) {
+		t.Fatalf("published %d document(s), want %d: %v", len(got), len(want), got)
+	}
+	for id, wantType := range want {
+		if got[id] != wantType {
+			t.Errorf("publish type for %s = %q, want %q (its own _type)", id, got[id], wantType)
+		}
+	}
+}
+
+// TestRunFallsBackToManifestPublishType is the QUIET arm: a seed whose documents
+// omit "_type" still publishes under the manifest's seed.publishType, exactly as
+// before the multi-type change. This is the single-type compatibility guarantee,
+// and it must stay green while the arm above reds on a revert.
+func TestRunFallsBackToManifestPublishType(t *testing.T) {
+	inst := newFakeInstance()
+	srv := httptest.NewServer(inst.handler())
+	defer srv.Close()
+
+	spec := multiTypeSpec(t, "post", []string{"post"}, []string{"", ""})
+	c := Client{BaseURL: srv.URL, AdminToken: "bp_admin_test", HTTPClient: srv.Client()}
+	if _, err := Run(context.Background(), c, spec); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(inst.mutates) != 2 {
+		t.Fatalf("mutate posts = %d, want 2 (seed + publish)", len(inst.mutates))
+	}
+	got := publishTypesByID(t, inst.mutates[1])
+	if len(got) != 2 {
+		t.Fatalf("published %d document(s), want 2: %v", len(got), got)
+	}
+	for id, ty := range got {
+		if ty != "post" {
+			t.Errorf("publish type for %s = %q, want the manifest fallback %q", id, ty, "post")
+		}
+	}
+}
+
+// TestRunRefusesSeedBeforeMutatingOnBadTypes proves the validation runs BEFORE
+// the seed POST: a document with no resolvable type, and a document whose type
+// no manifest schema declares, are both refused with ZERO mutate calls — so the
+// instance is never left holding drafts the publish pass cannot finish.
+func TestRunRefusesSeedBeforeMutatingOnBadTypes(t *testing.T) {
+	cases := []struct {
+		name        string
+		publishType string
+		schemaNames []string
+		seedTypes   []string
+		wantErr     string
+	}{
+		{"missing type, no fallback", "", []string{"post"}, []string{"post", ""}, "declares no _type"},
+		{"type no schema declares", "post", []string{"post"}, []string{"post", "ghost"}, "no manifest schema declares"},
+		{"fallback itself undeclared", "ghost", []string{"post"}, []string{""}, "no manifest schema declares"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := newFakeInstance()
+			srv := httptest.NewServer(inst.handler())
+			defer srv.Close()
+
+			spec := multiTypeSpec(t, tc.publishType, tc.schemaNames, tc.seedTypes)
+			c := Client{BaseURL: srv.URL, AdminToken: "bp_admin_test", HTTPClient: srv.Client()}
+			_, err := Run(context.Background(), c, spec)
+			if err == nil {
+				t.Fatal("Run succeeded, want a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+			// PRECONDITION of the "before mutation" claim: the schema step DID run,
+			// so reaching zero mutates is the validation refusing rather than the
+			// chain dying earlier for an unrelated reason.
+			if len(inst.schemas) != len(tc.schemaNames) {
+				t.Fatalf("schemas posted = %d, want %d — the run died before the seed step for another reason", len(inst.schemas), len(tc.schemaNames))
+			}
+			if len(inst.mutates) != 0 {
+				t.Errorf("mutate posts = %d, want 0 — the seed was applied before its types were checked", len(inst.mutates))
+			}
+		})
+	}
+}

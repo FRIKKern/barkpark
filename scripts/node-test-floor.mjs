@@ -33,6 +33,28 @@
 //      `# tests` therefore counts the FILE, not what the file asserted, and
 //      cannot distinguish "one real test" from "nothing ran".
 //
+//   4. A SKIPPED TEST IS INDISTINGUISHABLE FROM A TEST THAT RAN.
+//        test("x", { skip: true }, ...)  -> "# Subtest: x" / "ok 1 - x # SKIP"
+//        -> "# tests 1", "# pass 0", "# skipped 1", EXIT 0
+//      REGISTRATION is not EXECUTION. A skipped test still emits its
+//      `# Subtest:` line, so defect 3's per-file check — which counts those
+//      lines — was satisfied by a file where nothing ran, and `# tests` (the
+//      number this runner reports as "ran N tests") counted it as having run.
+//      Measured 2026-09-18 on origin/main c511a44fc: a lone `{ skip: "..." }`
+//      test printed `ran 1 tests from 1 files (pass 0, fail 0)` and exited 0,
+//      and `perl -pi -e 's/^test\(/test.skip(/'` over one of
+//      templates/search-starter's 12 spec files left the suite green at
+//      `ran 93 tests ... (pass 83)`. So this runner now counts EXECUTED tests
+//      (`# tests` minus `# skipped`), refuses any file whose executed count is
+//      zero, and prints the skipped tally rather than swallowing it.
+//      NOT "any skip fails": a platform-conditional `t.skip()` guarding one
+//      control among many (tooling/grip/test/class-coverage.test.mjs's
+//      running-as-root arm) is a legitimate shape, and a file carrying one
+//      still has executed tests. The rule is per FILE, on ZERO.
+//      The `ran N tests` number in the summary line is the EXECUTED count —
+//      pr-meta.yml parses it as a deliberate per-suite test floor, and a floor
+//      that counts skipped tests is satisfied by a suite that stopped running.
+//
 // THE FOUR DEFECTS ABOVE ARE CAUGHT BY DERIVATION -- the expected file count
 // comes from the patterns' own expansion. A DERIVED FLOOR CANNOT CATCH THE
 // FIFTH: partial deletion. Delete 4 of 5 test files and the derived floor
@@ -196,9 +218,10 @@ if (floor !== null && files.length > floor) {
 }
 
 // ------------------------------------------------------------------ run + count
-let totalTests = 0;
+let totalExecuted = 0;
 let totalPass = 0;
 let totalFail = 0;
+let totalSkipped = 0;
 
 /** @param {string} out @param {string} key @returns {number|null} */
 const tally = (out, key) => {
@@ -268,13 +291,33 @@ for (const r of results) {
     );
   }
 
-  totalTests += tests;
+  // Defect 4. `# skipped` is node's own aggregate over every level, so a
+  // nested-only skip leaves the top-level test counted as executed, which is
+  // correct: the outer test DID run. An unreadable `# skipped` is read as 0
+  // rather than failing closed — the line has been in node's TAP summary since
+  // the reporter existed, and the count above already failed closed for us.
+  const skipped = tally(r.out, "skipped") ?? 0;
+  const executed = tests - skipped;
+  if (executed < 1) {
+    fail(
+      `${r.shown}: registered ${tests} test(s) and executed NONE — all ${skipped} were skipped ` +
+        `(node reported "# tests ${tests}", "# skipped ${skipped}", "# pass ${tally(r.out, "pass") ?? 0}" and exited 0).\n` +
+        `  A skipped test emits the same "# Subtest:" line as one that ran, so registration is not evidence of execution.\n` +
+        `  Un-skip at least one test in this file, or delete the file and lower the floor at the call site deliberately.`,
+    );
+  }
+
+  totalExecuted += executed;
+  totalSkipped += skipped;
   totalPass += tally(r.out, "pass") ?? 0;
   totalFail += tally(r.out, "fail") ?? 0;
 }
 
 if (totalFail > 0) fail(`${totalFail} failing test(s)`);
 
-const summary = `node-test floor: ran ${totalTests} tests from ${files.length} files (pass ${totalPass}, fail ${totalFail}) for ${patterns.join(" ")}${floor !== null ? ` [floor ${floor} files]` : ""}${nodeArgs.length ? ` [node ${nodeArgs.join(" ")}]` : ""}`;
+// `ran N` is the EXECUTED count, never the registered one — see defect 4. The
+// `ran N tests from M files (pass P, fail F` prefix is load-bearing: pr-meta.yml
+// parses it with `sed -nE 's/^node-test floor: ran ([0-9]+) tests .*/\1/p'`.
+const summary = `node-test floor: ran ${totalExecuted} tests from ${files.length} files (pass ${totalPass}, fail ${totalFail}${totalSkipped > 0 ? `, skipped ${totalSkipped}` : ""}) for ${patterns.join(" ")}${floor !== null ? ` [floor ${floor} files]` : ""}${nodeArgs.length ? ` [node ${nodeArgs.join(" ")}]` : ""}`;
 console.log(`\n${summary}`);
 summarize(summary);

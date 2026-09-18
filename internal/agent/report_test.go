@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -86,8 +90,8 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	if r.AgentStatus != "online" {
 		t.Errorf("AgentStatus = %q, want online", r.AgentStatus)
 	}
-	if r.Version != Version {
-		t.Errorf("Version = %q, want %q", r.Version, Version)
+	if r.Version != AgentVersion() {
+		t.Errorf("Version = %q, want the binary's own stamp %q", r.Version, AgentVersion())
 	}
 	if r.GitCommit != "abc123def" {
 		t.Errorf("GitCommit = %q, want abc123def", r.GitCommit)
@@ -1871,13 +1875,111 @@ func TestReportCarriesAgentVersion(t *testing.T) {
 		t.Error("agent_version marshalled as \"\" — an absent-or-empty key means two things at once")
 	}
 
-	// The pre-existing version field is untouched by this addition.
-	if r.Version != Version {
-		t.Errorf("Report.Version = %q, want the unchanged %q", r.Version, Version)
+	// The pre-existing `version` key still arrives — the CP reads it — and now
+	// carries the SAME stamp, never a separate answer.
+	if r.Version != r.AgentVersion {
+		t.Errorf("Report.Version = %q, AgentVersion = %q — the two keys must be one answer", r.Version, r.AgentVersion)
 	}
-	if payload["version"] != Version {
-		t.Errorf("JSON version = %v, want the unchanged %q", payload["version"], Version)
+	if payload["version"] != payload["agent_version"] {
+		t.Errorf("JSON version = %v, agent_version = %v — the twins drifted", payload["version"], payload["agent_version"])
 	}
+}
+
+// TestVersionKeyIsTheMeasuredTwin is the BEHAVIOURAL arm of the lying-twin fix.
+// It reds the moment `version` stops being the same resolved build stamp as
+// `agent_version` — which is exactly what re-pointing it at a hand-maintained
+// constant would do.
+func TestVersionKeyIsTheMeasuredTwin(t *testing.T) {
+	r := gatherReport(ReportConfig{})
+
+	blob, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal Report: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(blob, &payload); err != nil {
+		t.Fatalf("unmarshal Report: %v", err)
+	}
+
+	v, ok := payload["version"]
+	if !ok {
+		t.Fatalf("Report JSON missing \"version\" — router.ex lands this key on barkparks.version; payload=%s", blob)
+	}
+	got, isString := v.(string)
+	if !isString {
+		t.Fatalf("version = %T, want a string", v)
+	}
+	if got == "" {
+		t.Error("version marshalled as \"\" — an absent-or-empty key means two things at once")
+	}
+	if want := AgentVersion(); got != want {
+		t.Errorf("version = %q, want the binary's own stamp %q — `version` is an ALIAS of agent_version, not a second source", got, want)
+	}
+	if av, _ := payload["agent_version"].(string); got != av {
+		t.Errorf("version = %q but agent_version = %q — the twins drifted; both must come from ONE AgentVersion() call in gatherReport", got, av)
+	}
+}
+
+// TestNoHandMaintainedVersionConst is the STRUCTURAL arm. The behavioural arm
+// above proves the two keys agree TODAY; this one proves the thing that made
+// them disagree — a hand-edited version literal in the package — cannot come
+// back. It parses the package's own source and reds on any top-level const or
+// var initialised to a bare version-shaped string literal ("0.1.0", "v1.2").
+//
+// A test that merely READS such a const would stay green forever while the
+// const rots; this one fails at the moment the const is typed.
+func TestNoHandMaintainedVersionConst(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse package source: %v", err)
+	}
+	if len(pkgs) == 0 {
+		t.Fatal("parsed 0 packages — the guard measured nothing")
+	}
+
+	versionLiteral := regexp.MustCompile(`^"v?\d+\.\d+(\.\d+)?"$`)
+	scanned := 0
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, decl := range f.Decls {
+				gd, ok := decl.(*ast.GenDecl)
+				if !ok || (gd.Tok != token.CONST && gd.Tok != token.VAR) {
+					continue
+				}
+				for _, spec := range gd.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, val := range vs.Values {
+						scanned++
+						lit, ok := val.(*ast.BasicLit)
+						if !ok || lit.Kind != token.STRING {
+							continue
+						}
+						if versionLiteral.MatchString(lit.Value) {
+							name := "_"
+							if i < len(vs.Names) {
+								name = vs.Names[i].Name
+							}
+							t.Errorf("%s: %s = %s is a hand-maintained version literal. "+
+								"That is the defect this package already shipped once: `version` and "+
+								"`agent_version` both claimed to date the binary and only the stamp could. "+
+								"Resolve the binary's identity through AgentVersion(), never a literal.",
+								fset.Position(lit.Pos()), name, lit.Value)
+						}
+					}
+				}
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("scanned 0 const/var initialisers — the guard is inert, not passing")
+	}
+	t.Logf("scanned %d top-level const/var initialisers in package agent", scanned)
 }
 
 // newTempGitRepo initialises a real git repository in a temp dir with one

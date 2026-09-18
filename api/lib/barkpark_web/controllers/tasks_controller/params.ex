@@ -2680,6 +2680,33 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   @doc """
+  `--clear-rerun`: the SUBTRACTION door on `content.disposition_rerun`
+  (task-fcc590f205433209). Read the same way as the two supersession overrides
+  and kept separate from both — removing the probe and replacing the reason are
+  different acts, and a caller must say which one they mean. Absent → `nil`, so
+  `put_opt/3` leaves the opt off and `Tasks.Stage` leaves the field alone.
+  """
+  @spec stage_clear_rerun(map()) :: true | nil
+  def stage_clear_rerun(params) do
+    flag = Map.get(params, "clear_rerun") || Map.get(params, "clear-rerun")
+
+    if stamp_flag?(flag), do: true, else: nil
+  end
+
+  @doc """
+  `--keep-rerun`: the deliberate-KEEP door. The caller stating that the
+  `content.disposition_rerun` already on the row still binds the reason they are
+  writing — the shared/kept shape PDS-D391b(b) and PDS-D336(a) rule honest.
+  Writes nothing; it only satisfies `rerun_would_orphan`. Absent → `nil`.
+  """
+  @spec stage_keep_rerun(map()) :: true | nil
+  def stage_keep_rerun(params) do
+    flag = Map.get(params, "keep_rerun") || Map.get(params, "keep-rerun")
+
+    if stamp_flag?(flag), do: true, else: nil
+  end
+
+  @doc """
   The `--supersede-instruction` flag, read the same way and kept DELIBERATELY
   SEPARATE from `stage_supersede/1` (task-bd7476eecdede252): the note override
   and the instruction override are two locks, and one key to both would let a
@@ -2728,6 +2755,25 @@ defmodule BarkparkWeb.TasksController.Params do
       s when is_binary(s) and s != "" -> s
       _ -> nil
     end
+  end
+
+  @doc """
+  `true` when a stamp asks to MINT the reporter-loop flag on a criterion it is
+  seeding (task-66cc8ad999fa5a24), else `nil` — the `put_opt` shape.
+
+  Read from both wire spellings (`ack_gate` JSON body / `ack-gate` manifest flag
+  → query key) and through `stamp_flag?/1`, the same truthiness every other
+  stamp flag uses, so `--ack-gate` behaves like `--miss` on the wire.
+
+  It only ever ADDS an obligation: `Internal.seed_criterion/4` mints the flag on
+  a NEWBORN criterion and nothing anywhere can clear it, so there is nothing for
+  a hostile caller to gain and the door stays a 400-free boolean.
+  """
+  @spec stamp_ack_gate(map()) :: true | nil
+  def stamp_ack_gate(params) do
+    if stamp_flag?(Map.get(params, "ack_gate") || Map.get(params, "ack-gate")),
+      do: true,
+      else: nil
   end
 
   defp stamp_flag?(v), do: v in [true, "true", "1"]

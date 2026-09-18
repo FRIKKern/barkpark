@@ -186,13 +186,51 @@ defmodule BarkparkCloud.Notifications.EventEmail do
        "A content publish for #{name(payload)} did not deploy — it was refused." <>
          "#{identity(payload)}#{detail(payload)}"}
 
+  # cch-w30-bl-member-joined-alert — the team learns somebody ACCEPTED.
+  #
+  # THE SUBJECT SAYS JOINED, and that is the whole point of the name. Wave 30
+  # deleted a `member_invited` toggle whose only honest message would have
+  # duplicated the invitee's own transactional invite letter
+  # (`Transactional.deliver_invite/1`); the fact nothing reported was the
+  # ACCEPTANCE. A subject saying "invited" here would re-introduce exactly the
+  # wrong event under the right column.
+  #
+  # `Render.joined_clause/1` writes the sentence, the same way
+  # `Render.abandonment_clause/1` writes its own, so the inbox and Slack cannot
+  # disagree about who joined or at what role. No `detail/1`: the producer
+  # sends name/email/role and no `:detail` key, and the arm states that absence
+  # rather than rendering an empty interpolation that implies a gap.
+  defp render(:member_joined, payload, _owner?),
+    do: {"A new member joined your team", "#{Render.joined_clause(payload)} on #{name(payload)}."}
+
   defp render(:agent_reachable, payload, _owner?),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
 
+  # cch-w29-bl-agent-unreachable-letter-has-no-next-step — the letter that
+  # reaches a person at the worst moment now says what to do.
+  #
+  # ONE SENTENCE WAS THE WHOLE LETTER: "<name> stopped reporting and may be
+  # down." No cause, no next step, nowhere to go — and `detail(payload)` renders
+  # "" for this event 100% of the time, because both and only both producers
+  # pass a name and nothing else (`Health.StalenessWorker.flip_offline/1` sends
+  # `%{name: offline.name}`; the report-flip site calls
+  # `dispatch_barkpark_event/2`, whose payload defaults to `%{}`). The empty
+  # interpolation is KEPT rather than deleted: it is the seam a future
+  # detail-carrying producer lands on, and `alert_detail_reachability_test.exs`
+  # pins today's `:never` so that arrival cannot be silent.
+  #
+  # THE NEXT STEP IS NOT WRITTEN HERE. `Render.unreachable_next_step/0` owns it,
+  # exactly as `Render.deployment_identity/1` owns the identity line, so the
+  # inbox and the chat channels cannot tell a person two different stories about
+  # the same outage. Its docstring carries the evidence for each sentence — and
+  # for what is deliberately absent: no cause, no duration, no missed-tick
+  # count, because Barkpark has no active probe and one of the two producers
+  # fires on a single reported transition with no debounce to count.
   defp render(:agent_unreachable, payload, _owner?),
     do:
       {"Your Barkpark is unreachable",
-       "#{name(payload)} stopped reporting and may be down.#{detail(payload)}"}
+       "#{name(payload)} stopped reporting and may be down.#{detail(payload)}" <>
+         Render.unreachable_next_step()}
 
   # The remedy — the billing portal — is behind `require_current_team_owner`. The
   # consequence is everyone's business, so it is what the non-owner arm leads

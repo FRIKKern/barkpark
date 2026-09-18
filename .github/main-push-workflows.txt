@@ -24,12 +24,15 @@
 .github/workflows/deploy.yml	CONDITIONAL
 .github/workflows/doc-gates.yml	CONDITIONAL
 .github/workflows/elixir.yml	ALWAYS
+.github/workflows/gh-retry-selftest.yml	CONDITIONAL
 .github/workflows/go-format.yml	CONDITIONAL
 .github/workflows/go-tests.yml	CONDITIONAL
 .github/workflows/grip-suite.yml	CONDITIONAL
 .github/workflows/hundesteder.yml	CONDITIONAL
 .github/workflows/js-tests.yml	CONDITIONAL
 .github/workflows/landed-mark.yml	ALWAYS
+.github/workflows/main-collapse-gates.yml	CONDITIONAL
+.github/workflows/main-red-owner.yml	ALWAYS
 .github/workflows/mobile.yml	CONDITIONAL
 .github/workflows/paper-editor.yml	CONDITIONAL
 .github/workflows/paper-rig.yml	CONDITIONAL
@@ -53,6 +56,7 @@
 .github/workflows/studio-instrument-selftests.yml	CONDITIONAL
 .github/workflows/studio-journey-smoke.yml	CONDITIONAL
 .github/workflows/task-lease-renew.yml	ALWAYS
+.github/workflows/taskboard-drive.yml	CONDITIONAL
 .github/workflows/twoslash.yml	CONDITIONAL
 .github/workflows/typedoc.yml	CONDITIONAL
 .github/workflows/vendored-assets.yml	CONDITIONAL

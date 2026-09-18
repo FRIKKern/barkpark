@@ -27,9 +27,9 @@ defmodule BarkparkCloud.AzureClientTest do
   end
 
   describe "FakeClient" do
-    test "a well-formed blob verifies and echoes the subscription" do
-      assert {:ok, %{subscription_id: "sub-123", resource_count: 1}} =
-               FakeClient.verify(blob())
+    test "a well-formed blob verifies and echoes the subscription — and nothing else" do
+      assert {:ok, meta} = FakeClient.verify(blob())
+      assert meta == %{subscription_id: "sub-123"}
     end
 
     test "the reject sentinel always fails :unauthorized" do

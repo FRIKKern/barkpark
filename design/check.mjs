@@ -14,6 +14,7 @@ import {
   auditActions, AUDIT_ACTIONS_PATH,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
+import { evaluateReadingMeasure, TOKENS_PATH } from "./reading-measure.mjs";
 import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -60,7 +61,10 @@ if (process.argv.slice(2).includes("--selftest")) {
 // Part A's hook says more: Part A prints a per-ARTIFACT ok line and gates no
 // part-summary, so it is the one injectable part whose fault withholds no ok. That
 // exemption is declared AT THE HOOK, where a reader of either file meets it, and
-// is read back by the selftest instead of being hand-listed there.
+// is read back by the selftest instead of being hand-listed there. Part 0's hook
+// says more too, for the opposite reason: its real failure path exits the process
+// immediately, so its hook deliberately does NOT — an injected fault there must
+// leave the run standing for the Parts the arm judges beside it.
 const FAULT = new Set(
   (process.env.BP_DESIGN_CHECK_FAULT || "").split(",").map((s) => s.trim()).filter(Boolean),
 );
@@ -86,21 +90,46 @@ const fail = (msg) => { console.error(msg); failed++; };
 // instead of the one sentence that says which row is wrong and why. The predicate
 // is auditActions() itself, so this gate and the emitter cannot disagree about
 // what "well-formed" means.
-try {
-  const rows = auditActions();
-  const nulls = rows.filter((r) => r.label === null);
-  console.log(
-    `design/check.mjs — Part 0: ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
-    `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
-  );
-} catch (e) {
-  console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
-  console.error(`
+//
+// Its verdict is a HEADER line plus a separately-gated `ok` line, the same shape
+// every Part below prints, rather than the one fused sentence it printed until
+// r21d. The fusion made Part 0 the last Part the selftest could say nothing
+// about: the selftest reads a Part's claim off its `  ok   ` lines, and a Part
+// with none has nothing for a fault to withhold, so it was named UNEXERCISED on
+// every green run. Splitting the sentence costs one line of output and buys the
+// arm.
+console.log(`design/check.mjs — Part 0: the audit verb table's own shape (${AUDIT_ACTIONS_PATH})`);
+{
+  const failedBefore0 = failed;
+  let rows;
+  try {
+    rows = auditActions();
+  } catch (e) {
+    console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
+    console.error(`
   ${AUDIT_ACTIONS_PATH} is the ONE table both audit vocabularies read. Until it is
   well-formed nothing downstream can be trusted: the console's ACTION_LABELS region is
   built from it and AuditEvent's @actions allowlist is derived from it at compile time.
 `);
-  process.exit(1);
+    process.exit(1);
+  }
+  const nulls = rows.filter((r) => r.label === null);
+
+  // Part 0's hook is the one that does NOT share the real failure path's exit.
+  // A genuinely malformed table exits(1) right here, because everything below
+  // reads it; an INJECTED fault must leave the run standing so the selftest can
+  // still watch every later Part keep its own ok lines. So the hook records its
+  // failure through `fail` — the verdict arm at the bottom still reds the gate on
+  // the count — and asks exactly the question the arm is for: does Part 0's ok
+  // line answer for Part 0's own failures? The exit path needs no hook: it
+  // withholds this ok line by never reaching it.
+  if (FAULT.has("0")) fail("  Part 0 FAIL: injected fault (--selftest)");
+  if (failed === failedBefore0) {
+    console.log(
+      `  ok   ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
+      `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
+    );
+  }
 }
 
 // ── Part A: per-artifact byte-compare against committed ──────────────────────
@@ -1306,6 +1335,50 @@ if (failed === failedBeforeH)
 //     the canvas ground is not its ground and it has no single resolved ratio.
 //   - Translucent inks are excluded for the same reason the first version
 //     excluded them: rgba() over a ground has no one ratio.
+//
+// ┌─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (BEGIN) ───────────
+// This row (task-4462bbaf17f63ec1) exists because #18162 and #18109 were each
+// green on their own branch and red only once main held both. Its last criterion
+// offers two answers and forbids blurring them. OPTION (b) IS CHOSEN: no
+// standing guard against that class is in scope here, and the exposure goes on
+// the record as ACCEPTED rather than quietly closed. The reason is mechanical,
+// not a preference.
+//
+// A guard catches a class BEFORE main only if it can stop a merge. This file has
+// exactly one CI venue: `node design/check.mjs` in .github/workflows/
+// doc-gates.yml, and there is no second invocation anywhere in .github. That
+// workflow publishes ONE check-run context, `Doc budgets + anchors`, and that
+// context is not in the required set of .github/required-checks.json — it sits in
+// that file's `exclusions` array as "S4 PATHS-FILTERED", and doc-gates.yml's own
+// header says of its red, in those words, that "none of it stops a merge". So no
+// code added to this file can catch anything before main. It can only make
+// main's red louder and better named, which is a different and smaller promise.
+//
+// The mechanism that would actually catch the class is not a checker at all: it
+// is re-evaluating a pull request's checks against the CURRENT tip before the
+// merge lands — "require branches to be up to date", or a merge queue. Both are
+// branch protection settings on the repository: owner-only, outside every lane
+// fence, and outside this file. .github/required-checks.json records that this
+// repo is user-owned with no merge queue today, so neither is switched on.
+// Writing a checker here and calling it the remedy would put the fix in the one
+// place that provably cannot deliver it, and would read afterwards as though the
+// class had been guarded.
+//
+// What IS in scope, and is shipped above: the KEY. The collision produced 46
+// blessings for 19 facts only because pairings were keyed on NAMES. They are
+// keyed on the resolved `<ink>|<ground>` bytes now, so the same colour arriving
+// under a second name from a second source is the SAME pair rather than a new
+// failure. That removes this file's own contribution to the class. It does not
+// guard the class, and this record exists so that nobody reads it as if it did.
+//
+// FINALLY, AND THIS IS WHAT KEEPS THE PARAGRAPH HONEST: none of the three facts
+// above is restated from memory. Part H2 reads them back from their sources every
+// run — the one invocation site in .github/workflows, this context's absence from
+// the required set, and the strict flag — and reds if any has moved. Two of those
+// checks fire when the repository gets BETTER, which is deliberate: an exposure
+// that has quietly been guarded must stop being carried as accepted just as
+// loudly as one whose reasoning rotted.
+// └─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (END) ─────────────
 console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canvas palette (keyed on the resolved colour)");
 {
   // Part H2 counts its OWN failures. `failed` is a shared, sticky boolean, so
@@ -1314,6 +1387,12 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
   // carries the same own-counter idiom and the same reason.
   let h2Failed = 0;
   const failH2 = (msg) => { h2Failed++; fail(msg); };
+  // Set by the accepted-exposure record arm below, and printed on the ok line so
+  // a reader can see that the arm RAN rather than inferring it from silence.
+  let recordWords = 0;
+  // Set by the premise arm below, on the same principle: an arm that ran must say
+  // so on the ok line, so "the premise held" is never inferred from silence.
+  let premiseNote = "premise NOT measured";
 
   const FAMILY = "color.graphCanvas";
   const GRAPH_JS = "web/public/bp-graph.js";
@@ -1576,8 +1655,159 @@ console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canva
   if (huePairs.length < hueValues.size * 2)
     failH2(`  Part H2 FAIL: REFUSING — ${hueValues.size} distinct per-type hues produced only ${huePairs.length} pairings, not the ${hueValues.size * 2} a both-grounds evaluation owes. A hue bound to one theme is a derivation that narrowed, which is how a gate goes quiet without going empty.`);
 
+
+  // ── the accepted-exposure record, ENFORCED rather than trusted ────────────
+  // A written finding does not fire by itself. The record above the part header
+  // is the WHOLE of this row's answer to the green-apart/red-together class, and
+  // a comment block is deletable by anyone editing this file for an unrelated
+  // reason — which is exactly how an ACCEPTED exposure turns back into a SILENT
+  // one, with nothing anywhere reporting the change. So Part H2 reads its own
+  // source and refuses to pass without it. This arm guards the RECORD, not the
+  // class; the record itself says why no guard on the class is landable here.
+  {
+    const MARK = "ACCEPTED-EXPOSURE RECORD: green-apart/red-together";
+    const SELF = fileURLToPath(import.meta.url);
+    let selfSrc = null;
+    try { selfSrc = readFileSync(SELF, "utf8"); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read own source ${SELF} (${err.code || err.message}) — the accepted-exposure record is verified by reading this file, so an unreadable self is a REFUSAL, never a pass.`); }
+    if (selfSrc !== null) {
+      const srcLines = selfSrc.split("\n");
+      const isComment = (l) => l.trim().startsWith("//");
+      // Markers are matched only on COMMENT lines, so the literals in this arm
+      // (which necessarily spell the same words) can never be mistaken for the
+      // block they delimit.
+      const markerAt = (tag) => srcLines.flatMap((l, i) => (isComment(l) && l.includes(`${MARK} (${tag})`) ? [i] : []));
+      const begins = markerAt("BEGIN"), ends = markerAt("END");
+      if (begins.length !== 1 || ends.length !== 1 || ends[0] <= begins[0] + 1) {
+        failH2(`  Part H2 FAIL: the accepted-exposure record is missing or unbalanced — ${begins.length} BEGIN and ${ends.length} END comment marker(s) for "${MARK}" in ${SELF}, needing exactly one of each with prose between them. Criterion c4 of task-4462bbaf17f63ec1 chose option (b), a WRITTEN statement, so the statement IS the deliverable: restore it rather than deleting this arm.`);
+      } else {
+        const body = srcLines.slice(begins[0] + 1, ends[0]);
+        const stray = body.filter((l) => l.trim() !== "" && !isComment(l));
+        if (stray.length)
+          failH2(`  Part H2 FAIL: the accepted-exposure record holds ${stray.length} non-comment line(s) — the block is prose only, so code inside it means the markers have drifted onto something they do not delimit.`);
+        const prose = body.map((l) => l.trim().replace(/^\/\/ ?/, "")).join(" ").replace(/\s+/g, " ").trim();
+        const words = prose.split(" ").filter(Boolean).length;
+        const MIN_WORDS = 120;
+        if (words < MIN_WORDS)
+          failH2(`  Part H2 FAIL: the accepted-exposure record is ${words} words, under the ${MIN_WORDS}-word floor — an exposure accepted in one sentence is not on the record, it is waved through. Restore the reasoning, or re-open the criterion.`);
+        // Each phrase carries one load-bearing half of the statement: WHICH
+        // option was taken, WHAT is being accepted, WHY no venue reachable from
+        // this file can catch the class, WHERE the real remedy lives, and WHICH
+        // row owns the decision. Lose one and the record stops saying the thing
+        // it was stamped for while still looking like a paragraph.
+        const REQUIRED = ["OPTION (b) IS CHOSEN", "no standing guard", "Doc budgets + anchors", "required-checks.json", "branch protection", "task-4462bbaf17f63ec1"];
+        const missing = REQUIRED.filter((phrase) => !prose.includes(phrase));
+        if (missing.length)
+          failH2(`  Part H2 FAIL: the accepted-exposure record no longer states ${missing.map((m) => JSON.stringify(m)).join(", ")} — each names one load-bearing half of the decision (which option, what is accepted, why no venue here can catch it, where the remedy lives, which row owns it), so a record that has lost one has stopped saying what it was stamped for.`);
+        recordWords = words;
+      }
+    }
+  }
+
+  // ── the record's PREMISE, read from the repo instead of restated ──────────
+  // The arm above proves the record is PRESENT and still SAYS its five load-
+  // bearing things. It cannot tell whether any of them is still TRUE. That gap is
+  // the whole risk of an option-(b) answer: the record is not a preference, it is
+  // a DERIVATION from three facts about this repository, and if any of them
+  // changes the record keeps reading like a reasoned decision while having become
+  // a false sentence committed to main. The assertion is where people stop
+  // looking, so the three facts are checked here, at their sources:
+  //
+  //   1. VENUE. `node design/check.mjs` is invoked from exactly one workflow.
+  //      A second invocation — especially from a workflow that publishes a
+  //      REQUIRED context — is precisely the venue the record says does not
+  //      exist, and code added to this file would then be able to stop a merge.
+  //   2. AUTHORITY. That workflow's context is not in branch protection's
+  //      required set, and is still carried in required-checks.json's own
+  //      `exclusions`.
+  //   3. THE REAL REMEDY. `required_status_checks.strict` is false — that flag IS
+  //      "require branches to be up to date before merging", the mechanism the
+  //      record names as the thing that would actually catch the class.
+  //
+  // Note the direction: 2 and 3 red when the world gets BETTER. That is intended.
+  // A ratchet has two failure directions, and an exposure that has quietly BEEN
+  // guarded must stop being carried as accepted just as loudly as one whose
+  // reasoning rotted. Every message below says which way it went.
+  {
+    const REQ_PATH = ".github/required-checks.json";
+    const WF_DIR = ".github/workflows";
+    const CTX = "Doc budgets + anchors";
+    const HOME_WF = "doc-gates.yml";
+    // `node design/check.mjs` on a real command line, never in a YAML comment and
+    // never inside the `paths:` list that merely NAMES the file.
+    const INVOKES = /(?:^|[\s;&|(])node\s+design\/check\.mjs(?![\w./-])/;
+
+    let wfFiles = null;
+    try { wfFiles = readdirSync(join(repoRoot, WF_DIR)).filter((n) => /\.ya?ml$/.test(n)).sort(); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read ${WF_DIR} (${err.code || err.message}) — the accepted-exposure record's first premise is "this file has exactly one CI venue", and an unreadable workflow directory means that premise is UNMEASURED, which is a REFUSAL rather than a pass.`); }
+
+    let venues = null;
+    if (wfFiles !== null) {
+      if (wfFiles.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${WF_DIR} lists ZERO workflow files. An empty read is a broken derivation, never a pass: it would report "one venue" as "no second venue" and the premise check would measure nothing.`);
+      } else {
+        venues = [];
+        for (const n of wfFiles) {
+          let src = null;
+          try { src = readFileSync(join(repoRoot, WF_DIR, n), "utf8"); }
+          catch (err) { failH2(`  Part H2 FAIL: cannot read ${WF_DIR}/${n} (${err.code || err.message}) — one unreadable workflow is one unsearched venue, so the "exactly one CI venue" premise cannot be answered from ${wfFiles.length - 1} of ${wfFiles.length} files.`); continue; }
+          if (src.split("\n").some((l) => !/^\s*#/.test(l) && INVOKES.test(l))) venues.push(n);
+        }
+        if (venues.length === 0) {
+          failH2(`  Part H2 FAIL: REFUSING — no workflow in ${WF_DIR} (${wfFiles.length} file(s)) invokes \`node design/check.mjs\` at all. Either this gate stopped running in CI, or the invocation was reworded past ${INVOKES} — both leave the venue premise unmeasurable, and "zero venues" must never read as "one venue".`);
+        } else if (venues.length !== 1 || venues[0] !== HOME_WF) {
+          failH2(`  Part H2 FAIL: the accepted-exposure record's VENUE premise no longer holds — \`node design/check.mjs\` is invoked from [${venues.join(", ")}], not from ${HOME_WF} alone. The record (option (b)) rests on this file having exactly one CI venue, publishing one non-required context; a second venue may be able to stop a merge, in which case a standing guard here IS landable and criterion c4 of task-4462bbaf17f63ec1 must be re-opened and re-answered as (a).`);
+        } else {
+          let home = null;
+          try { home = readFileSync(join(repoRoot, WF_DIR, HOME_WF), "utf8"); } catch { /* unreachable: read above succeeded */ }
+          if (home !== null && !home.includes(`name: ${CTX}`)) {
+            failH2(`  Part H2 FAIL: ${WF_DIR}/${HOME_WF} no longer declares \`name: ${CTX}\` — the record names that exact context as the one thing this file's venue publishes, and required-checks.json is keyed on the same string. A renamed job silently detaches the record's authority premise from the check it is about; re-point both, or re-open c4.`);
+          }
+        }
+      }
+    }
+
+    let req = null;
+    try { req = JSON.parse(readFileSync(join(repoRoot, REQ_PATH), "utf8")); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read or parse ${REQ_PATH} (${err.code || err.message}) — the record cites this file BY NAME for both its authority premise and its "no merge queue, no strict" remedy premise. Unreadable means UNMEASURED, which is a refusal.`); }
+
+    let strict = null, requiredNames = null;
+    if (req !== null) {
+      const checks = req?.protection?.required_status_checks?.checks;
+      if (!Array.isArray(checks) || checks.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${REQ_PATH} has no non-empty protection.required_status_checks.checks array (got ${JSON.stringify(checks)}). An empty or missing required set would make "${CTX} is not required" true VACUOUSLY, which is the shape of a premise check that has stopped measuring.`);
+      } else {
+        requiredNames = checks.map((c) => c?.context);
+        if (requiredNames.includes(CTX)) {
+          failH2(`  Part H2 FAIL: the accepted-exposure record's AUTHORITY premise has FLIPPED — "${CTX}" is now in ${REQ_PATH}'s required set [${requiredNames.join(", ")}]. This is the world getting BETTER: a red from this file can now stop a merge, so a standing guard against the green-apart/red-together class IS landable here and option (b) is no longer the honest answer. Re-open criterion c4 of task-4462bbaf17f63ec1 and answer it as (a); do not restore the old setting to quiet this line.`);
+        }
+      }
+      const excl = req?.exclusions;
+      if (!Array.isArray(excl) || excl.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${REQ_PATH} has no non-empty \`exclusions\` array (got ${Array.isArray(excl) ? "[]" : JSON.stringify(excl)}); the record quotes that array's reason for "${CTX}" verbatim, so its absence leaves the citation unverifiable rather than false.`);
+      } else if (!excl.some((e) => e?.context === CTX)) {
+        failH2(`  Part H2 FAIL: ${REQ_PATH} no longer carries "${CTX}" in \`exclusions\` (${excl.length} row(s): ${excl.map((e) => e?.context).filter(Boolean).slice(0, 6).join(", ")}…). The record cites that row as the reason this file's context holds no merge authority; with the row gone the citation points at nothing, whichever way the underlying fact went. Re-ground the record or re-open c4.`);
+      }
+      strict = req?.protection?.required_status_checks?.strict;
+      if (strict !== false) {
+        failH2(`  Part H2 FAIL: the accepted-exposure record's REMEDY premise has FLIPPED — ${REQ_PATH} now records protection.required_status_checks.strict = ${JSON.stringify(strict)}, not false. That flag IS "require branches to be up to date before merging", which the record names as the mechanism that would actually catch this class. If it is on, the class is guarded at the repository and the record must stop claiming it is accepted-and-unguarded. Re-open criterion c4 of task-4462bbaf17f63ec1; this is a BETTER world, not a regression to revert.`);
+      }
+    }
+
+    if (venues !== null && requiredNames !== null && strict === false) {
+      premiseNote = `premise live-checked (1 venue ${venues.join("")} of ${wfFiles.length} workflow(s), "${CTX}" absent from the ${requiredNames.length} required context(s), strict=false)`;
+    }
+  }
+
+  // The one hook this part lacked until task-e33b3fc1a5fc921b. It goes through
+  // failH2, not the shared fail(), so the injected failure is counted by the
+  // SAME counter the ok line below is gated on — a hook that bypassed h2Failed
+  // would red the gate and still print this part's ok, which is precisely the
+  // false-reassurance shape --selftest exists to catch.
+  if (FAULT.has("H2")) failH2("  Part H2 FAIL: injected fault (--selftest)");
+
   if (h2Failed === 0)
-    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived`);
+    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived; accepted-exposure record present and intact (${recordWords} words, option (b), ${premiseNote})`);
 }
 
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
@@ -2484,6 +2714,229 @@ console.log("\ndesign/check.mjs — Part P: terminal space-ladder Go consumer ce
         `each read by a live consumer in internal/pdrender (${consumers.length} candidate file(s))`,
     );
 }
+
+// ── Part Q: pdrender's DOWNSTREAM golden consumers ───────────────────────────
+// Part P above proves every emitted space symbol is READ inside internal/pdrender.
+// Being read is not the same as being RENDERED INTO SOMEONE ELSE'S COMMITTED
+// BYTES, and that gap has already cost a round: #18593 (724546d10) changed how
+// pdrender draws a section boundary, dutifully regenerated its OWN 16 fixtures,
+// and left internal/taskboard red on main — taskboard typesets task briefs
+// THROUGH pdrender, so its detail_*/compose_*/paper_* goldens are pdrender output
+// too and nothing told the author they existed. Part P was green the whole time.
+//
+// Part Q closes that. Two halves, and neither is a list:
+//
+//   1. THE CENSUS (a predicate, not a snapshot). A DOWNSTREAM CONSUMER is any
+//      package outside internal/pdrender that (a) imports
+//      github.com/FRIKKern/barkpark/internal/pdrender in a non-generated .go file
+//      and (b) owns a testdata/ directory. Derived by walking the tree on every
+//      run, so a package added later enrols itself and a package that stops
+//      importing pdrender leaves on its own. A pinned list of four package names
+//      would silently un-guard the fifth — the exact defect this repo keeps
+//      filing rows about (Part G shipped with five literal suffixes against ten
+//      real artifacts). The floors below are SHRINK-ONLY: they red when the
+//      census finds LESS than it found when this part was written, which is what
+//      a broken predicate and a deleted consumer both look like.
+//
+//   2. THE AGREEMENT. The section-boundary device is observable in committed
+//      bytes: a full-width run of the structural rule glyph, N blank rows above
+//      it and M below before the section head. pdrender's own goldens and every
+//      downstream consumer's goldens are the SAME renderer's output, so that
+//      (blanks-above, blanks-below, glyph) triple must be identical across all of
+//      them. Regenerating one side and not the other — literally what #18593 did
+//      — breaks the triple, and Part Q reds NAMING the consumer package and the
+//      command that regenerates it.
+//
+// THE LIMIT, stated rather than discovered later: if a rendering change is
+// committed with NO goldens regenerated at all, both sides are equally stale and
+// Part Q is honestly quiet — internal/pdrender's own golden tests red in that
+// case, which is the failure the author cannot miss. Part Q exists for the case
+// where the author DID regenerate, just not everywhere.
+console.log("\ndesign/check.mjs — Part Q: pdrender downstream golden-consumer agreement");
+{
+  const failedBeforeQ = failed;
+  const qFail = (m) => fail(m);
+
+  // Shrink-only floors. Raise one only alongside the change that makes it true.
+  const Q_CONSUMER_FLOOR = 4;        // cmd/barkpark, internal/chat, internal/cli, internal/taskboard
+  const Q_SELF_DEVICE_FLOOR = 4;     // section-boundary devices in internal/pdrender's own goldens
+  const Q_DOWNSTREAM_DEVICE_FLOOR = 3; // …and in its downstream consumers' goldens
+
+  const skipDir = (n) => n.startsWith(".") || n.startsWith("_") || n === "node_modules" || n === "vendor" || n === "testdata";
+  const goPkgDirs = [];
+  const walkPkgs = (rel) => {
+    let entries;
+    try { entries = readdirSync(join(repoRoot, rel || "."), { withFileTypes: true }); } catch { return; }
+    if (entries.some((e) => e.isFile() && e.name.endsWith(".go"))) goPkgDirs.push(rel);
+    for (const e of entries) if (e.isDirectory() && !skipDir(e.name)) walkPkgs(rel ? `${rel}/${e.name}` : e.name);
+  };
+  walkPkgs("");
+
+  const IMPORT = `"github.com/FRIKKern/barkpark/internal/pdrender"`;
+  const consumers = [];
+  for (const dir of goPkgDirs) {
+    if (dir === "internal/pdrender" || dir.startsWith("internal/pdrender/")) continue;
+    let entries;
+    try { entries = readdirSync(join(repoRoot, dir), { withFileTypes: true }); } catch { continue; }
+    if (!entries.some((e) => e.isDirectory() && e.name === "testdata")) continue;
+    const importers = entries
+      .filter((e) => e.isFile() && e.name.endsWith(".go"))
+      .filter((e) => readFileSync(join(repoRoot, dir, e.name), "utf8").includes(IMPORT))
+      .map((e) => e.name);
+    if (importers.length) consumers.push({ dir, importers });
+  }
+
+  // Every committed text artifact under a testdata/ tree. Read recursively: a
+  // golden moved into a subdirectory (internal/pdrender/testdata/golden/) must
+  // not fall out of the census.
+  const textFiles = (rel, out = []) => {
+    let entries;
+    try { entries = readdirSync(join(repoRoot, rel), { withFileTypes: true }); } catch { return out; }
+    for (const e of entries) {
+      if (e.isDirectory()) textFiles(`${rel}/${e.name}`, out);
+      else if (e.isFile() && !e.name.endsWith(".json")) out.push(`${rel}/${e.name}`);
+    }
+    return out;
+  };
+
+  // The section-boundary device as committed BYTES: a line that is nothing but a
+  // run of the structural glyph, with its surrounding blank-row counts. Lines
+  // that merely CONTAIN the glyph (a progress bar's filled head) are not the
+  // device and are not counted — the predicate is "the whole line is the rule".
+  const glyph = ruleGlyph(tokens.space.section.rule);
+  const devicesIn = (text) => {
+    const lines = text.split("\n");
+    const found = [];
+    for (let i = 0; i < lines.length; i++) {
+      const s = lines[i].trim();
+      if (!s || [...new Set(s)].join("") !== glyph) continue;
+      let above = 0;
+      for (let j = i - 1; j >= 0 && lines[j].trim() === ""; j--) above++;
+      let below = 0;
+      for (let k = i + 1; k < lines.length && lines[k].trim() === ""; k++) below++;
+      found.push({ line: i + 1, above, below });
+    }
+    return found;
+  };
+  const sigOf = (d) => `${d.above} blank row(s) above / ${d.below} below / ${JSON.stringify(glyph)}`;
+
+  const scanTree = (rel) => {
+    const hits = [];
+    for (const f of textFiles(rel)) {
+      let text;
+      try { text = readFileSync(join(repoRoot, f), "utf8"); } catch { continue; }
+      for (const d of devicesIn(text)) hits.push({ file: f, ...d });
+    }
+    return hits;
+  };
+
+  const self = scanTree("internal/pdrender/testdata");
+  const selfSigs = new Set(self.map(sigOf));
+
+  if (consumers.length < Q_CONSUMER_FLOOR)
+    qFail(
+      `  Part Q FAIL: the downstream-consumer census found ${consumers.length} package(s), floor is ${Q_CONSUMER_FLOOR}.\n` +
+        `    Either a consumer was deleted, or the predicate (imports ${IMPORT} AND owns testdata/)\n` +
+        `    stopped resolving. A census that shrank is indistinguishable from a census that broke —\n` +
+        `    re-derive it with:\n` +
+        `      git ls-files '*.go' | xargs grep -l ${IMPORT} | sed 's|/[^/]*$||' | sort -u\n` +
+        `    and lower Q_CONSUMER_FLOOR in the same commit that removes the consumer.`,
+    );
+  if (self.length < Q_SELF_DEVICE_FLOOR)
+    qFail(
+      `  Part Q FAIL: internal/pdrender's own goldens hold ${self.length} section-boundary device(s), floor is ${Q_SELF_DEVICE_FLOOR}.\n` +
+        `    Part Q compares downstream goldens against pdrender's own rendering of the device; with\n` +
+        `    no device of its own there is nothing to compare against and this part would pass\n` +
+        `    vacuously. Keep a fixture with an L2 heading after prose, or lower the floor deliberately.`,
+    );
+  if (selfSigs.size > 1)
+    qFail(
+      `  Part Q FAIL: internal/pdrender's own goldens disagree with EACH OTHER about the section\n` +
+        `    boundary: ${[...selfSigs].join(" vs ")}. Some of its fixtures were regenerated and some\n` +
+        `    were not — run: go test ./internal/pdrender -update`,
+    );
+
+  const selfSig = self.length ? sigOf(self[0]) : null;
+  let downstreamDevices = 0;
+  const rows = [];
+  for (const c of consumers) {
+    const hits = scanTree(`${c.dir}/testdata`);
+    downstreamDevices += hits.length;
+    const bad = selfSig ? hits.filter((h) => sigOf(h) !== selfSig) : [];
+    rows.push({ dir: c.dir, importers: c.importers.length, devices: hits.length, bad: bad.length });
+    if (bad.length)
+      qFail(
+        `  Part Q FAIL: ${c.dir} goldens are STALE pdrender output — regenerate them.\n` +
+          `    ${c.dir} renders THROUGH pdrender (imports it in ${c.importers.join(", ")}), so its goldens\n` +
+          `    are pdrender's committed bytes too. internal/pdrender's own goldens draw the section\n` +
+          `    boundary as ${selfSig}, but ${bad.length} device(s) in ${c.dir}/testdata still draw it as\n` +
+          `    ${[...new Set(bad.map(sigOf))].join(" / ")}:\n` +
+          bad.slice(0, 6).map((b) => `      ${b.file}:${b.line}`).join("\n") +
+          `\n    A pdrender rendering change regenerated its OWN fixtures and not these. Fix:\n` +
+          `      go test ./${c.dir} -update\n` +
+          `    (this is #18593's exact shape: 16 pdrender fixtures moved, internal/taskboard stayed\n` +
+          `    behind, main went red for a round and no gate had said a word.)`,
+      );
+  }
+  if (downstreamDevices < Q_DOWNSTREAM_DEVICE_FLOOR)
+    qFail(
+      `  Part Q FAIL: the downstream goldens hold ${downstreamDevices} section-boundary device(s), floor is\n` +
+        `    ${Q_DOWNSTREAM_DEVICE_FLOOR}. Part Q's agreement half has nothing to compare and is passing\n` +
+        `    vacuously — an all-clear and a nothing-measured look identical from the outside. Either a\n` +
+        `    consumer's fixtures lost their section boundary, or the device predicate stopped matching.`,
+    );
+
+  if (FAULT.has("Q")) qFail("  Part Q FAIL: injected fault (--selftest)");
+  if (failed === failedBeforeQ) {
+    for (const r of rows)
+      console.log(`       ${r.dir}  (${r.importers} pdrender importer file(s), ${r.devices} section-boundary device(s) in testdata/)`);
+    console.log(
+      `  ok   ${consumers.length} downstream golden consumer(s) derived by predicate; ` +
+        `${downstreamDevices} downstream + ${self.length} pdrender device(s) agree on ${selfSig}`,
+    );
+  }
+}
+
+// ── Part R: the reading-measure pin ─────────────────────────────────────────
+// The Studio paper surface floors at `calc(55ch + 2 * var(--paper-gutter))`
+// behind `@container content (min-width: 720px)`. `ch` resolves in the WINNING
+// FACE, so that floor holds only while the face is narrow enough — and which
+// face wins is decided by one human-gated line, design/tokens.json
+// font.reading.stack. Every face there was measured in a browser and clears the
+// gate with headroom; NOTHING held that. Part R is the hold: it re-derives the
+// gate from the sheet every run, and requires every face the stack names to
+// carry a MEASURED advance that fits.
+//
+// COVERAGE IS A PREDICATE, NOT A LIST. A sixth face is swept because it is in
+// the stack; there is no skip-list it can be quietly missing from. The pinned
+// advances live in design/reading-measure.mjs and are deliberately NOT derivable
+// from the sheet this Part checks — a guard reading its expected value out of
+// the thing it guards is inert.
+console.log("\ndesign/check.mjs — Part R: reading-face advance pin vs the paper-surface container gate");
+{
+  const failedBeforeR = failed;
+  const rFail = (m) => fail(m);
+
+  const { gate, faces, rows, failures } = evaluateReadingMeasure();
+  for (const f of failures) rFail(f);
+
+  if (FAULT.has("R")) rFail("  Part R FAIL: injected fault (--selftest)");
+  if (failed === failedBeforeR) {
+    const worst = rows.reduce((a, b) => (b.headroomPx < a.headroomPx ? b : a));
+    const crossing = (gate.containerMinPx - 2 * gate.gutterPx) / gate.chCount;
+    for (const r of rows)
+      console.log(
+        `       ${r.face.padEnd(20)} ${String(r.advance).padStart(8)} px/ch  ` +
+          `floor ${r.floorPx.toFixed(3)}px  headroom ${r.headroomPx.toFixed(3)}px`,
+      );
+    console.log(
+      `  ok   ${rows.length} face(s) from ${TOKENS_PATH} font.reading.stack swept by predicate against the ` +
+        `${gate.chCount}ch + 2*${gate.gutterPx}px floor behind @container content (min-width: ${gate.containerMinPx}px); ` +
+        `worst is ${worst.face} at ${worst.headroomPx.toFixed(3)}px headroom, crossing starts at ${crossing.toFixed(4)} px/ch`,
+    );
+  }
+}
+
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {

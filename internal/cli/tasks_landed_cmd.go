@@ -396,6 +396,27 @@ func resolveLandedCriteria(c *apiclient.Client, docID string) ([]landedCriterion
 // The author's explicit `merge_gate` decides in BOTH directions and prose
 // decides only its absence, which is `Tasks.Landed.merge_shaped?/1` exactly: an
 // explicit `false` VETOES wording that would otherwise match.
+//
+// THE POLARITY IS RULED, NOT UNDECIDED (task-573618865e3c2b3f, 2026-09-17, by
+// main as orchestrator). An explicit `merge_gate: true` STAYS FLIPPABLE by this
+// verb. task-4dca6c8453fb1f7c's c2 asked for the opposite — refuse to flip any
+// criterion carrying the flag — and it is NOT implemented, because the fence it
+// wanted already exists in a narrower and better shape: the per-row
+// `merge_discharges: false` that #16619 shipped and `landedMergeDischarges`
+// reads below. A lead who wants "the lead still closes it AND no landing notice
+// may seal it" declares that on the row and gets exactly it, affecting no other
+// row. Re-measured 2026-09-17 with this predicate over all 1451 rows carrying a
+// `landed:pr-*` label: 11 rows carry a resolvable candidate and 7 of the 11 are
+// candidates only because of this polarity, so the inversion would have cut the
+// cure from 11 rows to 4.
+//
+// TWO ARMS, TWO FENCES. `merge_gate` is not one thing: the FIELD arm below and
+// the PROSE arm (`mergeGateWordedRe`, which alone decides 1587 of the corpus's
+// 2668 marker-worded criteria as measured 2026-09-17) are separate code paths,
+// and a test that exercises one says nothing about the other. Both are pinned
+// and independently mutation-proved in tasks_landed_polarity_fence_test.go;
+// re-measure with TestMeasureLandedCandidatesOverCorpus rather than re-quoting
+// any number in this comment.
 func landedMergeShaped(c landedCriterion) bool {
 	if c.mergeGate != nil {
 		return *c.mergeGate

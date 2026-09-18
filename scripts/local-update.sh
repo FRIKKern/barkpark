@@ -100,8 +100,83 @@ else
 fi
 NEW="$(git rev-parse HEAD)"
 
+# ── 1b. The installed bp, independent of THIS invocation's pull delta ────────
+# THE DEFECT THIS CLOSES. Everything below used to be decided from $OLD..$NEW
+# alone, and the OLD==NEW arm exited 0 before reaching any of it. But "did MY
+# pull carry a Go change" is not the same question as "is the installed bp
+# behind origin/main": another session can pull this shared checkout first, or
+# the operator can run a bare `git pull` — and then `make update` reported
+# "Already up to date" and left the stale binary exactly where `make doctor`
+# was redding it. The fixer could not fix what the gauge could see.
+#
+# So the binary's OWN provenance is read here, from the same function doctor.sh
+# uses — scripts/lib/bp-staleness.sh, bp_staleness_verdict — rather than
+# re-derived: a second reading of one fact is how the two drift apart.
+# `$0`, not `$(pwd)` and not `dirname`: this script has already cd'd to the
+# repo root above, and the SessionStart hook can invoke it under a stripped
+# PATH where external `dirname` does not resolve at all (doctor.test.sh cell 11
+# runs it under `env -i PATH=<two symlinks>`). Parameter expansion needs no
+# binary, and binding to $0 keeps a copied fixture self-contained.
+case "$0" in */*) BP_LIB_DIR="${0%/*}" ;; *) BP_LIB_DIR="." ;; esac
+# shellcheck source=lib/bp-staleness.sh
+# shellcheck disable=SC1091  # resolved at runtime from $0; -x is not on the gate
+. "$BP_LIB_DIR/lib/bp-staleness.sh"
+BP_VERDICT=""; BP_COMMIT=""
+read -r BP_VERDICT BP_COMMIT <<<"$(bp_staleness_verdict)"
+
+# rebuild_bp <why> — build and install the stamped bp. Shared by both callers
+# below so the pull-driven path and the provenance-driven path cannot diverge
+# in what "rebuilt" means.
+rebuild_bp() {
+  if make cli-build >/dev/null 2>&1; then
+    BP_TARGET=""
+    if [ -n "${BP_INSTALL:-}" ]; then
+      BP_TARGET="$BP_INSTALL"
+    elif command -v bp >/dev/null 2>&1 && [ -w "$(command -v bp)" ]; then
+      BP_TARGET="$(command -v bp)"
+    fi
+    if [ -n "$BP_TARGET" ]; then
+      install -m 0755 dist/bp "$BP_TARGET"
+      did "bp CLI rebuilt at $(git rev-parse --short HEAD) and installed to $BP_TARGET ($1)"
+    else
+      did "bp CLI rebuilt -> dist/bp ($1; no writable bp on PATH; set BP_INSTALL=<path> to auto-install)"
+    fi
+  else
+    warn "bp CLI build failed — run by hand: make cli-build"
+  fi
+}
+
+# bp_provenance_refresh — act on the verdict when the pull delta says nothing.
+# DIVERGED is deliberately NOT a rebuild: `make cli-build` compiles THIS
+# checkout, which is the off-history tree the binary already came from, so a
+# rebuild reinstalls the same binary. Only a rebase ends that one.
+bp_provenance_refresh() {
+  case "$BP_VERDICT" in
+    stale)
+      rebuild_bp "installed bp $BP_COMMIT predates Go changes on origin/main" ;;
+    unstamped)
+      rebuild_bp "installed bp had NO build-commit stamp" ;;
+    diverged)
+      warn "installed bp ($BP_COMMIT) is DIVERGED from origin/main — a rebuild from this checkout reinstalls the same off-history binary; run: git pull --rebase (then: make cli-install)" ;;
+    current)
+      skipped "bp CLI (installed bp $BP_COMMIT is current with origin/main)" ;;
+    no-bp)
+      skipped "bp CLI (no bp on PATH — install: make cli-install)" ;;
+    *)
+      skipped "bp CLI (provenance unreadable: $BP_VERDICT)" ;;
+  esac
+}
+
 if [ "$OLD" = "$NEW" ]; then
   echo ">> Already up to date — nothing to refresh."
+  # …EXCEPT the installed binary, which this invocation's pull delta says
+  # nothing about. This is the whole point of section 1b.
+  section "Refreshing local artifacts (0 new commits)"
+  bp_provenance_refresh
+  if [ "$WARNINGS" -gt 0 ]; then
+    printf '%s>> Done with %d warning(s) — see WARN lines above for the manual commands.%s\n' "$YELLOW" "$WARNINGS" "$RESET"
+    exit 1
+  fi
   exit 0
 fi
 RANGE="$OLD..$NEW"
@@ -116,25 +191,13 @@ section "Refreshing local artifacts ($COUNT new commits)"
 
 # bp CLI — the Go binary embeds internal/ assets, so any Go-side change
 # (including vendored asset syncs) means the installed bp is stale.
+# A pull that carried Go changes rebuilds on the delta alone; a pull that
+# carried none still rebuilds when the INSTALLED binary's own stamp says it is
+# behind origin/main (the binary can be stale for reasons this pull never saw).
 if changed '*.go' go.mod go.sum internal cmd; then
-  if make cli-build >/dev/null 2>&1; then
-    BP_TARGET=""
-    if [ -n "${BP_INSTALL:-}" ]; then
-      BP_TARGET="$BP_INSTALL"
-    elif command -v bp >/dev/null 2>&1 && [ -w "$(command -v bp)" ]; then
-      BP_TARGET="$(command -v bp)"
-    fi
-    if [ -n "$BP_TARGET" ]; then
-      install -m 0755 dist/bp "$BP_TARGET"
-      did "bp CLI rebuilt at $(git rev-parse --short HEAD) and installed to $BP_TARGET"
-    else
-      did "bp CLI rebuilt -> dist/bp (no writable bp on PATH; set BP_INSTALL=<path> to auto-install)"
-    fi
-  else
-    warn "bp CLI build failed — run by hand: make cli-build"
-  fi
+  rebuild_bp "pull touched Go inputs"
 else
-  skipped "bp CLI (no Go changes)"
+  bp_provenance_refresh
 fi
 
 # Elixir deps

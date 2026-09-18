@@ -55,6 +55,125 @@ func TestLiveProbe(t *testing.T) {
 		fmt.Printf("  NOW %-40q worker=%s age=%s\n", tk.Title, tk.Claim.Worker, time.Since(tk.Claim.ClaimedAt).Round(time.Minute))
 	}
 
+	// ── Claim-forward against the LIVE ready overlay (task p-claim-forward) ──
+	// The board's ready set is not authored here: composeSnapshot OVERLAYS it
+	// from prime's derived ready head (storage never stores lifecycle "ready"),
+	// clamped at primeReadyLimit and raced against claims landing between the
+	// two fetches. A fixture cannot speak for that. ClaimForwardViolations is
+	// the SAME predicate the CI arms in claimforward_test.go exercise — run
+	// here against the real corpus, so "verified against the live guerrilla
+	// ready overlay" means a command, not a reading.
+	liveReadyOutsideNow := 0
+	liveNow := map[string]bool{}
+	for _, tk := range b.Now {
+		liveNow[bareID(tk.DocID)] = true
+	}
+	for _, tk := range collapseDraftTwins(snap.Tasks) {
+		if tk.Lifecycle == lifeReady && !liveNow[bareID(tk.DocID)] {
+			liveReadyOutsideNow++
+		}
+	}
+	fmt.Printf("claim-forward: overlay-ready-outside-NOW=%d next-strip=%d next-more=%d independent-ready=%d clamped=%v\n",
+		liveReadyOutsideNow, len(b.Next), b.NextReadyMore, b.IndependentReady, snap.ReadyHeadClamped)
+	for i, ni := range b.Next {
+		kind := "ready"
+		if ni.Kind == nextResume {
+			kind = "resume"
+		}
+		fmt.Printf("  NEXT[%d] %-6s %-34q reason=%q\n", i, kind, ni.Task.DocID, ni.Reason)
+	}
+	if v := ClaimForwardViolations(snap, b); len(v) != 0 {
+		for _, msg := range v {
+			t.Errorf("claim-forward violation on the LIVE corpus: %s", msg)
+		}
+	} else {
+		fmt.Printf("claim-forward contract OK on the live corpus (C0/C1/C2)\n")
+	}
+	// The live queue is never empty in practice, so assert the non-vacuous arm
+	// explicitly: a pass above must have MEASURED ready work, not skipped it.
+	if liveReadyOutsideNow == 0 {
+		t.Log("claim-forward: live overlay held no ready work outside NOW — C0 was vacuous this run")
+	} else if len(b.Next) == 0 {
+		t.Errorf("claim-forward: %d ready tasks in the live overlay but the NEXT strip is empty", liveReadyOutsideNow)
+	}
+
+	// ── The agent↔task JOIN against the live corpus (wsc-bl-agent-task-join) ──
+	// The join's rule is fixture-tested; what a fixture cannot say is whether the
+	// EMITTER grammar it reproduces still matches the titles the live ledger
+	// actually holds. Two numbers decide that, and both are read here, read-only:
+	//
+	//   · how many live titles slug past the emitter's 40-char slice (if this is
+	//     ~0 the cap is untested by the corpus and the fixture arms are the only
+	//     proof left — say so rather than passing quietly);
+	//   · how many emitted slugs are shared by two or more DIFFERENT rows (the
+	//     degrade-on-ambiguity path's live population).
+	//
+	// Then every emitted key is fed back through JoinAgentTask: a key that
+	// resolves must resolve to a row whose own emitted slug IS that key, and an
+	// ambiguous key must resolve to nothing. That is the contract, asserted
+	// against whatever the server serves rather than against three hand-picked
+	// titles.
+	idx := NewAgentTaskIndex(snap.Tasks)
+	overBudget := 0
+	for _, tk := range collapseDraftTwins(snap.Tasks) {
+		if tk.Title != "" && len(slugify(tk.Title)) > agentSlugBudget {
+			overBudget++
+		}
+	}
+	ambiguousKeys, ambiguousRows := 0, 0
+	for _, key := range idx.Keys() {
+		if rows := idx.Rows(key); len(rows) > 1 {
+			distinct := map[string]bool{}
+			for _, r := range rows {
+				distinct[bareID(r.DocID)] = true
+			}
+			if len(distinct) > 1 {
+				ambiguousKeys++
+				ambiguousRows += len(distinct)
+			}
+		}
+	}
+	fmt.Printf("agent-task join: distinct-keys=%d over-40-char-titles=%d ambiguous-keys=%d ambiguous-rows=%d\n",
+		idx.Len(), overBudget, ambiguousKeys, ambiguousRows)
+	if overBudget == 0 {
+		t.Log("agent-task join: NO live title slugs past 40 chars — the emitter cap is UNMEASURED this run; the fixture arms are the only proof")
+	}
+	if ambiguousKeys == 0 {
+		t.Log("agent-task join: NO ambiguous emitted slug on the live corpus — the degrade path is UNMEASURED this run")
+	}
+	joined, degraded := 0, 0
+	for _, key := range idx.Keys() {
+		distinct := map[string]bool{}
+		for _, r := range idx.Rows(key) {
+			distinct[bareID(r.DocID)] = true
+		}
+		j, ok := idx.Join("build:" + key)
+		if !ok {
+			degraded++
+			if len(distinct) == 1 {
+				t.Errorf("agent-task join: the unambiguous live key %q joined to nothing", key)
+			}
+			continue
+		}
+		joined++
+		if len(distinct) > 1 {
+			t.Errorf("agent-task join: the ambiguous live key %q (%d distinct rows) resolved to %s — a fabricated match",
+				key, len(distinct), j.Task.DocID)
+		}
+		if agentEmitterSlug(j.Task.Title) != key && slugify(j.Task.Title) != key {
+			t.Errorf("agent-task join: key %q resolved to %q whose own slugs are %q / %q",
+				key, j.Task.DocID, agentEmitterSlug(j.Task.Title), slugify(j.Task.Title))
+		}
+		// The two emitter grammars must land on the same row.
+		if j2, ok2 := idx.Join("build:cli:" + key); !ok2 || j2.Task.DocID != j.Task.DocID {
+			t.Errorf("agent-task join: the two-segment grammar disagreed on %q (ok=%v)", key, ok2)
+		}
+	}
+	if joined == 0 {
+		t.Errorf("agent-task join: not ONE live key joined — the join is inert on the real corpus")
+	}
+	fmt.Printf("agent-task join OK: %d/%d live keys joined, %d degraded to nothing\n", joined, idx.Len(), degraded)
+
 	// ── Live-shape regression guard ─────────────────────────────────────────
 	// Wave 2 shipped on fixtures alone; this pins the invariants the real
 	// guerrilla queue exercises that a fixture can't, so a future change that

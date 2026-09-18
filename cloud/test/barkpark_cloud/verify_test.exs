@@ -454,7 +454,7 @@ defmodule BarkparkCloud.VerifyTest do
 
       # A member of ANOTHER team hitting this instance → 404 (no existence leak).
       c1 = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(intruder))
-      # A garbage id → the SAME 404, no Ecto.CastError.
+      # A garbage id → the SAME 404, no Ecto.Query.CastError.
       c2 = call(:post, "/v1/barkparks/not-a-uuid/verify", session_token(intruder))
 
       assert c1.status == 404

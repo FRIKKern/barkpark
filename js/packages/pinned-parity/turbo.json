@@ -8,6 +8,7 @@
         "scripts/**",
         "package.json",
         "vitest.config.ts",
+        "vitest.globalSetup.ts",
         "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**",
         "$TURBO_ROOT$/packages/react/tests/support/**",
         "$TURBO_ROOT$/packages/react/src/**",

@@ -1199,6 +1199,19 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "wave rules provider-specific copy owed."
     },
     %{
+      code: "credential_unreadable",
+      site: "router.ex providers_identity (GET /v1/providers/:kind/identity)",
+      reason:
+        "NOT console-reachable YET — no console surface calls this route at all: " <>
+          "PROVIDERS carries no cloudflare entry and the only /overview reader is " <>
+          "the rotation card. A 502 here means the stored credential would not " <>
+          "decrypt, an infrastructure fault kept DELIBERATELY distinct from an " <>
+          "identity whose value is nil (which is a 200) so the two are never " <>
+          "collapsed; the 5xx honesty law renders the server-fault sentence. " <>
+          "Flip: the console reader ships (task-cc5125ed3a4da0c2), at which point " <>
+          "this owes a read or its own copy."
+    },
+    %{
       code: "enqueue_failed",
       site: "router.ex do_resurrect",
       reason:
@@ -1435,6 +1448,26 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "The sibling deploy_ability_required IS read only because its slug is quoted " <>
           "in app.js's shared 403 branch. Flip: the console ever authenticates with a " <>
           "non-root credential."
+    },
+
+    # -------------------------------------------------- operator digest-send arm
+    # gr-backlog-operator-digest-send: POST /v1/operator/digest/send mints ONE
+    # typed refusal of its own. The rest of its vocabulary is already read —
+    # `forbidden` / `unauthorized` through operatorReadFault, `rate_limited`
+    # through the shared quoted slug, `not_found` through the shared branch.
+    %{
+      code: "scope_required",
+      site: "router.ex digest_send_scope (POST /v1/operator/digest/send)",
+      reason:
+        "UNREACHABLE from the console BY CONSTRUCTION, not by absence: this is the " <>
+          "route's DEFAULT arm, and operatorConfirmDigestSend posts the literal " <>
+          "{scope: \"fleet\"} on every call — there is no code path in app.js that " <>
+          "sends this route a body without a scope, and a body with BOTH keys needs a " <>
+          "hand-built request. The refusal exists so a curl, a retried fetch or a " <>
+          "half-built client cannot mail the whole platform by omission, which is a " <>
+          "guarantee owed to people who are not the console. Flip: the console grows a " <>
+          "team picker (the route already supports team_id), because a picker that " <>
+          "can be submitted with nothing chosen WILL hit this and owes a sentence."
     }
   ]
 

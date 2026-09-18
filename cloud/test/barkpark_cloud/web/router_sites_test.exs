@@ -22,7 +22,16 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   alias BarkparkCloud.Cloudflare.Fake, as: CfFake
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Sites.FakeBoxRelay
+  alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Router
+
+  defmodule AttributionSink do
+    @moduledoc "Forwards a rollback attribution report to the test process."
+    def report(r) do
+      send(Process.get(:attribution_owner), {:attribution, r})
+      :ok
+    end
+  end
 
   @opts Router.init([])
   @password "correct-horse-battery"
@@ -352,6 +361,51 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       token = login_token(user)
 
       conn = call(:get, "/v1/sites/#{other_site.id}", nil, token)
+      assert conn.status == 404
+    end
+  end
+
+  ## task-6e6b76f60997dad6 — :id accepts a team-scoped SLUG
+  ##
+  ## Every with_team_site route resolves through `Registry.get_team_site/2`, so
+  ## proving the wrapper on ONE verb proves it for the family (status, deploy,
+  ## delete, settings, promote, rollback). Before this, the CLI had to spend a
+  ## list-ALL `GET /v1/sites` (measured ~0.4 s) turning the slug the user typed
+  ## into a uuid the route would accept.
+
+  describe "GET /v1/sites/:id addressed by SLUG (task-6e6b76f60997dad6)" do
+    test "the team's own slug → 200, same row as the uuid" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "slug-route-x"})
+      token = login_token(user)
+
+      # REDS if get_team_site/2's slug fallback is removed: the route 404s.
+      conn = call(:get, "/v1/sites/slug-route-x", nil, token)
+      assert conn.status == 200
+      assert json_body(conn)["site"]["id"] == site.id
+
+      # Control: the uuid form still answers, and with the same row.
+      by_uuid = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert by_uuid.status == 200
+      assert json_body(by_uuid)["site"]["id"] == site.id
+    end
+
+    test "CONTROL: another team's slug → 404, not a cross-tenant read" do
+      {_o, other_team} = user_with_team()
+      other_bp = barkpark_fixture(other_team)
+      {:ok, _other_site} = Registry.create_site(other_bp, %{name: "S", slug: "foreign-slug"})
+
+      {user, _team} = user_with_team()
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites/foreign-slug", nil, token)
+      assert conn.status == 404
+    end
+
+    test "CONTROL: a slug nobody owns → 404, never a 500" do
+      {user, _team} = user_with_team()
+      conn = call(:get, "/v1/sites/no-such-slug-anywhere", nil, login_token(user))
       assert conn.status == 404
     end
   end
@@ -1755,9 +1809,23 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       refute body["detail"] =~ "3328"
       # …and never a type the site's own token could not prove it can read.
       refute body["detail"] =~ "session"
-      # …and the EXACT re-run, not "check your dataset".
-      assert body["detail"] =~ "acme/blog/production"
-      assert body["detail"] =~ "--doc-type"
+
+      # cch-w69-bl — THE DETAIL IS SURFACE-NEUTRAL, AND THE TERMINAL RE-RUN HAS
+      # ITS OWN KEY. This route serves two surfaces, so `detail` is written in
+      # nobody's accent: it states the facts and stops. The `bp cloud site create
+      # …` incantation still exists, and it still names the exact dataset and the
+      # `--doc-type` flag — it just rides `cli_hint`, where a terminal renders it
+      # and a web modal simply does not look. Before this slice the incantation
+      # was welded to the END of `detail`, and the console had to CUT IT BACK OFF
+      # by matching the prose ("Re-run naming a type" — siteDetailWithoutCliReRun,
+      # now deleted). These four assertions are the contract that makes that strip
+      # unnecessary: no terminal voice in `detail`, ALL of it in `cli_hint`.
+      refute body["detail"] =~ "bp cloud site create"
+      refute body["detail"] =~ "--doc-type"
+      assert body["cli_hint"] =~ "bp cloud site create"
+      assert body["cli_hint"] =~ "--doc-type"
+      # …and the hint still carries the EXACT binding, not "check your dataset".
+      assert body["cli_hint"] =~ "--dataset acme/blog/production"
       # Machine-readable menu for the CLI/console, same intersection, same
       # provenance. Order is the admin candidate order (task outranks paper);
       # the NUMBERS are the site's.
@@ -1806,6 +1874,11 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["detail"] =~ "404"
       # No menu was obtainable — say that, do not invent one.
       assert body["detail"] =~ "could not list what IS readable"
+      # Same split on the arm where no menu was obtainable: the prose stays
+      # surface-neutral and the terminal line rides its own key.
+      refute body["detail"] =~ "bp cloud site create"
+      assert body["cli_hint"] =~ "bp cloud site create"
+      assert body["cli_hint"] =~ "--dataset acme/blog/prodcution"
       refute Map.has_key?(body, "readable_types")
       assert Registry.list_sites_for_team(team) == []
     end
@@ -2233,10 +2306,15 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 422
       body = json_body(conn)
       assert body["error"] == "content_binding_required"
-      # The message names the FLAG that fixes it, and exactly what is missing.
-      assert body["detail"] =~ "--dataset"
+      # cch-w69-bl — the message names exactly what is missing, in nobody's
+      # accent. It used to say "bind it with `--dataset <workspace>/<project>/
+      # <dataset>`" — a FLAG, read by a console modal that has those three fields
+      # on screen. The flag moved to `cli_hint`; the sentence now names the
+      # FIELDS, which is true on both surfaces.
       assert body["detail"] =~ "workspace"
       assert body["detail"] =~ "dataset"
+      refute body["detail"] =~ "--dataset"
+      assert body["cli_hint"] == "--dataset <workspace>/<project>/<dataset>"
 
       # No ghost row.
       assert Registry.list_sites_for_team(team) == []
@@ -2638,6 +2716,80 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert json_body(conn)["error"] == "content_binding_required"
       # No ghost row — the unbound node site was refused at the door.
       assert Registry.list_sites_for_team(team) == []
+    end
+
+    # ── the route's OWN time is measured (rollback-latency c0) ────────────────
+    #
+    # The relay's attribution line (PR #18130) starts AFTER auth, the team-scoped
+    # site read and the box row read, and stops BEFORE the site-pointer write, the
+    # audit row, the two console pushes and the render. Those two ends were simply
+    # not in anyone's sum, so a live 3.8s rollback could not be blamed on the route
+    # or acquitted of it. These arms prove the route now measures both.
+    test "a rollback reports the route's own work either side of the box call" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, _prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000001"}}
+      )
+
+      # The route runs IN THIS PROCESS under Plug.Test, and the accumulator is
+      # request-scoped, so redirecting the report here needs no global.
+      Process.put(:attribution_owner, self())
+      RollbackAttribution.redirect_reports_to(AttributionSink)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 200
+
+      assert_receive {:attribution, report}, 500
+
+      assert report.site_ref == site.id
+      assert report.outcome == "rolled_back"
+
+      for key <- [:total_ms, :route_pre_ms, :route_post_ms, :deploy_own_ms] do
+        assert is_integer(Map.fetch!(report, key)),
+               "#{key} is not measured on the route path: #{inspect(report)}"
+      end
+
+      # The stopwatch opened BEFORE auth and closed AFTER the render, so the whole
+      # request is inside it — the sum cannot exceed the wall clock it spans.
+      assert report.route_pre_ms + report.deploy_own_ms + report.route_post_ms <=
+               report.total_ms,
+             "the route's legs exceed the request's own span: #{inspect(report)}"
+    end
+
+    # THE CONTROL. A rollback the box REFUSED still spent route work, and the
+    # report must name the refusal rather than quietly reporting a success — a
+    # reporter wired only into the 200 branch would look green above and be blind
+    # to every failure, which is the half an operator actually greps for.
+    test "a REFUSED rollback still reports, and reports the refusal" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 422, %{"error" => "no previous release", "code" => "no_previous"}}
+      )
+
+      Process.put(:attribution_owner, self())
+      RollbackAttribution.redirect_reports_to(AttributionSink)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 422
+
+      assert_receive {:attribution, report}, 500
+      assert report.outcome == "no_previous"
+      assert is_integer(report.route_pre_ms)
     end
 
     test "a node site IS rollbackable → NOT 422 not_rollbackable (it flips the Caddy upstream to the previous slot)" do

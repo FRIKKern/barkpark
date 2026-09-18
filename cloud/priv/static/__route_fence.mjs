@@ -68,6 +68,11 @@ export const A_OPERATOR = "Auth.require_platform_operator";
 export const A_USER_OR_PAT = "Auth.require_user_or_pat";
 export const A_ABILITY = "Auth.require_ability";
 export const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
+// The OWNER rung of the same path-team helper. A separate constant, not a
+// widening of H_TEAM_ROLE: team erasure (DELETE /v1/teams/:id) is the only
+// route on this helper's owner rung, and a single string covering both rungs
+// would let an admin-gated affordance claim an owner predicate.
+export const H_TEAM_ROLE_OWNER = 'with_team_role(conn, "owner")';
 
 // The tiers that are elevated above plain team membership.
 //
@@ -75,7 +80,7 @@ export const H_TEAM_ROLE = 'with_team_role(conn, "admin")';
 // an oversight: a browser SESSION carries ["root"], so require_ability is a
 // PAT-shaped fence and a no-op for the console. Counting it as elevated would
 // make the sweep withhold controls the server honours.
-const ELEVATED_TIERS = new Set([A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, H_TEAM_ROLE]);
+const ELEVATED_TIERS = new Set([A_TADMIN, A_PTADMIN, A_PTOWNER, A_OPERATOR, H_TEAM_ROLE, H_TEAM_ROLE_OWNER]);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE INLINE-COND OVERLAY (charter D421) — router routes whose refusal of a
@@ -168,7 +173,7 @@ export const INLINE_COND_KEYS = new Set(
 export const ROUTE_TIERS = [
   // ── reads ──
   { key: "GET /v1/notifications/deliveries", auth_fn: A_USER, pin: null,
-    why_no_pin: "a READ. The census PIN is 80 WRITE call sites; no read has a row there. The overlay records this route as the EXCLUDED self-scope narrowing — a member sees their own rows, never a refusal",
+    why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there. The overlay records this route as the EXCLUDED self-scope narrowing — a member sees their own rows, never a refusal",
     why: "any member may page their own delivery log" },
   // cch-w36-bl: the team audit trail, which entered this table when
   // `activity-denied` gave the corpus its first member actor on #activity and
@@ -182,7 +187,7 @@ export const ROUTE_TIERS = [
   // a member asking for the team trail is answered 403 with
   // `required: "admin", scope: "team"` and renders nothing.
   { key: "GET /v1/audit", auth_fn: A_PTADMIN, pin: null,
-    why_no_pin: "a READ. The census PIN is 80 WRITE call sites; no read has a row there",
+    why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there",
     why: "the team's append-only trail is team-admin-only — a plain member is REFUSED, not narrowed" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session ──

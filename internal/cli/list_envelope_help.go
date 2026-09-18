@@ -81,9 +81,13 @@ var commandListEnvelopes = map[string]listEnvelopeShape{
 	"media.search":            {Key: "hits"},
 	"media.collections":       {Key: "collections"},
 	"media.collection-assets": {Key: "hits"},
-	"ticket.inbox":            {Key: "tickets"},
-	"token.ls":                {Key: "tokens", IDField: "id"},
-	"workspace.member-ls":     {Key: "members"},
+	// doc.history → history_controller.ex index/2 emits `revisions:`, and
+	// render_revision/1 keys each row `id` — read from the controller, not
+	// inferred from the key name.
+	"doc.history":         {Key: "revisions", IDField: "id"},
+	"ticket.inbox":        {Key: "tickets"},
+	"token.ls":            {Key: "tokens", IDField: "id"},
+	"workspace.member-ls": {Key: "members"},
 }
 
 // listEnvelopeHelpLines is the block usageCommand renders. Empty for a command

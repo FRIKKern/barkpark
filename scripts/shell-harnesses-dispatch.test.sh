@@ -28,6 +28,11 @@
 #               copy (anchor matched EXACTLY ONCE, diff non-empty) and the named
 #               refusal must DISAPPEAR — a mutation the harness cannot see is
 #               not a catch
+#   G  ARM NAME  every leg arm whose `run` invokes `--axis`/`--check-alloc` is
+#               NAMED for exactly the set it runs. Both sides come from the same
+#               regex over the same JSON (comments stripped from the body), so a
+#               new axis added to a loop alone reds here; mutation-proved by
+#               adding a fifth axis `q` to one loop in a scratch copy
 #
 # bash 3.2 compatible (macOS runs it too): no associative arrays, no mapfile.
 # python3 + PyYAML are the only unstubbed dependencies; their absence is exit 2
@@ -59,7 +64,7 @@ trap 'rm -rf "$TMP"' EXIT
 # then needs-ok/if-ok flags), outputs.txt (keys of jobs.changes.outputs),
 # body.sh (the dispatcher step with expressions substituted).
 if ! python3 - "$WORKFLOW" "$TMP" <<'PY'
-import sys, yaml
+import json, os, sys, yaml
 wf, out = sys.argv[1], sys.argv[2]
 with open(wf) as fh:
     doc = yaml.safe_load(fh)
@@ -72,18 +77,74 @@ with open(out + "/paths.txt", "w") as fh:
 jobs = doc["jobs"]
 if "changes" not in jobs:
     sys.stderr.write("no jobs.changes\n"); sys.exit(2)
+# THE GATED UNIT IS A MATRIX LEG, NOT A JOB (matrix collapse, 2026-09-17).
+# The 53 sibling jobs each gated by `if: needs.changes.outputs.<jid> == 'true'`
+# are now ONE `harness` job fanning out over the legs in
+# .github/shell-harness-legs.json. Clauses C and D are unchanged in what they
+# assert — every dispatched unit has a roster row and a declared output, and
+# nothing is dispatched that the roster does not name — but the unit they
+# iterate is now the leg slug. jobs.txt keeps its `<id> <needs-ok> <if-ok>`
+# shape so the arms below did not have to move.
+#
+# The `harness` job's OWN shape is checked here rather than per-leg, because it
+# is the single point where a whole collapse can go wrong:
+#   · it must `needs: [changes]`
+#   · it must be gated on `needs.changes.outputs.any == 'true'` and NOT on the
+#     matrix being non-empty — an empty `strategy.matrix` DELETES the job
+#     instead of skipping it, and a job that renders no check run at all is
+#     indistinguishable from a workflow that never started
+#   · it must carry an explicit `name:` template, or GitHub auto-suffixes every
+#     leg's check-run name with `(leg)` and renames 53 checks at once
+job_ids = sorted(k for k in jobs if k != "changes")
+if job_ids != ["harness"]:
+    sys.stderr.write("expected exactly one non-dispatcher job `harness`, got: %s\n" % ", ".join(job_ids))
+    sys.exit(2)
+h = jobs["harness"]
+hneeds = h.get("needs")
+if isinstance(hneeds, str):
+    hneeds = [hneeds]
+if not hneeds or "changes" not in hneeds:
+    sys.stderr.write("jobs.harness does not `needs: [changes]`\n"); sys.exit(2)
+if str(h.get("if", "")).strip() != "needs.changes.outputs.any == 'true'":
+    sys.stderr.write("jobs.harness must be gated on needs.changes.outputs.any == 'true' "
+                     "(an empty matrix deletes the job rather than skipping it); got %r\n"
+                     % h.get("if"))
+    sys.exit(2)
+if str(h.get("name", "")).strip() != "${{ matrix.leg.name }}":
+    sys.stderr.write("jobs.harness must carry name: ${{ matrix.leg.name }} — without an explicit "
+                     "name template GitHub renames every leg's check run; got %r\n" % h.get("name"))
+    sys.exit(2)
+if (h.get("strategy") or {}).get("fail-fast") is not False:
+    sys.stderr.write("jobs.harness must set strategy.fail-fast: false — a cancelled sibling "
+                     "harness reports nothing and reads as 'did not run'\n")
+    sys.exit(2)
+
+legs_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(wf))),
+                         "shell-harness-legs.json")
+try:
+    legs = json.load(open(legs_path))
+except Exception as exc:
+    sys.stderr.write("cannot read %s: %s\n" % (legs_path, exc)); sys.exit(2)
+if not isinstance(legs, list) or not legs:
+    sys.stderr.write("%s must be a non-empty list\n" % legs_path); sys.exit(2)
+slugs = [l["slug"] for l in legs]
+if len(set(slugs)) != len(slugs):
+    sys.stderr.write("duplicate leg slug in %s\n" % legs_path); sys.exit(2)
+for l in legs:
+    if not (l.get("arms") or []):
+        sys.stderr.write("leg %r carries ZERO arms — it would report a green over nothing\n"
+                         % l["slug"])
+        sys.exit(2)
 with open(out + "/jobs.txt", "w") as fh:
-    for jid, job in jobs.items():
-        if jid == "changes":
-            continue
-        needs = job.get("needs")
-        if isinstance(needs, str):
-            needs = [needs]
-        needs_ok = "1" if needs and "changes" in needs else "0"
-        want_if = "needs.changes.outputs.%s == 'true'" % jid
-        if_ok = "1" if str(job.get("if", "")).strip() == want_if else "0"
-        fh.write("%s %s %s\n" % (jid, needs_ok, if_ok))
+    for slug in slugs:
+        # Every leg is gated identically, by construction: the dispatcher emits
+        # the matrix from exactly these slugs' verdicts, so needs/if are 1/1 and
+        # what clauses C and D actually measure is the roster/outputs agreement.
+        fh.write("%s 1 1\n" % slug)
 outputs = jobs["changes"].get("outputs") or {}
+# `matrix` and `any` are the collapse's own plumbing, not harness gates; clause
+# D's "an output with no job" arm would otherwise read them as orphans.
+outputs = dict((k, v) for k, v in outputs.items() if k not in ("matrix", "any"))
 with open(out + "/outputs.txt", "w") as fh:
     for k, v in outputs.items():
         fh.write("%s %s\n" % (k, v))
@@ -117,7 +178,7 @@ awk '{ print $1 }' "$TMP/roster.txt" | awk '!seen[$0]++' >"$TMP/roster-jobs.txt"
 
 N_PATHS=$(wc -l <"$TMP/paths.txt" | tr -d ' ')
 N_JOBS=$(wc -l <"$TMP/jobs.txt" | tr -d ' ')
-echo "── shell-harnesses dispatcher: $N_PATHS workflow paths, $ROWS roster rows, $N_JOBS gated jobs ──"
+echo "── shell-harnesses dispatcher: $N_PATHS workflow paths, $ROWS roster rows, $N_JOBS dispatched legs ──"
 
 # ── A: SUBSET ────────────────────────────────────────────────────────────────
 missing_up=""
@@ -217,7 +278,7 @@ ungated=""
 while read -r jid needs_ok if_ok; do
   [ "$needs_ok" = 1 ] && [ "$if_ok" = 1 ] || ungated="$ungated $jid(needs=$needs_ok,if=$if_ok)"
 done <"$TMP/jobs.txt"
-if [ -z "$ungated" ]; then ok "C gating: all $N_JOBS jobs carry needs: [changes] + if: needs.changes.outputs.<id> == 'true'"
+if [ -z "$ungated" ]; then ok "C gating: the harness job needs [changes], is gated on outputs.any, names its legs explicitly, and all $N_JOBS legs are dispatched"
 else bad "C gating: jobs missing the gate:$ungated"; fi
 
 # ── D: OUTPUTS ───────────────────────────────────────────────────────────────
@@ -386,6 +447,120 @@ if ! grep -q 'is not resolvable in this checkout' "$TMP/f.log"; then
   ok "F: with the guard deleted the named refusal DISAPPEARS (mutant rc=$mrc) — the guard is load-bearing"
 else
   bad "F: the mutant still printed the unresolvable-base refusal — the anchor no longer covers the guard"
+fi
+
+# ── G: ARM NAME ↔ ARM LOOP — an arm is named for every axis it runs ─────────
+#
+# THE DEFECT (measured 2026-09-18 on probe PR #19286, task-b183f790876ad00f c3).
+# The pds-harnesses arm named "…: --check-alloc and --axis a over the merged
+# tree" ran FOUR arms — `for arm in --check-alloc "--axis a" "--axis d"
+# "--axis f"` — because #19093 added d and f to the loop and left the name
+# where it was. A planted defect reddened --axis f; the FAILED-arms line still
+# said check-alloc/axis a, and a lead reading it would go to two green arms.
+#
+# THE GUARD IS A PREDICATE, NOT A LIST. Both sides are derived from the same
+# JSON with the SAME regex, so no arm is special-cased and a SIXTH axis added
+# tomorrow to the loop alone reds here with nothing to update but the name:
+#
+#   RUN SIDE   the arm's `run` body with whole-line `#` comments stripped (the
+#              body's prose names --axis a/d/f while explaining WHY they joined;
+#              counting prose would make the guard agree with itself), then
+#              every `--axis <tok>` plus `--check-alloc` if present.
+#   NAME SIDE  the same two patterns over the arm's `name`.
+#   VERDICT    the sets must be EQUAL for every arm whose RUN side is non-empty.
+#
+# An arm that invokes neither pattern is out of the corpus, and G0 refuses a run
+# where the corpus came out empty — an empty corpus compares equal to anything.
+
+arm_token_guard() {  # <legs.json> → 0 equal · 1 drift (named) · 2 cannot measure
+  python3 - "$1" <<'PYG'
+import json, re, sys
+path = sys.argv[1]
+try:
+    legs = json.load(open(path))
+except Exception as exc:
+    sys.stderr.write("cannot read %s: %s\n" % (path, exc)); sys.exit(2)
+
+AXIS = re.compile(r'--axis\s+([A-Za-z0-9]+)')
+def tokens(text):
+    t = set(AXIS.findall(text))
+    if '--check-alloc' in text:
+        t.add('--check-alloc')
+    return t
+
+corpus = 0
+drift = 0
+for leg in legs:
+    for arm in leg.get("arms") or []:
+        name = str(arm.get("name", ""))
+        body = "\n".join(ln for ln in str(arm.get("run", "")).split("\n")
+                         if not ln.lstrip().startswith("#"))
+        run_t, name_t = tokens(body), tokens(name)
+        if not run_t:
+            continue
+        corpus += 1
+        if run_t == name_t:
+            continue
+        drift += 1
+        sys.stderr.write(
+            "DRIFT in leg %r arm %r:\n  the loop RUNS   %s\n  the name SAYS   %s\n"
+            "  missing from the name: %s\n  named but not run:     %s\n"
+            % (leg.get("slug"), name,
+               ", ".join(sorted(run_t)) or "<none>",
+               ", ".join(sorted(name_t)) or "<none>",
+               ", ".join(sorted(run_t - name_t)) or "<none>",
+               ", ".join(sorted(name_t - run_t)) or "<none>"))
+if corpus == 0:
+    sys.stderr.write("CANNOT MEASURE: no arm invokes --axis or --check-alloc — "
+                     "an empty corpus compares equal to anything\n")
+    sys.exit(2)
+if drift:
+    sys.stderr.write("RED: %d of %d arm(s) are named for a different axis set than they run. "
+                     "Rename the arm to list every axis its loop runs.\n" % (drift, corpus))
+    sys.exit(1)
+print("arm name/loop parity: %d arm(s) checked, every name lists exactly the axes it runs" % corpus)
+PYG
+}
+
+LEGS_JSON="$(dirname "$WORKFLOW")/../shell-harness-legs.json"
+if [ ! -f "$LEGS_JSON" ]; then
+  bad "G: $LEGS_JSON not found"
+else
+  if arm_token_guard "$LEGS_JSON" >"$TMP/g1.out" 2>"$TMP/g1.err"; then
+    ok "G1 arm name/loop parity holds: $(cat "$TMP/g1.out")"
+  else
+    bad "G1 arm name/loop parity: $(cat "$TMP/g1.err")"
+  fi
+
+  # G2 MUTATION. A fifth axis joins the LOOP ONLY, in a scratch copy. If the
+  # guard still greens, it is not reading the loop and G1 proved nothing.
+  MUTLEGS="$TMP/legs-mut.json"
+  if python3 - "$LEGS_JSON" "$MUTLEGS" <<'PYM'
+import json, sys
+legs = json.load(open(sys.argv[1]))
+hits = 0
+for leg in legs:
+    for arm in leg.get("arms") or []:
+        run = str(arm.get("run", ""))
+        if 'for arm in --check-alloc' in run:
+            arm["run"] = run.replace('"--axis f"', '"--axis f" "--axis q"', 1)
+            hits += 1
+if hits != 1:
+    sys.stderr.write("mutation anchor matched %d arms (want 1)\n" % hits); sys.exit(2)
+json.dump(legs, open(sys.argv[2], "w"), indent=2)
+PYM
+  then
+    ok "G2 mutation applied to exactly one arm's loop (a fifth axis q, name untouched)"
+    if arm_token_guard "$MUTLEGS" >"$TMP/g2.out" 2>"$TMP/g2.err"; then
+      bad "G2 the mutant PASSED — the guard does not read the loop, so G1 is vacuous"
+    elif grep -q 'missing from the name: q' "$TMP/g2.err"; then
+      ok "G2 the mutant REDS and names the drift: $(grep -m1 'missing from the name' "$TMP/g2.err" | sed 's/^ *//')"
+    else
+      bad "G2 the mutant failed for the wrong reason: $(head -3 "$TMP/g2.err" | tr '\n' ' ')"
+    fi
+  else
+    bad "G2 could not build the mutant legs file"
+  fi
 fi
 
 echo ""

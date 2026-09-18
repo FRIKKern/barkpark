@@ -6,7 +6,7 @@
 // Usage:
 //
 //	barkpark-agent \
-//	  --control-url https://cloud.barkpark.dev \
+//	  --control-url https://barkpark.cloud \
 //	  --token-file  /etc/barkpark/agent.token \
 //	  --checkout    /opt/barkpark \
 //	  --health-url  https://this-server.example.com \
@@ -42,7 +42,7 @@ func main() {
 func run(args []string) int {
 	fs := flag.NewFlagSet("barkpark-agent", flag.ContinueOnError)
 	var (
-		controlURL = fs.String("control-url", "", "control-plane origin (required), e.g. https://cloud.barkpark.dev")
+		controlURL = fs.String("control-url", "", "control-plane origin (required), e.g. https://barkpark.cloud")
 		tokenFile  = fs.String("token-file", "", "path to the agent bearer token file (required)")
 		interval   = fs.Duration("interval", agent.DefaultInterval, "report+poll cadence")
 		once       = fs.Bool("once", false, "run a single report+poll cycle and exit")
@@ -174,6 +174,26 @@ func run(args []string) int {
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
 			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, healthToken, nil),
+			// "Can this box deploy sites" (dr-w15-s1's GET /v1/instance/site-deploy),
+			// on the SAME base+token seam as the health gate and the stats probe
+			// above. Empty health-url -> nil probe -> the key never reaches the wire.
+			//
+			// A box that predates that route answers 404, and the probe degrades to
+			// UNMEASURED (an absent key), NOT to `configured: false`. That is not a
+			// nicety here: the fleet is old, so the 404 is the COMMON reading for a
+			// long while, and `false` would tell the control plane every one of those
+			// boxes REFUSES deploys.
+			SiteDeployProbe: agent.NewSiteDeployProbe(*healthURL, healthToken, nil),
+			// Does this box carry the SITE-HOSTING PLANE (docker+buildx, nixpacks,
+			// the isolated Go toolchain, git, and the builder/runtime units)?
+			// UNCONDITIONAL, unlike every HTTP probe above: the plane is LOCAL,
+			// so this needs neither *healthURL nor a token. warmpool.go's step
+			// 7c installs the plane NON-FATALLY — a failed install degrades into
+			// the provisioning worker's journal and the box then goes live with
+			// every site pointed at it stuck `queued` forever. Until this probe
+			// nothing on the beat could see that; the queue-age alarm only
+			// notices the consequence, hours downstream.
+			SitePlaneProbe: agent.NewSitePlaneProbe(),
 			// WHO is spending the box, beside the aggregates that can only
 			// say THAT it is being spent. One bounded `ps` per beat, no state.
 			// This is the detection half of the 2026-08-06 guerrilla runaway;

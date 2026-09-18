@@ -107,3 +107,46 @@ publish-needs-type rule, returning the first violation. Run the gate:
 ```sh
 go test ./internal/template/...
 ```
+
+`Validate` reads Go's own struct over the manifests EMBEDDED in the provisioner
+catalog, so a manifest that never reaches Go — a `create-barkpark-app`
+starter's — was unvalidated by anything. The JSON Schema that every manifest
+declares with `$schema` gets its reader here:
+
+```sh
+node design/template-manifest-contract.test.mjs
+```
+
+It finds manifests by a PREDICATE (any file named `barkpark.template.json`,
+build output pruned), so a new template or a new mirror root enrols itself, and
+it carries the arm that reds when a `create-barkpark-app` starter tree exists
+that `AVAILABLE_TEMPLATES` does not name or `cloud/priv/templates` does not
+mirror.
+
+## Which choices deserve a preview image
+
+A create-site picker wants a thumbnail per choice, and not every directory under
+`templates/` has earned one. `design/preview-inventory.json` is the inventory
+that rules on it, and it is the data contract a picker renders against.
+
+- A template is **previewable** exactly when it carries a
+  `barkpark.template.json` (so the deploy UI enumerates it at all) *and* that
+  manifest sets `demoContent: true` (so there is representative output to
+  photograph rather than a bare scaffold).
+- Everything else is a **framework scaffold** and stays text-only. Today that is
+  `templates/next-starter/` and `templates/astro-starter/`: bare framework
+  wiring, no manifest, no seeded content. A thumbnail of an empty page would
+  advertise a designed option that does not exist.
+- A palette is **pinnable** exactly when it appears in the `theme` enum of
+  `barkpark.template.schema.json`. A palette file can ship in `design/themes/`
+  without joining that enum, in which case no manifest can select it and a
+  picker must not offer it as a preview axis.
+
+Every boolean in the inventory is derived from the tree by
+`design/template-theme-contract.test.mjs`; the file carries the **reason**,
+which is the half a test cannot write. Coverage is compared as a set, so an
+eighth template or a sixth palette reds the gate the day it lands.
+
+The inventory holds no image paths on purpose. Preview bytes must not ride
+inside a published starter payload, so where they live is the picker surface's
+problem, not the descriptor's.

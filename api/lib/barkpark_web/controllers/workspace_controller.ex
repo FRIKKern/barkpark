@@ -353,12 +353,43 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
-  # The admitted half of `export/2`. Split out of the action ONLY so the
-  # single-flight slot can be released in one `after` that covers every exit
-  # from it — the error arms below all used to be `export/2`'s own `else`, and
-  # an arm that returned before the release would strand the slot until the
-  # request process died.
-  #
+  @doc """
+  THE DELIVERY EDGE. Puts the finished bundle on the socket and deletes it on
+  every exit from that write — success, client hang-up, or raise.
+
+  Split out of `stream_bundle/3` and made public so a test can drive this exact
+  code over a REAL TCP socket (`test/barkpark_web/export_delivery_edge_test.exs`).
+  `Plug.Test`'s conn never opens one, so before this split the only two
+  properties that matter about a multi-minute export — that the archive arrives
+  byte-complete, and that the temp tar is removed after a mid-transfer
+  disconnect — were unprovable in the suite. Not part of the HTTP contract;
+  `stream_bundle/3` is its only production caller.
+
+  ## What bounds this write (pds-backlog-export-edge-idle-timeout)
+
+  MEASURED on Bandit 1.12 / Thousand Island 1.5, not inferred:
+
+    * Bandit's HTTP/1 stack has **no response-side timeout at all** — see
+      `t:Bandit.http_1_options/0`, which offers none.
+    * Thousand Island's `read_timeout` (default 60_000 ms) waits for CLIENT
+      data. Nothing is read while a response is being written, so it cannot
+      cut this.
+    * Thousand Island's `transport_options[:send_timeout]` (default 30_000 ms,
+      `send_timeout_close: true`) is the only remaining candidate, and it is
+      **inert for this path**: TI delivers a `send_file` with one
+      `:file.sendfile(fd, socket, offset, length, [])` call, and `:file.sendfile/5`
+      does not honour the socket's send_timeout. The control test injects a
+      400 ms `send_timeout` and stalls the reader for 3 s; all bytes still
+      arrive.
+
+  So NOTHING in this application bounds the duration of an export response.
+  A multi-minute export that dies is being cut by an INTERMEDIARY — the
+  deployed Caddy reverse proxy, or any hop in front of it — never by here.
+  Raising an app-side timeout is not available as a remedy because there is no
+  app-side timeout to raise.
+
+  @canonical capability:workspace-export-delivery aka:send_file,export edge,bundle delivery
+  """
   # @sobelow_skip — Traversal.SendFile is an accepted false positive here, on a
   # stronger argument than the three media_controller sites: `path` is a
   # freshly-created per-request temp tar whose name the ENGINE chose
@@ -367,30 +398,39 @@ defmodule BarkparkWeb.WorkspaceController do
   # there is no traversal surface to defend.
   # The `after File.rm(path)` deletes that same engine-chosen temp tar; no
   # request input reaches the path, so it shares the SendFile argument above.
+  # The annotation MOVED HERE with the code: `stream_bundle/3` no longer
+  # contains either call, and a skip left on a function that does not raise the
+  # finding silently stops covering anything.
   # sobelow_skip ["Traversal.SendFile", "Traversal.FileModule"]
+  def deliver_bundle(conn, path, filename) do
+    # The engine hands ownership of the tar to us. `send_file/3` has finished
+    # writing to the socket by the time it returns, so deleting here is safe —
+    # and a socket killed mid-send raises a CATCHABLE Bandit.TransportError,
+    # which this `after` clause still fires on. (SIGKILL is out of reach by
+    # construction; sweeping orphans is pds-w11-spill-janitor's job.)
+    try do
+      conn
+      |> put_resp_content_type("application/x-tar", nil)
+      |> put_resp_header("content-disposition", "attachment; filename=#{filename}")
+      |> send_file(200, path)
+    after
+      # We are the deleter, so we are the disowner. The engine deliberately
+      # leaves the ownership sidecar on a tar it hands off — that is what keeps
+      # the janitor from reaping this file WHILE it is being streamed to the
+      # client, which for a multi-GB bundle on a slow link is a real window.
+      File.rm(path)
+      Janitor.disown(path)
+    end
+  end
+
+  # The admitted half of `export/2`. Split out of the action ONLY so the
+  # single-flight slot can be released in one `after` that covers every exit
+  # from it — the error arms below all used to be `export/2`'s own `else`, and
+  # an arm that returned before the release would strand the slot until the
+  # request process died.
   defp stream_bundle(conn, %Tenancy.Workspace{} = workspace, params) do
     with {:ok, path} <- export_bundle(workspace, params) do
-      # The engine hands ownership of the tar to us. `send_file/3` has finished
-      # writing to the socket by the time it returns, so deleting here is safe —
-      # and a socket killed mid-send raises a CATCHABLE Bandit.TransportError,
-      # which this `after` clause still fires on. (SIGKILL is out of reach by
-      # construction; sweeping orphans is pds-w11-spill-janitor's job.)
-      try do
-        conn
-        |> put_resp_content_type("application/x-tar", nil)
-        |> put_resp_header(
-          "content-disposition",
-          "attachment; filename=#{export_filename(params, workspace)}"
-        )
-        |> send_file(200, path)
-      after
-        # We are the deleter, so we are the disowner. The engine deliberately
-        # leaves the ownership sidecar on a tar it hands off — that is what keeps
-        # the janitor from reaping this file WHILE it is being streamed to the
-        # client, which for a multi-GB bundle on a slow link is a real window.
-        File.rm(path)
-        Janitor.disown(path)
-      end
+      deliver_bundle(conn, path, export_filename(params, workspace))
     else
       {:error, {:export_scope, reason, message}} ->
         conn
@@ -1143,7 +1183,18 @@ defmodule BarkparkWeb.WorkspaceController do
   # `Archive.open_scratch_dir!/0` just created — `spill_dir/0` (operator config)
   # plus System.unique_integer/1. No request input reaches the path; `spill_body`
   # below writes only to `Path.join(scratch, "body.tar")` under it.
-  # sobelow_skip ["Traversal.FileModule"]
+  #
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own, not even a capture. The removal it describes is
+  # `Archive.discard_scratch_dir/1` — see the `after` clause below, which spells
+  # out why it is that and not a bare `File.rm_rf/1` — and the write is
+  # `spill_body/2`'s. Each of those carries its own waiver where the call
+  # actually is. A waiver here suppressed nothing and told the next reader a
+  # risk had been weighed on this def; the reachability argument above outlived
+  # the call it was written for. If you add a direct `File.` call below, the
+  # waiver belongs with it — not back up here. (PR #12837 moved an annotation
+  # onto this function once already; `.sobelow-annotation-bindings` is what
+  # catches that, and it no longer has a row here to be stolen.)
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 

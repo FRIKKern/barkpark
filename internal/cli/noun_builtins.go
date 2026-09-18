@@ -96,6 +96,51 @@ var nounBuiltins = []nounBuiltin{
 		},
 	},
 	{
+		Noun: "task",
+		Verb: "resume",
+		// A purely LOCAL read: it rebuilds what a crashed predecessor held from
+		// the manifest `bp task claim` wrote and prints a crash brief. There is
+		// no server verb behind it, and REGISTERING it here rather than
+		// hand-writing an `if` in Execute is why `bp task --help` and
+		// `bp capabilities` can name it — a resume verb nobody can discover is
+		// the flight recorder's whole point thrown away.
+		Summary: "Rebuild a crashed agent's loadout from its claim-time manifest and print a crash brief (reads only).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskResume(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun: "task",
+		Verb: "history",
+		// The CLI half of flight-recorder P3 (task-b3045c0a79510f28). REGISTERED
+		// rather than special-cased in Execute for the same reason `resume` is:
+		// a timeline verb that `bp task --help` and `bp capabilities` deny the
+		// existence of is a flight recorder nobody can find.
+		Summary: "The per-mutation timeline for one task row, with WHO as the store answered it (reads only).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskHistory(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun:    "task",
+		Verb:    "enrichment",
+		Summary: "Controlled read of the close_reason absence enrichment (always exits 0).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskEnrichment(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun: "task",
+		Verb: "runtime-claims",
+		// The false-done class `bp task enrichment` cannot see: a SEALED
+		// criterion asserting a property of the RUNNING system, proved only by
+		// code presence. Advisory, read-only, exits 0.
+		Summary: "Sealed criteria asserting runtime properties proved only by code presence (always exits 0).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskRuntimeClaims(out, g, ctx, tail)
+		},
+	},
+	{
 		Noun:    "task",
 		Verb:    "tui",
 		Summary: "Open the live portrait task board (the same reader as `bp tasks`).",

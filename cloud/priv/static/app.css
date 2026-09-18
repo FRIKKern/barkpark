@@ -34,17 +34,30 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     56 of this file's 62 `min-width` declarations are this escape, and none of
+     62 of this file's 69 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
-   break-all), 62 `min-width` (66 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 24
-   `overflow-wrap`. The raw line greps are higher (18 / 103 / 38) because this
-   block and the per-site comments name them in prose. Re-derive with a
-   comment-stripping pass, never a bare `grep -c`.
+   break-all), 69 `min-width` (72 occurrences less the THREE that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 30
+   `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
+   quoted here: this block and the per-site comments name the properties in
+   prose, so any raw-grep figure counts its own paragraph and moves whenever a
+   comment anywhere in the file is edited. There is no honest constant to state,
+   so none is stated. Re-derive with a comment-stripping pass, never a bare
+   `grep -c`.
+
+   AND “DERIVED” IS NOW ENFORCED RATHER THAN ASSERTED. Every integer in this
+   block is re-derived from this file and compared against the words you are
+   reading, by `cloud/test/web/wrap_vocabulary_header_test.exs`. Change a wrap
+   in this file without changing these numbers — or change a number here without
+   the file — and that test reds and prints both sides. It FAILS, never skips,
+   when it cannot find a figure to check: a sentence it can no longer parse is
+   itself a red, so rewording this paragraph past its reach is not a way to go
+   quiet. That is the whole difference between a count that is derived and a
+   count that merely says it is.
 
    AND THE PART THAT IS NOT A DECLARATION: none of the four is provable by
    reading. Every wrap in this file that is load-bearing carries a MEASUREMENT
@@ -1455,25 +1468,29 @@ select.form-input {
 }
 .toast-close:hover { color: var(--text); }
 
-/* ===================================================== PROVIDER PICKER */
-.choice-list { display: flex; flex-direction: column; gap: 8px; }
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 14px;
-  text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font: inherit;
-  color: var(--text);
-  transition: border-color var(--t), background var(--t);
-}
-.choice:hover:not(:disabled) { border-color: var(--dim); background: var(--muted-surface); }
-.choice:disabled { opacity: 0.5; cursor: not-allowed; }
+/* ============================================= PROVIDER BRAND TILE (.choice-ico)
+   TOMBSTONE. This block used to be the PROVIDER PICKER. cch-w26-s4 deleted
+   openProviderPicker() — its only forward caller, #cred-back, was rewired to
+   the launch wizard — and that function was the ONLY producer of .choice-list,
+   .choice, .choice-main, .choice-name, .choice-sub, .choice-chev and
+   .choice-tag. app.css was outside that slice's file fence, so eleven rules
+   outlived their markup by a whole epic. Seven heads are gone here; ONE STAYS.
+
+   .choice-ico IS LIVE and must not follow them. It paints through
+   openProviderCredential()'s .modal-head tile and the providers roster
+   mini-tile, and both of its `choice-ico` ALLOW_PREFIXES waivers in
+   __css_check.mjs are earned by those two emission sites (E19 would red if
+   they were not). Re-derive, never inherit — the census is a PREDICATE over
+   the heads THIS FILE declares, not a list:
+
+     grep -oE '\.choice[a-z0-9-]*' app.css | sed 's/^\.//' | sort -u
+
+   and for each head, count the occurrences inside a STRING LITERAL in app.js
+   or a class="..." attribute in index.html / styleguide.html. Prose is not a
+   producer: the bare token `choice` has 16 raw hits in app.js and ZERO of them
+   are emissions. The live arm that keeps this honest is
+   cloud/test/web/choice_family_producer_test.exs — it reds if any .choice*
+   rule here has no producer, and stays quiet for .choice-ico. */
 .choice-ico {
   width: 32px; height: 32px;
   flex: 0 0 auto;
@@ -1482,11 +1499,6 @@ select.form-input {
   color: #fff; font-weight: 700; font-size: 13px;
 }
 .choice-ico.sm { width: 24px; height: 24px; font-size: 11px; display: inline-grid; vertical-align: middle; margin-right: 8px; }
-.choice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.choice-name { font-size: 14px; font-weight: 600; }
-.choice-sub { font-size: 12px; color: var(--muted-text); margin-top: 1px; }
-.choice-chev { color: var(--dim); font-size: 18px; line-height: 1; }
-.choice-tag { font-size: var(--text-xs); color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
 
 /* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
    the shared --provider-* identity tokens (S4) so the picker tile, the fleet
@@ -4490,6 +4502,31 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .wh-del-hint { font-size: 12px; }
 .wh-del-empty { font-size: 13px; padding: 6px 0; }
 .wh-del-heading { font-size: 13px; font-weight: 600; color: var(--text); }
+/* gr-backlog-operator-digest-send — the Operator console's Send-one-now block,
+   above the fleet-digest log. It sits apart from the log rather than inside the
+   card chrome, because the log is a RECORD and this is an ACT: one bordered
+   region reading as a single object would invite the button to be read as a
+   filter over the rows beneath it. */
+.op-digest-send {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.op-digest-send > .set-purpose {
+  margin: 0;
+  /* off-ladder: design/tokens.json carries no measure ladder at all — its `type`
+     section holds only the chrome and reading SIZE ladders (`jq -r '.type|keys[]'
+     design/tokens.json` prints `_units`, `chrome`, `reading`; `grep -n 'ch"'
+     design/tokens.json` is empty). So there is no rung to tokenize a reading-measure
+     cap against. 62ch is the file's established measure for a prose column — the
+     same value is hand-stamped at `.dunning-body` and at the `.set-purpose` cap
+     under the settings pane (`grep -n '62ch' cloud/priv/static/app.css`) — and this
+     declaration stays on it rather than inventing a one-site rung. */
+  max-width: 62ch;
+}
+
 .wh-del-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -4553,7 +4590,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    __css_check's E15 to police. */
 .wh-del-proof {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--muted-text);
   white-space: nowrap;
   overflow: hidden;

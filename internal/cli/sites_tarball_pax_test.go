@@ -39,19 +39,22 @@ import (
 	"testing"
 )
 
-// paxAcceptedTypeflags is the extractor's accepted set, transcribed from
-// `type/1` in api/lib/barkpark/sites/prebuilt_artifact.ex: NUL and '0' (regular),
-// '5' (directory), and — as of this wave — 'x' (a pax extension header, whose
-// `path`/`size` records are applied and then RE-VALIDATED through the whole of
-// name/1 + safe_path/2). Everything else is a typed refusal there: '1' hardlink,
-// '2' symlink, '3'/'4'/'6' devices and fifos, 'g' global header, 'L'/'K' the GNU
-// long-name extensions.
-var paxAcceptedTypeflags = map[byte]string{
-	0x00: "regular (NUL)",
-	'0':  "regular",
-	'5':  "directory",
-	'x':  "pax extension header",
-}
+// THE ACCEPTED SET THIS FILE ASSERTS AGAINST IS prebuiltAcceptedTypeflags, the
+// PRODUCTION symbol in sites_tarball.go — read, never re-transcribed.
+//
+// It used to be a second, independently authored copy (paxAcceptedTypeflags),
+// and that pair is the reason this file says so out loud: the two were written
+// on separate branches and the production copy shipped REFUSING 'x' while this
+// tripwire accepted it, so with both slices merged our own client could not
+// deploy an accented filename — and nothing in the package would have said a
+// word, because two hand-maintained lists only disagree silently.
+//
+// The set is pinned to the box's `type/1`
+// (api/lib/barkpark/sites/prebuilt_artifact.ex) in exactly ONE place:
+// TestPrebuiltAcceptedTypeflagsMatchTheExtractor in sites_tarball_test.go, which
+// holds the deliberate independent transcription. That is the only other copy
+// that may exist, and TestAcceptedTypeflagSetHasExactlyOneDefinition reds if a
+// third one appears — including a re-split of this file.
 
 // writePaxProbeFixture lays down a dist/-shaped tree that FORCES Go down its
 // PAX path, twice, for the two independent triggers measured this wave:
@@ -190,7 +193,7 @@ func TestPrebuiltPackerEmitsOnlyExtractorAcceptedTypeflags(t *testing.T) {
 	pax := 0
 	offending := 0
 	for i, b := range blocks {
-		if _, ok := paxAcceptedTypeflags[b.typeflag]; !ok {
+		if _, ok := prebuiltAcceptedTypeflags[b.typeflag]; !ok {
 			offending++
 			t.Errorf("block %d (%q): typeflag %q is NOT in the extractor's accepted set — this archive is dead on arrival with E_UNKNOWN_TYPE", i, b.name, string(b.typeflag))
 			continue

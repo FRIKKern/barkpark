@@ -261,4 +261,120 @@ defmodule BarkparkWeb.Contract.HistoryTest do
       assert Content.list_revisions("other1", "post", "test") == []
     end
   end
+
+  # [loop-low-history-offset-retention] The endpoint was limit-only, so the
+  # oldest revisions of a long trail had NO surfaced read at all: `restore`
+  # needs a revision UUID, and this listing is the only place one is published.
+  describe "offset pagination (loop-low-history-offset-retention)" do
+    defp walk_history(conn, doc_id, limit) do
+      # Bounded — see the sibling walker in
+      # test/barkpark/content/revision_retention_and_paging_test.exs.
+      0..50
+      |> Enum.map(&(&1 * limit))
+      |> Enum.reduce_while([], fn offset, acc ->
+        body =
+          conn
+          |> authed()
+          |> get("/v1/data/history/test/post/#{doc_id}", %{
+            "limit" => to_string(limit),
+            "offset" => to_string(offset)
+          })
+          |> Map.fetch!(:resp_body)
+          |> Jason.decode!()
+
+        case body["revisions"] do
+          [] -> {:halt, acc}
+          rows -> {:cont, acc ++ rows}
+        end
+      end)
+    end
+
+    test "the envelope publishes limit, offset and has_more", %{conn: conn, doc_id: doc_id} do
+      body =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}", %{"limit" => "1", "offset" => "0"})
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      assert body["limit"] == 1
+      assert body["offset"] == 0
+      assert body["has_more"] == true
+      assert body["count"] == 1
+    end
+
+    test "offset reaches a revision the first page cannot", %{conn: conn, doc_id: doc_id} do
+      first =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}", %{"limit" => "1", "offset" => "0"})
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      second =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}", %{"limit" => "1", "offset" => "1"})
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      [a] = first["revisions"]
+      [b] = second["revisions"]
+      assert a["id"] != b["id"], "offset=1 returned the same row as offset=0"
+      assert second["offset"] == 1
+    end
+
+    test "walking with offset yields every revision exactly once", %{conn: conn, doc_id: doc_id} do
+      unpaged =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}", %{"limit" => "200"})
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      walked = walk_history(conn, doc_id, 1)
+      walked_ids = Enum.map(walked, & &1["id"])
+
+      assert unpaged["has_more"] == false, "fixture broken: the one-page read is not complete"
+      assert Enum.uniq(walked_ids) == walked_ids, "a revision was handed out on two pages"
+      assert walked_ids == Enum.map(unpaged["revisions"], & &1["id"])
+    end
+
+    test "an offset past the end is an empty page, not the last one",
+         %{conn: conn, doc_id: doc_id} do
+      body =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}", %{"limit" => "5", "offset" => "500"})
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      assert body["revisions"] == []
+      assert body["count"] == 0
+      assert body["has_more"] == false
+      assert body["offset"] == 500
+    end
+
+    test "a garbage, negative or list-shaped offset reads as the first page",
+         %{conn: conn, doc_id: doc_id} do
+      first =
+        conn
+        |> authed()
+        |> get("/v1/data/history/test/post/#{doc_id}", %{"limit" => "1"})
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      for bad <- [%{"offset" => "abc"}, %{"offset" => "-7"}, %{"offset" => ["1"]}] do
+        body =
+          conn
+          |> authed()
+          |> get("/v1/data/history/test/post/#{doc_id}", Map.put(bad, "limit", "1"))
+          |> Map.fetch!(:resp_body)
+          |> Jason.decode!()
+
+        assert body["offset"] == 0, "offset #{inspect(bad)} did not clamp to the first page"
+        assert body["revisions"] == first["revisions"]
+      end
+    end
+  end
 end

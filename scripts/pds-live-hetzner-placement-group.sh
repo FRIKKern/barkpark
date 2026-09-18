@@ -375,7 +375,7 @@ hz_field() { printf '%s\n' "$2" | cut -f"$1"; }
 # `--harvest-only` issues ONE authenticated GET per flat hcloud kind against an
 # id that cannot exist. It creates nothing, deletes nothing, attaches nothing to
 # anything, arms no cleanup trap and needs no reserved-prefix fence: there is no
-# blast radius to fence. It DOES keep the credential fence (PDS-D429/D439) —
+# blast radius to fence. It DOES keep the credential fence (PDS-D429/PDS-D439) —
 # without one, every GET returns a 401 JSON envelope of exactly the shape a 404
 # fixture has, and the run would commit nine 401 bodies as 404 fixtures.
 #
@@ -927,7 +927,7 @@ if len(hcloud) != len(flat) + 1:
 # READ-ONLY. One GET per flat kind at an id that cannot exist. No create, no
 # delete, nothing attached to anything — so no reserved-prefix fence and no
 # cleanup trap, because there is no blast radius to fence. The CREDENTIAL fence
-# stays (PDS-D429/D439): an unauthenticated GET returns a 401 JSON envelope, and
+# stays (PDS-D429/PDS-D439): an unauthenticated GET returns a 401 JSON envelope, and
 # banking eight of those as 404 fixtures is exactly the historical mutation.
 harvest_only() {
   step "HARVEST-ONLY — read-only: GET /v1/<segment>/$HZ_MISSING_ID per flat hcloud kind"
