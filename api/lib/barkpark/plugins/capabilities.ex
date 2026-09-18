@@ -595,6 +595,41 @@ defmodule Barkpark.Plugins.Capabilities do
 
   # ── Server identity ──────────────────────────────────────────────────────
 
+  # The ADVISORY minimum `bp` release this box asks a client to be at.
+  #
+  # NOT A REFUSAL, and the API half must not turn it into one: `internal/cli`
+  # reports it (a named stderr notice on `bp capabilities`, and since
+  # 2026-09-17 a withheld `up_to_date: true` on the `bp whoami` /
+  # `bp doctor --onboarding` freshness leg via `serverFloorStaleness`) and
+  # never aborts on it. A floor that has never once fired must not debut as a
+  # refusal. See `docs/decisions/0007-capability-oracle.md`.
+  #
+  # THE VALUE IS SATISFIED BY EVERY PUBLISHED CLIENT, and that is deliberate.
+  # Two tag series live in this one repo and they have been conflated before:
+  #
+  #   * `v0.2.x`   — the SERVER release series. `/status.json` reported
+  #                  `0.2.26.929` on prod, 2026-09-16. No `bp` binary ever
+  #                  carries one of these.
+  #   * `cli-v1.x` — the CLI release series. `.github/workflows/cli-release.yml`
+  #                  does `VERSION=${TAG#cli-v}`, so a released `bp` carries
+  #                  e.g. `1.21.0`.
+  #
+  # Re-measured 2026-09-17: 27 published CLI releases, oldest `1.1.0`, newest
+  # `1.21.0`, none below `1.0.0`
+  # (`git tag -l 'cli-v*' | sed 's/cli-v//' | awk -F. '$1<1' | wc -l` -> 0).
+  # So this floor is inert because EVERYONE MEETS IT — not, as an earlier note
+  # on three surfaces claimed, because no released client could. That claim is
+  # retracted (PR #18876).
+  #
+  # RAISING IT IS THE ONE AVAILABLE MOVE. The envelope is
+  # `additionalProperties: false` and released binaries strict-decode it, so a
+  # server cannot grow a new key to tell an already-installed client it is
+  # behind; `min_cli` is the only channel. Anyone raising this must keep it at
+  # or below a release the fleet can actually reach, and
+  # `capabilities_server_identity_test.exs` holds that line against the
+  # published `cli-v*` tags.
+  @min_cli "1.0.0"
+
   @doc """
   The boot-time `server` envelope: `name`, `version`, `base_url`, `api_version`,
   `min_cli`. `base_url` defaults to the frozen `:capabilities_base_url` app-env
@@ -605,6 +640,21 @@ defmodule Barkpark.Plugins.Capabilities do
   `manifest/2`'s existing `:server` option. The envelope KEYS are fixed
   (`manifest.schema.json` is `additionalProperties: false` and the Go client
   strict-decodes it): only the `base_url` VALUE may be swapped, never a new key.
+
+  `version` IS THE RUNNING RELEASE — the same `Barkpark.BuildInfo.version/0`
+  compile-time constant `GET /status.json` publishes, so the two endpoints on
+  one box can never disagree. It used to be `Application.spec(:barkpark, :vsn)`,
+  the frozen `mix.exs` project version, which answered `"0.1.0"` on a prod box
+  running `0.2.26.929` (measured 89.167.28.206, 2026-09-16) — a field that had
+  never once tracked a release.
+
+  It is now accurate, and it is still NOT A DECISION INPUT: nothing may branch
+  on it. Box-lags-CLI is a supported product state (`pinned_release`,
+  `autoupdate_paused`, serial rollout), so a client-probed version comparison
+  reds correct configurations. `/v1/capabilities` answers SHAPE; the
+  running-release oracle a client may act on is `GET /status.json`, the opt-in
+  `?build=1` block (`Barkpark.BuildInfo.info/0`, which also carries the commit),
+  or the control plane. See `docs/decisions/0007-capability-oracle.md`.
   """
   @spec default_server() :: %{optional(String.t()) => String.t()}
   def default_server do
@@ -613,16 +663,22 @@ defmodule Barkpark.Plugins.Capabilities do
       "version" => server_version(),
       "base_url" => app_env(:capabilities_base_url, "http://localhost:4000"),
       "api_version" => "1",
-      "min_cli" => "1.0.0"
+      "min_cli" => @min_cli
     }
   end
 
-  defp server_version do
-    case Application.spec(:barkpark, :vsn) do
-      vsn when is_list(vsn) -> List.to_string(vsn)
-      _ -> "0.0.0"
-    end
-  end
+  @doc """
+  The advertised `min_cli` floor — see the `@min_cli` note above. Public only
+  so a test can assert the floor against the published `cli-v*` tag series
+  without re-deriving the envelope.
+  """
+  @spec min_cli() :: String.t()
+  def min_cli, do: @min_cli
+
+  # THE SAME SOURCE `/status.json` READS (`Barkpark.Status.health/0` ->
+  # `version:`). Changing this to anything else re-opens the divergence the
+  # `server.version` doc above records.
+  defp server_version, do: Barkpark.BuildInfo.version()
 
   defp app_env(key, default) do
     Application.get_env(:barkpark, key, default)
