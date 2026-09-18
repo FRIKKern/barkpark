@@ -105,6 +105,19 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 		return exitOK
 	}
 
+	// THE RAIL BASELINE CACHE (wb-bl-go-railrev-claim-plumbing). The server fires
+	// its rail_changed advisory only for a claim that SUPPLIES observed_rail_rev,
+	// and the only client-side source for that value is the `rail_rev` a previous
+	// claim/close envelope handed back for the SAME parent rail. A dispatch batch
+	// is exactly where that source exists: an epic's children share one rail, so
+	// pick #1's envelope supplies the baseline pick #2 observes against, and a
+	// sibling that moved the rail between the two claims lights up the notice the
+	// render path has always had and never received.
+	//
+	// Keyed by parent doc id; a parentless task has no rail, so it neither reads
+	// nor writes the map and its request stays byte-identical to today's.
+	railBaselines := map[string]string{}
+
 	spawned, failed, skipped := 0, 0, 0
 	for _, p := range picks {
 		id := taskboard.BareID(p.Task.DocID)
@@ -121,7 +134,8 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 			// WRITE-FENCE EXEMPTION (builtinWriteCensus, dispCannotLie): the
 			// claim receipt is the server's own ok:true + claim.epoch>0; see
 			// runTaskNextFrontier for the same argument at length.
-			outcome, err := client.TaskClaimResources(p.Task.DocID, w, resources)
+			outcome, err := client.TaskClaimResourcesObserved(
+				p.Task.DocID, w, resources, railBaselines[p.Task.ParentID])
 			if err != nil {
 				// Transport failure or a won claim with no fencing epoch — hard, but
 				// one bad pick never aborts the batch (design §7).
@@ -135,6 +149,13 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 				continue
 			}
 			worker, epoch = w, outcome.Epoch
+			// Refresh the rail baseline from the envelope the server just sent, so
+			// the NEXT pick in this rail observes against the rev this claim
+			// produced (a worker never trips its own rail_changed — the server
+			// compares against the PRE-write baseline).
+			if p.Task.ParentID != "" && outcome.RailRev != "" {
+				railBaselines[p.Task.ParentID] = outcome.RailRev
+			}
 			// Dispatch --claim bypasses runCommand, so the server's help[] next-command
 			// templates and rail-awareness notices — decoded on the outcome — would be
 			// dropped without this. Surface them to stderr (the house pattern), one

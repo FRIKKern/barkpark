@@ -20,41 +20,26 @@ import (
 // the 200 retry arm — where it deliberately does NOT re-start the driver. The Go
 // struct declared neither, so json.Unmarshal dropped both in silence.
 
-// TestPrebuiltRefusesANodeSiteBeforeMintingOrPacking is the RED-WHEN-REVERTED arm
-// of the static-only guard. Both write routes are armed with a SUCCESS: without
-// the guard this test passes the deploy rather than erroring, so the two counters
-// are the whole assertion.
-func TestPrebuiltRefusesANodeSiteBeforeMintingOrPacking(t *testing.T) {
-	const buildID = "b0b0b0b0b0b0b0b0"
-	dir := writeDistFixture(t, buildID)
-
-	cp := newSiteCP(t)
-	// Opted IN — the other preflight cannot be what refuses this.
-	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"app","slug":"app","kind":"node","framework":"nextjs","runtime_target":"node-slot","prebuilt_enabled":true}}`}
-	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"` + buildID + `","source":"prebuilt"}}`}
-	cp.artifactResp = fakeResp{201, `{"bytes":10}`}
-	cp.serve()
-
-	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
-	if code == exitOK {
-		t.Fatalf("a node/SSR site must not accept --prebuilt\nstdout:%s\nstderr:%s", stdout, stderr)
+// TestPrebuiltNodeSiteIsNoLongerRefusedHere is the RETIREMENT of (1) above, kept
+// in this file so the reversal is read beside the rule it reverses.
+//
+// (1) stood for one reason and one only: `--prebuilt` had no node mechanism to
+// hand bytes to. deploy/site-deploy-node.sh now carries PLAN_MODE=prebuilt — it
+// stages the uploaded standalone tree, records .bp-prebuilt-sha256, runs no npm,
+// and refuses a declared-ABI mismatch BEFORE STAGE with exit 17. The premise
+// expired, so the refusal did.
+//
+// The deep end-to-end arms for the node lane (mint+upload counters, the packed
+// .bp-node-abi, the engine's own reader over it) live in
+// cloud_site_prebuilt_node_abi_test.go. This one asserts only what this file is
+// about: the SENTENCE is gone for node.
+func TestPrebuiltNodeSiteIsNoLongerRefusedHere(t *testing.T) {
+	if clause := prebuiltUnservableClause("node", "node-slot"); clause != "" {
+		t.Fatalf("node now has an engine arm; --prebuilt must not refuse it, got %q", clause)
 	}
-	if cp.deployHits != 0 {
-		t.Fatalf("deploy hits=%d want 0 — the refusal must land BEFORE the mint (a prebuilt mint is nonced)", cp.deployHits)
-	}
-	if cp.artifactHits != 0 {
-		t.Fatalf("artifact hits=%d want 0 — the refusal must land BEFORE the pack and upload", cp.artifactHits)
-	}
-	all := stdout + stderr
-	for _, want := range []string{
-		"node/SSR",
-		"static-only",
-		"bp cloud site deploy " + testSiteID,
-		"no deployment was minted",
-	} {
-		if !strings.Contains(all, want) {
-			t.Fatalf("the refusal must carry %q:\n%s", want, all)
-		}
+	// And the guard has NOT been gutted: the axis it was built for still bites.
+	if prebuiltUnservableClause("static", "wasm-edge") == "" {
+		t.Fatalf("a runtime with no engine arm must still be refused")
 	}
 }
 

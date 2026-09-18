@@ -293,6 +293,10 @@ on:
       # build emits. Exact files, never deploy/**.
       - "deploy/site-runtime-install.sh"
       - "deploy/systemd/barkpark-agent.service"
+      # deploy/site-deploy-node.sh: internal/cli/cloud_site_prebuilt_node_abi_test.go
+      # extracts the engine's own abi_decl_value awk reader out of it and runs it
+      # over the packer's emitted .bp-node-abi bytes (task-486a81da02b65557).
+      - "deploy/site-deploy-node.sh"
       # Starter manifests: internal/template/template_test.go's TestRealManifests
       # loads and validates every checked-in barkpark.template.json and asserts
       # its referenced schema/seed paths exist. templates/place-directory is

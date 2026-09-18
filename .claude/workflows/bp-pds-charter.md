@@ -16362,7 +16362,12 @@ name unrelated code.
   CANNOT DISPATCH THEIR OWN CHECK (2026-09-17).** This closes the residue PDS-D758(vi) named and
   accepted, in the shape PDS-D758(vi) prescribed for it — "a parity check of the
   `shell-harnesses.yml` paths list against the charter's own anchor set". It is arm E of
-  `scripts/pds-charter-anchors-check.sh`@`TRIGGER_GAP_CEILING="${PDS_ANCHOR_TRIGGER_GAP_CEILING:-11}"`.
+  `scripts/pds-charter-anchors-check.sh`@`TRIGGER_GAP_CEILING="${PDS_ANCHOR_TRIGGER_GAP_CEILING:-0}"`.
+  CLOSED 2026-09-18 by task-ceada0e53f6d2f1d: all eleven paths are now in BOTH halves of
+  `.github/workflows/shell-harnesses.yml` and the ceiling is locked at 0, so this anchor now points
+  at the CLOSED form of the literal. The gap this decision measured is 0; the arm stays, and at
+  ceiling 0 it reds on the PR that writes the next untriggerable citation. The citation was rotted
+  by lowering the ceiling and caught by arm A on the same run — the mechanism adjudicating itself.
 
   **(i) THE RULE.** Every path an anchor CITES must be able to DISPATCH the job that checks the
   anchor. An anchor on a file that cannot trigger its own checker rots in SILENCE on the PR that

@@ -275,17 +275,30 @@ if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
 else bad "ARM 21 CONTROL — a workflow covering every cited path scores 0 and stays green (arm E)" "rc=$rc $out"; fi
 
 # ── ARM 22 (RED, arm E): the ratchet fires when the gap EXCEEDS the ceiling ──
-# The REAL workflow, ceiling one below the measured gap. This is the arm that
-# fails if arm E's comparison is inverted, its ceiling deleted, or its verdict
-# demoted to a PROGRESS line.
-run_e "$REPO_ROOT/.github/workflows/shell-harnesses.yml" 0
+# This is the arm that fails if arm E's comparison is inverted, its ceiling
+# deleted, or its verdict demoted to a PROGRESS line.
+#
+# RE-POINTED AT A FIXTURE 2026-09-18 (task-ceada0e53f6d2f1d), NOT DELETED. It
+# used to run against the REAL .github/workflows/shell-harnesses.yml at ceiling
+# 0, because the real gap was 11 and any ceiling below it reproduced the red.
+# That repair put all eleven cited paths into both halves of the real workflow,
+# so the real gap is 0 and the real workflow at ceiling 0 is now GREEN — this
+# arm stopped reproducing its own subject. A RED arm that cannot red is a
+# vacuous arm, so it moves to a fixture covering NOTHING: gap 15 (every cited
+# path) against ceiling 0. The subject is arm E's comparison, which the fixture
+# exercises exactly as the real workflow did; the real workflow's new 0 is
+# asserted separately and in the other direction by ARM 29 below, so the pair
+# still pins both sides.
+mk_wf 'no/such/path/at/all' 'no/such/path/at/all' > "$TMP/wf_none.yml"
+run_e "$TMP/wf_none.yml" 0
 if [ "$rc" -ne 0 ] && grep -q 'cited path(s) cannot DISPATCH this check' <<<"$out"; then
   ok "ARM 22 RED — a gap above the ceiling reds (arm E ratchet)"
 else bad "ARM 22 RED — a gap above the ceiling reds (arm E ratchet)" "rc=$rc $out"; fi
 
 # ── ARM 23 (RED, arm E): the gap is named, not just counted ─────────────────
 # A count alone gives the .github/ repair no worklist. board.ex is the path
-# whose three rots in one day produced this arm; it must appear BY NAME.
+# whose three rots in one day produced this arm; it must appear BY NAME. Reads
+# arm 22's $out, so it rides the same fixture.
 if [ "$rc" -ne 0 ] && grep -q 'api/lib/barkpark/tasks/board.ex' <<<"$out"; then
   ok "ARM 23 RED — the uncovered paths are named individually (arm E worklist)"
 else bad "ARM 23 RED — the uncovered paths are named individually (arm E worklist)" "rc=$rc $out"; fi
@@ -347,6 +360,19 @@ run_e "$TMP/wf_star.yml" 99
 if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 10 ' <<<"$out"; then
   ok "ARM 28 CONTROL — a single \052 does not span \057, so nested paths stay uncovered (arm E glob)"
 else bad "ARM 28 CONTROL — a single \052 does not span \057, so nested paths stay uncovered (arm E glob)" "rc=$rc $out"; fi
+
+# ── ARM 29 (QUIET/CONTROL, arm E): the REAL workflow's gap is 0 and stays 0 ──
+# task-ceada0e53f6d2f1d. This is the LOCK on the repair, and the arm that reds
+# if anyone deletes a cited path from either half of
+# .github/workflows/shell-harnesses.yml. Arm 21 proves a TOTAL-coverage fixture
+# scores 0; only this arm proves the SHIPPED workflow does — a fixture can never
+# vouch for the file CI actually reads. It is also the other half of arm 22's
+# pair: 22 reds on a fixture covering nothing, 29 greens on the real file, so
+# neither is satisfiable by an arm E stuck at one verdict.
+run_e "$REPO_ROOT/.github/workflows/shell-harnesses.yml" 0
+if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
+  ok "ARM 29 CONTROL — the REAL shell-harnesses.yml covers every cited path at ceiling 0 (arm E lock)"
+else bad "ARM 29 CONTROL — the REAL shell-harnesses.yml covers every cited path at ceiling 0 (arm E lock)" "rc=$rc $out"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

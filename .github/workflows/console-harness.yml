@@ -928,6 +928,49 @@ jobs:
       - name: Run preview smoke harness
         run: node cloud/priv/static/__preview__/smoke.mjs
 
+      # ── THE FILES-TO-INSTRUMENTS RULE'S OWN GUARD (studio-r21f-w7) ─────────
+      #
+      # scripts/preview-census-gate-check.mjs mechanises the rule the step above
+      # depends on: cloud/priv/static/__preview__/scenarios.mjs is the ONE fixture
+      # corpus, several instruments keep a TWO-WAY census over it, and its
+      # CENSUS_OWNERS table names each owner by path together with the census
+      # literal that makes it an owner. The table is re-read against the tree on
+      # every run, so an owner that vanished, stopped importing the corpus, or
+      # lost its literal is a REFUSAL rather than a quietly shorter answer.
+      #
+      # IT WAS REACHED BY NO `run:` STEP. Before this, the only line naming the
+      # file anywhere in the merge path was the `paths:` entry on this workflow's
+      # push arm — a dispatch trigger for a script nothing dispatched. The honest
+      # predicate finds it:
+      #
+      #   git grep -nE '(node|bash|sh)[[:space:]]+[^|;&]*preview-census-gate-check' \
+      #     -- .github/ scripts/ Makefile package.json
+      #
+      # printed only the script's own two usage strings, while the same search for
+      # breakpoint-sweep.test.mjs (a wired control) printed this file's `node --test`
+      # line. So the table could rot through any merge and nothing would say so.
+      #
+      # BOTH ARMS RUN, on this branch, against the REAL tree — the table arm is what
+      # has no other guard, so the mutation is a real owner losing its real literal:
+      #   RED   — `perl -pi -e 's/\bEXPECTATIONS\b/XPCTNS/g'` on the real
+      #           cloud/priv/static/__preview__/smoke.mjs (EXPECTATIONS occurrences
+      #           29 -> 0) makes this step exit 1 with
+      #           "SELF-TEST FAILED (1 of 20 assertion(s)) — the files-to-instruments
+      #           rule no longer holds."
+      #   QUIET — the tree unmutated, the same command exits 0 with
+      #           "self-test: 20/20 — the rule fires on a census move, stays quiet
+      #           otherwise, and refuses when its table rots."
+      # A WEAKER MUTATION DOES NOT COUNT, and this is why the arm is quoted with its
+      # regex: renaming the literal to `EXPECTATIONS_RENAMED` leaves it a SUBSTRING,
+      # the table arm still finds it, and the run stays 20/20 green. The first attempt
+      # at this red arm did exactly that and read as a guard that could not lose.
+      #
+      # No paths change is needed: this workflow's push arm already lists both
+      # `scripts/preview-census-gate-check.mjs` and `cloud/priv/static/**`, so every
+      # edit that can move the table already dispatches the run that now reads it.
+      - name: Preview census gate — the files-to-instruments rule still holds (20-check self-test)
+        run: node scripts/preview-census-gate-check.mjs --selftest
+
       # ── THE MEMBER-ACTOR RENDERED-STATE AUTHORITY SWEEP (cch-w46-s7) ────────
       #
       # The smoke harness above asserts that each scenario DREW what it should.

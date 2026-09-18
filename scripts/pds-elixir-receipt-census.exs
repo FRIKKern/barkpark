@@ -1333,9 +1333,13 @@ defmodule PDS.Census do
   # (`hzKeyConfirmation: "declared"` beside `hzKeyConfirmBasis`), because a confirmation
   # level that exists in one surface must not be re-invented with a new name in another.
   #
-  # WHAT THE REGISTER IS FOR. Exactly one row suppresses anything today
-  # (github_webhook_controller.ex:87, the one site the CATCH-ALL-TO-SUCCESS arm fires on
-  # whose body NAMES its outcome). The other four are DOCUMENTATION: they record that a
+  # WHAT THE REGISTER IS FOR. THREE rows withhold a finding today: the whole
+  # CATCH-ALL-TO-SUCCESS class — github_webhook_controller.ex:87 (the site whose body
+  # NAMES its outcome) plus the two synonym-delete sites registered off #18899 below.
+  # Up to wave 47 there was exactly one, and this sentence said so; the two that joined
+  # it were findings for two waves before their in-code ruling was written, which is the
+  # ORDER this register is supposed to enforce — reasoning in the code first, row second.
+  # The other five are DOCUMENTATION: they record that a
   # human read the code and found the receipt honest, so the next lens that starts firing
   # on them meets a written basis instead of an argument.
   #
@@ -1451,6 +1455,69 @@ defmodule PDS.Census do
           "because submit/2 routes to a write on its SUCCESS path — crediting a write to the one " <>
           "arm that provably makes none. The bracket is disputed here because it cannot be " <>
           "retracted from the shape vocabulary: route_tag/1 and evidence/3 read write?/depth only."
+    },
+    # -- REGISTERED BY task-477972989335da51, off the declarations #18899 shipped in api/.
+    # A CODE COMMENT DOES NOT REACH THIS REGISTER. #18899 wrote an explicit ruling above
+    # each of the three sites below, and the census AT THAT HEAD still printed
+    # `CATCH-ALL-TO-SUCCESS FINDINGS  2 undeclared of 3 fired` — the comment is where the
+    # reasoning lives, this row is what the instrument reads. Both halves, or neither.
+    # THE INVERSION THESE ROWS MUST NOT BE: a register row that silences a finding while
+    # the api-side basis is absent. Each row below is anchored on a basis_token that
+    # occurs ONLY inside the block #18899 added, so deleting that block reds
+    # DECLARED-BASIS-INTACT at rc 1 — proved by deletion on the filing branch, per site.
+    %{
+      key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
+      basis_spans: [{378, 403}],
+      basis_token: "no failure reaches this receipt",
+      class: "CATCH-ALL-TO-SUCCESS",
+      confirmation: "declared",
+      basis:
+        "the in-code ruling at :378-403, added by #18899 — three stated grounds, of which " <>
+          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :395.",
+      why:
+        "the arm fires and this row withholds the finding. The `_ws_id` head is NOT a " <>
+          "failure sink: it is the non-nil half of the two-way split on token_workspace_id/1 " <>
+          "whose `nil ->` half refuses the write one clause up, and " <>
+          "Barkpark.Search.Synonyms.delete/4 answers `:ok | {:error, :not_found}` with the " <>
+          "404 rendered by the clause beside the receipt. The receipt is reached only from " <>
+          "the `:ok` clause of a CLOSED case, so a future return tag raises rather than " <>
+          "passing as success."
+    },
+    %{
+      key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
+      basis_spans: [{219, 244}],
+      basis_token: "no failure reaches this receipt",
+      class: "CATCH-ALL-TO-SUCCESS",
+      confirmation: "declared",
+      basis:
+        "the in-code ruling at :219-244, added by #18899 — the `media` surface twin of the " <>
+          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :236.",
+      why:
+        "the arm fires and this row withholds the finding, for the reason its twin states: " <>
+          "same split, same @spec'd delete, same 404 beside the receipt. TWO ROWS, NOT ONE " <>
+          "SHARED ONE — the sites are separate keys with separate spans, and a basis that " <>
+          "covered both would survive the deletion of either block."
+    },
+    %{
+      key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
+      basis_spans: [{556, 578}],
+      basis_token: "why it must merge",
+      class: "PURE-ECHO",
+      confirmation: "declared",
+      basis:
+        "the in-code ruling at :556-578, added by #18899 — the `{:error, changeset}` " <>
+          "mint-failure arm, token `WHY IT MUST MERGE` on :565.",
+      why:
+        "A SECOND ROW ON A KEY THAT ALREADY HAS ONE, DELIBERATELY. The site carries TWO " <>
+          "independent declarations now: the @doc's anti-enumeration contract (the NO-OP-ACK " <>
+          "row above, span :537-542) and #18899's ruling on the mint-failure arm below it. " <>
+          "One row cannot tripwire both — DECLARED-BASIS-INTACT is satisfied by ANY span " <>
+          "carrying the token, so folding the new span into the old row would let either " <>
+          "block be deleted in silence. Each declaration gets its own row and its own " <>
+          "token. This row suppresses nothing: no arm fires on this site."
     }
   ]
 
@@ -1563,7 +1630,7 @@ defmodule PDS.Census do
   # REQUIRED, counted, printed, and never reds. @basis_vocab below is the authority.
   # THIS WAVE ADDS FOUR VALUES to PDS-D499's eleven, each mechanically falsifiable:
   #   end_to_end_unmutated   — the distinct token for a conjunction read but not exercised
-  #   declared_basis         — the five @declared rows; DECLARED-BASIS-INTACT is its check
+  #   declared_basis         — the eight @declared rows; DECLARED-BASIS-INTACT is its check
   #   partial_tag_coverage   — one emitted site, several rendered receipts (below)
   #   unexamined             — no differential has been READ for this row. It is not a
   #                            euphemism for "probably fine": it is the honest floor, and
