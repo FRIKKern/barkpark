@@ -7206,7 +7206,7 @@ defmodule BarkparkCloud.Web.Router do
   # mint an owner, or demote an owner/peer admin) → 403 forbidden. 409 last_owner
   # when demoting the sole owner; 422 invalid_role; 404 not a member.
   patch "/v1/teams/:id/members/:user_id" do
-    with_team_role(conn, "admin", fn conn, team ->
+    with_team_role(conn, "member", fn conn, team ->
       role = conn.body_params["role"]
 
       with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
@@ -7276,7 +7276,7 @@ defmodule BarkparkCloud.Web.Router do
   # out-rank; an owner may remove any peer (while owner_count > 1) → 403 forbidden
   # otherwise. 409 last_owner; 404 not a member.
   delete "/v1/teams/:id/members/:user_id" do
-    with_team_role(conn, "admin", fn conn, team ->
+    with_team_role(conn, "member", fn conn, team ->
       with %{} = target <- Accounts.get_user(conn.path_params["user_id"]),
            # activity-audit-log: the removal (+ its session eviction) and a
            # `member.removed` audit row commit in one transaction.

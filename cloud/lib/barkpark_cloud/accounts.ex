@@ -2236,7 +2236,7 @@ defmodule BarkparkCloud.Accounts do
         # and `Authz.can_grant?/3`, both of which are fail-closed TODAY precisely
         # because an unknown ACTOR role ranks 0. The floor belongs on the actor.
         if TeamMembership.admin?(actor_role) and
-             (actor_role == "owner" or TeamMembership.outranks?(actor_role, target_role)) do
+             TeamMembership.outranks?(actor_role, target_role) and target_role == "member" do
           remove_member(team, target)
         else
           {:error, :forbidden}
