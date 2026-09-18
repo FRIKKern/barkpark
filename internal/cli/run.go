@@ -836,6 +836,13 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		// and folds in #15851's fork advisory codes. stderr in every output
 		// shape, so `-o json` stays byte-identical (mutate_perspective.go).
 		emitMutatePerspective(out, cmd, respBody)
+		// A publish receipt is `rev: <n>` and nothing else, and a rev is minted
+		// by whichever server received the transaction — so the receipt reads
+		// identically whether the write landed on the server the author meant
+		// or on the one their active context happened to point at. This names
+		// the target, derived from the request URL that was actually sent.
+		// stderr in every output shape (publish_target_receipt.go, BP-ONB-18).
+		emitPublishTarget(out, cmd, req.url, status)
 	}
 	// `bp task get <id>` earns a better not_found than the noun-wide hint: the
 	// generic one names `bp task ls`, whose remedy costs the whole ledger. The
