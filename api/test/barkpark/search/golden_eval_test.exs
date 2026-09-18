@@ -133,10 +133,13 @@ defmodule Barkpark.Search.GoldenEvalTest do
           write_fixtures([%{"q" => @filler_q, "expect_ids" => [rank_two], "max_rank" => 1}])
       )
 
-    assert [%{q: @filler_q, got_ids: got}] = outside.failures,
+    # bind first, then assert on a boolean: a message on `assert pattern = expr`
+    # is unreachable (MatchError fires before assert/2 can read it).
+    assert match?([%{q: @filler_q, got_ids: _}], outside.failures),
            "a rank-2 id one position past a max_rank:1 budget must FAIL; it did not. " <>
-             "The window was widened past the declared budget."
+             "The window was widened past the declared budget. got: #{inspect(outside.failures)}"
 
+    [%{got_ids: got}] = outside.failures
     assert length(got) == 1, "the max_rank:1 window held #{length(got)} ids"
   end
 
