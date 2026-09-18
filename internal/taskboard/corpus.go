@@ -284,7 +284,31 @@ func fetchTaskCorpus(ctx context.Context, c *apiclient.Client, cc *corpusCache, 
 	cc.flight = nil
 	cc.mu.Unlock()
 	close(f.done)
-	return f.tasks, f.details, f.exhaustive, f.err
+	// THE LEADER TAKES A COPY TOO — this is not symmetry for its own sake.
+	//
+	// f.tasks/f.details are the SAME containers fetchTaskCorpusWalk just stored
+	// as the cache's base, and they stay readable by every waiter parked on
+	// f.done. The leader's own caller goes on to mutate them in place:
+	// fetchSnapshotWith hands `details` to syncDetails, which re-embeds the
+	// composed board row into every entry. Handing the leader the originals
+	// therefore did two things at once —
+	//
+	//	fatal error: concurrent map iteration and map write
+	//	  taskboard.copyDetails(...) corpus.go:307
+	//	  taskboard.fetchTaskCorpus(...) corpus.go:271
+	//
+	// a waiter iterating the map while the leader's syncDetails writes it, which
+	// KILLED THE PROCESS about ten seconds after the cold walk landed (measured
+	// on guerrilla 2026-09-18: `bp tasks` died at 29.3 s from launch, twice out
+	// of two runs, both times immediately after the 9-page walk completed) — and,
+	// quietly, it let the board rewrite the stored base's rows behind the cache's
+	// back.
+	//
+	// The crash is why the incremental re-list of PR #18468 had never once armed
+	// in the field: arming needs a SECOND re-list in the same process, and the
+	// process did not survive its first one. Copying here is what lets a board
+	// live long enough to be cheap.
+	return copyTasks(f.tasks), copyDetails(f.details), f.exhaustive, f.err
 }
 
 // copyTasks / copyDetails hand a waiter its own containers. The Task values and
@@ -345,11 +369,20 @@ func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCac
 			exhaustive: true,
 			lastFull:   now,
 		})
-	} else {
-		// A short walk must not become a base: the next incremental walk would
-		// stack a prefix on top of a hole and call the result complete.
-		cc.store(corpusBase{})
 	}
+	// A short walk must not become a base — the next incremental walk would
+	// stack a prefix on top of a hole and call the result complete — so the
+	// `exhaustive` arm above is the ONLY writer of a base.
+	//
+	// It must not DESTROY one either, which is what the `else cc.store(
+	// corpusBase{})` that stood here did. Losing state because a walk ran out of
+	// page budget is the defect, not the remedy: the wipe was self-perpetuating,
+	// since the base it threw away is precisely the thing that would have made
+	// the next walk cheap enough to finish. Keeping the old base is not serving
+	// a stale one — THIS call still returns the short walk with exhaustive=false,
+	// so nothing on screen is older than the read that produced it — and the
+	// base cannot go stale unnoticed because incrementalUsable refuses any base
+	// whose lastFull is older than fullResyncEvery.
 	return tasks, details, exhaustive, nil
 }
 

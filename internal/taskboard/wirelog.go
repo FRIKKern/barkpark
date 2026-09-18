@@ -21,7 +21,17 @@ import (
 // So the counter ships. It is OFF unless BARKPARK_TASKBOARD_WIRELOG names a
 // file, it writes one tab-separated line per SUCCESSFUL snapshot fetch —
 //
-//	<RFC3339Nano ts>\t<path, query stripped>\t<body bytes>
+//	<RFC3339Nano ts>\t<path, query stripped>\t<body bytes>\t<limit=N, or "">
+//
+// The FOURTH column exists because the third could not answer the question the
+// criterion actually asks. The board's cheap incremental head page and its
+// ~11 MB exhaustive page are BOTH `/v1/tasks`, and stripping the query — which
+// the second column must do, or a cursor walk scatters across thousands of
+// distinct keys — collapses them into one row of the tally. So "did the
+// incremental re-list arm?" was unanswerable from the log that exists to answer
+// it, and a reader had to infer it from body size. The `limit` param is the
+// discriminator the code already spells in one place (headPageLimitToken = 50
+// vs taskListLimitToken = 1000), so the log records it verbatim.
 //
 // — and it never touches the fetch's own return path: a logging failure is
 // dropped, because a measurement must not be able to fail the thing it
@@ -31,6 +41,10 @@ import (
 // Read it with:
 //
 //	awk -F'\t' '{n[$2]++; b[$2]+=$3} END{for (p in n) printf "%s n=%d bytes=%d\n", p, n[p], b[p]}'
+//
+// or, splitting the corpus GET by page size:
+//
+//	awk -F'\t' '{k=$2" "$4; n[k]++; b[k]+=$3} END{for (p in n) printf "%s n=%d bytes=%d\n", p, n[p], b[p]}'
 type wireLogger struct {
 	mu sync.Mutex
 	f  *os.File
@@ -71,7 +85,7 @@ func recordWire(path string, n int) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	fmt.Fprintf(w.f, "%s\t%s\t%d\n", time.Now().UTC().Format(time.RFC3339Nano), wireLogKey(path), n)
+	fmt.Fprintf(w.f, "%s\t%s\t%d\t%s\n", time.Now().UTC().Format(time.RFC3339Nano), wireLogKey(path), n, wireLogLimit(path))
 }
 
 // wireLogKey is the aggregation key: the path with its query string removed, so
@@ -83,4 +97,22 @@ func wireLogKey(path string) string {
 		return path[:i]
 	}
 	return path
+}
+
+// wireLogLimit is the fourth column: the request's own `limit` param, verbatim,
+// spelled as `limit=<v>` so the column is self-describing in a log a human
+// reads. A path with no limit (the events poll, prime) yields the empty string
+// rather than a placeholder — an absent param is not a value, and writing one
+// would put a number in the log that no request carried.
+func wireLogLimit(path string) string {
+	i := strings.IndexByte(path, '?')
+	if i < 0 {
+		return ""
+	}
+	for _, kv := range strings.Split(path[i+1:], "&") {
+		if v, ok := strings.CutPrefix(kv, "limit="); ok {
+			return "limit=" + v
+		}
+	}
+	return ""
 }
