@@ -15664,6 +15664,48 @@ defmodule BarkparkCloud.Web.Router do
 
           {:cont, bound_site}
         else
+          # Cloudflare ACCEPTED the PATCH (2xx) but answered `proxied: false`:
+          # the orange cloud did not stick. `Client.ensure_zone_proxied/3` is
+          # specced `{:ok, %{proxied: boolean()}}` — `false` is a DECLARED
+          # return, not an error term — so before this clause existed the
+          # `{:ok, %{proxied: true}}` head fell through to an else covering only
+          # `{:error, _}` and the request died with a `WithClauseError` (a 500
+          # with a stacktrace, and NO honest answer about the record just
+          # written). Fail CLOSED like every other arm here: the binding is NOT
+          # persisted, so the site keeps serving standalone and `serving_mode:
+          # "cf_proxied"` never becomes a lie about a grey record. Deliberately
+          # NOT retried — a re-PATCH of the same body gets the same answer; the
+          # causes (a non-proxiable record type/name, a zone plan that forbids
+          # proxying that hostname) are all standing conditions an operator has
+          # to clear. The wire code stays `cloudflare_bind_failed` — the client
+          # contract is "the bind did not happen, the box is still standalone",
+          # which is exactly true — and only the bounded `detail` distinguishes.
+          #
+          # The pattern binds `proxied` rather than matching the literal `false`
+          # on purpose. `Real.ensure_zone_proxied/3` lifts the value straight out
+          # of the Cloudflare body (`%{"result" => %{"proxied" => proxied}}`)
+          # WITHOUT checking it is a boolean, so a body carrying `"proxied": null`
+          # (or any non-boolean) yields an `{:ok, _}` the `boolean()` spec does
+          # not describe and a `false`-literal clause would miss — the same crash
+          # one field-value away. Anything not `true` is "not proxied", and this
+          # arm swallows no error term: `{:error, _}` still owns the clauses below.
+          {:ok, %{proxied: proxied}} ->
+            Logger.error(
+              "cloudflare_bind_not_proxied: #{domain} -> #{origin} Cloudflare accepted the " <>
+                "proxy PATCH but the record is not proxied (proxied=#{inspect(proxied)}); " <>
+                "refusing to persist a cf_proxied binding. The A record written above is " <>
+                "LEFT IN PLACE, unproxied."
+            )
+
+            {:halt,
+             json(conn, 502, %{
+               error: "cloudflare_bind_failed",
+               detail:
+                 "Cloudflare accepted the proxy change but the record is still unproxied " <>
+                   "(grey cloud) — the box is still serving standalone. Check that the zone " <>
+                   "plan allows proxying this hostname, then try again."
+             })}
+
           {:error, {:orphan_cleaned, cleaned_domain}} ->
             Logger.error(
               "cloudflare_bind_orphan_cleaned: #{cleaned_domain} deprovisioned mid-write, the A record just written was deleted again"
