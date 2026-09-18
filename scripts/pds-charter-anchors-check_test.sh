@@ -175,16 +175,18 @@ if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 0' <<<"$out"; then
   ok "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable anchors"
 else bad "ARM 13 REVERT — the pre-fix D101/D116 text carries ZERO checkable anchors" "rc=$rc $out"; fi
 
-# ── ARM 14 (QUIET/CONTROL): the shipped D101+D116 text carries SEVEN ─────────
-# pad_bare 14, not 15: the D101..D116 slice itself carries ONE surviving
-# `pds-pull-proof.sh:NNN` cite (in PDS-D113), so 14 + 1 sits exactly ON arm B's
-# ceiling. Padding to 15 would red arm B and mask what this arm measures.
+# ── ARM 14 (QUIET/CONTROL): the shipped D101+D116 text carries EIGHT ─────────
+# Eight, not seven, since the 2026-09-18 sweep (pds-bl-charter-line-refs-stale)
+# turned PDS-D113's last bare `pds-pull-proof.sh:NNN` cite into a content
+# anchor: the slice now carries ZERO surviving bare cites, so pad_bare 14 sits
+# one under arm B's ceiling of 15. This count is the slice's, read from the
+# live charter — bump it when a D101..D116 citation is re-anchored, never pad.
 { sed -n '/PDS-D101 — Anything touching rungs/,/arm C ratchets the file-less/p' \
     "$REPO_ROOT/.claude/workflows/bp-pds-charter.md"; pad_bare 14; } > "$TMP/shipped_d101.md"
 run "$TMP/shipped_d101.md"
-if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 7' <<<"$out"; then
-  ok "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors"
-else bad "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 7 resolving anchors" "rc=$rc $out"; fi
+if [ "$rc" -eq 0 ] && grep -q 'anchors checked ..... 8' <<<"$out"; then
+  ok "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 8 resolving anchors"
+else bad "ARM 14 CONTROL — the shipped D101/D116 text carries exactly 8 resolving anchors" "rc=$rc $out"; fi
 
 # ── ARM 15 (RED, arm D): the same number DEFINED TWICE in list form ──────────
 { printf -- '- **PDS-D900 — FIRST DEFINITION.** x\n- **PDS-D900 — SECOND DEFINITION.** y\n'; pad_bare 15; } > "$TMP/dupe_list.md"
