@@ -1199,6 +1199,19 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "wave rules provider-specific copy owed."
     },
     %{
+      code: "credential_unreadable",
+      site: "router.ex providers_identity (GET /v1/providers/:kind/identity)",
+      reason:
+        "NOT console-reachable YET — no console surface calls this route at all: " <>
+          "PROVIDERS carries no cloudflare entry and the only /overview reader is " <>
+          "the rotation card. A 502 here means the stored credential would not " <>
+          "decrypt, an infrastructure fault kept DELIBERATELY distinct from an " <>
+          "identity whose value is nil (which is a 200) so the two are never " <>
+          "collapsed; the 5xx honesty law renders the server-fault sentence. " <>
+          "Flip: the console reader ships (task-cc5125ed3a4da0c2), at which point " <>
+          "this owes a read or its own copy."
+    },
+    %{
       code: "enqueue_failed",
       site: "router.ex do_resurrect",
       reason:

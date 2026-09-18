@@ -122,6 +122,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/providers/:kind  admin     disconnect a cloud provider
       GET     /v1/providers/:kind/catalog user  a provider's allowlisted action catalog
       GET     /v1/providers/:kind/overview user  a provider's server-side estate snapshot
+      GET     /v1/providers/:kind/identity user  WHICH cloud account a connection points at
       GET     /v1/providers/capabilities user  per-provider capability matrix (SPA gating)
       GET     /v1/hetzner/catalog  user      the allowlisted Hetzner action catalog (resource/verb/tier/params)
       GET     /v1/hetzner/overview admin     server-side Hetzner estate snapshot (token never reaches the browser)
@@ -6282,6 +6283,28 @@ defmodule BarkparkCloud.Web.Router do
   get "/v1/providers/:kind/overview" do
     conn = Auth.require_user(conn, [])
     if conn.halted, do: conn, else: providers_overview(conn, conn.params["kind"])
+  end
+
+  # GET /v1/providers/:kind/identity → 200 {provider:{kind,label,identity}} —
+  # WHICH cloud account this connection points at, and NOTHING else.
+  #
+  # WHY A SECOND ROUTE INSTEAD OF WIDENING /overview (D899). `/overview` is a
+  # CATALOG route: it reads @neutral_kinds and 404s unknown_kind before any
+  # build clause runs, and its identity rides out of `build_provider_catalog/2`
+  # — which spends upstream round trips and closes `else: _ -> {:error,
+  # :unavailable}` → 502 catalog_unavailable. Two consequences that decide the
+  # shape: (1) cloudflare is CONNECTABLE but not catalog-backed, so it can never
+  # reach that handler at all; (2) an upstream hiccup blanks an identity that is
+  # sitting in the stored blob and needs no network to read. This route reads
+  # @connectable_kinds and makes ZERO upstream calls: decrypt, read a field,
+  # answer. An identity is a local fact and must not be hostage to a menu fetch.
+  #
+  # Auth.require_user only — same as /overview: any authenticated team member,
+  # and the provider is resolved through `conn.assigns.current_team`, so a
+  # member only ever reads their OWN team's connection.
+  get "/v1/providers/:kind/identity" do
+    conn = Auth.require_user(conn, [])
+    if conn.halted, do: conn, else: providers_identity(conn, conn.params["kind"])
   end
 
   # GET /v1/providers/capabilities → 200
@@ -13324,6 +13347,12 @@ defmodule BarkparkCloud.Web.Router do
   # what lets cloudflare connect without leaking a menu route it can't serve.
   @connectable_kinds ~w(hetzner azure cloudflare)
 
+  # Identity-absence copy that must read the same wherever it is emitted. A
+  # stored blob we cannot JSON-decode is NOT "no account" — we say what we
+  # actually know, which is that the stored shape did not name one.
+  @unreadable_blob_reason "This connection's stored credential doesn't name one."
+  @cloudflare_bare_token_reason "This connection stored a bare API token, which doesn't name an account."
+
   # The Hetzner Cloud API host. Lives HERE (the impure call site), never in the
   # pure catalog and never in any response. Defined above the first use (module
   # attributes are read at their point of reference).
@@ -13708,6 +13737,74 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
+  # GET /v1/providers/:kind/identity handler — the connection header alone, with
+  # NO catalog and NO upstream call. Deliberately NOT routed through
+  # with_provider_catalog/3: that helper's kind gate is @neutral_kinds and its
+  # failure mode is 502 catalog_unavailable, both wrong for a fact read out of
+  # the already-stored credential. The 404 vocabulary is kept identical
+  # (unknown_kind / no_provider) so a client reads one contract across the three
+  # provider routes.
+  defp providers_identity(conn, kind) do
+    cond do
+      kind not in @connectable_kinds ->
+        json(conn, 404, %{error: "unknown_kind"})
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "no_provider"})
+
+      true ->
+        case provider_of_kind(conn.assigns.current_team, kind) do
+          nil ->
+            json(conn, 404, %{error: "no_provider"})
+
+          provider ->
+            case stored_provider_identity(kind, provider) do
+              {:ok, identity} ->
+                json(conn, 200, %{
+                  provider: %{kind: provider.kind, label: provider.label, identity: identity}
+                })
+
+              {:error, :unreadable} ->
+                json(conn, 502, %{error: "credential_unreadable"})
+            end
+        end
+    end
+  end
+
+  # Decrypt the stored credential and read the identity out of it. The ONLY
+  # failure here is a credential this control plane cannot decrypt — an
+  # infrastructure fault, not an absent identity, so it is a 502 rather than an
+  # identity whose `value` is nil: "we could not read your credential" and "your
+  # credential does not name an account" are different sentences and must not be
+  # collapsed into one. No key of the blob other than the identity field is ever
+  # read here, so `api_token` / `client_secret` cannot reach the response.
+  defp stored_provider_identity(kind, provider) do
+    case Registry.reveal_provider_token(provider) do
+      {:ok, credential} -> {:ok, stored_identity(kind, credential)}
+      _ -> {:error, :unreadable}
+    end
+  end
+
+  # Per-kind: decode the stored credential into whatever provider_identity/2's
+  # clause for that kind expects. hetzner stores a bare token; azure and the
+  # cloudflare BLOB form store JSON; cloudflare may ALSO store a bare API-token
+  # string (the common paste), which names no account.
+  defp stored_identity("hetzner", token), do: provider_identity("hetzner", token)
+
+  defp stored_identity("azure", credential) do
+    case Jason.decode(credential) do
+      {:ok, creds} when is_map(creds) -> provider_identity("azure", creds)
+      _ -> identity_absent("Subscription", @unreadable_blob_reason)
+    end
+  end
+
+  defp stored_identity("cloudflare", credential) do
+    case Jason.decode(credential) do
+      {:ok, creds} when is_map(creds) -> provider_identity("cloudflare", creds)
+      _ -> identity_absent("Account", @cloudflare_bare_token_reason)
+    end
+  end
+
   # Shared resolve → build → serve for both neutral catalog routes. 404
   # unknown_kind for a kind we don't host; 404 no_provider when the team has
   # none connected (connect-first empty state); 502 catalog_unavailable when the
@@ -13790,11 +13887,12 @@ defmodule BarkparkCloud.Web.Router do
   # carrying its own reason (`value: nil`), never a silently omitted key the
   # client would paint as a blank that looks known.
   #
-  # Only the @neutral_kinds reach here (with_provider_catalog 404s anything
-  # else), so cloudflare — whose stored blob may carry an account_id — has no
-  # clause: it owns no catalog route, and the console's provider picker has no
-  # cloudflare entry at all, so a clause here would be unreachable code rather
-  # than a rendered fact.
+  # REACHED FROM TWO PLACES, AND THE SETS DIFFER. Through
+  # build_provider_catalog/2 only the @neutral_kinds arrive (with_provider_catalog
+  # 404s anything else); through providers_identity/2 the whole
+  # @connectable_kinds set arrives, which is why "cloudflare" has a clause at
+  # all. Before D899 it did not, and adding one would have been unreachable dead
+  # code — the route is what makes it a rendered fact.
   defp provider_identity("azure", creds) do
     case creds |> Map.get("subscription_id") |> to_string() |> String.trim() do
       "" ->
@@ -13812,6 +13910,26 @@ defmodule BarkparkCloud.Web.Router do
   # project or organization identifier. So we say that, rather than guessing.
   defp provider_identity("hetzner", _token),
     do: identity_absent("Project", "Hetzner doesn't report which project this token belongs to.")
+
+  # Cloudflare API tokens are ACCOUNT-scoped but the token itself does not name
+  # its account, and NOTHING in this tree asks Cloudflare whose account it is:
+  # `Cloudflare.Client` declares exactly five callbacks — verify_token,
+  # upsert_dns_record, delete_dns_record, ensure_zone_proxied,
+  # create_origin_ca_cert — and `verify_token/1` returns `%{status: ...}` off
+  # `GET /user/tokens/verify`, a token-liveness answer with no account
+  # in it. So the ONLY account we can name is the `account_id` the person typed
+  # at connect time and we stored (`cloudflare_credential_blob/1` keeps it when
+  # supplied). `source: "stored"` says exactly that; this is an ECHO and the
+  # console must never call it verified.
+  defp provider_identity("cloudflare", creds) when is_map(creds) do
+    case creds |> Map.get("account_id") |> to_string() |> String.trim() do
+      "" ->
+        identity_absent("Account", "This connection didn't store an account ID.")
+
+      account_id ->
+        %{label: "Account", value: account_id, source: "stored", reason: nil}
+    end
+  end
 
   defp identity_absent(label, reason),
     do: %{label: label, value: nil, source: "unavailable", reason: reason}

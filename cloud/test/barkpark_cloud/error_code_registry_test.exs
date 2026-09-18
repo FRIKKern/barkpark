@@ -116,6 +116,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "content_binding_empty",
              "content_binding_not_applicable",
              "content_binding_required",
+             "credential_unreadable",
              "decrypt_failed",
              "deliveries_required",
              "deploy_ability_required",
