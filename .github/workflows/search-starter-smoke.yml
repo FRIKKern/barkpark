@@ -106,14 +106,16 @@ jobs:
       # matches nothing prints "# tests 0" and exits 0, so this job would go
       # green having proven nothing at all.
       #
-      # `--floor 4` is a COMMITTED literal, not a derived one. Everything else
+      # `--floor 12` is a COMMITTED literal, not a derived one. Everything else
       # the runner checks comes out of this same glob, so a partial deletion --
-      # 3 of the 4 spec files removed -- shrinks the expectation with the tree
-      # and stays green. Four cannot shrink without an edit to this line.
-      # Adding a spec reds with `raise the floor to 5`; bump it here.
+      # 11 of the 12 spec files removed -- shrinks the expectation with the tree
+      # and stays green. Twelve cannot shrink without an edit to this line.
+      # Adding a spec reds with `raise the floor to 13`; bump it here.
+      # Raised 4 -> 12 (measured 2026-09-18: 12 files, 93 tests). The stale 4
+      # let 8 files and 51 tests be deleted with this job still green.
       - name: Run the finder unit specs
         working-directory: templates/search-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 4 'lib/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 12 'lib/**/*.test.ts'
 
   live-journey:
     name: Journey smoke — live demo (report mode, never gates)
