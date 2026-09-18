@@ -149,7 +149,7 @@ exact level-skip this epic exists to cure.
   every sentence `code`, `Actions` or `live-DB`, gives each its own re-run command, governs its
   live-DB counts with one anti-vacuity control, and marks the ones it settled — including one
   REFUTED — rather than leaving them open. Re-run: read that addendum's table and follow the
-  re-run column for the sentence you care about. Verified present at `9ef5d7223`.
+  re-run column for the sentence you care about. Verified present at `6c4b904f9`.
 - **PR-merged-but-open = 24** — inherited from wave 32, not re-counted here.
   Re-run: `bp task get task-fb4fb869490b4213 -o json` cross-referenced against merged PRs.
 
