@@ -293,6 +293,17 @@ config :barkpark_cloud, Oban,
        # enforced in-band by consume_oauth_exchange_code/1 — pure hygiene, so it
        # rides :maintenance beside its three twins.
        {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
+       # cch-bl-lifecycle-token-reaper: the fifth of the same sweep, for the last
+       # three short-lived `user_tokens` contexts that had no owner — `reset`,
+       # `confirm`, `change_email`. All three soft-stamp `revoked_at` and never
+       # DELETE, so every reset link ever requested was still a row. NOT a copy of
+       # the four above: `Accounts.throttled?/3` implements the confirm (1/300s)
+       # and change_email (3/3600s) DELIVERY throttles by counting unrevoked rows
+       # WITHOUT filtering `expires_at`, so reaping on expiry alone would return a
+       # resend slot early. Revoked rows go immediately; expired-unrevoked ones
+       # wait out a grace window double the largest throttle window. Pure hygiene
+       # otherwise, so it rides :maintenance beside its four twins.
+       {"* * * * *", BarkparkCloud.Workers.LifecycleTokenReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
