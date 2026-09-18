@@ -340,6 +340,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
             "content" =>
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "lifecycle_status" => "open",
                 "design_doc" => @dt_paper,
                 "acceptance_criteria" => [
