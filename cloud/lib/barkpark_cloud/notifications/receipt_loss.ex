@@ -106,6 +106,7 @@ defmodule BarkparkCloud.Notifications.ReceiptLoss do
       module: BarkparkCloud.Notifications,
       file: "barkpark_cloud/notifications.ex",
       adjudication: :traced,
+      writers: [:record_delivery],
       anchor: ~r/defp record_delivery\(/,
       why:
         "The email send already returned. The receipt is reduced and re-written, " <>
@@ -117,6 +118,7 @@ defmodule BarkparkCloud.Notifications.ReceiptLoss do
       module: BarkparkCloud.Notifications,
       file: "barkpark_cloud/notifications.ex",
       adjudication: :traced,
+      writers: [:log_chat_delivery],
       anchor: ~r/defp log_chat_delivery\(/,
       why:
         "The chat POST already returned. Same ladder as record_delivery/7 — the " <>
@@ -127,6 +129,9 @@ defmodule BarkparkCloud.Notifications.ReceiptLoss do
       module: BarkparkCloud.Notifications.Withhold,
       file: "barkpark_cloud/notifications/withhold.ex",
       adjudication: :consented,
+      # TWO enclosing functions, one write: `publishable?/1` builds and
+      # validates the changeset, `insert_suppressed/1` issues the statement.
+      writers: [:insert_suppressed, :publishable?],
       anchor: ~r/defp publishable\?\(attrs\)/,
       why:
         "NOT A RECEIPT and not reducible. A suppressed row's `last_error` IS its " <>
@@ -134,6 +139,23 @@ defmodule BarkparkCloud.Notifications.ReceiptLoss do
           "row this module would write is a withhold with no disclosure, which is " <>
           "the defect Withhold exists to kill. It refuses the row before the insert " <>
           "and logs the refusal instead."
+    },
+    %{
+      site: :receipt_rescue,
+      module: BarkparkCloud.Notifications.ReceiptLoss,
+      file: "barkpark_cloud/notifications/receipt_loss.ex",
+      adjudication: :consented,
+      # This module's OWN write. It is registered rather than excused by the
+      # census, because the funnel is a delivery writer like any other.
+      writers: [:walk_ladder],
+      anchor: ~r/defp walk_ladder\(site, attrs, \[/,
+      why:
+        "THE LAST RUNG. A reduced receipt that is itself refused has nothing " <>
+          "narrower left that is true — every remaining column is required by " <>
+          "`Delivery.changeset/2` — so there is no further trace to write. The " <>
+          "residue is named out loud instead: a Logger.error and a `:lost` " <>
+          "telemetry count, which is the honest end of the ladder rather than a " <>
+          "fourth rung that invents a value."
     }
   ]
 
@@ -156,7 +178,7 @@ defmodule BarkparkCloud.Notifications.ReceiptLoss do
   @doc """
   Write the narrowest TRUE receipt still available after `attrs` was refused.
 
-  Returns `{:reduced, %Delivery{}}` when a row landed, `:lost` when none could.
+  Returns `{:reduced, delivery}` when a row landed, `:lost` when none could.
   Never raises: the send it is a receipt for already happened.
   """
   @spec rescue_receipt(atom(), map(), Ecto.Changeset.t()) :: {:reduced, Delivery.t()} | :lost
