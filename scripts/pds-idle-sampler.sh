@@ -131,6 +131,14 @@
 #              re-runs this script against a fake `ssh` on a shimmed PATH in a
 #              mktemp work dir, so it is safe on any laptop and in CI.
 #
+#              WHERE IT RUNS. It is an arm of the `pds-harnesses` leg in
+#              .github/shell-harness-legs.json, executed by the `harness`
+#              matrix job of .github/workflows/shell-harnesses.yml through
+#              scripts/shell-harness-run.sh. The leg is dispatched for this
+#              file by the roster row `pds-harnesses scripts/pds-*.sh`, so an
+#              edit HERE runs it. Before that wiring it ran in no job at all,
+#              which is how a guard decays in silence.
+#
 # WHAT SURVIVES AN EARLY KILL (the defect this section documents)
 #
 # This instrument's ONLY product is the sample series in its work dir. It used
