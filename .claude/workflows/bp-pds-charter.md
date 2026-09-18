@@ -20,6 +20,10 @@
 > LIVE memory of a DIFFERENT epic (Cloud GUI Remake, `task-47bc4168392dec17`). PDS decisions must
 > never be written there. **This file is the PDS epic's charter** — every PDS wave reads and
 > amends it.
+>
+> PROBE LINE (throwaway branch, never merged): this sentence exists only to prove that a PR whose
+> ONLY change is this charter file selects the `pds-harnesses` job. It defines no PDS-D, amends no
+> ruling, and is deleted with the branch.
 
 ## Vision
 
