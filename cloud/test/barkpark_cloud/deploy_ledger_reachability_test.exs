@@ -424,14 +424,45 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   ]
 
   # ---------------------------------------------------------------------------
-  # ANTI-VACUITY FLOORS — a walker that quietly stopped matching reports a clean
+  # ANTI-VACUITY GAUGES — a walker that quietly stopped matching reports a clean
   # tree and passes, which is the failure mode this whole file exists to not
-  # have. Both floors are set EQUAL to the measured population, not comfortably
-  # under it, and a legitimate change RAISES them in the same commit — where the
-  # set-equality assertions red on that same change anyway, so a floor can never
-  # be the only thing a change has to satisfy.
-  @publics_floor 23
-  @call_sites_floor 23
+  # have.
+  #
+  # THEY ARE NOT `>=` FLOORS ANY MORE, AND THE PUBLICS ONE IS NOT A LITERAL.
+  # A `>=` floor has only ONE failure direction: it reds when the world gets
+  # WORSE and stays silent when the world gets BETTER than its record, so it
+  # drifts below the population it guards and nothing says so. Measured on
+  # origin/main at b0d986ac6: the pair sat at `>= 23 / >= 23` while the tree
+  # held 28 publics and 49 call sites — the publics number trailed by 5 and the
+  # call-sites number by 26, both silently, because `>=` cannot see up. The
+  # comment that used to sit here claimed "a legitimate change RAISES them in
+  # the same commit"; that claim is DELETED rather than restated, because no
+  # control ever proved it and the 26-site gap disproves it. Same shape #17194
+  # fixed for the classes gauge.
+  #
+  # PUBLICS — DERIVED, so it cannot be stale. `@declared` is the committed
+  # bucket table, and "the DECLARED table and the module's public surface are
+  # the SAME SET, both directions" already reds on any public that is not in it.
+  # Reading the gauge off `@declared` makes the floor move WITH that table for
+  # free; there is no second number to forget. A dead walker still reds: it
+  # measures 0 publics against a table of #{length(@declared)}.
+  #
+  # CALL SITES — an EQUALITY pin, because nothing in the tree derives it. It
+  # reds in BOTH directions: a lost call site (a broken walker, a deleted
+  # caller) and a GAINED one (the drift this row was filed for). Re-measure with
+  # the census arm below — `mix test test/barkpark_cloud/deploy_ledger_reachability_test.exs`
+  # prints `CENSUS: <n> publics / <n> call sites` on every run — and move the
+  # pin in the same commit as the caller, quoting that printed line.
+  #
+  # MEASURED, NOT INHERITED. The row that asked for this fix carried "23 publics
+  # / 36 call sites", read off a BRANCH on 2026-09-10. Re-measured on origin/main
+  # by the arm below at b0d986ac6, the tree answers 28 publics / 49 call sites
+  # over 168 `.ex` files — so the filed pair was ALSO stale and copying it would
+  # have re-created this row. The denominator is AST NODES (external + internal
+  # call sites summed by `total_sites/1`), never grep lines: one source line
+  # carrying two calls counts twice, which `grep -c` cannot see.
+  @publics_floor length(@declared)
+  @call_sites_floor 49
 
   # ---------------------------------------------------------------------------
 
@@ -616,24 +647,47 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # The instrument can lose
   # ---------------------------------------------------------------------------
 
-  test "ANTI-VACUITY FLOOR: a broken walker REFUSES rather than reporting a clean tree" do
+  test "THE CENSUS PRINTS WHAT IT SCANNED — the arm that re-measures the pins" do
     {entries, callers} = measured()
 
-    assert length(entries) >= @publics_floor,
-           "only #{length(entries)} public def(s) collected, floor is #{@publics_floor} — the " <>
-             "EXTRACTOR is broken, not the module shrunk. Check Census.collect_defs/1 for a " <>
-             "def syntax it does not match before touching the floor."
+    # The gauges are re-derivable from a RUN, not from memory or from a grep.
+    # This line is what a commit that adds a public or a caller quotes when it
+    # moves `@call_sites_floor`; without it the only way to learn the measured
+    # population is to read a failure message, which means guessing first.
+    IO.puts(
+      "\nCENSUS: #{length(entries)} publics / #{total_sites(callers)} call sites " <>
+        "(pinned: #{@publics_floor} publics [derived from @declared] / " <>
+        "#{@call_sites_floor} call sites) — #{length(Census.ex_files(@lib))} .ex files scanned"
+    )
 
-    assert total_sites(callers) >= @call_sites_floor,
-           "only #{total_sites(callers)} call site(s) collected, floor is #{@call_sites_floor}"
+    # Non-vacuous: it scanned a real tree, not an empty one.
+    assert length(Census.ex_files(@lib)) > 100
+    assert length(entries) > 0
+    assert total_sites(callers) > 0
+  end
 
-    # And the floor can LOSE: the identical assertion against a walker that
+  test "ANTI-VACUITY GAUGES: EQUALITY, so a pin that trails the population REDS" do
+    {entries, callers} = measured()
+
+    assert length(entries) == @publics_floor,
+           "measured #{length(entries)} public def(s), the @declared table holds #{@publics_floor} — " <>
+             "if measured is LOWER the EXTRACTOR is broken, not the module shrunk (check " <>
+             "Census.collect_defs/1 for a def syntax it does not match); if measured is HIGHER a " <>
+             "public arrived without a @declared row. Either way the fix is not a bigger number."
+
+    assert total_sites(callers) == @call_sites_floor,
+           "measured #{total_sites(callers)} call site(s), pinned at #{@call_sites_floor}. " <>
+             "This pin is an EQUALITY on purpose (both directions): FEWER means the walker lost a " <>
+             "call shape, MORE means a caller was added — move the pin in the same commit as the " <>
+             "caller and quote the CENSUS line this suite prints. Do not widen it to `>=`."
+
+    # And the gauge can LOSE: the identical assertion against a walker that
     # matches no call shape — what a future syntax looks like from in here.
     broken = Census.callers(entries, @lib, @ledger, walker: :broken)
     assert total_sites(broken) == 0
 
     assert_raise ExUnit.AssertionError, fn ->
-      assert total_sites(broken) >= @call_sites_floor
+      assert total_sites(broken) == @call_sites_floor
     end
 
     # With the walker dead, EVERY public reads unreachable — i.e. a silent
