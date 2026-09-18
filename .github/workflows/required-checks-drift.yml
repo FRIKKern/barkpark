@@ -147,6 +147,7 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/required-checks.test.sh"
       - "scripts/workflow-job-shape-check.sh"
+      - "scripts/workflow-run-block-length-check.sh"
       - "scripts/workflow-errexit-capture-check.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
@@ -562,6 +563,46 @@ jobs:
       - name: No NEW workflow joins the tree with no row in the required-checks ledger
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/unaccounted-workflow-ratchet.sh
+
+      # ── THE FOURTH LINT ON THIS JOB: the cap ABOVE the YAML parser ─────────
+      # A FOURTH SUBJECT, THE SAME HOST, FOR THE SAME REASON THE OTHERS ARE
+      # HERE: one more single PyYAML pass over the same tree, wanting to render
+      # on every PR including the ones that edit an unrelated workflow, on the
+      # one job in this repo that is already dispatcher-independent and
+      # path-unfiltered. A new job renders a new check-run name and pulls the
+      # census in behind it — the trade-off the blocks above record; this
+      # applies it rather than re-deriving it.
+      #
+      # AND THE HOST MATTERS MORE HERE THAN FOR ANY SIBLING. The failure this
+      # measures is a STARTUP FAILURE: GitHub refuses the whole workflow file at
+      # parse time, zero jobs, everything in that file dark at once. A checker
+      # wired inside shell-harnesses.yml — the file that actually carries the
+      # at-risk block — would be dead in exactly the run that needed it. A
+      # broken file cannot lint itself.
+      #
+      # WHAT IT SEES THAT NOTHING ELSE CAN (task-91e5ae77bb475fe1, 2026-09-18).
+      # GitHub compiles an interpolated `run:` scalar into ONE expression and
+      # caps it at 21000 characters. Eleven roster rows added to
+      # shell-harnesses.yml's `changes` block crossed it:
+      #
+      #   Invalid workflow file: .github/workflows/shell-harnesses.yml#L1
+      #   (Line: 1529, Col: 14): Exceeded max expression length 21000
+      #
+      # The file is VALID YAML, so actionlint, PyYAML, every local gate in this
+      # repo and shell-harnesses-dispatch.test.sh (22 arms) all passed it. The
+      # cap is one layer above the parser and nothing in the tree measured it.
+      #
+      # WHERE IT STANDS TODAY, so a reader gets the headroom without re-deriving
+      # it: that block is 19968 bytes of the 21000 cap at merge base c0e04a7ea —
+      # inside the WARN band, 32 bytes under the 20000 fail floor. The next
+      # roster row reds here, at PR time, instead of in a zero-job run nobody
+      # is watching.
+      - name: Prove the run-block length check on planted fixtures (--selftest)
+        run: bash scripts/workflow-run-block-length-check.sh --selftest
+
+      - name: No `run:` block approaches GitHub's 21000-char max expression length
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/workflow-run-block-length-check.sh --dir .github/workflows
 
   # ── required contexts must be unable to conclude `cancelled` ────────────────
   #
