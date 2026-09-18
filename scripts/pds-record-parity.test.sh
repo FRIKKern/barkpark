@@ -246,6 +246,43 @@ says "defined:    1 distinct PDS-D" "the loose heading lens sees only the one he
 says "unresolved: 3" "the loose heading lens reports every bullet-defined D as unresolved"
 says "LENS ARTIFACT" "the loose heading lens labels its own red as an artifact"
 
+# ══ AXIS A RESOLVES THE LETTERED SHAPE THE SAME WAY AXIS D DOES ══════════════
+#
+# A commit message cites clause (a) of a ruling as `PDS-D220a` exactly as a
+# script does. An axis that reds on what its sibling greens is a lens artifact
+# wearing a finding's clothes, so the rule here is the SAME rule, not a softer
+# one: the base's definition block must carry the literal marker, and a letter
+# that is a typo still reds.
+CHLA="$TMP/charter-lettered-a.md"
+cat > "$CHLA" <<'EOF'
+# A charter with lettered rulings
+
+- **PDS-D448 — THE BASE RULING.** A digits-only extractor credits every
+  PDS-D448x citation to this entry.
+- **PDS-D448a — A LETTERED RULING IN ITS OWN RIGHT.** Separately defined.
+- **PDS-D220 — A RULING WITH CLAUSES.** (a) the first clause. (b) the second.
+
+## PDS-D404 a decision defined as a HEADING
+
+Nothing else defines a D.
+EOF
+CM_LET="$TMP/commits-lettered"
+printf 'fix: per PDS-D448a and PDS-D220a and PDS-D220b
+' > "$CM_LET"
+run 0 "axis A resolves a real lettered ruling AND a clause reference" -- --axis a --charter "$CHLA" --commits-file "$CM_LET"
+says "clauses:    2 lettered citation(s) resolved as a CLAUSE" "the clause path is PRINTED on axis A too"
+says "unresolved: 0" "and nothing was left over"
+
+printf 'fix: a lettered typo, per PDS-D448z
+' > "$CM_LET"
+run 1 "axis A REDS on a phantom lettered ruling whose base exists" -- --axis a --charter "$CHLA" --commits-file "$CM_LET"
+says "UNRESOLVED-CITATION PDS-D448z" "the red names the phantom by its FULL name, not its numeric base"
+
+printf 'fix: a letter its base has no clause for, per PDS-D220z
+' > "$CM_LET"
+run 1 "axis A does not let the clause path decay into a base path" -- --axis a --charter "$CHLA" --commits-file "$CM_LET"
+says "UNRESOLVED-CITATION PDS-D220z" "220s block carries (a) and (b) and no (z)"
+
 # A missing charter is UNCHECKED, never a pass — an arm that cannot read the
 # charter has resolved exactly zero citations.
 run 2 "a missing charter lands in UNCHECKED, never a silent PASS" -- --axis a --charter "$TMP/no-such-charter.md" --commits-file "$CM_OK"
