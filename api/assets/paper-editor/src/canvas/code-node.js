@@ -279,10 +279,13 @@ export const Code = Node.create({
         langInput.style.display = hide ? "none" : "";
       };
 
+      let writeTimer = null; // pending debounced attr write (declared before paint, which guards on it)
       const paint = (n) => {
         const value = (n.attrs && n.attrs.value) || "";
         const lang = (n.attrs && n.attrs.lang) || "";
-        if (area.value !== value) area.value = value;
+        // While a local edit is still inside its debounce, an incoming repaint (own-echo,
+        // sibling save, node re-render) must not clobber the textarea with the stale attr.
+        if (area.value !== value && !writeTimer) area.value = value;
         syncRows();
         if (langInput.value !== lang) langInput.value = lang;
         // Editability mirrors the editor's mode.
@@ -329,7 +332,6 @@ export const Code = Node.create({
       // → run-convert emits a single patch-block carrying the changed field(s). The
       // debounce mirrors the editor's DEBOUNCE_MS so a burst of keystrokes coalesces
       // into one attr write (and thus one op batch).
-      let writeTimer = null;
       const commitNow = () => {
         if (typeof getPos !== "function") return;
         const pos = getPos();
