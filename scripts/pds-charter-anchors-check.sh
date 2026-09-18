@@ -77,14 +77,18 @@
 # other starts a run in which the job is skipped — the exact disagreement
 # shell-harnesses.yml records against `scripts/pds-secret-scan.sh`.
 #
-# It is a RATCHET, not a hard red, and deliberately so: 11 cited paths are
-# uncovered today, all of them outside the deploy/PDS fence that owns this
-# script (api/**, internal/**, docs/contracts/**, and `scripts/pds-*.py`, which
-# the `scripts/pds-*.sh` glob misses on its extension). Hard-redding here would
-# put a permanent red on main that no PDS PR is allowed to fix. The ceiling
-# bounds the damage and names every uncovered path, so the .github/ repair has a
-# worklist; the arm reds the moment a NEW anchor is pointed at a file that
-# cannot trigger the check.
+# It WAS a ratchet over known debt: 11 cited paths were uncovered when this arm
+# landed, all of them outside the deploy/PDS fence that owns this script
+# (api/**, internal/**, docs/contracts/**, and `scripts/pds-*.py`, which the
+# `scripts/pds-*.sh` glob misses on its extension). Hard-redding then would have
+# put a permanent red on main that no PDS PR was allowed to fix, so the ceiling
+# bounded the damage and named every uncovered path — which is exactly the
+# worklist the .github/ repair (task-ceada0e53f6d2f1d) worked through.
+#
+# THAT DEBT IS NOW ZERO and the ceiling is locked at 0. The arm still reds only
+# on an INCREASE, so it behaves identically; at ceiling 0 that means the first
+# anchor pointed at a file that cannot trigger the check reds on the PR that
+# writes it, which was the point of building the arm.
 #
 # PRECONDITION, loud: if the workflow is missing or either extracted set comes
 # back EMPTY, arm E reds as UNCHECKED instead of printing `0 uncovered`. An
@@ -129,9 +133,13 @@ UNCLASSIFIED_CEILING="${PDS_ANCHOR_UNCLASSIFIED_CEILING:-8}"
 DEF_FLOOR="${PDS_ANCHOR_DEF_FLOOR:-809}"
 
 # Arm E — anchor target paths that cannot DISPATCH the job that adjudicates
-# them. Baselined at 11 from a run of this script on d2a4ecc02. Same ratchet
-# rule as B/C/D: falling is progress, exceeding is the red.
-TRIGGER_GAP_CEILING="${PDS_ANCHOR_TRIGGER_GAP_CEILING:-11}"
+# them. Baselined at 11 from a run of this script on d2a4ecc02; CLOSED to 0 by
+# task-ceada0e53f6d2f1d, which put all eleven into BOTH halves of
+# .github/workflows/shell-harnesses.yml. Same ratchet rule as B/C/D: falling is
+# progress, exceeding is the red — and at 0 the ratchet is no longer a budget
+# for known debt but a hard rule: the NEXT anchor pointed at a file that cannot
+# trigger this check reds on the PR that writes it.
+TRIGGER_GAP_CEILING="${PDS_ANCHOR_TRIGGER_GAP_CEILING:-0}"
 # The workflow whose trigger set arm E reads. Overridable so the self-test can
 # point it at a fixture; never overridden in CI.
 TRIGGER_WORKFLOW="${PDS_ANCHOR_WORKFLOW:-.github/workflows/shell-harnesses.yml}"
