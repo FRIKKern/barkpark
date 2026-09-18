@@ -175,3 +175,77 @@ func trimForErr(body []byte) string {
 	}
 	return s
 }
+
+// PaperExport is one paper retrieved in PUBLISH SHAPE: the exact body
+// `POST /v1/plugins/bulldocs/papers` (`bp bulldocs publish`) accepts back.
+// Exactly one of Blocks / HTML is populated, mirroring the source route's
+// `source.kind` — a blocks paper exports blocks, an opaque body_html paper
+// exports body_html, and neither leg is ever synthesised from the other.
+// Rev is the row's `_rev` hash, carried for the caller's receipt only: the
+// publish endpoint is an unfenced create-or-replace and REFUSES a body that
+// carries ifRev/if_rev, so it is deliberately NOT part of the payload.
+type PaperExport struct {
+	Slug   string          `json:"slug"`
+	Title  string          `json:"title,omitempty"`
+	Blocks json.RawMessage `json:"blocks,omitempty"`
+	HTML   string          `json:"body_html,omitempty"`
+	Rev    string          `json:"-"`
+}
+
+// PaperExportPayload fetches the paper's block truth from the SAME public
+// source route `PaperPullBpml` reads (`?format=json` instead of `?format=bpml`)
+// and reshapes the reader envelope — {id,title,_rev,source:{kind,…}} — into the
+// publish payload. `format=json` is the block truth and has no BPML kernel to
+// escape, so it answers for papers the isomorphic view refuses with
+// `bpml_unprintable`.
+func (c *Client) PaperExportPayload(slug string) (*PaperExport, *PaperAPIErr, error) {
+	u := c.flatURL("/papers/" + url.PathEscape(slug) + "/source?format=json")
+
+	resp, err := c.authGet(u)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, paperBodyCap))
+	if err != nil {
+		return nil, nil, fmt.Errorf("paper export %s: %w", slug, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodePaperErr(resp.StatusCode, body), nil
+	}
+
+	var envelope struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Rev    string `json:"_rev"`
+		Source struct {
+			Kind   string          `json:"kind"`
+			Blocks json.RawMessage `json:"blocks"`
+			HTML   string          `json:"html"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, nil, fmt.Errorf("paper export %s: unreadable source envelope: %w", slug, err)
+	}
+
+	// The slug the CALLER asked for is the one that must go back in: the
+	// envelope's `id` is the stored doc id, and publishing under a different
+	// key than the one exported would silently fork the paper.
+	out := &PaperExport{Slug: slug, Title: envelope.Title, Rev: envelope.Rev}
+
+	switch envelope.Source.Kind {
+	case "blocks":
+		if len(envelope.Source.Blocks) == 0 {
+			return nil, nil, fmt.Errorf("paper export %s: source says blocks but carries none", slug)
+		}
+		out.Blocks = envelope.Source.Blocks
+	case "html":
+		out.HTML = envelope.Source.HTML
+	default:
+		return nil, nil, fmt.Errorf("paper export %s: source kind %q is neither blocks nor html", slug, envelope.Source.Kind)
+	}
+
+	return out, nil, nil
+}

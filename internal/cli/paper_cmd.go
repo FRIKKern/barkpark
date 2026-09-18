@@ -111,6 +111,11 @@ func runPaper(out *writer, g globals, args []string) int {
 		return runPaperNew(out, g, args[1:])
 	case "pull":
 		return runPaperPull(out, g, resolveContext(g), args[1:])
+	// `export` (paper_export_cmd.go) is the retrieval half the BP-ONB-21 audit
+	// found missing: the paper OUT in the shape `bp bulldocs publish` takes IN.
+	// It rides the same source route as `pull`, so it resolves context alike.
+	case "export":
+		return runPaperExport(out, g, resolveContext(g), args[1:])
 	case "status":
 		return runPaperStatus(out, g, resolveContext(g), args[1:])
 	case "diff":
@@ -1654,6 +1659,13 @@ func usagePaper(out *writer, toStdout bool) {
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
 	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
+	p("  export <slug>    print the paper as a publish-ready JSON payload on")
+	p("                   stdout (--out <path> to a file) — the retrieval half")
+	p("                   of the round trip:")
+	p("                     bp paper export <slug> > p.json")
+	p("                     bp bulldocs publish <slug> --file p.json")
+	p("                   (get/list are the generic doc verbs: bp doc get paper")
+	p("                    <slug> for the stored row, bp doc ls paper to list)")
 	p("")
 	p("working copy (BPML — papers as files under .barkpark/papers/):")
 	p("  new <slug>       scaffold a wall-passing BPML starter + rev-0 anchor")
