@@ -1374,6 +1374,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
                "expected the #{key} section to render"
 
         assert html =~ ~s(data-test-id="sidebar-section-toggle-#{key}")
+        assert html =~ ~s(id="bp-doc-sec-body-#{key}")
       end
 
       # section toggles are real <button>s (Enter/Space toggle) carrying aria-expanded
@@ -1394,21 +1395,182 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert html =~ "Public"
     end
 
-    test "the Publish section offers NO publish/unpublish action (papers publish in place)" do
-      # Papers are single-row, published-in-place (`upsert_paper` always writes
-      # doc_id = slug, status "published"); the doc-level publish/unpublish
-      # events assume the drafts-twin model — publish would always fail (no
-      # drafts.<slug> row) and unpublish would DELETE the published row and
-      # strand a twin no paper read-path resolves. Until a paper-aware
-      # lifecycle exists, the section is read-only state — a broken or
-      # destructive button here fails the honest-affordance bar.
+    # ── pdd-w13: the honest-affordance guard as a PREDICATE, not a spelling list ──
+    #
+    # Papers are single-row, published-in-place (`upsert_paper` always writes
+    # doc_id = slug, status "published"); the doc-level publish/unpublish events
+    # assume the drafts-twin model — publish would always fail (no drafts.<slug>
+    # row) and unpublish would DELETE the published row and strand a twin no paper
+    # read-path resolves. Until a paper-aware lifecycle exists, the section is
+    # read-only state — a broken or destructive button here fails the bar.
+    #
+    # The guard used to refute four literal spellings (`sidebar-publish`,
+    # `sidebar-unpublish`, `phx-click="publish"`, `phx-click="unpublish"`). NONE of
+    # the four occurs anywhere in `api/lib`, so the guard could only ever catch a
+    # button spelled the way the test happened to imagine. A Publish button named
+    # the way every OTHER control in this very section is named —
+    # `phx-click="sidebar-publish-paper"`, beside `sidebar-slug-change` and
+    # `sidebar-toggle-section` — walked straight past all four.
+    #
+    # The subject is now DERIVED from the rendered markup: every event binding
+    # inside `data-test-id="sidebar-section-publish"`, classified against the
+    # LiveView's OWN routing table, read out of the StudioLive sources:
+    #
+    #   :routes_to_publish_mutation — the event has a `handle_event` clause whose
+    #     body CALLS a `*publish*` function ("publish" → `Doc.publish/1`,
+    #     "unpublish" → `Doc.unpublish/1`, "paper-publish" → `Paper.paper_publish/1`).
+    #   :no_handler — the event has no `handle_event` clause at all: a dead control,
+    #     the other half of the honest-affordance bar.
+    #
+    # Any spelling, any element, either status.
+
+    defp studio_live_sources do
+      ["lib/barkpark_web/live/studio/studio_live.ex"] ++
+        Path.wildcard("lib/barkpark_web/live/studio/studio_live/**/*.ex")
+    end
+
+    # event name => the concatenated bodies of every `handle_event` clause for it.
+    defp event_routing do
+      for path <- studio_live_sources(), reduce: %{} do
+        acc ->
+          path
+          |> File.read!()
+          |> String.split("def handle_event(")
+          |> Enum.drop(1)
+          |> Enum.reduce(acc, fn chunk, acc ->
+            case Regex.run(~r/\A\s*"([^"]+)"/, chunk) do
+              [_, name] ->
+                body = chunk |> String.split(~r/\n  defp? /, parts: 2) |> hd()
+                Map.update(acc, name, body, &(&1 <> "\n" <> body))
+
+              _ ->
+                acc
+            end
+          end)
+      end
+    end
+
+    defp handled_events, do: event_routing() |> Map.keys() |> MapSet.new()
+
+    defp publish_mutating_events do
+      for {name, body} <- event_routing(),
+          Regex.match?(~r/(?:\A|[^\w.])(?:[A-Z]\w*\.)*\w*publish\w*\s*\(/, body),
+          into: MapSet.new(),
+          do: name
+    end
+
+    defp event_attrs, do: ~w(phx-click phx-submit phx-change phx-keydown phx-keyup phx-blur)
+
+    defp sidebar_section_nodes(html, key) do
+      doc = LazyHTML.from_fragment(html)
+      sel = ~s([data-test-id="sidebar-section-#{key}"])
+      Enum.to_list(LazyHTML.query(doc, sel)) ++ Enum.to_list(LazyHTML.query(doc, sel <> " *"))
+    end
+
+    defp event_bindings(nodes) do
+      for node <- nodes,
+          attr <- event_attrs(),
+          value <- LazyHTML.attribute(node, attr),
+          do: {attr, value}
+    end
+
+    defp publish_affordance_violations(html) do
+      handled = handled_events()
+      mutating = publish_mutating_events()
+
+      for {attr, event} <- event_bindings(sidebar_section_nodes(html, "publish")),
+          reason = publish_violation_reason(event, handled, mutating),
+          do: {attr, event, reason}
+    end
+
+    defp publish_violation_reason(event, handled, mutating) do
+      cond do
+        MapSet.member?(mutating, event) -> :routes_to_publish_mutation
+        not MapSet.member?(handled, event) -> :no_handler
+        true -> nil
+      end
+    end
+
+    # splice a control into the rendered Publish section (the positive controls)
+    defp inject_into_publish_section(html, attrs) do
+      marker = ~s(data-test-id="sidebar-section-publish">)
+      assert String.contains?(html, marker), "the Publish section's opening tag moved"
+
+      String.replace(
+        html,
+        marker,
+        marker <> ~s(<button type="button" #{attrs}>Publish</button>),
+        global: false
+      )
+    end
+
+    test "the Publish section offers NO control that can mutate publish state (a predicate over the rendered section)" do
+      mutating = publish_mutating_events()
+
+      # the derivation must be ALIVE — an empty/blind routing read would make the
+      # guard below pass vacuously for every markup.
+      assert MapSet.member?(mutating, "publish")
+      assert MapSet.member?(mutating, "unpublish")
+      assert MapSet.member?(mutating, "paper-publish")
+
       for status <- ["draft", "published"] do
         html = render_sidebar(%{paper_doc: draft_paper(%{status: status})})
-        refute html =~ ~s(data-test-id="sidebar-publish")
-        refute html =~ ~s(data-test-id="sidebar-unpublish")
-        refute html =~ ~s(phx-click="publish")
-        refute html =~ ~s(phx-click="unpublish")
+        assert html =~ ~s(data-test-id="sidebar-section-publish")
+
+        violations = publish_affordance_violations(html)
+
+        assert violations == [],
+               "the #{status} Publish section renders a control the paper lifecycle " <>
+                 "cannot honour: #{inspect(violations)}"
       end
+    end
+
+    test "POSITIVE CONTROL: the guard reds on a publish button spelled in the section's OWN vocabulary" do
+      doctored =
+        render_sidebar(%{})
+        |> inject_into_publish_section(
+          ~s(phx-click="sidebar-publish-paper" data-test-id="sidebar-publish-action")
+        )
+
+      assert publish_affordance_violations(doctored) ==
+               [{"phx-click", "sidebar-publish-paper", :no_handler}]
+
+      # …and every literal the OLD four-refute guard named is still absent from
+      # this markup — a spelling list calls the doctored sidebar clean.
+      for spelling <- [
+            ~s(data-test-id="sidebar-publish"),
+            ~s(data-test-id="sidebar-unpublish"),
+            ~s(phx-click="publish"),
+            ~s(phx-click="unpublish")
+          ] do
+        refute String.contains?(doctored, spelling),
+               "the old spelling list would have caught this after all: #{spelling}"
+      end
+    end
+
+    test "POSITIVE CONTROL: the guard reds on a WIRED publish control whose event the LiveView does handle" do
+      doctored = inject_into_publish_section(render_sidebar(%{}), ~s(phx-click="paper-publish"))
+
+      assert publish_affordance_violations(doctored) ==
+               [{"phx-click", "paper-publish", :routes_to_publish_mutation}]
+    end
+
+    test "every interactive control the sidebar renders routes to an event the LiveView handles" do
+      handled = handled_events()
+
+      nodes =
+        render_sidebar(%{}) |> LazyHTML.from_fragment() |> LazyHTML.query("*") |> Enum.to_list()
+
+      bindings = event_bindings(nodes)
+
+      assert bindings != [], "precondition: the sidebar renders at least one event binding"
+
+      unhandled =
+        for {attr, event} <- bindings, not MapSet.member?(handled, event), do: {attr, event}
+
+      assert unhandled == [],
+             "the sidebar renders bindings no StudioLive handle_event clause answers: " <>
+               inspect(unhandled)
     end
 
     test "the slug section shows the current slug + a live format verdict with a tone" do
@@ -1478,6 +1640,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert html =~ ~s(data-test-id="sidebar-section-toggle-labels")
       assert html =~ ~s(aria-expanded="false")
       refute html =~ ~s(id="bp-doc-sec-body-labels")
+      # …and the OPEN twin proves those are bytes this render CAN produce, so the
+      # refute above is an absence the renderer could actually have violated.
+      assert render_sidebar(%{}) =~ ~s(id="bp-doc-sec-body-labels")
     end
 
     test "a COLLAPSED panel hides the section body entirely (no overlay, no mode)" do
@@ -1794,6 +1959,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   end
 
   describe "the flag-ON canvas stamps constraints + paints the ghost slots (doctrine paper)" do
+    alias Barkpark.Content.Papers.Template
     alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
     setup do
@@ -1819,20 +1985,54 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       )
     end
 
+    defp canvas_runs(html) do
+      html |> LazyHTML.from_fragment() |> LazyHTML.query(~s([phx-hook="BarkparkPaperCanvas"]))
+    end
+
+    defp constraint_stamps(html) do
+      LazyHTML.attribute(canvas_runs(html), "data-canvas-constraints")
+    end
+
     test "the canvas run carries data-canvas-constraints (the JSON declarations) for a locked-carrying doc" do
       html = doctrine_html([locked_title(), para("body")])
 
-      assert html =~ ~s(data-canvas-constraints=)
-      # the declaration kinds ride the stamp
-      assert html =~ "featured"
-      assert html =~ "ingress"
+      assert Enum.count(canvas_runs(html)) >= 1
+
+      # the REAL rendered shape: HEEx writes the attribute's own delimiter as a
+      # literal `"` and escapes only the value's inner quotes.
+      assert html =~ ~s(data-canvas-constraints=")
       assert html =~ ~s(&quot;presence&quot;)
+
+      stamps = constraint_stamps(html)
+      assert stamps != []
+
+      # …and the VALUE is the declaration payload itself, parsed — not a substring.
+      for json <- stamps do
+        decoded = Jason.decode!(json)
+        assert decoded == Template.client_declarations()
+        kinds = Enum.map(decoded, & &1["kind"])
+        assert "featured" in kinds
+        assert "ingress" in kinds
+      end
     end
 
-    test "a NON-doctrine paper does NOT stamp constraints (additive — the attr renders empty)" do
+    # pdd-w13: this used to refute a needle that asked the attribute's OWN opening
+    # delimiter to be an escaped-quote entity — a byte string that can never occur
+    # for ANY payload, because that delimiter is a literal `"` (the sibling above
+    # proves exactly that, and only the value's inner quotes are escaped). The real
+    # rendered shape for a plain paper is a THIRD spelling neither that needle nor
+    # the old title described: HEEx DROPS a nil attribute, so the attribute is
+    # ABSENT, not empty. Asserted here off the parsed attribute, so the doctrine and
+    # non-doctrine arms are distinguishable by the SAME predicate.
+    test "a NON-doctrine paper does NOT stamp constraints — the attribute is ABSENT (not empty, not differently shaped)" do
       html = doctrine_html([para("p1"), para("p2")])
 
-      refute html =~ ~s(data-canvas-constraints=&quot;[)
+      # precondition: the run IS rendered, so the absence below is about the
+      # attribute and not about a canvas that never arrived.
+      assert Enum.count(canvas_runs(html)) >= 1
+
+      assert constraint_stamps(html) == []
+      refute html =~ "data-canvas-constraints"
       refute html =~ ~s(data-test-id="paper-ghost-slots")
     end
 
@@ -1945,6 +2145,81 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         assert button_decls(css, ".bp-canvas-action .bp-button--primary") == reader_primary,
                "#{sink}: .bp-canvas-action .bp-button--primary diverged from the reader --primary"
       end
+    end
+  end
+
+  # ── pdd-w13: an absence assertion must name bytes some render can PRODUCE ────
+  #
+  # Two unfirable refutes shipped in this very file: four publish spellings that
+  # occur nowhere in `api/lib`, and `data-canvas-constraints=&quot;[`, which asks
+  # the attribute's own delimiter to be an HTML entity. Both are shapes, not
+  # incidents, so they are guarded as shapes.
+  describe "this file's own HTML-absence assertions" do
+    # every refuted needle that is a whole `attr="value"` pair
+    defp refuted_attribute_needles(src) do
+      for line <- String.split(src, "\n"),
+          [_, needle] <- [Regex.run(~r/refute\s+[^=]*=~\s+~s\((.*)\)\s*$/, line)],
+          Regex.match?(~r/\A[-\w]+="[^"]*"\z/, needle),
+          do: needle
+    end
+
+    # a needle is PRODUCIBLE if some render can emit it: either the bytes occur in
+    # `api/lib` verbatim, or a positive assertion in this file names the same bytes
+    # (an actual render produced them).
+    defp unproducible_needles(src, lib_sources, asserted_lines) do
+      for needle <- Enum.uniq(refuted_attribute_needles(src)),
+          not Enum.any?(lib_sources, &String.contains?(&1, needle)),
+          not Enum.any?(asserted_lines, &String.contains?(&1, needle)),
+          do: needle
+    end
+
+    defp delimiter_entity_offenders(src) do
+      for line <- String.split(src, "\n"),
+          String.contains?(line, "refute"),
+          Regex.match?(~r/[-\w]+=&quot;/, line),
+          do: String.trim(line)
+    end
+
+    defp this_file, do: File.read!(__ENV__.file)
+
+    defp asserted_lines(src) do
+      src |> String.split("\n") |> Enum.filter(&String.contains?(&1, "assert"))
+    end
+
+    defp lib_sources do
+      (Path.wildcard("lib/**/*.ex") ++ Path.wildcard("lib/**/*.heex"))
+      |> Enum.map(&File.read!/1)
+    end
+
+    test "every refuted attribute needle names bytes some render can produce" do
+      src = this_file()
+      needles = Enum.uniq(refuted_attribute_needles(src))
+
+      assert length(needles) >= 5, "precondition: the scanner found the file's refutes"
+
+      unproducible = unproducible_needles(src, lib_sources(), asserted_lines(src))
+
+      assert unproducible == [],
+             "these refutes name bytes no render in api/lib and no positive assertion " <>
+               "in this file ever produced — they cannot fire: #{inspect(unproducible)}"
+    end
+
+    test "no absence assertion spells an attribute DELIMITER as &quot; — HEEx emits a real quote" do
+      assert delimiter_entity_offenders(this_file()) == []
+    end
+
+    test "POSITIVE CONTROL: both meta-guards flag the two shapes this file used to carry" do
+      spelling = ~s(data-test-id=) <> "\"sidebar-publish\""
+      entity = "data-canvas-constraints=" <> "&quot;["
+
+      src = """
+      refute html =~ ~s(#{spelling})
+      refute html =~ ~s(#{entity})
+      """
+
+      assert refuted_attribute_needles(src) == [spelling]
+      assert unproducible_needles(src, lib_sources(), asserted_lines(this_file())) == [spelling]
+      assert length(delimiter_entity_offenders(src)) == 1
     end
   end
 end
