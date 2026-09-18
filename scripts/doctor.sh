@@ -146,6 +146,7 @@ fi
 # binary, and binding to $0 keeps a copied fixture self-contained.
 case "$0" in */*) BP_LIB_DIR="${0%/*}" ;; *) BP_LIB_DIR="." ;; esac
 # shellcheck source=lib/bp-staleness.sh
+# shellcheck disable=SC1091  # resolved at runtime from $0; -x is not on the gate
 . "$BP_LIB_DIR/lib/bp-staleness.sh"
 read -r BP_VERDICT BP_COMMIT <<<"$(bp_staleness_verdict)"
 case "$BP_VERDICT" in
