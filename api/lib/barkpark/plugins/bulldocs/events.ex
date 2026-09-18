@@ -95,6 +95,56 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
 
   def authoritative_decision?(_), do: false
 
+  @doc """
+  The audit read: who decided which request, for one paper.
+
+  Returns one map per DECISION row, newest first — the decision's own id and
+  type, the `request_event_id` it decided, the request's branch, the actor on
+  both sides, and whether the server tied them (`authoritative?`). A legacy or
+  `"unverified"` decision is listed too, with `authoritative?: false` and a
+  `requested_by` of `nil` when it names no request: the audit surface must
+  show the untrustworthy rows, not hide them.
+
+  `opts` takes the same `:workspace_id` / `:project_id` scope every other
+  read here does.
+  """
+  @spec decision_audit(String.t(), keyword()) :: [map()]
+  def decision_audit(paper_slug, opts \\ []) when is_binary(paper_slug) do
+    decision_types = Event.decision_event_types()
+
+    decisions =
+      Event
+      |> where([e], e.paper_slug == ^paper_slug)
+      |> where([e], e.event_type in ^decision_types)
+      |> scope_opts(opts)
+      |> order_by([e], desc: e.inserted_at)
+      |> Repo.all()
+
+    request_ids = decisions |> Enum.map(& &1.request_event_id) |> Enum.reject(&is_nil/1)
+
+    requests =
+      Event
+      |> where([e], e.id in ^request_ids)
+      |> Repo.all()
+      |> Map.new(&{&1.id, &1})
+
+    Enum.map(decisions, fn decision ->
+      request = Map.get(requests, decision.request_event_id)
+
+      %{
+        decision_id: decision.id,
+        decision: decision.event_type,
+        decided_at: decision.inserted_at,
+        request_event_id: decision.request_event_id,
+        branch: (request && request.branch) || decision.branch,
+        requested_by: request && {request.actor_kind, request.actor_id},
+        decided_by: {decision.actor_kind, decision.actor_id},
+        authorization: decision.authorization,
+        authoritative?: authoritative_decision?(decision)
+      }
+    end)
+  end
+
   defp check_decision_type(attrs) do
     if fetch(attrs, "event_type") in Event.decision_event_types() do
       :ok

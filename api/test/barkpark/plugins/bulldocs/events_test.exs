@@ -358,6 +358,59 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
     end
   end
 
+  describe "decision_audit/2 — who accepted what request (task-cefcbf5b3a9b1665)" do
+    test "names both sides of an authorized decision and flags an untied one" do
+      slug = "audit-paper"
+
+      {:ok, request} =
+        Events.create_event(%{
+          "goal_id" => "g-audit",
+          "paper_slug" => slug,
+          "event_type" => "simplify-request",
+          "branch" => "simplified-1",
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      {:ok, _} =
+        Events.record_decision(%{
+          "event_type" => "simplify-accept",
+          "paper_slug" => slug,
+          "request_event_id" => request.id,
+          "actor_kind" => "user",
+          "actor_id" => "user-alice"
+        })
+
+      # An untied decision written straight through create_event/1.
+      {:ok, _} =
+        Events.create_event(%{
+          "goal_id" => "g-audit",
+          "paper_slug" => slug,
+          "event_type" => "simplify-reject",
+          "branch" => "simplified-7"
+        })
+
+      audit = Events.decision_audit(slug)
+
+      tied = Enum.find(audit, & &1.authoritative?)
+      untied = Enum.find(audit, &(not &1.authoritative?))
+
+      assert tied.decision == "simplify-accept"
+      assert tied.request_event_id == request.id
+      assert tied.branch == "simplified-1"
+      assert tied.requested_by == {"user", "user-alice"}
+      assert tied.decided_by == {"user", "user-alice"}
+      assert tied.authorization == "authorized"
+
+      # The untrustworthy row is LISTED, not hidden — that is the point of an
+      # audit surface.
+      assert untied.decision == "simplify-reject"
+      assert untied.request_event_id == nil
+      assert untied.requested_by == nil
+      assert untied.authorization == "unverified"
+    end
+  end
+
   describe "the consumer gate: list_pending_intents/1 (task-cefcbf5b3a9b1665)" do
     test "drains an AUTHORIZED decision and withholds an unverified one" do
       goal_id = "bd-consumer-gate"
