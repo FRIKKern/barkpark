@@ -294,8 +294,8 @@ func fetchTaskCorpus(ctx context.Context, c *apiclient.Client, cc *corpusCache, 
 	// therefore did two things at once —
 	//
 	//	fatal error: concurrent map iteration and map write
-	//	  taskboard.copyDetails(...) corpus.go:307
-	//	  taskboard.fetchTaskCorpus(...) corpus.go:271
+	//	  taskboard.copyDetails(...)     <- the waiter's copy, in this file
+	//	  taskboard.fetchTaskCorpus(...) <- the waiter's return, in this file
 	//
 	// a waiter iterating the map while the leader's syncDetails writes it, which
 	// KILLED THE PROCESS about ten seconds after the cold walk landed (measured
