@@ -303,6 +303,56 @@ EOF
   else _no "RED ARM 1: moved + unregistered" "exit $rc: $out"; fi
   rm -f "$tmp/.github/workflows/newly-moved.yml"
 
+  # RED ARM 1s — THE ARM THIS FIX EXISTS FOR. A cron'd workflow with no push arm
+  # and no pull_request arm: nothing about it is on the PR path, so nobody is
+  # told when it reds. Under the OLD predicate (`push AND NOT pull_request`) this
+  # arm goes QUIET -- that is the mutation proof. Revert the `arms and not pr`
+  # line in _classify to `push and not pr` and THIS is the arm that fails.
+  cat > "$tmp/.github/workflows/nightly.yml" <<'EOF'
+name: nightly
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+jobs: {}
+EOF
+  out=$(WOC_ROOT="$tmp" run_check 2>&1); rc=$?
+  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q 'RED 1 unowned: nightly.yml'; then
+    _ok "RED ARM 1s: cron'd + unregistered" "refused by name, arms named"
+  else _no "RED ARM 1s: cron'd + unregistered" "exit $rc: $out"; fi
+
+  # QUIET ARM — the same cron'd workflow, now registered, must PASS. Specifically
+  # it must not trip RED 5: it has no push arm at all, so "the push arm does not
+  # include main" is not a sentence about it, and firing there would be a refusal
+  # about the wrong watcher (scheduled-arm-health.sh reads the cron'd ones).
+  cat > "$tmp/.github/workflow-owners.json" <<'EOF'
+{"owners":{"offpr.yml":{"owner":"gates","why_off_pr":"fixture"},
+           "nightly.yml":{"owner":"api","why_off_pr":"fixture cron"}}}
+EOF
+  out=$(WOC_ROOT="$tmp" run_check 2>&1); rc=$?
+  if [ $rc -eq 0 ] && ! printf '%s' "$out" | grep -q 'RED 5'; then
+    _ok "QUIET ARM: cron'd + registered" "exit 0, no RED 5 — ${out}"
+  else _no "QUIET ARM: cron'd + registered" "exit $rc: $out"; fi
+
+  # QUIET ARM — a DISPATCH-ONLY workflow with no row must stay quiet. A person
+  # started it and is reading the result; demanding a registry row for it would
+  # widen the population past the property (a red nobody sees) and make the guard
+  # noisy exactly where it has nothing to say.
+  cat > "$tmp/.github/workflows/manual.yml" <<'EOF'
+name: manual
+on:
+  workflow_dispatch:
+jobs: {}
+EOF
+  out=$(WOC_ROOT="$tmp" run_check 2>&1); rc=$?
+  if [ $rc -eq 0 ] && ! printf '%s' "$out" | grep -q 'manual.yml'; then
+    _ok "QUIET ARM: dispatch-only unowned" "exit 0, never named"
+  else _no "QUIET ARM: dispatch-only unowned" "exit $rc: $out"; fi
+  rm -f "$tmp/.github/workflows/nightly.yml" "$tmp/.github/workflows/manual.yml"
+  cat > "$tmp/.github/workflow-owners.json" <<'EOF'
+{"owners":{"offpr.yml":{"owner":"gates","why_off_pr":"fixture"}}}
+EOF
+
   # RED ARM 5 — registered, but the push arm cannot reach main, so the watcher is
   # blind to it while this file reads as covered. The dangerous shape.
   cat > "$tmp/.github/workflows/offpr.yml" <<'EOF'
