@@ -15006,3 +15006,39 @@ read and would be a new class. Filed, not built, for the same fence reason.
   unblock it:** a gates-fenced slice adding the two fixture arms to the census's own probe suite, asserting the
   *classifier* never emits `ZOMBIED` for a run that is `DISPATCHED_PENDING` or `RERUN_DELETED`. That is a real
   and useful test; it is a test of the detector, not of a remediator, and the row should be re-cut to say so.
+
+## D619 — THE ARBITER IS WIRED, AND "WIRED" MEANS *A CHARTER-ONLY PR WAS SHOWN TO RUN IT AND TO RED*. D616's "WHAT IS NOT DONE HERE" IS SUPERSEDED. (2026-09-18)
+
+`D616` closed with a named gap: the `--check-alloc` arm existed but was *"not yet wired to run on a PR that touches
+only this charter"*, and `.github/workflows/**` sat outside this lane's fence. **That gap is now closed and this
+block is the record of it.** The wiring landed in `7028ed2d8` (#18884): `.github/workflows/shell-harnesses.yml`
+carries `.claude/workflows/bp-deploy-reliability-charter.md`, `deploy/d-number-reservations.tsv` and
+`deploy/d-number-arbiter.sh` on **both** the `pull_request` and `push` `paths:` arms, the dispatcher maps all three
+to the `pds-harnesses` leg, and `.github/shell-harness-legs.json` gained the arm *"D allocation arbiter
+(deploy-reliability charter): --check-alloc over the merged tree"*. **Read D616's gap paragraph only as history.**
+
+### THE RULING: PRESENT-IN-THE-WORKFLOW IS NOT FIRES-WHEN-IT-SHOULD
+
+A `paths:` entry is a claim, not a measurement. The three ways a guard like this is green and inert are all
+invisible to reading the YAML: the job **dispatches but the arm never executes** (a matrix leg not selected, an
+`if:` short-circuit); the arm **executes but cannot red** (the arbiter's non-zero rc swallowed by a pipe, a `|| true`,
+or a `continue-on-error`); the filter **matches a neighbour, not the file** (a glob that catches the ledger but not
+the charter, or only the `push:` arm). **So the standing bar for this charter's guards is a DEMONSTRATION, not an
+inspection: one PR whose diff is THIS FILE AND NOTHING ELSE must be shown to dispatch the job, and the arm must be
+shown to RED BY NAME on a planted violation.** A green run that never reached the step proves the opposite of what
+it looks like.
+
+### HOW IT WAS DEMONSTRATED, IN BOTH DIRECTIONS, ON ONE BRANCH
+
+The negative control came first, deliberately: the commit that introduced *this very block* minted `D619` in the
+charter and **did not** reserve it, with a diff of exactly one file — this one. That is simultaneously the
+charter-only trigger test and the planted violation, so a single run answers both halves: if the job does not
+dispatch, the filter is wrong; if it dispatches green, the arm is inert. It dispatched, and `pds-harnesses` failed
+naming `UNRESERVED-MINT D619`. The following commit reserved `D619` in `deploy/d-number-reservations.tsv` and the
+same arm returned `PARITY`. **The red and the green are the same arm on the same branch minutes apart, which is the
+only shape that rules out a flake being read as a control.**
+
+**WHAT THIS DOES NOT CLAIM.** It does not claim the charter is watched by everything it should be — it is matched
+by `doc-gates.yml` on `**/*.md` and by the unfiltered task gates, and those were always firing. The measured defect
+was narrower and is the one fixed: **no workflow ran the ARBITER**, and the single workflow that owns the shared
+implementation did not trigger on this charter at all.
