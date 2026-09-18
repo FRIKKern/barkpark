@@ -1938,6 +1938,23 @@ defmodule Barkpark.Sites.DeployRunner do
               "--property=WorkingDirectory=#{run_cd()}",
               "--property=EnvironmentFile=#{env_file}",
               "--property=MemoryMax=#{memory_max()}",
+              # Deploy-reliability charter D611 (the constructive half of D118).
+              # Under cgroup v2 `memory.swap.max` defaults to `max`, so a build
+              # held to MemoryMax RSS can still push an unbounded number of pages
+              # into the box's swapfile, and the pages it displaces are the
+              # serving BEAM's. This is a BLAST-RADIUS bound, not a reclaim one:
+              # the 2026-08-06 guerrilla steady-state budget
+              # (`tooling/grip/ledger/guerrilla-steady-state-memory-budget-2026-08-06.md:70-73`)
+              # measured build processes holding ~9 MB of swap in total while the
+              # box held 2,160 MB — refusing it outright frees approximately
+              # nothing and costs the build approximately nothing; what it buys
+              # is removing the build from the set of processes that can be the
+              # one that tips the API into the global OOM killer. Literal `0`,
+              # not a knob: D611(c) prescribes no other number, and a non-zero
+              # ceiling would have to be derived from the build unit's own
+              # MemorySwapPeak. D118 forbids this property on the SERVING slot;
+              # the per-build transient unit is its only permitted home.
+              "--property=MemorySwapMax=0",
               "--property=CPUQuota=#{cpu_quota()}",
               "--collect",
               engine_path

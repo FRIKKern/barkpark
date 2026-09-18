@@ -1684,6 +1684,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       argv = File.read!(argv_dump)
       assert argv =~ ~r/^--unit=bp-site-build-unitspawn-b9-\d+\.service$/m
       assert argv =~ "--property=MemoryMax=1500M"
+      assert argv =~ "--property=MemorySwapMax=0"
       assert argv =~ "--property=CPUQuota=150%"
       assert argv =~ "--property=EnvironmentFile=#{env_file}"
       assert argv =~ "--collect"
@@ -1965,6 +1966,53 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       refute status.failure_reason =~ "rollback"
       refute status.failure_reason =~ "deploy process died abnormally"
     end
+  end
+
+  describe "the swap bound lives on the BUILD unit and NOWHERE ELSE (D118/D611)" do
+    # ARM. This REDS the moment `--property=MemorySwapMax=0` is dropped from
+    # `systemd_run/3` in deploy_runner.ex — it reads the argv the launcher was
+    # ACTUALLY invoked with, not the source file, so present-in-file cannot
+    # satisfy it. Under cgroup v2 `memory.swap.max` defaults to `max`: MemoryMax
+    # alone bounds RSS and leaves the build free to displace the serving BEAM's
+    # pages into the swapfile. Blast radius, not reclaim — see D611(c).
+    test "the rendered systemd-run argv carries -p MemorySwapMax=0 beside MemoryMax" do
+      dir = run_dir()
+      argv_dump = Path.join(dir, "argv.dump")
+
+      put_cfg(
+        enabled: true,
+        runner_mode: :systemd,
+        run_state_dir: dir,
+        systemd_run_command: {fake_systemd_run(argv_dump), []},
+        is_active_cmd: {echo_script("inactive"), []},
+        command: stub("exit 0")
+      )
+
+      assert DeployRunner.trigger(req("swapbound", build_id: "sb1")) == {:ok, :started}
+
+      argv = argv_dump |> File.read!() |> String.split("\n", trim: true)
+
+      assert "--property=MemorySwapMax=0" in argv,
+             "the build unit's swap bound is missing from the argv: #{inspect(argv)}"
+
+      # It rides the SAME unit as the RSS/CPU bounds — the per-build transient
+      # unit named on this very argv, which is the home D118 permits.
+      assert "--property=MemoryMax=1500M" in argv
+      assert "--property=CPUQuota=150%" in argv
+      assert Enum.any?(argv, &String.starts_with?(&1, "--unit=bp-site-build-swapbound-sb1-"))
+    end
+
+    # The CONTROL for this rule — "the SERVING slot unit file still carries ZERO
+    # Memory*= directives", so the bound cannot be "satisfied" by putting it
+    # where D118 forbids — deliberately does NOT live here. It lives in the
+    # deploy fence, as ARM 18/19 of `bash deploy/slot-memory-peaks.sh
+    # --self-test` ("the SHIPPED barkpark-slot@.service carries ZERO memory
+    # directives (D118, in the tree)"), gated by offline-deploy-harnesses.
+    # Reading deploy/systemd/barkpark-slot@.service from an ExUnit test escapes
+    # elixir.yml's dispatcher — `scripts/elixir-path-escape-check.sh` reds it as
+    # an UNCOVERED repo-root read, because a PR editing ONLY that unit file
+    # would skip the Elixir suite and report green, i.e. the control would be
+    # silent in exactly the case it exists for.
   end
 
   describe "systemd unit path — re-attach on init (D32)" do
