@@ -1510,6 +1510,17 @@ defmodule BarkparkWeb.TasksController do
           message: msg
         })
 
+      # The recorder's bound (task-a42dccec2fe4a406). Its own code, ahead of
+      # every write — see flight_recorder_refusal/2.
+      {:error, code}
+      when code in [
+             :context_compact_too_large,
+             :context_compact_invalid,
+             :priming_start_too_large,
+             :priming_start_invalid
+           ] ->
+        flight_recorder_refusal(conn, code)
+
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
