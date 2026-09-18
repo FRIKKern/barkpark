@@ -20832,7 +20832,7 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.match(html, /set-matrix-off/);
 });
 
-test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless ones stay gone", () => {
+test("cch-w30-s1: the matrix offers TEN toggles — the two still-producerless ones stay gone", () => {
   const s = { channels: [], event_routes: {}, chat_default_on: [] };
   const html = hooks.notifMatrixSectionHtml(s);
   // Eight toggle rows × six columns = 48 cells, and not one of them names an
@@ -20840,14 +20840,21 @@ test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless 
   // this leg is the person-facing half — what the page actually draws.
   //
   // cch-w29-bl moved this 36 → 42; cch-w30-bl moved it 42 → 48;
-  // dr-w13-bl-abandonment-splits-off-the-flood moved it 48 → 54. The count is
+  // dr-w13-bl-abandonment-splits-off-the-flood moved it 48 → 54;
+  // cch-w30-bl-member-joined-alert moved it 54 → 60. The count is
   // EXACT on purpose and the number is not the assertion: the two loops below
   // are. A row moves this number only together with its producer, because arm
   // (a) of the census below reds on an offer with nothing behind it.
-  assert.equal((html.match(/set-matrix-cell/g) || []).length, 54, "9 events × 6 channels");
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 60, "10 events × 6 channels");
   // NOT OFFERED, FOR TWO DIFFERENT REASONS — and the difference matters.
   //
-  // `member_invited` is still the original case: no producer at all.
+  // `member_invited` is still the original case: no producer at all — and
+  // cch-w30-bl-member-joined-alert did NOT change that. It landed a producer for
+  // `member_joined`, the ACCEPTANCE, which is a different moment with a
+  // different dispatcher; the invite SEND still has no team-facing producer and
+  // still must not be offered, because the invitee's own letter already covers
+  // it. The two names sit one line apart on purpose: this loop is what refuses a
+  // future edit that "restores" the old row by renaming the new one.
   //
   // `token_expiring` is NOT. cch-w30-bl shipped its producer
   // (workers/token_expiry_warning_worker.ex), and it STILL must not appear
@@ -20875,8 +20882,12 @@ test("cch-w30-s1: the matrix offers NINE toggles — the two still-producerless 
   // `deployment_abandoned` is the given-up rebuild chain, branched off the one
   // `dispatch_deployment_failed/1` funnel in the same change — so arm (b) reds
   // while this row is absent, exactly as it did for the eighth.
+  // The tenth, drawn: cch-w30-bl-member-joined-alert. `member_joined` is the
+  // membership half — `Accounts.accept_invitation/2` dispatches it post-commit,
+  // so arm (b) reds while this row is absent, exactly as it did for the eighth
+  // and the ninth.
   for (const live of ["deployment_failed", "deployment_refused", "deployment_succeeded",
-                      "deployment_abandoned"]) {
+                      "deployment_abandoned", "member_joined"]) {
     assert.match(html, new RegExp(`data-event="${live}"`),
       `${live} has a producer in cloud/lib — the console must offer its toggle`);
   }

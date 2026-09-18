@@ -1569,6 +1569,28 @@ defmodule BarkparkCloud.Accounts do
   @spec accept_invitation(binary(), User.t()) ::
           {:ok, TeamMembership.t()} | {:error, atom()}
   def accept_invitation(raw_token, %User{} = user) when is_binary(raw_token) do
+    case do_accept_invitation(raw_token, user) do
+      {:ok, %TeamMembership{} = membership} ->
+        dispatch_member_joined(membership, user)
+        {:ok, membership}
+
+      other ->
+        other
+    end
+  end
+
+  def accept_invitation(_, _), do: {:error, :invalid_token}
+
+  # cch-w30-bl-member-joined-alert — THE TRANSACTION, AND ONLY THE TRANSACTION.
+  # Split out so the alert below can fire AFTER the commit, the wave-28
+  # discipline `Registry.transition_deployment_with_site_update/5` follows: the
+  # private function owns `Repo.transaction/1`, the public wrapper matches its
+  # `{:ok, _}` and dispatches outside it. Inside, a notification send would run
+  # on the same connection as an uncommitted write — a recipient read, an SMTP
+  # round-trip and a `notification_deliveries` insert all held inside a row lock
+  # (`lock: "FOR UPDATE"` on the invitation), and a rollback after the mail left
+  # would have told a team about a member who was never added.
+  defp do_accept_invitation(raw_token, %User{} = user) do
     hash = TeamInvitation.hash_token(raw_token)
 
     Repo.transaction(fn ->
@@ -1609,7 +1631,27 @@ defmodule BarkparkCloud.Accounts do
     end)
   end
 
-  def accept_invitation(_, _), do: {:error, :invalid_token}
+  # The team-facing half of an acceptance. `dispatch_event/3` fans to every team
+  # member and never raises into its caller, so a mail problem cannot fail an
+  # acceptance that already committed; a team that has the toggle off (the
+  # default — a join is a success, and successes are opt-in) sends nothing.
+  #
+  # The payload names WHO joined and AT WHAT ROLE, and `Render.joined_clause/1`
+  # is the single owner of that sentence for both rails. `:name` is the key
+  # `Render.render/2` and `EventEmail` already read for the alert's subject, so
+  # the team name rides under it rather than under a tenth spelling.
+  defp dispatch_member_joined(%TeamMembership{} = membership, %User{} = user) do
+    case Repo.get(Team, membership.team_id) do
+      %Team{} = team ->
+        payload = %{name: team.name, email: user.email, role: membership.role}
+        Notifications.dispatch_event(team, :member_joined, payload)
+
+      # The team vanished between the commit and this read. Nothing to name and
+      # nobody to name it to — the acceptance still stands.
+      nil ->
+        :ok
+    end
+  end
 
   @doc "Pending (unaccepted, unexpired) invitations for a team, newest first."
   @spec list_invitations(Team.t()) :: [TeamInvitation.t()]

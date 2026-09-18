@@ -4626,6 +4626,16 @@
   // this row names it. It is the chain the fleet GAVE UP ON — the row a person
   // scanning "Deployment failed" could not pick out, which is why it is worth a
   // name of its own rather than a severity word inside the old one.
+  // cch-w30-bl-member-joined-alert — TEN. `member_joined` is NOT `member_invited`
+  // coming back, and the difference is the whole row. `member_invited` promised a
+  // mail when an invitation was SENT — a duplicate of the letter the invitee
+  // already gets from `Transactional.deliver_invite/1` — and nothing dispatched
+  // it. `member_joined` fires when the invitation is ACCEPTED
+  // (`Accounts.accept_invitation/2`, post-commit), which is the membership change
+  // nobody on the team was ever told about. Producer, column, both renderer arms
+  // and this row land in ONE change, so arm (b) of the census reds until the row
+  // exists and arm (a) reds if the producer ever leaves. The label says JOINED:
+  // the toggle must never be readable as the invite that preceded it.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
@@ -4635,7 +4645,8 @@
     ["deployment_abandoned", "Rebuild chain given up on"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
-    ["subscription_past_due", "Subscription past due"]
+    ["subscription_past_due", "Subscription past due"],
+    ["member_joined", "Member joined"]
   ];
 
   // The ALWAYS-SEND events: dispatched, never toggleable, and therefore stated
