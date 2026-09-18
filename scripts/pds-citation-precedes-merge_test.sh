@@ -37,8 +37,8 @@
 # the exact string scripts/selftest-wiring-census.sh greps for over the first 60
 # lines, and a file that both RUNS in CI and still declares the exemption would
 # be counted EXEMPT rather than RUN — the census would stop measuring this file
-# on the very commit that wired it. Mirrors scripts/pds-charter-anchors-check_test.sh:12,
-# same job, same fence.
+# on the very commit that wired it. Mirrors the WIRED header on
+# scripts/pds-charter-anchors-check_test.sh — same job, same fence, same shape.
 # Baseline at authoring: 10 passed, 0 failed.
 #
 # Cases 6, 7 and 9 are the mutations that matter: they break the READER, not the
