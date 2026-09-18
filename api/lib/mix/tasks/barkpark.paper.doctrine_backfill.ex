@@ -54,8 +54,12 @@ defmodule Mix.Tasks.Barkpark.Paper.DoctrineBackfill do
       both revs from the new blocks so every derived surface stays honest
       (render parity). Row scope columns and `status` are preserved.
 
-  A paper that would still violate `Template.validate/1` after the plan is
-  REFUSED (never written) and surfaced as UNFIXABLE. Conforming papers are left
+  A paper whose POST-migration blocks would be HOLLOW (skeleton-only \u2014 e.g. a
+  legacy paper whose ONLY block is the heading the title is synthesized from) is
+  REFUSED, never written, and reported under its own `would-be-hollow` count and
+  list as well as the UNFIXABLE tally. A paper that would still violate
+  `Template.validate/1` after the plan is likewise REFUSED and surfaced as
+  UNFIXABLE. Conforming papers are left
   BYTE-IDENTICAL.
   """
   @shortdoc "Backfill the doctrine template (title@0 + featured@1) onto legacy papers (dry-run by default; --apply to write)"
