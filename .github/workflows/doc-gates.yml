@@ -97,6 +97,13 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # the ONE Part A artifact no other glob here reaches. check.mjs Part A
+      # adjudicates 28 generated artifacts; 27 are matched by a pattern in this
+      # list, but doc-gates carries no **/*.html glob, so a PR whose diff is only
+      # a hand-edit inside styleguide.html's BEGIN/END GENERATED swatch region
+      # dispatched this workflow on NEITHER arm — the byte-parity/attribution
+      # check never ran on the one change it exists to catch.
+      - "cloud/priv/static/styleguide.html"
       # check.mjs's own negative half. Without this glob a change that breaks the
       # selftest — or the selftest itself — never runs the step that executes it.
       - "design/check-selftest.mjs"
@@ -490,6 +497,13 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # the ONE Part A artifact no other glob here reaches. check.mjs Part A
+      # adjudicates 28 generated artifacts; 27 are matched by a pattern in this
+      # list, but doc-gates carries no **/*.html glob, so a PR whose diff is only
+      # a hand-edit inside styleguide.html's BEGIN/END GENERATED swatch region
+      # dispatched this workflow on NEITHER arm — the byte-parity/attribution
+      # check never ran on the one change it exists to catch.
+      - "cloud/priv/static/styleguide.html"
       # check.mjs's own negative half. Without this glob a change that breaks the
       # selftest — or the selftest itself — never runs the step that executes it.
       - "design/check-selftest.mjs"
