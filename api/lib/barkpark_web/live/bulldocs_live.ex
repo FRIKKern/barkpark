@@ -295,6 +295,12 @@ defmodule BarkparkWeb.BulldocsLive do
       # inline ack of the most recent simplify decision.
       |> assign(:simplify?, paper_goal_id(paper) != nil)
       |> assign(:pending_simplify, nil)
+      # task-cefcbf5b3a9b1665: the id of the `simplify-request` row this
+      # session opened. Accept/Reject carry it BACK to the server as
+      # `phx-value-request-id`, and the server re-derives the tie from the
+      # stored request rather than trusting the branch name — a client may say
+      # which request it means, never who made it.
+      |> assign(:pending_simplify_event_id, nil)
       |> assign(:last_simplify, nil)
       # Outbound `paper-links` refs are stored separately from rendered HTML so
       # workspace document broadcasts can refresh only readers whose related
@@ -698,7 +704,10 @@ defmodule BarkparkWeb.BulldocsLive do
     else
       branch = "simplified-#{next_simplify_index(slug, scope)}"
 
-      _ =
+      # The REQUESTER is stamped on the request row. Without it the decision
+      # has nothing to be tied to — `Events.record_decision/1` refuses a
+      # request whose actor it cannot read.
+      request =
         Events.create_event(
           %{
             "event_type" => "simplify-request",
@@ -708,12 +717,20 @@ defmodule BarkparkWeb.BulldocsLive do
             "branch" => branch
           }
           |> stamp_scope(scope)
+          |> stamp_actor(socket)
         )
 
-      {:noreply,
-       socket
-       |> assign(:pending_simplify, branch)
-       |> assign(:last_simplify, "Simplify requested — #{branch}")}
+      case request do
+        {:ok, event} ->
+          {:noreply,
+           socket
+           |> assign(:pending_simplify, branch)
+           |> assign(:pending_simplify_event_id, event.id)
+           |> assign(:last_simplify, "Simplify requested — #{branch}")}
+
+        {:error, _changeset} ->
+          {:noreply, assign(socket, :last_simplify, "Simplify could not be requested.")}
+      end
     end
   end
 
@@ -721,15 +738,15 @@ defmodule BarkparkWeb.BulldocsLive do
   # `simplify-accept` event on the pending branch. NOTE: this only records the
   # decision — the actual merge-to-source HTML write / branch-close is the
   # ORCHESTRATOR's job (out of scope here; a reader follow-on consumes this row).
-  def handle_event("simplify-accept", _params, socket) do
-    {:noreply, record_simplify_decision(socket, "simplify-accept", "Accepted")}
+  def handle_event("simplify-accept", params, socket) do
+    {:noreply, record_simplify_decision(socket, params, "simplify-accept", "Accepted")}
   end
 
   # Reject the pending simplify candidate. Records a `simplify-reject` decision
   # on the pending branch. As with accept, the branch-close itself is the
   # orchestrator's job (out of scope) — we only persist the user's intent.
-  def handle_event("simplify-reject", _params, socket) do
-    {:noreply, record_simplify_decision(socket, "simplify-reject", "Rejected")}
+  def handle_event("simplify-reject", params, socket) do
+    {:noreply, record_simplify_decision(socket, params, "simplify-reject", "Rejected")}
   end
 
   # ── Edit on the link, slice 2 (task-633d25cac4262afc) ─────────────────────
@@ -869,31 +886,83 @@ defmodule BarkparkWeb.BulldocsLive do
   # Shared body for accept/reject: record the decision event on the pending
   # branch (skip gracefully if there is no pending branch or no goal_id), ack
   # inline, then clear `:pending_simplify` so the controls retract.
-  defp record_simplify_decision(socket, event_type, verb) do
+  # task-cefcbf5b3a9b1665 — the requester<->accepter tie.
+  #
+  # The client names WHICH request it is deciding (`phx-value-request-id`,
+  # falling back to this session's own pending id). It names nothing else:
+  # `Events.record_decision/1` reads the stored request row and refuses unless
+  # the paper, the workspace/project scope, the actor, the freshness and the
+  # replay check ALL hold. Branch and goal_id come off the stored request too,
+  # so a forged branch name buys nothing.
+  #
+  # Every refusal returns the socket with the pending state INTACT and writes
+  # NO row — a denied decision leaves no trace in the event history and
+  # mutates no content.
+  defp record_simplify_decision(socket, params, event_type, verb) do
     slug = socket.assigns.slug
-    branch = socket.assigns.pending_simplify
 
-    {goal_id, scope} =
+    request_id =
+      case params do
+        %{"request-id" => id} when is_binary(id) and id != "" -> id
+        _ -> socket.assigns[:pending_simplify_event_id]
+      end
+
+    {_goal_id, scope} =
       paper_goal_and_scope(slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
 
-    if is_nil(branch) or is_nil(goal_id) do
+    if is_nil(request_id) do
       socket
     else
-      _ =
-        Events.create_event(
-          %{
-            "event_type" => event_type,
-            "goal_id" => goal_id,
-            "paper_slug" => slug,
-            "payload_html" => "<p>#{verb} #{branch} for /papers/#{slug}</p>",
-            "branch" => branch
-          }
-          |> stamp_scope(scope)
-        )
+      attrs =
+        %{
+          "event_type" => event_type,
+          "paper_slug" => slug,
+          "request_event_id" => request_id,
+          "payload_html" => "<p>#{verb} a simplify request for /papers/#{slug}</p>"
+        }
+        |> stamp_scope(scope)
+        |> stamp_actor(socket)
 
-      socket
-      |> assign(:pending_simplify, nil)
-      |> assign(:last_simplify, "#{verb} #{branch}")
+      case Events.record_decision(attrs) do
+        {:ok, event} ->
+          socket
+          |> assign(:pending_simplify, nil)
+          |> assign(:pending_simplify_event_id, nil)
+          |> assign(:last_simplify, "#{verb} #{event.branch}")
+
+        {:error, reason} ->
+          assign(socket, :last_simplify, decision_refusal(reason))
+      end
+    end
+  end
+
+  # One sentence per refusal. Deliberately does NOT leak whether the named
+  # request exists for somebody else — an unknown id and another person's id
+  # read the same to the client.
+  defp decision_refusal(reason) when is_atom(reason) do
+    case reason do
+      :already_decided -> "That simplify request has already been decided."
+      :expired_request -> "That simplify request has expired."
+      :anonymous -> "Sign in to act on this paper."
+      _ -> "That simplify request is not yours to decide."
+    end
+  end
+
+  defp decision_refusal(_), do: "That simplify request could not be decided."
+
+  # Stamp the authenticated principal behind this socket onto an event attr
+  # map. `Edit.principal?/1` already gated the event, so an anonymous socket
+  # never reaches here — but this stays fail-closed anyway and leaves both
+  # keys absent, which `Events.record_decision/1` reads as `:anonymous`.
+  defp stamp_actor(attrs, socket) do
+    case socket.assigns[:viewer] do
+      %{kind: kind, id: id} when kind in [:user, :token, :share] and is_binary(id) ->
+        attrs
+        |> Map.put("actor_kind", Atom.to_string(kind))
+        |> Map.put("actor_id", id)
+
+      _ ->
+        attrs
     end
   end
 
@@ -1624,6 +1693,7 @@ defmodule BarkparkWeb.BulldocsLive do
             type="button"
             class="bp-paper-action bp-paper-action-accept"
             phx-click="simplify-accept"
+            phx-value-request-id={@pending_simplify_event_id}
           >
             Accept
           </button>
@@ -1631,6 +1701,7 @@ defmodule BarkparkWeb.BulldocsLive do
             type="button"
             class="bp-paper-action bp-paper-action-reject"
             phx-click="simplify-reject"
+            phx-value-request-id={@pending_simplify_event_id}
           >
             Reject
           </button>
