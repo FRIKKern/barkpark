@@ -194,7 +194,7 @@
       switch (e.key) {
         case "ArrowDown":
           if (typeof e.preventDefault === "function") e.preventDefault();
-          if (vis.length) this._active = (this._active + 1) % vis.length;
+          if (vis.length) this._active = 0;
           this._paint();
           break;
 
