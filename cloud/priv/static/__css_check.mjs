@@ -1572,6 +1572,62 @@ export function citationScanSetRefusals(files, root = dir) {
 // only way to cite it is to re-derive it.
 const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?:js|mjs|sh))(?::~?|\s~))\d{2,}(?:-\d{2,})?/g;
 
+// ── SYNCHRONOUS OUTPUT FOR THE FOUR spawnSync-CONSUMED SUB-MODES ────────────
+//
+// THE DEFECT THIS DELETES (studio r21d, task-a510820f5b757050). Each of the
+// four targeted sub-modes below ends in `process.exit(...)`, and every one of
+// them is consumed by `__app.test.mjs` through a `spawnSync` whose stdout is a
+// PIPE. On this platform a child's stdout to a pipe is NON-BLOCKING and
+// ASYNCHRONOUS, so `console.log` does not write — it QUEUES. `process.exit()`
+// tears the process down without draining that queue, and every byte still
+// sitting on it is DISCARDED. The consumer sees a clean, well-formed,
+// SHORTER-THAN-TRUE report and cannot tell it apart from a real one.
+//
+// MEASURED, NOT ASSUMED. The pipe's buffer here is 8192 bytes: a child that
+// emits 9000+ bytes and then calls process.exit(0) delivers exactly 8192 to a
+// spawnSync parent, 8 runs out of 8, at every size from 9000 up to 660000.
+// Below the buffer size nothing is ever lost. The inventory sub-mode emits 9624
+// bytes over this tree — 1432 bytes MORE than the buffer — so it survives only
+// while the parent keeps draining mid-stream. It usually does, which is why 280
+// isolated spawns found nothing; under the full harness, where the parent is
+// busy, the observed rate was 1 red in 14 runs. The captured stdout of that red
+// stopped at 8154 bytes — the last whole row that fits under 8192. The cut is
+// the buffer boundary, not a scan that ended early.
+//
+// WHY THIS DRAINS RATHER THAN RACES. `fs.writeSync` hands the bytes to the
+// KERNEL before it returns, so when the loop finishes there is nothing left on
+// any JS-side queue for process.exit to throw away — no callback to schedule,
+// no event-loop turn to lose, no drain event to miss. The two ways a
+// non-blocking fd can decline are both handled as WAITING, never as dropping: a
+// PARTIAL write advances the offset and re-offers only the remainder, and
+// EAGAIN (the reader is behind) sleeps a millisecond and re-offers the SAME
+// remainder. The loop does not terminate until the kernel has accepted every
+// byte. EPIPE is the one honest stop: the reader is gone, so there is no
+// consumer left to shorten a report for.
+//
+// USE THESE, NOT console.log / console.error, inside any block that ends in
+// process.exit(). Mixing the two REORDERS output, because console.* queues on
+// the stream and these bypass it.
+const SUBMODE_BACKOFF = new Int32Array(new SharedArrayBuffer(4));
+const emitSync = (fd, text) => {
+  const buf = Buffer.from(text, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += fs.writeSync(fd, buf, off, buf.length - off);
+    } catch (e) {
+      if (e.code === "EAGAIN") {
+        Atomics.wait(SUBMODE_BACKOFF, 0, 0, 1);
+        continue;
+      }
+      if (e.code === "EPIPE") return;
+      throw e;
+    }
+  }
+};
+const outSync = (line) => emitSync(1, line + "\n");
+const errSync = (line) => emitSync(2, line + "\n");
+
 // Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
 // ONLY the E9 parse-completeness guard against one file and exits non-zero if it
 // fires — the committed #4251 regression proof (see __css_check.fixture.css).
@@ -1580,8 +1636,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const errs = swallowedTokenErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1599,8 +1655,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const errs = orphanCommentErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1617,8 +1673,8 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
   if (i !== -1) {
     const f = process.argv[i + 1];
     const { errors: errs, copies } = wrapParityErrors(readOrRefuse(f, f), path.basename(f));
-    for (const e of errs) console.error("FAIL  " + e);
-    console.log(
+    for (const e of errs) errSync("FAIL  " + e);
+    outSync(
       `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +
         `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
     );
@@ -1658,20 +1714,20 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
     const PV = "__preview__" + path.sep;
     let shippedTotal = 0;
     let ruledTotal = 0;
-    console.log(`__css_check --citation-inventory ${root}`);
+    outSync(`__css_check --citation-inventory ${root}`);
     for (const rel of files) {
       const src = readOrRefuse(path.join(root, rel), rel);
       const shipped = bannedSourceCitationErrors(src, rel).length;
       const hits = [...src.matchAll(CITATION_RULED_ALTERNATION)];
       shippedTotal += shipped;
       ruledTotal += hits.length;
-      console.log(
+      outSync(
         `  ruled=${String(hits.length).padStart(3)}  E11=${String(shipped).padStart(3)}  ${rel}`,
       );
-      for (const m of hits) console.log(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
+      for (const m of hits) outSync(`        ${rel}:${lineOf(src, m.index)}  ${JSON.stringify(m[0].trim())}`);
     }
-    for (const e of refusals) console.error("FAIL  " + e);
-    console.log(
+    for (const e of refusals) errSync("FAIL  " + e);
+    outSync(
       `__css_check --citation-inventory ${root}: ${files.length} file(s) scanned ` +
         `(${files.filter((f) => !f.includes(path.sep)).length} at the root, ` +
         `${files.filter((f) => f.startsWith(PV)).length} under __preview__/, ` +
@@ -3489,7 +3545,24 @@ console.log(
 if (errors.length) {
   console.error("");
   for (const e of errors) console.error("FAIL  " + e);
-  process.exit(1);
+  // NOT process.exit(1) — THE FIFTH INSTANCE of the sub-mode defect documented
+  // beside the emitSync helper above, found by this row's own stability arm.
+  // This body prints ~9.5KB, well past the 8192-byte pipe buffer, and the
+  // mirror harness in __app.test.mjs reads it through a spawnSync. On the GREEN
+  // path the gate simply falls off the end, so Node drains stdout before the
+  // process dies and nothing is ever lost — which is why the clean leg has
+  // never flaked. On THIS path the old `process.exit(1)` tore the process down
+  // with bytes still queued, and the mutation leg went red 1 run in 22 with a
+  // truncated capture.
+  //
+  // `process.exitCode` states the SAME verdict without the teardown: the
+  // statement below is the last in runGate, `if (IS_CLI) runGate()` is the last
+  // statement in the file, and the gate holds no timers or open handles, so
+  // returning here ends the program with nothing left to run. Node then exits
+  // on its own — flushing stdout and stderr first — and reports 1. Exit code
+  // identical, output no longer a race.
+  process.exitCode = 1;
+  return;
 }
 
 } // end runGate
