@@ -68,10 +68,36 @@ arm "422 Validation Failed is NOT retryable -> fails on attempt 1" 1 1 \
   "$(make_stub nonretryable \
       'HTTP 422: Validation Failed (https://api.github.com/repos/FRIKKern/barkpark/releases)')"
 
-# (a2) The 403 discrimination: a permission 403 must NOT be swallowed as a rate limit.
+# (a2) THE QUIET ARM for the unexplained-403 widening. A permission 403 carries a
+# MESSAGE, so it is not the unexplained class and must still die on attempt 1. If
+# the widening is ever loosened to "any 403", this arm reads 3 calls and FAILS.
 arm "403 permission denied is NOT retryable -> fails on attempt 1" 1 1 \
   "$(make_stub forbidden \
       'HTTP 403: Resource not accessible by integration (https://api.github.com/repos/FRIKKern/barkpark/releases)')"
+
+# (a3) SECOND QUIET ARM: a 403 explained with a message we have never seen before
+# is still EXPLAINED, so it is still one call. Guards the classifier against
+# keying on a permission-word allowlist instead of on the presence of a message.
+arm "403 with an unfamiliar message still fails on attempt 1" 1 1 \
+  "$(make_stub explained403 \
+      'HTTP 403: Repository rulesets forbid this operation (https://api.github.com/repos/FRIKKern/barkpark/releases)')"
+
+# (b3) THE ARM THAT REDS WHEN THE UNEXPLAINED-403 FIX IS REVERTED. Verbatim from
+# run 35289781362 (job `build`, main @ 9ef5d7223): a 403 with NO message at all.
+# Before the fix this exits 1 after ONE call ("NOT retryable, failing fast") and
+# throws away a completed prod compile. After it, one retry clears it.
+arm "unexplained HTTP 403 once -> succeeds on attempt 2" 0 2 \
+  "$(make_stub bare403 \
+      'error checking for existing release: HTTP 403 (https://api.github.com/repos/FRIKKern/barkpark/releases/tags/build-9ef5d7223d9bcb2fe2e216979677260886372682)' \
+      'OK')"
+
+# (c2) THE UNEXPLAINED 403 IS BOUNDED BY ITS OWN BUDGET, NOT THE GENERAL ONE.
+# GH_RETRY_MAX_ATTEMPTS is the default 5 here; a permanently unexplained 403 must
+# stop at GH_RETRY_MAX_403_ATTEMPTS (3). An arm asserting only "exit 1" would pass
+# on a loop that burned all 5 — the call COUNT is the whole assertion.
+arm "persistent unexplained 403 -> bounded at 3 calls, not 5" 1 3 \
+  "$(make_stub bare403persist \
+      'error checking for existing release: HTTP 403 (https://api.github.com/repos/FRIKKern/barkpark/releases/tags/build-deadbeef)')"
 
 # (b) RETRYABLE: the verbatim 500 from run 35271553511, twice, then success.
 arm "HTTP 500 Error saving asset twice -> succeeds on attempt 3" 0 3 \
