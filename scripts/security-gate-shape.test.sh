@@ -804,8 +804,18 @@ census_diff() {
 
   # Both directions: a class that appeared in the file and was never declared is
   # as much a rot as a declared class that vanished.
-  comm -3 <(printf '%s\n' "$want") <(printf '%s\n' "$actual") \
+  #
+  # TEMP FILES, NOT `comm -3 <(…) <(…)`. Process substitution is a bashism that
+  # scripts/posix-vacuous-green-census.sh reds on by name: under `sh` it is a
+  # syntax error, and a harness that dies before its first assertion exits
+  # having compared NOTHING while still looking like it ran. This file carries
+  # no interpreter guard, so it must not contain one.
+  local wf_want="$TMPROOT/census-want.$$" wf_have="$TMPROOT/census-have.$$"
+  printf '%s\n' "$want"   > "$wf_want"
+  printf '%s\n' "$actual" > "$wf_have"
+  comm -3 "$wf_want" "$wf_have" \
     | sed -e 's/^\t/FILE-HAS-NOT-DECLARED: /' -e 's/^\([^ ]\)/DECLARED-NOT-IN-FILE: \1/'
+  rm -f "$wf_want" "$wf_have"
 }
 
 CENSUS_BL="$REAL_ROOT/api/.sobelow-skips"
