@@ -750,6 +750,147 @@ gate "docs-only: Sobelow legitimately not dispatched" 0 \
   R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
 echo
 
+# ── case 7: the baseline census in security.yml's header is DERIVED, not told ─
+#
+# THE DEFECT THIS EXISTS FOR. security.yml's header carried a row count for
+# api/.sobelow-skips. It read 57, then 41, then 35 — each true when written,
+# each rotted in place. The wave that wrote 35 noticed the rot and its remedy
+# was PROSE: it published the derivation command beside the number so "the next
+# reader re-measures instead of trusting this line". Nobody ran it. Measured at
+# 6c4b904f9 the file held 24 rows, and three of six per-class figures had
+# drifted (Traversal.FileModule 18->9, DOS.StringToAtom 6->4, AST-anchored
+# 28->17). A command in a comment is not an instrument — nothing executes it.
+#
+# This case executes it. The `census:` lines in the header are a table; the
+# table is compared against the file it describes, and a mismatch NAMES the
+# class that drifted rather than saying "something is stale".
+#
+# WHY IT BELONGS HERE. `gate-shape` is unfiltered and NEVER-gated, so it runs
+# on every head, and it is a leaf of `Security gate` — which is ADVISORY
+# (S7 exclusion, .github/required-checks.json), so this reds a context nobody
+# merges on and blocks nothing. It is the same job that already pins the rest
+# of this workflow's shape.
+echo "case 7: the .sobelow-skips census in the header is compared, not trusted"
+
+# census_diff <workflow-file> <baseline-file>
+#   prints one line per disagreement; prints nothing when the table is true.
+#   REFUSES loudly (prints a REFUSED line) when either input is unreadable or
+#   the header carries no census table at all — an absent table must never read
+#   as "nothing disagrees".
+census_diff() {
+  local wf="$1" bl="$2"
+  if [ ! -r "$wf" ]; then echo "REFUSED: cannot read $wf"; return; fi
+  if [ ! -r "$bl" ]; then echo "REFUSED: cannot read $bl"; return; fi
+
+  local declared
+  declared="$(sed -n 's/^#[[:space:]]*census:[[:space:]]*\(.*\)$/\1/p' "$wf")"
+  if [ -z "$declared" ]; then
+    echo "REFUSED: $wf declares no 'census:' table — an absent census is not a clean one"
+    return
+  fi
+
+  # DERIVED, never hardcoded: total = non-blank rows; per-class = the detector
+  # prefix before the first colon on each non-blank row.
+  local actual
+  actual="$(
+    {
+      awk 'NF{n++} END{printf "total=%d\n", n+0}' "$bl"
+      grep -v '^[[:space:]]*$' "$bl" | sed 's/:.*//' | sort | uniq -c \
+        | awk '{printf "%s=%d\n", $2, $1}'
+    } | sort
+  )"
+  local want
+  want="$(printf '%s\n' "$declared" | sed 's/[[:space:]]*$//' | sort)"
+
+  # Both directions: a class that appeared in the file and was never declared is
+  # as much a rot as a declared class that vanished.
+  comm -3 <(printf '%s\n' "$want") <(printf '%s\n' "$actual") \
+    | sed -e 's/^\t/FILE-HAS-NOT-DECLARED: /' -e 's/^\([^ ]\)/DECLARED-NOT-IN-FILE: \1/'
+}
+
+CENSUS_BL="$REAL_ROOT/api/.sobelow-skips"
+
+# ARM (b) — THE REAL TREE. This must be green against the baseline as it
+# actually is, not a hypothetical clean one: a ratchet that reds on arrival gets
+# dismissed and then guards nothing.
+d="$(census_diff "$WF" "$CENSUS_BL")"
+if [ -z "$d" ]; then
+  ok "the header census matches api/.sobelow-skips exactly (real tree, both directions)"
+else
+  no "the header census disagrees with api/.sobelow-skips:"$'\n'"$d"
+fi
+
+# The declared table must actually be a table — this is the control that proves
+# the arm above is not passing on an empty comparison (an absence is never
+# caught by inspection: print the key set).
+n_declared="$(sed -n 's/^#[[:space:]]*census:.*/x/p' "$WF" | wc -l | tr -d ' ')"
+if [ "$n_declared" -ge 2 ]; then
+  ok "the census table is non-empty ($n_declared rows declared) — the arm above compared something"
+else
+  no "the census table has $n_declared rows; the match above is vacuous"
+fi
+
+# ── the mutants: every assertion above must be able to FIRE ─────────────────
+CENSUS_MUT="$TMPROOT/census"
+mkdir -p "$CENSUS_MUT"
+
+# M1 — the total rots (the exact historical failure: 57 -> 41 -> 35, file moved on)
+sed 's/^#\([[:space:]]*\)census: total=.*/#\1census: total=999/' "$WF" > "$CENSUS_MUT/m1.yml"
+d="$(census_diff "$CENSUS_MUT/m1.yml" "$CENSUS_BL")"
+if has "$d" "total=999"; then
+  ok "MUTANT total: a rotted row count fires, and the line names total"
+else
+  no "MUTANT total: a rotted row count did NOT fire"
+fi
+
+# M2 — one class rots while the total stays right (the half that a bare row
+#      count can never see, and the half that actually drifted this time)
+sed 's/^#\([[:space:]]*\)census: Traversal.FileModule=.*/#\1census: Traversal.FileModule=18/' "$WF" > "$CENSUS_MUT/m2.yml"
+d="$(census_diff "$CENSUS_MUT/m2.yml" "$CENSUS_BL")"
+if has "$d" "Traversal.FileModule"; then
+  ok "MUTANT per-class: a drifted class fires even with the total correct"
+else
+  no "MUTANT per-class: a drifted class did NOT fire"
+fi
+
+# M3 — the baseline gains a row and nobody updates the table
+{ cat "$CENSUS_BL"; echo "XSS.Raw: Unsafe raw,lib/barkpark_web/nope.ex:1,DEADBEE"; } > "$CENSUS_MUT/m3-skips"
+d="$(census_diff "$WF" "$CENSUS_MUT/m3-skips")"
+if has "$d" "total="; then
+  ok "MUTANT baseline-grew: adding a baseline row without touching the table fires"
+else
+  no "MUTANT baseline-grew: adding a baseline row did NOT fire"
+fi
+
+# M4 — a WHOLE CLASS appears in the file that the table never mentions. The
+#      direction a one-way check misses.
+{ cat "$CENSUS_BL"; echo "SQL.Query: SQL injection,lib/barkpark/nope.ex:1,DEADBEE"; } > "$CENSUS_MUT/m4-skips"
+d="$(census_diff "$WF" "$CENSUS_MUT/m4-skips")"
+if has "$d" "SQL.Query"; then
+  ok "MUTANT new-class: an undeclared detector class fires by name"
+else
+  no "MUTANT new-class: an undeclared detector class did NOT fire"
+fi
+
+# M5 — the table is DELETED. The failure a "no disagreements" check reports as
+#      clean unless it refuses on an absent table.
+grep -v '^#[[:space:]]*census:' "$WF" > "$CENSUS_MUT/m5.yml"
+d="$(census_diff "$CENSUS_MUT/m5.yml" "$CENSUS_BL")"
+if has "$d" "REFUSED"; then
+  ok "MUTANT table-deleted: an absent census REFUSES instead of reading clean"
+else
+  no "MUTANT table-deleted: an absent census read as clean — the hole this case exists for"
+fi
+
+# M6 — the baseline file is gone. Unreadable input is CANNOT READ, not a pass.
+d="$(census_diff "$WF" "$CENSUS_MUT/does-not-exist")"
+if has "$d" "REFUSED"; then
+  ok "MUTANT baseline-missing: an unreadable baseline REFUSES rather than greening"
+else
+  no "MUTANT baseline-missing: an unreadable baseline read as clean"
+fi
+echo
+
 echo "----"
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ] || exit 1
