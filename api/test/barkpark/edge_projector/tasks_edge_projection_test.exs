@@ -202,9 +202,10 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
 
       to_parent = Enum.filter(edges, &(&1[:to_id] == "t-parent"))
 
-      assert [parent] = to_parent,
+      assert length(to_parent) == 1,
              "one parent_id must project ONE edge, got: #{inspect(Enum.map(to_parent, & &1[:kind]))}"
 
+      [parent] = to_parent
       assert parent[:kind] == "parent_id"
       assert parent[:from_id] == "t-l"
 
