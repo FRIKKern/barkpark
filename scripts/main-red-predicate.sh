@@ -54,6 +54,7 @@ _mrp_selftest() {
   if grep -qF 'CANNOT READ: run feed shows' "$_MRP_SELF" \
   && grep -qF 'STALE FEED' "$_MRP_SELF" \
   && grep -qF '2H PREDICATE' "$_MRP_SELF" \
+  && grep -qF 'streak=' "$_MRP_SELF" \
   && grep -qF 'branch-driven push workflows' "$_MRP_SELF"; then _ok "not truncated" "control text + summary line both present"
   else _no "not truncated" "a load-bearing line is missing — file truncated"; fi
   # THE DESCENT MUST BE ABLE TO FIRE. The run-list projection must ASK for databaseId, or the
@@ -256,6 +257,40 @@ STUB
   # UNREAD IS NOT A PASS. A workflow with no readable verdict has no measurable
   # age, so the predicate must refuse rather than report TRUE over its silence.
   MRP_CANC_ARM=only _arm "unread leaves the 2h predicate CANNOT READ" many failure "" "" 2 "2H PREDICATE: CANNOT READ"
+
+  # ── THE RED-STREAK ARMS (gates-r21f-w4) ────────────────────────────────────
+  # THE FAULT: the age used to come off the NEWEST run, so a push-triggered
+  # workflow that reds on every push reset the clock on every merge and could be
+  # red for hours while reporting `age=0h4m under-2h`. The age must be the
+  # elapsed time since the workflow last SUCCEEDED.
+  # These arms are a PAIR over MRP_OLD: the newest failure is nine minutes old in
+  # BOTH, and only what sits behind it moves. If the age still came off the
+  # newest run, both would read under-2h and the pair would be indistinguishable.
+  _MRP_YOUNG="$(python3 -c 'import datetime as d;print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=9)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+  # FIRES WHEN THE FIX IS REVERTED: a young red with an OLDER failure behind it
+  # (no success between) is an unbroken streak reaching back to 2025-12-01.
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a young red on an OLD streak is OVER-2H" many failure "" "" 1 "OVER-2H" "under-2h"
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "an old streak falsifies the 2h predicate" many failure "" "" 1 "2H PREDICATE: FALSE"
+  # ...and the streak must be NAMED, not just folded into the age, or the lead
+  # cannot tell a long streak from a slow clock.
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "the streak length and start are printed" many failure "" "" 1 "streak=2x since=2025-12-01"
+  # THE QUIET ARM: the SAME young red, but a SUCCESS sits behind it. The streak is
+  # one run long, so this is a merge landing, not standing debt — it must stay
+  # under-2h and leave the predicate TRUE. Without this arm the fix above is
+  # satisfied by an age hard-wired to the oldest row in the window.
+  MRP_CANC_ARM=two MRP_OLD_ARM=success MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a young red behind a SUCCESS stays under-2h" many failure "" "" 1 "under-2h" "OVER-2H"
+  MRP_CANC_ARM=two MRP_OLD_ARM=success MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a one-run streak leaves the 2h predicate TRUE" many failure "" "" 1 "2H PREDICATE: TRUE"
+  MRP_CANC_ARM=two MRP_OLD_ARM=success MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a one-run streak is named as 1x" many failure "" "" 1 "streak=1x"
+  # A WINDOW WITH NO SUCCESS AT ALL IS A FLOOR, AND MUST SAY SO. Otherwise a
+  # workflow red for a month reads as red only as far back as the 50-run page.
+  MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "an all-red window is marked FLOOR" many failure "" "" 1 "FLOOR(no success in the 50-run window)"
 
   # The tags-only partition must fire against this repo's real workflows.
   out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success MRP_FJOB= MRP_NOID= bash "$_MRP_SELF" acme/widget 2>&1)
@@ -499,7 +534,46 @@ PYEOF
       # 2h predicate is READ OFF THIS OUTPUT rather than recomputed by every
       # consumer. Printed even when the age cannot be computed, as `age=?`, so an
       # unreadable clock is never silently rendered as a young red.
-      AGE_S=$(jq -n --arg w "$WHEN" '(now - ($w|fromdateiso8601))|floor' 2>/dev/null)
+      # THE AGE OF WHAT, THOUGH -- see the streak block immediately below.
+      # ── THE AGE IS THE RED STREAK, NOT THE LATEST RUN ────────────────────────
+      # FOUND 2026-09-18 (gates-r21f-w4). This block used to age `$WHEN`, the
+      # createdAt of the NEWEST run. For a push-triggered workflow that reds on
+      # EVERY push, every merge to main starts a fresh run, so the clock RESET on
+      # each merge and the 2h predicate could never trip no matter how long the
+      # workflow had been broken.
+      # SPECIMEN: `stale-verdict-watch` reported `age=0h4m under-2h` while it had
+      # been red continuously since 22:17:43Z — ~3h20m, ~17 consecutive failures,
+      # ZERO greens in between. `cli-release-cadence` and `doc-gates` carry the
+      # same exposure. Only a rare-trigger workflow (`scaffy-catalog-drift`,
+      # 8h45m) ever accumulated age under the old logic — i.e. the predicate
+      # measured TRIGGER FREQUENCY and called it health.
+      # THE FIX: age the UNBROKEN RED STREAK — walk the verdict rows newest-first
+      # and stop at the first `success`; the oldest row before that success is
+      # when the workflow last worked. The 2h threshold is UNCHANGED.
+      # TWO DELIBERATE FLOORS, both annotated rather than hidden:
+      #   * the streak is walked on RUN conclusions only. A laundered green
+      #     (RUN=success over a failing job) inside the streak ends the walk
+      #     early, so the streak is a floor, never an overcount. Descending jobs
+      #     for 50 rows x 55 workflows is not affordable here.
+      #   * if the whole 50-row window is red with no success, the streak reaches
+      #     only as far back as the window and is marked FLOOR.
+      STREAK_JSON=$(printf '%s' "$WFEED" | jq -c '
+        [.[]|select(.status=="completed" and (.conclusion|IN("success","failure","timed_out","startup_failure")))]
+        | sort_by(.createdAt) | reverse
+        | (map(.conclusion=="success")|index(true)) as $i
+        | (if $i == null then . else .[0:$i] end) as $streak
+        | {truncated: ($i == null), n: ($streak|length), oldest: ($streak[-1].createdAt // null)}' 2>/dev/null)
+      STREAK_WHEN=$(printf '%s' "$STREAK_JSON" | jq -r '.oldest // empty' 2>/dev/null)
+      STREAK_N=$(printf '%s' "$STREAK_JSON" | jq -r '.n // empty' 2>/dev/null)
+      # FAIL TOWARD THE OLD READING, NOT TOWARD SILENCE: an unreadable streak
+      # falls back to the newest run's own timestamp, which is what this block
+      # did before. It can only ever UNDER-report age, never invent one.
+      [ -n "$STREAK_WHEN" ] || { STREAK_WHEN="$WHEN"; STREAK_N="${STREAK_N:-1}"; }
+      STREAK=" streak=${STREAK_N:-1}x since=${STREAK_WHEN}"
+      if [ "$(printf '%s' "$STREAK_JSON" | jq -r '.truncated' 2>/dev/null)" = "true" ]; then
+        STREAK="$STREAK FLOOR(no success in the 50-run window)"
+      fi
+      AGE_S=$(jq -n --arg w "$STREAK_WHEN" '(now - ($w|fromdateiso8601))|floor' 2>/dev/null)
       if [ -n "$AGE_S" ] && [ "$AGE_S" -ge 0 ] 2>/dev/null; then
         AGE_H=$(( AGE_S / 3600 )); AGE_M=$(( (AGE_S % 3600) / 60 ))
         if [ "$AGE_S" -gt 7200 ]; then AGE=" age=${AGE_H}h${AGE_M}m OVER-2H"; over2h=$((over2h+1))
@@ -507,7 +581,7 @@ PYEOF
       else
         AGE=" age=? UNREADABLE-CLOCK"; over2h=$((over2h+1))
       fi
-      red=$((red+1)); printf '%s\t%s\t%s\t%s%s%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$AGE" "$LAUNDERED" "$EVICTED" >> "$RED_LIST";;
+      red=$((red+1)); printf '%s\t%s\t%s\t%s%s%s%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$AGE" "$STREAK" "$LAUNDERED" "$EVICTED" >> "$RED_LIST";;
     success)
       # THE NO-DESCENT WARNING MUST FIRE ON GREEN TOO. Found by gates-r19-w11 while
       # vendoring this file, measured with a control: NOID+success -> green 53, exit 0,
