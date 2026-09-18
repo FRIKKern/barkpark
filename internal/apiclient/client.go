@@ -1612,7 +1612,7 @@ func (r TaskReadback) IsDraft() bool {
 // token-scoped task route — tenancy rides the bearer token, exactly like the
 // claim/close/stamp POSTs above).
 //
-// It exists for the PDS success-claim law (charter PDS-D359/D361): a ledger
+// It exists for the PDS success-claim law (charter PDS-D359/PDS-D361): a ledger
 // writer may not report a write it never read back. `bp task stamp` POSTs and
 // then calls this to ask the STORE what it now holds, so a write dropped by a
 // transport ceiling, a second door, or a bad minute on the box cannot be

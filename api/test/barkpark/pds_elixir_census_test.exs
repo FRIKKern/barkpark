@@ -32,7 +32,7 @@ defmodule Barkpark.PdsElixirCensusTest do
   ## Why `--selftest` is NOT gated here
 
   Leaf-metered it cost ~210 s USER CPU across 33 port-child invocations on the
-  PDS-D633/D625 run -- illustrative, that run only; the census now DERIVES the
+  PDS-D633/PDS-D625 run -- illustrative, that run only; the census now DERIVES the
   floor on its output's one volatile line -- the MULTIPLIER counted off its own
   selftest case table (the cases whose corpus is the live tree), not typed, and
   guarded by SELFTEST-FLOOR-MULTIPLIER -- so re-read it there rather than quoting

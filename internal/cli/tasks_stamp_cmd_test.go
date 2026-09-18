@@ -543,7 +543,7 @@ func TestTaskStampExecute_EchoTranslatesOnNormalStamp(t *testing.T) {
 	}
 }
 
-// --- the READ-BACK: `bp task stamp` reports what the STORE says (PDS-D359/D361) ---
+// --- the READ-BACK: `bp task stamp` reports what the STORE says (PDS-D359/PDS-D361) ---
 
 // stampVerdictReq is the ONE package-level request fixture the registry's
 // renderStampVerdict rows share. It is deliberately never a Backed/Contradicted

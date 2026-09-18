@@ -98,7 +98,7 @@ defmodule Barkpark.Content.TagRegistry do
   the raise-on-error contract is directly testable (`register!/1` itself only
   ever feeds it the canonical `schema_attrs/0`).
 
-  ## The pull-provenance guard, on the UPDATE only (PDS-D125/D126)
+  ## The pull-provenance guard, on the UPDATE only (PDS-D125/PDS-D126)
 
   This is the SECOND boot-time writer into `schema_definitions` — it runs
   outside `Plugins.Bootstrap`'s registry walk and outside `SchemaBootstrap`'s

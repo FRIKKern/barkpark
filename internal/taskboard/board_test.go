@@ -1272,7 +1272,7 @@ func TestCollapseDraftTwinsIsNotAPrefixDrop(t *testing.T) {
 	}
 }
 
-// ── The bareID join, pinned (task-a7c3a17984689b3d, PDS-D748/D749) ──────────
+// ── The bareID join, pinned (task-a7c3a17984689b3d, PDS-D748/PDS-D749) ──────────
 //
 // `collapseDraftTwins` above governs the BOARD path. It does not govern
 // `Frontier`, `readySnapshotByBare` or `resolveNext`'s `byBare`, which index
