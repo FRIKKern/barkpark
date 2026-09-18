@@ -251,14 +251,14 @@ jobs:
       # exactly what mix.lock names, and the key is that lock.
       - name: Restore Elixir dependency sources
         id: depsrc
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: api/deps
           key: ${{ runner.os }}-boundary-deps-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
 
       - name: Restore the api dev build tree
         id: devbuild
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: api/_build/dev
           key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
@@ -282,7 +282,7 @@ jobs:
       # build tree.
       - name: Save Elixir dependency sources
         if: steps.depsrc.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: api/deps
           key: ${{ runner.os }}-boundary-deps-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
@@ -413,7 +413,7 @@ jobs:
       # next run starts from.
       - name: Save the api dev build tree
         if: steps.devbuild.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: api/_build/dev
           key: ${{ runner.os }}-boundary-devbuild-v2-otp27.0-ex1.18.1-${{ hashFiles('api/mix.lock') }}
