@@ -201,6 +201,27 @@ EOF
   fi
   printf '%s ok task-aaa\n' "$(_ago 4)" > "$d/lane/pulse.log"
 
+  echo "== arm 4b: a line in pulse-loop.sh's OWN say() format is measurable (cross-helper lock)"
+  # The arm-4 fixture above is written by THIS file's _ago, so it can only prove the parser
+  # reads the shape this file imagines. From 2026-09-10 to 2026-09-18 pulse-loop.sh wrote
+  # %H:%M:%SZ while the grep above wanted ^YYYY-MM-DDT…, and every real run of this helper
+  # printed STALE LOG "no parseable ISO timestamp" — a uniform verdict the fixture never saw.
+  # This arm reads pulse-loop.sh's date format OUT OF ITS SOURCE and refuses on an empty read.
+  local PL plfmt
+  PL="$(dirname "$SELF")/pulse-loop.sh"
+  plfmt=$(grep -oE "date -u \+[^)\"' ]+" "$PL" 2>/dev/null | head -1 | sed 's/^date -u +//')
+  if [ -z "$plfmt" ]; then
+    echo "FAIL arm4b: could not read a 'date -u +<fmt>' from $PL — the lock cannot see its subject"; fails=$((fails+1))
+  else
+    printf '%s ok task-aaa\n' "$(date -u -v-4M +"$plfmt" 2>/dev/null || date -u -d '4 minutes ago' +"$plfmt")" > "$d/lane/pulse.log"
+    if _run "arm4b runs (pulse-loop format '$plfmt')" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then
+      _last "arm4b verdict is OK"       'liveness: OK'
+      _want "arm4b measured the age"    1 'pulse log: newest line [0-9]+ min old'
+      _want "arm4b saw no STALE LOG"    0 'STALE LOG'
+    fi
+    printf '%s ok task-aaa\n' "$(_ago 4)" > "$d/lane/pulse.log"
+  fi
+
   echo "== arm 5: the pulse loop's pid is not alive -> NAMED, exit 1"
   echo "$DEAD" > "$d/lane/pulse.pid"
   if _run "arm5 runs" 1 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log"; then

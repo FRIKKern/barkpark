@@ -37,7 +37,26 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
       `invite_member/4`); the membership role-change path uses the rank-derived
       `Authz.can_grant?/3`. ARM D walks the whole (actor, target) matrix and
       measures the invitation side ONLY through the public `invite_member/4`
-      seam — never a test-only accessor for the private function.
+      seam — never a test-only accessor for the private function. Its ACTOR
+      domain is ARM C's `full_role_domain/0` — schema roles, `nil`, AND the
+      off-ladder strings — as of cch-w41-bl-arm-d-off-ladder-actors-unproved.
+      THE DECISION THAT ROW ASKED FOR, RECORDED: ARM D WIDENS; the invitation
+      path is NOT normalised. Both encodings already fail CLOSED on an
+      off-ladder actor on clean main (the private triple falls to its catch-all
+      `false`; `Authz.can_grant?/3` refuses at `not team_admin?`), so widening
+      asserts a property that HOLDS and changes no behaviour — whereas
+      normalising the invitation path would change what `invite_member/4` does
+      with an unknown role string, which is a charter call, not a census's
+      (same reasoning as the ARM E note at the foot of this file, charter D462).
+      RE-BASELINED, because cch-w41-s1's proof said "reds EXACTLY the two ARM C
+      tests": a downcasing `Authz.role/2` now reds ARM D as well, since an actor
+      holding `"OWNER"` becomes an admin to `Authz` while the invitation path
+      still reads the raw column. What ARM D catches that NOTHING else does is
+      the other direction — a change to the private triple (or to the role it is
+      handed) that lets an off-ladder actor mint an invitation: no other test in
+      `cloud/test` drives `invite_member/4` with an off-ladder ACTOR
+      (`accounts_invitations_test.exs` reaches off-ladder only as a TARGET of
+      `remove_member_as/3`).
 
   Plus the ratified behaviour change the rank drop makes reachable: an
   owner→admin demotion now ends the demoted user's sessions.
@@ -317,9 +336,14 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
 
   describe "ARM D: the invitation grant policy agrees with the rank-derived one" do
     test "invite_member/4 and Authz.can_grant?/3 agree over the whole (actor, target) matrix" do
-      actor_roles = TeamMembership.roles() ++ [nil]
+      # THE SAME DOMAIN ARM C WALKS — schema roles, `nil`, and the off-ladder
+      # strings — not `TeamMembership.roles() ++ [nil]`. The narrower cut left
+      # the invitation path's THIRD encoding of the rule (the private literal
+      # triple) unmeasured on exactly the inputs that distinguish it from a rank
+      # comparison: role strings the column accepts and no ladder ranks.
+      actor_roles = full_role_domain()
 
-      verdicts =
+      cells =
         for actor_role <- actor_roles, target_role <- TeamInvitation.roles() do
           {actor, team} = team_with_role_in_domain(actor_role)
 
@@ -332,12 +356,35 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
                    "the invitation path's private literal triple has drifted from the " <>
                    "rank-derived rule the role-change path uses"
 
-          invite?
+          {actor_role, invite?}
         end
+
+      verdicts = Enum.map(cells, &elem(&1, 1))
 
       assert true in verdicts and false in verdicts,
              "VACUOUS CENSUS: the (actor, target) matrix produced " <>
                "#{inspect(Enum.uniq(verdicts))} only — ARM D must see both a grant and a refusal"
+
+      # THE OFF-LADDER HALF, NAMED FROM WHAT WAS MEASURED — never inferred from
+      # the domain function. A fixture that stopped producing off-ladder rows
+      # would shrink this matrix silently and the equality above would still
+      # pass.
+      measured = cells |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      assert Enum.all?(@off_ladder, &(&1 in measured)),
+             "ARM D LOST ITS OFF-LADDER HALF: the actors measured were " <>
+               "#{inspect(measured)}, which does not cover #{inspect(@off_ladder)} — the " <>
+               "matrix shrank instead of reding"
+
+      # AND THE DIRECTION THE EQUALITY CANNOT STATE: equality is satisfied when
+      # BOTH encodings answer true, so it alone never says the off-ladder actors
+      # fail CLOSED. An unknown role string must confer no grant on either side.
+      granted = for {actor_role, true} <- cells, actor_role in @off_ladder, do: actor_role
+
+      assert granted == [],
+             "OFF-LADDER ACTOR GRANTED: #{inspect(Enum.uniq(granted))} minted an " <>
+               "invitation — a role string no changeset accepts must confer NO authority, " <>
+               "and both can_grant? encodings must fail closed on it"
     end
   end
 
