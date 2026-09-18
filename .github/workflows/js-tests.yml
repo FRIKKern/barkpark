@@ -42,6 +42,16 @@ on:
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
+      # The Elixir filter-op vocabulary. @barkpark/core's query-builder parity
+      # suite (packages/core/tests/filter-op-parity.test.ts) reads this fixture
+      # DIRECTLY across the tree ('../../../../api/test/fixtures/filter_ops.json')
+      # and is the only thing that proves the SDK's operator set matches the
+      # engine's. An engine-side vocabulary change regenerates it and touches no
+      # js/ path, so without this entry the suite was never DISPATCHED on the one
+      # change it exists to catch. MEASURED: appending one op to that fixture
+      # makes `vitest run tests/filter-op-parity.test.ts` fail 2 of 7 — the guard
+      # works; only its trigger was missing.
+      - "api/test/fixtures/filter_ops.json"
       # The Phoenix paper-surface stylesheet. @barkpark/react ships
       # dist/paper-surface.css as a byte-for-byte COPY of it, and
       # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
@@ -78,6 +88,16 @@ on:
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
+      # The Elixir filter-op vocabulary. @barkpark/core's query-builder parity
+      # suite (packages/core/tests/filter-op-parity.test.ts) reads this fixture
+      # DIRECTLY across the tree ('../../../../api/test/fixtures/filter_ops.json')
+      # and is the only thing that proves the SDK's operator set matches the
+      # engine's. An engine-side vocabulary change regenerates it and touches no
+      # js/ path, so without this entry the suite was never DISPATCHED on the one
+      # change it exists to catch. MEASURED: appending one op to that fixture
+      # makes `vitest run tests/filter-op-parity.test.ts` fail 2 of 7 — the guard
+      # works; only its trigger was missing.
+      - "api/test/fixtures/filter_ops.json"
       # The Phoenix paper-surface stylesheet. @barkpark/react ships
       # dist/paper-surface.css as a byte-for-byte COPY of it, and
       # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
