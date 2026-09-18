@@ -1763,27 +1763,23 @@ defmodule Barkpark.Plugins.Tasks do
   # bare `bp task get <ambiguous-id>` still sends no `?dataset=` and still gets
   # the honest 409. The refusal is what this makes followable, not what it
   # replaces.
-  @doc_id_dataset_flag %{
-    name: "dataset",
-    type: "string",
-    summary:
-      "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 " <>
-        "`ambiguous_dataset` refusal names: one doc_id may live in two datasets of a " <>
-        "single workspace+project, and the task doors REFUSE such an id rather than " <>
-        "picking a dataset you did not name. Omit it and nothing is picked for you — " <>
-        "an unambiguous id reads normally and an ambiguous one is still refused."
-  }
-
-  defp declare_dataset_on_doc_id_route(%{http: %{path_template: path}, flags: flags} = cmd)
-       when is_binary(path) and is_list(flags) do
-    if String.contains?(path, ":doc_id") and not Enum.any?(flags, &(&1.name == "dataset")) do
-      %{cmd | flags: flags ++ [@doc_id_dataset_flag]}
-    else
-      cmd
-    end
-  end
-
-  defp declare_dataset_on_doc_id_route(cmd), do: cmd
+  # THE RULE ITSELF NOW LIVES AT THE ASSEMBLY POINT (task-4968634c648cda54).
+  # `Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route/1` applies
+  # the same route predicate over the ASSEMBLED manifest — every plugin's
+  # `cli_commands/0`, not just this one's. That closes the escape hatch this
+  # per-list map left open: `session.link-task` targets
+  # `POST /v1/tasks/:doc_id/sessions` but is declared in
+  # `Barkpark.Plugins.Bulldocs`, so the map below never saw it, while its route
+  # (`TasksController.sessions/2` → `find_task_by_doc_id/2`) can answer the very
+  # 409 the flag exists to make followable.
+  #
+  # This call is KEPT, delegating to that one definition rather than repeating
+  # it, so `Barkpark.Plugins.Tasks.cli_commands/0` stays self-consistent when
+  # read on its own (tests and tooling do read it directly). The shared clause
+  # is idempotent, so applying it here and again at assembly appends nothing
+  # twice.
+  defp declare_dataset_on_doc_id_route(cmd),
+    do: Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route(cmd)
 
   # ── THE `?dataset=` SCOPE SELECTOR, DECLARED FROM THE ROUTE ─────────────
   # (task-052c01b723ce1006)

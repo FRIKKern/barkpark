@@ -352,8 +352,91 @@ defmodule Barkpark.Plugins.Registry do
   def collect_cli_commands(opts \\ []) do
     baseline = Keyword.get(opts, :baseline, [])
     ctx = Keyword.get(opts, :ctx, %{})
-    ResolverChain.reduce_resolvers(:resolve_cli_commands, baseline, ctx)
+
+    :resolve_cli_commands
+    |> ResolverChain.reduce_resolvers(baseline, ctx)
+    |> Enum.map(&declare_dataset_on_task_doc_id_route/1)
   end
+
+  # ── THE `?dataset=` DISAMBIGUATOR, KEYED ON THE ROUTE, OVER THE ASSEMBLED
+  #    MANIFEST ─────────────────────────────────────────────────── (#18611's
+  #    rule, moved to where every plugin's declaration passes through —
+  #    task-4968634c648cda54)
+  #
+  # `TasksController.find_task_by_doc_id/2` refuses a doc_id that lives in two
+  # datasets of one workspace+project with a 409 `ambiguous_dataset` whose
+  # message names the remedy: "?dataset=<name> on the task route". The CLI can
+  # type that remedy only for a command whose manifest DECLARES a dataset flag
+  # (`commandDeclaresFlag`, internal/cli/run.go, gating `globalQueryForwards`
+  # in internal/cli/globals.go). So every command that can RECEIVE that refusal
+  # must declare it, or the refusal names a remedy the caller cannot follow.
+  #
+  # WHY HERE AND NOT IN THE TASKS PLUGIN. #18611 derived exactly this rule, but
+  # applied it with `Enum.map/2` over the tasks plugin's OWN `cli_commands/0`
+  # list. The predicate is about the ROUTE; the application was about the LIST.
+  # A command that targets a `/v1/tasks/:doc_id` route but is DECLARED IN
+  # ANOTHER PLUGIN therefore escaped it for free. Measured on the served
+  # manifest: `session.link-task` (POST /v1/tasks/:doc_id/sessions, declared in
+  # `Barkpark.Plugins.Bulldocs`) was the one such command, and its route is
+  # `TasksController.sessions/2` — which resolves through
+  # `find_task_by_doc_id/2` and CAN answer the 409. A hand-written exception
+  # for it would have been the same stale-by-construction shape the derived
+  # rule exists to avoid, so the rule moved to the chokepoint instead: this
+  # collector is what the `/v1/capabilities` controller folds into
+  # `commands[]`, so EVERY plugin's declaration passes through it.
+  #
+  # THE PREFIX GUARD IS NOT COSMETIC. The predicate is ":doc_id UNDER
+  # /v1/tasks", not ":doc_id anywhere": the twin resolver is the task family's
+  # rule, and a `:doc_id` route some other plugin mounts elsewhere would get a
+  # flag its route never reads. No such route exists today (every `:doc_id`
+  # path_template in `lib/barkpark/plugins/` is under `/v1/tasks`), which is
+  # exactly why the guard is written now rather than after one appears.
+  #
+  # IDEMPOTENT: a command that already declares `dataset` (task.ready,
+  # task.events, task.ls, and the eleven the tasks plugin declares on its own
+  # list) is left verbatim — the clause never appends a second copy.
+  #
+  # Tolerant on shape by design: only a command with an atom-keyed
+  # `http.path_template` + `flags` list is rewritten; anything else falls to
+  # the catch-all unchanged rather than raising inside a boot-time collector.
+  @task_doc_id_dataset_flag %{
+    name: "dataset",
+    type: "string",
+    summary:
+      "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 " <>
+        "`ambiguous_dataset` refusal names: one doc_id may live in two datasets of a " <>
+        "single workspace+project, and the task doors REFUSE such an id rather than " <>
+        "picking a dataset you did not name. Omit it and nothing is picked for you — " <>
+        "an unambiguous id reads normally and an ambiguous one is still refused."
+  }
+
+  @doc """
+  Declare the `?dataset=` disambiguator on a command whose ROUTE is a
+  `/v1/tasks/:doc_id` route, whichever plugin declared the command.
+
+  Public so a test can assert the predicate directly, and so the tasks plugin
+  can apply the SAME rule to its own list without a second copy of it.
+  """
+  @spec declare_dataset_on_task_doc_id_route(Barkpark.Plugin.cli_command()) ::
+          Barkpark.Plugin.cli_command()
+  def declare_dataset_on_task_doc_id_route(%{http: %{path_template: path}, flags: flags} = cmd)
+      when is_binary(path) and is_list(flags) do
+    if task_doc_id_route?(path) and not Enum.any?(flags, &(flag_name(&1) == "dataset")) do
+      %{cmd | flags: flags ++ [@task_doc_id_dataset_flag]}
+    else
+      cmd
+    end
+  end
+
+  def declare_dataset_on_task_doc_id_route(cmd), do: cmd
+
+  defp task_doc_id_route?(path) do
+    String.starts_with?(path, "/v1/tasks/") and String.contains?(path, ":doc_id")
+  end
+
+  defp flag_name(%{name: name}), do: name
+  defp flag_name(%{"name" => name}), do: name
+  defp flag_name(_), do: nil
 
   # ─── Delegations ────────────────────────────────────────────────────────
   # Public surface preserved verbatim; canonical docs live on each delegated
