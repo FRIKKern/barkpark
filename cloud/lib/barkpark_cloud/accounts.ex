@@ -3145,7 +3145,8 @@ defmodule BarkparkCloud.Accounts do
   """
   @spec reap_lifecycle_tokens() :: %{reaped: non_neg_integer()}
   def reap_lifecycle_tokens do
-    cutoff = DateTime.add(lifecycle_now(), -@lifecycle_reap_grace_seconds, :second)
+    # MUTATION (DO NOT MERGE): grace neutered to 0 — the no-grace shape.
+    cutoff = lifecycle_now()
     contexts = @lifecycle_reap_contexts
 
     {count, _} =
