@@ -12781,7 +12781,7 @@ test("cch-r21-w22: no comment in this file types a scenario denominator the corp
   // The anchor is SPELLED IN TWO PIECES on purpose: written whole, this literal
   // would itself be a second occurrence of the line it targets, and replaceUnique
   // would refuse the ambiguity it exists to catch.
-  const anchor = "const CORPUS" + ' = await import("./__preview__/scenarios.mjs");';
+  const anchor = "const CORPUS" + " = PREVIEW_SCENARIOS;";
   const planted = replaceUnique(SRC, anchor,
     "// measured across all " + (names.length - 1) + " scenarios\n" + anchor,
     { what: "cch-r21-w22 CONTROL: plant a typed denominator" });
