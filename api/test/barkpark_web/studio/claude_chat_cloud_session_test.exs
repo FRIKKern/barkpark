@@ -504,11 +504,53 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
 
   # 400 × 20ms = 8s: under suite load the OS can take past 3s to schedule the
   # fake shell and flush its first write. The happy path returns on poll one.
+  #
+  # The deadline is DELIBERATELY not raised (#17605 measured that on the sibling
+  # file: "moving the clock buys silence, not signal"). What is raised is what a
+  # blown deadline SAYS — see `contention_report/1`.
   defp wait_for_file(file, tries \\ 400) do
     cond do
       File.exists?(file) and File.read!(file) != "" -> File.read!(file)
-      tries <= 0 -> flunk("capture file never written: #{file}")
+      tries <= 0 -> flunk(contention_report(file))
       true -> Process.sleep(20) && wait_for_file(file, tries - 1)
     end
+  end
+
+  # The named signature for this file's ONLY observed suite-run red (row
+  # task-9ffbd1b42bcf189f, reproduced 2026-09-18: 1 red in 6 runs of
+  # `mix test test/barkpark_web/studio/ test/barkpark_web/components/` under a
+  # private MIX_TEST_PARTITION, always as `capture file never written`).
+  #
+  # It is NOT an order dependence and NOT a leaked fixture: at test entry the
+  # measured `RuntimeAdmission.active_count()` was 0 and the RuntimeSupervisor
+  # held 0 children, so no earlier test left a Recorder, a lease or a binding
+  # behind. It is host contention on scheduling the fork/exec'd `sh` stub — the
+  # same classification #17605 (spd-b38) reached for `claude_chat_test.exs`.
+  #
+  # So the flunk states that, and prints the two facts that separate "the stub
+  # never ran" from "the stub ran and was slow": the invocation counter's
+  # contents and the sibling captures that DID land. A builder who meets this
+  # red can subtract it in one read instead of auditing their diff for a
+  # sandbox-binding bug that is not there.
+  defp contention_report(file) do
+    siblings =
+      file
+      |> Path.dirname()
+      |> Path.join("claude_chat_cloud_*_#{System.pid()}_*")
+      |> Path.wildcard()
+      |> Enum.map(&"#{Path.basename(&1)} (#{byte_size(File.read!(&1))}B)")
+
+    """
+    capture file never written: #{file}
+
+    HOST CONTENTION, not an order dependence (row task-9ffbd1b42bcf189f): the
+    fork/exec'd `sh` stub did not flush this capture within 8s. Measured at test
+    entry in the reproducing run: admission leases 0, RuntimeSupervisor children
+    0 — nothing leaked from an earlier test. Same family as #17605 / spd-b38.
+    Subtract it; do not accuse your diff.
+
+    captures this BEAM (#{System.pid()}) DID write:
+    #{Enum.map_join(siblings, "\n", &("  " <> &1))}
+    """
   end
 end
