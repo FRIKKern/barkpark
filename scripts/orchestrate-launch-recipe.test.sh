@@ -142,10 +142,17 @@ else
   bad "DECISIONS-FROM-MAIN.md's ownership is unstated — a reader cannot tell whether it was renamed"
 fi
 
-echo "== arm 8: both helper selftests pass, run to EOF (never piped to head/tail)"
-for h in session-files launch-headless-builder; do
+echo "== arm 8: the hermetic helper selftests pass, run to EOF (never piped to head/tail)"
+# pulse-loop.sh and held-liveness.sh joined this list for task-9afe7e0d6c901dbc: the two helpers
+# share a wire format (the pulse log's leading timestamp) and drifted apart for eight days, during
+# which held-liveness.sh printed STALE LOG about every live loop on the campaign. held-liveness's
+# own selftest now RUNS pulse-loop.sh and measures the line it wrote, so that drift cannot recur
+# silently -- but a selftest nothing invokes is a written finding, and a written finding does not
+# fire by itself. This loop is the trigger. Only HERMETIC selftests belong here: every helper
+# listed stubs its own `bp` and touches no network.
+for h in session-files launch-headless-builder pulse-loop held-liveness; do
   out=$(bash "$SKILL/helpers/$h.sh" --selftest 2>&1); rc=$?
-  if [ "$rc" -eq 0 ]; then ok "$h.sh --selftest: $(printf '%s' "$out" | grep -E 'passed, .* failed' | tail -1)"
+  if [ "$rc" -eq 0 ]; then ok "$h.sh --selftest: $(printf '%s' "$out" | grep -E 'passed, .* failed|all arms passed' | tail -1)"
   else bad "$h.sh --selftest exited $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 done
 
