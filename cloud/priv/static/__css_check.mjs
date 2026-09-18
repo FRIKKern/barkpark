@@ -3545,7 +3545,24 @@ console.log(
 if (errors.length) {
   console.error("");
   for (const e of errors) console.error("FAIL  " + e);
-  process.exit(1);
+  // NOT process.exit(1) — THE FIFTH INSTANCE of the sub-mode defect documented
+  // beside the emitSync helper above, found by this row's own stability arm.
+  // This body prints ~9.5KB, well past the 8192-byte pipe buffer, and the
+  // mirror harness in __app.test.mjs reads it through a spawnSync. On the GREEN
+  // path the gate simply falls off the end, so Node drains stdout before the
+  // process dies and nothing is ever lost — which is why the clean leg has
+  // never flaked. On THIS path the old `process.exit(1)` tore the process down
+  // with bytes still queued, and the mutation leg went red 1 run in 22 with a
+  // truncated capture.
+  //
+  // `process.exitCode` states the SAME verdict without the teardown: the
+  // statement below is the last in runGate, `if (IS_CLI) runGate()` is the last
+  // statement in the file, and the gate holds no timers or open handles, so
+  // returning here ends the program with nothing left to run. Node then exits
+  // on its own — flushing stdout and stderr first — and reports 1. Exit code
+  // identical, output no longer a race.
+  process.exitCode = 1;
+  return;
 }
 
 } // end runGate
