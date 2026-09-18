@@ -25,7 +25,11 @@ defmodule BarkparkCloud.Web.AuthRequireTeamRoleMinRoleTest do
       non-member, must answer exactly what they answer today. The fix narrows a
       value no live route passes; it must move nothing that they do.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — `off_ladder!/3` DROPS `team_memberships_role_check` inside this
+  # test's sandbox transaction (see `BarkparkCloud.OffLadderRole`), which takes
+  # ACCESS EXCLUSIVE on `team_memberships`. ExUnit runs sync suites serially and
+  # only after every async suite, so that lock cannot stall a concurrent test.
+  use BarkparkCloud.DataCase, async: false
 
   # The unranked-min_role clause logs at :error on purpose (reaching it is a
   # call-site bug). Captured so a green run stays quiet and a red one still
@@ -37,6 +41,7 @@ defmodule BarkparkCloud.Web.AuthRequireTeamRoleMinRoleTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.TeamMembership
+  alias BarkparkCloud.OffLadderRole
   alias BarkparkCloud.Web.Auth
   alias BarkparkCloud.Web.Router
 
@@ -79,24 +84,27 @@ defmodule BarkparkCloud.Web.AuthRequireTeamRoleMinRoleTest do
     user
   end
 
-  # Force a membership OFF the ladder. The changeset validates inclusion, so the
-  # write goes around it — the same technique accounts_invitations_test.exs uses.
+  # Force a membership OFF the ladder. The changeset validates inclusion AND
+  # (since `team_memberships_role_check`) so does the column, so the write goes
+  # around both via `OffLadderRole.without_role_constraint/1` — the same
+  # technique accounts_invitations_test.exs uses.
   defp off_ladder!(team, user, role) do
     refute role in TeamMembership.roles(),
            "off_ladder!/3 was handed #{inspect(role)}, which the changeset ACCEPTS — " <>
              "the caller would no longer be measuring the off-ladder branch"
 
     {1, _} =
-      Repo.update_all(
-        from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
-        set: [role: role]
-      )
+      OffLadderRole.without_role_constraint(fn ->
+        Repo.update_all(
+          from(m in TeamMembership, where: m.team_id == ^team.id and m.user_id == ^user.id),
+          set: [role: role]
+        )
+      end)
 
-    # Non-vacuity: if a CHECK constraint ever guards the column the write stops
-    # landing and every off-ladder assertion here would pass for the wrong
-    # reason. Asserted through match?/2 so the message stays live.
+    # Non-vacuity: if the write ever stops landing (a second guard, a failed
+    # drop), every off-ladder assertion here would pass for the wrong reason. Asserted through match?/2 so the message stays live.
     assert match?(^role, Accounts.team_role(user, team)),
-           "off_ladder!/3 did not land #{inspect(role)} — the column now refuses it, " <>
+           "off_ladder!/3 did not land #{inspect(role)} — the column still refuses it, " <>
              "so the off-ladder branch is UNREACHABLE from this fixture"
   end
 
