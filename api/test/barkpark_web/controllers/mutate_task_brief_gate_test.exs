@@ -23,6 +23,23 @@ defmodule BarkparkWeb.MutateTaskBriefGateTest do
   Revert the head-clause fix in `plugins/tasks.ex` and the first two arms go
   green-as-200, which is exactly the defect; the control keeps them honest.
 
+  ## The second arm: GRANDFATHERING
+
+  The wall is scoped to a task ENTERING the published corpus. A row that is
+  already published carrying no brief must keep publishing — 3 of 20 rows
+  sampled on the live instance are exactly that, and making them
+  un-republishable would strand the mutate publish op and the GitHub
+  draft-twin collapse on every legacy task.
+
+  The grandfather arm seeds such a row HONESTLY, without touching the Repo and
+  without disarming the plugin: it first-publishes with a well-formed brief
+  (the only way in), then patches the draft to DROP the brief and re-publishes.
+  Publish copies draft content wholesale, so after that second call the
+  published row genuinely carries no brief — and a THIRD publish, from a row
+  that was already published briefless, proves the grandfathering rather than
+  merely the transition. Remove the `published_doc` branch from the gate and
+  both of those re-publishes red 409.
+
   `scoped_conn/0` (never a bare `build_conn/0`) because several requests per test
   run against an ip-keyed limiter.
   """
@@ -113,6 +130,23 @@ defmodule BarkparkWeb.MutateTaskBriefGateTest do
     ])
   end
 
+  # createOrReplace the DRAFT with the given content, then publish it. The draft
+  # write is a plain content edit (only the PUBLISH may refuse), so this is the
+  # re-publish an operator issues after editing a live task.
+  defp replace_draft_and_publish(id, brief) do
+    mutate([
+      %{
+        "createOrReplace" => %{
+          "_id" => "drafts.#{id}",
+          "_type" => "task",
+          "title" => "brief gate #{id}",
+          "content" => task_content(brief)
+        }
+      },
+      %{"publish" => %{"id" => id, "type" => "task"}}
+    ])
+  end
+
   defp well_formed_brief do
     %{
       "version" => 1,
@@ -171,6 +205,58 @@ defmodule BarkparkWeb.MutateTaskBriefGateTest do
         |> json_response(200)
 
       assert read["result"]["_draft"] == false
+    end
+
+    test "GRANDFATHER — an already-published task re-publishes with NO brief at all" do
+      id = uniq("brief-gate-grandfather")
+
+      # (1) Birth, through the only door a birth has: a well-formed brief.
+      assert %{status: 200} = create_and_publish(id, well_formed_brief())
+
+      # (2) The brief is DROPPED and the task re-published. The gate is scoped
+      #     to first publish, so this must not be refused — and because publish
+      #     copies draft content wholesale, the published row now carries no
+      #     brief at all.
+      resp = replace_draft_and_publish(id, :none)
+
+      assert resp.status == 200,
+             "a re-publish must not be gated — the wall is scoped to first publish; got " <>
+               "#{resp.status}: #{resp.resp_body}"
+
+      read =
+        authed()
+        |> get("/v1/data/doc/#{@dataset}/task/#{id}")
+        |> json_response(200)
+
+      assert read["result"]["_draft"] == false
+
+      refute Map.has_key?(read["result"], "brief"),
+             "the published row must now genuinely carry no brief, or the arm below " <>
+               "proves nothing: #{inspect(Map.keys(read["result"]))}"
+
+      # (3) THE ARM THAT MATTERS: the incumbent is now a published, BRIEFLESS
+      #     row — the exact live shape — and it still publishes.
+      assert %{status: 200} = replace_draft_and_publish(id, :none)
+    end
+
+    test "GRANDFATHER BOUNDARY — a malformed brief on a re-publish is NOT refused" do
+      id = uniq("brief-gate-boundary")
+
+      assert %{status: 200} = create_and_publish(id, well_formed_brief())
+
+      # Stated so the boundary is a pinned fact and not a reader's inference:
+      # the gate does not fire on a re-publish AT ALL, so a bogus block type
+      # that would be a 409 at birth passes here. Shape validation on a
+      # re-publish belongs to Tasks.Validation's 422 layer, not to this wall.
+      resp =
+        replace_draft_and_publish(id, %{
+          "version" => 1,
+          "blocks" => [%{"type" => "totally-bogus-block"}]
+        })
+
+      assert resp.status == 200,
+             "the scoping is literal: a re-publish is not gated; got " <>
+               "#{resp.status}: #{resp.resp_body}"
     end
   end
 end

@@ -152,11 +152,36 @@ defmodule Barkpark.Plugins.Tasks do
   # `Bulldocs.reject_hollow_paper_publish/1` already did on this same seam.
   # `fetch/2` below was ALWAYS struct-safe (it falls back to the atom key), so
   # the head was the whole defect and the body needed no change.
+  # ── SCOPE: FIRST PUBLISH ONLY (task-c1f155da34d3338f, ruling) ─────────────
+  #
+  # The wall applies to a task ENTERING the published corpus, not to every
+  # publish forever after. A row that is ALREADY published without a brief —
+  # 3 of 20 sampled on the live instance, all of them born before the brief
+  # composer existed — keeps publishing: arming a dormant wall must not make
+  # the existing corpus un-republishable, which would strand the mutate publish
+  # op and the GitHub draft-twin collapse on every legacy row.
+  #
+  # `published_doc` is `nil` exactly on a birth (`Content.Lifecycle`'s
+  # `read_incumbent/4`). A payload that does not carry the key at all reads as
+  # `nil` too, and that is the SAFE default: a hook fired with a bare map (the
+  # shape the plugin's own unit tests use) still gates.
+  #
+  # THE BOUNDARY, STATED SO NOBODY HAS TO INFER IT: on a re-publish this gate
+  # does not fire AT ALL. A malformed brief on an already-published task is
+  # therefore NOT refused here. That is deliberate — the scope is the row's
+  # entry into the corpus, not a running brief validator — and it is the price
+  # of grandfathering. `Barkpark.Tasks.Validation` still owns brief SHAPE at
+  # the 422 layer on every write.
+  #
   # `task_doc?/1` (defined beside the edge helpers below) already reads all
   # three spellings — `:type`, `"type"`, `"_type"` — so the head reuses it
   # rather than growing a second, drift-prone copy of the same predicate.
-  defp portable_brief_gate(%{doc: doc}) when is_map(doc) do
-    if task_doc?(doc), do: gate_task_brief(doc), else: :ok
+  defp portable_brief_gate(%{doc: doc} = payload) when is_map(doc) do
+    cond do
+      not task_doc?(doc) -> :ok
+      not is_nil(Map.get(payload, :published_doc)) -> :ok
+      true -> gate_task_brief(doc)
+    end
   end
 
   defp portable_brief_gate(_payload), do: :ok
