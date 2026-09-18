@@ -3181,8 +3181,11 @@ func TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall(t *testing.T) {
 	if code != exitUsage {
 		t.Fatalf("project dir exit=%d want %d\n%s%s", code, exitUsage, stdout, stderr)
 	}
-	if !strings.Contains(stdout+stderr, "no index.html") {
-		t.Fatalf("the refusal must name the missing root index.html:\n%s%s", stdout, stderr)
+	// The PRE-MINT arm has read no site row yet, so it asks the union question
+	// (see prebuiltRuntime): a project directory is refused because it is
+	// NEITHER release-root shape, and the refusal names both.
+	if !strings.Contains(stdout+stderr, "neither an index.html nor a server.js") {
+		t.Fatalf("the refusal must name both release-root shapes it looked for:\n%s%s", stdout, stderr)
 	}
 
 	if cp.deployHits != 0 || cp.artifactHits != 0 {

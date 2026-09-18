@@ -2687,7 +2687,17 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # reports it LOST. This is the SEVENTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
         # exactly this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "Golden Rule 8 observer (selftest)")
+        --expect-unrendered "Golden Rule 8 observer (selftest)"
+        # main-red-owner.yml job `own-the-red` has existed since 2026-09-16 but its
+        # .exclusions row is added BY HAND in this commit (pe-bl-main-advisory-gate-
+        # hygiene), so the row postdates the frozen fixture pair and the pair cannot
+        # render it — the generator reports it LOST. The workflow's pull_request arm
+        # is `paths:`-fenced to its own four scripts, which is also WHY it had no row
+        # for two days: no sampled head rendered the name, so the census could not
+        # see it. This is the EIGHTH place, paid in the same commit.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
+        # exactly this name as MISSING ACK_EX (and nothing else) on this tree.
+        --expect-unrendered "a red on main's tip gets an owner")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

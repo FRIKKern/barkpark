@@ -311,6 +311,41 @@ ALLOC_LEDGER="${PDS_D_ALLOC_LEDGER:-tooling/pds/d-number-reservations.tsv}"
 # The default is PDS-D, so every existing caller, fixture and CI arm is
 # byte-identical to before this parameter existed.
 D_PREFIX="${PDS_RECORD_PARITY_PREFIX:-PDS-D}"
+
+# ── THE RULING-NUMBER SHAPE: DIGITS WITH AN OPTIONAL LETTER SUFFIX ───────────
+#
+# A ruling number is NOT digits. The charter mints lettered rulings — 34 of them
+# on main at the time of writing (PDS-D448a, PDS-D448b, PDS-D449a, … PDS-D496a)
+# — and the scripts cite them: PDS-D220a x26, PDS-D220b x12, PDS-D391b, PDS-D480a.
+#
+# WHAT A DIGITS-ONLY PREDICATE COST, MEASURED. Every scan in here used to read
+# the prefix followed by digits only, so `PDS-D480a` was extracted as `PDS-D480`
+# — a DIFFERENT ruling. In all 34 cases the numeric base is itself a separately
+# defined ruling, so the merge was SILENT rather than a missing-definition red,
+# and the undefined-citation arm could not fire on a lettered typo at all: cite
+# `PDS-D448` with a stray trailing `z` and it RESOLVED, because `PDS-D448`
+# exists — and axis D would red on this very comment if it spelled that phantom
+# out, which is the widening proving itself in its own header. The guard's whole
+# purpose was defeated for that shape. Reproduced against a fixture tree, with a
+# numeric phantom as the control, BEFORE this was widened.
+#
+# THE SAME SHAPE `scripts/pds-citation-expand.sh` CARRIES. Its every segment
+# class is `[0-9]+[a-z]?` and its selftest arm 4b reds if anyone narrows it back.
+# This file gets the same treatment: the shapes are NAMED here, every scan reads
+# a name, and `pds-record-parity.test.sh` runs a PREDICATE over this whole file —
+# not a list of line numbers somebody eyeballed — that reds if a digit class ever
+# reappears beside the prefix. A constant nobody may bypass is the only form of
+# this rule that survives the next edit.
+D_NUM_RE='[0-9]+[a-z]?'          # a ruling number, as CITED and as DEFINED
+D_BASE_RE='[0-9]+'               # the ALLOCATION base — see below
+D_NAIVE_NUM_RE='[0-9]{3}[a-z]?'  # the contrast-only naive lens's fixed-width form
+
+# WHY THE ALLOCATION LEDGER STAYS ON THE BASE. A letter is a SUB-ruling of a
+# number that was already minted: `PDS-D448a` consumes no new number, and the
+# arbiter's pointer is arithmetic (`high + 1`). Feeding `448a` into `-gt` or
+# `sort -n` would be a type error wearing a widening's clothes. So the arbiter
+# reads bases (charter_defined_bases), the RESOLUTION lenses read full ids, and
+# neither borrows the other's shape.
 REPO="${PDS_RECORD_PARITY_REPO:-FRIKKern/barkpark}"
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
@@ -443,15 +478,65 @@ now_epoch() {
 # about a test fixture.
 charter_defined_numbers() {
   [ -f "$CHARTER" ] || return 1
+  # `sort -u` then `sort -n -s`, NEVER `sort -n -u`: under a numeric key `448`
+  # and `448a` compare EQUAL, so `-n -u` would silently drop one of them — the
+  # very collapse this widening exists to stop, reintroduced by the sort. The
+  # lexicographic `-u` dedups on the WHOLE id; the stable numeric pass then
+  # orders `404 448 448a 1000` and keeps `448` ahead of `448a`.
   {
-    grep -oE "^[[:space:]]*([-*][[:space:]]+)?\*\*${D_PREFIX}[0-9]+" "$CHARTER"
-    grep -oE "^#+[[:space:]]+${D_PREFIX}[0-9]+([[:space:]]|$)" "$CHARTER"
-  } | grep -oE "${D_PREFIX}[0-9]+" | sed "s/^${D_PREFIX}//" | sort -n -u
+    grep -oE "^[[:space:]]*([-*][[:space:]]+)?\*\*${D_PREFIX}${D_NUM_RE}" "$CHARTER"
+    grep -oE "^#+[[:space:]]+${D_PREFIX}${D_NUM_RE}([[:space:]]|$)" "$CHARTER"
+  } | grep -oE "${D_PREFIX}${D_NUM_RE}" | sed "s/^${D_PREFIX}//" | sort -u | sort -n -s
+}
+
+# The same lens, projected onto the ALLOCATION base — `448a` -> `448`. This is
+# what the arbiter scores: a letter never consumed a number, so a lettered
+# definition must not read as an unreserved mint and must not move the pointer.
+charter_defined_bases() {
+  charter_defined_numbers | sed 's/[a-z]*$//' | sort -n -u
+}
+
+# ── THE CLAUSE LENS — AND WHY IT IS NOT "RESOLVE A LETTER BY ITS BASE" ───────
+#
+# Widening the extractor turns up a THIRD shape, live on main: `PDS-D220a` x26
+# and `PDS-D220b` x12 and `PDS-D391b`, which are not rulings at all. They name a
+# CLAUSE inside a ruling — D220's definition line literally reads
+#   `- **PDS-D220 — TWO PRE-MERGE INSTRUMENT FIXES …** (a) **THE ZERO-SAMPLE …`
+# and the scripts cite clause (a) as `PDS-D220a`. That is a real citation to a
+# real authority and must not red.
+#
+# THE TEMPTING FIX IS THE DEFECT AGAIN. "A lettered citation resolves if its
+# numeric base is defined" would green `PDS-D220a` — and green a `PDS-D448` with
+# a stray `z` with it, which is precisely the blind spot this file was widened to
+# close. The base
+# is not the discriminator. The CHARTER is: a clause reference resolves only if
+# the base's own definition BLOCK carries the literal marker `(a)`. D220's does;
+# D448's carries no `(z)`, and no charter block anywhere carries one. Measured on
+# main: 220a, 220b, 391b resolve here; the `z`-suffixed phantoms of 448, 480 and
+# 391 do not. (Spelled that way on purpose: a phantom written out in full in a
+# pds-*.sh comment is a citation, and axis D reds on it — as it should.)
+#
+# The block runs from the base's definition line to the NEXT definition line, so
+# a marker belonging to some other ruling cannot be borrowed.
+charter_clause_defined() { # charter_clause_defined <id, e.g. 220a> — rc 0 if it is a clause
+  case "$1" in *[a-z]) : ;; *) return 1 ;; esac
+  [ -f "$CHARTER" ] || return 1
+  local base="${1%[a-z]}" letter="${1##*[0-9]}"
+  awk -v pfx="$D_PREFIX" -v num="$D_NUM_RE" -v base="$base" -v l="$letter" '
+    BEGIN {
+      anydef = "^[ \t]*([-*][ \t]+)?\\*\\*" pfx num "|^#+[ \t]+" pfx num
+      # `[^0-9a-zA-Z]` after the base so 22 cannot claim 220s definition line.
+      thisdef = "^[ \t]*([-*][ \t]+)?\\*\\*" pfx base "[^0-9a-zA-Z]|^#+[ \t]+" pfx base "[^0-9a-zA-Z]"
+    }
+    $0 ~ anydef { if (inblock) exit; if ($0 ~ thisdef) inblock = 1 }
+    inblock && index($0, "(" l ")") { found = 1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$CHARTER"
 }
 
 alloc_ledger_numbers() { # every number this ledger has ever spoken for, seed excluded
   [ -f "$ALLOC_LEDGER" ] || return 0
-  awk -F'\t' -v pfx="$D_PREFIX" '$1 ~ "^" pfx "[0-9]+$" { sub("^" pfx, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
+  awk -F'\t' -v pfx="$D_PREFIX" -v num="$D_BASE_RE" '$1 ~ "^" pfx num "$" { sub("^" pfx, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
 }
 
 alloc_seed() { # the high-water mark at adoption; empty if the ledger has none
@@ -482,7 +567,7 @@ allocate_d() { # allocate_d <count>
   trap 'rm -rf -- "$WORKDIR"; rmdir "'"$lock"'" 2>/dev/null' EXIT
 
   local defs high_charter high_res high seed now
-  defs="$(charter_defined_numbers)" || {
+  defs="$(charter_defined_bases)" || {
     echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found — the arbiter will not" >&2
     echo "  mint a number against a corpus it cannot read." >&2
     rmdir "$lock" 2>/dev/null; return 2
@@ -538,7 +623,7 @@ check_alloc() {
     # to make that impossible. The selftest fixture below caught it.
     raise 2; return 0
   fi
-  defs="$(charter_defined_numbers)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
+  defs="$(charter_defined_bases)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
   res="$(alloc_ledger_numbers)"
   echo "D-NUMBER ALLOCATION — every number minted since the seed was reserved first"
   echo "  prefix:     ${D_PREFIX}"
@@ -548,7 +633,7 @@ check_alloc() {
   echo "  reserved:   $(printf '%s\n' "$res" | grep -c '[0-9]') number(s)"
   # A ledger that reserves one number twice is the defect wearing the fix's
   # clothes, so it is scored before anything else.
-  dupres="$(awk -F'\t' -v pfx="$D_PREFIX" '$1 ~ "^" pfx "[0-9]+$" { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
+  dupres="$(awk -F'\t' -v pfx="$D_PREFIX" -v num="$D_BASE_RE" '$1 ~ "^" pfx num "$" { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
   if [ "${dupres:-0}" -gt 0 ]; then
     echo "  DIVERGENT: ${dupres} number(s) reserved MORE THAN ONCE — the arbiter minted a collision."
     raise 1
@@ -696,10 +781,13 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
   # character classes and matches NOTHING for them — silently, which here would
   # mean `titled: 0` and a uniqueness leg that greens because it parsed nothing.
   # The selftest pins a non-zero titled count for exactly that reason.
-  awk '
-    match($0, /^[ \t]*([-*][ \t]+)?\*\*PDS-D[0-9]+ —/) ||
-    match($0, /^#+[ \t]+PDS-D[0-9]+ —/) {
-      if (match($0, /PDS-D[0-9]+/)) print substr($0, RSTART, RLENGTH), NR
+  # A DYNAMIC regex built from the named shapes above, not a literal, so this
+  # lens cannot drift away from the ones the axes resolve with. `\\*` inside a
+  # STRING regex is the escaped asterisk awk's regex compiler sees as `\*`.
+  awk -v pfx="$D_PREFIX" -v num="$D_NUM_RE" '
+    match($0, "^[ \t]*([-*][ \t]+)?\\*\\*" pfx num " —") ||
+    match($0, "^#+[ \t]+" pfx num " —") {
+      if (match($0, pfx num)) print substr($0, RSTART, RLENGTH), NR
     }
   ' "$CHARTER" > "$occ"
 
@@ -796,7 +884,7 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
   # another decision's prose. The gap between the two counts is re-derived on
   # every run and every number in it must be named, or the arm says so.
   local naive="$WORKDIR/naive-dups"
-  grep -oE 'PDS-D[0-9]{3} —' "$CHARTER" | sed 's/ —$//' | sort | uniq -c \
+  grep -oE "${D_PREFIX}${D_NAIVE_NUM_RE} —" "$CHARTER" | sed 's/ —$//' | sort | uniq -c \
     | awk '$1 > 1 { print $2 }' | sort -k1.6n > "$naive"
   echo "  naive grep: $(wc -l < "$naive" | tr -d ' ') number(s) — the unanchored \`PDS-D### —\` count, for contrast only"
   local nn
@@ -948,7 +1036,7 @@ axis_a() {
     # It loses every bullet-defined number and is kept only to demonstrate what a
     # lens artifact looks like. Never the gate. See ruling (1).
     lens="LOOSE HEADING (lens-artifact demonstrator — NOT the gate)"
-    grep -oE '^#+[[:space:]].*PDS-D[0-9]+' "$CHARTER" | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
+    grep -oE "^#+[[:space:]].*${D_PREFIX}${D_NUM_RE}" "$CHARTER" | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u > "$defs"
   else
     # THE UNION OF THE TWO FORMS THE CHARTER DEFINES DECISIONS IN (ruling 1):
     #   a bold lead at the start of a line, optionally bulleted —
@@ -961,14 +1049,14 @@ axis_a() {
     # between this lens and --heading-lens.
     lens="DEFINITION FORMS — bold-lead bullet UNION own-line heading"
     {
-      grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER"
-      grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER" # revert-marker: heading-arm
-    } | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
+      grep -oE "^[[:space:]]*([-*][[:space:]]+)?\*\*${D_PREFIX}${D_NUM_RE}" "$CHARTER"
+      grep -oE "^#+[[:space:]]+${D_PREFIX}${D_NUM_RE}([[:space:]]|$)" "$CHARTER" # revert-marker: heading-arm
+    } | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u > "$defs"
   fi
 
   if [ -n "$COMMITS_FILE" ]; then
     [ -f "$COMMITS_FILE" ] || { echo "  UNCHECKED: --commits-file ${COMMITS_FILE} not found" >&2; raise 2; return 0; }
-    grep -oE 'PDS-D[0-9]+' "$COMMITS_FILE" | sort -u > "$cites"
+    grep -oE "${D_PREFIX}${D_NUM_RE}" "$COMMITS_FILE" | sort -u > "$cites"
   else
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
       echo "  UNCHECKED: not inside a git work tree — the commit corpus is unreachable" >&2
@@ -982,7 +1070,7 @@ axis_a() {
     if [ "$WALK_STATE" != "complete" ]; then
       local seen_commits seen_cites
       seen_commits="$(git rev-list --count HEAD 2>/dev/null)" || seen_commits=""
-      seen_cites="$(git log --format=%B 2>/dev/null | grep -oE 'PDS-D[0-9]+' | sort -u | wc -l | tr -d ' ')"
+      seen_cites="$(git log --format=%B 2>/dev/null | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u | wc -l | tr -d ' ')"
       {
         if [ "$WALK_STATE" = "truncated" ]; then
           echo "  UNCHECKED: TRUNCATED WALK — this checkout's history is grafted ON HEAD, so"
@@ -1005,7 +1093,7 @@ axis_a() {
       raise 2; return 0
     fi
 
-    git log --format=%B | grep -oE 'PDS-D[0-9]+' | sort -u > "$cites"
+    git log --format=%B | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u > "$cites"
   fi
 
   # THE ROSTER, OUT OF THE CORPUS — the same declaration axis D reads, taken at
@@ -1023,6 +1111,25 @@ axis_a() {
 
   comm -23 "$cites" "$defs" > "$unresolved"
 
+  # THE CLAUSE LENS, ON THIS AXIS TOO. A commit message cites clause (a) of a
+  # ruling as PDS-D220a exactly as a script does, so the two axes must resolve
+  # the same shape the same way — an axis that reds on what its sibling greens
+  # is a lens artifact wearing a finding's clothes. Same rule, not a softer one:
+  # the base's definition BLOCK must carry the literal (x) marker, so a letter
+  # that is a typo still reds here. COUNTED and PRINTED below.
+  local a_clause=0
+  if [ -s "$unresolved" ]; then
+    : > "$WORKDIR/a_unres_real"
+    while IFS= read -r cited; do
+      [ -n "$cited" ] || continue
+      if charter_clause_defined "${cited#"$D_PREFIX"}"; then
+        a_clause=$((a_clause + 1)); continue
+      fi
+      printf '%s\n' "$cited" >> "$WORKDIR/a_unres_real"
+    done < "$unresolved"
+    mv -f "$WORKDIR/a_unres_real" "$unresolved"
+  fi
+
   local n_def n_cite n_unres
   n_def="$(wc -l < "$defs" | tr -d ' ')"
   n_cite="$(wc -l < "$cites" | tr -d ' ')"
@@ -1033,6 +1140,7 @@ axis_a() {
   echo "  defined:    ${n_def} distinct PDS-D"
   echo "  cited:      ${n_cite} distinct PDS-D across the commit corpus"
   echo "  fixtures:   ${a_sent_skipped} dropped before resolving, off a roster of $(printf '%s' "$a_sent_nums" | wc -w | tr -d ' ') (PDS-D$(printf '%s' "$a_sent_nums" | sed 's/ /, PDS-D/g'))"
+  echo "  clauses:    ${a_clause} lettered citation(s) resolved as a CLAUSE of their base"
   echo "  unresolved: ${n_unres}"
 
   if [ "$n_unres" -gt 0 ]; then
@@ -1189,7 +1297,7 @@ axis_d() {
   local f_err="$WORKDIR/d_grep_err" f_refused="$WORKDIR/d_refused" grc=0
   : > "$f_refused"
   while IFS= read -r f; do
-    grep -I -noE 'PDS-D[0-9]+' "$f" 2>"$f_err" | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites"
+    grep -I -noE "${D_PREFIX}${D_NUM_RE}" "$f" 2>"$f_err" | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites"
     grc="${PIPESTATUS[0]}"
     [ "$grc" -le 1 ] && continue
     printf '%s (grep rc=%s) %s\n' "${f#"$CITATION_ROOT"/}" "$grc" "$(tr '\n' ' ' < "$f_err")" >> "$f_refused"
@@ -1208,7 +1316,7 @@ axis_d() {
   local n_files n_occ n_distinct
   n_files="$(wc -l < "$files" | tr -d ' ')"
   n_occ="$(wc -l < "$cites" | tr -d ' ')"
-  n_distinct="$(sed 's/.*:\(PDS-D[0-9]*\)$/\1/' "$cites" | sort -u | wc -l | tr -d ' ')"
+  n_distinct="$(sed -E "s/.*:(${D_PREFIX}${D_NUM_RE})\$/\1/" "$cites" | sort -u | wc -l | tr -d ' ')"
 
   if [ "$n_occ" -eq 0 ]; then
     echo "  UNCHECKED: ${n_files} file(s) in scope and ZERO citations in any of them." >&2
@@ -1226,14 +1334,20 @@ axis_d() {
 
   # NORMALISED to `path:line:number` — the bare number, so the allowlist below
   # can name an entry without itself becoming a citation of it.
-  sed 's/:PDS-D\([0-9][0-9]*\)$/:\1/' "$WORKDIR/d_cites_real" > "$WORKDIR/d_cites_norm"
+  sed -E "s/:${D_PREFIX}(${D_NUM_RE})\$/:\1/" "$WORKDIR/d_cites_real" > "$WORKDIR/d_cites_norm"
 
   # Undefined = the number is not in the definition lens's output.
   : > "$unres"
+  local n_clause=0
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     local num="${line##*:}"
-    grep -qx "$num" "$defs" || printf '%s\n' "$line" >> "$unres"
+    grep -qx "$num" "$defs" && continue
+    # A clause reference resolves against the base's definition BLOCK, never
+    # against the base's mere existence. COUNTED and PRINTED below, because a
+    # resolution path nobody can see in the run is the next silent merge.
+    if charter_clause_defined "$num"; then n_clause=$((n_clause + 1)); continue; fi
+    printf '%s\n' "$line" >> "$unres"
   done < "$WORKDIR/d_cites_norm"
 
   printf '%s\n' "$AXIS_D_ALLOWLIST" | sed '/^[[:space:]]*$/d' | sort -u > "$allow"
@@ -1244,6 +1358,10 @@ axis_d() {
   echo "  sentinels:  ${sent_skipped} occurrence(s) skipped (PDS-D$(printf '%s' "$sent_nums" | sed 's/ /, PDS-D/g'))"
   echo "  defined:    $(wc -l < "$defs" | tr -d ' ') distinct PDS-D in the charter"
   echo "  allowlist:  $(wc -l < "$allow" | tr -d ' ') entry(ies) — shrinks, never grows"
+  echo "  clauses:    ${n_clause} lettered citation(s) resolved as a CLAUSE of their base"
+  echo "              (the base's definition block carries the literal (x) marker;"
+  echo "               a letter whose base has no such marker still reds — that is"
+  echo "               the lettered-typo arm this axis was widened to get back)"
 
   : > "$fired"
   local n_allowed=0
@@ -1260,8 +1378,13 @@ axis_d() {
   if [ -s "$fired" ]; then
     while IFS= read -r line; do
       local num="${line##*:}" below above near=""
-      below="$(awk -v n="$num" '$1 < n {v=$1} END {print v}' "$defs")"
-      above="$(awk -v n="$num" '$1 > n {print $1; exit}' "$defs")"
+      # BASE-AWARE. `$1 < n` alone compares "1000" against "448a" as STRINGS the
+      # moment a letter enters the set, and prints a nearest number that is not
+      # near anything. The base orders; the whole id breaks the tie.
+      below="$(awk -v n="$num" 'function b(x){sub(/[a-z]+$/,"",x); return x+0}
+               b($1) < b(n) || (b($1) == b(n) && $1 < n) {v=$1} END {print v}' "$defs")"
+      above="$(awk -v n="$num" 'function b(x){sub(/[a-z]+$/,"",x); return x+0}
+               b($1) > b(n) || (b($1) == b(n) && $1 > n) {print $1; exit}' "$defs")"
       [ -n "$below" ] && near="PDS-D${below}"
       [ -n "$above" ] && near="${near:+${near}, }PDS-D${above}"
       echo "    UNDEFINED-CITATION   ${line%:*} cites PDS-D${num}"
