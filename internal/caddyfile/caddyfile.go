@@ -87,6 +87,7 @@ p{opacity:.7;line-height:1.5;margin:.25rem 0}
 func MaintenanceHandler(indent string) string {
 	var sb strings.Builder
 	sb.WriteString(indent + "handle_errors 502 503 504 {\n")
+	sb.WriteString(indent + "handle_errors {\n")
 	sb.WriteString(indent + "\theader Retry-After \"15\"\n")
 	sb.WriteString(indent + "\theader Content-Type \"text/html; charset=utf-8\"\n")
 	// The block form of `respond` lets us set 503 AND supply a heredoc body — a
