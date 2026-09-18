@@ -220,7 +220,19 @@ export function quotesRetiredGateOnly(text) {
 // THIS TABLE IS A SNAPSHOT AND IS GUARDED AS ONE. `--plan` refuses loudly on any
 // live stamp-blocked criterion missing from it, and reports every entry that has
 // since drained. It is never consulted without that reconciliation.
-export const VERDICT = Object.freeze({ GATE: "GATE", MENTION: "MENTION" });
+// A SECOND READER (gates-r21d-w11, 2026-09-18) asked a DIFFERENT question of the
+// same 22 live criteria than the first pass did. The first pass asked "is this
+// criterion the LEAD's to close?"; the second asked "is the thing this criterion
+// ASSERTS genuinely `this PR merged with its required contexts green`?". Those
+// questions agree on 20 of 22 and diverge on exactly the shape where the merge
+// is a CONJUNCT or a MARKER rather than the whole assertion — which is the
+// fabrication direction this row exists to prevent, because `merge_gate:true`
+// makes `merge_gate_synthetics/3` autostamp the WHOLE criterion on a lead merge
+// close, including the half no merge proves. HOLD is the third verdict those two
+// need: classified (so the staleness guard stays satisfied and cannot rot into
+// silence), but NEVER planned as a write in either direction. An unflagged
+// criterion is merely inconvenient; a wrongly-permitted one is a fabricated done.
+export const VERDICT = Object.freeze({ GATE: "GATE", MENTION: "MENTION", HOLD: "HOLD" });
 
 export const CLASSIFICATION = Object.freeze({
   // ── GATE (19): the criterion IS this row's merge gate.
@@ -228,7 +240,6 @@ export const CLASSIFICATION = Object.freeze({
   "tgw3-decide-stages-foreign-rows#3":            [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
   "tgw4-bl-plainrule-flag-audit#6":               [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
   "tgw-census-reach-triage#3":                    [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
-  "pds-w20-crown-collect-and-seal#5":             [VERDICT.GATE, "LEAD closes: the crown seals 12/12 or records a named refusal"],
   "hgw4-bl-automerge-artifact-side-head-recheck#3":[VERDICT.GATE, "LEAD closes: PR merged, or declined with the decision recorded"],
   "connectors-telegram-webhook-wire#2":           [VERDICT.GATE, "declares the gate: PR merged; connectors.yml green"],
   "task-e7bd4b127aaee4fc#2":                      [VERDICT.GATE, "THE LEAD CLOSES THIS: PR merged with the merge SHA recorded"],
@@ -239,7 +250,6 @@ export const CLASSIFICATION = Object.freeze({
   "task-97750fc8b61c45cc#6":                      [VERDICT.GATE, "lead-owned: merge-base --is-ancestor against origin/main"],
   "task-6f12ce2edd4be65a#4":                      [VERDICT.GATE, "declares the gate: merged to main with its gates green"],
   "wbt-jwt-bl-wire-p7-doc-gates#4":               [VERDICT.GATE, "THE LEAD closes, never the builder: PR merged with the Task: trailer"],
-  "task-f56d553a70a4bba8#4":                      [VERDICT.GATE, "THE LEAD closes: atomic PR merged, required contexts green"],
   "tgw9-bl-epic-cycle-digest-demotion-prose#2":   [VERDICT.GATE, "THE LEAD closes: the PR is merged to main"],
   "task-c7e10834d493da6f#2":                      [VERDICT.GATE, "THE LEAD closes: PR merged to main"],
   "task-5753ff3072d00b67#4":                      [VERDICT.GATE, "THE LEAD closes: PR merged, required contexts green"],
@@ -253,6 +263,11 @@ export const CLASSIFICATION = Object.freeze({
   "task-0ed428e843b83382#0":                      [VERDICT.MENTION, "about the CREATE path setting merge_gate:true; meta"],
   "task-616789a3afe59364#1":                      [VERDICT.MENTION, "about merge-gate-autostamp-liveness.sh exiting 0; meta"],
   "task-60703ce4dd41a5a0#3":                      [VERDICT.MENTION, "about hand-classifying worded-but-unflagged criteria; meta"],
+
+  // -- HOLD (2): merge-SHAPED but not merge-EXHAUSTED. Both were GATE in the
+  // first pass. Neither is written in either direction; both are the owner's call.
+  "pds-w20-crown-collect-and-seal#5":             [VERDICT.HOLD, "marker says LEAD-closes, but the ASSERTION is 'the crown seals 12/12 under one RUN_ID, OR a named refusal is recorded in the wave paper' — a merge proves neither disjunct, so merge_gate:true would autostamp a crown that never sealed"],
+  "task-f56d553a70a4bba8#4":                      [VERDICT.HOLD, "a CONJUNCTION: 'the atomic PR is merged to main with all required contexts green, AND the first five post-flip campaign PRs render five required contexts in pr-required.sh (5/5)'. The merge proves the first conjunct only; merge_gate:true would autostamp the 5/5 half no merge can witness"],
 });
 
 // The two blind-sample MENTIONs main's 2026-09-07 deferral named by hand
@@ -530,8 +545,16 @@ export function buildPlan(report) {
   const live = report.stamp_blocked;
   const unclassified = live.filter((k) => !CLASSIFICATION[k]);
   const drained = Object.keys(CLASSIFICATION).filter((k) => !live.includes(k));
+  // HOLD is CLASSIFIED but NEVER WRITTEN. It must be filtered out BEFORE the
+  // map, not inside it: `merge_gate: verdict === VERDICT.GATE` would silently
+  // turn a HOLD into a `merge_gate:false` write, which is the same fabrication
+  // in the other direction. The PLAN selftest arm reds if a HOLD ever reaches
+  // `writes`.
+  const held = live
+    .filter((k) => CLASSIFICATION[k] && CLASSIFICATION[k][0] === VERDICT.HOLD)
+    .map((k) => ({ key: k, why: CLASSIFICATION[k][1] }));
   const writes = live
-    .filter((k) => CLASSIFICATION[k])
+    .filter((k) => CLASSIFICATION[k] && CLASSIFICATION[k][0] !== VERDICT.HOLD)
     .map((k) => {
       const [verdict, why] = CLASSIFICATION[k];
       const [doc_id, idx] = [k.slice(0, k.lastIndexOf("#")), Number(k.slice(k.lastIndexOf("#") + 1))];
@@ -542,7 +565,10 @@ export function buildPlan(report) {
     applied: false,
     apply_deferred_by: "main, 2026-09-07 — post-campaign, single lane, serialized",
     live_stamp_blocked: live.length,
-    classified: writes.length,
+    classified: writes.length + held.length,
+    planned_writes: writes.length,
+    held_for_owner: held.length,
+    held,
     gate_writes: writes.filter((w) => w.merge_gate === true).length,
     mention_writes: writes.filter((w) => w.merge_gate === false).length,
     unclassified,
@@ -714,10 +740,12 @@ function selftest() {
 
         // ── THE CLASSIFICATION TABLE ──────────────────────────────────────
         eq("CLASSIFY: every entry carries a verdict and a reason",
-           Object.values(CLASSIFICATION).every((v) => (v[0] === VERDICT.GATE || v[0] === VERDICT.MENTION) && typeof v[1] === "string" && v[1].length > 0), true);
-        eq("CLASSIFY: the split is 19 GATE / 6 MENTION as hand-derived 2026-09-17",
+           Object.values(CLASSIFICATION).every((v) => Object.values(VERDICT).includes(v[0]) && typeof v[1] === "string" && v[1].length > 0), true);
+        eq("CLASSIFY: the split is 17 GATE / 6 MENTION / 2 HOLD after the 2026-09-18 second read",
            [Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.GATE).length,
-            Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.MENTION).length], [19, 6]);
+            Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.MENTION).length], [17, 6]);
+        eq("CLASSIFY: the second reader's HOLD bucket exists and is non-empty",
+           Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.HOLD).length, 2);
         eq("CLASSIFY: every key is <doc_id>#<index>",
            Object.keys(CLASSIFICATION).every((k) => /^[^#]+#\d+$/.test(k)), true);
 
@@ -725,7 +753,7 @@ function selftest() {
         const planRep = (blocked) => ({ stamp_blocked: blocked });
         const allKeys = Object.keys(CLASSIFICATION);
         const pFull = buildPlan(planRep(allKeys));
-        eq("PLAN: writes both directions, never one", [pFull.gate_writes, pFull.mention_writes], [19, 6]);
+        eq("PLAN: writes both directions, never one", [pFull.gate_writes, pFull.mention_writes], [17, 6]);
         eq("PLAN: it is a plan — nothing is applied", pFull.applied, false);
         eq("PLAN: a GATE entry plans merge_gate:true", pFull.writes.find((w) => w.key === "task-c7e10834d493da6f#2").merge_gate, true);
         eq("PLAN: a MENTION entry plans merge_gate:false — the one-field veto, not a reword",
@@ -738,6 +766,21 @@ function selftest() {
         const pDrain = buildPlan(planRep(allKeys.slice(1)));
         eq("PLAN: a criterion that drained since classification is named too", pDrain.drained_since_classification, [allKeys[0]]);
         eq("PLAN: a drained entry is NOT planned as a write", pDrain.writes.some((w) => w.key === allKeys[0]), false);
+
+        // ── HOLD: CLASSIFIED, NEVER WRITTEN ───────────────────────────────
+        // The failure this guards is not an omission but a SILENT DOWNGRADE:
+        // `merge_gate: verdict === VERDICT.GATE` maps HOLD to `false`, so a HOLD
+        // that reaches `writes` is planned as a veto nobody decided on.
+        const holdKeys = Object.keys(CLASSIFICATION).filter((k) => CLASSIFICATION[k][0] === VERDICT.HOLD);
+        eq("HOLD: a held criterion is NEVER planned as a write, in either direction",
+           pFull.writes.some((w) => holdKeys.includes(w.key)), false);
+        eq("HOLD: every held criterion is surfaced by name for the owner",
+           pFull.held.map((h) => h.key).sort(), holdKeys.slice().sort());
+        eq("HOLD: a held criterion is CLASSIFIED, so the staleness guard stays quiet",
+           pFull.unclassified.length, 0);
+        eq("HOLD: classified counts writes AND holds; planned_writes counts only writes",
+           [pFull.classified, pFull.planned_writes, pFull.held_for_owner],
+           [Object.keys(CLASSIFICATION).length, Object.keys(CLASSIFICATION).length - holdKeys.length, holdKeys.length]);
 
         console.log(fails === 0 ? "\nSELFTEST PASS" : `\nSELFTEST FAIL (${fails})`);
         process.exit(fails === 0 ? 0 : 1);
@@ -821,7 +864,9 @@ async function main(argv) {
     console.log(`live stamp-blocked: ${plan.live_stamp_blocked}   classified: ${plan.classified}`);
     console.log(`PLAN  merge_gate:true  -> ${plan.gate_writes}`);
     console.log(`PLAN  merge_gate:false -> ${plan.mention_writes}`);
+    console.log(`HOLD  no write either way -> ${plan.held_for_owner}`);
     for (const w of plan.writes) console.log(`  ${w.merge_gate ? "TRUE " : "FALSE"}  ${w.key}  ${w.why}`);
+    for (const h of plan.held) console.log(`  HOLD   ${h.key}  ${h.why}`);
     if (plan.drained_since_classification.length) {
       console.log(`DRAINED since classification (${plan.drained_since_classification.length}): ${plan.drained_since_classification.join(" ")}`);
     }
