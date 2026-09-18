@@ -138,8 +138,12 @@ defmodule BarkparkCloud.Notifications.Render do
          "A content publish for #{site} did not deploy — it was refused." <>
            "#{identity(payload)}#{cause(payload)}", :warning}
 
+      # cch-w29-bl-agent-unreachable-letter-has-no-next-step: the chat twin gets
+      # the SAME next step as the letter, from the same owner
+      # (`unreachable_next_step/0`) — one dispatch must not produce two stories.
       "agent_unreachable" ->
-        {"Site unreachable", "#{site} stopped responding to health checks.", :warning}
+        {"Site unreachable",
+         "#{site} stopped responding to health checks." <> unreachable_next_step(), :warning}
 
       "agent_reachable" ->
         {"Site reachable again", "#{site} is responding to health checks again.", :info}
@@ -260,6 +264,63 @@ defmodule BarkparkCloud.Notifications.Render do
       [one] -> "#{one} has been torn down"
       many -> "#{join_names(many)} have been torn down"
     end
+  end
+
+  @doc """
+  The NEXT STEP for an unreachable instance, as one block of prose, shared
+  verbatim by the alert email and every chat channel
+  (cch-w29-bl-agent-unreachable-letter-has-no-next-step).
+
+  ## Why it is a constant and not a producer field
+
+  Both and only both `:agent_unreachable` producers pass a name and nothing else
+  — `Health.StalenessWorker.flip_offline/1` sends `%{name: offline.name}`, and
+  the report-flip site calls `dispatch_barkpark_event/2`, whose payload defaults
+  to `%{}`. So `EventEmail.detail/1` renders `""` for this event 100% of the
+  time, and `alert_detail_reachability_test.exs` PINS that (`detail_reachability
+  (:agent_unreachable) == :never`). Giving the letter a next step by inventing a
+  payload would break that pin and, worse, would invite a CAUSE the control
+  plane never measured. It did not measure one: Barkpark has no active probe.
+
+  ## Every sentence below is a property the code actually has
+
+    * "Barkpark only knows what the box reports" — ingest is push-only
+      (`POST /v1/agent/report`); `StalenessWorker`'s moduledoc states the same
+      absence ("Barkpark has no active-probe channel").
+    * "It will not restart it, retry it, or send another message about this
+      outage" — `flip_offline/1` records a status event, dispatches once and
+      broadcasts; there is no remediation path, and the second message is
+      debounced two ways (the WENT SILENT arm drops out of
+      `Registry.stale_online_barkparks/1` once `agent_status` leaves "online";
+      the NEVER REPORTED arm latches on `unreachable_notification_sent`). The
+      report-flip producer needs an up→down transition, which cannot recur
+      without an intervening recovery.
+    * "Nothing changes here until its agent reports again" — true of BOTH
+      producers, which is why it is phrased as the agent reporting rather than
+      as a count or a duration.
+    * The recovery notice is stated CONDITIONALLY. `Registry.record_agent_report/2`
+      re-arms the latch and the health flip dispatches `:agent_reachable`, but
+      that event has its own per-team toggle (`EmailSettings.agent_reachable`),
+      so promising the mail unconditionally would assert a property a muted team
+      does not have.
+
+  No duration and no missed-tick count appear, deliberately: the report-flip
+  producer fires on a single reported transition with no debounce at all, so any
+  "we waited N checks" sentence would be false on one of the two rails.
+  """
+  @spec unreachable_next_step() :: String.t()
+  def unreachable_next_step do
+    "\n\nBarkpark only knows what the box reports — there is no probe that can " <>
+      "reach in and look, so this is the end of what Barkpark can do by itself. " <>
+      "It will not restart the box, retry it, or send another message about this " <>
+      "outage.\n\n" <>
+      "Worth checking on the box, in this order: that the machine is powered on " <>
+      "and on the network, that the Barkpark agent is running on it, and that the " <>
+      "agent can still reach Barkpark Cloud.\n\n" <>
+      "If you do nothing, nothing changes here until the agent reports again. " <>
+      "When it does, Barkpark notices on its own and marks the instance reachable " <>
+      "— you get a \"reachable again\" notice unless your team has switched that " <>
+      "one off."
   end
 
   defp instance_names(payload) do
