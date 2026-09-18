@@ -67,6 +67,7 @@
 // never the NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 
 // The TipTap node NAME is `bpCode`, NOT `code` — `code` is already the StarterKit
@@ -374,6 +375,58 @@ export const Code = Node.create({
         commitNow();
       };
 
+      // Keyboard exits (Notion parity): ArrowDown on the last line / ArrowUp on the first line
+      // leave the island into the neighbouring block (creating a paragraph when there is none),
+      // Escape selects the block itself, and Backspace in an empty block turns it back into text.
+      const exitTo = (direction) => {
+        flushPending();
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur) return;
+        const { state, view } = editor;
+        let tr = state.tr;
+        if (direction === "down") {
+          const after = pos + cur.nodeSize;
+          if (after >= state.doc.content.size) tr = tr.insert(after, state.schema.nodes.paragraph.create());
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1), 1));
+        } else if (pos === 0) {
+          tr = tr.insert(0, state.schema.nodes.paragraph.create());
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(1), -1));
+        } else {
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos - 1), -1));
+        }
+        view.dispatch(tr);
+        view.focus();
+      };
+      const onAreaKey = (e) => {
+        if (!editor.isEditable) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          flushPending();
+          const pos = typeof getPos === "function" ? getPos() : null;
+          if (pos != null) editor.chain().setNodeSelection(pos).focus().run();
+          return;
+        }
+        const firstLine = area.value.lastIndexOf("\n", area.selectionStart - 1) === -1;
+        const lastLine = area.value.indexOf("\n", area.selectionEnd) === -1;
+        if (e.key === "ArrowDown" && lastLine && !e.shiftKey) { e.preventDefault(); exitTo("down"); }
+        else if (e.key === "ArrowUp" && firstLine && !e.shiftKey) { e.preventDefault(); exitTo("up"); }
+        else if (e.key === "Backspace" && area.value === "") {
+          e.preventDefault();
+          if (typeof getPos !== "function") return;
+          const pos = getPos();
+          const cur = pos != null ? editor.state.doc.nodeAt(pos) : null;
+          if (!cur) return;
+          const { state, view } = editor;
+          let tr = state.tr.replaceWith(pos, pos + cur.nodeSize, state.schema.nodes.paragraph.create());
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)));
+          view.dispatch(tr);
+          view.focus();
+        }
+      };
+      area.addEventListener("keydown", onAreaKey);
       area.addEventListener("input", onAreaInput);
       langInput.addEventListener("input", scheduleWrite);
       dom.addEventListener("bp-flush-node", flushPending);
@@ -408,6 +461,7 @@ export const Code = Node.create({
 
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
+          area.removeEventListener("keydown", onAreaKey);
           area.removeEventListener("input", onAreaInput);
           langInput.removeEventListener("input", scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);

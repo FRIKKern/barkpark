@@ -3457,9 +3457,13 @@ function classifyNode(node) {
             : isStage
               ? "stage"
               : node.type);
+  // A list the person just created (input rule, toggle, paste) has no bpType attr yet: its
+  // node name is bulletList/orderedList, but the portable-doc kind is "list". Without this the
+  // new block was emitted as {type:"bulletList", content:[]} and its items were lost on save.
+  const listAware = bpType === "bulletList" || bpType === "orderedList" ? "list" : bpType;
   return {
     node,
-    bpType,
+    bpType: listAware,
     isOpaque,
     isAtom,
     isContent,

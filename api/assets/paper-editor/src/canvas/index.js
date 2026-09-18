@@ -184,6 +184,7 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
+import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection } from "./block-handle.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
 // for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
 // replace-range mappers. All shipped + browser-verified in the per-block editor;
@@ -978,7 +979,7 @@ class BpPaperCanvas extends HTMLElement {
         // others shut so a stale popup never lingers (triggers disjoint by leading
         // token "[[" vs "#" vs "/", but the gate makes the single-popup invariant
         // code-enforced rather than incidental).
-        const consumed = this._maybeCalloutShorthand();
+        const consumed = this._maybeBlockShorthand() || this._maybeCalloutShorthand();
         if (!consumed) {
           if (this._maybeWikilink()) {
             this._closeTag();
@@ -1019,6 +1020,8 @@ class BpPaperCanvas extends HTMLElement {
     // mode; every consumer is `if (this._bubble)` guarded.
     if (this._editable) {
       this._bubble = new FormatBubble({ editor: this._editor });
+      // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
+      this._handle = new BlockHandle({ host: this, editor: this._editor, openSlash: () => this._openSlash("") });
     }
 
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
@@ -1218,6 +1221,10 @@ class BpPaperCanvas extends HTMLElement {
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
+    }
+    if (this._handle) {
+      this._handle.destroy();
+      this._handle = null;
     }
     // P5 source-mode: tear down the markdown textarea + its keydown listener if the
     // element disconnects while in source mode (so neither the node nor the listener
@@ -1491,6 +1498,26 @@ class BpPaperCanvas extends HTMLElement {
   // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
   // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
+    if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && !event.altKey) {
+      const key = event.key;
+      if (event.shiftKey && (key === "ArrowUp" || key === "ArrowDown")) {
+        const index = topLevelIndexAtSelection(this._editor);
+        event.preventDefault();
+        moveTopLevel(this._editor, index, key === "ArrowUp" ? index - 1 : index + 1);
+        return true;
+      }
+      if (!event.shiftKey && (key === "d" || key === "D")) {
+        event.preventDefault();
+        duplicateTopLevel(this._editor, topLevelIndexAtSelection(this._editor));
+        return true;
+      }
+      if (!event.shiftKey && (key === "k" || key === "K") && this._bubble && !this._editor.state.selection.empty) {
+        event.preventDefault();
+        this._bubble.update();
+        this._bubble.openLink();
+        return true;
+      }
+    }
     // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
     // elsewhere) ENTERS source mode from the rich editor. Detected FIRST, before the
     // palette/popup branches: it is a deliberately FREE combo (Mod-p = palette, Mod-b
@@ -1984,7 +2011,9 @@ class BpPaperCanvas extends HTMLElement {
     // body). Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body (and any future inline-content node-view), and also keeps rejecting a
     // paragraph nested in a list item (depth 3). See slashTriggerAllowsParent.
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) {
+    // Notion parity: "/" also works inside an otherwise-empty list item; the item is lifted
+    // out of the list when a block is chosen (see _chooseSlash).
+    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name) && !this._slashInListItem($from)) {
       this._closeSlash();
       return;
     }
@@ -2017,6 +2046,52 @@ class BpPaperCanvas extends HTMLElement {
   // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
   // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
   // mid-prose or across blocks. The trailing space in the regex commits the gesture.
+  _maybeBlockShorthand() {
+    if (!this._editable || !this._editor) return false;
+    const { selection } = this._editor.state;
+    if (!selection.empty) return false;
+    const $from = selection.$from;
+    if ($from.parent.type.name !== "paragraph" || $from.depth !== 1) return false;
+    const blockText = $from.parent.textContent;
+    if ($from.parentOffset !== blockText.length) return false;
+    // Typography turns the first two dashes into an en/em dash before the third arrives; accept both spellings.
+    const divider = /^(---|—-|–-)$/.test(blockText);
+    const code = /^```$/.test(blockText);
+    if (!divider && !code) return false;
+    if (code) {
+      // Clear the fence text, then reuse the slash-insert seam so the code atom takes the
+      // caret exactly as it does from the menu (its own editing surface, not a PM text hole).
+      const { state, view } = this._editor;
+      view.dispatch(state.tr.delete($from.start(1), $from.end(1)));
+      insertSlashTypeAtSelection(this._editor, "code");
+      // The code atom edits in its own textarea island; hand it the caret at once so the very
+      // next keystroke lands inside the block (a deferred focus would swallow fast typing).
+      const focusArea = () => {
+        if (!this._editor || this._editor.isDestroyed) return false;
+        const dom = this._editor.view.nodeDOM(this._editor.state.selection.from);
+        const area = dom && dom.querySelector ? dom.querySelector(".bp-canvas-code-area") : null;
+        if (!area) return false;
+        area.focus();
+        return true;
+      };
+      if (!focusArea()) requestAnimationFrame(focusArea);
+      return true;
+    }
+    const block = canvasDefaultBlock("divider");
+    const node = runToTiptap([block]).content[0];
+    const { state, view } = this._editor;
+    const start = $from.before(1);
+    const end = $from.after(1);
+    const pmNode = state.schema.nodeFromJSON(node);
+    let tr = state.tr.replaceWith(start, end, pmNode);
+    const after = start + pmNode.nodeSize;
+    tr = tr.insert(after, state.schema.nodes.paragraph.create());
+    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1))); } catch (_e) {}
+    view.dispatch(tr);
+    this._editor.commands.focus();
+    return true;
+  }
+
   _maybeCalloutShorthand() {
     if (!this._editable) return false; // read mode: no shorthand
     if (!this._editor) return false;
@@ -2125,8 +2200,22 @@ class BpPaperCanvas extends HTMLElement {
   // DEFENSIVE: an EXPECTED-group pick (or any item) whose type is NOT canvas-
   // insertable is a no-op — CANVAS_SLASH_TYPES is the same allowlist that built the
   // base menu, so a non-insertable EXPECTED field never produces a bad insert.
+  // True when the caret sits in a list item's only paragraph and that paragraph holds nothing but the slash query.
+  _slashInListItem($from) {
+    if ($from.parent.type.name !== "paragraph" || $from.depth < 2) return false;
+    const item = $from.node($from.depth - 1);
+    if (!item || item.type.name !== "listItem" || item.childCount !== 1) return false;
+    return /^\/[^\s]*$/.test($from.parent.textContent) || $from.parent.textContent === "";
+  }
+
   _chooseSlash(item) {
     this._closeSlash();
+    // A slash pick inside a list item first lifts the item out of the list, so the chosen block
+    // lands at the top level where insertSlashTypeAtSelection replaces the paragraph.
+    let guard = 0;
+    while (this._editor.state.selection.$from.depth > 1 && guard++ < 6) {
+      if (!this._editor.commands.liftListItem("listItem")) break;
+    }
     // A COMPOUND starter row (the Starters group): insert the whole pre-composed
     // subtree through the shared landing seam — same guard, same caret rules as a
     // single-node pick, but the carried node is a container + seeded children.
