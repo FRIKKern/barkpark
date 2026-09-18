@@ -321,6 +321,15 @@ func writePrimingManifestIO(io primingIO, dir string, m PrimingManifest) error {
 // priming dir is configured (the default — no existing invocation changes), and
 // exitGeneric with a loud message when the manifest could not be PROVEN.
 func recordPrimingManifest(out *writer, env primingEnv, docID, worker string) int {
+	return recordPrimingManifestOf(out, env, docID, worker, nil)
+}
+
+// recordPrimingManifestOf is recordPrimingManifest with the manifest ALREADY
+// BUILT — the shape the wire half needs (tasks_flight_recorder.go). The claim
+// path builds once, before the POST, and hands that same value here so the
+// ledger's copy and the directory's copy carry one ClaimedAt and one Digest.
+// A nil `pre` means nobody built one yet, and this builds it exactly as before.
+func recordPrimingManifestOf(out *writer, env primingEnv, docID, worker string, pre *PrimingManifest) int {
 	dir := primingDirPath(env.getenv)
 	if dir == "" {
 		return exitOK
@@ -330,6 +339,9 @@ func recordPrimingManifest(out *writer, env primingEnv, docID, worker string) in
 		return exitGeneric
 	}
 	m := buildPrimingManifest(env, docID, worker)
+	if pre != nil {
+		m = *pre
+	}
 	if err := writePrimingManifest(dir, m); err != nil {
 		out.errf("priming: %v\n", err)
 		return exitGeneric
