@@ -2411,7 +2411,17 @@ async function main() {
         // tall, i.e. a red that fired on both sides of the fix and proved
         // nothing. A hit-test that cannot tell the states apart is not a
         // measurement.
-        await evalJs(`(function(){var s=document.querySelector('.set-matrix');if(s){s.scrollIntoView({block:'center'});s.scrollLeft=0;}})()`);
+        //
+        // `block:'start'`, not 'center' (cch-w30-bl-member-joined-alert): the
+        // matrix declares `scroll-margin-top` equal to the sticky topbar's
+        // height, and 'start' is the alignment that reservation is written
+        // for — the header row lands exactly on the bar's bottom edge however
+        // many rows the roster carries. 'center' divides the space BELOW the
+        // bar, which held for eight and nine rows and broke at ten: a matrix
+        // taller than that space cannot be centred without its head going
+        // under the bar (measured: tall.top 50.5 vs bar bottom 56, six cells).
+        // Nothing in app.js centres this matrix; only this guard did.
+        await evalJs(`(function(){var s=document.querySelector('.set-matrix');if(s){s.scrollIntoView({block:'start'});s.scrollLeft=0;}})()`);
         await settle();
         const rest = await evalJs(
           `(function(){var s=document.querySelector('.set-matrix');if(!s)return null;` +

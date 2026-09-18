@@ -148,6 +148,22 @@ defmodule BarkparkCloud.Notifications.Render do
       "agent_reachable" ->
         {"Site reachable again", "#{site} is responding to health checks again.", :info}
 
+      # cch-w30-bl-member-joined-alert — a person ACCEPTED an invitation and is
+      # now on the team. `:info` is correct and is honest green: nothing is
+      # broken, and this is the one membership change the team asked to hear
+      # about (the column defaults OFF — a join is a success, and successes are
+      # opt-in).
+      #
+      # `joined_clause/1` owns the sentence, shared with `EventEmail`, so the
+      # inbox and Slack cannot disagree about who joined or at what role. The
+      # copy says JOINED and never "invited": the event fires at
+      # `Accounts.accept_invitation/2`, not when the invitation was sent — the
+      # invitee's own invite letter is a different, transactional message
+      # (`Transactional.deliver_invite/1`), and wave 30 deleted the
+      # `member_invited` toggle precisely because it promised a duplicate of it.
+      "member_joined" ->
+        {"Member joined", "#{joined_clause(payload)} on #{site}.", :info}
+
       "subscription_past_due" ->
         {"Subscription past due",
          "Your subscription is past due — hosted instances may be suspended.", :warning}
@@ -239,6 +255,50 @@ defmodule BarkparkCloud.Notifications.Render do
       1 -> "was given up on after 1 refusal"
       n when is_integer(n) and n > 1 -> "was given up on after #{n} refusals"
       _ -> "was given up on after repeated refusals"
+    end
+  end
+
+  @doc """
+  WHO joined and at WHAT ROLE, as ONE clause — `"pat@acme.com joined as an
+  admin"`, `"pat@acme.com joined"` when the payload carries no role, or
+  `"a new member joined"` when it carries no address either
+  (cch-w30-bl-member-joined-alert).
+
+  It lives here, and the alert email calls it, for exactly the reason
+  `deployment_identity/1` does: the inbox and the chat channels must not tell one
+  person a different story about the same join.
+
+  TWO THINGS IT REFUSES TO SAY:
+
+    * "invited". The producer is `Accounts.accept_invitation/2` — the moment the
+      person ACCEPTED. The send side already has its own transactional letter,
+      and a toggle that mailed a team at invite time is the one wave 30 deleted.
+    * a role it does not hold. `role` is the `team_memberships.role` column the
+      acceptance actually wrote; an absent or unrecognised value drops the
+      clause rather than guessing "member".
+
+  The payload reaching a chat shaper is the Oban args map, so every key is read
+  under both a string and an atom.
+  """
+  @spec joined_clause(map()) :: String.t()
+  def joined_clause(payload) when is_map(payload) do
+    who =
+      case field(payload, :email) do
+        address when is_binary(address) and address != "" -> address
+        _ -> "a new member"
+      end
+
+    who <> " joined" <> role_clause(payload)
+  end
+
+  # The roles `Accounts` actually grants (`can_grant?/2`: owner, admin, member).
+  # Anything else — nil, a string nobody writes — renders NO clause at all.
+  defp role_clause(payload) do
+    case field(payload, :role) do
+      "owner" -> " as the owner"
+      "admin" -> " as an admin"
+      "member" -> " as a member"
+      _ -> ""
     end
   end
 

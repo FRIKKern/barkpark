@@ -169,6 +169,15 @@ defmodule BarkparkCloud.Notifications.AlertDetailReachabilityTest do
   #     `:refusals`. CARRIES detail.
   #   * `registry.ex :deployment_succeeded` — a success payload; `event_email.ex`
   #     notes it deliberately has no `:detail`.
+  #   * `accounts.ex :member_joined` — `%{name:, email:, role:}` built one line
+  #     above the dispatch (cch-w30-bl-member-joined-alert). NO `:detail`, by
+  #     construction: there is no failure capture on a join, and
+  #     `event_email.ex`'s arm renders no `detail/1` at all. It is classed
+  #     `:indirect_payload` only because the map is BOUND rather than inline —
+  #     the census reads shape, not reachability, and the bound form is what
+  #     keeps the `dispatch_event(` call on ONE SOURCE LINE, which
+  #     `__app.test.mjs`'s producer census requires (it matches per line, so a
+  #     formatter-wrapped call is invisible to it).
   @dispatch_census [
     {:agent_reachable, "barkpark_cloud/web/router.ex", :dispatch_barkpark_event, :no_payload_arg},
     {:agent_unreachable, "barkpark_cloud/health/staleness_worker.ex", :dispatch_event,
@@ -184,6 +193,7 @@ defmodule BarkparkCloud.Notifications.AlertDetailReachabilityTest do
      :literal_detail},
     {:deployment_succeeded, "barkpark_cloud/registry.ex", :dispatch_site_event,
      :indirect_payload},
+    {:member_joined, "barkpark_cloud/accounts.ex", :dispatch_event, :indirect_payload},
     {:provision_failed, "barkpark_cloud/web/router.ex", :dispatch_barkpark_event,
      :literal_detail},
     {:provision_succeeded, "barkpark_cloud/web/router.ex", :dispatch_barkpark_event,
