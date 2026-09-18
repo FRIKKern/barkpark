@@ -75,6 +75,14 @@ defmodule Barkpark.Content.EdgeExtractTest do
         "fields" => [
           %{"name" => "author", "type" => "reference", "refType" => "author"},
           %{"name" => "mentions", "type" => "reference"},
+          # `refTypeTolerant` — declares a refType for expand/typeahead but does
+          # NOT let it gate dangling. Mirrors the task schema's `parent_id`.
+          %{
+            "name" => "anchor",
+            "type" => "reference",
+            "refType" => "author",
+            "refTypeTolerant" => true
+          },
           %{
             "name" => "attachments",
             "type" => "arrayOf",
@@ -134,6 +142,64 @@ defmodule Barkpark.Content.EdgeExtractTest do
 
       edge = Content.extract_edges(src) |> Enum.find(&(&1.field == "author"))
       assert edge.to_id == "ghost-author"
+      assert edge.dangling
+    end
+  end
+
+  # ── refTypeTolerant — the type-tolerant dangling probe ────────────────────
+  #
+  # THE DEFECT THIS PINS. The task schema declares `parent_id` as
+  # `refType: "task"`, but a task is legitimately hung off a PAPER as an epic
+  # anchor. `resolve_target_existence/4`'s typed arm ran
+  # `get_document(to_id, "task", …)`, so a real paper target came back
+  # `:not_found` and the edge was reported dangling. MEASURED on the live corpus
+  # 2026-09-18: `GET /v1/graph/dangling` returned 54 rows with
+  # `via_field: "parent_id"` across 11 distinct existing-but-not-a-task targets.
+  #
+  # `anchor` here has the SAME declaration shape (refType "author", tolerant) and
+  # points at a `note`. Revert `dangling_ref_type/1` and the first test below
+  # fails: the typed probe reports the existing note as dangling.
+  describe "refTypeTolerant: a declared refType that does not gate dangling" do
+    test "a tolerant ref to a target of ANOTHER type is NOT dangling" do
+      publish!("note", "anchor-note")
+      src = publish!("article", "art-tol", %{"anchor" => "anchor-note"})
+
+      edge = Content.extract_edges(src) |> Enum.find(&(&1.field == "anchor"))
+
+      assert edge.to_id == "anchor-note"
+
+      refute edge.dangling,
+             "a refTypeTolerant reference must resolve against ANY type, not just its refType"
+    end
+
+    test "the declared refType is still dropped from the edge, so the batched " <>
+           "resolver takes the same (untyped) arm" do
+      publish!("note", "anchor-note-2")
+      src = publish!("article", "art-tol-2", %{"anchor" => "anchor-note-2"})
+
+      edge = Content.extract_edges(src) |> Enum.find(&(&1.field == "anchor"))
+
+      assert edge.refType == nil
+
+      # The gap-#2 contract: `resolvable_targets/3` keys on {to_id, refType} and
+      # must answer the same thing the per-target probe just did.
+      set = Barkpark.Content.Edges.resolvable_targets([{edge.to_id, edge.refType}], @dataset)
+      assert MapSet.member?(set, {"anchor-note-2", nil})
+    end
+
+    test "tolerance does not make a MISSING target resolve" do
+      src = publish!("article", "art-tol-3", %{"anchor" => "no-such-doc"})
+
+      edge = Content.extract_edges(src) |> Enum.find(&(&1.field == "anchor"))
+      assert edge.dangling
+    end
+
+    # The CONTROL: the untouched typed field still gates on its refType.
+    test "a NON-tolerant typed ref to another type is still dangling" do
+      publish!("note", "note-typed-control")
+      src = publish!("article", "art-tol-4", %{"author" => "note-typed-control"})
+
+      edge = Content.extract_edges(src) |> Enum.find(&(&1.field == "author"))
       assert edge.dangling
     end
   end

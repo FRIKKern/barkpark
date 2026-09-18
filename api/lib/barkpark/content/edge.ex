@@ -55,7 +55,12 @@ defmodule Barkpark.Content.Edge do
 
   # `valueref` (Bulldocs body-walk, wire §7) is spelled IDENTICALLY to the
   # inline node type that projects it — `valueref`, never `value-ref`.
-  @kinds ~w(references embeds related-to parent blocks discovered-from valueref
+  # `parent_id` (NOT `parent`): the task hierarchy edge is projected by the CORE
+  # reference-field extractor off the schema's `parent_id` field, so it carries
+  # the source field name like every other reference kind. The Tasks plugin used
+  # to emit a SECOND edge for the same relationship under kind `parent`; that
+  # clause is retired and the spelling must not come back.
+  @kinds ~w(references embeds related-to parent_id blocks discovered-from valueref
             design_doc wave_paper papers)
 
   @type t :: %__MODULE__{}
