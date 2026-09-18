@@ -6962,6 +6962,16 @@ defmodule BarkparkCloud.Web.Router do
   # the failures that happen to be in the newest 50. A filter value outside the
   # closed vocabulary matches nothing rather than being dropped — a dropped
   # filter would silently show MORE than was asked for.
+  #
+  # cch-w32-bl: the EMPTY or RARE result used to be the expensive one — a filter
+  # that never fills the LIMIT made the planner abandon
+  # `notification_deliveries_team_id_inserted_at_index` and bitmap-scan the whole
+  # team partition (1153 buffers, `Rows Removed by Filter: 50000`, measured on a
+  # 250k-row corpus). One `(team_id, <axis>, inserted_at)` index per axis
+  # (migration 20260918110000) takes that to 3-12 buffers. No vocabulary gate was
+  # added and none is wanted: the unknown-value case is now 3 buffers, and a gate
+  # could not have helped the RARE-but-real value or the free-text `event` axis
+  # this page renders as a text input.
   get "/v1/notifications/deliveries" do
     conn = Auth.require_user(conn, [])
 

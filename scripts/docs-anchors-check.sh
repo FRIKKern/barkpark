@@ -2,22 +2,25 @@
 # docs-anchors-check.sh — CI link/anchor/header gate for the doc spine
 # (strategy §5 + amendment A6).
 #
-# Blocking checks:
+# Blocking checks — THE COMPLETE SET. §14 derives this list from the file's own
+# `# --- <N>.` section anchors and reds if it and the code disagree in either
+# direction, because a hand-kept roster reads as complete by construction: this
+# header once listed 9 arms while 16 could red, and §3b/§3c/§8b/§8c/§9/§10/§12
+# appeared NOWHERE in it. Add an arm, add its line here — the gate now checks.
 #   1. Every routing-table target in root CLAUDE.md resolves to a file.
 #   2. Every docs/INDEX.md entry resolves to a file.
 #   3. Every "Code anchors" line in docs/cards/*.md points at an existing
 #      path; declared symbols (func/def/defmodule) grep to a real DEFINITION
 #      with pattern 'func |def |defmodule ' (Go + Elixir). The '^#' heading
 #      alternative (A6) applies to .md anchor paths ONLY — see §3.
-#
-# Self-test:  bash scripts/docs-anchors-check.sh --selftest
-#   drives THIS script against mktemp fixture repos via DOCS_ANCHORS_ROOT,
-#   proving each blocking check still reds on its own planted violation.
-#   Unknown argument => exit 2 (distinct from a gate failure, exit 1).
+#  3b. Code anchors in NON-card agent docs: path existence only (no symbol
+#      resolution — those docs anchor prose, not declarations).
+#  3c. Every cross-doc markdown link between .md files resolves.
 #   4. G1 doc-tier header on every non-attic .md under docs/ and on surface
-#      CLAUDE/AGENTS files. Exempt: web/CLAUDE.md (@AGENTS.md import stub),
-#      _attic/, docs/cli/fixtures/. YAML-frontmatter files carry the header
-#      on the first line after the closing '---'.
+#      CLAUDE/AGENTS files. Exempt: import stubs whose entire content is
+#      Claude Code `@path` lines (DERIVED, not an enumeration), _attic/,
+#      docs/cli/fixtures/. YAML-frontmatter files carry the header on the
+#      first line after the closing '---'.
 #   5. canonical-for values are unique repo-wide (one owner per fact-topic).
 #   6. Every .md under _attic/docs-2026-06/ starts with "ARCHIVED" (G3;
 #      scoped to docs-2026-06 only — legacy attic predates the convention;
@@ -25,13 +28,16 @@
 #   8. @canonical capability:<slug> markers are unique repo-wide, sit on a
 #      PUBLIC entry point, and their optional doc: backlink resolves — checked
 #      only AFTER a planted fixture proves the scan can still find a defect.
-#  13. @boundary capability:<slug> markers are unique repo-wide and their
-#      `test:<relpath>#<name>` pointer RESOLVES — the file exists and that test
-#      is declared in it (D41: a coverage boundary must be machine-checked; a
-#      comment is not a tripwire). Delegated to scripts/boundary-marker-check.sh
-#      exactly as §9/§10 are, and ALSO wired on the REQUIRED, unfiltered
-#      `Elixir gate` — this job's context is paths-filtered and cannot block a
-#      merge, so it is not by itself a venue for an enforcement claim.
+#  8b. The marker→symbol PIN: a @canonical marker that silently comes to name a
+#      DIFFERENT symbol reds against the recorded pin.
+#  8c. docs/ops/merge-gates.md's pointers into elixir.yml still resolve.
+#      Delegated to scripts/merge-gates-elixir-anchor-check.sh; a missing or
+#      non-executable delegate is a RED, never a skip.
+#   9. Roster drift: documented rosters (root CLAUDE.md plugins, api/CLAUDE.md
+#      mutation_event kinds) must match the code. Delegated to
+#      scripts/roster-drift-check.sh; missing delegate => RED.
+#  10. No in-place `bp` copy recipe on this tree. Delegated to
+#      scripts/no-inplace-bp-copy-check.sh; missing delegate => RED.
 #  11. docs/auth.md's "## Plug pipelines (HTTP)" section agrees with
 #      api/lib/barkpark_web/router.ex, both directions: every pipeline whose
 #      body plugs RequireAdmin must be named there (the required set is DERIVED
@@ -39,6 +45,18 @@
 #      must still exist. Numbered 11 because 9 and 10 are reserved for two PRs
 #      in flight. Nothing read this page's CONTENT before: deleting the whole
 #      section left both doc gates at exit 0.
+#  12. A `cold` doc that still carries RUNNABLE COMMANDS must carry a
+#      '> HISTORICAL RECORD (<date>)' banner in its first 10 lines.
+#  13. @boundary capability:<slug> markers are unique repo-wide and their
+#      `test:<relpath>#<name>` pointer RESOLVES — the file exists and that test
+#      is declared in it (D41: a coverage boundary must be machine-checked; a
+#      comment is not a tripwire). Delegated to scripts/boundary-marker-check.sh
+#      exactly as §9/§10 are, and ALSO wired on the REQUIRED, unfiltered
+#      `Elixir gate` — this job's context is paths-filtered and cannot block a
+#      merge, so it is not by itself a venue for an enforcement claim.
+#  14. THIS docblock's enumeration matches the file's blocking sections, both
+#      directions, with a non-vacuity arm. Delegated to
+#      scripts/docblock-enumeration-check.sh; missing delegate => RED.
 #
 # WARN-only (never fails the gate):
 #   7. Duplication tripwires — prod IP literal, webhook signature literal,
@@ -47,6 +65,11 @@
 #      Also warns when an ALLOWLIST entry has gone stale (path vanished, or the
 #      file no longer carries the literal) — the one check here with a known
 #      ground truth, so the section is not purely an absence proof.
+#
+# Self-test:  bash scripts/docs-anchors-check.sh --selftest
+#   drives THIS script against mktemp fixture repos via DOCS_ANCHORS_ROOT,
+#   proving each blocking check still reds on its own planted violation.
+#   Unknown argument => exit 2 (distinct from a gate failure, exit 1).
 #
 # bash 3.2 compatible: no associative arrays, no mapfile.
 
@@ -1350,6 +1373,12 @@ else
 fi
 
 echo ""
+# --- 10. in-place bp copy recipes -------------------------------------------
+# This heading is not decoration: §10 was the one blocking arm in the file with
+# no `# --- <N>.` anchor, so it lived INSIDE §9's block and no reader — human or
+# machine — could see it as a section of its own. §14 derives the file's
+# blocking set from these anchors; an arm without one is invisible to its own
+# gate.
 echo "== §10 in-place bp copy recipes =="
 # Delegated exactly as §9 above, and for the same reason: the rc is captured
 # BEFORE any formatting, because `cmd | sed` reports sed's exit code unless
@@ -1431,6 +1460,39 @@ else
     echo "ok:   §13 every @boundary marker names a test that exists (pairing only, not mutation-kill)"
   else
     echo "FAIL: §13 a @boundary marker is unpaired, duplicated or dangling (rc=$BND_RC, see above)"
+    FAIL=1
+  fi
+fi
+
+# --- 14. this file's own docblock enumerates every blocking arm --------------
+# The last unaudited claim in a doc gate is the gate's OWN header. §9 proved a
+# documented roster undercounts silently; this file WAS that roster — 9 arms
+# listed, 16 able to red. Delegated for §9's reason (its own --selftest), and
+# INVOKED here so every doc-gates run exercises it.
+echo ""
+echo "== §14 docblock enumerates every blocking section =="
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO — same precedent as §8b/§9/§10/§13. The
+  # fixtures are four-file trees with no scripts/ directory; the delegate is
+  # certified by its own hermetic fixture suite.
+  echo "ok:   §14 docblock enumeration not applicable to a custom DOCS_ANCHORS_ROOT"
+elif [ ! -x "$REPO_ROOT/scripts/docblock-enumeration-check.sh" ]; then
+  # A missing or non-executable delegate is a RED, never a skip — §10's lesson.
+  echo "FAIL: §14 scripts/docblock-enumeration-check.sh is missing or not executable"
+  FAIL=1
+else
+  # rc captured BEFORE any formatting (§9's lesson): `cmd | sed` reports sed's
+  # exit code, and a gate whose red is laundered by its pretty-printer is worse
+  # than no gate.
+  set +e
+  DBE_OUT=$("$REPO_ROOT/scripts/docblock-enumeration-check.sh" 2>&1)
+  DBE_RC=$?
+  set -e
+  printf '%s\n' "$DBE_OUT" | sed 's/^/      /'
+  if [ "$DBE_RC" -eq 0 ]; then
+    echo "ok:   §14 this docblock names every blocking section, and no orphans"
+  else
+    echo "FAIL: §14 this script's docblock disagrees with its own blocking sections (rc=$DBE_RC, see above)"
     FAIL=1
   fi
 fi
