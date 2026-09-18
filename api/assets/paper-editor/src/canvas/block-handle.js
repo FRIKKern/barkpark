@@ -9,7 +9,8 @@
 // shapes. The handle is purely additive: read-mode canvases never mount it.
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 
-const GRIP = "⋮⋮";
+// Six-dot braille cell: reads as a drag grip without letter-spacing tricks.
+const GRIP = "⠿";
 
 // Top-level (depth 0) block index whose DOM box contains clientY, else -1.
 export function topLevelIndexAtY(editor, clientY) {

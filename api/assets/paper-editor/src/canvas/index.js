@@ -2139,7 +2139,10 @@ class BpPaperCanvas extends HTMLElement {
       const { state, view } = this._editor;
       const start = $from.before(1);
       const end = $from.after(1);
-      const quoteNode = state.schema.nodes.pullquote ? state.schema.nodes.pullquote.create() : null;
+      // Keep the block's id so the save is a same-id replace-block, not remove + insert.
+      const quoteNode = state.schema.nodes.pullquote
+        ? state.schema.nodes.pullquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "pullquote" })
+        : null;
       if (!quoteNode) return false;
       let tr = state.tr.replaceWith(start, end, quoteNode);
       try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}

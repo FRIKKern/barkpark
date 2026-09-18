@@ -1742,8 +1742,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp list(%{"task" => true} = n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
 
-    ~s(<ul style="margin:0 0 24px;padding-left:0;list-style:none;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
-      inner <> "</ul>"
+    style =
+      "margin:0 0 24px;padding-left:0;list-style:none;" <>
+        "font-family:#{pal.font_body};color:#{pal.text};line-height:1.7"
+
+    ~s(<ul style="#{style}">) <> inner <> "</ul>"
   end
 
   defp list(n, width, pal) do
@@ -1760,9 +1763,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp list_item(%{"task" => true} = n, width, %{style: :article} = pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
     checked = Map.get(n, "checked") == true
+    checked_attr = if checked, do: " checked", else: ""
+    label = if checked, do: "Done", else: "To do"
 
-    ~s(<li class="bp-checklist__item" data-checked="#{checked}"><input type="checkbox" class="bp-checklist__box" disabled#{if checked, do: " checked", else: ""} aria-label="#{if checked, do: "Done", else: "To do"}">) <>
-      ~s(<span class="bp-checklist__body">) <> inner <> "</span></li>"
+    box =
+      ~s(<input type="checkbox" class="bp-checklist__box" disabled#{checked_attr} ) <>
+        ~s(aria-label="#{label}">)
+
+    ~s(<li class="bp-checklist__item" data-checked="#{checked}">) <>
+      box <> ~s(<span class="bp-checklist__body">) <> inner <> "</span></li>"
   end
 
   defp list_item(n, width, %{style: :article} = pal) do
@@ -1774,8 +1783,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     inner = render_children(Map.get(n, "children", []), width, pal)
     checked = Map.get(n, "checked") == true
     box = if checked, do: "&#9745;", else: "&#9744;"
-    style = if checked, do: "margin:4pt 0 0;opacity:.65;text-decoration:line-through", else: "margin:4pt 0 0"
-    ~s(<li style="#{style}"><span style="display:inline-block;width:1.4em">#{box}</span>) <> inner <> "</li>"
+
+    style =
+      if checked do
+        "margin:4pt 0 0;opacity:.65;text-decoration:line-through"
+      else
+        "margin:4pt 0 0"
+      end
+
+    glyph = ~s(<span style="display:inline-block;width:1.4em">#{box}</span>)
+    ~s(<li style="#{style}">) <> glyph <> inner <> "</li>"
   end
 
   defp list_item(n, width, pal) do

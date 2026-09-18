@@ -398,9 +398,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
             ] ++ compose_list_children(item, style)
         }
 
-        if task,
-          do: Map.merge(base, %{"task" => true, "checked" => is_map(item) and Map.get(item, "checked") == true}),
-          else: base
+        if task do
+          checked = is_map(item) and Map.get(item, "checked") == true
+          Map.merge(base, %{"task" => true, "checked" => checked})
+        else
+          base
+        end
       end)
 
     list = %{"kind" => "PdList", "ordered" => ordered, "children" => items}

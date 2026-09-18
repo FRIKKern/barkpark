@@ -137,8 +137,8 @@
    },
    {
     "path": "api/assets/paper-editor/src/styles.css",
-    "count": 69,
-    "note": "Paper-editor Studio bundle (the scoped embedder source), outside its paper-surface mirror block. Its sizes must track the reader's; a silent stamp here IS View/Edit drift."
+    "count": 72,
+    "note": "Paper-editor Studio bundle (the scoped embedder source), outside its paper-surface mirror block. Its sizes must track the reader's; a silent stamp here IS View/Edit drift. 69 -> 72 (paper-editor block gutter, 2026-09-18): the hover gutter's three chrome sizes — .bp-block-handle__grip font-size: 14px, .bp-block-menu__group font-size: 10px, .bp-block-menu__glyph font-size: 11px. These are EDITOR CHROME (the + / grip buttons and the block menu), not reader type, so tracking the reader's scale is wrong for them, and this file carries no chrome type ladder to consume (only the mirrored --bp-* reading tokens). RAISED and MEASURED: node design/check.mjs Part O printed GREW 69 -> 72 (+3) and named 72."
    },
    {
     "path": "api/assets/paper-surface/paper-surface.css",
