@@ -239,7 +239,7 @@ run 1 "a D merely MENTIONED inside a heading is NOT defined" -- --axis a --chart
 says "UNRESOLVED-CITATION PDS-D640" "the union lens anchors on the number at the START of the heading text"
 
 # RULING 1 — the LOOSE heading lens is a LENS ARTIFACT, and the arm says so
-# instead of gating on it. The fixture charter defines PDS-D1/2/3 as bullets and
+# instead of gating on it. The fixture charter defines PDS-D1/PDS-D2/PDS-D3 as bullets and
 # only PDS-D404 as a heading, so the loose lens loses all three bullet forms.
 run 0 "--heading-lens does NOT fold its red into the exit code" -- --axis a --charter "$CH" --commits-file "$CM_OK" --heading-lens
 says "defined:    1 distinct PDS-D" "the loose heading lens sees only the one heading-defined D"
@@ -289,7 +289,7 @@ rm "$DROOT/scripts/pds-phantom.sh"
 run 0 "removing the phantom citation greens axis D again" -- --axis d --charter "$CH" --citation-root "$DROOT"
 says_not "UNDEFINED-CITATION" "the red is gone with the citation, not sticky"
 
-# THE SENTINELS. PDS-D777/999/1000 are this harness's own synthetic numbers and
+# THE SENTINELS. PDS-D777/PDS-D999/PDS-D1000 are this harness's own synthetic numbers and
 # must never red — but they must be COUNTED, not silently dropped.
 printf '#!/usr/bin/env bash\n# the fixtures PDS-D777 PDS-D999 PDS-D1000 are sentinels\n' > "$DROOT/scripts/pds-sentinel.sh"
 run 0 "the synthetic sentinels do not red axis D" -- --axis d --charter "$CH" --citation-root "$DROOT"

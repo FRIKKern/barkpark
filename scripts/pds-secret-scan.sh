@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pds-secret-scan.sh — the VALUE-based secret scan for bp-export-v1 bundles
-# (PDS wave 2; charter decisions PDS-D24/D25/D26 under the PDS-D20 anti-vacuity
+# (PDS wave 2; charter decisions PDS-D24/PDS-D25/PDS-D26 under the PDS-D20 anti-vacuity
 # doctrine).
 #
 # THE QUESTION IT ANSWERS: "is this bundle provably stripped?" — with an answer

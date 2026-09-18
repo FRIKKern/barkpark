@@ -24,7 +24,7 @@
 # no new floor, no new predicate is introduced by this file.
 #
 # THE FLOOR IT ARMS, AND TWO NON-ACTIONS — load-bearing, not decoration:
-#   * It arms the DERIVED floor of 897 MiB (PDS-D276/D277), against the DEPLOYED
+#   * It arms the DERIVED floor of 897 MiB (PDS-D276/PDS-D277), against the DEPLOYED
 #     streaming spill engine, in all three floor knobs at once: the poll
 #     predicate (:348), the arm-refusal guard (:412-414), and
 #     PDS_FULL_EXPORT_MIN_MEM_MB exported to the harness (fire_detached). The old
@@ -176,7 +176,7 @@ FULL_LOCK="$FULL_DIR/lock"
 # floor can be dialled down is a rubber stamp with extra steps.
 INTERVAL="${PDS_LAUNCH_INTERVAL:-10}"
 MAX_DRAWS="${PDS_LAUNCH_MAX_DRAWS:-360}"
-# PDS-D276/D277: the DERIVED floor is 897 MiB, against the deployed streaming
+# PDS-D276/PDS-D277: the DERIVED floor is 897 MiB, against the deployed streaming
 # spill engine (98.16 demand + 798.81 margin). Both the poll-predicate default
 # and the tighten-only guard-law move off the fossil 2200 together — moving one
 # without the other leaves the predicate defaulting to 2200 and the child
@@ -346,7 +346,7 @@ fire_detached() {
   spent="$(cat "$attempts_file" 2>/dev/null || echo 0)"
   is_int "$spent" || spent=0
   export PDS_FULL_EXPORT_BUDGET=$(( spent + 2 ))                    # PDS-D224
-  # PDS-D276/D277: export the DERIVED 897 MiB floor to the frozen harness's own
+  # PDS-D276/PDS-D277: export the DERIVED 897 MiB floor to the frozen harness's own
   # cond_b (b) gate. This REVERSES D244's deliberate UNSET — that refusal was
   # taken against the retired in-RAM engine's NEGATIVE -7.55 MiB delta; the
   # deployed streaming engine's real demand is 98.16 MiB + 798.81 margin = 897.
@@ -451,8 +451,8 @@ sentinel() { printf 'EXIT: %s\n' "$1"; }
 stamp "child up — pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ') sid_leader=$(ps -o stat= -p $$ | tr -d ' ')"
 stamp "run_tag=$RUN_TAG"
 stamp "budget PDS_FULL_EXPORT_BUDGET=${PDS_FULL_EXPORT_BUDGET:-<UNSET — the child did not inherit it>}"
-stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/D277 derived floor)"
-stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/D277; UNSET here means the export did NOT cross the fork>}"
+stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/PDS-D277 derived floor)"
+stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/PDS-D277; UNSET here means the export did NOT cross the fork>}"
 stamp "home   BARKPARK_HOME=${BARKPARK_HOME:-<unset>}"
 stamp "point  PDS_SCRATCH_POINTER=${PDS_SCRATCH_POINTER:-<unset>}"
 stamp "art    PDS_PROOF_ARTIFACTS=${PDS_PROOF_ARTIFACTS:-<unset>}"
@@ -690,7 +690,7 @@ CHILD_BODY
   chmod +x "$dest"
 }
 
-# ── the floor record (PDS-D276/D277) ─────────────────────────────────────────
+# ── the floor record (PDS-D276/PDS-D277) ─────────────────────────────────────────
 #
 # ONE producer for the two floor knobs this arm carries, emitted as key=value
 # lines. run_dir/meta, the arm banner, and the selftest ALL read this — so the
@@ -712,7 +712,7 @@ arm_floor_summary() {
   info "poll floor  mem_floor_mib=$MEM_FLOOR_MIB — the launcher's poll predicate (:348)"
   info "harness flr full_export_min_mem_mb=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET>} — exported to the frozen harness's cond_b gate"
   if [ "$MEM_FLOOR_MIB" != 2200 ] || [ "${PDS_FULL_EXPORT_MIN_MEM_MB:-}" != 2200 ]; then
-    info "            DERIVED floor (PDS-D276/D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
+    info "            DERIVED floor (PDS-D276/PDS-D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
   fi
 }
 
@@ -891,7 +891,7 @@ cmd_arm() {
 
   # meta records BOTH floor knobs distinctly (mem_floor_mib AND
   # full_export_min_mem_mb) via arm_floor_record, so a revert of either is
-  # individually diagnosable from the run directory (PDS-D276/D277).
+  # individually diagnosable from the run directory (PDS-D276/PDS-D277).
   write_run_meta "$run_dir" "$run_tag" "$run_id" "$pid" "$log"
 
   # ── the read-back behind the word ARMED (PDS-D317) ──────────────────────
@@ -1469,12 +1469,12 @@ DUMMY
   if [ "${budget:-1}" = "1" ]; then
     bad "the child read 1 — that is the silent default, i.e. the export never crossed the fork"
   fi
-  # PDS-D276/D277: fire_detached exports the derived 897 floor, so the DUMMY
+  # PDS-D276/PDS-D277: fire_detached exports the derived 897 floor, so the DUMMY
   # child MUST inherit it across the fork. Mutation-provable: remove the
   # `export PDS_FULL_EXPORT_MIN_MEM_MB=897` knob and the child prints `unset`
   # here and this check FAILS (this is the pds-bl-floor-env-silent-revert guard).
   out="$(grep '^DUMMY-FLOOR=' "$scratch/dummy.log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
-  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/D277 — was UNSET under D244)"
+  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/PDS-D277 — was UNSET under D244)"
 
   # …and the arm's OWN floor record carries the derived 897 in BOTH knobs. This
   # is the single producer that meta AND the banner read (arm_floor_record /

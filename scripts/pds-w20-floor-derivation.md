@@ -1,6 +1,6 @@
 <!-- doc-tier: agent | canonical-for: pds-w20-floor-derivation | budget: 6000tok -->
 
-# PDS-D276/D277 — the crown floor, derived against the DEPLOYED engine
+# PDS-D276/PDS-D277 — the crown floor, derived against the DEPLOYED engine
 
 **What this is.** The arithmetic behind moving the crown-climb launcher's memory floor
 from the fossil **2200 MiB** to the derived **897 MiB**. The 2200 was calibrated against the

@@ -141,7 +141,7 @@ not on Bootstrap's path at all — and why it reverts on both legs.
 >
 > 1. **The class behaviour changes.** `tag` no longer "reverts on both legs". Post-merge it
 >    SURVIVES the stamped leg (like the 34) and REVERTS the cleared leg. Only its
->    INSERT-when-absent stays unconditional, on purpose (PDS-D126/D12).
+>    INSERT-when-absent stays unconditional, on purpose (PDS-D126/PDS-D12).
 > 2. **The `grep -c "pull_provenance\|Tenancy"` command above returns NON-ZERO post-merge.**
 >    Its `0` is evidence *of the defect*, reproducible only at or before `3be27f0fd`.
 > 3. **`tag` stays OUT of the sentinel roster regardless.** The `NOT IN ('tag','metric')`

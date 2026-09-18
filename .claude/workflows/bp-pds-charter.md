@@ -1206,7 +1206,7 @@ prose that preceded it.
   admitted only after a green re-climb closes the crown.
 
 - **PDS-D144 — EVERY WAVE-8 BUILDER IS `opus`.** Fable 5 is spend-limited this session. Not a quality
-  judgment — a hard constraint carried from the wish (PDS-D38/D56).
+  judgment — a hard constraint carried from the wish (PDS-D38/PDS-D56).
 
 ### Wave 8 review amendments (2026-07-20, D145–D146)
 
@@ -2467,7 +2467,7 @@ is FINISHED before it is CLIMBED — merging the wave-3 PRs greened zero blocked
   disagreeing.
 
 
-Wave 5 — CLIMB THE LADDER (DECIDED 2026-07-20; 6 slices; every builder `opus` per PDS-D38/D56):
+Wave 5 — CLIMB THE LADDER (DECIDED 2026-07-20; 6 slices; every builder `opus` per PDS-D38/PDS-D56):
 
 - R1 `pds-w5-criteria-reconcile` (opus, S): rewrite criteria 6, 7 and 10 of `pds-w1-crown-proof`
   in the ledger per D75/D76/D77 — the climber must not author the criteria it will be judged by.
@@ -2560,14 +2560,14 @@ Wave 8 — pay the crown (DECIDED; 4 slices; ROUNDS ARE LAW; every builder `opus
 
 - R1 `pds-w8-tagregistry-guard` (opus, M): ENGINE — `TagRegistry.register_attrs!/2` stops clobbering
   a drifted row inside a pull-provenance-stamped slot; INSERT-when-absent stays unconditional
-  (PDS-D125/D126). Differential test: same stamp, `tag` row survives all eight, absent `tag` row is
+  (PDS-D125/PDS-D126). Differential test: same stamp, `tag` row survives all eight, absent `tag` row is
   still created.
 - R1 `pds-w8-rung6-sentinel` (opus, L): HARNESS PREFLIGHT — step 6 gets a sentinel scoped to the 34
   Bootstrap-owned rows, per-column leg B, workspace-id capture, stamp-check hoist, plus the `pgrep`
   sampler fix; three fail-demos (PDS-D128..D135). Re-freezes the instrument at the merge sha.
 - R1 `pds-w8-schema-row-census` (opus, S): the committed derivation of the 36-row taxonomy the
   exclusion list rests on — 34 plugin + `tag` + `metric`, per-leg behaviour, and why no SQL
-  discriminator exists (PDS-D127/D129).
+  discriminator exists (PDS-D127/PDS-D129).
 - R2 `pds-w8-crown-reclimb` (opus, L; AFTER `pds-w8-tagregistry-guard` + `pds-w8-rung6-sentinel`
   merge): one serial `--all`, fresh RUN_ID, `PDS_FULL_EXPORT_BUDGET=2`, the transcript deliverable,
   and `pds-w1-crown-proof` closed ONLY if every rung passes with its controls FIRING (PDS-D122).
@@ -2575,7 +2575,7 @@ Wave 8 — pay the crown (DECIDED; 4 slices; ROUNDS ARE LAW; every builder `opus
 
 
 **Wave 9r — THE RE-CLIMB, RESUMED (this wave, 4 slices, ALL round 1, file-disjoint; every builder
-`opus` per PDS-D38/D56).** The premise correction wave 8 bought is carried; the shot has never been
+`opus` per PDS-D38/PDS-D56).** The premise correction wave 8 bought is carried; the shot has never been
 fired, and the binding constraint turned out to be MEMORY, not budget.
 
 | # | Slice | Task | Surface | Size | Model | Round |
@@ -5395,7 +5395,7 @@ untouched and was independently re-derived at review (34 SKIP / 34 REGISTER / `d
 Verified honest rather than assumed: the 22 failures in the wider Elixir run are
 `Tickets.ThreadTest` + `Tasks.Web.BoardLiveTest` and reproduce IDENTICALLY (22/22, same modules)
 on clean `origin/main` — the wave contributes zero. `pds-w1-crown-proof` is correctly reopened
-per PDS-D138/D139: lifecycle `open`, claim released so it is actually claimable, 9/11 with
+per PDS-D138/PDS-D139: lifecycle `open`, claim released so it is actually claimable, 9/11 with
 criteria 6 and 10 honestly unmet.
 
 Filed at review, none of it taken this wave: `pds-bl-legb-visibility-false-red` (leg B's
@@ -5438,7 +5438,7 @@ coverage. The premise every prior wave reasoned from — one clobber path, one g
 The census closed too. The 36th row is `metric`: present on guerrilla, declared by no local plugin,
 never walked by `Registry.all()`, and therefore never reverted on EITHER leg. So a table-wide
 sentinel would red leg A on `tag` and hang leg B red forever on `metric` — scope is the fix, not a
-detail of it (PDS-D127/D128). And the sentinel's own SQL had a trap the brief got wrong: `fields`
+detail of it (PDS-D127/PDS-D128). And the sentinel's own SQL had a trap the brief got wrong: `fields`
 and `desk_groups` are Postgres `jsonb[]`, so the prescribed `|| '[{...}]'::jsonb` appends an array
 INTO an array, the UPDATE succeeds silently, and the break surfaces one read later as a 500 that
 `reboot_target` reports as a 90-second environment abort (PDS-D131). Both forms were run; the
@@ -5455,7 +5455,7 @@ the eleven-day-old note omits: the dead claim lease must be renewed and released
 open and still cannot be claimed (PDS-D139).
 
 The thaw is chartered and bounded: PREFLIGHT only, three pre-declared fail-demos, every rung made
-STRICTER, re-freeze at the merge sha (PDS-D134/D136). `pds-w3-shares-fidelity` stays deferred to
+STRICTER, re-freeze at the merge sha (PDS-D134/PDS-D136). `pds-w3-shares-fidelity` stays deferred to
 wave 9 — it moves nothing the census asserts, but it falsifies a banner the transcript prints
 (PDS-D143).
 
@@ -5745,7 +5745,7 @@ answer was worse than any prior wave's estimate.
 
 - **PDS-D251 — RUNG 4 FIRES FULL-STRENGTH OR NOT AT ALL, AND THE FIX IS TWO ENV LINES, NOT A SCRIPT.**
   The single highest-value finding of the wave, and exactly the "silent misfire in the handoff" the
-  direction's second attack predicted. The original crown brief's **W5-E amendment (PDS-D79/D80/D102)
+  direction's second attack predicted. The original crown brief's **W5-E amendment (PDS-D79/PDS-D80/PDS-D102)
   requires `PDS_CONTROL_PG` EXPORTED and `PDS_AMMO_FILE` UNSET**, and **nobody carried it into the
   detached-launcher era**: `grep -nE 'CONTROL_PG|AMMO'` over `pds-crown-launch.sh` returns NOTHING,
   `pds-climb-preflight.sh` and `pds-crown-stamp.sh` likewise, and neither appears in
@@ -6088,7 +6088,7 @@ re-measured this turn and TWO of them moved.
   own p0 recorded the match — correct at the time). Guerrilla has since auto-deployed: live HEAD read
   fresh over SSH this turn is **`e16869ac06e2861f91b4359599d7f8311e035f6f`** (`.instance-deploy-last`
   matches, deployed 2026-07-21T16:12:13Z). The parked `full-default.tar.meta` still reads
-  `8eeaf688…` (v0.2.25.1494) — a **MISMATCH**, so `acquire_full_bundle`'s PDS-D20/D223 provenance gate
+  `8eeaf688…` (v0.2.25.1494) — a **MISMATCH**, so `acquire_full_bundle`'s PDS-D20/PDS-D223 provenance gate
   REFUSES the parked bundle and rungs 3/4 must take a **fresh export, spending one attempt**. Local
   `/tmp/pds-full-export/attempts` reads **4** (host-authoritative, D156). CRITICAL: `FULL_BUDGET`
   defaults to **1**, so gate (c) `spent < budget` is ALREADY FAILING (4 ≥ 1) unless the budget is set —
@@ -6385,7 +6385,7 @@ successor. **ZERO NEW SCRIPTS; scripts/pds-* ONLY; frozen blob untouched.**
 
 **What landed.** One round-1 slice, `pds-w20-launcher-floor-arm` (branch
 `loop-epic/arm-the-launcher-at-the-derived-897-floo-0-r`, PR opened): `scripts/pds-crown-launch.sh`
-armed at the PDS-D276/D277 derived **897 MiB** floor and the derivation record
+armed at the PDS-D276/PDS-D277 derived **897 MiB** floor and the derivation record
 `scripts/pds-w20-floor-derivation.md` written. The 2200 fossil (retired in-RAM engine's 2235 demand)
 is retired against the deployed streaming spill engine whose real peak-minus-baseline demand is
 **98.16 MiB** = (488564−388044)/1024 (wave-16 harness rung-3); FLOOR = 98.16 + 798.81 (D222 max
@@ -15576,7 +15576,7 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
 
   `visibility` is `validate_inclusion(:visibility, ~w(public private))` (`api/lib/barkpark/content/schema_definition.ex:107`, default `"public"` at `:11`) — the enum is binary, so there is no non-public drift value and "drift every row" can only mean flipping the 31 natively-private rows to `'public'`, which is exactly the exposure inversion the row's own c7 caveat names: the containment comment (`scripts/pds-pull-proof.sh`, the SENTINEL block — NOT the `:2152-2158` the row cites) says `'private'` 404s anonymous document reads and that this is contained only because step 6 is terminal among target-reading rungs — flipping the other direction un-404s 31 schemas for the length of the run, so the drift remedy buys an n=34 control by weakening the target. The three-state diff buys the same honesty for nothing: the sentinel UPDATE, `scoped_column_digests`/`columns_where` and `leg_b_unmoved = columns_where same "$cols_before" "$cols_clobbered"` already compute per-column md5s, so a pre-sentinel capture taken before the UPDATE yields the moved set directly. This is also the shape the CANCELLED sibling row `pds-bl-legb-visibility-false-red` already proposed ("only require reversion on columns the sentinel moved… strictly stronger… would also cover any future column with a small value domain"), and it is the only shape that keeps PDS-D130's per-column assertion honest in BOTH failure directions — the false red on an all-private roster and the silent 7-of-8 green this row was filed for.
 
-  **SCOPE.** Sanctions edits to `scripts/pds-pull-proof.sh` ONLY, inside rung 6: the sentinel block, the digest/compare helpers, the leg A/leg B compare sites and the `pass 6` line. No other file; in particular `scripts/pds-climb-preflight.sh` is NOT thawed and `FREEZE_BLOB_HISTORICAL` is NOT edited. **RE-FREEZE:** per PDS-D136/D146 the PR body quotes the POST-MERGE blob OID read with `git rev-parse origin/main:scripts/pds-pull-proof.sh` — `git rev-parse`, never `shasum` (PDS-D154) — and that OID is the evidence stamped on the row's thaw criterion (c3). No literal is edited anywhere: since PR #16311 the preflight DERIVES the freeze from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` at run time (`scripts/pds-climb-preflight.sh:113-138`), so the merge itself IS the re-freeze and the harness is frozen again from attempt 1.
+  **SCOPE.** Sanctions edits to `scripts/pds-pull-proof.sh` ONLY, inside rung 6: the sentinel block, the digest/compare helpers, the leg A/leg B compare sites and the `pass 6` line. No other file; in particular `scripts/pds-climb-preflight.sh` is NOT thawed and `FREEZE_BLOB_HISTORICAL` is NOT edited. **RE-FREEZE:** per PDS-D136/PDS-D146 the PR body quotes the POST-MERGE blob OID read with `git rev-parse origin/main:scripts/pds-pull-proof.sh` — `git rev-parse`, never `shasum` (PDS-D154) — and that OID is the evidence stamped on the row's thaw criterion (c3). No literal is edited anywhere: since PR #16311 the preflight DERIVES the freeze from `refs/remotes/origin/main:scripts/pds-pull-proof.sh` at run time (`scripts/pds-climb-preflight.sh:113-138`), so the merge itself IS the re-freeze and the harness is frozen again from attempt 1.
 
   PAYS: `pds-bl-legb-visibility-control-n3` c3 (in part — the "record the new hash" half is OBSOLETE, see above), c5, c7. SOURCE: the wave's thaw ruling, read at `origin/main` `1c71c5a03`.
 
@@ -15615,7 +15615,7 @@ merge sha of that PR is named in the ruling; where nothing enforces a ruling yet
 
 - **PDS-D746 — THE cond_d THAW IS SANCTIONED, AND IT IS SCOPED TO THE PRE-FLIGHT QUERY AND NOTHING ELSE.** `cond_d` in `acquire_full_bundle` asks one job-blind question — `gh run list --workflow deploy.yml --branch main --status in_progress` — and aborts the full export on ANY hit. But `.github/workflows/deploy.yml` splits into two independent deploy jobs behind one `changes` job: `control-plane` (`if: needs.changes.outputs.cp == 'true'`), which ships to `CP_HOST`, and `instance` (`if: needs.changes.outputs.instance == 'true'`), which ships to `GUERRILLA_HOST`. A PDS climb pulls from the INSTANCE box, so only the `instance` job can swap the slot under an export. A cloud-only merge — which never runs `instance` and cannot possibly disturb the export — therefore reads identically to a real api deploy and trips a FALSE ABORT that costs the run its whole precondition set. The fix is licensed: the gate must discriminate the `instance` job from a control-plane-only run, and abort only on the former.
 
-  **SCOPE — READ IT NARROWLY.** Sanctions edits to `scripts/pds-pull-proof.sh` ONLY, and inside that file ONLY the `cond_d` region of `acquire_full_bundle`: the `gh run list` invocation, the per-run job-graph lookup it now needs, the two pure helpers that decide the verdict (`deploy_run_instance_verdict`, `gate_d_verdict`), the `cond_d` verdict text, and the `(d)` lines in the conditions banner. **NO OTHER CONDITION, NO OTHER RUNG, NO OTHER FILE IS THAWED. In particular `scripts/pds-climb-preflight.sh` is NOT thawed** — not its freeze derivation, not its wording, not one byte — and `FREEZE_BLOB_HISTORICAL` is not edited. Nothing here licenses touching (a), (b), (c), (e) or (f), and nothing here licenses a change of behaviour on the paths `cond_d` already failed CLOSED on: a nonzero `gh` exit and a missing `gh` stay UNKNOWN (PDS-D98), and per-run blindness joins them. The companion edits this thaw REQUIRES but does not itself sanction as harness changes are the arm-count doors that would otherwise red the merge — `scripts/pds-pull-proof_test.sh` and `api/test/barkpark/pds_pull_proof_test.exs` — plus the reservation rows in `tooling/pds/d-number-reservations.tsv`; the same five-file shape PR #18113 landed PDS-D742/D743/D744 in.
+  **SCOPE — READ IT NARROWLY.** Sanctions edits to `scripts/pds-pull-proof.sh` ONLY, and inside that file ONLY the `cond_d` region of `acquire_full_bundle`: the `gh run list` invocation, the per-run job-graph lookup it now needs, the two pure helpers that decide the verdict (`deploy_run_instance_verdict`, `gate_d_verdict`), the `cond_d` verdict text, and the `(d)` lines in the conditions banner. **NO OTHER CONDITION, NO OTHER RUNG, NO OTHER FILE IS THAWED. In particular `scripts/pds-climb-preflight.sh` is NOT thawed** — not its freeze derivation, not its wording, not one byte — and `FREEZE_BLOB_HISTORICAL` is not edited. Nothing here licenses touching (a), (b), (c), (e) or (f), and nothing here licenses a change of behaviour on the paths `cond_d` already failed CLOSED on: a nonzero `gh` exit and a missing `gh` stay UNKNOWN (PDS-D98), and per-run blindness joins them. The companion edits this thaw REQUIRES but does not itself sanction as harness changes are the arm-count doors that would otherwise red the merge — `scripts/pds-pull-proof_test.sh` and `api/test/barkpark/pds_pull_proof_test.exs` — plus the reservation rows in `tooling/pds/d-number-reservations.tsv`; the same five-file shape PR #18113 landed PDS-D742/PDS-D743/PDS-D744 in.
 
   **THE PRICE (PDS-D100/PDS-D134, and PDS-D31 caps how it may be paid).** The thaw is licensed only against a SHOWN two-sided failure, and NEITHER direction may be bought with a live target mutation or a spent export: a fixture job graph whose `instance` job is `completed`/`skipped` must NOT abort, and one whose `instance` job is live must abort, both driven through the SHIPPED functions in `PDS_PROOF_LIB=1` library mode and both pasted into the PR body. That is why the discriminator is factored as two PURE functions over the jobs listing as TEXT: a gate whose only route to its own verdict is a live GitHub API call is a gate nobody can show failing in both directions.
 
@@ -15922,7 +15922,7 @@ name unrelated code.
 
   **THE METER IS NAMED, AND IT IS DELIBERATELY NOT THE CENSUS'S OWN.** `/usr/bin/time -l` wrapped around
   `bash -c 'bash scripts/pds-ledger-census_test.sh'` — an OS meter around a SHELL, never a figure taken
-  inside a BEAM parent (PDS-D633/D646). The census's standing row was taken by its own `--measure`
+  inside a BEAM parent (PDS-D633/PDS-D646). The census's standing row was taken by its own `--measure`
   (bash's `times` builtin around `LC_ALL=C bash -c`); PDS-D633's PLACEMENT clause blesses BOTH forms, and
   using the OTHER one is the point — **re-running a builder's own instrument in the builder's own file is
   repetition, not verification.** The two meters agree on shape and the divergence in magnitude is
@@ -16220,10 +16220,10 @@ name unrelated code.
   **THE GAP, MEASURED, NOT ASSERTED.** `git log --format=%H origin/main -- scripts/pds-pull-proof.sh`
   returns **25** commits. Joining each one's post-merge blob — `git rev-parse <sha>:scripts/pds-pull-proof.sh`,
   never `shasum` (PDS-D154) — against this charter resolved **3**: `e219e97cc…` (PDS-D146) and the
-  pre/post pair `012e3232b…`/`97d9cbb86…` recorded by PDS-D745/D746. The control that makes those
+  pre/post pair `012e3232b…`/`97d9cbb86…` recorded by PDS-D745/PDS-D746. The control that makes those
   zeroes admissible fired on the same file with the same grep: `grep -c PDS-D` = 1155 hits. The greps
   work; the values were not there. So the charter could name the DECISION for a thaw (PDS-D741 for
-  #18078, PDS-D742/D743/D744 for #18113) and still not name the BLOB that decision produced — the
+  #18078, PDS-D742/PDS-D743/PDS-D744 for #18113) and still not name the BLOB that decision produced — the
   freeze value lived only in a PR body, which is not a record anyone can query.
 
   **(i) THE RULE.** Every commit that changes `scripts/pds-pull-proof.sh` is a THAW, sanctioned or
@@ -16326,7 +16326,7 @@ name unrelated code.
   **(vii) THE RETROACTIVE LEDGER — ALL 20 IN-WINDOW THAWS, DERIVED, NOT TYPED FROM MEMORY.** Each
   row's blob was produced by `git rev-parse <sha>:scripts/pds-pull-proof.sh` at
   `origin/main` = `f4c25e982`. Two rows (`4d5a84001`, `bb8e98f78`) were already recorded by
-  PDS-D745/D746 and are restated here so this table is the complete ledger rather than a delta.
+  PDS-D745/PDS-D746 and are restated here so this table is the complete ledger rather than a delta.
 
   | commit | merged | PR | post-merge blob OID |
   |---|---|---|---|
