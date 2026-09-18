@@ -45,7 +45,13 @@ package cli
 //
 //	bp paper export <slug> > p.json && bp bulldocs publish <slug> --file p.json
 //
-// ONE CAVEAT, deliberately not papered over: the source route resolves task
+// TWO CAVEATS, deliberately not papered over. First, the publish WALL requires
+// a label spine (a description of 20+ characters and 1-12 weighted tags) that
+// the reader source route does not serve — it serves what a reader renders.
+// Export therefore makes a second, best-effort read of the stored row for
+// description + tags, and when it cannot recover them it says so on stderr
+// rather than handing over a payload that looks complete and is refused.
+// Second: the source route resolves task
 // references in blocks before serving them (`Content.Papers.resolve_tasks_in_blocks`),
 // so a paper carrying task blocks exports them HYDRATED. That is what the
 // reader shows and what re-publishing re-derives; it is not the byte image of
@@ -55,6 +61,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -109,6 +116,13 @@ func runPaperExport(out *writer, g globals, ctx manifest.Context, args []string)
 		return exitGeneric
 	}
 	body = append(body, '\n')
+
+	// A payload missing the label spine still publishes NOTHING: say so on
+	// stderr (never stdout — stdout is the payload) before the caller pipes it.
+	if len(payload.SpineMissing) > 0 {
+		out.errf("bp: paper export %s: no %s on the stored row — the publish wall requires a description (20+ chars) and 1-12 weighted tags, so re-publishing this payload as-is will be refused",
+			slug, strings.Join(payload.SpineMissing, " or "))
+	}
 
 	if dest != "" {
 		if err := os.WriteFile(dest, body, 0o644); err != nil {

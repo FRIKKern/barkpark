@@ -24,6 +24,12 @@ type fakePaperSourceServer struct {
 	status   int
 	lastPath string
 	lastQ    string
+
+	// row is the stored document GET /v1/data/doc/:ds/paper/:slug answers with
+	// (the publish wall's label spine lives there, not in the reader source).
+	// Empty means the route 404s — the share-scoped reader's situation.
+	row      string
+	rowReads int
 }
 
 func (f *fakePaperSourceServer) handler() http.Handler {
@@ -40,6 +46,21 @@ func (f *fakePaperSourceServer) handler() http.Handler {
 			w.WriteHeader(f.status)
 		}
 		_, _ = w.Write([]byte(f.envelope))
+	})
+	// The stored-row read is SCOPED (/w/<ws>/p/<proj>/v1/data/doc/…), so match
+	// on the segment rather than a prefix pattern.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/v1/data/doc/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		f.rowReads++
+		if f.row == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":` + f.row + `}`))
 	})
 	return mux
 }
@@ -228,5 +249,73 @@ func TestPaperExportUsageErrors(t *testing.T) {
 		if code := runPaper(out, g, args); code != exitUsage {
 			t.Fatalf("runPaper %v exit = %d, want exitUsage", args, code)
 		}
+	}
+}
+
+// The publish wall requires a description (20+ chars) and 1-12 weighted tags.
+// The reader source route serves neither, so export reads the stored row for
+// them — without this the round trip loses the spine and the re-publish is
+// refused.
+func TestPaperExportCarriesTheLabelSpine(t *testing.T) {
+	fake := &fakePaperSourceServer{
+		envelope: `{"id":"p1","title":"T","_rev":"abc123","source":{"kind":"blocks","blocks":` + exportBlocks + `}}`,
+		row:      `{"_id":"p1","description":"a description long enough for the wall","tags":[{"tag":"cli","strength":80,"rationale":"why"}]}`,
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	_, g := paperTestEnv(t, srv.URL)
+	var so, se bytes.Buffer
+	out := newWriter(&so, &se)
+	if code := runPaper(out, g, []string{"export", "p1"}); code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+	if fake.rowReads == 0 {
+		t.Fatal("export never read the stored row — the label spine cannot have come from anywhere")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(so.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["description"] != "a description long enough for the wall" {
+		t.Fatalf("description = %v; the re-publish would be refused label_spine", payload["description"])
+	}
+	tags, ok := payload["tags"].([]any)
+	if !ok || len(tags) != 1 {
+		t.Fatalf("tags = %v, want the row's one weighted tag", payload["tags"])
+	}
+	if se.Len() != 0 {
+		t.Fatalf("a complete payload still warned:\n%s", se.String())
+	}
+}
+
+// When the spine cannot be recovered the payload is still served — but the
+// caller is TOLD, on stderr, that re-publishing it will be refused. A silent
+// partial payload is the failure this guards.
+func TestPaperExportWarnsWhenTheSpineIsUnreachable(t *testing.T) {
+	fake := &fakePaperSourceServer{
+		envelope: `{"id":"p1","title":"T","_rev":"abc123","source":{"kind":"blocks","blocks":` + exportBlocks + `}}`,
+		// row empty: the document API 404s for this caller.
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	_, g := paperTestEnv(t, srv.URL)
+	var so, se bytes.Buffer
+	out := newWriter(&so, &se)
+	if code := runPaper(out, g, []string{"export", "p1"}); code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+	if !strings.Contains(se.String(), "description") || !strings.Contains(se.String(), "refused") {
+		t.Fatalf("no warning that the payload cannot be re-published:\n%s", se.String())
+	}
+	// stdout is still the payload, and still only the payload.
+	var payload map[string]any
+	if err := json.Unmarshal(so.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout is not the payload: %v", err)
+	}
+	if _, ok := payload["description"]; ok {
+		t.Fatal("export invented a description")
 	}
 }
