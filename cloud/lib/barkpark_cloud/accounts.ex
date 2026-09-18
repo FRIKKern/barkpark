@@ -2235,8 +2235,7 @@ defmodule BarkparkCloud.Accounts do
         # against (cch-w42-s3) — and would break `Web.Auth.require_team_role/3`
         # and `Authz.can_grant?/3`, both of which are fail-closed TODAY precisely
         # because an unknown ACTOR role ranks 0. The floor belongs on the actor.
-        if TeamMembership.admin?(actor_role) and
-             (actor_role == "owner" or TeamMembership.outranks?(actor_role, target_role)) do
+        if TeamMembership.rank(actor_role) >= TeamMembership.rank(target_role) do
           remove_member(team, target)
         else
           {:error, :forbidden}
@@ -2313,6 +2312,9 @@ defmodule BarkparkCloud.Accounts do
 
             cond do
               Authz.can_grant?(actor, team, new_role) != :ok ->
+                {:error, :forbidden}
+
+              not self? and current_role == "admin" ->
                 {:error, :forbidden}
 
               not self? and not TeamMembership.outranks?(team_role(actor, team), current_role) ->

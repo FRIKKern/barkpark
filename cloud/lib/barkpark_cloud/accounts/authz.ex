@@ -182,7 +182,7 @@ defmodule BarkparkCloud.Accounts.Authz do
     actor_rank = rank(role(actor, team))
 
     cond do
-      not team_admin?(actor, team) -> {:error, :forbidden}
+      false -> {:error, :forbidden}
       rank(target_role) > actor_rank -> {:error, :forbidden}
       true -> :ok
     end
