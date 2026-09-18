@@ -305,7 +305,7 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
     end
 
     # cch-w60-bl — THE `:forbidden` RUNG IS A DECIDED, RE-MEASURED DEFERRAL
-    # (charter D715, re-ruled D900). This test is the pin: it holds the guard's
+    # (charter D715, re-ruled D901). This test is the pin: it holds the guard's
     # one-rung set from BELOW, by asserting what the OTHER rung does instead, so
     # nobody re-litigates the widening from scratch.
     #
@@ -340,7 +340,7 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
     # needs its OWN sentence ("this box does not grant our token admin —
     # re-provision it") plus a re-provision affordance, and both live in
     # cloud/priv/static/app.js. Widen the guard and this test reds by design.
-    test "the :forbidden rung PERMITS the ask and the 403 box sees 502 instance_error (D900)" do
+    test "the :forbidden rung PERMITS the ask and the 403 box sees 502 instance_error (D901)" do
       {user, team} = user_with_team()
 
       bp =
@@ -365,7 +365,7 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
       # identity_refused test above: the ask is SPENT. An empty wire means the
       # guard was widened.
       assert length(StudioLinkFakeHttpClient.requests()) == 1,
-             "the :forbidden rung must PERMIT the ask (charter D715/D900 — one rung, not two). " <>
+             "the :forbidden rung must PERMIT the ask (charter D715/D901 — one rung, not two). " <>
                "An empty wire means the guard widened; before it may, the rung needs its OWN " <>
                "console sentence and a re-provision affordance in app.js, or every 403 box is " <>
                "told \"The instance refused our credential\" — the wrong fact."
