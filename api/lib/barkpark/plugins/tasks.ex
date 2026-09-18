@@ -152,16 +152,14 @@ defmodule Barkpark.Plugins.Tasks do
   # `Bulldocs.reject_hollow_paper_publish/1` already did on this same seam.
   # `fetch/2` below was ALWAYS struct-safe (it falls back to the atom key), so
   # the head was the whole defect and the body needed no change.
+  # `task_doc?/1` (defined beside the edge helpers below) already reads all
+  # three spellings — `:type`, `"type"`, `"_type"` — so the head reuses it
+  # rather than growing a second, drift-prone copy of the same predicate.
   defp portable_brief_gate(%{doc: doc}) when is_map(doc) do
     if task_doc?(doc), do: gate_task_brief(doc), else: :ok
   end
 
   defp portable_brief_gate(_payload), do: :ok
-
-  defp task_doc?(%{type: "task"}), do: true
-  defp task_doc?(%{"type" => "task"}), do: true
-  defp task_doc?(%{"_type" => "task"}), do: true
-  defp task_doc?(_), do: false
 
   defp gate_task_brief(doc) do
     with content when is_map(content) <- fetch(doc, "content"),
