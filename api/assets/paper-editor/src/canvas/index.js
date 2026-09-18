@@ -38,6 +38,7 @@ import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
+import Underline from "@tiptap/extension-underline";
 // ProseMirror selection constructors — used by the slash direct-insert to place the
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
@@ -737,6 +738,9 @@ class BpPaperCanvas extends HTMLElement {
         // Smart typography — parity with ../index.js. A prose run holds no code
         // block, so nothing to exclude.
         Typography,
+        // Underline (Mod-u) — the PortableDoc inline wire already carries an `underline`
+        // wrapper (convert.js), so this only adds the mark the schema was missing.
+        Underline,
         // Internal-link marks — schema registration only (see import note). This
         // keeps existing inline wikilink/blockref/tag marks round-tripping; the
         // [[ / # autocomplete UI is OUT of S1.

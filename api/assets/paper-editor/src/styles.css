@@ -1515,3 +1515,4 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-block-menu__item--danger { color: var(--paper-danger, #c2413a); }
 .bp-block-menu__glyph { width: 22px; text-align: center; font-size: 11px; color: var(--paper-muted, #8a8f98); }
 .bp-paper-format__btn--strike { text-decoration: line-through; }
+.bp-paper-format__btn--underline { text-decoration: underline; text-underline-offset: 2px; }

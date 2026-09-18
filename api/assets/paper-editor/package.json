@@ -20,6 +20,7 @@
     "@tiptap/extension-link": "^2.11.5",
     "@tiptap/extension-placeholder": "^2.27.2",
     "@tiptap/extension-typography": "^2.27.2",
+    "@tiptap/extension-underline": "^2.27.3",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5"
   },
