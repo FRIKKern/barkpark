@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The instrument's own tripwire. If the census can no longer report, this
       # step says so before any verdict below is believed.
