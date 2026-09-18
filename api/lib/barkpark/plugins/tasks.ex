@@ -133,7 +133,37 @@ defmodule Barkpark.Plugins.Tasks do
   # Publish wall: a task that cannot render as PortableDoc in the terminal is
   # not a publishable task. Draft authoring remains permissive; publication
   # gives every agent an actionable repair message.
-  defp portable_brief_gate(%{doc: %{"type" => "task"} = doc}) do
+  #
+  # ── WHY THE HEAD READS BOTH SPELLINGS (task-c1f155da34d3338f) ─────────────
+  #
+  # This clause used to be `%{doc: %{"type" => "task"} = doc}` — a STRING key.
+  # `:before_save` fires with the raw string-keyed write attrs, so the sibling
+  # `quality_gate/1` matches there and every test that hands this function a
+  # plain map went green. But `:before_publish` is fired by
+  # `Content.Lifecycle.publish_after_gate/5` with `doc: draft`, and `draft` is a
+  # `%Barkpark.Content.Document{}` STRUCT whose keys are ATOMS. A struct never
+  # matches a string-key pattern, so every publish fell through to the catch-all
+  # `portable_brief_gate(_payload), do: :ok` below: the wall was registered,
+  # fired, and inert. Measured live on guerrilla 2026-09-18 — a briefless task
+  # and a bogus-block-brief task BOTH published 200 through
+  # `POST /v1/data/mutate/:dataset`.
+  #
+  # Both shapes are read now, exactly as `Grip.reject_level_skipping_fact/1` and
+  # `Bulldocs.reject_hollow_paper_publish/1` already did on this same seam.
+  # `fetch/2` below was ALWAYS struct-safe (it falls back to the atom key), so
+  # the head was the whole defect and the body needed no change.
+  defp portable_brief_gate(%{doc: doc}) when is_map(doc) do
+    if task_doc?(doc), do: gate_task_brief(doc), else: :ok
+  end
+
+  defp portable_brief_gate(_payload), do: :ok
+
+  defp task_doc?(%{type: "task"}), do: true
+  defp task_doc?(%{"type" => "task"}), do: true
+  defp task_doc?(%{"_type" => "task"}), do: true
+  defp task_doc?(_), do: false
+
+  defp gate_task_brief(doc) do
     with content when is_map(content) <- fetch(doc, "content"),
          brief when is_map(brief) <- fetch(content, "brief"),
          1 <- fetch(brief, "version"),
@@ -150,8 +180,6 @@ defmodule Barkpark.Plugins.Tasks do
            "PortableDoc {version: 1, blocks: [...]} so bp task tui can render it"}
     end
   end
-
-  defp portable_brief_gate(_payload), do: :ok
 
   defp validate_brief_blocks(blocks) do
     Enum.reduce_while(blocks, :ok, fn
