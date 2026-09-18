@@ -166,17 +166,24 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
       # reddened it from this file. `fetch_env` is what distinguishes the two.
       original = Application.fetch_env(:barkpark, :boot_mode)
 
+      # `persistent: true` on BOTH the write and the restore (2026-09-18). The
+      # production writer is `Barkpark.OneShot.boot!/0`, which is persistent, and
+      # a NON-persistent delete does not retract a persistent record: OTP keeps
+      # the persistent value in its own table and re-applies it the next time
+      # `:barkpark` is loaded. A restore that cannot undo every write this test
+      # makes is not a restore, and the value it leaves behind is node-global —
+      # `Barkpark.ApplicationBootModeTest` is the module that reads it next.
       on_exit(fn ->
         case original do
-          {:ok, mode} -> Application.put_env(:barkpark, :boot_mode, mode)
-          :error -> Application.delete_env(:barkpark, :boot_mode)
+          {:ok, mode} -> Application.put_env(:barkpark, :boot_mode, mode, persistent: true)
+          :error -> Application.delete_env(:barkpark, :boot_mode, persistent: true)
         end
       end)
 
-      Application.put_env(:barkpark, :boot_mode, :one_shot)
+      Application.put_env(:barkpark, :boot_mode, :one_shot, persistent: true)
       assert App.boot_mode() == :one_shot
 
-      Application.put_env(:barkpark, :boot_mode, :one_shot_typo)
+      Application.put_env(:barkpark, :boot_mode, :one_shot_typo, persistent: true)
       assert_raise ArgumentError, fn -> App.boot_mode() end
     end
   end
