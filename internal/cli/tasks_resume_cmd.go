@@ -23,7 +23,16 @@ import (
 // documents and their content hashes, and an explicit instruction to REVIEW
 // before continuing.
 //
-// `resume` is a purely LOCAL builtin, not a manifest verb: it writes nothing,
+// TWO SOURCES, ONE LAW (the server arm, task-7ac1b27605ef6060 c3). The manifest
+// lives in two places: `claim.priming_start` on the row (sent by `bp task
+// claim`, stored by api/lib/barkpark/tasks/flight_recorder.ex) and the local
+// BARKPARK_PRIMING_DIR file. The LEDGER copy is preferred, because it is the
+// only one that survives the machine that wrote it — which is the entire case
+// this verb exists for: a lease that lapsed on a host the successor has never
+// seen. The local file is the fallback. Both are judged by believeManifest,
+// the same schema/doc-id/digest arms, so neither wire buys a weaker proof.
+//
+// `resume` reads the row but is otherwise a READ-ONLY builtin, not a manifest verb: it writes nothing,
 // claims nothing, and takes no lease. Taking the row is still `bp task claim`.
 //
 // ========================= A RESUME PATH IS ALL ABSENCES =====================
@@ -86,8 +95,15 @@ func (s resumeState) String() string {
 }
 
 // resumeRecord is the outcome of rehydrating one row's loadout.
+//
+// Source names WHERE the bytes came from, because a successor reading a brief
+// on a machine that never ran the claim needs to know whether the loadout was
+// rebuilt from the LEDGER (durable, reachable from anywhere) or from a local
+// file (exactly as durable as this host). It is prose in the brief, never a
+// predicate: no arm below branches on it.
 type resumeRecord struct {
 	Path     string
+	Source   string // "the ledger (claim.priming_start)" / "<path>"
 	State    resumeState
 	Fault    string // why the record could not be believed (UNREADABLE only)
 	Manifest *PrimingManifest
@@ -115,7 +131,7 @@ func osResumeIO() resumeIO { return resumeIO{readFile: os.ReadFile} }
 // render of bytes nobody checked.
 func loadResumeRecord(io resumeIO, dir, docID string) resumeRecord {
 	path := primingManifestPath(dir, docID)
-	rec := resumeRecord{Path: path}
+	rec := resumeRecord{Path: path, Source: path}
 
 	b, err := io.readFile(path)
 	if err != nil {
@@ -131,42 +147,47 @@ func loadResumeRecord(io resumeIO, dir, docID string) resumeRecord {
 		return rec
 	}
 
+	state, fault, m := believeManifest(b, docID)
+	rec.State, rec.Fault, rec.Manifest = state, fault, m
+	return rec
+}
+
+// believeManifest is the ONE set of verification arms that decides whether a
+// manifest's bytes may be turned into a loadout. Both readers — the local file
+// and the ledger copy — go through it, DELIBERATELY: a server arm with its own
+// weaker checks would be a second law for the same record, and the successor
+// would have no way to know which one had judged the bytes it is being shown.
+// The bytes arrive over a different wire; they do not arrive with a different
+// standard of proof.
+//
+// Returns the state, the fault (UNREADABLE only), and a manifest ONLY when the
+// record was believed — never alongside a fault, because handing a caller a
+// manifest it may render is exactly how a corrupt record gets believed.
+func believeManifest(b []byte, docID string) (resumeState, string, *PrimingManifest) {
 	var m PrimingManifest
 	if err := json.Unmarshal(b, &m); err != nil {
-		rec.State = resumeUnreadable
-		rec.Fault = fmt.Sprintf("the file does not parse as a priming manifest: %v", err)
-		return rec
+		return resumeUnreadable, fmt.Sprintf("it does not parse as a priming manifest: %v", err), nil
 	}
 	// A successor that does not know the schema number must REFUSE to interpret
-	// the file, not guess at it — the writer's own instruction.
+	// the record, not guess at it — the writer's own instruction.
 	if m.Schema != primingSchema {
-		rec.State = resumeUnreadable
-		rec.Fault = fmt.Sprintf("schema %d, but this build only understands schema %d — refusing to interpret it rather than guess", m.Schema, primingSchema)
-		return rec
+		return resumeUnreadable, fmt.Sprintf("schema %d, but this build only understands schema %d — refusing to interpret it rather than guess", m.Schema, primingSchema), nil
 	}
 	// A manifest for a DIFFERENT row is not this row's loadout. Rendering it
 	// would hand the successor another agent's primers as its own.
 	if m.DocID != docID {
-		rec.State = resumeUnreadable
-		rec.Fault = fmt.Sprintf("it records doc_id %q, but this resume asked for %q — this is another row's loadout", m.DocID, docID)
-		return rec
+		return resumeUnreadable, fmt.Sprintf("it records doc_id %q, but this resume asked for %q — this is another row's loadout", m.DocID, docID), nil
 	}
 	// The digest must still describe the bytes that came back. A manifest that
 	// says one thing and hashes as another has been truncated or edited since
 	// the claim, and nothing in it can be relied on.
 	if re := primingDigest(m); re != m.Digest {
-		rec.State = resumeUnreadable
-		rec.Fault = fmt.Sprintf("it carries digest %q but its own content hashes to %q — truncated or edited since the claim", m.Digest, re)
-		return rec
+		return resumeUnreadable, fmt.Sprintf("it carries digest %q but its own content hashes to %q — truncated or edited since the claim", m.Digest, re), nil
 	}
-
-	rec.Manifest = &m
 	if manifestIsSilent(m) {
-		rec.State = resumeSilent
-		return rec
+		return resumeSilent, "", &m
 	}
-	rec.State = resumeLoaded
-	return rec
+	return resumeLoaded, "", &m
 }
 
 // manifestIsSilent reports the third nothing: a record that loaded and answers
@@ -186,6 +207,70 @@ type resumeLive struct {
 	Fault     string
 	Lifecycle string
 	Claim     apiclient.ClaimInfo
+	// Priming is content.claim.priming_start EXACTLY as the ledger holds it —
+	// raw, undecoded, unjudged. Nil means the key was absent from the claim
+	// object (or there was no claim object), which is NO RECORD on the server
+	// arm; a present-but-corrupt value is UNREADABLE and must reach
+	// believeManifest to be told so. Decoding here would collapse the two.
+	Priming json.RawMessage
+}
+
+// serverPrimingSource names the ledger in the brief. A successor must be able
+// to see at a glance that the loadout it is reading survived the machine that
+// wrote it.
+const serverPrimingSource = "the ledger (claim.priming_start)"
+
+// serverResumeRecord rehydrates the loadout from the LEDGER copy of the
+// manifest — the one `bp task claim` sends under `claim.priming_start`
+// (api/lib/barkpark/tasks/flight_recorder.ex). This is the arm that makes
+// resume work at all for the case the verb exists for: a lease that lapsed on
+// a machine the successor has never touched, whose BARKPARK_PRIMING_DIR it
+// cannot read and must not pretend to.
+//
+// THE THREE-ABSENCE LAW HOLDS HERE VERBATIM, and asked=false is a FOURTH thing
+// that is not one of the three:
+//
+//	asked=false   the store was not read at all. NOT "no record on the
+//	              server" — an unreachable ledger says NOTHING about whether a
+//	              manifest is stored, and reporting it as NO RECORD would be a
+//	              statement about the predecessor drawn from a network error.
+//	NO RECORD     the row was read and carries no priming_start. UNMEASURED.
+//	UNREADABLE    a priming_start EXISTS and cannot be believed. The loudest.
+//	SILENT/LOADED believeManifest's own verdicts, unchanged.
+func serverResumeRecord(live resumeLive, docID string) (rec resumeRecord, asked bool) {
+	rec = resumeRecord{Source: serverPrimingSource}
+	if !live.Read {
+		return rec, false
+	}
+	if len(live.Priming) == 0 {
+		return rec, true
+	}
+	state, fault, m := believeManifest(live.Priming, docID)
+	rec.State, rec.Fault, rec.Manifest = state, fault, m
+	return rec, true
+}
+
+// claimPrimingStart pulls content.claim.priming_start out of a read row
+// WITHOUT judging it. An absent claim, a null claim, a claim that does not
+// decode, and an absent key all yield nil — every one of them is "the ledger
+// holds no manifest for this row", which is NO RECORD. A present value is
+// handed back raw, including `null` and `{}`, so believeManifest is the only
+// thing that ever decides a stored value is unbelievable.
+func claimPrimingStart(doc apiclient.Doc) json.RawMessage {
+	raw, ok := doc.Extra["claim"]
+	if !ok {
+		return nil
+	}
+	var c struct {
+		PrimingStart json.RawMessage `json:"priming_start"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil
+	}
+	if len(c.PrimingStart) == 0 || string(c.PrimingStart) == "null" {
+		return nil
+	}
+	return c.PrimingStart
 }
 
 // runTaskResume is the builtin entry point: `bp task resume <doc-id> <worker>`.
@@ -198,22 +283,23 @@ func runTaskResume(out *writer, g globals, ctx manifest.Context, tail []string) 
 		pos = append(pos, strings.TrimSpace(a))
 	}
 	if len(pos) < 2 || pos[0] == "" || pos[1] == "" {
-		out.userErr("usage: barkpark task resume <doc-id> <worker-id>\n  rebuilds the loadout a crashed agent held at claim time and prints a crash brief.\n  reads the manifest `bp task claim` wrote under BARKPARK_PRIMING_DIR; writes nothing and takes no lease.")
+		out.userErr("usage: barkpark task resume <doc-id> <worker-id>\n  rebuilds the loadout a crashed agent held at claim time and prints a crash brief.\n  prefers the manifest the ledger holds at claim.priming_start, and falls back to the\n  local file `bp task claim` wrote under BARKPARK_PRIMING_DIR; writes nothing and takes no lease.")
 		return exitUsage
 	}
 	docID, worker := pos[0], pos[1]
 
+	live := fetchResumeLive(ctx, docID)
 	dir := primingDirPath(defaultPrimingEnv().getenv)
-	if dir == "" {
-		// REFUSE RATHER THAN RENDER AN EMPTY BRIEF. With no priming dir there is
-		// no place a manifest could ever have been, so "no record" here would be
-		// a statement about the predecessor drawn from a missing configuration.
-		out.userErr("BARKPARK_PRIMING_DIR is unset, so there is nowhere a loadout could have been recorded.\n  This is NOT evidence that %s has no loadout — it is evidence that this shell cannot look.\n  Set BARKPARK_PRIMING_DIR to the directory `bp task claim` wrote to, then re-run.", docID)
+
+	rec, ok := pickResumeRecord(osResumeIO(), live, dir, docID)
+	if !ok {
+		// REFUSE RATHER THAN RENDER AN EMPTY BRIEF. Neither place a manifest
+		// could be was readable — the ledger did not answer AND this shell has
+		// no priming dir — so "no record" would be a statement about the
+		// predecessor drawn from a network error and a missing env var.
+		out.userErr("Neither source of a loadout could be LOOKED AT for %s:\n  the ledger was not read (%s), and BARKPARK_PRIMING_DIR is unset so there is nowhere local to look.\n  This is NOT evidence that %s has no loadout — it is evidence that this shell cannot look.\n  Fix the server connection, or set BARKPARK_PRIMING_DIR to the directory `bp task claim` wrote to, then re-run.", docID, orNoneStr(live.Fault), docID)
 		return exitUsage
 	}
-
-	rec := loadResumeRecord(osResumeIO(), dir, docID)
-	live := fetchResumeLive(ctx, docID)
 	renderCrashBrief(out, docID, worker, rec, live)
 
 	if rec.State == resumeUnreadable {
@@ -223,6 +309,43 @@ func runTaskResume(out *writer, g globals, ctx manifest.Context, tail []string) 
 		return exitGeneric
 	}
 	return exitOK
+}
+
+// pickResumeRecord chooses WHICH manifest the brief is built from.
+//
+// THE LEDGER WINS WHEN IT HAS ONE. The server copy is the only one that
+// survives the machine that wrote it, and it is the copy the successor can
+// actually be expected to reach; the local file is the FALLBACK, for the case
+// where the claim predates the wire half or the ledger did not answer.
+//
+// The precedence is on PRESENCE, never on content: a ledger manifest that is
+// UNREADABLE still wins over a local file that loads. Falling through to a
+// believable local copy on a corrupt server copy would silently swallow the
+// loudest of the three nothings — the successor would see a clean brief and
+// never learn that the ledger holds a record that lies.
+//
+// ok=false means NEITHER source could be looked at (store unread AND no
+// priming dir). That is not a fourth state of the record; it is the caller's
+// signal to refuse instead of printing a brief about a row nobody asked.
+func pickResumeRecord(io resumeIO, live resumeLive, dir, docID string) (resumeRecord, bool) {
+	srv, asked := serverResumeRecord(live, docID)
+	if asked && srv.State != resumeNoRecord {
+		return srv, true
+	}
+	if dir != "" {
+		local := loadResumeRecord(io, dir, docID)
+		// A local record that says something answers where the ledger had
+		// nothing. If it too is NO RECORD, prefer the SERVER's no-record when
+		// the store was actually asked — same state, and the source line then
+		// names the durable place that was checked.
+		if local.State != resumeNoRecord || !asked {
+			return local, true
+		}
+	}
+	if asked {
+		return srv, true
+	}
+	return resumeRecord{}, false
 }
 
 // fetchResumeLive reads the row back for the live half of the brief. Every
@@ -248,6 +371,7 @@ func fetchResumeLive(ctx manifest.Context, docID string) resumeLive {
 		Read:      true,
 		Lifecycle: doc.ContentString("lifecycle_status"),
 		Claim:     doc.ClaimInfo(),
+		Priming:   claimPrimingStart(doc),
 	}
 }
 
@@ -260,24 +384,25 @@ func renderCrashBrief(out *writer, docID, worker string, rec resumeRecord, live 
 	out.outf("")
 
 	out.outf("LOADOUT: %s", rec.State)
+	out.outf("  source: %s", orNoneStr(rec.Source))
 	switch rec.State {
 	case resumeNoRecord:
-		out.outf("  No manifest names this row at %s.", rec.Path)
+		out.outf("  No manifest names this row at %s.", orNoneStr(rec.Source))
 		out.outf("  UNMEASURED: this says NOTHING about what your predecessor held. It is not")
 		out.outf("  a finding that they held nothing — only that nothing was written down.")
 	case resumeUnreadable:
-		out.outf("  A manifest EXISTS at %s and cannot be believed:", rec.Path)
+		out.outf("  A manifest EXISTS at %s and cannot be believed:", orNoneStr(rec.Source))
 		out.outf("  %s", rec.Fault)
 		out.outf("  This is a MEASURED failure, not an absence: something was recorded and it")
 		out.outf("  is wrong. Do NOT reconstruct a loadout from it, and do not treat this row")
 		out.outf("  as unprimed — find out what corrupted the record first.")
 	case resumeSilent:
-		out.outf("  A manifest at %s loaded and re-digested clean, and measures NOTHING:", rec.Path)
+		out.outf("  A manifest at %s loaded and re-digested clean, and measures NOTHING:", orNoneStr(rec.Source))
 		out.outf("  no model, no effort, no worktree, no HEAD, no tree state, no primers.")
 		out.outf("  The record answered; its answer is UNMEASURED. That is different from no")
 		out.outf("  record at all — the claim DID run this path, and had nothing to report.")
 	default:
-		renderLoadout(out, *rec.Manifest, rec.Path)
+		renderLoadout(out, *rec.Manifest, rec.Source)
 	}
 	out.outf("")
 
