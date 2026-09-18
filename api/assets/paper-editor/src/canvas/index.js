@@ -39,6 +39,8 @@ import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import Underline from "@tiptap/extension-underline";
+import TiptapTaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
 // ProseMirror selection constructors — used by the slash direct-insert to place the
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
@@ -472,7 +474,8 @@ function hasOnlyBpKeys(attrs) {
 // kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
 // and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
 const CANVAS_SLASH_ITEMS = [
-  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)),
+  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
+    it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
   ...CANVAS_COMPOUND_INSERTS.map((c) => ({
     group: "Starters",
     type: c.kind,
@@ -741,6 +744,11 @@ class BpPaperCanvas extends HTMLElement {
         // Underline (Mod-u) — the PortableDoc inline wire already carries an `underline`
         // wrapper (convert.js), so this only adds the mark the schema was missing.
         Underline,
+        // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
+        // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
+        // ordinary transaction, so runToOps patches the item's `checked`.
+        TiptapTaskList,
+        TaskItem.configure({ nested: true }),
         // Internal-link marks — schema registration only (see import note). This
         // keeps existing inline wikilink/blockref/tag marks round-tripping; the
         // [[ / # autocomplete UI is OUT of S1.
@@ -1520,7 +1528,7 @@ class BpPaperCanvas extends HTMLElement {
       // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
       const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
       if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
-        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 5: "bullet", 6: "ordered" }[digit];
+        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered" }[digit];
         if (kind) {
           event.preventDefault();
           turnTopLevelInto(this._editor, topLevelIndexAtSelection(this._editor), kind);
@@ -1547,8 +1555,9 @@ class BpPaperCanvas extends HTMLElement {
       if (empty && $from.parentOffset === 0) {
         // Only the FIRST item of a list lifts; a later item keeps ProseMirror's join into the
         // item above, which is how an Enter-split is undone without losing nested children.
-        if ($from.depth >= 3 && $from.node(-1).type.name === "listItem" && $from.index(-1) === 0 && $from.index(-2) === 0) {
-          if (this._editor.commands.liftListItem("listItem")) { event.preventDefault(); return true; }
+        const itemType = $from.depth >= 3 ? $from.node(-1).type.name : null;
+        if ((itemType === "listItem" || itemType === "taskItem") && $from.index(-1) === 0 && $from.index(-2) === 0) {
+          if (this._editor.commands.liftListItem(itemType)) { event.preventDefault(); return true; }
         }
         if ($from.depth === 1 && $from.parent.type.name === "pullquote") {
           event.preventDefault();
@@ -2286,7 +2295,7 @@ class BpPaperCanvas extends HTMLElement {
   _slashInListItem($from) {
     if ($from.parent.type.name !== "paragraph" || $from.depth < 2) return false;
     const item = $from.node($from.depth - 1);
-    if (!item || item.type.name !== "listItem" || item.childCount !== 1) return false;
+    if (!item || (item.type.name !== "listItem" && item.type.name !== "taskItem") || item.childCount !== 1) return false;
     return /^\/[^\s]*$/.test($from.parent.textContent) || $from.parent.textContent === "";
   }
 

@@ -113,6 +113,7 @@ export function turnTopLevelInto(editor, index, kind) {
     case "h3": return chain.setHeading({ level: 3 }).run();
     case "bullet": return src.node.type.name === "bulletList" ? true : chain.toggleBulletList().run();
     case "ordered": return src.node.type.name === "orderedList" ? true : chain.toggleOrderedList().run();
+    case "task": return src.node.type.name === "taskList" ? true : chain.toggleTaskList().run();
     default: return false;
   }
 }
@@ -124,6 +125,7 @@ export const TURN_INTO = [
   { kind: "h3", label: "Heading 3", glyph: "H3" },
   { kind: "bullet", label: "Bulleted list", glyph: "•" },
   { kind: "ordered", label: "Numbered list", glyph: "1." },
+  { kind: "task", label: "Checklist", glyph: "☑" },
 ];
 
 export class BlockHandle {

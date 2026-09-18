@@ -643,6 +643,14 @@
 .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
 .bp-paper-editor-body ul > li { list-style: disc; }
 .bp-paper-editor-body ol > li { list-style: decimal; }
+/* Checklist (TipTap taskList/taskItem markup; the reader twin is .bp-checklist in
+ * paper-surface.css): no marker, native checkbox ahead of the text, done items struck. */
+.bp-paper-editor-body ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.bp-paper-editor-body ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 0.55em; list-style: none; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > label { flex: 0 0 auto; margin: 0.35em 0 0; user-select: none; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > label input { width: 1em; height: 1em; margin: 0; accent-color: var(--paper-accent); cursor: pointer; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > div { flex: 1 1 auto; min-width: 0; }
+.bp-paper-editor-body ul[data-type="taskList"] > li[data-checked="true"] > div > p { color: var(--paper-ink-soft); text-decoration: line-through; text-decoration-color: var(--paper-rule); }
 /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — mirror of the
  * single-source .bp-paper-surface .bp-role-* rules (paper-surface.css). The canvas
  * node emits `<p class="bp-role-*">` matching the reader; pullquote's italic rides

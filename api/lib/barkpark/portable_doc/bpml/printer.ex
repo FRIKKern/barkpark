@@ -96,9 +96,23 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # (compose.ex `Map.get(b, "ordered") == true` -> PdList ordered), so dropping
   # it turned every numbered list in a pulled paper back into bullets on push.
   defp block(%{"type" => "list"} = b, d) do
-    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<li>#{inline(&1)}</li>")
-    wrap("ul", attr_str(b, ["id", "ordered"]), items, d)
+    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<li#{li_attrs(&1)}>#{inline(list_item_inline(&1))}</li>")
+    wrap("ul", attr_str(b, ["id", "ordered", "task"]), items, d)
   end
+
+  # A checklist item is a map ({content|text, checked}); its `checked` rides as an
+  # attribute and its body prints like any inline array.
+  defp li_attrs(%{"checked" => true}), do: ~s( checked="true")
+  defp li_attrs(_), do: ""
+
+  defp list_item_inline(%{} = item) do
+    case Map.get(item, "content") do
+      content when is_list(content) -> content
+      _ -> [%{"type" => "text", "value" => to_string(Map.get(item, "text") || "")}]
+    end
+  end
+
+  defp list_item_inline(item), do: item
 
   # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
   # read it, and the Studio's code editor renders `Map.get(@block, "lang", "")`.

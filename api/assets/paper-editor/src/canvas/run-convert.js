@@ -105,6 +105,17 @@ function isCanvasRoleType(t) {
   return CANVAS_ROLE_TYPES.has(t);
 }
 
+// Prose/role kinds a block can be turned into inside the canvas (block menu, chords, Backspace
+// lifts, `> ` shorthand). A same-id block whose kind changed is REPLACED, since patch-block
+// keeps `type` immutable.
+const CONVERTIBLE_NODE_KIND = { paragraph: "paragraph", heading: "heading", bulletList: "list", orderedList: "list", taskList: "list" };
+const CONVERTIBLE_KINDS = new Set(["paragraph", "heading", "list", "pullquote", "eyebrow", "byline", "ingress"]);
+const LIST_KIND_ALIASES = new Set(["list", "bulletList", "bullet_list", "bullet-list", "bulletedList", "bulleted_list", "bulleted-list", "orderedList", "ordered-list", "ordered_list", "numbered_list", "numberedList"]);
+function blockKind(block) {
+  const t = block && block.type;
+  return LIST_KIND_ALIASES.has(t) ? "list" : t;
+}
+
 // The `table` block as FOUR hand-rolled NESTED nodes (bpTable > bpTableRow >
 // bpTableHeaderCell|bpTableCell; see table-node.js). UNLIKE every other canvas node,
 // the TABLE is a container of PM structure, not a leaf/atom/inline body — its data
@@ -1166,7 +1177,10 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
   if (proseNodeChanged(prevChild, nextChild)) {
     const bpType =
       cls.bpType || (prevChild && prevChild.attrs && prevChild.attrs.bpType);
-    return buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
+    const patch = buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
+    // A checklist turned back into a plain list must clear task (patch-block merges keys).
+    if (bpType === "list" && prevBlock && prevBlock.task === true && patch.task !== true) patch.task = false;
+    return patch;
   }
   return null;
 }
@@ -3056,7 +3070,7 @@ function childNodeToBlock(childNode) {
   if (type === "divider") return { type: "divider" };
   const env = nodeToDocEnvelope(childNode);
   if (type === "heading") return { type: "heading", ...tiptapToBlock(env, null, "heading") };
-  if (type === "bulletList" || type === "orderedList") {
+  if (type === "bulletList" || type === "orderedList" || type === "taskList") {
     return { type: "list", ...tiptapToBlock(env, null, "list") };
   }
   return { type: "paragraph", ...tiptapToBlock(env, null, "paragraph") };
@@ -3181,7 +3195,7 @@ function terminalChildNodeToBlock(childNode) {
   if (type === "divider") return { type: "divider" };
   const env = nodeToDocEnvelope(childNode);
   if (type === "heading") return { type: "heading", ...tiptapToBlock(env, null, "heading") };
-  if (type === "bulletList" || type === "orderedList") {
+  if (type === "bulletList" || type === "orderedList" || type === "taskList") {
     return { type: "list", ...tiptapToBlock(env, null, "list") };
   }
   return { type: "paragraph", ...tiptapToBlock(env, null, "paragraph") };
@@ -3460,10 +3474,15 @@ function classifyNode(node) {
   // A list the person just created (input rule, toggle, paste) has no bpType attr yet: its
   // node name is bulletList/orderedList, but the portable-doc kind is "list". Without this the
   // new block was emitted as {type:"bulletList", content:[]} and its items were lost on save.
-  const listAware = bpType === "bulletList" || bpType === "orderedList" ? "list" : bpType;
+  const listAware = bpType === "bulletList" || bpType === "orderedList" || bpType === "taskList" ? "list" : bpType;
+  // Turn-into (heading ⇄ paragraph ⇄ list ⇄ pullquote…) keeps the node's stamped bpType attr,
+  // so for the kinds the canvas converts between the NODE TYPE is the truth, not the attr.
+  // Kinds the canvas cannot represent natively keep their stamped bpType untouched.
+  const nodeKind = isRole ? node.type : CONVERTIBLE_NODE_KIND[node.type];
+  const resolved = nodeKind && (!listAware || CONVERTIBLE_KINDS.has(listAware)) ? nodeKind : listAware;
   return {
     node,
-    bpType: listAware,
+    bpType: resolved,
     isOpaque,
     isAtom,
     isContent,
@@ -3987,6 +4006,17 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           patch: actionNodeToPatch(entry.node),
         });
       }
+      continue;
+    }
+
+    // A same-id block whose KIND changed (turn-into, Backspace lift, `> ` on an existing
+    // paragraph): patch-block cannot change `type`, so replace the block wholesale, same id.
+    const prevKind = prevBlock ? blockKind(prevBlock) : null;
+    if (prevBlock && prevKind !== entry.bpType && CONVERTIBLE_KINDS.has(prevKind) && CONVERTIBLE_KINDS.has(entry.bpType)) {
+      const fields = entry.isRole
+        ? roleNodeToPatch(entry.node)
+        : tiptapToBlock(nodeToDocEnvelope(entry.node), entry.id, entry.bpType);
+      ops.push({ op: "replace-block", id: entry.id, block: { ...fields, id: entry.id, type: entry.bpType } });
       continue;
     }
 

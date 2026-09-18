@@ -67,7 +67,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
-    "li" => [],
+    "li" => ~w(checked),
     "tr" => [],
     "th" => [],
     "td" => [],
@@ -314,11 +314,23 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp build_block("ul", attrs, sc, cur) do
     with {:ok, items, cur} <-
-           child_seq("ul", "li", sc, cur, fn _attrs, sc, cur -> tag_inline("li", sc, cur) end) do
+           child_seq("ul", "li", sc, cur, fn li_attrs, sc, cur ->
+             case tag_inline("li", sc, cur) do
+               {:ok, nodes, cur} ->
+                 case List.keyfind(li_attrs, "checked", 0) do
+                   {"checked", v} -> {:ok, %{"content" => nodes, "checked" => v == "true"}, cur}
+                   nil -> {:ok, nodes, cur}
+                 end
+
+               other ->
+                 other
+             end
+           end) do
       {:ok,
        %{"type" => "list", "items" => items}
        |> put_attr("id", attrs)
-       |> put_bool_attr("ordered", attrs), cur}
+       |> put_bool_attr("ordered", attrs)
+       |> put_bool_attr("task", attrs), cur}
     end
   end
 
