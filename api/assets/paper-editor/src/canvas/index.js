@@ -722,7 +722,7 @@ class BpPaperCanvas extends HTMLElement {
         }),
         // Link mark — same config as ../index.js so existing `link` inline nodes
         // render/edit and the format bubble's link button works.
-        Link.configure({ openOnClick: false, autolink: false }),
+        Link.configure({ openOnClick: false, autolink: true }),
         // Empty-block ghost text — same contract as ../index.js. includeChildren
         // :false so one placeholder shows on the focused top-level textblock only.
         Placeholder.configure({
@@ -1515,6 +1515,7 @@ class BpPaperCanvas extends HTMLElement {
         duplicateTopLevel(this._editor, topLevelIndexAtSelection(this._editor));
         return true;
       }
+      // (Backspace handling sits below, outside the modifier branch.)
       // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
       // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
       const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
@@ -1536,6 +1537,24 @@ class BpPaperCanvas extends HTMLElement {
         this._bubble.update();
         this._bubble.openLink();
         return true;
+      }
+    }
+    // Backspace at the very start of a block: a list item lifts out one level (a top-level item
+    // becomes a paragraph) and a quote turns back into a paragraph, instead of merging into the
+    // block above. Notion and Tiptap 3's list keymap behave this way.
+    if (event.key === "Backspace" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && this._editable && this._editor) {
+      const { $from, empty } = this._editor.state.selection;
+      if (empty && $from.parentOffset === 0) {
+        // Only the FIRST item of a list lifts; a later item keeps ProseMirror's join into the
+        // item above, which is how an Enter-split is undone without losing nested children.
+        if ($from.depth >= 3 && $from.node(-1).type.name === "listItem" && $from.index(-1) === 0 && $from.index(-2) === 0) {
+          if (this._editor.commands.liftListItem("listItem")) { event.preventDefault(); return true; }
+        }
+        if ($from.depth === 1 && $from.parent.type.name === "pullquote") {
+          event.preventDefault();
+          this._editor.commands.setNode("paragraph");
+          return true;
+        }
       }
     }
     // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
@@ -1706,6 +1725,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _onPaste(view, _event, slice) {
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
     const plan = figurePastePlan(slice);
     if (plan.native) return false;
@@ -1716,6 +1736,32 @@ class BpPaperCanvas extends HTMLElement {
       return true;
     }
     view.dispatch(view.state.tr.replaceSelection(plan.inline).scrollIntoView());
+    return true;
+  }
+
+  // Plain-text paste that carries markdown block syntax (headings, lists, quotes, fences, rules)
+  // lands as the corresponding blocks instead of literal `## ` and `- ` paragraphs. HTML on the
+  // clipboard keeps the native path (the browser already structured it); a single plain line too.
+  _pasteMarkdown(view, event) {
+    const data = event && event.clipboardData;
+    if (!data) return false;
+    const html = data.getData("text/html");
+    const text = data.getData("text/plain");
+    if (html || !text) return false;
+    const lines = text.split(/\r?\n/);
+    const blockish = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|---\s*$)/;
+    if (!lines.some((line) => blockish.test(line))) return false;
+    let nodes;
+    try {
+      const blocks = markdownToBlocks(text);
+      if (!blocks.length) return false;
+      nodes = runToTiptap(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
+    } catch (_e) {
+      return false;
+    }
+    if (!nodes.length) return false;
+    const tr = view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0)).scrollIntoView();
+    view.dispatch(tr);
     return true;
   }
 
@@ -2077,6 +2123,21 @@ class BpPaperCanvas extends HTMLElement {
     // Typography turns the first two dashes into an en/em dash before the third arrives; accept both spellings.
     const divider = /^(---|—-|–-)$/.test(blockText);
     const code = /^```$/.test(blockText);
+    const quote = /^>\s$/.test(blockText);
+    if (quote) {
+      // `> ` → the quote block (pullquote is the canvas's authored quote). The callout gesture
+      // `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside the quote.
+      const { state, view } = this._editor;
+      const start = $from.before(1);
+      const end = $from.after(1);
+      const quoteNode = state.schema.nodes.pullquote ? state.schema.nodes.pullquote.create() : null;
+      if (!quoteNode) return false;
+      let tr = state.tr.replaceWith(start, end, quoteNode);
+      try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
+      view.dispatch(tr);
+      this._editor.commands.focus();
+      return true;
+    }
     if (!divider && !code) return false;
     if (code) {
       // Clear the fence text, then reuse the slash-insert seam so the code atom takes the
@@ -2133,15 +2194,16 @@ class BpPaperCanvas extends HTMLElement {
     // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body, and still rejects a paragraph nested in a list item. See
     // slashTriggerAllowsParent.
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
+    const inQuote = $from.depth === 1 && $from.parent.type.name === "pullquote";
+    if (!inQuote && !slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
     const blockText = $from.parent.textContent;
     const atEnd = $from.parentOffset === blockText.length;
     if (!atEnd || blockText.includes("\n")) return false;
 
     // ^>\s*\[!(\w+)\]([+-]?)\s$ — identical to the per-block editor. The trailing \s
     // (the committing space) + the no-newline guard above mean \s only matches that
-    // space here.
-    const m = /^>\s*\[!(\w+)\]([+-]?)\s$/.exec(blockText);
+    // space here. Inside a quote block (`> ` already consumed) the leading `>` is absent.
+    const m = (inQuote ? /^\[!(\w+)\]([+-]?)\s$/ : /^>\s*\[!(\w+)\]([+-]?)\s$/).exec(blockText);
     if (!m) return false;
 
     const tone = normalizeTone(m[1]);
