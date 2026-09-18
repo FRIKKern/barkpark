@@ -15,8 +15,14 @@
 //     schema (the instance upserts, so re-posting is idempotent).
 //  3. seed       — POST /w/<ws>/p/default/v1/data/mutate/<dataset> with the
 //     manifest's mutations (createOrReplace is idempotent), then an EXPLICIT
-//     publish pass per seed.publish/publishType — createOrReplace lands DRAFTS
+//     publish pass per seed.publish — createOrReplace lands DRAFTS
 //     (templates/DEPLOYING.md gotcha #2), and publish needs BOTH {id,type}.
+//     The type is PER DOCUMENT (the seed document's own "_type"), so a
+//     connected multi-type graph — posts + authors + categories — seeds in one
+//     batch; seed.publishType is the fallback for a document that omits one.
+//     Every resolved type is checked against the types the manifest's schemas
+//     DECLARE, BEFORE the seed is POSTed: publish is a second pass, so a batch
+//     validated late would leave drafts behind that can never be published.
 //  4. read token — POST /w/<ws>/p/default/v1/tokens {label,permissions:
 //     ["public-read"]}. MANDATORY: non-Default workspaces 403 anonymous reads
 //     (gotcha #3), so the deploy target cannot read without it. Idempotency is
@@ -53,6 +59,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/template"
@@ -196,7 +203,11 @@ func Run(ctx context.Context, c Client, spec Spec) (*Outputs, error) {
 			// fail loudly rather than half-applying.
 			return nil, fmt.Errorf("bootstrap seed: format %q is not supported (only %q)", got, template.SeedFormatMutations)
 		}
-		if err := c.seedAndPublish(ctx, scopedBase, dataset, spec.SeedFile, tpl.Seed); err != nil {
+		allowedTypes, terr := schemaTypes(spec.SchemaFiles)
+		if terr != nil {
+			return nil, fmt.Errorf("bootstrap seed: %w", terr)
+		}
+		if err := c.seedAndPublish(ctx, scopedBase, dataset, spec.SeedFile, tpl.Seed, allowedTypes); err != nil {
 			return nil, fmt.Errorf("bootstrap seed: %w", err)
 		}
 	}
@@ -333,7 +344,25 @@ func (c Client) applySchema(ctx context.Context, scopedBase, dataset string, sch
 // seedAndPublish POSTs the seed mutations, then publishes every seeded doc id
 // when the manifest asks for it (createOrReplace lands drafts; publish needs
 // BOTH id and type).
-func (c Client) seedAndPublish(ctx context.Context, scopedBase, dataset string, seed []byte, s *template.Seed) error {
+func (c Client) seedAndPublish(ctx context.Context, scopedBase, dataset string, seed []byte, s *template.Seed, allowedTypes map[string]bool) error {
+	// Type validation runs BEFORE the mutate POST, not between the two passes:
+	// a seed whose types are wrong would otherwise land as drafts and then fail
+	// to publish, leaving content the owner never asked for behind.
+	var docs []seedDoc
+	if s.Publish {
+		parsed, perr := seedDocs(seed)
+		if perr != nil {
+			return perr
+		}
+		if len(parsed) == 0 {
+			return fmt.Errorf("publish: the seed carries no document ids to publish")
+		}
+		if verr := validateSeedTypes(parsed, allowedTypes, s.PublishType); verr != nil {
+			return fmt.Errorf("publish: %w", verr)
+		}
+		docs = parsed
+	}
+
 	c.caption("Adding your sample content…")
 	u := scopedBase + "/v1/data/mutate/" + url.PathEscape(dataset)
 	status, respBody, err := c.doJSON(ctx, http.MethodPost, u, seed)
@@ -348,15 +377,8 @@ func (c Client) seedAndPublish(ctx context.Context, scopedBase, dataset string, 
 	if !s.Publish {
 		return nil
 	}
-	ids, err := seedIDs(seed)
-	if err != nil {
-		return err
-	}
-	if len(ids) == 0 {
-		return fmt.Errorf("publish: the seed carries no document ids to publish")
-	}
-	c.caption("Publishing %d sample %s…", len(ids), plural(len(ids), "document", "documents"))
-	pubBody, _ := json.Marshal(publishPayload(ids, s.PublishType))
+	c.caption("Publishing %d sample %s…", len(docs), plural(len(docs), "document", "documents"))
+	pubBody, _ := json.Marshal(publishPayload(docs, s.PublishType))
 	status, respBody, err = c.doJSON(ctx, http.MethodPost, u, pubBody)
 	if err != nil {
 		return err
@@ -364,7 +386,7 @@ func (c Client) seedAndPublish(ctx context.Context, scopedBase, dataset string, 
 	if status < 200 || status >= 300 {
 		return fmt.Errorf("publish: status %d: %s", status, snippet(respBody))
 	}
-	c.logf("bootstrap: published %d document(s) of type %q", len(ids), s.PublishType)
+	c.logf("bootstrap: published %d document(s) of type(s) %q", len(docs), publishTypeSummary(docs, s.PublishType))
 	return nil
 }
 
@@ -526,10 +548,21 @@ func (c Client) updateWebhookSecret(ctx context.Context, scopedBase, dataset, id
 	return nil
 }
 
-// seedIDs extracts document ids from a {"mutations":[…]} seed payload —
-// createOrReplace._id first, then create._id (the same extraction the CLI
-// quick-setup performs).
-func seedIDs(seed []byte) ([]string, error) {
+// seedDoc is one seeded document's publish identity: the id the mutation
+// created and the _type the document declares for ITSELF. A seed may mix types
+// (a posts/authors/categories graph), so the type travels PER DOCUMENT rather
+// than once for the whole batch.
+type seedDoc struct {
+	ID string
+	// Type is the document's own "_type". Empty when the seed document omits
+	// it — the manifest's seed.publishType is then the fallback.
+	Type string
+}
+
+// seedDocs extracts (id, _type) pairs from a {"mutations":[…]} seed payload —
+// createOrReplace first, then create (the same extraction the CLI quick-setup
+// performs).
+func seedDocs(seed []byte) ([]seedDoc, error) {
 	var env struct {
 		Mutations []struct {
 			CreateOrReplace map[string]json.RawMessage `json:"createOrReplace"`
@@ -539,25 +572,26 @@ func seedIDs(seed []byte) ([]string, error) {
 	if err := json.Unmarshal(seed, &env); err != nil {
 		return nil, fmt.Errorf("parse seed mutations: %w", err)
 	}
-	var ids []string
+	var docs []seedDoc
 	for _, m := range env.Mutations {
-		if id := rawID(m.CreateOrReplace); id != "" {
-			ids = append(ids, id)
-			continue
-		}
-		if id := rawID(m.Create); id != "" {
-			ids = append(ids, id)
+		for _, doc := range []map[string]json.RawMessage{m.CreateOrReplace, m.Create} {
+			if id := rawString(doc, "_id"); id != "" {
+				docs = append(docs, seedDoc{ID: id, Type: rawString(doc, "_type")})
+				break
+			}
 		}
 	}
-	return ids, nil
+	return docs, nil
 }
 
-// rawID pulls a string "_id" out of a mutation document map.
-func rawID(doc map[string]json.RawMessage) string {
+// rawString pulls a string field out of a mutation document map. A missing key
+// and a non-string value are both reported as "" — the caller decides whether
+// that is fatal (validateSeedTypes does, for "_type").
+func rawString(doc map[string]json.RawMessage, key string) string {
 	if doc == nil {
 		return ""
 	}
-	raw, ok := doc["_id"]
+	raw, ok := doc[key]
 	if !ok {
 		return ""
 	}
@@ -568,16 +602,98 @@ func rawID(doc map[string]json.RawMessage) string {
 	return s
 }
 
+// schemaTypes is the set of document types the manifest's schema bodies
+// DECLARE (each schema file's top-level "name"). It is the allowlist a seed
+// document's _type is checked against; a schema body the bootstrap cannot parse
+// is an error rather than a silently empty allowlist, because an empty
+// allowlist would wave every type through.
+func schemaTypes(files [][]byte) (map[string]bool, error) {
+	types := make(map[string]bool, len(files))
+	for i, body := range files {
+		var s struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(body, &s); err != nil {
+			return nil, fmt.Errorf("parse schema body %d: %w", i, err)
+		}
+		if name := strings.TrimSpace(s.Name); name != "" {
+			types[name] = true
+		}
+	}
+	return types, nil
+}
+
+// validateSeedTypes checks EVERY seeded document resolves to a legal publish
+// type BEFORE any mutation is POSTed. Publishing is a second pass, so a batch
+// that fails halfway leaves drafts the owner never asked for: the whole seed is
+// refused up front instead.
+//
+// Resolution order per document: the document's own "_type", else the
+// manifest's seed.publishType. The result must be non-empty AND, when the
+// manifest declared schemas, one of the types those schemas declare.
+func validateSeedTypes(docs []seedDoc, allowed map[string]bool, fallbackType string) error {
+	fallbackType = strings.TrimSpace(fallbackType)
+	for _, d := range docs {
+		t := strings.TrimSpace(d.Type)
+		if t == "" {
+			t = fallbackType
+		}
+		if t == "" {
+			return fmt.Errorf("document %q declares no _type and the manifest sets no seed.publishType", d.ID)
+		}
+		if len(allowed) > 0 && !allowed[t] {
+			return fmt.Errorf("document %q has type %q, which no manifest schema declares (declared: %s)", d.ID, t, strings.Join(sortedKeys(allowed), ", "))
+		}
+	}
+	return nil
+}
+
+// sortedKeys renders an allowlist deterministically so the refusal message is
+// stable across runs (map iteration order is not).
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // publishPayload builds {"mutations":[{"publish":{"id","type"}}]} — publish
-// needs BOTH id and type, else the instance 400s.
-func publishPayload(ids []string, publishType string) map[string]any {
-	muts := make([]map[string]any, 0, len(ids))
-	for _, id := range ids {
+// needs BOTH id and type, else the instance 400s. Each document publishes under
+// its OWN _type; fallbackType (the manifest's seed.publishType) covers a
+// document that omits one. validateSeedTypes has already proven every resolved
+// type is non-empty and legal.
+func publishPayload(docs []seedDoc, fallbackType string) map[string]any {
+	fallbackType = strings.TrimSpace(fallbackType)
+	muts := make([]map[string]any, 0, len(docs))
+	for _, d := range docs {
+		t := strings.TrimSpace(d.Type)
+		if t == "" {
+			t = fallbackType
+		}
 		muts = append(muts, map[string]any{
-			"publish": map[string]string{"id": id, "type": publishType},
+			"publish": map[string]string{"id": d.ID, "type": t},
 		})
 	}
 	return map[string]any{"mutations": muts}
+}
+
+// publishTypeSummary renders the DISTINCT types a publish pass covered, for the
+// journal line — a single-type seed still reads as one type, a mixed seed names
+// them all instead of quoting one and hiding the rest.
+func publishTypeSummary(docs []seedDoc, fallbackType string) string {
+	seen := map[string]bool{}
+	for _, d := range docs {
+		t := strings.TrimSpace(d.Type)
+		if t == "" {
+			t = strings.TrimSpace(fallbackType)
+		}
+		if t != "" {
+			seen[t] = true
+		}
+	}
+	return strings.Join(sortedKeys(seen), ", ")
 }
 
 // doJSON POSTs/sends body with the admin bearer + JSON content type and returns
