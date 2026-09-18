@@ -138,7 +138,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   #         `paper_stylesheet()` → Layouts.paper_stylesheet/0 →
   #         PortableDoc.Render.Stylesheet.css/0 (the paper-surface sheet)
   #     (d) the LiveView's own markup — inline `style=` attributes
-  #         (settings_live.ex:648 `<div class="settings-live" style="… font-family: var(--font);">`)
+  #         (settings_live.ex, the page root — grep: `class="settings-live" style=` —
+  #         `<div class="settings-live" style="… font-family: var(--font);">`)
   #
   # `font_sources/0` walks (a)–(c) off disk; `body` above is (d). Both arms are
   # asserted below.
