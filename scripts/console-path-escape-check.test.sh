@@ -1600,21 +1600,21 @@ gate "cssom-parity publishes OK but the job failed" 1 \
 gate_says "the instrument said clean and the job" "…and names the contradiction"
 
 # (s) THE MODAL ORACLE'S TWO ARMS, BOTH DRIVEN. Added with the `modal-oracle`
-#     job (cch-w22-s1-residue-modal-oracle-uninvoked). Every `R_MODAL=` R_ADJACENCY=` above
+#     job (cch-w22-s1-residue-modal-oracle-uninvoked). Every `R_MODAL=` above
 #     is `success` or `skipped`, so without these two cases the new leg would
 #     be present in every fixture and decidable in none — the same shape as the
 #     unwitnessable `REFUSED)` arm this block exists to have caught. exit 1 and
 #     exit 2 are indistinguishable at the aggregator by design, so each arm is
 #     told apart ONLY by the verdict the job publishes; drive both.
 gate "modal-oracle MEASURED_DEFECT" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_MODAL=MEASURED_DEFECT
 gate_says "This one IS about the console's own bytes" "…and says the modal defect is real and console-side"
 gate_denies "REFUSED TO MEASURE" "…and does not call a measured modal defect a refusal"
 gate_names "modal-oracle" "cssom-parity"
 
 gate "modal-oracle REFUSED" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_MODAL=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the oracle refused, not that the modal is broken"
 gate_names "modal-oracle" "cssom-parity"
