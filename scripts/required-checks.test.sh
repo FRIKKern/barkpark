@@ -2409,7 +2409,6 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
-        --expect-unrendered "Format (mix format --check-formatted, advisory) (27.0, 1.18.1)"
         --expect-unrendered "gofmt drift ceiling (blocking)"
         --expect-unrendered "PR task gate self-test"
         --expect-unrendered "Dependabot PRs carry the standing task trailer"
@@ -2707,7 +2706,17 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # see it. This is the EIGHTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named
         # exactly this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "a red on main's tip gets an owner")
+        --expect-unrendered "a red on main's tip gets an owner"
+        # shell-harnesses.yml job `harness`, matrix leg `breaker-measure-precondition`,
+        # landed in #18655 (d288448d9) and its .exclusions row is added BY HAND in this
+        # commit (task-6eb8290021afb0e4): the row postdates the frozen fixture pair and
+        # the pair cannot render it — the generator reports it LOST. The workflow is
+        # paths-filtered at the workflow level, which is also WHY the row was missing:
+        # no settled main head renders the name, so the census only reds on a PR that
+        # touches .github/** or scripts/**. This is the SIXTH place, paid in the same commit.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
+        # this name as MISSING ACK_EX (and nothing else) on this tree.
+        --expect-unrendered "the breaker measurement's preconditions can still be UNMET")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
