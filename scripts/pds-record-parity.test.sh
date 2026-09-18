@@ -296,6 +296,77 @@ run 0 "the synthetic sentinels do not red axis D" -- --axis d --charter "$CH" --
 says "sentinels:  3 occurrence(s) skipped" "the exclusion is PRINTED, so it cannot hide a growing skip list"
 rm "$DROOT/scripts/pds-sentinel.sh"
 
+# ══ THE LETTERED RULING — BOTH ARMS ══════════════════════════════════════════
+#
+# THE DEFECT THESE PIN. Every scan in the arm used to read the prefix followed
+# by DIGITS ONLY, so `PDS-D448a` was extracted as `PDS-D448` — a different
+# ruling. All 34 lettered rulings on main collide with a separately-defined
+# numeric base, so the collapse was SILENT, and a lettered TYPO could not red at
+# all: the base resolved on the phantom's behalf. Reproduced against this same
+# fixture shape before the widening: the phantom exited 0 and printed PARITY,
+# while a numeric phantom in the same tree exited 1.
+#
+# TWO ARMS, AND NEITHER IS SUFFICIENT ALONE. The phantom arm alone is satisfied
+# by an arm that reds on every letter; the positive arm alone is satisfied by
+# the old blind one. Together they say the lens discriminates.
+CHL="$TMP/charter-lettered.md"
+cat > "$CHL" <<'EOF'
+# A charter with lettered rulings
+
+- **PDS-D448 — THE BASE RULING.** It exists, which is the whole trap: a
+  digits-only extractor credits every PDS-D448x citation to THIS entry.
+- **PDS-D448a — A LETTERED RULING IN ITS OWN RIGHT.** Separately defined.
+- **PDS-D220 — A RULING WITH CLAUSES.** (a) the first clause. (b) the second.
+
+## PDS-D404 a decision defined as a HEADING
+
+Nothing else defines a D.
+EOF
+
+LROOT="$TMP/lroot"
+mkdir -p "$LROOT/scripts"
+
+# ARM 1 — THE PHANTOM. A letter the charter does not carry, on a base it does.
+printf '#!/usr/bin/env bash\n# a lettered typo the base used to absorb: PDS-D448z\n' > "$LROOT/scripts/pds-lettered.sh"
+run 1 "a phantom LETTERED ruling REDS axis D" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "cites PDS-D448z" "the red names the phantom by its FULL name, not its numeric base"
+says_not "cites PDS-D448
+" "the red is not the numeric base wearing the phantom's place"
+says "undefined:  1 firing" "exactly one citation fired"
+
+# ARM 2 — THE POSITIVE CONTROL. A real lettered ruling must still resolve, and
+# resolve QUIETLY: present-in-the-file is not fires-when-it-should, and an arm
+# that reds on every letter would pass arm 1 on its own.
+printf '#!/usr/bin/env bash\n# a REAL lettered ruling: PDS-D448a\n' > "$LROOT/scripts/pds-lettered.sh"
+run 0 "a REAL lettered ruling resolves QUIETLY on axis D" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says_not "UNDEFINED-CITATION" "the real lettered citation raises nothing"
+says "citations:  1 occurrence(s), 1 distinct PDS-D" "it was READ — a green over an unread corpus is the vacuous pass"
+says "undefined:  0 firing" "and it resolved"
+
+# ARM 3 — THE CLAUSE. `PDS-D220a` names clause (a) inside PDS-D220 and resolves
+# against the base's definition BLOCK carrying the literal `(a)`. This is the
+# one path a letter may take through its base, and it is NOT "the base exists":
+# arm 1's PDS-D448z has a defined base too and still reds.
+printf '#!/usr/bin/env bash\n# a CLAUSE reference: PDS-D220a and PDS-D220b\n' > "$LROOT/scripts/pds-lettered.sh"
+run 0 "a CLAUSE reference resolves through its base's (x) marker" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "clauses:    2 lettered citation(s) resolved as a CLAUSE" "the clause path is PRINTED, never a silent skip"
+says_not "UNDEFINED-CITATION" "neither clause reds"
+
+# ARM 3b — AND THE CLAUSE PATH IS NOT A BASE PATH. PDS-D220z shares 220's base,
+# whose block carries (a) and (b) and no (z).
+printf '#!/usr/bin/env bash\n# a letter its base has no clause for: PDS-D220z\n' > "$LROOT/scripts/pds-lettered.sh"
+run 1 "a letter its base carries no clause marker for still REDS" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "cites PDS-D220z" "the clause lens did not become a base lens"
+rm "$LROOT/scripts/pds-lettered.sh"
+
+# ARM 4 — THE DEFINITION SIDE. The charter above defines PDS-D448 AND PDS-D448a
+# as two rulings; a digits-only definition scan merges them into one.
+printf '#!/usr/bin/env bash\n# every citation here resolves: PDS-D448 PDS-D448a PDS-D220 PDS-D404\n' > "$LROOT/scripts/pds-lettered.sh"
+run 0 "the definition lens counts a lettered ruling SEPARATELY from its base" -- --axis d --charter "$CHL" --citation-root "$LROOT"
+says "defined:    4 distinct PDS-D in the charter" "448, 448a, 220 and 404 — four, not the three a digits-only lens sees"
+says "citations:  4 occurrence(s), 4 distinct PDS-D" "and the citing side kept 448 and 448a apart too"
+rm "$LROOT/scripts/pds-lettered.sh"
+
 # A corpus root with nothing in it is UNCHECKED. An arm that printed PARITY here
 # would be certifying a corpus it never opened.
 run 2 "an empty corpus root is UNCHECKED, never a green" -- --axis d --charter "$CH" --citation-root "$TMP/no-such-root"
@@ -1072,11 +1143,46 @@ fi
 # edit that hoists `walk_truncation` to top level would UNCHECK `--axis b` on every
 # shallow CI checkout and this harness would stay GREEN. Position is the behaviour,
 # so position is what is asserted (the PACE-sleep idiom above, same reason).
+# ══ THE ANTI-NARROWING PREDICATE ═════════════════════════════════════════════
+#
+# A PREDICATE OVER THE WHOLE FILE, NOT A LIST OF SITES. Widening eighteen
+# regexes by hand is a snapshot; the next person adds a nineteenth. So the arm
+# routes every D-number scan through a NAMED shape (D_NUM_RE / D_BASE_RE /
+# D_NAIVE_NUM_RE) and this check asserts the only thing that keeps that true:
+# a digit class must never appear beside the prefix again, in any quoting, in
+# any tool. `scripts/pds-citation-expand.sh` carries the same arm (4b) for the
+# same reason — this is that shape, not a new one.
+CHECKS=$((CHECKS + 1))
+NARROW="$(grep -nE '(PDS-D|\$\{D_PREFIX\})[^ ]{0,4}\[0-9\]' "$ARM" || true)"
+if [ -z "$NARROW" ]; then
+  echo "ok    no bare digit class survives beside the D prefix — every scan reads a named shape"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  a D-number scan was narrowed back to digits-only — this is the blind spot returning"
+  echo "      a lettered ruling would be extracted as its numeric base, and a lettered typo could not red:"
+  printf '%s\n' "$NARROW" | sed 's/^/        /'
+fi
+
+# …and the shapes themselves must still carry the suffix. The check above is
+# satisfied by a constant redefined to '[0-9]+', which is the narrowing wearing
+# the widening's clothes.
+CHECKS=$((CHECKS + 1))
+if grep -qE "^D_NUM_RE='\[0-9\]\+\[a-z\]\?'" "$ARM" && grep -qE "^D_BASE_RE='\[0-9\]\+'" "$ARM"; then
+  echo "ok    D_NUM_RE still carries the optional letter suffix, and the allocation base still does not"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  the named shapes drifted — D_NUM_RE must be '[0-9]+[a-z]?' and D_BASE_RE '[0-9]+'"
+  grep -nE "^D_(NUM|BASE|NAIVE_NUM)_RE=" "$ARM" | sed 's/^/        /'
+fi
+
 CHECKS=$((CHECKS + 1))
 WT_CALLS="$(grep -cE '^[[:space:]]*walk_truncation$' "$ARM")"
 WT_CALL="$(grep -nE '^[[:space:]]*walk_truncation$' "$ARM" | head -1 | cut -d: -f1)"
 WT_WORKTREE="$(grep -n 'UNCHECKED: not inside a git work tree' "$ARM" | head -1 | cut -d: -f1)"
-WT_LOG="$(grep -n "git log --format=%B | grep -oE 'PDS-D" "$ARM" | head -1 | cut -d: -f1)"
+# Located by the PIPELINE, not by the citation regex: the regex is a named
+# shape now (D_NUM_RE) and a locator spelled `PDS-D[0-9]+` would both go stale
+# on a widening AND quietly re-pin the narrow shape it is not here to police.
+WT_LOG="$(grep -nF 'git log --format=%B | grep -oE' "$ARM" | head -1 | cut -d: -f1)"
 WT_AXISB="$(grep -n '^axis_b()' "$ARM" | head -1 | cut -d: -f1)"
 if [ "$WT_CALLS" = "1" ] && [ -n "$WT_CALL" ] && [ -n "$WT_WORKTREE" ] && [ -n "$WT_LOG" ] &&
    [ -n "$WT_AXISB" ] && [ "$WT_WORKTREE" -lt "$WT_CALL" ] && [ "$WT_CALL" -lt "$WT_LOG" ] &&
