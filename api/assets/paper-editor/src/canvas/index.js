@@ -185,7 +185,7 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
-import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection } from "./block-handle.js";
+import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
 // for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
 // replace-range mappers. All shipped + browser-verified in the per-block editor;
@@ -1514,6 +1514,22 @@ class BpPaperCanvas extends HTMLElement {
         event.preventDefault();
         duplicateTopLevel(this._editor, topLevelIndexAtSelection(this._editor));
         return true;
+      }
+      // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
+      // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
+      const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
+      if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
+        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 5: "bullet", 6: "ordered" }[digit];
+        if (kind) {
+          event.preventDefault();
+          turnTopLevelInto(this._editor, topLevelIndexAtSelection(this._editor), kind);
+          return true;
+        }
+        if (digit === "8") {
+          event.preventDefault();
+          insertSlashTypeAtSelection(this._editor, "code");
+          return true;
+        }
       }
       if (!event.shiftKey && (key === "k" || key === "K") && this._bubble && !this._editor.state.selection.empty) {
         event.preventDefault();
