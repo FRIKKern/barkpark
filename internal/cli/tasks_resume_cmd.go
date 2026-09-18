@@ -438,7 +438,7 @@ func renderCrashBrief(out *writer, docID, worker string, rec resumeRecord, live 
 // distinct on the terminal from a measured empty one — the same distinction the
 // writer keeps on the wire.
 func renderLoadout(out *writer, m PrimingManifest, path string) {
-	out.outf("  from %s (digest %s)", path, shortDigest(m.Digest))
+	out.outf("  digest %s (from %s)", shortDigest(m.Digest), path)
 	out.outf("  claimed by %s at %s", orNoneStr(m.Worker), orNoneStr(m.ClaimedAt))
 	out.outf("  model=%s effort=%s", orUnmeasured(m.Model), orUnmeasured(m.Effort))
 	out.outf("  worktree=%s head=%s dirty_tree=%s",
