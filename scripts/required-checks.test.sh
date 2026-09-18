@@ -319,9 +319,9 @@ emit_spec() {
     # `STALE  …` line several lines down, so take the class line plus every
     # diagnostic line — a plain `head -n` truncates exactly the half that
     # identifies what to fix.
-    banner="$(printf '%s\n' "$log" | grep -v '^[[:space:]]*$' | head -1)"
-    why="$(printf '%s\n' "$log" | grep -E '^ *(LOST|STALE|UNMAPPED|POISONED) ' | head -6 | tr '\n' '⏎')"
-    [ -n "$why" ] || why="$(printf '%s\n' "$log" | grep -v '^[[:space:]]*$' | head -4 | tr '\n' '⏎')"
+    banner="$(printf '%s\n' "$log" | grep -v '^[[:space:]]*$' | head -1 || true)"
+    why="$(printf '%s\n' "$log" | grep -E '^ *(LOST|STALE|UNMAPPED|POISONED) ' | head -6 | tr '\n' '⏎' || true)"
+    [ -n "$why" ] || why="$(printf '%s\n' "$log" | grep -v '^[[:space:]]*$' | head -4 | tr '\n' '⏎' || true)"
     GEN_EMIT_ERR="the generator REFUSED (exit $rc), wrote no $(basename "$out"), and said: ${banner:-<no output>} ⇢ ${why:-<no diagnostic lines>}"
     echo "  ---- $(basename "$out"): generator refused (exit $rc); its own output follows ----" >&2
     printf '%s\n' "$log" >&2
@@ -448,7 +448,7 @@ gen() { # args… -> ledger+notes on stdout, never dies the suite
 }
 
 verdict_for() { # name, ledger
-  printf '%s\n' "$2" | awk -F'\t' -v n="$3" '$3 == n { print $2 }' | head -1
+  printf '%s\n' "$2" | awk -F'\t' -v n="$3" '$3 == n { print $2 }' | head -1 || true
 }
 
 # ═══ 1. the poison filter: five rejections, each fired ALONE ═════════════════
@@ -1330,7 +1330,7 @@ section "7. the deadlock detector — a SET DIFFERENCE, at N=2 where the refusal
 # N=2 exactly, and the KEPT name is the spec's first context rather than a typed
 # one — so the "the rendered context is not reported" assertion below still has a
 # rendered name to point at whatever the spec grows to.
-KEPT_CTX="$(SPEC_CONTEXTS | head -1)"
+KEPT_CTX="$(SPEC_CONTEXTS | head -1 || true)"
 jq --arg keep "$KEPT_CTX" '.protection.required_status_checks.checks = [
       {"context":$keep,"app_id":15368},
       {"context":"A name no workflow emits","app_id":15368}]' "$TMP/enforced.json" > "$TMP/dead2.json"
@@ -2849,12 +2849,12 @@ else
 fi
 # The DISTINCTION, each half keyed to ITS OWN synthetic seed row's line — never
 # to a real workflow's trigger shape, which a correct edit is allowed to change.
-if grep -F "LOST  $SEEDNAME" <<<"$X14_OUT" | grep -qF "no job in"; then
+if grep -qF "no job in" <<<"$(grep -F "LOST  $SEEDNAME" <<<"$X14_OUT" || true)"; then
   ok "…the deleted-job absence is named ON the ghost row itself (no job in …)"
 else
   bad "the ghost row did not carry the deleted-job hint: $(grep -F "LOST  $SEEDNAME" <<<"$X14_OUT")"
 fi
-if grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT" | grep -qF "PULL_REQUEST-ONLY"; then
+if grep -qF "PULL_REQUEST-ONLY" <<<"$(grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT" || true)"; then
   ok "…and the pull_request-only absence is named ON the seeded PR-only row — keyed to the synthetic workflow, so adding a push arm to any REAL workflow cannot red this"
 else
   bad "the seeded PR-only row did not carry the PULL_REQUEST-ONLY hint: $(grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT")"
@@ -5177,7 +5177,7 @@ RC20_DG_YML="$REPO_ROOT/.github/workflows/doc-gates.yml"
 # message when the rename landed. A guard that dies is strictly worse than one
 # that reds — the `-gt 0` test below is the decision, and it still reds on zero.
 RC20_DG_REAL="$({ grep -cE '^[[:space:]]*- name: .*(\(blocking\)|\(fails this job\))' "$RC20_DG_YML" || true; } | tr -d ' ')"
-rc20_roster_claim() { grep -oE '\*\*[0-9]+ steps labelled' "$1" | head -1 | grep -oE '[0-9]+'; }
+rc20_roster_claim() { grep -oE '\*\*[0-9]+ steps labelled' "$1" | head -1 | grep -oE '[0-9]+' || true; }
 rc20_roster_rows() {
   awk '/^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Step[[:space:]]*\|/ { t = 1; next }
        t && $0 !~ /^\|/ { t = 0 }
@@ -7863,7 +7863,7 @@ RC31_V="$RC31/repo/scripts/required-checks-verify.sh"
 # committed spec so this section widens with the real one instead of reding on
 # the PR that registers a name.
 cp "$SPEC" "$RC31/live.json"
-RC31_DROP="$(SPEC_CONTEXTS | head -1)"
+RC31_DROP="$(SPEC_CONTEXTS | head -1 || true)"
 RC31_KEEP_N="$(SPEC_CONTEXTS | grep -c . || true)"
 jq -c '[ .protection.required_status_checks.checks[]
         | { name: .context, conclusion: "success", started_at: "2026-07-28T01:00:00Z" } ]
