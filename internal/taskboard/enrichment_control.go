@@ -26,7 +26,6 @@ import (
 // whether the effect survives. A caller that only wants the headline number
 // cannot get one without also getting the control.
 //
-// @canonical capability:ledger-enrichment-control aka:false-done-carveout,close_reason-enrichment
 
 // EnrichmentRow is one terminal ledger row reduced to the three facts the
 // control needs. Nothing here is task-specific: Class is the partition under
@@ -119,6 +118,7 @@ func (v EnrichmentVerdict) PooledRatio() float64 {
 // Everything else — no comparable strata, a field that is absent or present
 // almost everywhere, a pooled effect that vanishes or reverses — is a refusal
 // with a Reason naming which one fired.
+// @canonical capability:ledger-enrichment-control aka:false-done-carveout,close_reason-enrichment
 func ControlEnrichment(rows []EnrichmentRow, suspectClass, baselineClass string, minStratum int) EnrichmentVerdict {
 	if minStratum < 1 {
 		minStratum = 1
