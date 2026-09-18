@@ -1524,6 +1524,12 @@ defmodule BarkparkCloud.Accounts do
   # anyone lower (or a non-member) may grant nothing.
   defp can_grant?("owner", _role), do: true
   defp can_grant?("admin", role), do: role != "owner"
+
+  # THROWAWAY MUTATION — DO NOT MERGE. An off-ladder actor may grant anything.
+  defp can_grant?(actor_role, _role)
+       when is_binary(actor_role) and actor_role not in ~w(owner admin member),
+       do: true
+
   defp can_grant?(_actor_role, _role), do: false
 
   defp member_with_email?(team, norm_email) do
