@@ -18,10 +18,13 @@
 #      the gate completely while PRINTING SUCCESS.
 #  64 bad usage.
 #
-# --selftest plants the five specimens from the row that filed this guard (a
-# clean baseline, a dynamic import, a bare side-effect import, a static import
-# and a re-export) plus an empty corpus, in a THROWAWAY tree, and includes a
-# mutation arm that disarms a shape to prove the specimen arms can fail.
+# --selftest runs a CENSUS OF SHAPES in a THROWAWAY tree: it derives the
+# expected shape list from the very "${SHAPES[@]}" array the scan uses (never a
+# second hand-typed copy), gives EVERY declared shape a plant-and-disarm
+# specimen pair, reds on any shape with no specimen (UNCOVERED) and on any
+# specimen whose shape has been deleted (ORPHANED), and reports a denominator
+# computed from the shape count. Plus a clean baseline and the two
+# refused-to-measure corpora.
 #
 # Usage: bash js/scripts/check-no-node-imports.sh            # the scan
 #        bash js/scripts/check-no-node-imports.sh --selftest # prove it can lose
@@ -101,7 +104,9 @@ if [ -z "$BUILTINS" ]; then
 fi
 
 # Every shape that reaches a Node builtin from edge-reachable code. Each entry
-# is "<label>@@<extended regex>". All six are DETECTED; none are out of scope.
+# is "<label>@@<extended regex>". ALL of them are DETECTED; none are out of
+# scope, and --selftest proves each one bites by deriving its census from this
+# array — adding a row here without a specimen reds the selftest.
 #
 #   createRequire is flagged on the CALL, not on a `node:` argument: its only
 #   purpose in ESM is to reach CJS/builtins, and the specifier may be a
@@ -158,25 +163,67 @@ scan() {
   echo "check-no-node-imports: clean ($SCANNED file(s) scanned)"
 }
 
-# ── selftest: the five planted specimens, plus the proof this can LOSE ────────
+# ── selftest: a CENSUS of SHAPES, not a hand-picked handful of specimens ──────
 #
 # Every arm builds a THROWAWAY corpus under mktemp -d — never the real js/ tree —
 # copies THIS file in, and runs the copy with that tree as the working directory.
 # The assertions therefore drive the shipping scan.
 #
+# WHY A CENSUS. The previous selftest planted five specimens covering three of
+# the eight labels and printed "PASS (8/8)" — a number that came from the arm
+# count, not from the shape set. Deleting five of the eight SHAPES entries left
+# it green. So the expected shape list is now DERIVED, at run time, from the
+# very "${SHAPES[@]}" array the scan uses; there is no second hand-typed copy of
+# it to rot.
+#
+# THE SPECIMEN REGISTRY BELOW IS COVERAGE, NOT A MIRROR. It holds SOURCE LINES,
+# never regexes, so it cannot agree with a rotted SHAPES entry by construction.
+# It is reconciled against SHAPES IN BOTH DIRECTIONS:
+#   • a shape with no specimen is reported UNCOVERED and reds — so adding a
+#     shape without proving it cannot leave the score at full marks;
+#   • a specimen whose shape has vanished is reported ORPHANED and reds — so
+#     deleting a shape from the scan reds instead of shrinking the census.
+#
+# EVERY SHAPE GETS A PLANT-AND-DISARM PAIR, not a mere mention:
+#   PLANT   — the specimen in a clean corpus must be caught, at exit 1, under
+#             that shape's own label.
+#   DISARM  — with that one SHAPES line deleted from the COPY, the same
+#             specimen must sail through at exit 0. Without this half, a PLANT
+#             arm can be green because some OTHER shape caught the line, and a
+#             neutered regex would never be noticed.
+#
 # EVERY PLANT IS VERIFIED TO HAVE LANDED before its probe runs. A specimen that
 # silently failed to write, or a mutation whose anchor did not match, passes
 # while testing nothing — that is the exact defect class this guard exists for.
-#
-# ARM 8 IS THE ONE THAT MATTERS: it DISARMS a shape and asserts the matching
-# specimen is then ACCEPTED. Without it, arms 2-5 could be green because the
-# harness cannot fail rather than because the rule bites.
+
+# One planted source line per shape label, "<label>::<line>". Deliberately NOT
+# written with the SHAPES separator (@@) or its leading-quote indentation, so a
+# disarm anchor can never match a registry row instead of the rule it targets.
+SPECIMENS=(
+  'static-prefixed::import c from "node:crypto";'
+  'require-prefixed::const c = require("node:crypto");'
+  'dynamic-import-prefixed::const c = await import("node:crypto");'
+  'bare-side-effect-prefixed::import "node:crypto";'
+  'create-require::const req = createRequire(import.meta.url);'
+  'legacy-unprefixed-from::import c from "crypto";'
+  'legacy-unprefixed-call::const c = require("crypto");'
+  'legacy-unprefixed-bare::import "crypto";'
+)
+
+specimen_line_for() {
+  local want="$1" entry
+  for entry in "${SPECIMENS[@]}"; do
+    if [ "${entry%%::*}" = "$want" ]; then printf '%s\n' "${entry#*::}"; return 0; fi
+  done
+  return 1
+}
+
 selftest() {
-  local tmp bad=0 rc anchor
+  local tmp bad=0 ran=0 total rc anchor shape label line entry
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
-  say() { if [ "$2" -eq 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; bad=$((bad + 1)); fi; }
+  say() { ran=$((ran + 1)); if [ "$2" -eq 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; bad=$((bad + 1)); fi; }
   # Takes a CONDITION, not an exit status: `cmd; plant_check msg $?` cannot work
   # under `set -e`, which kills the shell before $? is ever read.
   plant_check() { local msg="$1"; shift; if "$@"; then :; else echo "  FAIL  PLANT CHECK: $msg"; bad=$((bad + 1)); fi; }
@@ -204,21 +251,46 @@ selftest() {
     plant_check "specimen not on disk: $line" grep -qF -- "$line" "$target"
   }
 
-  # One violation arm: plant, probe, expect exit 1 and the named shape label.
-  violates() {
-    local label="$1" line="$2" desc="$3"
-    fresh
-    specimen "$line"
-    rc="$(probe)"
-    if [ "$rc" -eq 1 ] && grep -q "FAIL: $label " "$tmp/out"; then
-      say "$desc -> exit 1 ($label)" 0
-    else
-      say "$desc -> exit 1 ($label) (got $rc)" 1
-      sed 's/^/        /' "$tmp/out"
-    fi
+  # Delete exactly ONE SHAPES entry from the probe copy, by label. Anchored on
+  # the SHAPES row alone: a bare label match would also hit the registry rows
+  # and the prose above, and mutate something other than the rule.
+  disarm_shape() {
+    local lbl="$1"
+    anchor="^  \"${lbl}@@"
+    plant_check "the disarm anchor for $lbl did not match EXACTLY ONCE" \
+      test "$(grep -cE "$anchor" "$tmp/t/probe.sh")" -eq 1
+    sed -E "/$anchor/d" "$tmp/t/probe.sh" > "$tmp/mut" && mv "$tmp/mut" "$tmp/t/probe.sh"
+    plant_check "the disarm of $lbl produced no diff" \
+      test "$(grep -cE "$anchor" "$tmp/t/probe.sh")" -eq 0
   }
 
+  # The census is sized off the SHAPES array itself — three fixed arms plus a
+  # plant and a disarm for every shape the scan declares.
+  total=$((3 + 2 * ${#SHAPES[@]}))
+
   echo "check-no-node-imports --selftest (throwaway corpora under $tmp)"
+  echo "  census: ${#SHAPES[@]} shape(s) declared by SHAPES, ${#SPECIMENS[@]} specimen(s) registered"
+
+  # 0a. COVERAGE — every declared shape must have a specimen. A new shape with
+  #     no plant-and-disarm pair cannot leave the score at full marks.
+  for shape in "${SHAPES[@]}"; do
+    label="${shape%%@@*}"
+    if ! specimen_line_for "$label" >/dev/null; then
+      echo "  FAIL  UNCOVERED SHAPE: SHAPES declares '$label' but no specimen proves it bites"
+      bad=$((bad + 1))
+    fi
+  done
+
+  # 0b. ORPHANS — every registered specimen must still have a shape. Deleting a
+  #     detection shape from the scan reds HERE instead of quietly shrinking the
+  #     census to match the damage.
+  for entry in "${SPECIMENS[@]}"; do
+    label="${entry%%::*}"
+    if ! printf '%s\n' "${SHAPES[@]}" | grep -q "^${label}@@"; then
+      echo "  FAIL  ORPHANED SPECIMEN: '$label' has a specimen but SHAPES no longer declares it"
+      bad=$((bad + 1))
+    fi
+  done
 
   # 1. SILENT ARM — a clean corpus passes, and states its sample size.
   fresh
@@ -230,18 +302,37 @@ selftest() {
     sed 's/^/        /' "$tmp/out"
   fi
 
-  # 2-5. THE FOUR SPECIMENS THE ROW PLANTED. Two of them (dynamic import and the
-  #      bare side-effect import) were the shapes that slipped through silently.
-  violates "dynamic-import-prefixed"    'const c = await import("node:crypto");' \
-           "a dynamic import of a node: builtin"
-  violates "bare-side-effect-prefixed"  'import "node:crypto";' \
-           "a bare side-effect import of a node: builtin"
-  violates "static-prefixed"            'import c from "node:crypto";' \
-           "a static default import of a node: builtin"
-  violates "static-prefixed"            'export { randomUUID } from "node:crypto";' \
-           "a re-export from a node: builtin"
+  # 2. THE PLANT-AND-DISARM PAIR, ONCE PER DECLARED SHAPE.
+  for shape in "${SHAPES[@]}"; do
+    label="${shape%%@@*}"
+    line="$(specimen_line_for "$label")" || continue   # already counted as UNCOVERED
 
-  # 6. REFUSED TO MEASURE — the whole corpus is gone. This is the mode that used
+    # PLANT: the specimen is caught, at exit 1, under this shape's own label.
+    fresh
+    specimen "$line"
+    rc="$(probe)"
+    if [ "$rc" -eq 1 ] && grep -q "FAIL: $label " "$tmp/out"; then
+      say "PLANT  $label: '$line' -> exit 1 ($label)" 0
+    else
+      say "PLANT  $label: '$line' -> exit 1 ($label) (got $rc)" 1
+      sed 's/^/        /' "$tmp/out"
+    fi
+
+    # DISARM: with that one shape deleted, the same specimen is ACCEPTED. This
+    # is what makes the PLANT arm load-bearing rather than incidental.
+    fresh
+    disarm_shape "$label"
+    specimen "$line"
+    rc="$(probe)"
+    if [ "$rc" -eq 0 ]; then
+      say "DISARM $label: with the shape deleted, its specimen is ACCEPTED (the PLANT arm is load-bearing)" 0
+    else
+      say "DISARM $label: with the shape deleted, its specimen is ACCEPTED (got $rc — the PLANT arm proves nothing)" 1
+      sed 's/^/        /' "$tmp/out"
+    fi
+  done
+
+  # 3. REFUSED TO MEASURE — the whole corpus is gone. This is the mode that used
   #    to print "clean" at exit 0, so it must NEVER be green.
   fresh
   rm -rf "$tmp/t/packages"
@@ -254,7 +345,7 @@ selftest() {
     sed 's/^/        /' "$tmp/out"
   fi
 
-  # 7. REFUSED TO MEASURE — the dirs exist but hold nothing scannable. A rename
+  # 4. REFUSED TO MEASURE — the dirs exist but hold nothing scannable. A rename
   #    that leaves the directory behind is indistinguishable from a clean read
   #    unless this arm holds.
   fresh
@@ -268,31 +359,16 @@ selftest() {
     sed 's/^/        /' "$tmp/out"
   fi
 
-  # 8. THE BITE PROOF — disarm the dynamic-import shape in the COPY and the
-  #    specimen from arm 2 must sail through at exit 0. If this arm ever reports
-  #    "still caught", arm 2 is not measuring what its label claims.
-  fresh
-  # Anchored on the SHAPES entry alone. A bare label match would also hit these
-  # very lines (the selftest names the label it disarms), delete them from the
-  # copy, and mutate something other than the rule.
-  anchor='^  "dynamic-import-prefixed@@'
-  plant_check "the disarm anchor did not match EXACTLY ONCE" \
-    test "$(grep -cE "$anchor" "$tmp/t/probe.sh")" -eq 1
-  sed -E "/$anchor/d" "$tmp/t/probe.sh" > "$tmp/mut" && mv "$tmp/mut" "$tmp/t/probe.sh"
-  plant_check "the disarm produced no diff" \
-    test "$(grep -cE "$anchor" "$tmp/t/probe.sh")" -eq 0
-  specimen 'const c = await import("node:crypto");'
-  rc="$(probe)"
-  if [ "$rc" -eq 0 ]; then
-    say "MUTATION: with the dynamic-import shape deleted, the specimen is ACCEPTED (arm 2 is load-bearing)" 0
-  else
-    say "MUTATION: with the dynamic-import shape deleted, the specimen is ACCEPTED (got $rc — arm 2 proves nothing)" 1
-    sed 's/^/        /' "$tmp/out"
-  fi
-
   echo ""
-  if [ "$bad" -eq 0 ]; then echo "check-no-node-imports --selftest: PASS (8/8)"; return 0; fi
-  echo "check-no-node-imports --selftest: FAILED ($bad case(s))"; return 1
+  # The denominator is DERIVED from SHAPES, and a skipped arm is not a passed
+  # one: `ran` must reach the planned total or the run is short and reds.
+  if [ "$bad" -eq 0 ] && [ "$ran" -eq "$total" ]; then
+    echo "check-no-node-imports --selftest: PASS ($ran/$total)"; return 0
+  fi
+  if [ "$ran" -ne "$total" ]; then
+    echo "check-no-node-imports --selftest: SHORT RUN — $ran of $total planned case(s) actually ran"
+  fi
+  echo "check-no-node-imports --selftest: FAILED ($bad case(s), $ran/$total ran)"; return 1
 }
 
 case "${1:-}" in
