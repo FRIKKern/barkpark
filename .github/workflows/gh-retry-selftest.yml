@@ -34,7 +34,7 @@ jobs:
   selftest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Classifier arms (non-retryable fails fast, transient retries)
         run: bash scripts/gh-retry-selftest.sh
       - name: release-artifact.yml actually calls the helper

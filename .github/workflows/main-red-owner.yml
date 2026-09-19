@@ -72,7 +72,7 @@ jobs:
     name: a red on main's tip gets an owner
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # THE ARMS, FIRST AND HERMETICALLY. Present-in-file is not
       # fires-when-it-should: this step stubs `gh` and the predicate and proves

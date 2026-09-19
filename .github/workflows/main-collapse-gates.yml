@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # SYNTAX FIRST. A truncated harness that cannot parse would otherwise read
       # as a green from whichever arm happened to exit 0.
       - name: syntax
