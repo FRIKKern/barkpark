@@ -426,6 +426,18 @@ function makeDom() {
     let groups = [];
     // The registry ids this element's CURRENT markup declares (see declaredBy).
     let ownIds = new Set();
+    // cch-w49-bl-repaint: how many times this element's innerHTML was WRITTEN.
+    // Not derivable from the final markup — a card painted once and a card
+    // painted six times identically leave byte-identical state behind, and the
+    // difference between them is the whole defect. Every write is counted,
+    // including the ones that set the same string, because in a browser
+    // `innerHTML =` destroys and rebuilds the subtree regardless.
+    let htmlWriteCount = 0;
+    // …and how many of those writes set the string that was ALREADY there. This
+    // is the sharp end: a repaint that changes nothing still destroys and
+    // rebuilds the subtree in a browser, taking every listener on it with it,
+    // so an identical repaint is pure loss — never a no-op.
+    let htmlRepeatWrites = 0;
     const handlers = Object.create(null);
     const attrs = Object.create(null);
 
@@ -551,11 +563,16 @@ function makeDom() {
       closest() { return null; },
       getClientRects() { return []; },
       get children() { return kids.slice(); },
+      // Harness-internal (leading underscore), never something app.js reads.
+      _htmlWrites() { return htmlWriteCount; },
+      _htmlRepeatWrites() { return htmlRepeatWrites; },
     };
 
     Object.defineProperty(el, "innerHTML", {
       get() { return html; },
       set(v) {
+        htmlWriteCount++;
+        if (String(v == null ? "" : v) === html) htmlRepeatWrites++;
         html = String(v == null ? "" : v);
         kids = parseChildren(html, makeEl);
         groups = parseGroups(html, kids, makeEl, el);
@@ -6709,10 +6726,61 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
 // each other and to the corpus: late-/v1/me, then billing-numerals, then the
 // census guard and the scenarios.
 
+// ── cch-w49-bl-repaint · THE MONEY CARD IS PAINTED ONCE PER FACT ────────────
+// Measured on origin/main by instrumenting this shim's innerHTML setter across
+// the whole billing corpus: #billing-recommended took 6 writes on ten of the
+// eleven billing actors and 8 on billing-portal-return, of which 4 and 5 set
+// the string that was ALREADY there. The cause is that the cold arm of
+// renderBilling is entered more than once per boot — applyRoute paints it on a
+// #billing deep link, and loadMe's billing seam re-enters it when /v1/me lands,
+// both while GET /v1/subscription is still open — and each entry started its
+// OWN subscription read and subscribed its OWN re-render, each of which then
+// started its own ceiling read and subscribed another.
+//
+// TWO PREDICATES, neither a magic number:
+//   (1) ZERO identical-consecutive writes. A repaint that changes nothing still
+//       destroys and rebuilds the subtree in a browser, taking the card's
+//       "See all plans" listener with it, and pays a full layout for pixels
+//       nobody can tell apart. A repaint must change something or not happen.
+//   (2) ONE GET per read per boot. The duplicate paints were not free client
+//       work — each came with a duplicate request to the control plane.
+// Both are properties, not tallies, so a new billing scenario is covered the
+// day it is added and no baseline needs re-cutting when the copy changes.
+async function assertBillingPaintsOncePerFact() {
+  const scens = SCENARIO_NAMES.filter((n) => n.startsWith("billing-"));
+  const broken = [];
+  const line = [];
+  for (const scen of scens) {
+    const boot = bootScenario(scen, {});
+    await flush();
+    const box = boot.registry.get("billing-recommended");
+    if (!box) { broken.push(scen + ": #billing-recommended was never written at all"); continue; }
+    const writes = box._htmlWrites();
+    const repeats = box._htmlRepeatWrites();
+    const subs = boot.calls.filter((c) => c.path.endsWith("/v1/subscription")).length;
+    const usage = boot.calls.filter((c) => c.path.endsWith("/v1/usage/summary")).length;
+    line.push(scen.replace(/^billing-/, "") + " " + writes + "w/" + repeats + "r/" + subs + "s/" + usage + "u");
+    if (repeats > 0) {
+      broken.push(scen + ": " + repeats + " of " + writes + " writes to #billing-recommended repainted " +
+        "BYTE-IDENTICAL markup — every one of those destroys the card's live handlers to redraw the same pixels");
+    }
+    if (subs !== 1) broken.push(scen + ": GET /v1/subscription issued " + subs + " times in one boot (want 1)");
+    if (usage !== 1) broken.push(scen + ": GET /v1/usage/summary issued " + usage + " times in one boot (want 1)");
+  }
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " billing-repaint — " + scens.length +
+    " billing actors, writes/repeats/sub-GETs/usage-GETs: " + line.join(", ") + "\n");
+  if (broken.length) {
+    process.stdout.write("\nbilling repaint guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
+  await assertBillingPaintsOncePerFact();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");

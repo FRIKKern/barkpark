@@ -472,6 +472,11 @@
         "env": {}
       },
       {
+        "name": "pds-citation-expand 4-arm harness (the guard's 16 selftest arms + its LIVE --check over the PDS fence)",
+        "run": "bash scripts/pds-citation-expand.test.sh\n",
+        "env": {}
+      },
+      {
         "name": "pds-idle-sampler --selftest — 3 arms (killed-mid-window, clean cleanup, KEEP control); fake ssh on PATH, no host",
         "run": "bash scripts/pds-idle-sampler.sh --selftest\n",
         "env": {}
