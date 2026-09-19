@@ -584,6 +584,13 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
 .bp-paper-surface ul > li { list-style: disc; }
 .bp-paper-surface ol > li { list-style: decimal; }
+/* Checklist (list block with task:true): no marker, a disabled native checkbox ahead of the text,
+ * done items muted and struck. State is data; the reader never toggles it. */
+.bp-paper-surface ul.bp-checklist { list-style: none; padding-left: 0; }
+.bp-paper-surface .bp-checklist__item { display: flex; align-items: flex-start; gap: 0.55em; list-style: none; }
+.bp-paper-surface .bp-checklist__box { flex: 0 0 auto; margin: 0.35em 0 0; width: 1em; height: 1em; accent-color: var(--paper-accent); }
+.bp-paper-surface .bp-checklist__body { flex: 1 1 auto; min-width: 0; }
+.bp-paper-surface .bp-checklist__item[data-checked="true"] .bp-checklist__body { color: var(--paper-ink-soft); text-decoration: line-through; text-decoration-color: var(--paper-rule); }
 .bp-paper-surface code {
   font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
   background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
