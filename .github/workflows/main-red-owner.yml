@@ -180,7 +180,7 @@ jobs:
       #     staleness fault is a property, not only a cost.
       - name: Restore the 24 h window ledger (best effort)
         if: github.event_name != 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/main-red-window.jsonl
           key: main-red-window-${{ github.run_id }}
@@ -279,7 +279,7 @@ jobs:
       # this run just recorded is the one the NEXT window needs.
       - name: Save the 24 h window ledger
         if: always() && github.event_name != 'pull_request'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/main-red-window.jsonl
           key: main-red-window-${{ github.run_id }}
