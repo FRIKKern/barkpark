@@ -925,7 +925,7 @@ defmodule Barkpark.Content.Lifecycle do
           # see the :sync coverage note above.
           criteria_fence(pub_content || %{}, draft.content || %{})
         else
-          gate_task_publish(pub_content || %{}, draft.content || %{})
+          gate_task_publish(pub_content || %{}, draft.content || %{}, pid)
         end
 
       _ ->
@@ -937,7 +937,7 @@ defmodule Barkpark.Content.Lifecycle do
 
   defp ensure_task_publish_transition_legal(_type, _draft, _pid, _dataset, _opts), do: :ok
 
-  defp gate_task_publish(pub_content, draft_content) do
+  defp gate_task_publish(pub_content, draft_content, pid) do
     was = pub_content["lifecycle_status"]
     now = draft_content["lifecycle_status"]
 
@@ -946,7 +946,7 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, publish_transition_error(was, now)}}
 
       stale_claim?(pub_content, draft_content) ->
-        {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
+        {:error, {:invalid_task_content, stale_claim_error(pub_content, pid)}}
 
       true ->
         # THE CLAIM-TIME CONTRACT (task-11390a3b900c8a09). `criteria_fence/2`
@@ -1191,7 +1191,25 @@ defmodule Barkpark.Content.Lifecycle do
     }
   end
 
-  defp stale_claim_error(pub_content) do
+  # THE REMEDY MUST BE ONE THAT LANDS (task-922e616cb9b99243). This refusal
+  # used to prescribe "re-derive the draft from the published row (patch, then
+  # publish)". Measured live on guerrilla 2026-09-16/18 (task-bff844cc812f0fe4)
+  # and again 2026-09-19 for this row: while `drafts.<id>` exists, the bare-id
+  # patch is refused by the published-first fork fence
+  # (`Mutations.draft_twin_error/1`, "Resolve the fork first"), and a publish
+  # after that refuses HERE again, byte-identically. The two refusals pointed
+  # at each other, so an operator following the printed sentence could not get
+  # out. The sequence that lands: DISCARD the unlandable twin, then a BARE-ID
+  # patch — published-first for a task (`@published_first_patch_types` /
+  # `land_patch/5`), so it edits the published row in place and the claim
+  # (worker, epoch, ts_iso, lease) rides through byte-identical. The commands
+  # are printed with the real id so they run as pasted; a remedy that needs a
+  # human to adapt it is the defect, not the fix. The wall itself is unchanged.
+  #
+  # The old clause "Re-derive the draft from the published row" is DELIBERATELY
+  # absent: `internal/cli/stale_draft_publish_remedy.go` keys its corrective
+  # advisory on that exact phrase and retires itself the day it disappears.
+  defp stale_claim_error(pub_content, pid) do
     worker = get_in(pub_content, ["claim", "worker"])
     epoch = get_in(pub_content, ["claim", "epoch"])
 
@@ -1199,8 +1217,12 @@ defmodule Barkpark.Content.Lifecycle do
       "claim" => [
         "stale draft: the published row carries claim state (worker #{inspect(worker)}, " <>
           "epoch #{inspect(epoch)}) this draft does not — publishing would obliterate it. " <>
-          "Re-derive the draft from the published row (patch, then publish), or move the " <>
-          "claim through the sanctioned verbs (`bp task claim` / `bp task release` / " <>
+          "Do NOT patch-then-publish: while `drafts.#{pid}` exists the bare-id patch is " <>
+          "refused by the fork fence and this publish refuses again. Discard the twin, " <>
+          "then patch the published row directly (published-first, the claim rides " <>
+          "through untouched): `bp doc discard-draft task #{pid} --yes` then " <>
+          "`bp doc patch task #{pid} --set <field>=<value> --yes`. Or move the claim " <>
+          "through the sanctioned verbs (`bp task claim` / `bp task release` / " <>
           "`bp task close`)."
       ]
     }
@@ -1217,7 +1239,8 @@ defmodule Barkpark.Content.Lifecycle do
           "holds that proof and this draft does not. A stamp is written DIRECTLY to the " <>
           "published row (`bp task stamp`) and never rebases an open draft, so a draft " <>
           "minted before the stamp still carries the pre-stamp criteria. Re-derive the " <>
-          "draft from the published row (discard it, patch again, then publish), or move " <>
+          "draft from the published row (`bp doc discard-draft` the twin, then a bare-id " <>
+          "`bp doc patch` — published-first, it lands without a publish), or move " <>
           "the criterion through the sanctioned verbs (`bp task stamp` / `bp task close`)."
       ]
     }
