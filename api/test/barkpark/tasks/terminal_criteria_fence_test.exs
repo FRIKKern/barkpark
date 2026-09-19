@@ -70,6 +70,7 @@ defmodule Barkpark.Tasks.TerminalCriteriaFenceTest do
   defp base_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "acceptance_criteria" => [%{"criterion" => @c0, "met" => false}]
     }

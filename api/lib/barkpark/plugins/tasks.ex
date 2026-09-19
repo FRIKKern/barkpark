@@ -133,7 +133,60 @@ defmodule Barkpark.Plugins.Tasks do
   # Publish wall: a task that cannot render as PortableDoc in the terminal is
   # not a publishable task. Draft authoring remains permissive; publication
   # gives every agent an actionable repair message.
-  defp portable_brief_gate(%{doc: %{"type" => "task"} = doc}) do
+  #
+  # ── WHY THE HEAD READS BOTH SPELLINGS (task-c1f155da34d3338f) ─────────────
+  #
+  # This clause used to be `%{doc: %{"type" => "task"} = doc}` — a STRING key.
+  # `:before_save` fires with the raw string-keyed write attrs, so the sibling
+  # `quality_gate/1` matches there and every test that hands this function a
+  # plain map went green. But `:before_publish` is fired by
+  # `Content.Lifecycle.publish_after_gate/5` with `doc: draft`, and `draft` is a
+  # `%Barkpark.Content.Document{}` STRUCT whose keys are ATOMS. A struct never
+  # matches a string-key pattern, so every publish fell through to the catch-all
+  # `portable_brief_gate(_payload), do: :ok` below: the wall was registered,
+  # fired, and inert. Measured live on guerrilla 2026-09-18 — a briefless task
+  # and a bogus-block-brief task BOTH published 200 through
+  # `POST /v1/data/mutate/:dataset`.
+  #
+  # Both shapes are read now, exactly as `Grip.reject_level_skipping_fact/1` and
+  # `Bulldocs.reject_hollow_paper_publish/1` already did on this same seam.
+  # `fetch/2` below was ALWAYS struct-safe (it falls back to the atom key), so
+  # the head was the whole defect and the body needed no change.
+  # ── SCOPE: FIRST PUBLISH ONLY (task-c1f155da34d3338f, ruling) ─────────────
+  #
+  # The wall applies to a task ENTERING the published corpus, not to every
+  # publish forever after. A row that is ALREADY published without a brief —
+  # 3 of 20 sampled on the live instance, all of them born before the brief
+  # composer existed — keeps publishing: arming a dormant wall must not make
+  # the existing corpus un-republishable, which would strand the mutate publish
+  # op and the GitHub draft-twin collapse on every legacy row.
+  #
+  # `published_doc` is `nil` exactly on a birth (`Content.Lifecycle`'s
+  # `read_incumbent/4`). A payload that does not carry the key at all reads as
+  # `nil` too, and that is the SAFE default: a hook fired with a bare map (the
+  # shape the plugin's own unit tests use) still gates.
+  #
+  # THE BOUNDARY, STATED SO NOBODY HAS TO INFER IT: on a re-publish this gate
+  # does not fire AT ALL. A malformed brief on an already-published task is
+  # therefore NOT refused here. That is deliberate — the scope is the row's
+  # entry into the corpus, not a running brief validator — and it is the price
+  # of grandfathering. `Barkpark.Tasks.Validation` still owns brief SHAPE at
+  # the 422 layer on every write.
+  #
+  # `task_doc?/1` (defined beside the edge helpers below) already reads all
+  # three spellings — `:type`, `"type"`, `"_type"` — so the head reuses it
+  # rather than growing a second, drift-prone copy of the same predicate.
+  defp portable_brief_gate(%{doc: doc} = payload) when is_map(doc) do
+    cond do
+      not task_doc?(doc) -> :ok
+      not is_nil(Map.get(payload, :published_doc)) -> :ok
+      true -> gate_task_brief(doc)
+    end
+  end
+
+  defp portable_brief_gate(_payload), do: :ok
+
+  defp gate_task_brief(doc) do
     with content when is_map(content) <- fetch(doc, "content"),
          brief when is_map(brief) <- fetch(content, "brief"),
          1 <- fetch(brief, "version"),
@@ -150,8 +203,6 @@ defmodule Barkpark.Plugins.Tasks do
            "PortableDoc {version: 1, blocks: [...]} so bp task tui can render it"}
     end
   end
-
-  defp portable_brief_gate(_payload), do: :ok
 
   defp validate_brief_blocks(blocks) do
     Enum.reduce_while(blocks, :ok, fn
