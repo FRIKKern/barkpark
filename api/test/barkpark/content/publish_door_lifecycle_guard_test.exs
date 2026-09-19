@@ -551,4 +551,86 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
                "takes — see section (h) above and task-b36741707eabe359."
     end
   end
+
+  # ── (i) the stale-draft refusal's REMEDY lands (task-922e616cb9b99243) ────
+  #
+  # The refusal above used to prescribe "patch, then publish". While the twin
+  # exists, a bare-id patch is refused by the published-first fork fence
+  # (`Mutations.draft_twin_error/1`) and the publish then refuses identically —
+  # the two refusals pointed at each other. This arm runs the remedy the
+  # refusal NOW prints, in the order it prints it, against the same row the
+  # refusal was raised on, and shows it landing with the claim byte-identical.
+  # The wall itself is the quiet arm: the refusal fires BEFORE the remedy and
+  # the published row does not move until the remedy runs.
+  describe "the stale-claim refusal prescribes a remedy that lands" do
+    test "discard-draft, then a bare-id patch: lands, claim byte-identical", %{scope: scope} do
+      id = "pdg-remedy"
+      mk_task!(id, scope)
+      {:ok, _} = Content.publish_document(id, "task", @dataset, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(id, "pdg-remedy-worker", scope)
+      claim_before = claimed.content["claim"]
+      assert claim_before["worker"] == "pdg-remedy-worker"
+
+      # The trap shape: a draft twin that predates the claim (carries none).
+      mk_task!(id, scope)
+      {:ok, twin} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+      refute twin.content["claim"]
+
+      # THE WALL (quiet arm): still refused, published row untouched.
+      assert {:error, {:invalid_task_content, %{"claim" => [message]}}} =
+               Content.publish_document(id, "task", @dataset, scope)
+
+      assert published!(id, scope).content["claim"] == claim_before
+
+      # The sentence: names the working sequence WITH the id, and no longer
+      # the loop. Both commands are asserted verbatim — a remedy that needs a
+      # human to adapt it is the defect.
+      assert message =~ "stale draft: the published row carries claim state"
+      assert message =~ "`bp doc discard-draft task #{id} --yes`"
+      assert message =~ "`bp doc patch task #{id} --set <field>=<value> --yes`"
+      refute message =~ "patch, then publish"
+      refute message =~ "Re-derive the draft from the published row"
+
+      # THE PRINTED "patch, then publish" IS STILL A LOOP — pinned so the
+      # fork fence cannot be loosened by this row: with the twin in place the
+      # bare-id patch is refused…
+      assert {:error, {:invalid_task_content, %{"_id" => [fork]}}} =
+               Content.apply_mutations(
+                 [
+                   %{"patch" => %{"id" => id, "type" => "task", "set" => %{"description" => "x"}}}
+                 ],
+                 @dataset,
+                 [source: :api] ++ scope
+               )
+
+      assert fork =~ "Resolve the fork first"
+
+      # …and THE REMEDY, in the printed order. Step 1: discard the twin.
+      assert {:ok, _} = Content.discard_draft(id, "task", @dataset, scope)
+      assert {:error, :not_found} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+
+      # Step 2: the bare-id patch — published-first, so it LANDS.
+      assert {:ok, {_tx, [_]}} =
+               Content.apply_mutations(
+                 [
+                   %{
+                     "patch" => %{
+                       "id" => id,
+                       "type" => "task",
+                       "set" => %{"description" => "enriched through the printed remedy"}
+                     }
+                   }
+                 ],
+                 @dataset,
+                 [source: :api] ++ scope
+               )
+
+      pub = published!(id, scope)
+      assert pub.content["description"] == "enriched through the printed remedy"
+      assert pub.content["claim"] == claim_before
+      assert pub.content["lifecycle_status"] == "in_progress"
+      # No twin left behind: the remedy is a landing, not another fork.
+      assert {:error, :not_found} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+    end
+  end
 end
