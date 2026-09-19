@@ -1254,7 +1254,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "doc.patch",
         "doc",
         "patch",
-        "Patch a document: --set the fields to change (key:=json for typed values).",
+        "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "POST",
         "/v1/data/mutate/:dataset",
         "write",
@@ -1265,7 +1265,10 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("set", "string", "Field key=value to change (repeatable; key:=json for typed).",
             repeatable: true
-          )
+          ),
+          # scaffy-backlog-doc-patch-file-flag: the Go route for --file bodies
+          # landed in #18616/#19261; the manifest never declared the flag.
+          flag("file", "file", "Fields to change as a JSON object from a file or - for stdin.")
         ],
         writes: true,
         mutation_op: "patch",
