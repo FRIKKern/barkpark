@@ -7269,9 +7269,10 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "format": "binary",
+                "type": "string"
               }
             }
           },
@@ -7316,7 +7317,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -11161,9 +11162,10 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "format": "binary",
+                "type": "string"
               }
             }
           },
@@ -11208,7 +11210,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -14027,6 +14029,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -14839,6 +14850,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],

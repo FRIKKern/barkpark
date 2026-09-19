@@ -365,6 +365,12 @@ function collectText(node: unknown, out: string[]): void {
  * paper block tree (or a string body / description), collapses whitespace, and
  * caps the length so the client can window a snippet around a match without
  * bloating the payload. */
+/** The ONE prose budget: the cap  applies AND the 
+ * bound  asks the API for, so the server stops shipping block
+ * trees this function is about to throw away (a limit=100 browse seed was
+ * 14.65 MB for ~100 KB of usable prose). */
+export const BODY_CHARS = 1000;
+
 function deriveBody(doc: RawDoc): string | null {
   const out: string[] = [];
   collectText(doc.blocks, out);
@@ -378,7 +384,7 @@ function deriveBody(doc: RawDoc): string | null {
   if (!text) return null;
   // Cap to keep the seed/landing payload bounded — covers near-top matches; a
   // deep match falls back to the static excerpt.
-  return text.length > 1000 ? text.slice(0, 1000) : text;
+  return text.length > BODY_CHARS ? text.slice(0, BODY_CHARS) : text;
 }
 
 function deriveSlug(doc: RawDoc): string {
