@@ -94,9 +94,17 @@ defmodule Mix.Tasks.Frt.Export do
     out = Keyword.get(opts, :out)
     dataset = Keyword.get(opts, :dataset, @default_dataset)
 
-    # Boot the app so Repo + tenancy tables are live. Confirmed safe: app.start
-    # does NOT bind the web port.
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51). This used to say "Confirmed safe:
+    # app.start does NOT bind the web port" — false on a live box: with
+    # `PHX_SERVER` set, `app.start` binds the SERVING slot's port ("port 4001
+    # already in use", guerrilla 2026-09-02) and puts up a second Oban on the
+    # live queues. MEASURED: the read path is `Tenancy.get_default_*` (Repo.get_by
+    # / Repo.one), `Tenancy.get_or_create_dataset/2`, `Content.list_schemas/2`
+    # (a `Repo.all` over `schema_definitions`) and `Content.collect_all_documents/3`
+    # — no endpoint read, no Oban insert. The dev corpus exports doc_count=125
+    # with the identical content_hash under both boots (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     {ws_id, project_id, _dataset_id} = resolve_scope!(dataset)
 
