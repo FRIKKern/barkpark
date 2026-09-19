@@ -83,7 +83,7 @@ jobs:
           elixir-version: "1.18.1"
 
       - name: Setup Go (builds bp from source under test)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "1.23"
 
