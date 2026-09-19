@@ -3152,6 +3152,28 @@ test("cchi-w20: --citation-inventory runs ABOVE the gate body, so a red gate can
   // census banner appears in this output and this test reds.
   const r = runCssCheck("--citation-inventory");
   assert.equal(r.status, 0, r.out);
+  // NON-VACUITY FLOOR, BEFORE THE TWO ABSENCE ASSERTIONS. Both of those are of
+  // the form !/x/.test(r.out), and the empty string satisfies both — so on its
+  // own this test could not tell "the inventory correctly exited above the gate
+  // body" from "the inventory printed nothing at all". That is not theoretical:
+  // gating the sub-mode to process.exit(0) before printing anything left this
+  // test green. Pin a COUNT the real run exceeds, derived here rather than
+  // hardcoded, so an EMPTY or TRUNCATED stdout reds instead of passing.
+  const invRows = r.out.split("\n").filter((l) => /^\s*ruled=\s*\d+\s+E11=\s*\d+\s+\S/.test(l));
+  assert.ok(invRows.length > 10, `the inventory must PRINT its per-file rows, got ${invRows.length} row(s):\n` + r.out);
+  const expectedRows = citationScanSetFrom(fileURLToPath(new URL(".", import.meta.url)));
+  assert.equal(
+    invRows.length,
+    expectedRows.length,
+    `the inventory must emit one row per scanned file (${expectedRows.length} expected):\n` + r.out,
+  );
+  // And the totals line must be PRESENT and whole — a stdout cut mid-stream
+  // keeps the rows above it and loses this, which the row count alone can miss.
+  assert.match(
+    r.out,
+    /\d+ file\(s\) scanned \(.*\), \d+ shipped-E11 hit\(s\), \d+ ruled-alternation hit\(s\), \d+ E17 refusal\(s\)/,
+    "the inventory's totals line must survive to the end of stdout:\n" + r.out,
+  );
   assert.ok(!/classes checked/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
   assert.ok(!/contrast pairs/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
 });
