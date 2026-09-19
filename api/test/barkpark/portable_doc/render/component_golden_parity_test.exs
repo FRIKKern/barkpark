@@ -379,8 +379,8 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   test "roadmap: the emitter realizes the projection (scale axis · per-lane title/role/phase)" do
     fx = decode!(@api_dir, "roadmap")
     html = Components.roadmap_html(fx["input"])
-    scale = population!(fx, "roadmap", "scale", fx["input"]["scale"])
     lanes = population!(fx, "roadmap", "lanes", fx["input"]["snapshot"])
+    scale = population!(fx, "roadmap", "scale", fx["input"]["scale"])
 
     for cell <- scale, do: assert(html =~ ~s|<span>#{cell}</span>|, "scale #{cell}")
 
