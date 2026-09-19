@@ -1309,8 +1309,10 @@ defmodule Barkpark.Auth do
   backstop; `revoke_token/1` (idempotent) in the Session's terminate clauses
   is the primary teardown.
 
-  `opts`: `:ttl`, `:workspace_id` (default: the minter token's workspace,
-  then the Default workspace), `:dataset` (default `"production"`). Returns
+  ATTRIBUTION FAILS CLOSED: `:workspace_id`, else the minter token's own
+  workspace binding, else `{:error, :no_workspace}` — there is NO fall-through
+  to the seeded Default workspace. `:dataset` defaults to `"production"`.
+  `opts`: `:ttl`, `:workspace_id`, `:dataset`. Returns
   `{:ok, {raw_token, %ApiToken{}}}` — the raw token is written ONLY into the
   session's temp mcp-config env block, never logged, never recoverable.
   """
@@ -1320,7 +1322,8 @@ defmodule Barkpark.Auth do
 
   def create_claude_session_token(minter, session_id, opts) when is_binary(session_id) do
     ws_id =
-      Keyword.get(opts, :workspace_id) || minter_workspace_id(minter) || default_workspace_id()
+      concrete_workspace_id(Keyword.get(opts, :workspace_id)) ||
+        concrete_workspace_id(minter_workspace_id(minter))
 
     with ws_id when is_binary(ws_id) <- ws_id || {:error, :no_workspace},
          :ok <- TenancyAuth.authorize(minter, ws_id, :write) do
@@ -1354,6 +1357,26 @@ defmodule Barkpark.Auth do
 
   defp minter_workspace_id(%ApiToken{workspace_id: ws_id}), do: ws_id
   defp minter_workspace_id(_), do: nil
+
+  # THE TWO HALVES OF ONE BOUNDARY NOW AGREE (task-1db81c1568866df8). This
+  # predicate is deliberately the same one
+  # `Barkpark.StudioChat.Provider.Claude.cloud_workspace_id!/1` (claude.ex,
+  # `defp cloud_workspace_id!`) applies before it will spawn a cloud turn:
+  # a concrete binary passes; `nil`, `""` and the `"global"` sentinel do not.
+  # There it RAISES ("refusing to spawn an unattributed cloud turn"); here it
+  # yields nil so the `with` above answers `{:error, :no_workspace}` and every
+  # caller's fail-soft mint-refused branch runs. Same verdict, two shapes.
+  #
+  # DO NOT RESTORE THE `|| default_workspace_id()` FALLBACK. It was here, and
+  # it made the `{:error, :no_workspace}` arm DEAD CODE: an unbound minter
+  # called with no `:workspace_id` was silently issued a credential stamped
+  # with the seeded Default workspace it never selected. That was never a
+  # privilege escalation — `TenancyAuth.authorize/3` below still had to pass
+  # for Default — it was a MIS-ATTRIBUTION, and the attribution is what the
+  # audit trail reads afterwards. A refused mint is fail-soft at every caller
+  # (a chat spawns without hands); a mis-attributed one is silent forever.
+  defp concrete_workspace_id(id) when is_binary(id) and id != "" and id != "global", do: id
+  defp concrete_workspace_id(_), do: nil
 
   defp clamp_claude_session_ttl(ttl) when is_integer(ttl) and ttl > 0,
     do: min(ttl, @claude_session_max_ttl)
