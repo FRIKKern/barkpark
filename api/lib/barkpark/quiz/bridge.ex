@@ -3,9 +3,12 @@ defmodule Barkpark.Quiz.Bridge do
   P4 live-edit bridge (`/papers/hyperquiz-content-model`) — the differentiator:
   a Studio edit to a quiz updates the running game in the same second.
 
-  Subscribes to the dataset's document-mutation topic (`documents:<dataset>`,
-  the same fan-out `Content.broadcast_document_mutation/3` emits). When a `quiz`
-  document changes, every live room bound to that quiz reloads it
+  Subscribes to the dataset's document-list topics the way any tenant-scoped
+  consumer does (`Content.Broadcast.subscribe_documents/2`): the global
+  `documents:<dataset>` topic (shared layer) PLUS the seeded Default
+  workspace's keyed topic `documents:ws:<default>:<dataset>` — see
+  `safe_subscribe/1` for why THAT workspace. When a `quiz` document changes,
+  every live room bound to that quiz reloads it
   (`Barkpark.Quiz.Content.load_question/2`) and the new question is applied to the
   room (`Barkpark.Quiz.Room.apply_question/2`), which broadcasts
   `{:question_updated, question}` to players — no reconnect, no redeploy.
@@ -87,6 +90,7 @@ defmodule Barkpark.Quiz.Bridge do
   """
   use GenServer
 
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Quiz
 
   @pubsub Barkpark.PubSub
@@ -144,11 +148,13 @@ defmodule Barkpark.Quiz.Bridge do
     # Phoenix.PubSub child (application.ex splices plugin_children ahead of
     # PubSub), so subscribing synchronously here would crash the boot. Defer the
     # default-dataset subscribe to a self-message that retries until PubSub is
-    # alive. `datasets` starts EMPTY and tracks what we've actually subscribed —
-    # bind/3 subscribes any not-yet-seen dataset on demand the same way.
+    # alive. `topics` starts EMPTY and tracks the TOPIC STRINGS we've actually
+    # joined — bind/3 re-derives the wanted set for its dataset on every call
+    # and joins whatever is still missing (the Default workspace's keyed topic
+    # may not have been resolvable at boot; see `safe_subscribe/1`).
     send(self(), {:subscribe, dataset})
     Process.send_after(self(), :sweep, @sweep_ms)
-    {:ok, %{datasets: MapSet.new(), bindings: %{}, rooms: %{}}}
+    {:ok, %{topics: MapSet.new(), bindings: %{}, rooms: %{}}}
   end
 
   @impl true
@@ -302,34 +308,68 @@ defmodule Barkpark.Quiz.Bridge do
     %{state | bindings: bindings, rooms: Map.delete(state.rooms, pin)}
   end
 
-  # Subscribe to a dataset's mutation topic exactly once. If PubSub isn't up yet
-  # (boot race — plugin workers precede the host PubSub child), reschedule and
-  # retry; at runtime PubSub is always alive so this subscribes on the first try.
+  # Join every document-list topic this dataset needs, each exactly once. If
+  # PubSub isn't up yet (boot race — plugin workers precede the host PubSub
+  # child), reschedule and retry; at runtime PubSub is always alive so this
+  # subscribes on the first try. Re-entered on every bind/3, so a keyed topic
+  # that was not resolvable at boot is picked up the first time a room binds.
   defp ensure_subscribed(dataset, state) do
-    if MapSet.member?(state.datasets, dataset) do
-      state
-    else
-      case safe_subscribe(dataset) do
-        :ok ->
-          %{state | datasets: MapSet.put(state.datasets, dataset)}
+    missing = Enum.reject(wanted_topics(dataset), &MapSet.member?(state.topics, &1))
 
-        :retry ->
-          Process.send_after(self(), {:subscribe, dataset}, 50)
-          state
-      end
+    case Enum.split_with(missing, &(safe_subscribe(&1) == :ok)) do
+      {joined, []} ->
+        %{state | topics: MapSet.union(state.topics, MapSet.new(joined))}
+
+      {joined, _retry} ->
+        Process.send_after(self(), {:subscribe, dataset}, 50)
+        %{state | topics: MapSet.union(state.topics, MapSet.new(joined))}
     end
   end
 
-  # DELIBERATELY THE GLOBAL TOPIC (task-5d0615ee60143cc8). The Bridge is an
-  # instance-wide daemon: a live quiz room can be bound to a quiz in ANY
-  # workspace, and there is no workspace in context here to key a topic on. It
-  # is safe there because it consumes IDENTITY ONLY — `handle_info` matches
-  # `%{type: "quiz", doc_id: id}` and then RE-READS the document through
-  # `Quiz.load_question/2`. `Content.Broadcast.global_msg/1` strips a
-  # workspace-owned document's `:document`/`:doc` payload from this topic, so
-  # the Bridge keeps every field it reads and no tenant body reaches it.
-  defp safe_subscribe(dataset) do
-    Phoenix.PubSub.subscribe(@pubsub, Barkpark.Content.Broadcast.global_list_topic(dataset))
+  # THE TOPICS, AND WHY THIS WORKSPACE (task-b7e81f26e959106c, retiring the
+  # task-5d0615ee60143cc8 residual). The global `documents:<dataset>` topic now
+  # announces the SHARED LAYER (nil-workspace documents) ONLY — nothing about a
+  # workspace-owned document, not even its id, reaches it — so a daemon that
+  # sat on the global topic alone would never hear a quiz publish again.
+  #
+  # The Bridge is instance-wide, but its BINDABLE set is not: `apply_now/3`
+  # re-reads through `Quiz.load_question/2` -> `Content.get_public_document/3`,
+  # which is pinned to the seeded Default (public) workspace, plus the
+  # `workspace_or_global` nil-workspace rows. A quiz in any OTHER workspace is
+  # not loadable here by design (the anonymous host door), so a frame for it
+  # would be a re-read that returns `:not_found` — there is nothing to hear.
+  # `Broadcast.subscribe_documents/2` with the Default workspace's id is
+  # therefore exactly the set of frames this process can act on, and no
+  # other tenant's frames at all.
+  #
+  # When no Default is seeded (fresh sandbox, or the support provisioner's
+  # reset window) only the global topic is joined; the next bind/3 re-derives
+  # and joins the keyed topic once the seat is filled.
+  defp wanted_topics(dataset) do
+    case default_workspace_id() do
+      nil ->
+        [Broadcast.global_list_topic(dataset)]
+
+      ws_id ->
+        [Broadcast.global_list_topic(dataset), Broadcast.workspace_list_topic(dataset, ws_id)]
+    end
+  end
+
+  # The Repo may not be answering at boot (this worker starts early) — treat any
+  # failure as "no Default yet"; nil is never cached, so a later bind re-asks.
+  defp default_workspace_id do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} when is_binary(id) -> id
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  defp safe_subscribe(topic) do
+    Phoenix.PubSub.subscribe(@pubsub, topic)
     :ok
   rescue
     # Phoenix.PubSub.subscribe raises ArgumentError when the named PubSub isn't
