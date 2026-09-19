@@ -81,7 +81,7 @@ defmodule Barkpark.Tasks.Close do
       fenced_content_write: 4,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
       actor_stamp: 2,
       merge_criteria: 2,
       merge_landed: 2,
@@ -681,7 +681,7 @@ defmodule Barkpark.Tasks.Close do
                       # WRITTEN (`updated`) rather than from the request, so
                       # the event records what committed. A claimless close
                       # (container / root rows) stamps no `actor` key at all.
-                      caller_stamp(caller_token_id)
+                      caller_stamp(caller_token_id, session)
                       |> Map.put("closed_by", worker_id)
                       |> Map.merge(
                         actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
