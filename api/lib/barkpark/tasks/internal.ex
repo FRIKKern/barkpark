@@ -974,10 +974,17 @@ defmodule Barkpark.Tasks.Internal do
   # catalogue.
   @spec caller_identity_stamp(term(), term()) :: map()
   def caller_identity_stamp(token_id, session \\ nil) do
+    # `token_id != ""` is not defensive noise: an empty-string token id is the
+    # exact placeholder criterion 2 forbids. Without it this emits
+    # `%{"caller" => %{"kind" => "api_token", "id" => ""}}` — a row that reads
+    # MEASURED, NOBODY where the truth is UNMEASURED. (This arm was red on the
+    # first run of `caller_identity_stamp/2 never emits an empty placeholder`.)
+    named? = is_binary(token_id) and token_id != ""
+
     identity =
       %{}
-      |> maybe_put("kind", if(is_binary(token_id), do: "api_token"))
-      |> maybe_put("id", if(is_binary(token_id), do: token_id))
+      |> maybe_put("kind", if(named?, do: "api_token"))
+      |> maybe_put("id", if(named?, do: token_id))
       |> maybe_put("session", if(is_binary(session) and session != "", do: session))
 
     if map_size(identity) == 0, do: %{}, else: %{"caller" => identity}
