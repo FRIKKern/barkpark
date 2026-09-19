@@ -396,10 +396,12 @@ jobs:
       # (advisory)` carries `continue-on-error: true`, so a floor breach there
       # prints and the job still concludes SUCCESS — a guard whose red is
       # swallowed is the defect class this workflow exists to delete. `spec-gate`
-      # is hermetic (the floor makes no API call and needs no credential),
-      # deliberately path-unfiltered so it renders on EVERY pull request rather
-      # than only on ones that look like CI changes, and its failure is a real
-      # red X. It is not a REQUIRED context today — registering it is a
+      # is hermetic (the floor makes no API call and needs no credential). It is
+      # NOT workflow-level paths-filtered, so its NAME renders on every pull
+      # request — but it is dispatcher-gated (`needs: changes` + `if: touched`,
+      # see the job comment above), so it RUNS only on a PR that touches the
+      # dispatcher's paths and concludes `skipped` otherwise. When it runs, its
+      # failure is a real red X. It is not a REQUIRED context today — registering it is a
       # branch-protection change and a lead call — so this is an unswallowed red
       # a human must read, which is strictly more than the advisory job can offer,
       # and it becomes blocking for free the day that name is registered.
