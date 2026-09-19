@@ -553,7 +553,7 @@ EOF
 
 PRODUCER_TMP=""
 producer_cleanup() { [ -n "$PRODUCER_TMP" ] && rm -rf "$PRODUCER_TMP"; return 0; }
-trap producer_cleanup EXIT
+trap 'producer_cleanup; anchor_cleanup' EXIT
 
 # Built once and reused: every fixture branch hangs off one base commit, so the
 # repeated check_file calls inside --selftest do not each pay for a git init.
@@ -679,6 +679,200 @@ check_producer() {
   else
     echo "  FAIL     a docs-only change  ->  cp=${got:-<none>}, wanted false — the filter says true to" >&2
     echo "           everything, so the two cases above prove nothing." >&2
+    rc=1
+  fi
+
+  return "$rc"
+}
+
+# ── anchor: the last run that DEPLOYED, not the last that SUCCEEDED ──────────
+#
+# THE BUG THIS ARM EXISTS FOR (task-220b847a8072f82e)
+#
+# The `changes` step anchors its diff to a previous run of this workflow. It
+# used to pick that run with `gh run list --status=success --limit=1` — a
+# RUN-LEVEL conclusion. But two arms of that same step finish a run in seconds
+# having deployed NOTHING: "superseded at start" (deploy-supersede-exit.sh rc 3)
+# and "already covered". Both write cp=false + instance=false and exit 0, and a
+# run whose only job succeeded IS a success run. So the anchor was routinely a
+# run that never touched a box, the next run's range collapsed to
+# <superseded sha>..<its sha>, and every deployable file merged BEFORE that sha
+# dropped silently out of the classification under a GREEN run.
+#
+# MEASURED 2026-09-18: run 35334681747 (bfbdd50ff) exited superseded -> success;
+# run 35335602083 (ffb3b90c9) then printed `diff base: bfbdd50ff…` and
+# classified instance=false while api/lib changes from #19327 sat undeployed.
+#
+# No LIST arm can see this — the two path lists are untouched, the producer line
+# is untouched, and the classifier answers correctly about the range it was
+# given. Only the RANGE is wrong. So this arm, like the producer arm, EXTRACTS
+# the real `changes` step body and EXECUTES it, against a real git fixture and a
+# `gh` stub that serves a run history in which the newest success deployed
+# nothing. The stub applies the workflow's own `--jq` filters with real jq, so
+# the jq expressions are under test rather than paraphrased.
+
+ANCHOR_TMP=""
+ANCHOR_BASE_SHA=""
+ANCHOR_DEPLOYED_SHA=""
+ANCHOR_SUPERSEDED_SHA=""
+ANCHOR_HEAD_SHA=""
+anchor_cleanup() { [ -n "$ANCHOR_TMP" ] && rm -rf "$ANCHOR_TMP"; return 0; }
+
+# The history, in merge order:
+#   C0 base
+#   C1 cloud/a.ex      <- head of run 111, the run that ACTUALLY deployed
+#   C2 api/lib/x.ex    <- the deployable merge a collapsed range loses (#19327)
+#   C3 docs only       <- head of run 222, which exited SUPERSEDED (no leg ran)
+#   C4 docs only       <- this run's sha
+# C4's own push is docs-only, so instance=true is reachable ONLY by anchoring
+# back past C3 to C1. That is the whole defect, expressed as a fixture.
+anchor_fixture() {
+  [ -n "$ANCHOR_TMP" ] && return 0
+  ANCHOR_TMP="$(mktemp -d)"
+  local dr="$ANCHOR_TMP/repo"
+  mkdir -p "$dr/docs" "$dr/api/lib" "$dr/cloud"
+  git -C "$dr" init -q
+  printf 'guide\n' >"$dr/docs/guide.md"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm c0 >/dev/null 2>&1
+  ANCHOR_BASE_SHA="$(git -C "$dr" rev-parse HEAD)"
+
+  printf 'cp\n' >"$dr/cloud/a.ex"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm c1-deployed >/dev/null 2>&1
+  ANCHOR_DEPLOYED_SHA="$(git -C "$dr" rev-parse HEAD)"
+
+  printf 'x\n' >"$dr/api/lib/x.ex"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm c2-stranded >/dev/null 2>&1
+
+  printf 'more\n' >>"$dr/docs/guide.md"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm c3-superseded >/dev/null 2>&1
+  ANCHOR_SUPERSEDED_SHA="$(git -C "$dr" rev-parse HEAD)"
+
+  printf 'more2\n' >>"$dr/docs/guide.md"
+  git -C "$dr" add -A >/dev/null 2>&1
+  git -C "$dr" -c user.email=t@t -c user.name=t commit -qm c4-head >/dev/null 2>&1
+  ANCHOR_HEAD_SHA="$(git -C "$dr" rev-parse HEAD)"
+
+  mkdir -p "$ANCHOR_TMP/bin"
+  cat >"$ANCHOR_TMP/bin/gh" <<'GHSTUB'
+#!/bin/sh
+# gh stub. Answers `run list` and `api .../runs/<id>/jobs` from two fixture
+# files, then applies the caller's REAL --jq filter with real jq.
+filter=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "--jq" ] && filter="$a"
+  prev="$a"
+done
+case "$1" in
+  run)
+    # The supersede enumeration above asks WITHOUT --status; answer it empty so
+    # this fixture measures the anchor and nothing else.
+    case " $* " in
+      *" --status success "*|*" --status=success "*) ;;
+      *) exit 0 ;;
+    esac
+    # Assigned in two steps on purpose: bash 3.2 (macOS /bin/sh) mis-parses a
+    # single-quoted awk program nested inside "$( … )" and brace-expands the
+    # braces of the JSON object, which silently yields an EMPTY run list — i.e. a
+    # green arm that measured nothing.
+    rows=$(awk '{ printf "%s{\"databaseId\":%s,\"headSha\":\"%s\"}", (NR>1 ? "," : ""), $1, $2 }' "$ANCHOR_RUNS_FILE")
+    printf '[%s]' "$rows" | jq -r "$filter"
+    ;;
+  api)
+    id=$(printf '%s' "$2" | sed -n 's#.*/runs/\([0-9][0-9]*\)/jobs.*#\1#p')
+    # `changes` succeeds on EVERY run, superseded ones included — a stub that
+    # omitted it would let a name-blind selector pass.
+    if grep -qx "$id" "$ANCHOR_LEGS_FILE" 2>/dev/null; then
+      printf '{"jobs":[{"name":"changes","conclusion":"success"},{"name":"control-plane","conclusion":"skipped"},{"name":"instance","conclusion":"success"}]}'
+    else
+      printf '{"jobs":[{"name":"changes","conclusion":"success"},{"name":"control-plane","conclusion":"skipped"},{"name":"instance","conclusion":"skipped"}]}'
+    fi | jq -r "$filter"
+    ;;
+esac
+exit 0
+GHSTUB
+  chmod +x "$ANCHOR_TMP/bin/gh"
+  return 0
+}
+
+# anchor_run <step.sh> <runs> <legs> -> "<observed base sha>|<instance>"
+# <runs> is "<id> <sha>" per line, NEWEST FIRST; <legs> lists the ids whose
+# instance job concluded success.
+anchor_run() {
+  local step="$1" runs="$2" legs="$3" dr="$ANCHOR_TMP/repo"
+  local out="$ANCHOR_TMP/gh_output"
+  printf '%s\n' "$runs" >"$ANCHOR_TMP/runs.txt"
+  printf '%s\n' "$legs" >"$ANCHOR_TMP/legs.txt"
+  : >"$out"
+  # T_BEFORE is C0, deliberately DIFFERENT from both candidate anchors: a base
+  # that silently fell through to the github.event.before fallback is then
+  # visible as C0 rather than masquerading as a correct answer.
+  ( cd "$dr" && env -u DISPATCH_TARGETS -u DISPATCH_REASON \
+      PATH="$ANCHOR_TMP/bin:$PATH" \
+      GITHUB_EVENT_NAME=push \
+      GITHUB_REPOSITORY=FRIKKern/barkpark \
+      GITHUB_RUN_ID=999 \
+      GITHUB_OUTPUT="$out" \
+      ANCHOR_RUNS_FILE="$ANCHOR_TMP/runs.txt" \
+      ANCHOR_LEGS_FILE="$ANCHOR_TMP/legs.txt" \
+      T_SHA="$ANCHOR_HEAD_SHA" \
+      T_BEFORE="$ANCHOR_BASE_SHA" \
+      bash --noprofile --norc "$step" ) >"$ANCHOR_TMP/step.out" 2>&1 || true
+  printf '%s|%s' \
+    "$(sed -n 's/^diff base: //p' "$ANCHOR_TMP/step.out" | tail -1)" \
+    "$(sed -n 's/^instance=//p' "$out" | tail -1)"
+}
+
+# check_anchor <yml> <label> — 0 if a run that deployed nothing is never the
+# anchor AND a run that did deploy still is.
+check_anchor() {
+  local yml="$1" label="$2" step got base inst rc=0 hist
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    echo "HARNESS-UNAVAILABLE[$label]: python3 and jq are both required — the anchor arm cannot run." >&2
+    return 2
+  fi
+  anchor_fixture
+  step="$ANCHOR_TMP/changes-step.sh"
+  if ! extract_changes_step "$yml" "$step" 2>"$ANCHOR_TMP/extract.err"; then
+    echo "FAIL[$label]: could not extract the 'changes' job's step id 'f': $(cat "$ANCHOR_TMP/extract.err")" >&2
+    return 1
+  fi
+  hist="222 $ANCHOR_SUPERSEDED_SHA
+111 $ANCHOR_DEPLOYED_SHA"
+
+  # THE INVARIANT. Newest success (222) had BOTH legs skipped; the older run
+  # (111) deployed. The anchor must be 111's head, and the api/lib/ file merged
+  # between them must come back into the range.
+  got="$(anchor_run "$step" "$hist" "111")"
+  base="${got%%|*}"; inst="${got##*|}"
+  if [ "$base" = "$ANCHOR_DEPLOYED_SHA" ] && [ "$inst" = "true" ]; then
+    echo "  anchor   newest success deployed NOTHING  ->  diff base: $base (run 111, the last that deployed), instance=true"
+  else
+    echo "  ESCAPE   newest success deployed NOTHING  ->  diff base: ${base:-<none>}, instance=${inst:-<none>}" >&2
+    echo "           wanted diff base: $ANCHOR_DEPLOYED_SHA (run 111, instance job concluded success) and instance=true." >&2
+    echo "           run 222's head is $ANCHOR_SUPERSEDED_SHA — it exited superseded-at-start, so both" >&2
+    echo "           legs SKIPPED and no box moved; github.event.before is $ANCHOR_BASE_SHA." >&2
+    echo "           Anchoring on a run-level 'success' collapses the range and strands every deployable" >&2
+    echo "           file merged before it. Fix: select the newest run whose control-plane or instance" >&2
+    echo "           JOB concluded success (gh api repos/<repo>/actions/runs/<id>/jobs)." >&2
+    rc=1
+  fi
+
+  # THE POSITIVE CONTROL. Without it, a selector that simply always reached one
+  # run further back would satisfy the case above and this arm would certify a
+  # rule nobody stated.
+  got="$(anchor_run "$step" "$hist" "222
+111")"
+  base="${got%%|*}"; inst="${got##*|}"
+  if [ "$base" = "$ANCHOR_SUPERSEDED_SHA" ] && [ "$inst" = "false" ]; then
+    echo "  anchor   newest success DID deploy       ->  diff base: $base (run 222), instance=false (the range still answers)"
+  else
+    echo "  FAIL     newest success DID deploy       ->  diff base: ${base:-<none>}, instance=${inst:-<none>}," >&2
+    echo "           wanted diff base: $ANCHOR_SUPERSEDED_SHA (run 222) and instance=false. The selector reaches" >&2
+    echo "           past a run that DID deploy, so the case above proves nothing about leg conclusions." >&2
     rc=1
   fi
 
@@ -1437,6 +1631,15 @@ EOF
     return 2
   fi
 
+  # The anchor arm: the RANGE the classifier is handed. Every arm above judges
+  # what the classifier does with a diff; this one judges which previous run the
+  # diff is taken FROM — and a run that deployed nothing must never be it.
+  local anchor_rc=0
+  check_anchor "$yml" "$label" || anchor_rc=$?
+  if [ "$anchor_rc" -eq 2 ]; then
+    return 2
+  fi
+
   # The README arm: the PUBLISHED copy of the same predicate. Runs
   # unconditionally alongside the others so ONE run reports every drift it can
   # see. $README_FOR_CHECK exists only so --selftest can point the arm at a
@@ -1444,11 +1647,11 @@ EOF
   local readme_rc=0
   check_readme_routing "$yml" "${README_FOR_CHECK:-$REPO_ROOT/$README_DEFAULT}" "$label" || readme_rc=$?
 
-  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ] || [ "$exclusion_rc" -ne 0 ] || [ "$readme_rc" -ne 0 ]; then
+  if [ "$presence_rc" -ne 0 ] || [ "$reverse_rc" -ne 0 ] || [ "$producer_rc" -ne 0 ] || [ "$target_rc" -ne 0 ] || [ "$exclusion_rc" -ne 0 ] || [ "$anchor_rc" -ne 0 ] || [ "$readme_rc" -ne 0 ]; then
     return 1
   fi
 
-  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded; $excluded exclusion(s) not judged here); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row; exclusions: $EXCLUSIONS_CHECKED judged behaviourally (negative shallow+deep, control, mixed); README: $README_ROWS published routing row(s) equal the classifier, exclusion included."
+  echo "OK[$label]: $checked path(s) each target at least one deploy job ($exempted exempt, each bounded; $excluded exclusion(s) not judged here); reverse: $REVERSE_PREFIXES regex prefix(es), all reachable from on.push.paths; target: $TARGET_CHECKED declared (prefix -> job) pair(s), each reaching the job that builds it, and every listed tree has a row; exclusions: $EXCLUSIONS_CHECKED judged behaviourally (negative shallow+deep, control, mixed); README: $README_ROWS published routing row(s) equal the classifier, exclusion included; anchor: the diff base is the newest run with a leg-proven deploy, proved against a history whose newest success deployed nothing."
   return 0
 }
 
@@ -1496,14 +1699,14 @@ selftest() {
   local rc=0
   local out sub_rc
 
-  echo "selftest 1/20: the real workflow passes"
+  echo "selftest 1/21: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/20: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/21: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -1516,7 +1719,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/20: an unexplained targetless path must FAIL"
+  echo "selftest 3/21: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   sub_rc=0
@@ -1541,7 +1744,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/20: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/21: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
@@ -1565,7 +1768,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/20: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/21: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -1597,7 +1800,7 @@ YML
   fi
 
   echo
-  echo "selftest 6/20: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  echo "selftest 6/21: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
   # Mirror of case 2, but for DELETION not drift: strip the required push-path
   # line entirely. The drift arm now sees nothing to judge — the false-green W35
   # exists to close (charter D275). (Since the reverse arm landed, this half also
@@ -1616,7 +1819,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/20: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
+  echo "selftest 7/21: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
   # `web` is dispatched by the control-plane filter, but no on.push.paths entry
   # delivers a web/ file — so a web-only merge never starts the workflow and that
   # arm of the filter can only ever fire on somebody else's co-triggering merge.
@@ -1640,7 +1843,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/20: the reverse arm must actually RUN on the real workflow (non-vacuity)"
+  echo "selftest 8/21: the reverse arm must actually RUN on the real workflow (non-vacuity)"
   # A direction that silently checks nothing is worse than no direction: it puts
   # the word "reverse" in a green line. So the count must be non-zero AND the
   # per-prefix verdicts must be present, on the REAL file.
@@ -1663,7 +1866,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/20: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
+  echo "selftest 9/21: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
   # The D275 shape, and the reason the allowlist is not made redundant by the
   # reverse arm: with the push-path line AND its regex prefix both gone, the
   # forward arm has no path to judge and the reverse arm has no prefix to judge.
@@ -1695,7 +1898,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/20: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
+  echo "selftest 10/21: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
   # The fail-closed arm of prefixes_of, proven rather than asserted. A dispatch
   # filter that is not an anchored alternation is a filter this direction cannot
   # answer for — and "could not look" must never print as "it is fine". Without
@@ -1721,7 +1924,7 @@ YML
   fi
 
   echo
-  echo "selftest 11/20: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
+  echo "selftest 11/21: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
   # THE MUTATION THAT MATTERS. Every case above mutates a LIST; this one mutates
   # the line that feeds them, back to exactly what deploy.yml carried before the
   # wave-10 sweep. Both false-green shapes must reappear, or the behaviour arm is
@@ -1779,7 +1982,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 12/20: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
+  echo "selftest 12/21: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
   # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. cmd/**
   # stays listed in on.push.paths and stays matched by the CONTROL-PLANE regex,
   # so the forward arm still prints `ok`, the reverse arm still finds every
@@ -1840,7 +2043,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 13/20: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
+  echo "selftest 13/21: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
   # THE MEASURED FALSE GREEN (task-9ece1f95b89111cf). Before the bounded
   # exemption: `# deploy-filter-exempt:` above `- "internal/**"` plus
   # `internal|` removed from the cp AND instance filters read
@@ -1905,7 +2108,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 14/20: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
+  echo "selftest 14/21: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
   # The spelling the measured green used. An exemption that names no job
   # exempts from every job — over a tree it is Mutation C, over a file it is a
   # claim nobody can check. Either way it is refused by name.
@@ -1942,7 +2145,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 15/20: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
+  echo "selftest 15/21: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
   # The enumeration hole with no exemption involved: add web/** to
   # on.push.paths AND to the cp regex. Forward prints its cheerful ok, reverse
   # finds web reachable, presence and producer read clean, every declared pair
@@ -1994,7 +2197,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 16/20: an exemption whose named job's filter STILL matches the path must FAIL"
+  echo "selftest 16/21: an exemption whose named job's filter STILL matches the path must FAIL"
   # A bounded exemption is a checkable claim; this is the check. cloud/** is
   # matched by the cp filter, so `deploy-filter-exempt[cp]` above it is false.
   python3 - "$real" "$tmp/stale-exempt.yml" <<'PYMUT'
@@ -2030,7 +2233,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 17/20: deleting the '!api/test/**' push-path exclusion must FAIL (the exclusion presence allowlist)"
+  echo "selftest 17/21: deleting the '!api/test/**' push-path exclusion must FAIL (the exclusion presence allowlist)"
   # The push arm alone. The classifier keeps its grep -vE, so the BEHAVIOURAL
   # arm still reads clean — only the presence allowlist can see this half go.
   grep -v '^      - "!api/test/\*\*"$' "$real" > "$tmp/noexcl.yml"
@@ -2053,7 +2256,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 18/20: neutering the CLASSIFIER half must FAIL on the exclusion arm (LEAKS)"
+  echo "selftest 18/21: neutering the CLASSIFIER half must FAIL on the exclusion arm (LEAKS)"
   # The other half, and the one no arm could see before: on.push.paths still
   # carries the exclusion, so presence, forward, reverse, coverage and target all
   # read clean. Only driving the real step body against an api/test-only tree
@@ -2082,7 +2285,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 19/20: widening the exclusion to the whole api/ tree must FAIL on the CONTROL (OVER-EXCLUDED)"
+  echo "selftest 19/21: widening the exclusion to the whole api/ tree must FAIL on the CONTROL (OVER-EXCLUDED)"
   # The opposite failure, and the reason the arm carries a control at all: a
   # classifier that says false to everything satisfies the negative case and
   # deploys nothing. Without this case, selftest 18 could be answered by simply
@@ -2107,7 +2310,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 20/20: dropping the WHOLE diff when an excluded file is present must FAIL on the MIXED case"
+  echo "selftest 20/21: dropping the WHOLE diff when an excluded file is present must FAIL on the MIXED case"
   # The third distinct way to get an exclusion wrong, and the one both cases
   # above pass: subtract the excluded FILES and a real code change riding
   # alongside a test file still deploys; subtract the whole DIFF and it strands.
@@ -2146,6 +2349,78 @@ PY
       rc=1
     else
       echo "  ok: the gate reds when the exclusion drops the whole diff (mixed case alone)"
+    fi
+  fi
+
+  echo
+  echo "selftest 21/21: restoring the RUN-LEVEL success anchor must FAIL (the anchor arm)"
+  # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. Every
+  # list, every regex, the producer line and the exclusion all stay byte-identical;
+  # only the RANGE the classifier is handed moves. Restoring
+  # `--status=success --limit=1` makes the superseded run the anchor again — which
+  # is exactly what shipped and what stranded #19327 on 2026-09-18.
+  #
+  # The POSITIVE CONTROL inside the arm must stay green under this mutation: a
+  # run-level selector is RIGHT whenever the newest success did deploy. A
+  # mutation that reddened both cases would prove the arm notices a diff, not
+  # that it notices THIS defect.
+  python3 - "$real" "$tmp/run-level-anchor.yml" <<'PYANCHOR'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+start_mark = '          base=""\n'
+end_mark = '(already-covered stays disarmed)"\n          fi\n'
+ns, ne = s.count(start_mark), s.count(end_mark)
+if ns != 1 or ne != 1:
+    sys.exit("MUTATION ANCHORS matched %d/%d times, wanted 1/1 — the anchor selection no "
+             "longer looks as this selftest expects. Fix the anchor, do not loosen it." % (ns, ne))
+start = s.index(start_mark)
+end = s.index(end_mark) + len(end_mark)
+if start >= end:
+    sys.exit("MUTATION ANCHORS are out of order — refusing to cut a region backwards")
+legacy = ('          base="$(gh run list --workflow=deploy.yml --branch=main --status=success \\\n'
+          '                    --limit=1 --json headSha --jq \'.[0].headSha\' 2>/dev/null || true)"\n'
+          '          last_deployed=""\n'
+          '          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then\n'
+          '            last_deployed="$base"\n'
+          '          fi\n')
+out = s[:start] + legacy + s[end:]
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(dst, "w").write(out)
+PYANCHOR
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the run-level-anchor mutation could not be applied — case 21 proves nothing" >&2
+    rc=1
+  elif cmp -s "$real" "$tmp/run-level-anchor.yml"; then
+    echo "SELFTEST FAIL: the run-level-anchor mutation changed nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/run-level-anchor.yml" "run-level-anchor" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: the RUN-LEVEL success anchor read GREEN — the anchor arm cannot fail" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'ESCAPE   newest success deployed NOTHING' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the anchor arm naming the superseded run" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'anchor   newest success DID deploy' <<<"$out"; then
+      echo "SELFTEST FAIL: the POSITIVE CONTROL also red — this mutation must isolate the" >&2
+      echo "               superseded case; a selector that is wrong in BOTH directions" >&2
+      echo "               would prove the arm notices a diff, not that it notices this defect." >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -qE 'DRIFT|UNREACHABLE|MISSING|LEAKS|OVER-EXCLUDED|STRANDS-MIXED|ESCAPE   a cloud/' <<<"$out"; then
+      echo "SELFTEST FAIL: another arm also red — this fixture is meant to prove the list," >&2
+      echo "               producer and exclusion arms see NOTHING when only the RANGE moves," >&2
+      echo "               which is why the anchor arm is load-bearing and not redundant" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when the anchor reverts to run-level success; every other arm reads clean"
     fi
   fi
 
