@@ -288,13 +288,13 @@ defmodule Barkpark.AuthSessionTokenTest do
       unbound = %{bound | workspace_id: nil}
 
       for bad <- [nil, "", "global"] do
-        assert {:error, :no_workspace} =
-                 Auth.create_claude_session_token(
-                   unbound,
-                   Ecto.UUID.generate(),
-                   workspace_id: bad
-                 ),
-               "workspace_id: #{inspect(bad)} must be refused, exactly as cloud_workspace_id!/1 refuses it"
+        # Bound first so the message is reachable: `assert pattern = expr, msg`
+        # never prints msg (the unreachable-assert-message ratchet reds on it).
+        verdict =
+          Auth.create_claude_session_token(unbound, Ecto.UUID.generate(), workspace_id: bad)
+
+        assert verdict == {:error, :no_workspace},
+               "workspace_id: #{inspect(bad)} must be refused, exactly as cloud_workspace_id!/1 refuses it — got #{inspect(verdict)}"
       end
 
       # and the control in the same breath: a concrete one passes.
