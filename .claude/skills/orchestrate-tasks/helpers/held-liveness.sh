@@ -21,9 +21,25 @@
 # WHAT IT ANSWERS, per row in the lane's OWN held.txt (LEAD-BRIEF: "a pulse loop reads a file
 # only your lane writes"):
 #   a) who the LEDGER says holds it            (.doc.claim.worker)
-#   b) when the lease expires                  (.doc.claim.lease_extension.until when an open PR
-#      extends it; otherwise .doc.claim.ts_iso + the 45-minute lease — "A claim is a **45 min**
-#      lease (`:task_lease_ttl_seconds`, 2700 s)", docs/setup/TASK-SYSTEM.md line 92)
+#   b) when the lease expires                  = MAX(.doc.claim.ts_iso + the 45-minute lease,
+#      .doc.claim.lease_extension.until when the key is present) — never the extension ALONE.
+#      "A claim is a **45 min** lease (`:task_lease_ttl_seconds`, 2700 s)",
+#      docs/setup/TASK-SYSTEM.md line 92. The winning side is printed as `lease-source=`.
+#
+#      WHY MAX, RE-DERIVED FROM THE SERVER (api/lib/barkpark/tasks/ttl_sweeper.ex, read at
+#      e6b983c18; re-read these three sites rather than trusting this comment):
+#        * :329  the reap predicate on ts_iso —
+#                "((?->'claim'->>'ts_iso')::timestamptz IS NULL OR
+#                  (?->'claim'->>'ts_iso')::timestamptz < ?)"   [? = now - ttl]
+#        * :340  LEASE-EXTENSION-SQL, an ADDITIONAL `where` the candidate must ALSO satisfy —
+#                "((?->'claim'->'lease_extension'->>'until')::timestamptz IS NULL OR
+#                  (?->'claim'->'lease_extension'->>'until')::timestamptz <= ?)"   [? = now]
+#        * :448  lease_extended?/2, the in-lock re-check: `DateTime.compare(dt, now) == :gt`.
+#      Both `where`s are ANDed, so a row is reaped only when ts_iso is stale AND the window has
+#      elapsed. The extension is a SKIP, and a skip can only ever LENGTHEN a lease. Reading the
+#      extension IN PREFERENCE to ts_iso lets a STALE window SHORTEN the lease, which the server
+#      cannot do — measured 2026-09-18T09:54Z on task-b90711d2b54d8c07 (PR #19287 had merged, so
+#      nothing renewed the window): a row pulsing on cadence read LAPSING for ~45 minutes.
 #   c) how stale the lane's own pulse log is   (newest line of --log vs --pulse-interval)
 #   d) whether the loop's pid is still alive   (--pid-file)
 # Lease-until always comes from the LEDGER, never from local state: local state is exactly what
@@ -90,6 +106,14 @@ iso_epoch() {
   return 1
 }
 
+# epoch seconds -> ISO-8601 Z. GNU date first, then BSD/macOS. Empty on failure, never a guess.
+epoch_iso() {
+  local e="${1:-}"; [ -n "$e" ] || return 1
+  date -u -r "$e" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null && return 0
+  date -u -d "@$e" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null && return 0
+  return 1
+}
+
 # ---- THE PULSE LOG'S OWN STAMP (task-9afe7e0d6c901dbc) ---------------------------------------
 # A log line's LEADING stamp -> epoch seconds. TWO shapes are accepted, deliberately:
 #
@@ -139,6 +163,11 @@ log_stamp_epoch() {
 # frozen string). Seven arms:
 #   1 all-held green                     2 a row whose ledger worker DIFFERS  -> named, exit 1
 #   3 a lease inside the warning window  4 a pulse log older than the interval -> named, exit 1
+#   3b an open-PR extension LONGER than the ts lease (both rules agree -> it measures neither)
+#   3c a STALE extension under a FRESH ts_iso: ok, lease-source=ts+45m  (task-c5d38911080f3592)
+#   3d a FUTURE extension over a STALE ts_iso: ok, lease-source=extension (the mirror)
+#   MUTATION that must red 3c: `if [ -n "$ext_e" ]; then src=extension` first, i.e. prefer the
+#   extension. MUTATION that must red 3d: drop the ext_e branch and always take ts_e.
 #   4b the log pulse-loop.sh ACTUALLY WROTE (that helper is RUN, one round, stub bp) is measured
 #   4c every `date -u +<fmt>` READ OUT OF pulse-loop.sh's source is accepted, both directions
 #   4d CONTROL: the legacy time-only stamp is parsed, fresh and old, never silently STALE
@@ -243,10 +272,39 @@ EOF
     _want "arm3 prints its minutes-left"    1 '^task-aaa .*minutes-left=[0-9]+ '
   fi
   echo "== arm 3b: the SAME row with an open-PR lease_extension is NOT lapsing (ledger, not local)"
+  # NOTE on this fixture (it does NOT encode the old preference): ts_iso 38 min ago on a 45-min
+  # lease expires in 7 min, the window in 90 — so the extension is ALSO the max, and this arm
+  # stays green under both the old preference rule and the new max() rule. That is exactly why
+  # it could never have caught task-c5d38911080f3592: an arm whose two rules agree measures
+  # neither. Arms 3c and 3d are the two orderings where they DISAGREE.
   _row task-aaa lead-x "$(_ago 38)" in_progress "$(_in 90)"
   if _run "arm3b runs" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" --warn-minutes 15; then
     _last "arm3b verdict is OK" 'liveness: OK'
     _want "arm3b uses the extension" 1 '^task-aaa .*lease-source=extension'
+  fi
+
+  echo "== arm 3c (task-c5d38911080f3592): a STALE extension never SHORTENS a fresh ts_iso lease"
+  # THE MEASURED SHAPE. ts_iso 5 min ago => ts lease has ~40 min left. lease_extension.until is
+  # 20 min in the PAST (the PR merged; nothing renews the window). The server reaps on
+  # ts_iso + ttl (ttl_sweeper.ex:329) and treats the window as an ADDITIONAL skip (:340, :448),
+  # so this row is SAFE. Preferring the extension reports LAPSING on a row pulsing on cadence.
+  _row task-aaa lead-x "$(_ago 5)" in_progress "$(_ago 20)"
+  if _run "arm3c runs" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" --warn-minutes 15; then
+    _last "arm3c verdict is OK" 'liveness: OK'
+    _want "arm3c ts_iso wins the max"    1 "^task-aaa .*lease-source=ts\\+45m"
+    _want "arm3c keeps the ~40 min left" 1 '^task-aaa .*minutes-left=(39|40|41) '
+    _want "arm3c NEVER calls it lapsing" 0 '^task-aaa .*LAPSING'
+  fi
+
+  echo "== arm 3d (mirror): a FUTURE extension over a STALE ts_iso still wins — max, not ts-only"
+  # The other ordering. ts_iso 80 min ago (its 45-min lease elapsed 35 min ago) but the window
+  # is open 20 min out: ttl_sweeper.ex:340/:448 SKIP this row, so it is held, via the extension.
+  # This arm is what stops the fix over-correcting into "always ts_iso".
+  _row task-aaa lead-x "$(_ago 80)" in_progress "$(_in 20)"
+  if _run "arm3d runs" 0 -- "$d/lane" --expect-worker lead-x --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" --warn-minutes 15; then
+    _last "arm3d verdict is OK" 'liveness: OK'
+    _want "arm3d extension wins the max" 1 '^task-aaa .*lease-source=extension'
+    _want "arm3d NEVER calls it lapsing" 0 '^task-aaa .*LAPSING'
   fi
   _row task-aaa lead-x "$(_ago 5)" in_progress
 
@@ -511,20 +569,30 @@ for id in "${IDS[@]}"; do
   [ "$ts" = "-" ] && ts=""
   [ "$ext" = "-" ] && ext=""
 
-  # lease-until ALWAYS from the ledger: an extension when an open PR carries one, otherwise the
-  # claim's own ts_iso + the 45-min lease (docs/setup/TASK-SYSTEM.md:92).
-  src="ts+${LEASE}m"; until_iso="$ext"
-  if [ -n "$ext" ]; then
-    src="extension"
-  elif [ -n "$ts" ]; then
-    base=$(iso_epoch "$ts") || base=""
-    [ -n "$base" ] && until_iso=$(date -u -r $((base + LEASE*60)) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-                                  || date -u -d "@$((base + LEASE*60))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)
+  # lease-until ALWAYS from the ledger, and ALWAYS the LATER of the two candidates — the shape
+  # ttl_sweeper.ex:329 + :340 (both `where`s ANDed) and :448 enforce. See the header's (b).
+  # An extension can only LENGTHEN a lease; a STALE window (its PR merged, nothing renewed it)
+  # must never shorten one. `lease-source=` names the side that won, so a reader can tell a
+  # ts-driven lease from a PR-extended one WITHOUT re-reading the row.
+  ts_e=""; ts_until=""; ext_e=""
+  if [ -n "$ts" ]; then
+    if base=$(iso_epoch "$ts"); then
+      ts_e=$((base + LEASE*60)); ts_until=$(epoch_iso "$ts_e") || { ts_e=""; ts_until=""; }
+    fi
   fi
-  if [ -n "$until_iso" ] && ue=$(iso_epoch "$until_iso"); then
+  [ -n "$ext" ] && { ext_e=$(iso_epoch "$ext") || ext_e=""; }
+
+  src="?"; until_iso=""; ue=""
+  if [ -n "$ts_e" ] && { [ -z "$ext_e" ] || [ "$ts_e" -ge "$ext_e" ]; }; then
+    src="ts+${LEASE}m"; until_iso="$ts_until"; ue="$ts_e"
+  elif [ -n "$ext_e" ]; then
+    src="extension"; until_iso="$ext"; ue="$ext_e"
+  fi
+  if [ -n "$ue" ]; then
     left=$(( (ue - NOW) / 60 ))
   else
-    left=""; until_iso="${until_iso:-?}"
+    # Nothing parseable on either side. Show the raw string we DID get, never a computed one.
+    left=""; until_iso="${ext:-${ts:-?}}"; [ -n "$until_iso" ] || until_iso="?"
   fi
   base_line="$id worker=$w lease-until=${until_iso:-?} lease-source=$src minutes-left=${left:-?}"
 
