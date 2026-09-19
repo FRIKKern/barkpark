@@ -987,7 +987,7 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :not_found}
 
-  # ── Pull provenance (PDS-D15/D16 — where pulled data came from) ────────────
+  # ── Pull provenance (PDS-D15/PDS-D16 — where pulled data came from) ────────────
   #
   # A dataset pulled from another server (`bp dev pull`) records WHERE it came
   # from, in the same `settings` jsonb bag as `theme` / `plugins` / `chat`,
@@ -1043,7 +1043,7 @@ defmodule Barkpark.Tenancy do
 
   def pull_provenance(_workspace), do: %{}
 
-  # ─── The pull-provenance guard predicate (PDS-D21/D22, PDS-D125/D126) ──────
+  # ─── The pull-provenance guard predicate (PDS-D21/PDS-D22, PDS-D125/PDS-D126) ──────
   #
   # ONE home, TWO boot-time writers. `Plugins.Bootstrap.upsert_one/3` walks the
   # plugin registry; `Content.TagRegistry.register_attrs!/2` writes the core

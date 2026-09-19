@@ -47,7 +47,7 @@ defmodule Barkpark.PdsDoorCensusTest do
 
   ## The meter blind spot
 
-  PDS-D633/D646 obliges every meter-derived number in this epic to carry the
+  PDS-D633/PDS-D646 obliges every meter-derived number in this epic to carry the
   blind-spot sentence in the instrument's `@moduledoc` AND its printed output.
   A green ExUnit case prints nothing, so the printed half can only land on the
   instrument — and it is asserted here so a copy-paste cannot drop it:
@@ -443,6 +443,14 @@ defmodule Barkpark.PdsDoorCensusTest do
        ctx do
     out = ctx.check_out
 
+    # NOT EXPANDED, AND THE COMPRESSION IS THE POINT: this is not prose, it is a
+    # byte-for-byte pin on what scripts/pds-door-census.sh PRINTS, and that
+    # script lives in another lane's fence (scripts/pds-*). The deploy lane
+    # already expanded it once and had to REVERT, because this line is the
+    # contract. Expanding either half alone reds the other; the repair is a
+    # coordinated change in both trees. scripts/pds-citation-expand.sh --check
+    # classifies the script's token BLOCKED by finding this exact literal here,
+    # so re-prefixing it would also blind that guard.
     assert out =~ "METER BLIND SPOT (PDS-D633/D646)",
            "the blind-spot sentence is gone from the census's printed output. D633's own " <>
              "closing clause is that the sentence must ship in the instrument's @moduledoc AND " <>

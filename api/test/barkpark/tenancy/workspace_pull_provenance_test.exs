@@ -1,6 +1,6 @@
 defmodule Barkpark.Tenancy.WorkspacePullProvenanceTest do
   @moduledoc """
-  PULLED DATA KNOWS WHERE IT CAME FROM (PDS-D15/D16/D50).
+  PULLED DATA KNOWS WHERE IT CAME FROM (PDS-D15/PDS-D16/PDS-D50).
 
   Two halves, both proven against the real DB / real HTTP edge:
 

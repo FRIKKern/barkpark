@@ -1775,7 +1775,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # Stamp (and any future holder-gated verb) on a task with no live claim —
   # mirror the invalid_lifecycle wire shape instead of leaking inspect() output.
   def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
-  # Close honesty gates (PDS-D288/D289/D290). Each gets a STABLE wire token —
+  # Close honesty gates (PDS-D288/PDS-D289/PDS-D290). Each gets a STABLE wire token —
   # `inspect/1` on the tuple would leak Elixir syntax (`{:not_holder, "w"}`) into
   # a JSON `reason` field that the bp CLI and the pr-task gate both string-match.
   def reason_to_string({:not_holder, held}), do: "not_holder:#{held || "?"}"
@@ -1974,7 +1974,7 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|that criterion index is past the end of acceptance_criteria. The index is 0-BASED: the FIRST criterion is 0. Nothing was written.|
 
-  # Close honesty gates (PDS-D288/D289/D290). Same law as the D56 hints above:
+  # Close honesty gates (PDS-D288/PDS-D289/PDS-D290). Same law as the D56 hints above:
   # a refusal that does not teach the escape hatch is just a wall. Each names the
   # exact body field to add — both overrides are plain close-body params, so on
   # the CLI they ride `--set <field>="<reason>"`.

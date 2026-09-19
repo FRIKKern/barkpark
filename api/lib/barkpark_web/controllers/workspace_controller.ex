@@ -655,7 +655,7 @@ defmodule BarkparkWeb.WorkspaceController do
       below (the 25P02 blindfold that made it a bare `internal_error` 500 is
       gone, task-63a199c0a0ce2a06), and that refusal is pinned by an
       HTTP-level test.
-    * `mode=merge` (PDS-D8/D10) — convergent upsert over a possibly-populated
+    * `mode=merge` (PDS-D8/PDS-D10) — convergent upsert over a possibly-populated
       workspace. FAIL-CLOSED OPT-IN: refused with 403 `bundle_import_disabled`
       unless `Application.get_env(:barkpark, :allow_bundle_import, false)` is
       true (the env plumb ships separately; the default here is always false).
@@ -665,7 +665,7 @@ defmodule BarkparkWeb.WorkspaceController do
   Returns the import stats — `{tables, total_rows}` — as JSON (plus
   `mode: "merge"` on the merge path), and a `provenance` receipt: pulled data
   says WHERE it came from, both in the response and, durably, in the target
-  workspace's `settings["pull_provenance"]` (PDS-D15/D16).
+  workspace's `settings["pull_provenance"]` (PDS-D15/PDS-D16).
 
   An empty or truncated body answers 422 `invalid_bundle` — an honest refusal
   rather than the MatchError-driven 500 it used to raise (PDS-D50).
@@ -916,7 +916,7 @@ defmodule BarkparkWeb.WorkspaceController do
     reraise(e, stacktrace)
   end
 
-  # PDS-D15/D16 — stamp WHERE the imported data came from into the target
+  # PDS-D15/PDS-D16 — stamp WHERE the imported data came from into the target
   # workspace's `settings["pull_provenance"]`, keyed by dataset slug, and echo
   # the same receipt in the response.
   #
