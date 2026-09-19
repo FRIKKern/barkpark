@@ -105,25 +105,28 @@ defmodule Barkpark.Content.Broadcast do
       sender: self()
     }
 
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      global_list_topic(dataset),
-      {:document_changed, global_msg(msg)}
-    )
-
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      doc_topic(DraftId.published_id(doc.doc_id), doc.type, doc.workspace_id, dataset),
-      {:doc_updated, msg}
-    )
-
-    if doc.workspace_id do
+    # EXACTLY ONE document-list topic per document (see `global_list_topic/1`):
+    # the global one for a shared-layer (nil-workspace) document, the
+    # workspace-keyed one for a workspace-owned document. Never both.
+    if shared_layer?(doc.workspace_id) do
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        global_list_topic(dataset),
+        {:document_changed, msg}
+      )
+    else
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
         workspace_list_topic(dataset, doc.workspace_id),
         {:document_changed, msg}
       )
     end
+
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      doc_topic(DraftId.published_id(doc.doc_id), doc.type, doc.workspace_id, dataset),
+      {:doc_updated, msg}
+    )
 
     :ok
   end
@@ -169,8 +172,6 @@ defmodule Barkpark.Content.Broadcast do
           sender: self()
         }
 
-        global_topic = global_list_topic(dataset)
-
         # Workspace-scope the per-doc topic (barkpark-rwva, P1 sibling of
         # barkpark-n56v). doc_ids/pubids are per-workspace, so the old
         # workspace-less `doc:<dataset>:<type>:<pubid>` topic collapsed two
@@ -180,18 +181,20 @@ defmodule Barkpark.Content.Broadcast do
         # both sides normalize nil identically (see doc_topic/3).
         doc_topic = doc_topic(DraftId.published_id(doc.doc_id), type, doc.workspace_id, dataset)
 
-        maybe_broadcast(global_topic, {:document_changed, global_msg(msg)})
-        maybe_broadcast(doc_topic, {:doc_updated, msg})
-
-        # Additional workspace-scoped topic so consumers can subscribe by
-        # workspace without filtering the global stream. ADDITIVE — the
-        # global `documents:#{dataset}` topic above is untouched.
-        if doc.workspace_id do
+        # EXACTLY ONE document-list topic per document (see
+        # `global_list_topic/1`): a shared-layer document is announced on the
+        # global topic, a workspace-owned one on its workspace-keyed topic —
+        # and NOTHING about a workspace-owned document reaches the global one.
+        if shared_layer?(doc.workspace_id) do
+          maybe_broadcast(global_list_topic(dataset), {:document_changed, msg})
+        else
           maybe_broadcast(
             workspace_list_topic(dataset, doc.workspace_id),
             {:document_changed, msg}
           )
         end
+
+        maybe_broadcast(doc_topic, {:doc_updated, msg})
 
         maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id,
           workspace_id: doc.workspace_id,
@@ -777,8 +780,24 @@ defmodule Barkpark.Content.Broadcast do
   @doc """
   The GLOBAL (workspace-less) document-list topic: `documents:<dataset>`.
 
-  Fired for EVERY document in the dataset regardless of owner — see
-  `global_msg/1` for why that is safe and what it costs.
+  THE TENANT FENCE, PRODUCER SIDE (task-b7e81f26e959106c, ruling (b) —
+  retiring the #17207 residual). This topic fires ONLY for a SHARED-LAYER
+  document (`workspace_id IS NULL`). A workspace-owned document is announced
+  on `workspace_list_topic/2` ALONE: no frame of any shape — not even an
+  identity-only `{doc_id, type, rev, workspace_id}` one — reaches this topic
+  for it, because a workspace-owned document's identity and activity (which
+  doc changed, to which rev, when) is tenant data, and doc ids can be
+  user-chosen slugs. #17207 stripped the PAYLOAD from such frames and let the
+  identity through so instance-wide daemons (`Quiz.Bridge`) could keep one
+  subscription; that residual is retired — every consumer that needs a
+  workspace's frames joins that workspace's keyed topic
+  (`subscribe_documents/2`).
+
+  The global topic has no workspace component, so every subscriber receives
+  every frame on it — which is exactly why only the layer with no tenant may
+  be announced here. `content_pubsub_global_topic_leak_test.exs` pins both
+  halves: NO frame for a foreign workspace's document, and the shared layer
+  still arriving with its payload.
   """
   @spec global_list_topic(String.t()) :: String.t()
   def global_list_topic(dataset), do: "documents:#{dataset}"
@@ -786,8 +805,8 @@ defmodule Barkpark.Content.Broadcast do
   @doc """
   The workspace-keyed document-list topic: `documents:ws:<ws_id>:<dataset>`.
 
-  Fired ONLY for a document that HAS a `workspace_id`; it is the only topic
-  that carries a workspace-owned document's payload.
+  Fired for a document that HAS a `workspace_id`, and it is the ONLY topic on
+  which such a document is announced — payload, identity, anything.
   """
   @spec workspace_list_topic(String.t(), String.t()) :: String.t()
   def workspace_list_topic(dataset, workspace_id) when is_binary(workspace_id),
@@ -796,27 +815,22 @@ defmodule Barkpark.Content.Broadcast do
   @doc """
   Join every document-list topic a consumer scoped to `ws_id` must hear.
 
-  A document is announced on EXACTLY ONE PAYLOAD-BEARING topic — the global
+  A document is announced on EXACTLY ONE document-list topic — the global
   topic when it has no workspace (the shared layer), the workspace-keyed topic
   when it has one — so a subscriber to both sees every document it is entitled
-  to WITH its payload, and no foreign tenant's payload at all.
-
-  ## A workspace-owned document arrives TWICE — guard on the payload
-
-  The global topic keeps firing for every document (see `global_msg/1` for why
-  it must), so a consumer joined to BOTH topics receives a workspace-owned
-  document twice: first the PAYLOAD-FREE frame on the global topic
-  (`:document` and `:doc` are `nil`), then the full frame on the keyed one.
-  A handler that reads `msg.doc` MUST therefore require it — match
-  `%{doc: doc} when is_map(doc)` and let the stripped twin fall through to a
-  catch-all — or it will fold an EMPTY document: `Tasks.Web.BoardLive`,
-  `StudioChat.Recorder` and `ChatLive` all do exactly that. A handler that
-  reads identity only (`doc_id`, `type`, `rev`) may take both and dedupe on
-  `event_id`.
+  to, exactly once, WITH its payload, and nothing at all about any foreign
+  tenant's documents.
 
   A consumer with no workspace in context (`ws_id` nil) joins the global topic
-  alone and therefore sees payloads for the shared layer only; foreign
-  workspaces reach it as content-free frames (`global_msg/1`).
+  alone and therefore hears the shared layer only. An instance-wide daemon
+  that serves ONE resolvable tenant (the seeded Default workspace — the public
+  reader's tenant, `Quiz.Bridge`'s bindable set) passes that workspace's id.
+
+  The `%{doc: doc} when is_map(doc)` guard `Tasks.Web.BoardLive`,
+  `StudioChat.Recorder` and `ChatLive` carry was written for the #17207 era in
+  which a workspace-owned document ALSO arrived as a payload-free twin on the
+  global topic; that twin no longer exists, and the guard is now merely
+  defensive.
   """
   @spec subscribe_documents(String.t(), String.t() | nil) :: :ok
   def subscribe_documents(dataset, ws_id) do
@@ -829,47 +843,10 @@ defmodule Barkpark.Content.Broadcast do
     :ok
   end
 
-  @doc """
-  THE PRODUCER-SIDE TENANT FENCE for the global `documents:<dataset>` topic
-  (task-5d0615ee60143cc8 — the producer half of task-be3b3aa6da5df3a2).
-
-  The global topic has no workspace component, so every one of its subscribers
-  receives every tenant's frame. Until now that frame carried the FULL payload
-  — `Envelope.render(doc, nil, :internal)` plus `title`/`status`/`content` —
-  so any process that joined `documents:<dataset>` read other tenants' document
-  bodies. `Shared.own_tenant?/2` (#17132) closed the Studio CONSUMER; this
-  closes the PRODUCER, for every consumer at once and for the ones that never
-  filtered at all.
-
-  ## Why redact rather than stop firing the topic
-
-  AVAILABILITY AND DISCLOSURE ARE SEPARATE HALVES (the rule
-  `ListenController.list_topic/2` already states in its own comment). A
-  shared-layer document — `workspace_id IS NULL` — is announced on the global
-  topic ALONE, so the topic cannot be silenced without silencing the shared
-  layer. And genuinely instance-wide consumers exist that need only identity:
-  `Quiz.Bridge` folds `{:document_changed, %{type: "quiz", doc_id: id}}` and
-  then RE-READS the document itself, so a content-free frame serves it exactly
-  as well as a full one.
-
-  So the topic keeps firing for every document; what changes is that a
-  WORKSPACE-OWNED document's global frame is stripped of its payload. The
-  metadata a fan-out needs to decide "is this mine, and should I re-read?" —
-  `event_id`, `type`, `mutation`, `doc_id`, `rev`, `previous_rev`,
-  `workspace_id`, `project_id`, `sender` — survives; `:document` and `:doc`
-  become `nil`. A shared-layer document (nil workspace) is unchanged: it has no
-  tenant to leak from, and the global topic is its only announcement.
-
-  A consumer that NEEDS a workspace-owned payload joins the workspace-keyed
-  topic (`subscribe_documents/2`), which still carries the full message.
-  """
-  @spec global_msg(map()) :: map()
-  def global_msg(%{workspace_id: nil} = msg), do: msg
-
-  def global_msg(%{workspace_id: ws} = msg) when is_binary(ws) and ws != "",
-    do: %{msg | document: nil, doc: nil}
-
-  def global_msg(msg), do: msg
+  # A document with no workspace is the SHARED LAYER — the only layer the global
+  # document-list topic may announce. Everything else is workspace-owned and is
+  # announced on its keyed topic alone (`global_list_topic/1`).
+  defp shared_layer?(workspace_id), do: is_nil(workspace_id)
 
   # Normalize a (possibly nil) workspace_id into the deterministic token both
   # the broadcast side and the subscribe side use to build a PubSub topic. A
