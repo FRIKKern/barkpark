@@ -35,7 +35,8 @@
 //   --min N   floor per project (default 1). A floor of 1 is the honest bar:
 //             this gate answers "did it run", never "did it run enough".
 // Exit 0 = every declared project cleared the floor.
-// Exit 1 = at least one declared project is dark (named in the output).
+// Exit 1 = at least one declared project is dark, OR a workspace package that
+//          ships test files is covered by no declared project (named in the output).
 // Exit 2 = the harness itself failed (could not enumerate or could not run) —
 //          distinct on purpose, because a broken harness must never read as a
 //          pass, and must never read as a project defect either.
@@ -43,7 +44,12 @@
 import { createVitest } from 'vitest/node'
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+import {
+  DerivationError,
+  needsTestExecution,
+  workspacePackages,
+} from './workspace-packages.mjs'
 
 const argv = process.argv.slice(2)
 const minIdx = argv.indexOf('--min')
@@ -148,6 +154,64 @@ if (declared.length === 0) {
 console.log(`check-vitest-projects: ${declared.length} declared project(s), floor ${MIN} test(s) each`)
 console.log(declared.map((n) => `  declared: ${n}`).join('\n'))
 
+// ---------------------------------------------------------------------------
+// RECONCILIATION AGAINST THE WORKSPACE PACKAGE SET (task-d4c973367c0d1a76 c3).
+//
+// Everything above this point is honest about its own scope and blind past it:
+// it guards every project VITEST DECLARES. Nothing bound that declared set to
+// the PACKAGE set, and `packages/*/vitest.config.ts` is what makes a package
+// declarable at all — so a package with test files and no config was not a
+// dark project, it was NO project, and this script printed a SMALLER declared
+// count and "OK". Measured on 6744725c58d6657b0e90e4767ee17e938b87cf9e with
+// packages/w3probe (a failing test file, no `test` script, no vitest config):
+//   check-vitest-projects: 17 declared project(s), floor 1 test(s) each
+//   check-vitest-projects: OK — all 17 declared project(s) executed tests.  EXIT=0
+// A count that SHRINKS when coverage is lost is not an instrument.
+//
+// So: derive the package set (scripts/workspace-packages.mjs — pnpm-workspace.yaml,
+// not a list here), take every package that SHIPS TEST FILES, and require at
+// least one declared project ROOTED INSIDE it. Nothing below names a package;
+// a package added tomorrow is reconciled on its first run.
+let workspace
+try {
+  workspace = workspacePackages(process.cwd())
+} catch (err) {
+  if (!(err instanceof DerivationError)) throw err
+  console.error(`check-vitest-projects: HARNESS FAILURE — ${err.message}`)
+  await vitest.close().catch(() => {})
+  process.exit(2)
+}
+
+const projectRoots = vitest.projects.map((p) => resolve(String(p.config?.root ?? process.cwd())))
+const unreconciled = workspace
+  .filter(needsTestExecution)
+  .filter((pkg) => !projectRoots.some((r) => r === pkg.dir || r.startsWith(pkg.dir + sep)))
+
+console.log(
+  `check-vitest-projects: reconciled against ${workspace.length} workspace package(s); ` +
+    `${workspace.filter(needsTestExecution).length} ship test files`,
+)
+
+if (unreconciled.length > 0) {
+  console.error('')
+  console.error(
+    `check-vitest-projects: FAILED — ${unreconciled.length} workspace package(s) ship test ` +
+      'files that NO declared vitest project covers. They are not dark projects; they are ' +
+      'not projects at all, so the declared count above simply does not mention them:',
+  )
+  for (const pkg of unreconciled) {
+    console.error(
+      `  - ${pkg.name} (${pkg.dir}): ${pkg.testFiles.length} test file(s), e.g. ${pkg.testFiles[0]}` +
+        (pkg.hasVitestConfig
+          ? ' — it HAS a vitest config, but no declared project resolves to it; check that js/vitest.config.mts still globs it'
+          : ' — it has NO vitest config, so js/vitest.config.mts cannot glob it. Add vitest.config.ts'),
+    )
+  }
+  console.error('')
+  await vitest.close().catch(() => {})
+  process.exit(1)
+}
+
 /** counts[project] = { tests, files, failedFiles } */
 const counts = Object.fromEntries(declared.map((n) => [n, { tests: 0, files: 0, failedFiles: 0 }]))
 
@@ -250,5 +314,8 @@ if (failedHere > 0) {
       'Not this gate\'s verdict (the Test step owns pass/fail); reported so it is never a surprise.',
   )
 }
-console.log(`check-vitest-projects: OK — all ${declared.length} declared project(s) executed tests.`)
+console.log(
+  `check-vitest-projects: OK — all ${declared.length} declared project(s) executed tests, ` +
+    `and every one of ${workspace.filter(needsTestExecution).length} test-shipping workspace package(s) is covered by one.`,
+)
 process.exit(0)
