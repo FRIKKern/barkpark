@@ -1401,7 +1401,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
         |> Params.put_opt(:landed, landed)
-        # The two LOUD overrides (PDS-D288/D289). Without these two lines the
+        # The two LOUD overrides (PDS-D288/PDS-D289). Without these two lines the
         # honesty gates are refuse-only over HTTP — a lead could not seal a
         # foreign task and nobody could close over an honest unmet criterion
         # through the API or the bp CLI at all. `bp task close … --set

@@ -3,7 +3,7 @@ package cli
 // tasks_close_pulse_cmd.go — the read-back for `bp task close` and
 // `bp task pulse`, the two siblings of `bp task stamp` on the same ledger.
 //
-// Wave 26 gave `stamp` a second read (PDS-D359/D361) and cut the slice at the
+// Wave 26 gave `stamp` a second read (PDS-D359/PDS-D361) and cut the slice at the
 // stamp verb. Its two siblings carry the SAME exposure and were left reporting
 // success on an exit code alone:
 //

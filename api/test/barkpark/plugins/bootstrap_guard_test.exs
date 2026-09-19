@@ -1,6 +1,6 @@
 defmodule Barkpark.Plugins.BootstrapGuardTest do
   @moduledoc """
-  THE PULL-PROVENANCE GUARD (PDS-D21/D22).
+  THE PULL-PROVENANCE GUARD (PDS-D21/PDS-D22).
 
   `bootstrap_default_slot_probe_test.exs` proves the HAZARD: a pulled schema row
   sitting in the Default dataset slot is UPDATED in place on every boot and

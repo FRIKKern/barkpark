@@ -96,8 +96,8 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # (compose.ex `Map.get(b, "ordered") == true` -> PdList ordered), so dropping
   # it turned every numbered list in a pulled paper back into bullets on push.
   defp block(%{"type" => "list"} = b, d) do
-    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<li>#{inline(&1)}</li>")
-    wrap("ul", attr_str(b, ["id", "ordered"]), items, d)
+    items = Enum.map(Map.get(b, "items", []), &list_item_tag(&1, d))
+    wrap("ul", attr_str(b, ["id", "ordered", "task"]), items, d)
   end
 
   # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
@@ -506,6 +506,24 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # FunctionClauseError, which escaped the callers' rescue as a raw 500.
   defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
   defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
+
+  # A checklist item is a map ({content|text, checked}); its `checked` rides as an
+  # attribute and its body prints like any inline array.
+  defp list_item_tag(item, d) do
+    pad(d + 1) <> "<li" <> li_attrs(item) <> ">" <> inline(list_item_inline(item)) <> "</li>"
+  end
+
+  defp li_attrs(%{"checked" => true}), do: ~s( checked="true")
+  defp li_attrs(_), do: ""
+
+  defp list_item_inline(%{} = item) do
+    case Map.get(item, "content") do
+      content when is_list(content) -> content
+      _ -> [%{"type" => "text", "value" => to_string(Map.get(item, "text") || "")}]
+    end
+  end
+
+  defp list_item_inline(item), do: item
 
   # `variant` must be a SCALAR string to print — `attr_str`'s `to_string/1`
   # raises Protocol.UndefinedError on a map. A non-binary variant is DROPPED

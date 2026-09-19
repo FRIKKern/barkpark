@@ -2,7 +2,7 @@ package taskboard
 
 // seal_readback.go — the typed SECOND READ behind `bp task close` and
 // `bp task pulse`, the two siblings of `bp task stamp` on the same ledger
-// (charter PDS-D359/D361: a ledger writer may not report a write it never read
+// (charter PDS-D359/PDS-D361: a ledger writer may not report a write it never read
 // back).
 //
 // `stamp` got its read-back in wave 26 and these two were left reporting

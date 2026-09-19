@@ -143,6 +143,36 @@ mc_hold_verdict(){
   printf 'CLEAR\tlabels: [%s]\n' "$names"; return 0
 }
 
+# THE PDS-CITATION CLASSIFIER. Lives HERE, above --selftest, for the same reason
+# mc_hold_verdict does: the selftest's arms must drive THIS function and the REAL
+# `arm`/`cannot` helpers, not a copy of the case statement. A selftest that
+# re-types the mapping it is checking pins nothing (the A6 lesson in this file).
+#
+# WHY IT IS A SIBLING OF ARM 6 AND NOT AN EXTENSION OF IT. `squash sentinels`
+# greps the PR BODY for D-tokens and warns that the squash message can re-create
+# a guarded literal on main. This reads the PR DIFF and asks a different question
+# of a different corpus: does each PDS-D number the diff INTRODUCES resolve to a
+# decision the charter ALREADY defines on origin/main. A body citing a
+# perfectly-resolving number still needs the sentinel warning; a diff citing a
+# phantom still needs this one. Folding them makes both verdicts unreadable.
+#
+# THE HAZARD (PDS-D643, mechanised by scripts/pds-citation-precedes-merge.sh):
+# on 2026-08-03 three slice PRs merged forty minutes BEFORE the charter PR that
+# defined the numbers they cite, and origin/main carried thirteen hits in
+# shipped code pointing at decisions it did not define.
+#
+# THREE OUTCOMES, NOT TWO. rc 2 (and anything else) is UNCHECKED — the predicate
+# refuses to print a verdict when its own controls do not fire — and UNCHECKED is
+# `cannot`, never a pass. A predicate that could not look must not read as clean.
+mc_pds_citation_verdict(){ # <rc> <output-of-the-predicate>
+  local rc="${1-}" out="${2-}"
+  case "$rc" in
+    0) arm ok "pds citation" "resolves on origin/main —$(printf '%s' "$out" | sed -n 's/^  citations  ://p')" ;;
+    1) arm no "pds citation" "cites what origin/main does not define: $(printf '%s' "$out" | sed -n 's/^  MISSING: //p')" ;;
+    *) cannot "pds citation" "$(printf '%s' "$out" | tail -1)" ;;
+  esac
+}
+
 # Display join. NEVER re-parsed: check names contain commas (A14).
 mc_join(){ awk 'NR>1{printf ", "}{printf "%s",$0} END{if(NR)printf "\n"}'; }
 
@@ -944,13 +974,138 @@ if [ "${1:-}" = "--selftest" ]; then
     _ok "CONTROL the stripped grep sees code" "the same stripped stream finds the live CLEAR branch, exactly once"
   else _no "CONTROL the stripped grep sees code" "expected exactly 1 live CLEAR branch, found ${_passclear:-0} — A17k is vacuous or the arm was duplicated"; fi
 
+  # ── A18 — THE PDS-CITATION ARM, PROVEN IN BOTH DIRECTIONS ─────────────────
+  #
+  # NOT FIXTURE THEATRE. These arms run the REAL predicate
+  # (scripts/pds-citation-precedes-merge.sh) over a THROWAWAY GIT REPO this
+  # block writes, then hand its ACTUAL rc and ACTUAL stdout to the REAL
+  # classifier mc_pds_citation_verdict, which calls the REAL `arm`/`cannot`
+  # helpers and moves the REAL counters. Nothing below re-types the case
+  # statement it is checking, and nothing below matches its own fixture: the
+  # two `sed` extractions in the classifier are read off output the predicate
+  # produced, so a classifier whose extraction stopped matching reds here.
+  #
+  # THE REPO IS ITS OWN CORPUS. The real charter is never read, so the verdict
+  # cannot move when an unrelated PR lands, and no network or origin/main
+  # history is needed — the merge-check leg may be checked out shallow.
+  #
+  # THE PHANTOM NUMBER IS BUILT ARITHMETICALLY, never written as a prefixed
+  # literal: the live arm above runs this very predicate over this very file's
+  # diff, and a planted phantom written out would red the arm by construction.
+  # Anchored on THIS FILE's location, never on $PWD: merge-check.sh --selftest is
+  # run from wherever the operator stands, and a relative subject path would make
+  # the arms below vanish (or worse, read a different tree) off the cwd alone.
+  PWD_REAL="$(cd "$(dirname "$0")/.." && pwd)"
+  _pc_subj="scripts/pds-citation-precedes-merge.sh"
+  _pc_lens="$PWD_REAL/scripts/pds-record-parity.sh"
+  if [ ! -f "$PWD_REAL/$_pc_subj" ] || [ ! -f "$_pc_lens" ]; then
+    # ABSENCE IS NOT A SKIP. A missing subject makes every arm below vacuous, so
+    # it refuses loudly — six times, once per arm it displaced, so the tally
+    # reads FAILED (a diagnosis) and not CANNOT READ (a floor breach).
+    _no "a defined citation PASSES" "missing $PWD_REAL/$_pc_subj or $_pc_lens — this arm measured nothing"
+    _no "the PASS detail is extracted, not empty" "not run: the subject or its lens is absent"
+    _no "a phantom citation REFUSES" "not run: the subject or its lens is absent"
+    _no "the refusal NAMES the number" "not run: the subject or its lens is absent"
+    _no "UNCHECKED refuses, it does not pass" "not run: the subject or its lens is absent"
+    _no "UNCHECKED counts against the verdict" "not run: the subject or its lens is absent"
+  else
+    _pcD1=$((100 + 0)); _pcD2=$((100 + 1)); _pcPH=$((9000 + 91))
+    _pcT="$(mktemp -d "${TMPDIR:-/tmp}/mc-pdscite.XXXXXX")"
+    mkdir -p "$_pcT/.claude/workflows" "$_pcT/api"
+    git -C "$_pcT" init -q -b main
+    git -C "$_pcT" config user.email t@example.com
+    git -C "$_pcT" config user.name t
+    git -C "$_pcT" config commit.gpgsign false
+    {
+      echo "# Fixture charter"; echo
+      echo "### PDS-D${_pcD1} — THE FIRST DECISION."; echo "body"; echo
+      echo "- **PDS-D${_pcD2} — THE SECOND DECISION.** body"
+    } > "$_pcT/.claude/workflows/bp-pds-charter.md"
+    echo "seed" > "$_pcT/api/seed.ex"
+    git -C "$_pcT" add -A && git -C "$_pcT" commit -q -m base
+    git -C "$_pcT" checkout -q -b slice
+
+    # A FILE REDIRECT, NOT A COMMAND SUBSTITUTION. `v=$(mc_pds_citation_verdict …)`
+    # runs the classifier in a SUBSHELL, so ARMS and FAIL come back unchanged and
+    # every counter assertion below would read 0->0 and fail while the classifier
+    # worked perfectly. Measured here on the first run of these arms. The verdict
+    # must be captured WITHOUT losing the side effect that IS the thing under test.
+    _pcVF="$(mktemp "${TMPDIR:-/tmp}/mc-pdsv.XXXXXX")"
+    _pc_verdict(){ mc_pds_citation_verdict "$_pcRC" "$_pcOUT" > "$_pcVF" 2>&1; _pcV="$(cat "$_pcVF")"; }
+
+    _pc_run(){ # -> $_pcOUT, $_pcRC
+      _pcOUT="$(cd "$_pcT" && bash "$PWD_REAL/$_pc_subj" --root "$_pcT" --base main --head HEAD --lens "$_pc_lens" 2>&1)"
+      _pcRC=$?
+    }
+
+    # DIRECTION 1 — a diff citing a number the base charter DEFINES must PASS.
+    echo "# see PDS-D${_pcD1} for why" >> "$_pcT/api/seed.ex"
+    git -C "$_pcT" commit -q -am "cite a defined decision"
+    _pc_run
+    _A0=$ARMS; _F0=$FAIL
+    _pc_verdict
+    if [ "$_pcRC" -eq 0 ] && [ "$FAIL" -eq "$_F0" ] && [ "$ARMS" -eq "$((_A0 + 1))" ]; then
+      _ok "a defined citation PASSES" "predicate rc=0; the arm reported and did NOT refuse: ${_pcV}"
+    else
+      _no "a defined citation PASSES" "rc=$_pcRC FAIL $_F0->$FAIL ARMS $_A0->$ARMS — ${_pcV}"
+    fi
+    # and the PASS detail must carry the predicate's own citations line, or the
+    # classifier's sed matched nothing and the verdict is content-free.
+    case "$_pcV" in
+      *"introduced occurrence"*) _ok "the PASS detail is extracted, not empty" "the citations line reached the verdict: ${_pcV}" ;;
+      *) _no "the PASS detail is extracted, not empty" "the classifier's sed pulled nothing off real output: ${_pcV}" ;;
+    esac
+
+    # DIRECTION 2 — a diff citing a number NOTHING defines must RED, BY NAME.
+    echo "# and also PDS-D${_pcPH}, which is nothing" >> "$_pcT/api/seed.ex"
+    git -C "$_pcT" commit -q -am "cite a phantom"
+    _pc_run
+    _A0=$ARMS; _F0=$FAIL
+    _pc_verdict
+    if [ "$_pcRC" -eq 1 ] && [ "$FAIL" -eq "$((_F0 + 1))" ]; then
+      _ok "a phantom citation REFUSES" "predicate rc=1 and the arm refused: ${_pcV}"
+    else
+      _no "a phantom citation REFUSES" "rc=$_pcRC FAIL $_F0->$FAIL — a phantom did not reach the verdict: ${_pcV}"
+    fi
+    case "$_pcV" in
+      *"PDS-D${_pcPH}"*) _ok "the refusal NAMES the number" "the MISSING list reached the verdict: PDS-D${_pcPH}" ;;
+      *) _no "the refusal NAMES the number" "the refusal does not name PDS-D${_pcPH}: ${_pcV}" ;;
+    esac
+
+    # DIRECTION 3 — UNCHECKED is `cannot`, never a pass. An unresolvable base
+    # makes the predicate exit 2 with no verdict printed; a classifier that
+    # folded that into the 0-branch would publish a clean bill off a read that
+    # never happened.
+    _pcOUT="$(cd "$_pcT" && bash "$PWD_REAL/$_pc_subj" --root "$_pcT" --base no-such-ref-here --head HEAD --lens "$_pc_lens" 2>&1)"; _pcRC=$?
+    _A0=$ARMS; _F0=$FAIL
+    _pc_verdict
+    case "${_pcRC}|${_pcV}" in
+      2\|CANNOT*) _ok "UNCHECKED refuses, it does not pass" "predicate rc=2 -> ${_pcV}" ;;
+      *) _no "UNCHECKED refuses, it does not pass" "rc=$_pcRC -> ${_pcV} — an unreadable corpus must not print a pass" ;;
+    esac
+    if [ "$FAIL" -eq "$((_F0 + 1))" ]; then
+      _ok "UNCHECKED counts against the verdict" "FAIL $_F0->$FAIL"
+    else _no "UNCHECKED counts against the verdict" "FAIL $_F0->$FAIL — a CANNOT READ that costs nothing is decoration"; fi
+
+    rm -rf -- "$_pcT" "$_pcVF"
+  fi
+
+  # A18f — PIN THE LIVE CALL. Every arm above drives the classifier directly, so
+  # deleting the live invocation would leave all of them green while the shipped
+  # check measured nothing. Assert the live path calls it, exactly once, off a
+  # comment-stripped stream (a hit inside a comment is documentation, not code).
+  _pclive=$(grep -v '^[[:space:]]*#' "$0" | grep -c 'mc_pds_citation_verdict "\$PCS_RC"' || true)
+  if [ "${_pclive:-0}" -eq 1 ]; then
+    _ok "the live pds-citation arm is wired" "1 live call to the classifier on the merge path"
+  else _no "the live pds-citation arm is wired" "found ${_pclive:-0} live call(s) — the arm above is unreachable in production"; fi
+
   # DERIVED tally with its own floor. A hardcoded count is a lie waiting.
   _total=$((_p+_f))
   # THE FLOOR RISES WITH THE SUITE. 26 before the pending/failure split and the
   # workflow-history read added 10 arms (A15..A15d, A16..A16e); the hold-label
   # repair added 12 more (A17..A17m); A1b split into a
   # platform-independent arm plus a platform-scoped one.
-  if [ "$_total" -lt 49 ]; then
+  if [ "$_total" -lt 56 ]; then
     echo "MERGE-CHECK SELFTEST: CANNOT READ — only $_total arm(s) reported; this tally measures nothing"; exit 3
   fi
   if [ "$_f" -eq 0 ]; then echo "MERGE-CHECK SELFTEST: $_p/$_total arms pass"; exit 0
@@ -1130,8 +1285,23 @@ else
   else arm no "squash sentinels" "$N in body — control the squash message explicitly or it re-creates the guarded literal on main"; fi
 fi
 
+# 7. PDS CITATION PRECEDES MERGE — a SIBLING of arm 6, over the DIFF, asking
+#    whether each cited number RESOLVES on origin/main. See mc_pds_citation_verdict
+#    above for why this is not folded into the sentinel arm.
+#
+#    ABSENT PREDICATE IS `cannot`, NOT SILENCE. If the script is not in the tree
+#    the arm still reports — dropping it would shrink ARMS and let the vacuity
+#    floor pass a verdict that measured one condition fewer without saying so.
+PCS=scripts/pds-citation-precedes-merge.sh
+if [ -f "$PCS" ]; then
+  PCS_OUT=$(bash "$PCS" --head "$BR" 2>&1); PCS_RC=$?
+  mc_pds_citation_verdict "$PCS_RC" "$PCS_OUT"
+else
+  cannot "pds citation" "$PCS is not in this tree — the citation corpus was never read"
+fi
+
 # DERIVED tally with a vacuity floor. A hardcoded count is a lie waiting.
-if [ "$ARMS" -lt 6 ]; then
+if [ "$ARMS" -lt 7 ]; then
   echo "MERGE-CHECK: CANNOT READ — only $ARMS arm(s) reported; this verdict measures nothing"; exit 3
 fi
 # THREE OUTCOMES, NOT TWO. A WAIT is not a refusal and must not print like one:

@@ -1,6 +1,6 @@
 defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
   @moduledoc """
-  THE 7-SCENARIO PROBE — the re-runnable artifact behind PDS-D21/D22/D23.
+  THE 7-SCENARIO PROBE — the re-runnable artifact behind PDS-D21/PDS-D22/PDS-D23.
 
   Wave 2 settled "what does `Plugins.Bootstrap.register_all_schemas/0` actually
   clobber?" by RUNNING a 7-scenario probe, but the probe was never committed —

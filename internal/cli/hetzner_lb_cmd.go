@@ -26,7 +26,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// THE LB-FAMILY POST-READ OBSERVERS (PDS-D398/D399)
+// THE LB-FAMILY POST-READ OBSERVERS (PDS-D398/PDS-D399)
 //
 // One observer per obligation, all handed to hzResObserved / hzResObservedResponse
 // (hetzner_respost_mutation.go). Two rules hold across every one of them:

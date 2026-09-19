@@ -854,7 +854,7 @@ defmodule Barkpark.Content.Lifecycle do
   #     the github bookkeeping collapse) carries the claim byte-identical and
   #     passes untouched.
   #   * a CLAIM-IDENTICAL draft can STILL erase evidence (PDS wave 26,
-  #     PDS-D360/D362, observed end-to-end): `bp task stamp` writes the
+  #     PDS-D360/PDS-D362, observed end-to-end): `bp task stamp` writes the
   #     PUBLISHED row directly (`Tasks.Stamp`, `Repo.update_all`) and never
   #     touches the draft twin, and a draft NEVER rebases. So a draft minted
   #     DURING an active claim carries that claim verbatim, sails past
