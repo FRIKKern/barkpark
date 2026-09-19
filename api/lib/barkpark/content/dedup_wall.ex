@@ -49,7 +49,12 @@ defmodule Barkpark.Content.DedupWall do
       failure arrives as an exit, not an exception, and a rescue-only clause
       lets it escape as a 500;
     * a degraded fetch returns `{:error, {:dedup_unavailable, message}}` whose
-      message names what could not be done and how to proceed.
+      message names what could not be done and how to proceed — and says WHICH
+      of two things happened: an infra OUTAGE (DBConnection / Postgrex / exit)
+      keeps the `content.dedup_bypass` remedy and logs at `:warning`; a code
+      DEFECT (FunctionClauseError, ArgumentError, MatchError, …) names the bug,
+      offers no bypass, logs at `:error` with a `DEFECT` prefix and emits
+      `[:barkpark, :dedup_wall, :defect]` — one sentence cannot mean both.
 
   Escape hatches, both live: a document in the grandfather exemption ledger
   never reaches E4 at all (`AuthoringWall.dedup_gate/5`), and
@@ -404,7 +409,25 @@ defmodule Barkpark.Content.DedupWall do
     end
   end
 
-  defp degraded_message(reason) do
+  # Two messages from one door, because two different people need to act.
+  #
+  # OUTAGE (a binary reason): the database was slow or gone. The operator can
+  # wait it out or, deliberately, publish unchecked — so the remedy is named.
+  #
+  # DEFECT (`{:defect, phrase}`): OUR code raised. Offering `dedup_bypass` here
+  # would teach the operator to disable the wall permanently for a bug that is
+  # never reported — the exact misread this arm exists to prevent. No remedy is
+  # offered because the operator has none; the sentence tells them whose bug it
+  # is and to report it.
+  defp degraded_message({:defect, phrase}) do
+    "publish dedup wall hit a DEFECT, not an outage: #{phrase}. The publish was " <>
+      "REFUSED rather than passed unchecked — no duplicate check ran, so nothing " <>
+      "here claims this document is new. This is a bug in Barkpark, not a slow " <>
+      "database: retrying will not help and there is no operator escape for it. " <>
+      "Report it with this message so the defect gets fixed."
+  end
+
+  defp degraded_message(reason) when is_binary(reason) do
     "publish dedup wall could not complete: #{reason}. The publish was REFUSED " <>
       "rather than passed unchecked — no duplicate check ran, so nothing here " <>
       "claims this document is new. Retry, or resend with content.dedup_bypass: " <>
@@ -629,11 +652,15 @@ defmodule Barkpark.Content.DedupWall do
       # `{:ok, _}` alone would have shaped this as a MatchError — the right
       # verdict by accident, with a message that names the wrong failure.
       {:error, reason} ->
-        Logger.warning(
-          "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
-        )
+        if code_error?(reason) do
+          {:degraded, defect_reason("candidate txn rolled back", reason)}
+        else
+          Logger.warning(
+            "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
+          )
 
-        {:degraded, rollback_phrase(reason, timeout)}
+          {:degraded, rollback_phrase(reason, timeout)}
+        end
     end
   rescue
     # CLIFF B, now fail-LOUD: this wraps the WHOLE Repo.transaction — a
@@ -645,12 +672,19 @@ defmodule Barkpark.Content.DedupWall do
     # outage, wrong for the bug — see @code_error_modules for the FunctionClauseError
     # that hid here, green, for months.
     e ->
-      if code_error?(e) and raise_on_code_errors?() do
-        reraise e, __STACKTRACE__
-      end
+      cond do
+        code_error?(e) and raise_on_code_errors?(opts) ->
+          reraise e, __STACKTRACE__
 
-      Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, resolve_timeout(opts))}
+        # Prod (tripwire off): the defect still refuses the publish, but it
+        # must not arrive wearing the outage's clothes — see `defect_reason/2`.
+        code_error?(e) ->
+          {:degraded, defect_reason("candidate fetch failed", e)}
+
+        true ->
+          Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
+          {:degraded, reason_phrase(e, resolve_timeout(opts))}
+      end
   catch
     # Pool-checkout death arrives as an EXIT, not an exception — a rescue-only
     # clause lets it through as a 500. This is the clause Tasks.Dedup needed.
@@ -673,6 +707,30 @@ defmodule Barkpark.Content.DedupWall do
     do: "the duplicate scan failed (#{inspect(mod)})"
 
   defp reason_phrase(_, _timeout), do: "the duplicate scan failed"
+
+  # The code-class arm of the rescue, when the tripwire is not re-raising (prod).
+  # Same fail-CLOSED verdict as an outage, DIFFERENT clothes:
+  #
+  #   * `Logger.error`, not `.warning` — an outage is watched, a defect is
+  #     paged. The `DEFECT` prefix is the string an alert can key on; the infra
+  #     arms above keep `degraded:` and stay at warning.
+  #   * `[:barkpark, :dedup_wall, :defect]` telemetry with the exception module,
+  #     for anyone who alerts on events rather than log lines.
+  #   * a `{:defect, phrase}` reason, so `degraded_message/1` renders the message
+  #     that does NOT offer `content.dedup_bypass`.
+  defp defect_reason(where, %{__struct__: mod} = e) do
+    Logger.error(
+      "Content.DedupWall DEFECT (not an outage): #{where} with a code error " <>
+        "in Barkpark, #{inspect(e)}"
+    )
+
+    :telemetry.execute([:barkpark, :dedup_wall, :defect], %{count: 1}, %{
+      exception: mod,
+      where: where
+    })
+
+    {:defect, "the duplicate scan could not run because of a bug in Barkpark (#{inspect(mod)})"}
+  end
 
   defp maybe_filter_dataset(query, nil), do: query
 
@@ -706,11 +764,14 @@ defmodule Barkpark.Content.DedupWall do
   # is refused, never waved through), which is exactly why nobody looked: the
   # wall was refusing publishes on that path while the log blamed the database.
   #
-  # PROD BEHAVIOUR IS UNCHANGED, deliberately. Raising in prod would turn a
-  # fail-closed refusal into a 500 and lose the actionable message the caller
-  # gets today, so `raise_on_code_errors?` defaults OFF and `config/test.exs`
-  # turns it ON. The tripwire's job is to stop a defect from SHIPPING, not to
-  # change what a shipped defect does.
+  # PROD STILL REFUSES INSTEAD OF RAISING, deliberately. Raising in prod would
+  # turn a fail-closed refusal into a 500, so `raise_on_code_errors?` defaults
+  # OFF and `config/test.exs` turns it ON. The tripwire's job is to stop a defect
+  # from SHIPPING. What a shipped defect SAYS did change: with the tripwire off,
+  # a code-class exception goes through `defect_reason/2` (`:error` log,
+  # telemetry, a message that names the bug and offers no bypass) instead of
+  # wearing the outage's `:warning` + `dedup_bypass` clothes. The classifier
+  # below is shared by both arms.
   @code_error_modules [
     ArgumentError,
     ArithmeticError,
@@ -733,8 +794,17 @@ defmodule Barkpark.Content.DedupWall do
   defp code_error?(%{__struct__: mod}), do: mod in @code_error_modules
   defp code_error?(_), do: false
 
-  defp raise_on_code_errors?,
-    do: Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+  # A per-call `dedup_raise_on_code_errors: false` opt lets a test exercise the
+  # PROD arm (tripwire off) without flipping the global app env under async
+  # siblings; it can only ever turn the tripwire OFF for one call, which is what
+  # prod already is.
+  defp raise_on_code_errors?(opts) do
+    Keyword.get(
+      opts,
+      :dedup_raise_on_code_errors,
+      Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+    )
+  end
 
   # ── THE SCAN BUDGET, AND WHY ITS OVERRIDE IS COMPILED OUT OF PROD ───────────
   #
