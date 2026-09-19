@@ -7269,9 +7269,10 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "format": "binary",
+                "type": "string"
               }
             }
           },
@@ -7316,7 +7317,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -11161,9 +11162,10 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "format": "binary",
+                "type": "string"
               }
             }
           },
@@ -11208,7 +11210,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
