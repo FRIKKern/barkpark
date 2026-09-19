@@ -1763,23 +1763,35 @@ defmodule Barkpark.Plugins.Tasks do
   # bare `bp task get <ambiguous-id>` still sends no `?dataset=` and still gets
   # the honest 409. The refusal is what this makes followable, not what it
   # replaces.
-  # THE RULE ITSELF NOW LIVES AT THE ASSEMBLY POINT (task-4968634c648cda54).
-  # `Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route/1` applies
-  # the same route predicate over the ASSEMBLED manifest — every plugin's
-  # `cli_commands/0`, not just this one's. That closes the escape hatch this
-  # per-list map left open: `session.link-task` targets
-  # `POST /v1/tasks/:doc_id/sessions` but is declared in
-  # `Barkpark.Plugins.Bulldocs`, so the map below never saw it, while its route
-  # (`TasksController.sessions/2` → `find_task_by_doc_id/2`) can answer the very
-  # 409 the flag exists to make followable.
+  # THE RULE ITSELF LIVES IN THE TENANCY KERNEL (task-9a90596e9194f370),
+  # `Barkpark.Tenancy.CliDatasetFlag` — ONE definition of the flag literal and
+  # of the route predicate, reached INWARD by both of its application points:
   #
-  # This call is KEPT, delegating to that one definition rather than repeating
-  # it, so `Barkpark.Plugins.Tasks.cli_commands/0` stays self-consistent when
-  # read on its own (tests and tooling do read it directly). The shared clause
-  # is idempotent, so applying it here and again at assembly appends nothing
-  # twice.
+  #   * `Barkpark.Plugins.Registry.collect_cli_commands/1` applies it at
+  #     ASSEMBLY, over the manifest every plugin contributes to. That closes
+  #     the escape hatch this per-list map leaves open on its own:
+  #     `session.link-task` targets `POST /v1/tasks/:doc_id/sessions` but is
+  #     declared in `Barkpark.Plugins.Bulldocs`, so the map below never sees
+  #     it, while its route (`TasksController.sessions/2` →
+  #     `find_task_by_doc_id/2`) can answer the very 409 the flag exists to
+  #     make followable (task-4968634c648cda54).
+  #   * this call, KEPT so `Barkpark.Plugins.Tasks.cli_commands/0` stays
+  #     self-consistent when read on its own — tests and tooling do read it
+  #     directly, without going through the registry.
+  #
+  # The shared clause is idempotent, so applying it here and again at assembly
+  # appends nothing twice.
+  #
+  # WHY NOT DELEGATE TO THE REGISTRY, which is where the assembly-point rule
+  # was first written: this plugin and the plugins registry are two FEATURE
+  # concepts, and `tasks → registry` is a sideways edge. It reddened the
+  # advisory architecture Boundary gate on EVERY pull request from 2026-09-18
+  # (`new feature→feature sideways edge "tasks>registry" not present in
+  # baseline`) for authors who had touched neither file. A rule two features
+  # share belongs in the kernel they both already depend on, and `?dataset=`
+  # is a tenancy selector by its own nature.
   defp declare_dataset_on_doc_id_route(cmd),
-    do: Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route(cmd)
+    do: Barkpark.Tenancy.CliDatasetFlag.declare_on_task_doc_id_route(cmd)
 
   # ── THE `?dataset=` SCOPE SELECTOR, DECLARED FROM THE ROUTE ─────────────
   # (task-052c01b723ce1006)
