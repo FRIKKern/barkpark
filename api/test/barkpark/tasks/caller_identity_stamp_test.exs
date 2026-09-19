@@ -179,8 +179,16 @@ defmodule Barkpark.Tasks.CallerIdentityStampTest do
         assert json_response(resp, 200)["ok"] == true,
                "#{label} door refused: #{inspect(json_response(resp, 200))}"
 
-        assert [row] = rows_for(since, doc.doc_id, event),
-               "#{label} wrote no #{event} event at all"
+        # BOUND FIRST, then asserted on a boolean. `assert [row] = expr, msg`
+        # raises MatchError before assert/2 ever renders the message, so the
+        # message would be dead text naming the door — the one thing this arm
+        # needs said when a door silently writes nothing.
+        rows = rows_for(since, doc.doc_id, event)
+
+        assert length(rows) == 1,
+               "#{label} wrote #{length(rows)} #{event} events, expected exactly 1"
+
+        [row] = rows
 
         caller = get_in(row, [:payload, "caller"])
 
