@@ -1840,6 +1840,15 @@ defmodule Barkpark.Plugins.Capabilities do
             "perspective",
             "string",
             "published (default) | drafts | raw. Any other value is a 400, never a silent downgrade to published."
+          ),
+          flag(
+            "bodyChars",
+            "int",
+            "Bound each hit's projected prose to ~N characters: blocks/body are cut to the " <>
+              "smallest whole-block document prefix carrying that much text, and a cut hit " <>
+              "carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse " <>
+              "projecting blocks answers ~14 MB). A malformed value is a 400, never an " <>
+              "unbounded 200."
           )
         ],
         paginated: true,

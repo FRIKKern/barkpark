@@ -14027,6 +14027,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -14839,6 +14848,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
