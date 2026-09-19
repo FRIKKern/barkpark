@@ -8,8 +8,11 @@
 # IT IS WIRED. The `PDS census / parity / scratch-target harnesses` leg of
 # .github/workflows/shell-harnesses.yml runs this file — the arm lives in
 # .github/shell-harness-legs.json beside its pds-* siblings, and the workflow's
-# twin paths lists and its `changes` dispatcher name both this file and its
-# subject, so an edit to either triggers the leg that runs it. Be exact about
+# twin paths lists and its `changes` dispatcher admit both this file and its
+# subject through the `scripts/pds-*.sh` glob (explicit rows were tried and
+# pushed the `changes` run block over its 20000-byte fail floor, 63 bytes past
+# it — scripts/workflow-run-block-length-check.sh), so an edit to either
+# triggers the leg that runs it. Be exact about
 # what that buys: shell-harnesses.yml is NOT one of main's required contexts
 # (those are exactly Elixir gate, PR references an active task, Cloud gate,
 # Console gate), so wiring makes this harness RUN, not BLOCK. Running is the

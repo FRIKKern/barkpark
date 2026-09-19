@@ -265,16 +265,6 @@ on:
       # an INPUT of this job exactly as bp-pds-charter.md is above.
       - "scripts/pds-personal-local-smoke_test.sh"
       - "docs/setup/personal-local.md"
-      # THE COMPRESSED-CITATION GUARD (task-b92409dc562dc20c). The harness runs
-      # the guard's own 16-arm --selftest AND its LIVE --check over the PDS
-      # fence, so the SUBJECT is an input of the harness in the strongest sense:
-      # a compressed PDS-D citation re-entering scripts/pds-*, deploy/,
-      # tooling/pds/ or the charter must be able to trigger the leg that catches
-      # it. Both files are named explicitly per this list's rule that every
-      # script a job here executes gets its own entry, even where the
-      # `scripts/pds-*.sh` glob above would already admit them.
-      - "scripts/pds-citation-expand.sh"
-      - "scripts/pds-citation-expand.test.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -937,16 +927,6 @@ on:
       # an INPUT of this job exactly as bp-pds-charter.md is above.
       - "scripts/pds-personal-local-smoke_test.sh"
       - "docs/setup/personal-local.md"
-      # THE COMPRESSED-CITATION GUARD (task-b92409dc562dc20c). The harness runs
-      # the guard's own 16-arm --selftest AND its LIVE --check over the PDS
-      # fence, so the SUBJECT is an input of the harness in the strongest sense:
-      # a compressed PDS-D citation re-entering scripts/pds-*, deploy/,
-      # tooling/pds/ or the charter must be able to trigger the leg that catches
-      # it. Both files are named explicitly per this list's rule that every
-      # script a job here executes gets its own entry, even where the
-      # `scripts/pds-*.sh` glob above would already admit them.
-      - "scripts/pds-citation-expand.sh"
-      - "scripts/pds-citation-expand.test.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -1654,8 +1634,6 @@ jobs:
           pds-harnesses scripts/pds-crown-stamp.sh
           pds-harnesses scripts/pds-personal-local-smoke_test.sh
           pds-harnesses docs/setup/personal-local.md
-          pds-harnesses scripts/pds-citation-expand.sh
-          pds-harnesses scripts/pds-citation-expand.test.sh
           pds-harnesses scripts/pr-task-gate.sh
           pds-harnesses api/lib/barkpark/tasks/*.ex
           pds-harnesses internal/taskboard/*.go
