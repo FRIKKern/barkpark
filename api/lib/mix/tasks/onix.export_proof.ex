@@ -60,7 +60,14 @@ defmodule Mix.Tasks.Onix.ExportProof do
     fixture_path = Path.expand(Keyword.get(opts, :fixture, @default_fixture), File.cwd!())
     output_path = Path.expand(Keyword.get(opts, :output, @default_output), File.cwd!())
 
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51), not `app.start`. MEASURED: the
+    # pipeline is `File.read` + `Jason.decode` + `Export.to_string/2`, whose
+    # codelist resolvers are compile-time (`Export.Codelists`, not the
+    # `codelists` table) and whose XSD gate shells out to xmllint. No Repo
+    # write, no Oban insert, no endpoint read. The narrowed boot regenerates
+    # the committed `onix-sample.xml` byte-for-byte (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     Mix.shell().info("==> reading fixture: #{fixture_path}")
 
