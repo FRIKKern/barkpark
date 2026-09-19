@@ -10351,6 +10351,15 @@
     if (updates && updates.isConnected !== false) {
       updates.innerHTML = updatePanelActionsHtml(bp, authority);
       wireUpdatePanel(bp);
+      // cch-w45-s5-fu: this strip now carries the unknown arm's exit too, and
+      // the innerHTML above just destroyed whichever button was wired. Same
+      // selfHealing:false the header strip takes, and for the same reason —
+      // loadMe re-enters this repaint, never this view's loader, so a
+      // SUCCESSFUL retry must still re-render or the strip keeps saying
+      // "Checking capabilities…" against an answer the console holds.
+      wireMeRetry(updates, function () {
+        loadInstance(bp.id, (instanceAuthorityMount || {}).tab);
+      }, false);
     }
   }
 
@@ -11980,15 +11989,24 @@
     // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
-    // authority-gated (no exit here: the page's one [data-me-retry] rides the
-    // header, where the still-checking arm first appears).
+    // authority-gated.
     buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "", "", UPDATE_ACTIONS_REASON_ID);
     // cch-w47-rv-bl: ONE reason for the strip. The pointer test (rather than
     // re-deriving which arms fired) keeps this correct if a future control is
     // added or a policy block goes missing — no grouped control, no span.
+    // cch-w45-s5-fu — THIS STRIP CARRIES ITS OWN EXIT. It used to pass "" and
+    // say so in words: "the page's one [data-me-retry] rides the header, where
+    // the still-checking arm first appears". That is false on every lifecycle
+    // arm whose header actions draw no adminWriteControlHtml control — a
+    // SUSPENDED box (and a removing one) still has a host, so this panel still
+    // renders and its Roll back still takes the unknown arm, while the header
+    // strip emits only the CLI disclosure and therefore no group reason and no
+    // exit. The result was a disabled "Checking capabilities…" with nothing on
+    // screen that could re-ask /v1/me. wireMeRetry now binds EVERY match in the
+    // subtree, so this second copy is a live button and not dead bytes.
     return buttons + (buttons.indexOf('aria-describedby="' + UPDATE_ACTIONS_REASON_ID + '"') === -1
       ? ""
-      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, ""));
+      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, meRetryHtml()));
   }
 
   function updatePanelHtml(bp, authority) {
@@ -21511,15 +21529,42 @@
   // and deliberately has none, and there the retry must repaint on BOTH
   // outcomes or a successful read leaves the stale unknown picker on screen,
   // which is the exact lie this slice exists to kill.
+  // cch-w45-s5-fu — EVERY [data-me-retry] IN THE SUBTREE, not the first one.
+  // This used to bind `root.querySelector("[data-me-retry]")`, and that single
+  // binding was load-bearing in the WRONG direction: because a second copy of
+  // the exit would be a DEAD button, five call sites reasoned their way OUT of
+  // emitting one ("the page's ONE shipped exit is already on screen beside
+  // it"), and the instance screen's Updates strip was left with none at all on
+  // every lifecycle arm whose header draws no grouped control — a disabled
+  // "Checking capabilities…" Roll back with no way to re-ask. Measured, not
+  // argued: the committed instance-suspended-me-unreadable scenario booted the
+  // instance screen on a failed /v1/me and #instance-body contained ZERO
+  // [data-me-retry].
+  //
+  // Binding all of them is the smaller of the two available fixes. The other
+  // was to hoist ONE exit to the instance screen, above the strips — rejected
+  // because the exit is an explanation attached to a specific disabled control
+  // (it sits inside the strip's own reason span, which is what
+  // `aria-describedby` points at), and a screen-level button would either
+  // duplicate the header's or float unanchored above two strips that can appear
+  // independently of each other. A per-strip exit keeps the D428 grammar; this
+  // makes the second one LIVE.
+  //
+  // Each button owns its own disable, so pressing one does not blank the other;
+  // whichever repaint wins replaces both nodes anyway.
   function wireMeRetry(root, repaint, selfHealing) {
-    var btn = root && root.querySelector ? root.querySelector("[data-me-retry]") : null;
-    if (!btn) return;
-    btn.addEventListener("click", function () {
-      btn.disabled = true;
-      loadMe().then(function () {
-        if (selfHealing === false || meState() !== "loaded") repaint();
-      });
-    });
+    var btns = root && root.querySelectorAll ? root.querySelectorAll("[data-me-retry]") : null;
+    if (!btns || !btns.length) return;
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          loadMe().then(function () {
+            if (selfHealing === false || meState() !== "loaded") repaint();
+          });
+        });
+      })(btns[i]);
+    }
   }
 
   function setAccountChip(team, email) {
