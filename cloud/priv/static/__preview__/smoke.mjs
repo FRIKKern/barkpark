@@ -3485,6 +3485,71 @@ const EXPECTATIONS = {
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
     },
   },
+  // ── cch-w47-rv-bl: the REFUSE arm of the same panel, end to end ────────────
+  //
+  // The twin above boots the default OWNER. This one boots the SAME two bundles
+  // for an actor whose own GET /v1/me answers role "member" — the first member x
+  // archives scenario in the corpus. Until it existed, the refuse arm was proven
+  // only where __app.test.mjs hands the pure helper the string "refuse" by hand:
+  // a helper that is right and never reached is the vacuous green this epic keeps
+  // finding, and nothing anywhere proved that instanceAdminAuthority's answer
+  // travels from the loadArchives render site into these helpers at all.
+  //
+  // EVERY EXPECTED STRING IS DERIVED, NOT TYPED. The role sentence comes out of
+  // the shipped reader (hooks.friendly on the exact payload router.ex's
+  // resurrect/1 sends), and the refuse-arm bytes come out of the shipped pure
+  // pair called on this scenario's OWN fixture. So a copy edit in app.js moves
+  // both sides together and this expectation cannot go stale into a false green;
+  // what it pins is the RELATION — mount bytes == refuse render, and refuse !=
+  // grant — which is exactly the thing a regression breaks.
+  "fleet-archives-member": {
+    what: "the Archives panel refused: no live Resurrect, the CLI chip kept, and ONE server-owned line saying which role the command needs",
+    check(reg, hooks) {
+      const arch = (reg.get("archives-body") || {}).innerHTML || "";
+      // THE PRECONDITION, ASSERTED — not assumed. Both assertions below are
+      // about what a REFUSED member sees; measured against an owner they would
+      // pass or fail for reasons that have nothing to do with authority.
+      assert.equal(hooks.meState(), "loaded",
+        "fleet-archives-member must boot with /v1/me ANSWERED — got " + hooks.meState() +
+        ", and an unanswered read takes the 'unknown' arm, so nothing below measures the refuse arm");
+      assert.equal(hooks.meFlags().role, "member",
+        "fleet-archives-member must boot a plain member — got " + JSON.stringify(hooks.meFlags().role));
+      // The panel really rendered the list (an empty/error arm would pass the
+      // absence assertions below for free).
+      assert.ok(arch.includes("archive-list"), "the populated archive list renders for a member too");
+      assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle, unchanged by authority");
+      // THE REFUSAL LINE, in the server's own words. `friendly` is the shipped
+      // 403 reader; this is the payload router.ex's resurrect/1 really sends
+      // (`Auth.forbidden(required: "admin", scope: "team")`).
+      const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+      assert.ok(roleSentence && roleSentence.includes("admin role"),
+        "the shipped 403 reader must answer this payload with the admin-role sentence; got: " + roleSentence);
+      assert.ok(arch.includes(roleSentence),
+        "the refuse arm prints the server's own role sentence above the list; got: " + arch.slice(0, 600));
+      // The live write stays OMITTED (cch-w47-s3's ruling, unweakened) …
+      assert.ok(!arch.includes("archive-resurrect-btn"),
+        "a member the route refuses is offered no live Resurrect");
+      // … and the CLI chip stays on EVERY row (cch-w47-rv-bl ruled (a), not (c):
+      // a member must still be able to learn the command and hand it on).
+      assert.ok(countMatches(arch, "bp cloud instance resurrect") >= 2,
+        "the copy-paste CLI chip is kept on every row — the ruling labels it, it does not delete it");
+      // THE MOUNT IS WIRED TO THE HELPER, and the two arms really differ. Both
+      // sides are computed from this scenario's own fixture through the shipped
+      // pure pair, so this is a diff of rendered BYTES, not of two hand-written
+      // strings.
+      const payload = SCENARIOS["fleet-archives-member"].data.archives.body;
+      const refused = hooks.archivesPanelHtml(hooks.archivesModel(payload, "refuse"));
+      const granted = hooks.archivesPanelHtml(hooks.archivesModel(payload, "grant"));
+      assert.equal(arch, refused,
+        "the DOM mount must render exactly the pure refuse arm — if these differ, instanceAdminAuthority's answer is not reaching the helpers");
+      assert.notEqual(refused, granted,
+        "the refused member's rendered bytes must differ from the granted ones");
+      assert.ok(!granted.includes(roleSentence),
+        "the grant arm never carries the role sentence — it is offered the button and has nothing to apologise for");
+      assert.ok(granted.includes("archive-resurrect-btn"),
+        "the grant arm still offers the live Resurrect (this is the control: the refuse assertions above could otherwise pass on a panel that offers it to nobody)");
+    },
+  },
 
   // ── gr-p3 instance workspace (GR24/GR30): D-02 header + D-03 Overview ──────
   // The scenario predates this wave with a fixture but ZERO assertions (the
