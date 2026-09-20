@@ -309,4 +309,131 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
       assert after_doc.rev == legacy.rev
     end
   end
+
+  describe "criterion 3 — each disjunct of the door predicate decides alone" do
+    # WHY THIS DESCRIBE EXISTS. `ReadableBody.body_bearing?/1` is a four-way
+    # disjunction — "body" | "blocks" | "body_html" | a top-level "content"
+    # list — and every fixture above carries a "body" key (`:parked_nodes` is
+    # %{"body" => nil, "content" => [...]}), so the FIRST term admitted all of
+    # them and the other three never decided anything: collapsing the
+    # disjunction to `Map.has_key?(content, "body")` alone left this file 39
+    # tests, 0 failures. Each test below carries exactly ONE of the remaining
+    # three signals and NO "body" key, so deleting that one term — and only
+    # that term — flips the write from refused to accepted and reds exactly
+    # this test. Each arm pairs the refusal with a POSITIVE CONTROL: the same
+    # write with its signal removed, which must take the "a write carrying no
+    # body signal at all" path the moduledoc names — `classify/1` -> `:ok`,
+    # write accepted — so the arm cannot be satisfied by some unrelated
+    # refusal. These are all refusals on origin/main today; the arms pin live
+    # behaviour and change nothing.
+
+    test "the \"blocks\" disjunct decides alone: blocks as a ProseMirror map, no body key", ctx do
+      # `Projection.read_blocks/1` matches "blocks" only `when is_list(blocks)`,
+      # so a ProseMirror doc NODE parked at content.blocks is unreadable — and
+      # only `Map.has_key?(content, "blocks")` brings it through the door.
+      content = %{
+        "blocks" => %{
+          "type" => "doc",
+          "content" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "Hello"}]}
+          ]
+        }
+      }
+
+      refute Map.has_key?(content, "body")
+      refute Map.has_key?(content, "body_html")
+      refute is_list(Map.get(content, "content"))
+
+      assert ReadableBody.classify(content) == {:error, :unreadable_body}
+
+      doc_id = "rb-blocks-map-#{System.unique_integer([:positive])}"
+      written = create_paper(content, doc_id, ctx)
+      halted? = match?({:error, {:halted, _reason}}, written)
+      assert halted?, "blocks-as-prosemirror-map write was not refused — got #{inspect(written)}"
+      {:error, {:halted, reason}} = written
+      assert reason =~ "no reader can read"
+
+      # POSITIVE CONTROL — the door, not some other refusal. Drop the one
+      # signal and the same write offers no body at all, so the gate has
+      # nothing to judge and the row lands.
+      control = Map.delete(content, "blocks")
+      assert ReadableBody.classify(control) == :ok
+
+      control_id = "rb-blocks-map-control-#{System.unique_integer([:positive])}"
+      control_written = create_paper(control, control_id, ctx)
+      control_ok? = match?({:ok, {_tx, [_result]}}, control_written)
+
+      assert control_ok?,
+             "control (blocks key removed) was not accepted — got #{inspect(control_written)}"
+    end
+
+    test "the \"body_html\" disjunct decides alone: a whitespace body_html, no body key", ctx do
+      # `html_source?/1` trims, so "   " is NOT an HTML source; nothing else in
+      # this content offers a body, so only
+      # `Map.has_key?(content, "body_html")` opens the door.
+      content = %{"body_html" => "   \n\t  "}
+
+      refute Map.has_key?(content, "body")
+      refute Map.has_key?(content, "blocks")
+      refute is_list(Map.get(content, "content"))
+
+      assert ReadableBody.classify(content) == {:error, :unreadable_body}
+
+      doc_id = "rb-blank-html-#{System.unique_integer([:positive])}"
+      written = create_paper(content, doc_id, ctx)
+      halted? = match?({:error, {:halted, _reason}}, written)
+      assert halted?, "whitespace body_html write was not refused — got #{inspect(written)}"
+      {:error, {:halted, reason}} = written
+      assert reason =~ "no reader can read"
+
+      # POSITIVE CONTROL — signal removed, no body offered, write lands.
+      control = Map.delete(content, "body_html")
+      assert ReadableBody.classify(control) == :ok
+
+      control_id = "rb-blank-html-control-#{System.unique_integer([:positive])}"
+      control_written = create_paper(control, control_id, ctx)
+      control_ok? = match?({:ok, {_tx, [_result]}}, control_written)
+
+      assert control_ok?,
+             "control (body_html key removed) was not accepted — got #{inspect(control_written)}"
+    end
+
+    test "the top-level content-list disjunct decides alone: parked nodes with NO body key",
+         ctx do
+      # Dialect 3 without its null "body" key — the shape a writer produces by
+      # simply omitting the key rather than setting it to nil. No
+      # `read_blocks/1` clause reads a top-level "content", so only
+      # `is_list(Map.get(content, "content"))` brings it through the door.
+      content = %{
+        "content" => [
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "Hello"}]}
+        ]
+      }
+
+      refute Map.has_key?(content, "body")
+      refute Map.has_key?(content, "blocks")
+      refute Map.has_key?(content, "body_html")
+
+      assert ReadableBody.classify(content) == {:error, :unreadable_body}
+
+      doc_id = "rb-parked-nobody-#{System.unique_integer([:positive])}"
+      written = create_paper(content, doc_id, ctx)
+      halted? = match?({:error, {:halted, _reason}}, written)
+      assert halted?, "parked-nodes-without-body write was not refused — got #{inspect(written)}"
+      {:error, {:halted, reason}} = written
+      assert reason =~ "no reader can read"
+
+      # POSITIVE CONTROL — the LIST-ness is what decides, not the key: the same
+      # key holding a non-list offers no body, so the write lands.
+      control = %{"content" => %{"type" => "doc"}}
+      assert ReadableBody.classify(control) == :ok
+
+      control_id = "rb-parked-nobody-control-#{System.unique_integer([:positive])}"
+      control_written = create_paper(control, control_id, ctx)
+      control_ok? = match?({:ok, {_tx, [_result]}}, control_written)
+
+      assert control_ok?,
+             "control (content held a map, not a list) was not accepted — got #{inspect(control_written)}"
+    end
+  end
 end
