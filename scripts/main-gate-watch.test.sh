@@ -1022,6 +1022,162 @@ else
   bad "python3+pyyaml unavailable — the wiring half of section 14 CANNOT READ, and an unread wiring is not a proven one"
 fi
 
+# ═══ 15. THE WATCH MUST NOT COUNT ITSELF AS A REASON TO WAIT ═════════════════
+# RECORDED FROM PRODUCTION, not imagined. Scheduled run 35492442980
+# (2026-09-20T05:44Z, tip 56e0dbca4) printed:
+#
+#     still in flight on this tip — a row that is absent may yet appear:
+#       main-gate-watch #35492442980 (status=in_progress)
+#     RED      Elixir gate — conclusion=failure
+#     ok       Cloud gate
+#     WAITING  Console gate — no check run row YET, and a workflow run on this
+#              sha is still in flight: main-gate-watch #35492442980
+#
+# Its SOLE in-flight row was ITSELF. `Console gate` had never rendered on that
+# sha and never did: re-running the identical script on the identical sha once
+# that run went terminal prints `MISSING  Console gate` and exits 1. The watch
+# is reading the tip WHILE RUNNING ON the tip, and it renders none of the
+# watched contexts, so its own run can never be the run that makes an absent row
+# appear. On that day only the unrelated `Elixir gate` red carried the run to a
+# scream. With Elixir green — the fixture below — the MISSING row alone decided
+# the verdict, and it read WAITING = exit 2 = green while a required context was
+# absent from main's tip. That is a vacuous green in the repo's own
+# MISSING-detector, which is the single thing this file exists to prevent.
+section "15. a watch that counts its own run cannot report MISSING"
+
+# 56e0dbca4's real rows, reduced to the three watched contexts, with Elixir gate
+# flipped to success so the SELF-EXCLUSION is the only thing deciding the exit
+# code. Console gate is absent because it genuinely never rendered on that sha.
+cat > "$FX/self-inflight-checks.json" <<'JSON'
+{"check_runs": [
+  {"name": "Elixir gate", "status": "completed", "conclusion": "success", "started_at": "2026-09-20T05:10:00Z", "id": 106029000001},
+  {"name": "Cloud gate", "status": "completed", "conclusion": "success", "started_at": "2026-09-20T05:11:00Z", "id": 106029000002}
+]}
+JSON
+
+# Every run on the tip terminal EXCEPT the watch's own run — the exact shape of
+# the 05:44 read.
+cat > "$FX/self-inflight-runs.json" <<'JSON'
+{"workflow_runs": [
+  {"name": "elixir", "status": "completed", "id": 35492000001},
+  {"name": "cloud", "status": "completed", "id": 35492000002},
+  {"name": "console-harness", "status": "completed", "id": 35492000003},
+  {"name": "main-gate-watch", "status": "in_progress", "id": 35492442980}
+]}
+JSON
+
+# DRIVEN THROUGH THE ENVIRONMENT, NOT A NEW FLAG (review of this slice). The
+# first cut of this section passed `--self-run-id` on both arms. Against the
+# pre-fix script that flag is an UNKNOWN ARGUMENT — exit 3 — so every
+# RED-WITHOUT assertion reddened on argument rejection and measured nothing
+# about the defect. GITHUB_RUN_ID is what GitHub Actions actually sets, the
+# pre-fix script ignores it completely, and the same command line therefore
+# exercises the real behavioural difference: identical argv, identical fixtures,
+# one environment variable, two opposite verdicts.
+self_watch() { # GITHUB_RUN_ID value ("" = unset)
+  if [ -n "$1" ]; then
+    env GITHUB_RUN_ID="$1" bash "$WATCH" --sha 56e0dbca4 \
+      --protection-file "$FX/protection.json" \
+      --check-runs-file "$FX/self-inflight-checks.json" \
+      --runs-file "$FX/self-inflight-runs.json" > "$OUT" 2>&1
+  else
+    env -u GITHUB_RUN_ID bash "$WATCH" --sha 56e0dbca4 \
+      --protection-file "$FX/protection.json" \
+      --check-runs-file "$FX/self-inflight-checks.json" \
+      --runs-file "$FX/self-inflight-runs.json" > "$OUT" 2>&1
+  fi
+  echo $?
+}
+
+# ── RED WITHOUT: no run id in the environment, so nothing is excluded — the
+# pre-fix behaviour, and the behaviour of the FIXED script when it is not told
+# which run is its own.
+rc="$(self_watch "")"
+if [ "$rc" = "2" ] && grep -q "WAITING  Console gate" "$OUT"; then
+  ok "WITHOUT a self run id: MISSING Console gate is softened to WAITING, exit 2 — production run 35492442980's bug, reproduced"
+else
+  bad "WITHOUT a self run id: expected exit 2 + 'WAITING  Console gate', got exit $rc"; cat "$OUT" >&2
+fi
+if [ "$rc" != "1" ]; then
+  ok "WITHOUT it the run does NOT scream — a required context absent from main's tip reads as green"
+else
+  bad "WITHOUT it the run screamed; the fixture no longer reproduces the defect"
+fi
+if grep -q "main-gate-watch #35492442980" "$OUT"; then
+  ok "WITHOUT it the watch cites its OWN run as the reason a row may yet appear"
+else
+  bad "WITHOUT it the watch does not cite its own run; the fixture is not the production shape"
+fi
+
+# ── GREEN WITH: the SAME argv and the SAME fixtures, plus the GITHUB_RUN_ID
+# that GitHub Actions sets on every run. Against the pre-fix script this arm is
+# byte-identical to the one above and still exits 2 — which is precisely what
+# makes it a mutation proof rather than an argument-parsing test.
+rc="$(self_watch 35492442980)"
+if [ "$rc" = "1" ]; then
+  ok "WITH GITHUB_RUN_ID set: SAME argv, SAME payload -> scream (exit 1) — the fix is load-bearing"
+else
+  bad "WITH GITHUB_RUN_ID set: expected exit 1, got $rc"; cat "$OUT" >&2
+fi
+if grep -q "MISSING  Console gate" "$OUT"; then
+  ok "WITH it Console gate is correctly named MISSING — no check run at all, every OTHER run terminal"
+else
+  bad "WITH it Console gate is still not reported MISSING"; cat "$OUT" >&2
+fi
+if ! grep -q "WAITING" "$OUT"; then
+  ok "WITH it nothing is WAITING — the watch's own run was the entire in-flight set"
+else
+  bad "WITH it something is still WAITING"; cat "$OUT" >&2
+fi
+if grep -q "ignoring this watch's own run #35492442980" "$OUT"; then
+  ok "the exclusion is STATED in the output, not silent — a reader can see why MISSING was reached"
+else
+  bad "the self-exclusion is silent; an unexplained verdict is how a watch gets distrusted"
+fi
+
+# ── the exclusion is keyed on the RUN ID, never the workflow NAME ────────────
+# A name-keyed fix would delete every main-gate-watch run from the in-flight
+# set, including a genuinely concurrent second one, and would break the moment
+# the workflow is renamed. This arm fails against a name-keyed implementation.
+cat > "$FX/self-inflight-runs-other.json" <<'JSON'
+{"workflow_runs": [
+  {"name": "elixir", "status": "completed", "id": 35492000001},
+  {"name": "cloud", "status": "completed", "id": 35492000002},
+  {"name": "main-gate-watch", "status": "in_progress", "id": 35492999999}
+]}
+JSON
+rc="$(env GITHUB_RUN_ID=35492442980 bash "$WATCH" --sha 56e0dbca4 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs-other.json" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "2" ] && grep -q "main-gate-watch #35492999999" "$OUT"; then
+  ok "a DIFFERENT main-gate-watch run (#35492999999) still counts as in flight -> WAITING; the exclusion is id-keyed, not name-keyed"
+else
+  bad "a different main-gate-watch run was excluded too — the fix is name-keyed, got exit $rc"; cat "$OUT" >&2
+fi
+
+# ── the explicit flag exists too, for a caller that is not GitHub Actions ────
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 56e0dbca4 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs.json" \
+  --self-run-id 35492442980 > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+  ok "--self-run-id reaches the same verdict as the environment default"
+else
+  bad "--self-run-id does not reach the MISSING verdict, got exit $rc"; cat "$OUT" >&2
+fi
+
+# ── the live workflow must actually supply the id ────────────────────────────
+# The script defaults SELF_RUN_ID from GITHUB_RUN_ID, which GitHub Actions sets
+# on every run, so the live path needs no argument. Assert the default exists:
+# without it the fix ships inert and this whole section measures nothing.
+if grep -q 'SELF_RUN_ID="${GITHUB_RUN_ID:-}"' "$WATCH"; then
+  ok "SELF_RUN_ID defaults from GITHUB_RUN_ID — the live scheduled run excludes itself with no workflow change"
+else
+  bad "SELF_RUN_ID does not default from GITHUB_RUN_ID; the fix is inert in production"
+fi
+
 bash -n "$WATCH" && ok "main-gate-watch.sh passes bash -n" || bad "main-gate-watch.sh has a syntax error"
 
 echo

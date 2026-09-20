@@ -112,6 +112,8 @@
 # USAGE
 #   scripts/main-gate-watch.sh
 #   scripts/main-gate-watch.sh --repo O/R --branch main
+#   # the watch's own run id is read from GITHUB_RUN_ID; override for a test:
+#   scripts/main-gate-watch.sh --self-run-id <id>
 #   # hermetic (the test harness; no network at all):
 #   scripts/main-gate-watch.sh --sha <sha> \
 #       --protection-file <f> --check-runs-file <f> [--runs-file <f>]
@@ -141,6 +143,22 @@ RUNS_FILE=""
 SHA_OVERRIDE=""
 REPO_OVERRIDE=""
 BRANCH_OVERRIDE=""
+# THE WATCH MUST NOT COUNT ITSELF AS A REASON TO WAIT (task-PENDING-gatewatch).
+# The in-flight set below is what separates "no row YET" from "never judged".
+# On the schedule arm this workflow's OWN run is ALWAYS in that set — it is
+# reading the tip while running on the tip — and it renders NONE of the watched
+# contexts, so it can never be the run that makes an absent row appear. Counting
+# it downgrades a genuine MISSING to WAITING, and WAITING exits 0.
+# MEASURED, not reasoned: scheduled run 35492442980 (2026-09-20T05:44Z, sha
+# 56e0dbca4) printed "WAITING Console gate — ... still in flight:
+# main-gate-watch #35492442980" — its SOLE in-flight row was ITSELF. `Console
+# gate` had never rendered on that sha and never did; the same script re-run on
+# the same sha once that run went terminal prints "MISSING Console gate" and
+# exits 1. Only the `Elixir gate` red carried that run to a scream; with Elixir
+# green it would have exited 2 = green while a required context was absent from
+# main's tip forever. Defaulted from GITHUB_RUN_ID so the live workflow needs no
+# argument, and overridable so the harness can prove both directions.
+SELF_RUN_ID="${GITHUB_RUN_ID:-}"
 
 say() { echo "$*"; }
 red() { echo "$*" >&2; }
@@ -282,6 +300,7 @@ main() {
       --sha)             SHA_OVERRIDE="${2:-}"; shift 2 ;;
       --repo)            REPO_OVERRIDE="${2:-}"; shift 2 ;;
       --branch)          BRANCH_OVERRIDE="${2:-}"; shift 2 ;;
+      --self-run-id)     SELF_RUN_ID="${2:-}"; shift 2 ;;
       --spec)            SPEC="${2:-}"; shift 2 ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) red "unknown argument: $1"; exit 3 ;;
@@ -388,6 +407,13 @@ EOF
   while IFS="$(printf '\t')" read -r rname rstatus rid; do
     [ -n "$rname" ] || continue
     [ "$rstatus" = "completed" ] && continue
+    # This run is not evidence that a row is coming — see SELF_RUN_ID above.
+    # Matched on the run ID, never the workflow NAME: a genuinely concurrent
+    # second main-gate-watch run is a different id and stays in the set.
+    if [ -n "$SELF_RUN_ID" ] && [ "$rid" = "$SELF_RUN_ID" ]; then
+      say "  (ignoring this watch's own run #$rid — it renders no watched context)"
+      continue
+    fi
     inflight="$inflight$rname #$rid (status=$rstatus)
 "
   done <<EOF
