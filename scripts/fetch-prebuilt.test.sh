@@ -9,6 +9,45 @@ pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
+# ── Digest: resolve ONE tool up front, then REFUSE on failure ───────────────
+# `shasum` is the macOS-canonical digest tool; GNU coreutils ships `sha256sum`
+# and `shasum` only arrives with perl. RESOLUTION falls back (that is a probe);
+# EXECUTION does not — a silent fallback hides a broken canonical tool exactly
+# the way a silent skip does. A failed or empty digest is a REFUSAL, never an
+# empty string: `x="$(shasum …)"` does not trip `set -e`, and two empty
+# captures compare EQUAL, so the assertion prints PASS having measured nothing.
+DIGEST_BIN=""
+if DIGEST_BIN="$(command -v shasum 2>/dev/null)" && [ -n "$DIGEST_BIN" ]; then
+  DIGEST_DESC="$DIGEST_BIN -a 256"
+  digest_run() { "$DIGEST_BIN" -a 256 "$@"; }
+elif DIGEST_BIN="$(command -v sha256sum 2>/dev/null)" && [ -n "$DIGEST_BIN" ]; then
+  DIGEST_DESC="$DIGEST_BIN"
+  digest_run() { "$DIGEST_BIN" "$@"; }
+else
+  echo "CANNOT MEASURE: no digest tool on PATH (need shasum or sha256sum)" >&2
+  exit 2
+fi
+digest() {
+  local out rc
+  out="$(digest_run "$@" 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "CANNOT MEASURE: digest tool '$DIGEST_DESC' failed (exit $rc) on: $* -- $out" >&2
+    return 1
+  fi
+  if [ -z "$out" ]; then
+    echo "CANNOT MEASURE: digest tool '$DIGEST_DESC' produced an EMPTY digest for: $*" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+die_digest() {
+  echo "CANNOT MEASURE: $* — refusing to compare unmeasured digests" >&2
+  exit 2
+}
+# Compare two already-captured digests WITHOUT re-entering `eval`, so no call
+# site can smuggle an unguarded `$( … )` back into an equality assertion.
+check_eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (digests differ)"; fi; }
+
 TMP="$(mktemp -d)"
 cleanup() { find "$TMP" -depth -delete 2>/dev/null || true; }
 trap cleanup EXIT
@@ -45,7 +84,7 @@ EOF
 }
 
 snapshot() {
-  shasum -a 256 \
+  digest \
     "$1/api/_build/prod/SENTINEL" \
     "$1/api/deps/SENTINEL"
 }
@@ -65,7 +104,7 @@ echo "== slot layout: direct fetch refuses before every side effect =="
 DIRECT="$TMP/direct"
 make_repo "$DIRECT"
 mkdir -p "$DIRECT/.slots"
-before="$(snapshot "$DIRECT")"
+before="$(snapshot "$DIRECT")" || die_digest "direct sentinels before the arm"
 : > "$DANGER_LOG"
 run_script "$DIRECT" fetch-prebuilt.sh "$TMP/direct.out" deadbeef
 rc=$?
@@ -73,13 +112,14 @@ check "direct exit is typed 3" "[ '$rc' = 3 ]"
 check "direct message names blue/green deployer" \
   "grep -qF '[fetch-prebuilt] blue/green slot layout detected — use deploy/instance-deploy.sh' '$TMP/direct.out'"
 check "direct dangerous-command log is empty" "[ ! -s '$DANGER_LOG' ]"
-check "direct sentinels are byte-identical" "[ \"\$(snapshot '$DIRECT')\" = \"$before\" ]"
+after="$(snapshot "$DIRECT")" || die_digest "direct sentinels after the arm"
+check_eq "direct sentinels are byte-identical" "$before" "$after"
 
 echo "== slot layout: apply-update caller also fails closed =="
 CALLER="$TMP/caller"
 make_repo "$CALLER"
 mkdir -p "$CALLER/.slots"
-before="$(snapshot "$CALLER")"
+before="$(snapshot "$CALLER")" || die_digest "caller sentinels before the arm"
 : > "$DANGER_LOG"
 run_script "$CALLER" apply-update.sh "$TMP/caller.out"
 rc=$?
@@ -87,7 +127,8 @@ check "caller exit is typed 3" "[ '$rc' = 3 ]"
 check "caller surfaces the fetch-prebuilt slot refusal" \
   "grep -qF '[fetch-prebuilt] blue/green slot layout detected — use deploy/instance-deploy.sh' '$TMP/caller.out'"
 check "caller dangerous-command log is empty" "[ ! -s '$DANGER_LOG' ]"
-check "caller sentinels are byte-identical" "[ \"\$(snapshot '$CALLER')\" = \"$before\" ]"
+after="$(snapshot "$CALLER")" || die_digest "caller sentinels after the arm"
+check_eq "caller sentinels are byte-identical" "$before" "$after"
 
 echo "== non-slot behavior remains unchanged =="
 PLAIN="$TMP/plain"
@@ -178,7 +219,7 @@ OTP_OFF='{"sha":"deadbeef","elixir":"1.18.3","otp":"26","erts":"15.2.7","arch":"
 
 STAMPED="$TMP/stamped"
 make_repo "$STAMPED"
-before="$(snapshot "$STAMPED")"
+before="$(snapshot "$STAMPED")" || die_digest "stamped sentinels before the arm"
 
 : > "$DANGER_LOG"
 run_stamped "$STAMPED" "$TMP/stamp-match.out" "$MATCHING"
@@ -196,7 +237,8 @@ check "an otp mismatch is NAMED as otp, not swallowed" \
   "grep -qF \"[fetch-prebuilt] fallback to on-box compile: otp mismatch (artifact '26' vs box '27')\" '$TMP/stamp-otp.out'"
 check "an otp mismatch never downloads the tarball" \
   "! grep -q 'api-build.tar.zst' '$DANGER_LOG'"
-check "stamp-gate arms swapped nothing" "[ \"\$(snapshot '$STAMPED')\" = \"$before\" ]"
+after="$(snapshot "$STAMPED")" || die_digest "stamped sentinels after the arm"
+check_eq "stamp-gate arms swapped nothing" "$before" "$after"
 
 if [ "$fails" -ne 0 ]; then
   echo "fetch-prebuilt tests: $fails failure(s)" >&2
