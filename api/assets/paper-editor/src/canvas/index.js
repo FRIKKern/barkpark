@@ -150,6 +150,8 @@ import { Expandable } from "./expandable-node.js";
 import { Steps, Step, Tabs, Tab } from "./rows-node.js";
 // The "data + island" atoms: equation, footnotes, contents, video.
 import { Equation, Footnote, Toc, Video } from "./island-node.js";
+// Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
+import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
 // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
@@ -777,6 +779,7 @@ class BpPaperCanvas extends HTMLElement {
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
         restingScaffolds(this),
+        findReplace(),
         // S3: the divider atom node — a non-prose leaf living INSIDE the canvas
         // document. Registers the `divider` node type (toDOM <hr>, bpId/bpType
         // attrs) so runToTiptap's { type:"divider" } node mounts as an atom and
@@ -1314,6 +1317,15 @@ class BpPaperCanvas extends HTMLElement {
   // Synchronous host seam for navigation / beforeunload guards. A debounced
   // transaction is unsaved before bp-canvas-ops exists; source-mode text and
   // edits queued behind an acknowledgement must also survive an attempted exit.
+  // ── find and replace (the host draws the bar; see canvas/find-replace.js) ──
+  findSet(query, opts) { return this._editor ? frSet(this._editor, query, opts) : { query: "", count: 0, index: -1 }; }
+  findNext() { return this._editor ? frStep(this._editor, 1) : { count: 0, index: -1 }; }
+  findPrev() { return this._editor ? frStep(this._editor, -1) : { count: 0, index: -1 }; }
+  findClear() { if (this._editor) frClear(this._editor); }
+  findState() { return this._editor ? frState(this._editor) : { query: "", count: 0, index: -1 }; }
+  replaceCurrent(text) { return this._editor && this._editable ? frReplaceCurrent(this._editor, text) : this.findState(); }
+  replaceAll(text) { return this._editor && this._editable ? frReplaceAll(this._editor, text) : { replaced: 0, ...this.findState() }; }
+
   hasPendingChanges() {
     const sourceChanged =
       this._mode === "source" && this._sourceEl &&

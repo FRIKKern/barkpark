@@ -1236,6 +1236,9 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head { padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
 .bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head > input.bp-tabs__tab { font-weight: 700; color: var(--paper-ink); border-bottom: var(--bp-rule-hairline) solid var(--paper-accent); padding: 6px 12px; }
 .bp-canvas-tabs > .bp-canvas-row + .bp-canvas-row { border-top: 1px solid var(--paper-chrome-border); }
+/* find matches (canvas/find-replace.js): the host's bar drives them. */
+.bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
+.bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
 /* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
    row that hides at rest once the block has data. */
 .bp-canvas-island { position: relative; margin: 1rem 0 0; }
