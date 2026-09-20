@@ -183,6 +183,14 @@
 # recovers, turning it on is a one-flag change with a fixture already proving
 # it fires.
 #
+# THE SPAN IS WHAT THE FETCHED PAGE COVERS, not a fixed 24 h, and the rate is
+# computed against THAT span — so a push-armed workflow whose 60 rows only reach
+# back 9 h is scored over 9 h, never over a window it has no rows for. The
+# window flag is a CEILING on the span, never a claim about it. And the line
+# names all three sources (schedule:, this probe's rescue, any other trigger),
+# because "breakglass-watch fired 60 times" and "the scheduler delivered 2 of
+# its 18 promised beats" are both true and only the second is this measure.
+#
 # THE MEASURE IS SILENT RATHER THAN WRONG when it has too little history: fewer
 # than 3 rows in the window, or a span under 4x the interval, prints "not
 # measured" and scores nothing. A cadence verdict computed from two samples is
@@ -690,9 +698,9 @@ EOF
   [ "$disp" -gt "$sched" ] && primary=" — SO THIS PROBE, NOT THE SCHEDULER, IS THE PRIMARY DELIVERY MECHANISM for it"
   if [ "$pct" -lt "$CADENCE_FLOOR_PCT" ]; then
     CADENCE_SHORTFALL=$(( CADENCE_SHORTFALL + 1 ))
-    echo "CADENCE  $file (critical, every ${interval}m): the SCHEDULER delivered $sched of ~$expected expected beats over the last ${span}m — ${pct}% of its declared cadence, under the ${CADENCE_FLOOR_PCT}% floor. $disp of the $firings firings in that window were probe dispatches${primary}. THIS IS A DELIVERY FINDING, NOT 'late right now' — the age line below answers that question on its own, and it may well say inside-bound." >&2
+    echo "CADENCE  $file (critical, every ${interval}m): the SCHEDULER delivered $sched of ~$expected expected beats over the last ${span}m — ${pct}% of its declared cadence, under the ${CADENCE_FLOOR_PCT}% floor. It fired $firings times in that window: $sched by schedule:, $disp by THIS PROBE's workflow_dispatch rescue, $other by another trigger (push/pull_request)${primary}. THIS IS A DELIVERY FINDING, NOT 'late right now' — the age line below answers that question on its own, and it may well say inside-bound." >&2
   else
-    echo "  ok   $file (cadence): $sched of ~$expected expected beats delivered by schedule: over the last ${span}m (${pct}% of the declared ${interval}m cadence, floor ${CADENCE_FLOOR_PCT}%); $disp of $firings firings were probe dispatches"
+    echo "  ok   $file (cadence): $sched of ~$expected expected beats delivered by schedule: over the last ${span}m (${pct}% of the declared ${interval}m cadence, floor ${CADENCE_FLOOR_PCT}%); of $firings firings, $disp were probe dispatches and $other came from another trigger"
   fi
 }
 
@@ -1337,7 +1345,7 @@ FIX
            --runs-file "$tmp/probe-primary.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
   if [ "$rc" = "0" ] \
      && grep -q 'THIS PROBE, NOT THE SCHEDULER, IS THE PRIMARY DELIVERY MECHANISM' <<<"$out" \
-     && grep -q '5 of the 7 firings in that window were probe dispatches' <<<"$out" \
+     && grep -q 'It fired 7 times in that window: 2 by schedule:, 5 by THIS PROBE' <<<"$out" \
      && grep -q 'newest run 10m old, inside the 90m bound' <<<"$out"; then
     pass=$((pass+1)); echo "  ok   c9d a green built out of 5 probe dispatches and 2 scheduled runs SAYS SO: $(grep -o 'CADENCE  main-gate-watch.yml.*MECHANISM for it' <<<"$out")"
   else
