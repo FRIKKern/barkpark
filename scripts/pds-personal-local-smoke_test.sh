@@ -169,7 +169,12 @@ cmd_boot() {
   else bad 'BARKPARK_KEK absent from .env — :prod raises without it'; fi
   if grep -q '^BARKPARK_ALLOW_BUNDLE_IMPORT=1' "$home/.env" 2>/dev/null; then ok 'BARKPARK_ALLOW_BUNDLE_IMPORT=1 written'
   else bad 'BARKPARK_ALLOW_BUNDLE_IMPORT=1 absent from .env'; fi
-  local mode; mode="$(stat -f '%Lp' "$home/.env" 2>/dev/null || stat -c '%a' "$home/.env" 2>/dev/null)"
+  # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+  # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+  # report instead of failing, and a BSD-first `||` chain never reaches the
+  # GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on
+  # the wrong platform instead of quietly.
+  local mode; mode="$(stat -c '%a' "$home/.env" 2>/dev/null || stat -f '%Lp' "$home/.env" 2>/dev/null)"
   if [ "$mode" = 600 ]; then ok '.env is chmod 0600'; else bad ".env mode is '$mode', doc says 0600"; fi
 
   step 'S5 token creation — `bin/barkpark token`'
@@ -225,7 +230,18 @@ cmd_boot() {
   return 0
 }
 
-PLAN_OUT="$(mktemp -t pds-pl-plan)"; PLAN_ERR="$(mktemp -t pds-pl-planerr)"
+# PORTABLE mktemp, AND a hard failure. `mktemp -t NAME` with no XXXXXX is a
+# BSD-only form: GNU coreutils (every ubuntu CI runner) refuses it. This site
+# used to swallow that refusal — $(...) yielded "", every redirect below wrote
+# to the empty filename, resolve_plan grepped nothing, and the run reported
+# "0 of  doc anchor(s) resolved" while its ARM went green. An mktemp refusal is
+# now a named, fatal error; it must never be survivable.
+PLAN_OUT="$(mktemp "${TMPDIR:-/tmp}/pds-pl-plan.XXXXXX")" || {
+  echo "pds-personal-local-smoke: REFUSING — mktemp failed for the plan file" >&2; exit 2; }
+PLAN_ERR="$(mktemp "${TMPDIR:-/tmp}/pds-pl-planerr.XXXXXX")" || {
+  echo "pds-personal-local-smoke: REFUSING — mktemp failed for the plan error file" >&2; exit 2; }
+[ -n "$PLAN_OUT" ] && [ -n "$PLAN_ERR" ] || {
+  echo "pds-personal-local-smoke: REFUSING — mktemp returned an EMPTY path" >&2; exit 2; }
 trap 'rm -f "$PLAN_OUT" "$PLAN_ERR"' EXIT
 
 case "${1:---dry-run}" in

@@ -626,7 +626,11 @@ SERVING_AT_OVERRIDE=""
 # probe is blind to it. A live run reads the real clock at the real instant.
 ROWS_AT_OVERRIDE=""
 
-WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
+# PORTABLE mktemp: a `-t NAME` template with no XXXXXX is a BSD-only form; GNU
+# coreutils (every ubuntu CI runner) refuses it with "too few X's in template".
+# The explicit-path form below behaves identically on both.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/crown-reconcile.XXXXXX")" || {
+  echo "crown-reconcile: REFUSING — mktemp -d failed; no work directory" >&2; exit 2; }
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 

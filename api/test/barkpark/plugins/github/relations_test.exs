@@ -97,7 +97,11 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
           "doc_id" => doc_id,
           "title" => doc_id,
           "content" =>
-            %{"kind" => "task", "lifecycle_status" => "open"}
+            %{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => "open"
+            }
             |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
             |> Map.merge(content)
         },

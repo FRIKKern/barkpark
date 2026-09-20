@@ -241,3 +241,54 @@ The August measurement was taken while two processes from another session ran
 wall-clock timing from that window is worthless. The 2026-09-10 suite run below
 was taken on a host also running a multi-worker campaign; treat its DURATION
 (531.9s) as an upper bound and its FAILURE SET (empty) as the signal.
+
+## 8 — FOURTH residue signature, added 2026-09-20: `claude_chat_cloud_session_test.exs:170`
+
+Sections 3b and 4 name three residue reds. There is a FOURTH, and until this entry
+it was not written down anywhere a builder would look — so it kept being read as a
+fresh red caused by whatever diff happened to be under it.
+
+**Signature.** `BarkparkWeb.Studio.ClaudeChatCloudSessionTest`, the test
+
+    dead-sandbox binding clears on a loud reuse failure
+    (connectors D139 half B / D152-D156)
+    turn 3 mints FRESH after the bound sandbox vanishes on turn 2
+    — honest reset, not --resume into the void
+
+fails at `api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs:170` with
+
+    a loud reuse failure (nonzero exit) must clear the dead sandbox binding ("sbx-stub-1")
+    code: assert match?(%{cloud_sandbox_id: nil}, session_after),
+    stacktrace:
+      test/barkpark_web/studio/claude_chat_cloud_session_test.exs:220: (test)
+
+**Reproduction.** It reds in a DIRECTORY run and passes ALONE. Under a private
+`MIX_TEST_PARTITION`:
+
+    cd api && ../scripts/mix-test-strict.sh test/barkpark_web/studio/ test/barkpark_web/components/
+    # 823 tests, 1 failure  — the :170 test
+    cd api && ../scripts/mix-test-strict.sh test/barkpark_web/studio/claude_chat_cloud_session_test.exs
+    # 4 tests, 0 failures
+
+**It is NOT an order dependence you can fix, and the "find the leaking fixture"
+arm is VACUOUS — do not spend a round on it.** That was tried and ruled out, with
+controls: the red was non-reproducible as an ordering effect across SIX directory
+runs, and an instrumented run measured ZERO live Recorders, admission leases and
+bindings at that test's own entry. It is host contention on subprocess scheduling,
+the same family as #17605 and spd-b38. The adjacent log noise on a red run —
+`Postgrex.Protocol … disconnected`, `** (stop) {:app_server_exit, 17}`,
+`Req.TransportError connection refused` — is that contention, not a code defect.
+
+**Why this entry exists rather than a fix.** A red nobody has written down is
+indistinguishable from a red your diff caused, and the rule every lead is given —
+never accuse the diff under a flapping red — cannot be applied to a signature that
+is not recorded. First filed as `task-9ffbd1b42bcf189f` on 2026-09-11 by
+studio-r11-w2 off `task-a905d8016760e72e` (#17796); the leak-hunt half landed in
+#19209. Observed again on 2026-09-20 in `Elixir gate` run 35505321451, on a PR
+whose entire diff was two Studio switcher TEST files — nothing near chat or
+sandbox code — which is exactly the false accusation this entry prevents.
+
+**What to do when you hit it.** Confirm the failing test is this one and only this
+one, then re-fire the gate with `gh pr update-branch <pr>` (a new head, a fresh
+run) rather than `gh run rerun`. If a run fails with this signature PLUS anything
+else, the something else is yours.

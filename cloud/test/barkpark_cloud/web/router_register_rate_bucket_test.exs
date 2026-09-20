@@ -36,6 +36,7 @@ defmodule BarkparkCloud.Web.RouterRegisterRateBucketTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.DeviceAuth.RateLimiter
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -67,6 +68,10 @@ defmodule BarkparkCloud.Web.RouterRegisterRateBucketTest do
 
   describe "register rate bucket is keyed per forwarded client address" do
     test "one client exhausting its budget does not rate-limit a different client" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       # Cheap invalid-password bodies: each still spends the bucket (the check
       # runs before validation), so we exhaust 30 without 30 bcrypt hashes.
       for i <- 1..@register_limit do
@@ -90,6 +95,10 @@ defmodule BarkparkCloud.Web.RouterRegisterRateBucketTest do
     end
 
     test "the second client keeps its OWN full budget, not the first client's remainder" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       for _ <- 1..(@register_limit + 1),
           do: register_from("203.0.113.5", %{email: fresh_email(), password: @short_password})
 

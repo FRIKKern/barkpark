@@ -290,7 +290,12 @@ echo ">> Shooting into: $OUT"
 echo ">> Census (derived from scenarios.mjs): $SCEN_DEEP of $SCEN_TOTAL scenarios carry a deepLink"
 
 # Portable file size (macOS `stat -f%z`, GNU `stat -c%s`), 0 if absent.
-png_size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0; }
+# GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+# FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+# report instead of failing, and a BSD-first `||` chain never reaches the
+# GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on the
+# wrong platform instead of quietly.
+png_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo 0; }
 
 # Is the preview server still answering? Checked ONCE at boot was not enough:
 # when node died mid-run every remaining shot captured Chrome's

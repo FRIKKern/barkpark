@@ -1098,7 +1098,16 @@ const WRAP_CORE_SHORTHANDS = [
 // REQUIRED — a scan degrading to 3-of-4 that lost exactly the attention
 // queue's copy would still have reported clean, which is the partial
 // blindness these pins exist to close.
-const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"];
+// cch-w24-s2 added `.detail-title-row` as the FIFTH copy — a COMMA MEMBER of
+// the `.instance-card-head` prelude, not a new block (Δheads 0). It was
+// COUNTED (the harness's same-file count pin went 4 -> 5) but not REQUIRED,
+// so a scan degrading to 4-of-5 that lost exactly the failed instance's OWN
+// detail header — the one screen a person opens to read WHY provisioning
+// failed — still reported clean. `cch-w24-bl-detail-title-row-not-a-required-
+// wrap-host` closes that, and the cascade is the point: every fixture
+// stylesheet E14 runs against now owes the fifth copy, which is what makes a
+// required host a pin rather than a note.
+const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"];
 // WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
 // NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
 // and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
@@ -3345,10 +3354,15 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
 
-// E14 — wrap-recipe declaration parity (charter D220): the three hand-built
-// copies share a byte-identical five-declaration core wearing three different
-// jackets, and nothing asserted that the core still agrees. The copy inventory
-// is printed below so the count is the SCAN's claim, never a comment's.
+// E14 — wrap-recipe declaration parity (charter D220): the hand-built copies
+// share a byte-identical five-declaration core wearing different jackets, and
+// nothing asserted that the core still agrees. The copy inventory is printed
+// below so the count is the SCAN's claim, never a comment's — which is why
+// this sentence no longer states a number: it said "three" through two
+// additions (W20-S6's `.attention-row`, cch-w24-s2's `.detail-title-row`) and
+// was wrong for both. This gate body scans app.css ALONE (`cssRaw`); the
+// fixtures reach E14 only through the targeted `--wrap-parity-check <file>`
+// sub-mode.
 const wrapParity = wrapParityErrors(cssRaw);
 for (const e of wrapParity.errors) errors.push(e);
 

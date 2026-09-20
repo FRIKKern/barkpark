@@ -59,7 +59,11 @@ defmodule BarkparkWeb.MutateTaskPublishedFirstTest do
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   defp task_content(extra) do
-    %{"kind" => "task", "lifecycle_status" => "open"}
+    %{
+      "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
+      "lifecycle_status" => "open"
+    }
     |> Map.merge(extra)
     |> LabelFixtures.with_registered_labels(@dataset)
   end
@@ -181,6 +185,7 @@ defmodule BarkparkWeb.MutateTaskPublishedFirstTest do
               "_type" => "task",
               "title" => "hotfix override: a fixture PR",
               "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => "open",
               "labels" => ["hotfix-override", "merge-gate-override", "proj:task-obsession"],
               "description" =>
