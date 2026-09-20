@@ -45,6 +45,29 @@ export function parseOpenWikilink(text, caretOffset) {
   return { query: between, from: open, to: off, trigger: "[[" };
 }
 
+// `:` + at least two shortcode chars at a word start opens the emoji picker (GitHub's
+// shorthand). A time (12:30), a URL (http://) or a word containing a colon never
+// opens: the char before the `:` must be the block start or whitespace, and the
+// query is shortcode chars only (letters, digits, _ + -) with no space up to the caret.
+export function parseOpenEmoji(text, caretOffset) {
+  if (typeof text !== "string" || typeof caretOffset !== "number") return null;
+  const off = Math.max(0, Math.min(caretOffset, text.length));
+  const before = text.slice(0, off);
+  const colon = before.lastIndexOf(":");
+  if (colon === -1) return null;
+  if (colon > 0 && !/\s/.test(before[colon - 1])) return null;
+  const query = before.slice(colon + 1);
+  if (query.length < 2 || !/^[A-Za-z0-9_+-]+$/.test(query)) return null;
+  return { query, from: colon, to: off, trigger: ":" };
+}
+
+// The typed span is ":" + query ending at the caret.
+export function emojiReplaceRange(caretPos, query) {
+  const to = typeof caretPos === "number" ? caretPos : 0;
+  const len = typeof query === "string" ? query.length : 0;
+  return { from: Math.max(0, to - len - 1), to };
+}
+
 // `@` is an alias for `[[`: what Notion and Tiptap users reach for to link a page or a
 // person. It opens only where a mention can start — at the block start or after
 // whitespace / an opening bracket — so an address like me@example.com never opens,

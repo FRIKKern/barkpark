@@ -16,6 +16,8 @@ import {
   wikilinkReplaceRange,
   parseOpenTag,
   tagReplaceRange,
+  parseOpenEmoji,
+  emojiReplaceRange,
 } from "./wikilink-trigger.js";
 
 let failures = 0;
@@ -91,6 +93,24 @@ check("caretOffset is clamped into range", () => {
 });
 
 // ── replace-range PM-position mapping (pick seam) ──────────────────────────
+
+// ── `:` emoji picker (plan: Barkdown #18) ─────────────────────────────────────
+check("`:smi` at block start opens with query 'smi'", () => {
+  assert.deepEqual(parseOpenEmoji(":smi", 4), { query: "smi", from: 0, to: 4, trigger: ":" });
+});
+check("`see :sm` mid-prose opens (after whitespace); one letter does not", () => {
+  assert.deepEqual(parseOpenEmoji("see :sm", 7), { query: "sm", from: 4, to: 7, trigger: ":" });
+  assert.equal(parseOpenEmoji("see :s", 6), null);
+});
+check("a time (12:30), a URL (http://) and a bare `:` never open", () => {
+  assert.equal(parseOpenEmoji("at 12:30", 8), null);
+  assert.equal(parseOpenEmoji("http://x", 8), null);
+  assert.equal(parseOpenEmoji("hi :", 4), null);
+  assert.equal(parseOpenEmoji("hi :sm ile", 10), null);
+});
+check("emoji replace range backs up one char for the colon", () => {
+  assert.deepEqual(emojiReplaceRange(9, "smi"), { from: 5, to: 9 });
+});
 
 // ── `@` as an alias for `[[` (plan: Barkdown #19) ────────────────────────────
 check("`@Mult` at block start opens with query 'Mult' and trigger '@'", () => {

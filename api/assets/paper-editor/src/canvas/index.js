@@ -150,6 +150,8 @@ import { Expandable } from "./expandable-node.js";
 import { Steps, Step, Tabs, Tab } from "./rows-node.js";
 // The "data + island" atoms: equation, footnotes, contents, video.
 import { Equation, Footnote, Toc, Video } from "./island-node.js";
+// The `:` emoji picker: a local shortcode table, plain text on pick (no server change).
+import { searchEmoji } from "../emoji.js";
 // Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
@@ -211,6 +213,8 @@ import {
   wikilinkReplaceRange,
   parseOpenTag,
   tagReplaceRange,
+  parseOpenEmoji,
+  emojiReplaceRange,
 } from "../wikilink-trigger.js";
 // P4 S-slash: the SAME caret-anchored "/" insert popup the per-block editor uses
 // (slash-menu.js), REUSED verbatim — only the WC-side wiring differs. SLASH_ITEMS
@@ -578,6 +582,8 @@ class BpPaperCanvas extends HTMLElement {
     this._mediaUploader = null;
     this._uploadSeq = 0;
     this._tagRange = null; // { from, to } PM range to replace on the current pick
+    this._emoji = null; // WikilinkMenu instance reused for the `:` emoji picker (lazy)
+    this._emojiRange = null; // { from, to } PM range to replace on the current pick
     // P4 S-slash: the "/" insert popup (lazy, created on first trigger). UNLIKE the
     // wikilink/tag popups it needs no injected source — the item list is the static
     // CANVAS_SLASH_ITEMS (SLASH_ITEMS filtered to the insertable set) + EXPECTED-group
@@ -1029,8 +1035,12 @@ class BpPaperCanvas extends HTMLElement {
         if (!consumed) {
           if (this._maybeWikilink()) {
             this._closeTag();
+            this._closeEmoji();
             this._closeSlash();
           } else if (this._maybeTag()) {
+            this._closeEmoji();
+            this._closeSlash();
+          } else if (this._maybeEmoji()) {
             this._closeSlash();
           } else {
             this._maybeSlash();
@@ -1685,6 +1695,7 @@ class BpPaperCanvas extends HTMLElement {
       const anyPopupOpen =
         (this._wikilink && this._wikilink.isOpen()) ||
         (this._tag && this._tag.isOpen()) ||
+        (this._emoji && this._emoji.isOpen()) ||
         (this._slash && this._slash.isOpen());
       // If the palette is ALREADY open, Mod-p closes it (toggle); else open it — but
       // never co-open alongside a text-triggered popup.
@@ -1742,6 +1753,27 @@ class BpPaperCanvas extends HTMLElement {
           return true;
         case "Escape":
           this._dismissWikilink();
+          return true;
+        default:
+          return false;
+      }
+    }
+
+    // `:` emoji picker owns the nav keys while open — the same contract.
+    if (this._emoji && this._emoji.isOpen()) {
+      switch (event.key) {
+        case "ArrowDown":
+          this._emoji.move(1);
+          return true;
+        case "ArrowUp":
+          this._emoji.move(-1);
+          return true;
+        case "Enter":
+        case "Tab":
+          this._emoji.choose();
+          return true;
+        case "Escape":
+          this._dismissEmoji();
           return true;
         default:
           return false;
@@ -2163,6 +2195,68 @@ class BpPaperCanvas extends HTMLElement {
       })
       .catch(() => {});
     return true;
+  }
+
+  // ── `:` emoji picker ───────────────────────────────────────────────────────
+  //
+  // GitHub's shorthand: `:` + two letters opens a picker over a local shortcode
+  // table (emoji.js); the pick inserts the character as plain text and a space, so
+  // the server sees ordinary text. Same popup class as [[ and #, eyebrow "Emoji".
+  _maybeEmoji() {
+    if (!this._editable || !this._editor) return false;
+    const $from = this._editor.state.selection.$from;
+    const hit = parseOpenEmoji($from.parent.textContent, $from.parentOffset);
+    if (!hit) {
+      this._closeEmoji();
+      return false;
+    }
+    const rows = searchEmoji(hit.query).map(({ name, char }) => ({ title: char + "  " + name, id: char, type: "emoji" }));
+    if (!rows.length) {
+      this._closeEmoji();
+      return false;
+    }
+    this._openEmoji(this._caretRect(), hit.query);
+    this._emojiRange = emojiReplaceRange(this._editor.state.selection.from, hit.query);
+    this._emoji.setResults(rows);
+    return true;
+  }
+
+  _openEmoji(rect, query = "") {
+    if (!this._emoji) {
+      this._emoji = new WikilinkMenu({
+        onChoose: (c) => this._chooseEmoji(c),
+        onDismiss: () => this._dismissEmoji(),
+        eyebrow: "Emoji",
+        kind: "emoji",
+      });
+    }
+    this._emoji.open(rect, query);
+  }
+
+  _closeEmoji() {
+    if (this._emoji && this._emoji.isOpen()) this._emoji.close();
+  }
+
+  _chooseEmoji(candidate) {
+    const range = this._emojiRange;
+    if (!range || !candidate || !candidate.id) {
+      this._closeEmoji();
+      return;
+    }
+    this._editor
+      .chain()
+      .focus()
+      .insertContentAt({ from: range.from, to: range.to }, [
+        { type: "text", text: String(candidate.id) },
+        { type: "text", text: " " },
+      ])
+      .run();
+    this._closeEmoji();
+  }
+
+  _dismissEmoji() {
+    this._closeEmoji();
+    this._editor.commands.focus();
   }
 
   _openTag(rect, query = "") {
@@ -2645,6 +2739,7 @@ class BpPaperCanvas extends HTMLElement {
     // [[ / # / slash / palette popup would float over a now-hidden editor.
     this._closeWikilink();
     this._closeTag();
+    this._closeEmoji();
     this._closeSlash();
     this._closePalette();
 
