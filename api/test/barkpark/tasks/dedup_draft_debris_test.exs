@@ -57,7 +57,11 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
   end
 
   defp create_task(doc_id, title, scope, content_extra) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(content_extra)
+      # The Tasks plugin's :before_publish brief wall (inert until #19303).
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     Content.create_document(
       "task",
@@ -69,6 +73,20 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
 
   @title "harden the payload sanitizer against nested block ids"
   @desc "walk nested blocks and strip attacker supplied identifiers before storage"
+
+  # The minimum content.brief that satisfies portable_brief_gate/1: version 1
+  # and at least one block of a bp-task-tui type. Only the PUBLISHED arm needs
+  # it — the gate is a before_publish hook, so the draft arms are unaffected.
+  @brief %{
+    "version" => 1,
+    "blocks" => [
+      %{
+        "id" => "purpose-copy",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => @desc}]
+      }
+    ]
+  }
 
   test "THE MECHANISM: a byte-identical retry is refused by the debris draft its own failed create left behind",
        %{scope: scope} do
@@ -127,8 +145,17 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
     # The publish wall (label_spine) requires 1–12 REGISTERED weighted tags, so
     # the PUBLISHED arm needs them; the fixture also supplies a description,
     # which is overridden here so both arms score on the same token bag.
+    #
+    # portable_brief_gate/1 (api/lib/barkpark/plugins/tasks.ex, from ee483fa4b
+    # "feat(tasks): require PortableDoc briefs at publish") is a SECOND publish
+    # wall: it halts any task publish whose content.brief is not a PortableDoc
+    # {version: 1, blocks: [...]} of bp-task-tui block types. Without it this
+    # publish returns {:error, {:halted, "task brief is required before
+    # publish — ..."}} and the {:ok, published} match below raises a
+    # MatchError — which is exactly how this test reds on origin/main.
     published_content =
-      Barkpark.LabelFixtures.with_registered_labels(%{"description" => @desc}, @dataset)
+      %{"description" => @desc, "brief" => @brief}
+      |> Barkpark.LabelFixtures.with_registered_labels(@dataset)
 
     {:ok, _} = create_task(existing, @title, scope, published_content)
     {:ok, published} = Content.publish_document(existing, "task", @dataset, scope)

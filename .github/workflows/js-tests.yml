@@ -150,13 +150,15 @@ jobs:
       - name: Setup Node (pnpm store cached on the lockfile)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # cache: pnpm needs pnpm on PATH first, hence the reorder above
           cache: pnpm
           cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: "The Node pin above satisfies engines.node and the root vitest config can load under it (task-a9c4b827881d71bd)"
+        run: node scripts/check-node-floor.mjs --selftest && node scripts/check-node-floor.mjs
 
       # COVERAGE for the `size` and `test` steps below, in front of both
       # (task-3cd40ebba5ab106a, task-d4c973367c0d1a76). `turbo run <task>`
@@ -416,7 +418,7 @@ jobs:
       - name: Setup Node (pnpm store cached on the lockfile)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # cache: pnpm needs pnpm on PATH first, hence the reorder above
           cache: pnpm
           cache-dependency-path: js/pnpm-lock.yaml
