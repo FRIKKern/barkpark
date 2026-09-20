@@ -1462,7 +1462,21 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
-    if (saved !== true) return false;
+    if (saved !== true) {
+      // REJECTED (a lifecycle veto, a failed request): drop the in-flight batch WITHOUT
+      // advancing the baseline. `_blocks` still holds the last SAVED snapshot, so the
+      // next local edit diffs against it and carries the refused change along — the
+      // author keeps what they see, and it lands as soon as the server will take it
+      // (a batch that would hollow the paper saves once they write again). Edits made
+      // while the batch was travelling are emitted now: that diff already differs from
+      // the refused one. Nothing else is resent here — an unchanged vetoed batch would
+      // just be vetoed again.
+      this._inflightOps = null;
+      const dirty = this._dirtyWhileInflight;
+      this._dirtyWhileInflight = false;
+      if (dirty) this._emitOps();
+      return true;
+    }
 
     // Diff against the local snapshot the author still sees. A canonical reply
     // can contain remote sibling changes queued for later display; advancing
