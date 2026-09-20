@@ -466,7 +466,11 @@ const ALLOW_PREFIXES = [
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
   // gr-w1 (cloud GUI remake): dynamic sites whose composed classes all have
   // rules in app.css today — verified via `.<family>` grep before allowing.
-  "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
+  // cch-r21l: `"inst-life-pill "` stood here and is REMOVED with the family. The
+  // instance lifecycle chip now composes `status-pill status-pill--` like every
+  // other state affordance (LIFECYCLE_PILL_ROLE -> statusMetaPill), so it is
+  // covered by that entry above — and E19 would red on this one anyway the
+  // moment the last emitting site went, which is the durable half of the removal.
   "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
   "notice",                     // fleetRolloutBannerHtml(): + NOTICE_TONE_CLASS[tone] (.notice / .notice-ok|warn|error)
   "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
@@ -564,7 +568,17 @@ const STATUS_PILL_ROLES = ["ok", "info", "warn", "danger", "neutral"];
 // lives. Returns null when the table cannot be located or brace-matched — an
 // empty scan is not a clean scan, so arm (a) makes that a hard error.
 function deployStatusMetaTable(js) {
-  const start = js.indexOf("var DEPLOY_STATUS_META = {");
+  return roleTableOf(js, "DEPLOY_STATUS_META");
+}
+
+// The same brace-matched read, for any `var <NAME> = { key: {role,variant}, … }`
+// role table in app.js. cch-r21l added LIFECYCLE_PILL_ROLE as a second such
+// table (the instance lifecycle chip's absorption into the .status-pill family),
+// and a SECOND hand-rolled parser is a second thing to keep in step — so the
+// deploy reader above is expressed through this one rather than beside it.
+function roleTableOf(js, name) {
+  if (js == null) return null;
+  const start = js.indexOf(`var ${name} = {`);
   if (start === -1) return null;
   let i = js.indexOf("{", start);
   if (i === -1) return null;
@@ -577,14 +591,34 @@ function deployStatusMetaTable(js) {
   if (depth !== 0) return null;
   const body = js.slice(open + 1, i);
   const table = new Map();
-  for (const m of body.matchAll(
-    /([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g,
-  )) {
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g)) {
     const role = /\brole\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
     const variant = /\bvariant\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
     table.set(m[1], { role: role ? role[1] : null, variant: variant ? variant[1] : null });
   }
   return table.size === 0 ? null : table;
+}
+
+// The KEY SET of a flat `var <NAME> = { key: "…", … }` object in app.js. Used by
+// E13 arm (g) to hold LIFECYCLE_PILL_ROLE's domain against LIFECYCLE_PILL_LABEL's,
+// so a sixth lifecycle state cannot arrive with a label and no role (which would
+// fall the chip through to a bare neutral pill — the impersonation shape).
+function flatObjectKeys(js, name) {
+  if (js == null) return null;
+  const start = js.indexOf(`var ${name} = {`);
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open + 1, i);
+  const keys = new Set();
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:/g)) keys.add(m[1]);
+  return keys.size === 0 ? null : keys;
 }
 
 // The `wh-del-status--` VALUE SPACE, mirroring DEPLOY_STATUSES above and checked
@@ -2977,6 +3011,102 @@ function statusMetaPillBody(src) {
             `pre-escaped title / data-* attribute string, so no call site needs its own ` +
             `span.`,
         );
+      }
+    }
+
+    // cch-r21l — THE SAME PREDICATE, WIDENED TO THE SECOND ABSORBED FAMILY.
+    // Arm (f) above measures the SURVIVING family's literals; `.inst-life-pill`
+    // was a THIRD grammar for a state the ladder already paints (the fleet row
+    // renders the same lifecycle state through statusMetaPill), so absorbing it
+    // without a checked predicate would just re-run the decision-24 mistake —
+    // the sentence "there is one state grammar" with nothing measuring it.
+    //
+    // TWO WAYS IT CAN COME BACK, both refused BY NAME:
+    //   · a class LITERAL in app.js (the hand-built span in the pure render), or
+    //   · a RULE in app.css (comment-stripped, so the tombstone that names the
+    //     dead classes is not itself a revival).
+    // The third way — the imperative `className = "inst-life-pill " + …` repaint
+    // in the decommission handler — is caught by the literal scan too, because
+    // the class name is spelled in a quoted string either way. That site is
+    // exactly the one no class-attribute scan could ever see, which is why the
+    // regex below is keyed on the NAME and not on the attribute.
+    const ABSORBED = ["inst-life-pill", "inst-life-dot", "inst-life-label"];
+    const revivedCss = ABSORBED.filter((c) => cssClasses.has(c)).sort();
+    if (revivedCss.length) {
+      errors.push(
+        `E13 app.css  the RETIRED .inst-life-pill chip family is back: ${revivedCss
+          .map((c) => "." + c)
+          .join(", ")}. The instance lifecycle chip is .status-pill + a ` +
+          `LIFECYCLE_PILL_ROLE role since cch-r21l; a second family painting the ` +
+          `same state is the regression this arm exists to catch, not a styling ` +
+          `choice.`,
+      );
+    }
+    for (const [file, src] of [["app.js", jsRaw], ["styleguide.html", styleguideRaw]]) {
+      if (src == null) continue;
+      const back = ABSORBED.filter((c) => new RegExp(`["'][^"'\n]*\\b${c}\\b`).test(src)).sort();
+      if (!back.length) continue;
+      errors.push(
+        `E13 ${file}  emits a \`${back.join("\`, \`")}\` class literal — the ` +
+          `.inst-life-pill chip family is retired. Render the chip through ` +
+          `lifecycleStatePillHtml(state), which delegates to statusMetaPill, so ` +
+          `there stays exactly one state grammar and exactly one author for it.`,
+      );
+    }
+  }
+
+  // (g) THE ABSORBED FAMILY'S ROLE TABLE IS TOTAL AND PAINTED. Same shape as
+  //     arms (b)/(c)/(d) above, one surface over: LIFECYCLE_PILL_ROLE must cover
+  //     every state LIFECYCLE_PILL_LABEL declares, name only closed roles, and
+  //     every role/variant it names must have a .status-pill--* rule. A state
+  //     with a label and no role falls through to a bare neutral chip — the
+  //     impersonation shape that made `.dep-cancelled` read as `queued`.
+  {
+    const roleTable = roleTableOf(jsRaw, "LIFECYCLE_PILL_ROLE");
+    const labelKeys = flatObjectKeys(jsRaw, "LIFECYCLE_PILL_LABEL");
+    if (roleTable === null || labelKeys === null) {
+      errors.push(
+        "E13 app.js  LIFECYCLE_PILL_ROLE and/or LIFECYCLE_PILL_LABEL could not be " +
+          "located or parsed — this arm reads both, so a rename or a rewrite must " +
+          "come with an update to roleTableOf()/flatObjectKeys() here, never a " +
+          "silently skipped check.",
+      );
+    } else {
+      const roles = new Set(STATUS_PILL_ROLES);
+      for (const st of [...labelKeys].sort()) {
+        if (roleTable.has(st)) continue;
+        errors.push(
+          `E13 app.js  lifecycle state "${st}" has a LIFECYCLE_PILL_LABEL entry but ` +
+            `no LIFECYCLE_PILL_ROLE entry — lifecycleStatePillHtml() falls it through ` +
+            `to the neutral role with no variant, so a ${st} box would wear the same ` +
+            `chip as one nobody has classified. Add the role beside the others.`,
+        );
+      }
+      for (const [st, m] of roleTable) {
+        if (!labelKeys.has(st)) {
+          errors.push(
+            `E13 app.js  LIFECYCLE_PILL_ROLE["${st}"] names a state LIFECYCLE_PILL_LABEL ` +
+              `does not declare — the chip would render the literal word "Unknown" in a ` +
+              `${m.role || "?"}-coloured pill. Give it a label or drop the role.`,
+          );
+          continue;
+        }
+        if (m.role === null || !roles.has(m.role)) {
+          errors.push(
+            `E13 app.js  LIFECYCLE_PILL_ROLE["${st}"] names role "${m.role}", which is ` +
+              `not one of the closed five (${STATUS_PILL_ROLES.join(" | ")}).`,
+          );
+        }
+        for (const [kind, name] of [["role", m.role], ["variant", m.variant]]) {
+          if (!name) continue;
+          if (kind === "role" && !roles.has(name)) continue;
+          if (cssClasses.has(`status-pill--${name}`)) continue;
+          errors.push(
+            `E13 app.css  LIFECYCLE_PILL_ROLE["${st}"] names ${kind} "${name}" but there ` +
+              `is no .status-pill--${name} rule — the class rides into the DOM and ` +
+              `paints as the bare base pill.`,
+          );
+        }
       }
     }
   }

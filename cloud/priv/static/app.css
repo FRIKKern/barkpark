@@ -1845,25 +1845,31 @@ select.form-input {
 
 /* ── S11b lifecycle action row — the persistent "operate this box" cluster ─────
    Previously UNSTYLED (raw inline spans); rendered here as one compact cluster:
-   a state pill + the verb controls, with a single "via the bp CLI" caption. The
-   pill mirrors .status-pill; the .bp-inst--<state> class tints its colour and the
-   dot reads that hue through currentColor while the label stays neutral. */
+   a state pill + the verb controls, with a single "via the bp CLI" caption.
+
+   cch-r21l: THE `.inst-life-pill` FAMILY IS RETIRED — absorbed into the one
+   `.status-pill` family (parent decision 24 / GR11), same sweep that retired
+   `.dep-*`. What stood here: `.inst-life-pill` (inline-flex, gap 7px, height
+   24px, padding 0 11px, 1px border, var(--pill) radius, var(--muted-surface),
+   12px — i.e. `.status-pill`'s box re-typed, differing only in font-weight
+   600 vs 500), plus `.inst-life-dot` and `.inst-life-label`. The chip said the
+   SAME thing the fleet row's `.status-pill` already said (this box's lifecycle
+   state), in a second dialect, and it was additionally RE-CLASSED by hand in
+   the decommission handler — a second author no static check could see.
+   Where each look went: the box is `.status-pill`'s, the dot is
+   `.status-pill-dot`, the label is `.status-pill-label`, and the state hue is
+   the ROLE the state maps to — provisioning → `--info`, live → `--ok`,
+   degraded → `--warn`, stopped/Suspended → `--neutral --stopped`,
+   decommissioned → `--danger`. That mapping is not this comment's to keep: it
+   is LIFECYCLE_PILL_ROLE in app.js (grep -n 'LIFECYCLE_PILL_ROLE' app.js),
+   which __css_check E13 reads and holds total over LIFECYCLE_PILL_LABEL — and
+   E13 also reds if an `.inst-life-pill` / `.inst-life-dot` / `.inst-life-label`
+   rule or class literal returns, so re-forking the grammar fails the gate.
+   The `.bp-inst--<state>` token still rides on the chip as an extra class; it
+   is the S4 identity, not the paint. Every other `.inst-life-*` rule survives:
+   they are the row's LAYOUT and copy, never pills. */
 .inst-lifecycle-actions { margin: 18px 0 4px; }
 .inst-life-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
-.inst-life-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 24px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--pill);
-  background: var(--muted-surface);
-  font-size: 12px;
-  font-weight: 600;
-}
-.inst-life-dot { width: 7px; height: 7px; border-radius: var(--pill); background: currentColor; flex: 0 0 auto; }
-.inst-life-label { color: var(--text); }
 .inst-life-status { display: inline-flex; align-items: center; gap: 8px; }
 .inst-life-note { font-size: 12px; color: var(--muted-text); }
 .inst-life-note--warn { color: var(--warn-strong); }
