@@ -15,7 +15,7 @@ name: Prod micro-block staleness
 #
 # VENUE IS DECIDED PER JOB, never per file.
 #
-#   selftest  — schedule + dispatch + EVERY pull_request. It runs the harness
+#   prod-microblock-selftest  — schedule + dispatch + EVERY pull_request. It runs the harness
 #               scripts/prod-microblock-staleness-check.test.sh, which is pure
 #               bash over a stubbed network and finishes in seconds, so it sits
 #               inside the CI-policy budget ("a PR runs only what can block it,
@@ -26,7 +26,7 @@ name: Prod micro-block staleness
 #               This job is deliberately NOT in .github/required-checks.json's
 #               required set; it is a reader, not a merge gate.
 #
-#   read      — schedule + dispatch ONLY (`if:` below). It runs the reader
+#   prod-microblock-read      — schedule + dispatch ONLY (`if:` below). It runs the reader
 #               against the live box. On a pull_request head that answer is
 #               about a SERVER, not about the PR's code, so a PR could neither
 #               cause the red nor clear it. A BEHIND box (exit 3) reds the
@@ -35,13 +35,13 @@ name: Prod micro-block staleness
 #               different sentence — never confuse it with "0 commits behind",
 #               which is the defect the harness above exists to forbid.
 #
-#   report-scheduled-failure — a red on a cron fails into the void (see
+#   prod-microblock-report-scheduled-failure — a red on a cron fails into the void (see
 #               scripts/scheduled-arm-health.sh: studio-journey-smoke's cron
 #               failed 47 of 47 times and cost nobody a second). This job is
 #               the human surface, the same idiom deploy-harnesses.yml uses.
 #
 # CHECKOUT DEPTH. The reader resolves the served sha and counts commits against
-# origin/main, so the `read` job needs the WHOLE history (`fetch-depth: 0`). A
+# origin/main, so the `prod-microblock-read` job needs the WHOLE history (`fetch-depth: 0`). A
 # shallow clone would make every served sha unresolvable and turn every run
 # into CANNOT-READ — loud, but about the checkout, not the box.
 #
@@ -63,7 +63,7 @@ permissions:
   contents: read
 
 jobs:
-  selftest:
+  prod-microblock-selftest:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -121,7 +121,7 @@ jobs:
           fi
           echo "control: an unreachable box exits 4 (CANNOT-READ) and never says '0 commits behind'."
 
-  read:
+  prod-microblock-read:
     # PR heads are excluded: the verdict is about a SERVER, so a PR can neither
     # cause it nor clear it. Schedule and manual dispatch only.
     if: github.event_name != 'pull_request'
@@ -147,8 +147,8 @@ jobs:
           esac
           exit "$rc"
 
-  report-scheduled-failure:
-    needs: [read]
+  prod-microblock-report-scheduled-failure:
+    needs: [prod-microblock-read]
     # A red on a cron fails into the void. This is the only reader of that red.
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
