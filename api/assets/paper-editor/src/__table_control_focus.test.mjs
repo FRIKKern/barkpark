@@ -54,8 +54,6 @@ const tab = (position, shiftKey = false) => {
 };
 assert.equal(tab(cellPositions[0], true).defaultPrevented, false,
   "Shift-Tab in the first cell allows native focus to leave the table");
-assert.equal(tab(cellPositions.at(-1)).defaultPrevented, false,
-  "Tab in the last cell allows native focus to reach table controls");
 assert.equal(tab(cellPositions[0]).defaultPrevented, true,
   "Tab between cells remains an editor navigation command");
 assert.equal(editor._editor.state.selection.from, cellPositions[1]);
@@ -115,6 +113,19 @@ document.body.appendChild(outside);
 outside.focus();
 editor.block = structuredClone(projection);
 assert.equal(document.activeElement, outside, "a background Table echo never steals focus");
+
+// Tab in the LAST cell grows the table by a body row — what @tiptap/extension-table does,
+// and how an author builds a table from the keyboard. Keyboard reach to the controls
+// stays: Shift-Tab out of the first cell (above), and the disclosure follows the table in
+// the tab order. In this table-field host the row is an action the host applies and
+// echoes, so the keystroke must emit the same structure op as the "+ row" control rather
+// than edit the doc. Last, because the request leaves the editor awaiting that echo.
+const structureOps = [];
+editor.addEventListener("bp-op", (e) => { if (e.detail?.op === "patch-table-structure") structureOps.push(e.detail); });
+assert.equal(tab(cellPositions.at(-1)).defaultPrevented, true,
+  "Tab in the last cell is an editor command: it requests a new row");
+assert.equal(structureOps.length, 1, "Tab in the last cell emits one table structure op");
+assert.equal(structureOps[0].action, "add-row", "the op adds a row");
 editor.remove();
 outside.remove();
 console.log("PASS Table controls retain keyboard focus through authoritative repaints");

@@ -826,6 +826,35 @@ anchor_run() {
     "$(sed -n 's/^instance=//p' "$out" | tail -1)"
 }
 
+# anchor_plant_drain <step.sh> <dst.sh> — the extracted step body with a
+# STDIN-DRAINING CHILD planted as the first statement of the anchor loop.
+#
+# WHY A PLANT AND NOT A FIXTURE. The hazard is not in the candidate list; it is
+# in the loop's own fd 0. `cat >/dev/null` in the body is the smallest exact
+# stand-in for the shapes that actually appear in deploy code — `ssh` without
+# -n, a `-` operand, `docker exec -i` — each of which reads the REST of the
+# heredoc and ends the loop after one iteration. deploy-w5 measured this on a
+# copy: every child in the real body processes 3 of 3 candidates, an unguarded
+# `cat` processes 1 of 3. So the plant is a MEASURED shape, not an invented one.
+#
+# It refuses rather than writing a copy that is silently unmutated: a plant that
+# did not apply would make the arm below certify nothing at all.
+anchor_plant_drain() {
+  local src="$1" dst="$2" n
+  n="$(grep -c '^[[:space:]]*while read -r cand_id cand_sha; do$' "$src" || true)"
+  if [ "${n:-0}" -ne 1 ]; then
+    echo "PLANT-REFUSED: the anchor loop header matched ${n:-0} time(s) in the extracted step, wanted 1 — the loop no longer looks as this arm expects. Fix the arm, do not loosen it." >&2
+    return 1
+  fi
+  awk '{ print; if ($0 ~ /^[[:space:]]*while read -r cand_id cand_sha; do$/) print "  cat >/dev/null 2>&1 || true" }' \
+    "$src" >"$dst"
+  if cmp -s "$src" "$dst"; then
+    echo "PLANT-REFUSED: the stdin-draining child produced an IDENTICAL file — it did not apply." >&2
+    return 1
+  fi
+  return 0
+}
+
 # check_anchor <yml> <label> — 0 if a run that deployed nothing is never the
 # anchor AND a run that did deploy still is.
 check_anchor() {
@@ -861,6 +890,22 @@ check_anchor() {
     rc=1
   fi
 
+  # THE COUNT, PRINTED. A healthy scan examines every candidate it was handed,
+  # and the log must SAY so — an identity nobody can read is an identity nobody
+  # can act on, and the shortfall arm below is only trustworthy if the same line
+  # is present and equal when nothing is wrong.
+  if grep -q '^anchor: candidates examined 2 of 2 listed$' "$ANCHOR_TMP/step.out"; then
+    echo "  anchor   healthy scan                     ->  candidates examined 2 of 2 listed (identity holds)"
+  else
+    echo "  ESCAPE   healthy scan did not print an EQUAL examined/listed count" >&2
+    echo "           wanted the line 'anchor: candidates examined 2 of 2 listed' in the step log." >&2
+    echo "           got: $(grep -c '^anchor: candidates examined' "$ANCHOR_TMP/step.out" || true) count line(s):" >&2
+    grep '^anchor: candidates examined' "$ANCHOR_TMP/step.out" >&2 || echo "           (none)" >&2
+    echo "           Without the count the next arm's shortfall test has no baseline: a loop that" >&2
+    echo "           ALWAYS reads short would look identical to one that never does." >&2
+    rc=1
+  fi
+
   # THE POSITIVE CONTROL. Without it, a selector that simply always reached one
   # run further back would satisfy the case above and this arm would certify a
   # rule nobody stated.
@@ -874,6 +919,65 @@ check_anchor() {
     echo "           wanted diff base: $ANCHOR_SUPERSEDED_SHA (run 222) and instance=false. The selector reaches" >&2
     echo "           past a run that DID deploy, so the case above proves nothing about leg conclusions." >&2
     rc=1
+  fi
+
+  # ── THE SHORTFALL ARM (task-5c4cd03a726b0a0c) ──────────────────────────────
+  #
+  # Both cases above hand the loop input it fully consumes. This one STEALS the
+  # input mid-scan and asks what base comes out. A three-run history in which NO
+  # run proved a leg is the arm's own control: scanned whole it walks to the
+  # OLDEST candidate (111 / C1, the widest the window holds); scanned short it
+  # stops at the NEWEST (333 / C4, this run's own sha — an EMPTY range). The two
+  # answers are at opposite ends of the same list, so a narrowed base cannot be
+  # mistaken for a correct one.
+  #
+  # The fix must not answer C4 and must not answer C1 either: a scan that ended
+  # early has not SEEN the window, so C1 is unproven. It must widen to the safe
+  # base the file already falls through to, github.event.before (C0) — WIDER
+  # than every candidate — and say in the log that it did.
+  local drain="$ANCHOR_TMP/changes-step-drained.sh" hist3 want
+  hist3="333 $ANCHOR_HEAD_SHA
+222 $ANCHOR_SUPERSEDED_SHA
+111 $ANCHOR_DEPLOYED_SHA"
+
+  # (a) The control: the SAME history, the SAME no-leg answer, no plant. If this
+  # does not reach C1 then the plant below proves nothing — the scan would have
+  # been short for some other reason.
+  got="$(anchor_run "$step" "$hist3" "")"
+  base="${got%%|*}"; inst="${got##*|}"
+  if [ "$base" = "$ANCHOR_DEPLOYED_SHA" ] && [ "$inst" = "true" ]; then
+    echo "  anchor   no leg anywhere, scan INTACT     ->  diff base: $base (run 111, the oldest scanned), instance=true"
+  else
+    echo "  FAIL     no leg anywhere, scan INTACT     ->  diff base: ${base:-<none>}, instance=${inst:-<none>}," >&2
+    echo "           wanted diff base: $ANCHOR_DEPLOYED_SHA (the OLDEST of the three candidates) and instance=true." >&2
+    echo "           This is the shortfall arm's control: without it a base of $ANCHOR_BASE_SHA below would" >&2
+    echo "           prove only that this fixture never reaches the end of its list." >&2
+    rc=1
+  fi
+
+  # (b) The plant.
+  if ! anchor_plant_drain "$step" "$drain"; then
+    echo "FAIL[$label]: could not plant the stdin-draining child — the shortfall arm proves nothing." >&2
+    rc=1
+  else
+    got="$(anchor_run "$drain" "$hist3" "")"
+    base="${got%%|*}"; inst="${got##*|}"
+    want="$ANCHOR_BASE_SHA"
+    if [ "$base" = "$want" ] && [ "$inst" = "true" ] &&
+       grep -q 'anchor scan short read' "$ANCHOR_TMP/step.out"; then
+      echo "  anchor   a body child DRAINS stdin       ->  diff base: $base (github.event.before, the WIDEST safe base), instance=true, shortfall named in the log"
+    else
+      echo "  SHORTFALL a body child DRAINS stdin      ->  diff base: ${base:-<none>}, instance=${inst:-<none>}" >&2
+      echo "           wanted diff base: $want (github.event.before) and instance=true, plus an 'anchor scan" >&2
+      echo "           short read' line in the log. The loop was handed 3 candidates and a child in its body" >&2
+      echo "           read fd 0, so it saw 1. The list is NEWEST FIRST: \$anchor_widest then holds $ANCHOR_HEAD_SHA" >&2
+      echo "           (this run's own sha, an EMPTY range) instead of $ANCHOR_DEPLOYED_SHA. Nothing in the loop" >&2
+      echo "           notices, because 'read returned non-zero' is the same exit whether stdin was exhausted" >&2
+      echo "           or STOLEN. Fix: count the candidates handed in, count the ones examined, and when they" >&2
+      echo "           differ WITHOUT a leg-proven break, discard \$anchor_widest and fall through to the safe" >&2
+      echo "           base. A narrowed base strands a commit (deploy.yml:171, task-220b847a8072f82e)." >&2
+      rc=1
+    fi
   fi
 
   return "$rc"
@@ -1699,14 +1803,14 @@ selftest() {
   local rc=0
   local out sub_rc
 
-  echo "selftest 1/21: the real workflow passes"
+  echo "selftest 1/23: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/21: dropping 'templates' from the instance regex must FAIL (the original bug)"
+  echo "selftest 2/23: dropping 'templates' from the instance regex must FAIL (the original bug)"
   sed "s#|connectors|templates|scripts/connectors)/#|connectors|scripts/connectors)/#" "$real" > "$tmp/mutated.yml"
   if cmp -s "$real" "$tmp/mutated.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the instance regex no longer looks as expected" >&2
@@ -1719,7 +1823,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/21: an unexplained targetless path must FAIL"
+  echo "selftest 3/23: an unexplained targetless path must FAIL"
   awk '{ print } /^      - "connectors\/\*\*"$/ { print "      - \"totally-unrouted/**\"" }' \
     "$real" > "$tmp/orphan.yml"
   sub_rc=0
@@ -1744,7 +1848,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/21: another job's own regex must NOT rescue a drifted dispatch filter"
+  echo "selftest 4/23: another job's own regex must NOT rescue a drifted dispatch filter"
   # The disarm shape, verbatim: strip `templates` from the instance filter AND
   # append a recorder job whose shell carries a copy of the same regex. Before
   # extract_regexes was scoped to `changes`, this read OK at rc=0.
@@ -1768,7 +1872,7 @@ YML
   fi
 
   echo
-  echo "selftest 5/21: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/23: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -1800,7 +1904,7 @@ YML
   fi
 
   echo
-  echo "selftest 6/21: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
+  echo "selftest 6/23: deleting the required scripts/connectors/** path must FAIL (the presence allowlist)"
   # Mirror of case 2, but for DELETION not drift: strip the required push-path
   # line entirely. The drift arm now sees nothing to judge — the false-green W35
   # exists to close (charter D275). (Since the reverse arm landed, this half also
@@ -1819,7 +1923,7 @@ YML
   fi
 
   echo
-  echo "selftest 7/21: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
+  echo "selftest 7/23: a job-filter prefix absent from on.push.paths must FAIL (the reverse direction)"
   # `web` is dispatched by the control-plane filter, but no on.push.paths entry
   # delivers a web/ file — so a web-only merge never starts the workflow and that
   # arm of the filter can only ever fire on somebody else's co-triggering merge.
@@ -1843,7 +1947,7 @@ YML
   fi
 
   echo
-  echo "selftest 8/21: the reverse arm must actually RUN on the real workflow (non-vacuity)"
+  echo "selftest 8/23: the reverse arm must actually RUN on the real workflow (non-vacuity)"
   # A direction that silently checks nothing is worse than no direction: it puts
   # the word "reverse" in a green line. So the count must be non-zero AND the
   # per-prefix verdicts must be present, on the REAL file.
@@ -1866,7 +1970,7 @@ YML
   fi
 
   echo
-  echo "selftest 9/21: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
+  echo "selftest 9/23: deleting BOTH halves must still FAIL — on the presence allowlist ALONE"
   # The D275 shape, and the reason the allowlist is not made redundant by the
   # reverse arm: with the push-path line AND its regex prefix both gone, the
   # forward arm has no path to judge and the reverse arm has no prefix to judge.
@@ -1898,7 +2002,7 @@ YML
   fi
 
   echo
-  echo "selftest 10/21: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
+  echo "selftest 10/23: a 'changes' filter the reverse arm cannot decompose must FAIL, not be skipped"
   # The fail-closed arm of prefixes_of, proven rather than asserted. A dispatch
   # filter that is not an anchored alternation is a filter this direction cannot
   # answer for — and "could not look" must never print as "it is fine". Without
@@ -1924,7 +2028,7 @@ YML
   fi
 
   echo
-  echo "selftest 11/21: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
+  echo "selftest 11/23: restoring the PRE-FIX producer must FAIL (the behaviour arm)"
   # THE MUTATION THAT MATTERS. Every case above mutates a LIST; this one mutates
   # the line that feeds them, back to exactly what deploy.yml carried before the
   # wave-10 sweep. Both false-green shapes must reappear, or the behaviour arm is
@@ -1982,7 +2086,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 12/21: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
+  echo "selftest 12/23: stripping 'cmd' from the instance regex must FAIL — on the TARGET arm ALONE"
   # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. cmd/**
   # stays listed in on.push.paths and stays matched by the CONTROL-PLANE regex,
   # so the forward arm still prints `ok`, the reverse arm still finds every
@@ -2043,7 +2147,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 13/21: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
+  echo "selftest 13/23: Mutation C — a TREE exempted from every job, its prefix stripped from BOTH regexes, must FAIL"
   # THE MEASURED FALSE GREEN (task-9ece1f95b89111cf). Before the bounded
   # exemption: `# deploy-filter-exempt:` above `- "internal/**"` plus
   # `internal|` removed from the cp AND instance filters read
@@ -2108,7 +2212,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 14/21: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
+  echo "selftest 14/23: the legacy UNBOUNDED 'deploy-filter-exempt:' spelling must FAIL"
   # The spelling the measured green used. An exemption that names no job
   # exempts from every job — over a tree it is Mutation C, over a file it is a
   # claim nobody can check. Either way it is refused by name.
@@ -2145,7 +2249,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 15/21: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
+  echo "selftest 15/23: a listed, ROUTED tree with no TARGET_PAIRS row must FAIL — on the coverage predicate ALONE"
   # The enumeration hole with no exemption involved: add web/** to
   # on.push.paths AND to the cp regex. Forward prints its cheerful ok, reverse
   # finds web reachable, presence and producer read clean, every declared pair
@@ -2197,7 +2301,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 16/21: an exemption whose named job's filter STILL matches the path must FAIL"
+  echo "selftest 16/23: an exemption whose named job's filter STILL matches the path must FAIL"
   # A bounded exemption is a checkable claim; this is the check. cloud/** is
   # matched by the cp filter, so `deploy-filter-exempt[cp]` above it is false.
   python3 - "$real" "$tmp/stale-exempt.yml" <<'PYMUT'
@@ -2233,7 +2337,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 17/21: deleting the '!api/test/**' push-path exclusion must FAIL (the exclusion presence allowlist)"
+  echo "selftest 17/23: deleting the '!api/test/**' push-path exclusion must FAIL (the exclusion presence allowlist)"
   # The push arm alone. The classifier keeps its grep -vE, so the BEHAVIOURAL
   # arm still reads clean — only the presence allowlist can see this half go.
   grep -v '^      - "!api/test/\*\*"$' "$real" > "$tmp/noexcl.yml"
@@ -2256,7 +2360,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 18/21: neutering the CLASSIFIER half must FAIL on the exclusion arm (LEAKS)"
+  echo "selftest 18/23: neutering the CLASSIFIER half must FAIL on the exclusion arm (LEAKS)"
   # The other half, and the one no arm could see before: on.push.paths still
   # carries the exclusion, so presence, forward, reverse, coverage and target all
   # read clean. Only driving the real step body against an api/test-only tree
@@ -2285,7 +2389,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 19/21: widening the exclusion to the whole api/ tree must FAIL on the CONTROL (OVER-EXCLUDED)"
+  echo "selftest 19/23: widening the exclusion to the whole api/ tree must FAIL on the CONTROL (OVER-EXCLUDED)"
   # The opposite failure, and the reason the arm carries a control at all: a
   # classifier that says false to everything satisfies the negative case and
   # deploys nothing. Without this case, selftest 18 could be answered by simply
@@ -2310,7 +2414,7 @@ PYMUT
   fi
 
   echo
-  echo "selftest 20/21: dropping the WHOLE diff when an excluded file is present must FAIL on the MIXED case"
+  echo "selftest 20/23: dropping the WHOLE diff when an excluded file is present must FAIL on the MIXED case"
   # The third distinct way to get an exclusion wrong, and the one both cases
   # above pass: subtract the excluded FILES and a real code change riding
   # alongside a test file still deploys; subtract the whole DIFF and it strands.
@@ -2353,12 +2457,17 @@ PY
   fi
 
   echo
-  echo "selftest 21/21: restoring the RUN-LEVEL success anchor must FAIL (the anchor arm)"
+  echo "selftest 21/23: restoring the RUN-LEVEL success anchor must FAIL (the anchor arm)"
   # THE MUTATION THIS ARM EXISTS FOR, and the one no other arm can feel. Every
   # list, every regex, the producer line and the exclusion all stay byte-identical;
   # only the RANGE the classifier is handed moves. Restoring
   # `--status=success --limit=1` makes the superseded run the anchor again — which
   # is exactly what shipped and what stranded #19327 on 2026-09-18.
+  #
+  # This mutation cuts the WHOLE anchor region, so the shortfall arm (which
+  # lives inside it) reds here too — correctly, since the identity it tests is
+  # gone. Cases 22 and 23 below cut the identity and the count line SURGICALLY,
+  # which is where the isolation claim for those two lives.
   #
   # The POSITIVE CONTROL inside the arm must stay green under this mutation: a
   # run-level selector is RIGHT whenever the newest success did deploy. A
@@ -2421,6 +2530,117 @@ PYANCHOR
       rc=1
     else
       echo "  ok: the gate reds when the anchor reverts to run-level success; every other arm reads clean"
+    fi
+  fi
+
+  echo
+  echo "selftest 22/23: removing the COUNT IDENTITY must FAIL (the shortfall arm ALONE)"
+  # SURGICAL, unlike case 21: the candidate capture, the per-iteration counter,
+  # the printed count and every regex stay byte-identical. Only the decision the
+  # identity drives is cut. A run whose scan ends early then widens to
+  # $anchor_widest exactly as it did before this fix — which, the list being
+  # NEWEST FIRST, is the NARROWEST base in the window.
+  python3 - "$real" "$tmp/no-anchor-identity.yml" <<'PYIDENT'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+block = ('          if [ "$anchor_broke" -eq 0 ] && [ "$anchor_examined" -ne "$anchor_listed" ]; then\n')
+if s.count(block) != 1:
+    sys.exit("MUTATION ANCHOR matched %d times, wanted 1 — the count identity no longer "
+             "looks as this selftest expects. Fix the identity, do not loosen it." % s.count(block))
+start = s.index(block)
+end_mark = '            anchor_widest=""\n          fi\n'
+if s.count(end_mark) != 1:
+    sys.exit("MUTATION END ANCHOR matched %d times, wanted 1" % s.count(end_mark))
+end = s.index(end_mark) + len(end_mark)
+if end <= start:
+    sys.exit("MUTATION ANCHORS are out of order — refusing to cut a region backwards")
+out = s[:start] + s[end:]
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(dst, "w").write(out)
+PYIDENT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the identity mutation could not be applied — case 22 proves nothing" >&2
+    rc=1
+  elif cmp -s "$real" "$tmp/no-anchor-identity.yml"; then
+    echo "SELFTEST FAIL: the identity mutation changed nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/no-anchor-identity.yml" "no-anchor-identity" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a loop with no count identity read GREEN — the shortfall arm cannot fail" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'SHORTFALL a body child DRAINS stdin' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the shortfall arm naming the drained stdin" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'anchor   healthy scan' <<<"$out"; then
+      echo "SELFTEST FAIL: the printed-count assertion also red — this mutation cuts only the" >&2
+      echo "               DECISION, not the count line, so an arm that reds on both is judging" >&2
+      echo "               the diff rather than the invariant." >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'anchor   no leg anywhere, scan INTACT' <<<"$out"; then
+      echo "SELFTEST FAIL: the shortfall arm's own CONTROL also red — an intact scan must still" >&2
+      echo "               reach the oldest candidate without the identity; a fixture that reads" >&2
+      echo "               short in BOTH directions proves nothing about the plant." >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif grep -qE 'DRIFT|UNREACHABLE|MISSING|LEAKS|OVER-EXCLUDED|STRANDS-MIXED|ESCAPE   newest success' <<<"$out"; then
+      echo "SELFTEST FAIL: another arm also red — this fixture is meant to prove that only the" >&2
+      echo "               shortfall arm can feel a missing count identity" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when the count identity is cut; the count line, the control and every other arm read clean"
+    fi
+  fi
+
+  echo
+  echo "selftest 23/23: removing the PRINTED count must FAIL (the count assertion ALONE)"
+  # The identity can be RIGHT and still unreadable. An operator reading a job log
+  # cannot act on a decision that leaves no trace, and the shortfall arm's own
+  # baseline is the healthy run's equal count. So the printed line is a separate
+  # invariant with its own mutation.
+  python3 - "$real" "$tmp/no-anchor-count.yml" <<'PYCOUNT'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
+line = '          echo "anchor: candidates examined ${anchor_examined} of ${anchor_listed} listed"\n'
+if s.count(line) != 1:
+    sys.exit("MUTATION ANCHOR matched %d times, wanted 1 — the printed count no longer looks "
+             "as this selftest expects." % s.count(line))
+out = s.replace(line, "", 1)
+if out == s:
+    sys.exit("MUTATION produced an IDENTICAL file — it did not apply")
+open(dst, "w").write(out)
+PYCOUNT
+  mut_rc=$?
+  if [ "$mut_rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: the count-print mutation could not be applied — case 23 proves nothing" >&2
+    rc=1
+  else
+    sub_rc=0
+    out="$(check_file "$tmp/no-anchor-count.yml" "no-anchor-count" 2>&1)" || sub_rc=$?
+    if [ "$sub_rc" -eq 0 ]; then
+      echo "SELFTEST FAIL: a run that never prints its examined/listed count read GREEN" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'ESCAPE   healthy scan did not print an EQUAL examined/listed count' <<<"$out"; then
+      echo "SELFTEST FAIL: it red, but not on the printed-count assertion" >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    elif ! grep -q 'anchor   a body child DRAINS stdin' <<<"$out"; then
+      echo "SELFTEST FAIL: the shortfall arm also red — deleting the count PRINT must not change" >&2
+      echo "               the base a short scan chooses; an arm that reds on both is judging the diff." >&2
+      printf '%s\n' "$out" >&2
+      rc=1
+    else
+      echo "  ok: the gate reds when the count is computed but never printed; the shortfall decision still holds"
     fi
   fi
 

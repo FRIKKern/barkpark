@@ -3265,6 +3265,30 @@ const EXPECTATIONS = {
       assert.ok(grid.includes("instance-card--warn"), "the degraded card carries the amber accent");
     },
   },
+  // cch-w20-bl. The ONE axis between this fixture and `overview-attention` is
+  // the instance name, so this expectation pins the name and nothing else that
+  // its twin above does not already pin. The exclusion is the load-bearing
+  // half: the name must arrive at the DOM WHOLE. `.attention-name`'s ellipsis
+  // is a PAINT treatment — if a truncation ever moved into the markup, the
+  // person would lose the tail from the link's href-bearing text and from every
+  // assistive reading of it, and the overflow-guard leg that measures the
+  // rendered run against the full string would still read "engaged".
+  "overview-attention-long-name": {
+    what: "the degraded box's 71-character operator name reaches the DOM whole, for the ellipsis to bound in paint",
+    check(reg) {
+      const body = (reg.get("overview-body") || {}).innerHTML || "";
+      const NAME = "Reporting — EU customer analytics, billing reconciliation and retention";
+      assert.equal(NAME.length, 71, "the fixture name is the 71 characters this expectation is written about");
+      assert.ok(body.includes("attention-row"), "an attention row renders");
+      assert.ok(body.includes(">" + NAME + "</a>"), "the whole name is the link's text — never truncated in the markup");
+      assert.ok(!body.includes("…"), "no ellipsis CHARACTER is written into the markup; the ellipsis is CSS");
+      assert.ok(
+        body.includes("Health unknown · Agent offline"),
+        "the row carries the same production-dominant reason its short-named twin does",
+      );
+      assert.ok(body.includes("View instance"), "the row offers View instance");
+    },
+  },
   // cch-w34-s6 (REVIEW ADDITION). Every string below is DERIVED FROM THE
   // FIXTURE, and the EXCLUSIONS are the load-bearing half: the row carries
   // `health_status: "up"`, so a console that reprints its cached column would
