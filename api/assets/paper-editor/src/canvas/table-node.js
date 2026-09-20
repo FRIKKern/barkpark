@@ -60,6 +60,7 @@
 // in the pure-Node harness (same lazy-DOM discipline as callout-node.js).
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 
 // Shared bpId/bpType attr skeleton (the role-nodes.js roleAttributes shape). Only the
 // bpTable carries identity — rows/cells are INTERNAL PM structure with NO bpId (one id
@@ -208,22 +209,27 @@ function cellDepthInfo($pos) {
   return null;
 }
 
-// The content-start position of every cell in the table, in row-major order.
+// Every cell's content range in the table, in row-major order.
 // cell-content-start = tablePos + rowOffset + cellOffset + 3
-//   (+1 into the table, +1 into the row, +1 into the cell).
-function collectCellStarts(tableNode, tablePos) {
-  const starts = [];
+//   (+1 into the table, +1 into the row, +1 into the cell); end = start + content size.
+function collectCells(tableNode, tablePos) {
+  const cells = [];
   tableNode.forEach((rowNode, rowOffset) => {
-    rowNode.forEach((_cellNode, cellOffset) => {
-      starts.push(tablePos + rowOffset + cellOffset + 3);
+    rowNode.forEach((cellNode, cellOffset) => {
+      const start = tablePos + rowOffset + cellOffset + 3;
+      cells.push({ start, end: start + cellNode.content.size });
     });
   });
-  return starts;
+  return cells;
 }
 
-// Move the caret to the previous (dir=-1) / next (dir=1) cell. Returns false when the
-// caret is outside the table or at a grid edge, allowing native focus navigation
-// to reach the surrounding controls instead of trapping keyboard users.
+// Move to the previous (dir=-1) / next (dir=1) cell, SELECTING that cell's whole
+// content — what @tiptap/extension-table (prosemirror-tables goToNextCell) does, so
+// typing into a tabbed-to cell replaces it and Tab reads as "next field". Tab in the
+// LAST cell adds a body row and lands in its first cell (TableKit's addRowAfter +
+// goToNextCell): that is how a table grows from the keyboard. Returns false when the
+// caret is outside a table, or on Shift-Tab in the first cell, so native focus
+// navigation can still leave the table backwards toward the surrounding controls.
 function moveCell(editor, dir) {
   const { state } = editor;
   const { $from } = state.selection;
@@ -234,12 +240,48 @@ function moveCell(editor, dir) {
   const tablePos = $from.before(td);
   const tableNode = $from.node(td);
   const curCellStart = $from.before(ci.depth) + 1;
-  const starts = collectCellStarts(tableNode, tablePos);
-  const idx = starts.indexOf(curCellStart);
+  const cells = collectCells(tableNode, tablePos);
+  const idx = cells.findIndex((c) => c.start === curCellStart);
   if (idx === -1) return false;
   const target = idx + dir;
-  if (target < 0 || target >= starts.length) return false;
-  editor.chain().focus().setTextSelection(starts[target]).run();
+  if (target < 0) return false;
+  if (target >= cells.length) {
+    if (dir < 0) return false;
+    // In the per-block table field (<bp-paper-editor data-editor-mode="table">) structure is
+    // an ACTION the host applies and echoes (its transaction filter refuses a raw row
+    // insert), so route through the same seam the chrome's "+ row" uses there.
+    const contextualHost = editor.options.element?.closest?.(
+      'bp-paper-editor[data-editor-mode="table"]',
+    );
+    if (contextualHost) return contextualHost.requestTableStructure?.("add-row") === true;
+    return editor
+      .chain()
+      .focus()
+      .command(({ tr, dispatch }) => {
+        const rows = extractRows(tableNode);
+        TRANSFORMS.addRow(rows);
+        const newTable = editor.schema.nodes.bpTable.create(
+          tableNode.attrs,
+          buildRowNodes(editor.schema, rows)
+        );
+        if (dispatch) {
+          tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, newTable);
+          const first = collectCells(newTable, tablePos)[cells.length];
+          tr.setSelection(TextSelection.create(tr.doc, first.start, first.end)).scrollIntoView();
+        }
+        return true;
+      })
+      .run();
+  }
+  const { start, end } = cells[target];
+  editor
+    .chain()
+    .focus()
+    .command(({ tr, dispatch }) => {
+      if (dispatch) tr.setSelection(TextSelection.create(tr.doc, start, end)).scrollIntoView();
+      return true;
+    })
+    .run();
   return true;
 }
 

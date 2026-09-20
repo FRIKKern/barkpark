@@ -105,8 +105,6 @@ assert_all "a .heex template under api/lib selects ALL" "api/lib/barkpark_web/co
 assert_all "api/assets/** selects ALL" "api/assets/sheet-grid/grid.mjs"
 assert_all "the workflow itself (COMPILE set) selects ALL" ".github/workflows/elixir.yml"
 assert_all "design/** (COMPILE set) selects ALL" "design/status-manifest.json"
-assert_all "a TEST-set tree the census names no reader for selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs"
-assert_all "internal/taskboard/** (TEST set, no census reader) selects ALL" "internal/taskboard/board.go"
 
 # §1f — CLASS 3 branches (b) and (c). Neither can produce an empty selection:
 # the ALWAYS set rides regardless, and any api/ path in the same diff is still
@@ -136,6 +134,98 @@ done
 # the result. If this ever regresses to "no tests", the OpenAPI contract stops
 # being covered by any PR that only regenerates it.
 assert_selects "docs/openapi.json selects the test that guards it" "docs/openapi.json" "test/barkpark/api/openapi_test.exs"
+
+# §1g — BRANCH (d1) vs (d2): the one-hop extension of the census.
+#
+# (d1) `cloud/test/**` used to land in (d) and select ALL — 1,892 api test
+# files for a PR that edits no api file, measured at 12.8 median minutes per
+# run over the 2026-09-18..20 window. It is in the TEST set because
+# async_global_seam_guard_test.exs requires scripts/async_env_seam_scan.exs and
+# that scanner reads `Path.join(repo_root(), "cloud/test")`. The census
+# resolves the api-side literal (the script) and not the script's own literal
+# (the tree), so the reader was knowable and unnamed. The selector now takes
+# that one hop.
+#
+# THE TWO ASSERTIONS ARE DIFFERENT QUESTIONS, and the second is the one that
+# matters: "not ALL" only says the widening was silenced; "contains the reader
+# the hop is FOR" says the narrowing landed on the right files. A selector that
+# emitted only the ALWAYS set here would pass the first and fail the second.
+# ONE selector run, THREE questions. Each narrowing run is ~20 s of the
+# REQUIRED Elixir gate's own selftest step, so re-invoking the selector once
+# per assertion would spend the minutes this change exists to save.
+ct_path="cloud/test/barkpark_cloud/accounts_test.exs"
+ct_err="$(mktemp "${TMPDIR:-/tmp}/bp-ct-err.XXXXXX")"
+ct_out="$(printf '%s\n' "$ct_path" | bash "$SEL" --select 2>"$ct_err")"
+ct_n="$(printf '%s\n' "$ct_out" | sed '/^$/d' | awk 'END{print NR}')"
+if is_all "$ct_out"; then
+  bad "a cloud/test-only change NO LONGER selects ALL" "still ALL"
+elif [ -z "$ct_out" ]; then
+  bad "a cloud/test-only change NO LONGER selects ALL" "EMPTY — the failure this file exists to catch"
+else
+  ok "a cloud/test-only change NO LONGER selects ALL ($ct_n of $(cd "$ROOT/api" && find test -name '*_test.exs' | awk 'END{print NR}') api test files)"
+fi
+if grep -qxF -- "test/barkpark/async_global_seam_guard_test.exs" <<<"$ct_out"; then
+  ok "…and it selects the seam guard, the api test that actually reads cloud/test"
+else
+  bad "…and it selects the seam guard, the api test that actually reads cloud/test" "absent from $ct_n files"
+fi
+
+# DERIVED, NOT LISTED — and proved by a SECOND INSTRUMENT rather than by
+# re-reading the selector's own answer. The harness recomputes the one hop with
+# its own pipeline (census -> source files -> their quoted on-disk path
+# literals -> back to the readers) and asserts the selector's derived reader
+# set is exactly that. A hard-coded list inside the selector would diverge from
+# this join the first time the tree moved; a snapshot of today's answer would
+# not.
+tmp_ext_rows="$(mktemp "${TMPDIR:-/tmp}/bp-ext-rows.XXXXXX")"
+bash "$HERE/elixir-path-escape-check.sh" --list-escapes 2>/dev/null \
+  | awk -F'\t' '{print $1 "\t" $2}' | LC_ALL=C sort -u >"$tmp_ext_rows" || true
+ext_expect="$(
+  cut -f1 "$tmp_ext_rows" | LC_ALL=C sort -u | while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    [ "$s" = "scripts/elixir-path-escape-check.sh" ] && continue
+    [ -f "$ROOT/$s" ] || continue
+    grep -ohaE '"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)+"' -- "$ROOT/$s" </dev/null 2>/dev/null \
+      | tr -d '"' | LC_ALL=C sort -u | while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        [ -e "$ROOT/$t" ] || continue
+        [ "$t" = "cloud/test" ] || continue
+        awk -F'\t' -v s="$s" '$1 == s { print $2 }' "$tmp_ext_rows"
+      done
+  done | LC_ALL=C sort -u
+)"
+rm -f -- "$tmp_ext_rows"
+ext_got="$(sed -n 's/.*DERIVED readers are: //p' "$ct_err" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u)"
+rm -f -- "$ct_err"
+if [ -z "$ext_expect" ]; then
+  bad "the independent one-hop join finds a reader for cloud/test" "it found NONE — the control itself is measuring nothing"
+elif [ "$ext_got" = "$ext_expect" ]; then
+  ok "the selector's derived readers for cloud/test EQUAL an independently computed one-hop join ($(printf '%s\n' "$ext_expect" | awk 'END{print NR}') reader(s))"
+else
+  bad "the selector's derived readers EQUAL an independent one-hop join" "selector: [$(printf '%s' "$ext_got" | tr '\n' ' ')] independent: [$(printf '%s' "$ext_expect" | tr '\n' ' ')]"
+fi
+
+# (d2) THE MUTATION CONTROL, and the reason this block is not just three greens
+# in a row. The danger of naming readers is SILENCING A CORRECT WIDENING, so a
+# TEST-set path that the census and its one-hop extension BOTH fail to name
+# must still select ALL. internal/taskboard/board.go is the sharpest specimen
+# available: three of its SIBLINGS (components.go, tokens_gen.go, testdata/)
+# are censused, so a derivation that widened from a file to its directory —
+# the most likely wrong way to build this — would narrow it. It must not.
+assert_all "(d2) internal/taskboard/board.go — a TEST-set path whose SIBLINGS are censused but which nothing reads — still selects ALL" "internal/taskboard/board.go"
+assert_all "(d2) cmd/barkpark/testdata/** with no censused reader still selects ALL" "cmd/barkpark/testdata/nothing-reads-this.json"
+assert_all "(d2) web/node_modules/** still selects ALL" "web/node_modules/left-pad/index.js"
+
+# THE OTHER HALF OF THE MUTATION: the paths that MUST keep widening for a
+# reason that has nothing to do with the census. The gate scripts and the
+# workflow are in the COMPILE set and are answered by branch (a) BEFORE any
+# census lookup, so the hop cannot reach them.
+assert_all "(a) scripts/elixir-impacted-tests.sh still selects ALL" "scripts/elixir-impacted-tests.sh"
+assert_all "(a) scripts/elixir-path-escape-check.sh still selects ALL" "scripts/elixir-path-escape-check.sh"
+assert_all "(a) a cloud/test change PLUS a gate-script change still selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs
+scripts/elixir-path-escape-check.sh"
+assert_all "(a) a cloud/test change PLUS an api/ non-narrowable path still selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs
+api/mix.lock"
 
 # §1b — the empty diff. Same polarity as the elixir.yml dispatcher's own empty
 # arm: rare but legal, and a narrow answer from no information is the unsafe one.

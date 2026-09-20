@@ -173,3 +173,43 @@ export const Pullquote = Node.create({
     ];
   },
 });
+
+// The plain quote: the `blockquote` element the BPML parser, the Studio block editor
+// and agents write, and what an author means by `> ` in a note (the pullquote is
+// article chrome — italic, large, a magazine pull; a quote is a quoted passage).
+// Persist is an inline `content` array (paragraph_inline/1 in compose.ex) plus an
+// optional `cite` string the reader renders as <cite class="bp-blockquote__cite">.
+// The reader (walk.ex, article style) emits
+//   <blockquote class="bp-blockquote"><p>…</p><cite class="bp-blockquote__cite">…</cite></blockquote>
+// so this node renders the same element and class with the content hole in the <p>;
+// `cite` rides as an attr the ops never patch (roleNodeToPatch sends content only)
+// and is carried through a same-id replace (roleNodeToBlock includes it).
+export const Blockquote = Node.create({
+  name: "blockquote",
+  group: "block",
+  content: "inline*",
+  defining: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      ...roleAttributes("blockquote"),
+      cite: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-bp-cite"),
+        renderHTML: (attrs) => (attrs.cite ? { "data-bp-cite": attrs.cite } : {}),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "blockquote[data-bp-type='blockquote']", contentElement: "p" }];
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const spec = [
+      "blockquote",
+      mergeAttributes(HTMLAttributes, { "data-bp-type": "blockquote", class: "bp-blockquote" }),
+      ["p", 0],
+    ];
+    if (node.attrs.cite) spec.push(["cite", { class: "bp-blockquote__cite" }, node.attrs.cite]);
+    return spec;
+  },
+});

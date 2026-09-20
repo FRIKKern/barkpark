@@ -221,6 +221,8 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-secret-scan.sh"
+      - "scripts/pds-secret-scan_test.sh"
       # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
       # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
       # reads the charter AND this checkout's git log. An edit to either FILE can
@@ -914,6 +916,8 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-secret-scan.sh"
+      - "scripts/pds-secret-scan_test.sh"
       # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
       # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
       # reads the charter AND this checkout's git log. An edit to either FILE can
@@ -1597,7 +1601,32 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bash scripts/shell-harness-dispatch.sh
+        # THE ABSENT-FILE FALLBACK (task-ecb7fc56b5868bfc). The checkout above is
+        # the PR HEAD; the workflow FILE comes from the merge ref. So a head
+        # whose merge base predates befc8cbbf — the commit that created this
+        # script — carries the new `run:` line and NOT the script:
+        # `bash: scripts/shell-harness-dispatch.sh: No such file or directory`,
+        # exit 127. And because this job feeds the matrix, the failure is not a
+        # red leg, it is NO LEG AT ALL: every harness check run is ABSENT, which
+        # reads exactly like "nothing to run". MEASURED on run 35517160933 job
+        # 106094923976 (head 1badf9dc5, 42 open PRs affected at 18:35Z).
+        # So: the head's OWN copy when it has one — a PR that edits the
+        # dispatcher must test its edit — else the base branch's copy.
+        run: |
+          set -euo pipefail
+          src=scripts/shell-harness-dispatch.sh
+          if [ -f "$src" ]; then
+            echo "dispatcher: HEAD copy ($src)"
+          else
+            base="${GITHUB_BASE_REF:-main}"
+            echo "dispatcher: this head has no $src (it predates befc8cbbf) — running origin/$base's copy"
+            src="$RUNNER_TEMP/shell-harness-dispatch.sh"
+            git show "origin/$base:scripts/shell-harness-dispatch.sh" >"$src" || {
+              git fetch --depth=1 origin "$base"
+              git show "FETCH_HEAD:scripts/shell-harness-dispatch.sh" >"$src"
+            }
+          fi
+          bash "$src"
       - name: Emit the harness matrix
         id: matrix
         # The verdicts the step above wrote are read back as ONE object rather
@@ -1608,7 +1637,24 @@ jobs:
         # introduce, and it is the one thing an empty matrix would hide.
         env:
           SELECTION: ${{ toJSON(steps.sets.outputs) }}
-        run: python3 scripts/shell-harness-matrix.py "$SELECTION" >> "$GITHUB_OUTPUT"
+        # Same absent-file fallback as the step above, for the same reason: a
+        # head that predates this script would exit 127 here and delete the
+        # matrix just as silently.
+        run: |
+          set -euo pipefail
+          src=scripts/shell-harness-matrix.py
+          if [ -f "$src" ]; then
+            echo "matrix: HEAD copy ($src)"
+          else
+            base="${GITHUB_BASE_REF:-main}"
+            echo "matrix: this head has no $src — running origin/$base's copy"
+            src="$RUNNER_TEMP/shell-harness-matrix.py"
+            git show "origin/$base:scripts/shell-harness-matrix.py" >"$src" || {
+              git fetch --depth=1 origin "$base"
+              git show "FETCH_HEAD:scripts/shell-harness-matrix.py" >"$src"
+            }
+          fi
+          python3 "$src" "$SELECTION" >> "$GITHUB_OUTPUT"
 
   # ── THE HARNESS MATRIX ───────────────────────────────────────────────────────
   # 53 sibling jobs, each gated by one uniform

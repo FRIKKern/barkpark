@@ -1972,7 +1972,11 @@ func TestBuildBodyTaskRelease(t *testing.T) {
 	if release.HTTP.Method != "POST" || release.HTTP.PathTemplate != "/v1/tasks/:doc_id/release" {
 		t.Fatalf("task release http = %s %s, want POST /v1/tasks/:doc_id/release", release.HTTP.Method, release.HTTP.PathTemplate)
 	}
-	if !release.Writes || release.AuthTier != "read" || release.DefaultOutput != "minimal" {
+	// auth_tier is the SERVER's policy for this row, re-read from the manifest on
+	// every fixture refresh — it moved read -> write between the 2026-07-23 and
+	// 2026-09-20 fixtures with no CLI change. What this test is actually about is
+	// the SHAPE (writes, minimal output, URL-bound doc_id), which is unchanged.
+	if !release.Writes || release.AuthTier != "write" || release.DefaultOutput != "minimal" {
 		t.Fatalf("task release contract = writes:%v auth:%q output:%q", release.Writes, release.AuthTier, release.DefaultOutput)
 	}
 
@@ -3110,22 +3114,41 @@ func tree0(t *testing.T) *manifest.Tree {
 func TestSoleReadVerbRule(t *testing.T) {
 	_, tree := loadTreeFrom(t, fullManifest)
 
-	search, ok := lookupNoun(tree, "search")
-	if !ok {
-		t.Fatal("search noun missing from the fixture manifest")
+	// The real-manifest arm is chosen by the PREDICATE the rule is about — one
+	// verb, affirmatively non-writing — never by a noun NAME. `search` was that
+	// noun when this test was written and stopped being it the moment the server
+	// grew `search suggestions`, `search reindex`, …: a fixture refresh then red
+	// a test whose SUBJECT had not changed. A name is a snapshot; this is the
+	// rule. The Fatal below is the control: if no noun in the fixture qualifies,
+	// this arm is measuring NOTHING and must say so rather than pass silently.
+	var soleNoun *manifest.TreeNoun
+	for _, name := range tree.NounNames() {
+		n, ok := lookupNoun(tree, name)
+		if !ok || len(n.Verbs) != 1 || !n.Verbs[0].NonWriting() {
+			continue
+		}
+		soleNoun = n
+		break
 	}
-	if sole, inferable := soleReadVerb(search, "PDS crown proof"); !inferable || sole.Verb != "query" {
-		t.Errorf("soleReadVerb(search, free text) = %v,%v; want query,true", sole, inferable)
+	if soleNoun == nil {
+		t.Fatal("no single-verb non-writing noun in the fixture manifest — the real-manifest arm of this rule has no subject; add one or retire the arm")
+	}
+	soleVerb := soleNoun.Verbs[0].Verb
+	if sole, inferable := soleReadVerb(soleNoun, "PDS crown proof"); !inferable || sole.Verb != soleVerb {
+		t.Errorf("soleReadVerb(%s, free text) = %v,%v; want %s,true", soleNoun.Name, sole, inferable, soleVerb)
 	}
 	// A near-typo of the sole verb is a mistyped VERB, not an argument — it must
 	// fall through to the typo suggestion rather than be forwarded as a query.
-	if _, inferable := soleReadVerb(search, "quer"); inferable {
+	if len(soleVerb) < 3 {
+		t.Fatalf("sole verb %q is too short to truncate into a near-typo — this arm needs a subject", soleVerb)
+	}
+	if _, inferable := soleReadVerb(soleNoun, soleVerb[:len(soleVerb)-1]); inferable {
 		t.Error("a near-typo of the sole verb must not be inferred as an argument")
 	}
 	// Flag-shaped and empty tokens are never arguments to an inferred verb.
 	for _, typed := range []string{"--json", "-x", ""} {
-		if _, inferable := soleReadVerb(search, typed); inferable {
-			t.Errorf("soleReadVerb(search, %q) fired; want no inference", typed)
+		if _, inferable := soleReadVerb(soleNoun, typed); inferable {
+			t.Errorf("soleReadVerb(%s, %q) fired; want no inference", soleNoun.Name, typed)
 		}
 	}
 

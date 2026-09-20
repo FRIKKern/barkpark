@@ -256,7 +256,7 @@ func landWithResolvedCriterion(out *writer, g globals, ctx manifest.Context, m *
 		return runCommand(out, g, ctx, m, cmd, tail)
 	}
 
-	cands, err := resolveLandedCriteria(taskReadbackClient(ctx), docID)
+	cands, proseOnly, err := resolveLandedCriteria(taskReadbackClient(ctx), docID)
 	if err != nil {
 		out.errf("note: could not read %s's acceptance_criteria to resolve a merge-shaped criterion (%v) — recording the landing alone, criteria unchanged. Pass --criterion N to flip one explicitly.", docID, err)
 		return runCommand(out, g, ctx, m, cmd, tail)
@@ -264,7 +264,8 @@ func landWithResolvedCriterion(out *writer, g globals, ctx manifest.Context, m *
 
 	switch {
 	case len(cands) == 0:
-		out.errf("note: %s has no UNMET merge-shaped acceptance criterion, so this landing flips nothing — the sentence is recorded and the criteria are unchanged. (A criterion is merge-shaped when it carries \"merge_gate\": true, or its wording says MERGE-GATED / MERGE GATE / PR merged / merged to main, and its text does not demand a demonstration.)", docID)
+		out.errf("note: %s has no UNMET merge-shaped acceptance criterion this verb may volunteer, so this landing flips nothing — the sentence is recorded and the criteria are unchanged. (An implicit candidate must carry \"merge_gate\": true structurally and its text must not demand a demonstration.)", docID)
+		reportLandedProseOnlySkips(out, docID, proseOnly)
 		return runCommand(out, g, ctx, m, cmd, tail)
 
 	case len(cands) > 1:
@@ -272,10 +273,12 @@ func landWithResolvedCriterion(out *writer, g globals, ctx manifest.Context, m *
 		for _, c := range cands {
 			out.errf("    --criterion %d   (#%d as boards number them)  %q", c.index, c.index+1, truncateCell(c.text, 72))
 		}
+		reportLandedProseOnlySkips(out, docID, proseOnly)
 		return runCommand(out, g, ctx, m, cmd, tail)
 	}
 
 	c := cands[0]
+	reportLandedProseOnlySkips(out, docID, proseOnly)
 	out.errf("note: criterion index %d (#%d as boards number them) is the ONE unmet merge-shaped criterion on %s — sending it with this landing so the label and the criteria stop disagreeing: %q", c.index, c.index+1, docID, truncateCell(c.text, 72))
 
 	withIndex := append(append([]string{}, tail...), "--criterion", strconv.Itoa(c.index))
@@ -345,9 +348,17 @@ type landedCriterion struct {
 	mergeDischarges *bool
 }
 
-// resolveLandedCriteria reads the row and returns every criterion the server
-// would PERMIT this verb to flip: unmet, merge-shaped, and not vetoed by the
-// demonstration wording.
+// resolveLandedCriteria reads the row and returns TWO lists.
+//
+// The first is the implicit CANDIDATES — the criteria this verb may volunteer
+// with no `--criterion` typed: unmet, structurally flagged `merge_gate: true`,
+// and not vetoed by the demonstration wording.
+//
+// The second is the PROSE-ONLY SKIPS — unmet criteria the server would still
+// PERMIT (they are merge-shaped through the wording arm and they discharge on a
+// merge) but which this verb refuses to volunteer because no author ever set the
+// flag. They are returned so the receipt can name them; see
+// `landedImplicitCandidate` for why they are not candidates.
 //
 // It mirrors `Tasks.Landed.merge_shaped?/1` and `merge_discharges?/1` rather
 // than inventing a predicate, and the mirroring is allowed to be imperfect in
@@ -355,10 +366,10 @@ type landedCriterion struct {
 // row under the write lock, so a client false NEGATIVE costs a flip that has to
 // be typed by hand, and a client false POSITIVE costs a 409 this wrapper already
 // reports and recovers from. Neither can fabricate a met.
-func resolveLandedCriteria(c *apiclient.Client, docID string) ([]landedCriterion, error) {
+func resolveLandedCriteria(c *apiclient.Client, docID string) (cands []landedCriterion, proseOnly []landedCriterion, err error) {
 	rb, err := c.TaskGetContent(docID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var content struct {
 		Criteria []struct {
@@ -369,10 +380,9 @@ func resolveLandedCriteria(c *apiclient.Client, docID string) ([]landedCriterion
 		} `json:"acceptance_criteria"`
 	}
 	if err := json.Unmarshal(rb.Content, &content); err != nil {
-		return nil, fmt.Errorf("the store's acceptance_criteria did not decode: %w", err)
+		return nil, nil, fmt.Errorf("the store's acceptance_criteria did not decode: %w", err)
 	}
 
-	var out []landedCriterion
 	for i, raw := range content.Criteria {
 		lc := landedCriterion{
 			index:           i,
@@ -387,9 +397,74 @@ func resolveLandedCriteria(c *apiclient.Client, docID string) ([]landedCriterion
 		if !landedMergeShaped(lc) || !landedMergeDischarges(lc) {
 			continue
 		}
-		out = append(out, lc)
+		// Merge-shaped AND dischargeable: the SERVER would take this index.
+		// Whether this client OFFERS it unasked is the narrower question.
+		if landedImplicitCandidate(lc) {
+			cands = append(cands, lc)
+			continue
+		}
+		proseOnly = append(proseOnly, lc)
 	}
-	return out, nil
+	return cands, proseOnly, nil
+}
+
+// landedImplicitCandidate is the door for a landing that named NO criterion, and
+// it is DELIBERATELY narrower than `landedMergeShaped` above: only a structural
+// `merge_gate: true` volunteers a criterion.
+//
+// WHY IT IS NOT `landedMergeShaped` (task-b40af0580ec7deb6, MEASURED
+// 2026-09-20 on a scratch row). `bp task landed <row> --commit <sha> --note <t>`
+// with no `--criterion` resolved a criterion that carried the MERGE-GATED marker
+// in its PROSE and NO `merge_gate` key, and flipped it met=true with the landing
+// note as its evidence. The close-time readers the lead relies on —
+// `Barkpark.Tasks.Close.merge_gate_synthetics/3` and `reconcile_locked/4` — are
+// FLAG-ONLY by design and would have refused to autostamp that same criterion.
+// So the ledger recorded a met nobody verified, through the one door that never
+// asks. The population is not marginal: the backfill measurement found ~65% of
+// marker-worded criteria carry no flag.
+//
+// THE ASYMMETRY IS THE POINT, AND IT ONLY EVER SUBTRACTS.
+//
+//   - The WIDE reader (`landedMergeShaped`, mirroring
+//     `Tasks.Landed.merge_shaped?/1` and `Criteria.merge_gated?/1`) stays
+//     exactly as wide as it is. It is what the STAMP REFUSAL reads, where a
+//     false positive is a loud refusal and a false negative is a silent
+//     fabricated done. Narrowing it there is the FAILURE DIRECTION this change
+//     must not take, and nothing below touches it.
+//   - This NARROW reader decides only whether the client VOLUNTEERS an index
+//     nobody typed. A false negative here costs one typed `--criterion N`; the
+//     false positive it prevents costs a fabricated met on the ledger.
+//
+// WHAT IS UNCHANGED. The 2026-09-17 KEEP ruling (task-573618865e3c2b3f) holds
+// verbatim: an explicit `merge_gate: true` IS still the candidate and still gets
+// flipped, which is the case every field-arm test pins. A per-row
+// `merge_discharges: false` is still the fence for a flagged criterion a merge
+// must not seal. And an explicit `--criterion N` is still passed through
+// UNTOUCHED — this door is never consulted on that path, so a lead who knows the
+// index keeps every ability they had, prose-only criterion included.
+//
+// WHAT THE AUTHOR DOES INSTEAD. Sets `merge_gate: true` on the criterion. That
+// is the same declaration the close-time readers require, so after this change
+// the landing verb and the close path agree about which criteria a merge seals —
+// which was the whole disagreement.
+func landedImplicitCandidate(c landedCriterion) bool {
+	return c.mergeGate != nil && *c.mergeGate
+}
+
+// reportLandedProseOnlySkips names the criteria the WIDE predicate would have
+// volunteered and the narrow door did not, so the omission is visible rather
+// than silent. Saying nothing here would be the same collapse the arity rule's
+// ZERO arm exists to avoid: an operator would read "nothing was merge-shaped"
+// when the truth is "something was, and nobody had declared it".
+func reportLandedProseOnlySkips(out *writer, docID string, proseOnly []landedCriterion) {
+	if len(proseOnly) == 0 {
+		return
+	}
+	out.errf("note: %s has %d unmet criterion(s) whose WORDING reads as merge-gated but which carry no \"merge_gate\" key — this landing did NOT volunteer them, because the flag is the author's deliberate declaration and the wording alone is not it (the close-time readers are flag-only too, so a landing that flipped one would record a met the lead's own close would have refused):", docID, len(proseOnly))
+	for _, c := range proseOnly {
+		out.errf("    skipped #%d (index %d)  %q", c.index+1, c.index, truncateCell(c.text, 72))
+	}
+	out.errf("    To make one of them flippable, set \"merge_gate\": true on it; to flip one now, type --criterion N yourself.")
 }
 
 // landedMergeShaped answers the SHAPE question — is this the row a merge seals?
