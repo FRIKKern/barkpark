@@ -1243,6 +1243,155 @@ STUB
   else
     fail=$((fail+1)); echo "  FAIL c8e --no-dispatch went green without firing anything (rc=$rc)"
   fi
+  # ══ c9 — THE CADENCE MEASURE (task-edebe459992b3574) ══════════════════════
+  # THE SPECIMEN IS THE ROW'S OWN: task-lease-renew.yml (*/20, bound 60m), which
+  # violated its 60m bound on 120 of 120 gaps measured 2026-09-20 and which the
+  # probe reported INSIDE BOUND — truthfully — whenever it looked just after a
+  # firing. This fixture is exactly that shape: newest run 2 MINUTES old, and
+  # every trailing gap far past the bound. The age answer and the cadence answer
+  # must both be printed, must disagree, and must be labelled so a reader cannot
+  # mistake one for the other.
+  cat > "$tmp/chronic-late.ndjson" <<'FIX'
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:40:00Z", "event": "schedule"}
+{"path": "breakglass-watch.yml", "status": "completed", "created_at": "2026-09-03T11:41:00Z", "event": "schedule"}
+{"path": "stale-verdict-watch.yml", "status": "completed", "created_at": "2026-09-03T11:42:00Z", "event": "schedule"}
+{"path": "main-red-owner.yml", "status": "completed", "created_at": "2026-09-03T11:43:00Z", "event": "schedule"}
+{"path": "cron-overdue-probe.yml", "status": "completed", "created_at": "2026-09-03T11:45:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T11:58:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T09:30:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T06:45:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-03T03:10:00Z", "event": "schedule"}
+{"path": "task-lease-renew.yml", "status": "completed", "created_at": "2026-09-02T23:40:00Z", "event": "schedule"}
+FIX
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/chronic-late.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'CADENCE  task-lease-renew.yml' <<<"$out" \
+     && grep -q 'newest run 2m old, inside the 60m bound' <<<"$out" \
+     && grep -q 'VERDICT  cadence: DEGRADED' <<<"$out" \
+     && grep -q 'VERDICT  cron: every critical-cadence workflow fired' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9a the CHRONICALLY-LATE specimen is caught by the CADENCE measure while the AGE measure says inside-bound, and the two answers are printed separately: $(grep -o 'CADENCE  task-lease-renew.yml.*floor\.' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c9a the chronic-lateness specimen was not split into two answers (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9a2 — and the AGE measure really did say inside-bound on that same fixture,
+  # asserted as an ABSENCE of the scream as well as a presence of the ok line.
+  # Without this, c9a would pass on a fixture that reddened for the ordinary
+  # reason and printed a cadence line as a bonus.
+  if ! grep -q 'OVERDUE  task-lease-renew.yml' <<<"$out" \
+     && ! grep -q 'VERDICT  cron: SCREAM' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9a2 …and NOTHING about that fixture is overdue — the cadence finding is the ONLY finding, which is the whole point of asking the second question"
+  else
+    fail=$((fail+1)); echo "  FAIL c9a2 the specimen was overdue too, so c9a did not isolate the cadence measure"
+  fi
+
+  # c9b — THE DISTINCT EXIT. A delivery shortfall is a WARNING by default (see
+  # the 2026-09-20 header: no PR can clear a platform-wide shortfall, and a red
+  # nobody can act on is how an alarm gets ignored). --cadence-strict turns the
+  # same finding into exit 4 — never 1, so it can never be read as "late or dark
+  # right now", and never 2, so it can never be read as a config chore.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/chronic-late.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "4" ] && grep -q 'VERDICT  cadence: DEGRADED' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9b …and --cadence-strict reds the SAME fixture at exit 4 — a code distinct from 1 (late/dark now), 2 (config drift) and 3 (unreadable)"
+  else
+    fail=$((fail+1)); echo "  FAIL c9b --cadence-strict did not produce the distinct code (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9c — AND IT CAN LOSE. The same workflow delivering its declared */20 for
+  # five hours is green on BOTH measures. A cadence check that reds on every
+  # history is a cadence check nobody reads.
+  grep -v 'task-lease-renew' "$tmp/chronic-late.ndjson" > "$tmp/healthy-cadence.ndjson"
+  for t in 07:00 07:20 07:40 08:00 08:20 08:40 09:00 09:20 09:40 10:00 10:20 10:40 11:00 11:20 11:40 11:55; do
+    echo "{\"path\": \"task-lease-renew.yml\", \"status\": \"completed\", \"created_at\": \"2026-09-03T$t:00Z\", \"event\": \"schedule\"}" \
+      >> "$tmp/healthy-cadence.ndjson"
+  done
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/healthy-cadence.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'ok   task-lease-renew.yml (cadence)' <<<"$out" \
+     && ! grep -q 'CADENCE  ' <<<"$out" \
+     && grep -q 'VERDICT  cadence: every measured critical workflow' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9c a workflow actually delivering its */20 is GREEN on both measures even under --cadence-strict: $(grep -o 'ok   task-lease-renew.yml (cadence).*' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c9c a healthy cadence was flagged (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9d — THE LEGIBILITY HALF, which is the reason the row calls the dispatch
+  # arm's success a problem: 5 of 7 firings in the window are this probe's own
+  # rescues, the scheduler delivered 2, and the verdict must SAY SO. Before this
+  # change the identical history printed `cron: every critical-cadence workflow
+  # fired inside 3x its interval` and nothing else.
+  grep -v 'main-gate-watch' "$tmp/chronic-late.ndjson" > "$tmp/probe-primary.ndjson"
+  cat >> "$tmp/probe-primary.ndjson" <<'FIX'
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-02T13:00:00Z", "event": "schedule"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T02:00:00Z", "event": "schedule"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T04:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T06:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T08:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T10:00:00Z", "event": "workflow_dispatch"}
+{"path": "main-gate-watch.yml", "status": "completed", "created_at": "2026-09-03T11:50:00Z", "event": "workflow_dispatch"}
+FIX
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$0" --workflows "$tmp/wf" \
+           --runs-file "$tmp/probe-primary.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] \
+     && grep -q 'THIS PROBE, NOT THE SCHEDULER, IS THE PRIMARY DELIVERY MECHANISM' <<<"$out" \
+     && grep -q '5 of the 7 firings in that window were probe dispatches' <<<"$out" \
+     && grep -q 'newest run 10m old, inside the 90m bound' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9d a green built out of 5 probe dispatches and 2 scheduled runs SAYS SO: $(grep -o 'CADENCE  main-gate-watch.yml.*MECHANISM for it' <<<"$out")"
+  else
+    fail=$((fail+1)); echo "  FAIL c9d the probe-as-primary-delivery case was not made legible (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9e — RED-BEFORE, by a SURGICAL CUT of the cadence DECISION. Not the
+  # counting, not the printing: only the comparison against the floor. If c9a
+  # passes on the mutant, the measure is decorative.
+  sed 's|^  if \[ "$pct" -lt "$CADENCE_FLOOR_PCT" \]; then$|  if false; then|' "$0" > "$tmp/nocadence.sh"
+  if [ "$(grep -c '^  if false; then$' "$tmp/nocadence.sh")" = "1" ] \
+     && ! diff -q "$0" "$tmp/nocadence.sh" >/dev/null; then
+    pass=$((pass+1)); echo "  ok   c9e-mut the cut-the-cadence-decision MUTATION applied — exactly one comparison disabled"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e-mut the mutation did not apply — c9e below would prove nothing"
+  fi
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nocadence.sh" --workflows "$tmp/wf" \
+           --runs-file "$tmp/chronic-late.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && ! grep -q 'CADENCE  task-lease-renew.yml' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9e …and with that ONE comparison cut, the chronic-lateness specimen goes silent and exits 0 — c9a/c9b are the decision doing the work, not the fixture"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e the mutant still flagged the specimen (rc=$rc) — c9a proves nothing"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  # c9e2 — AND THE MUTANT MUST NOT MOVE THE OTHER TWO ARMS. A cut that also
+  # broke the dead-workflow scream or the healthy fixture would make c9e a
+  # measurement of something else entirely.
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nocadence.sh" --workflows "$tmp/wf" \
+           --runs-file "$tmp/gap6h.ndjson" --now "$NOW" --no-dispatch 2>&1)"; rc=$?
+  if [ "$rc" = "1" ] && grep -q 'OVERDUE  main-gate-watch.yml' <<<"$out" && grep -q '360m old' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9e2 …and the SAME mutant still reds the 6 h dead-workflow fixture (c3's) at exit 1 — the cut touched the cadence decision and nothing else"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e2 the cadence mutation also broke the dead-workflow scream (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+  out="$(CRON_PROBE_REPO_ROOT="$REPO_ROOT" bash "$tmp/nocadence.sh" --workflows "$tmp/wf" \
+           --runs-file "$tmp/healthy-cadence.ndjson" --now "$NOW" --no-dispatch --cadence-strict 2>&1)"; rc=$?
+  if [ "$rc" = "0" ]; then
+    pass=$((pass+1)); echo "  ok   c9e3 …and it still passes the healthy-cadence fixture — the mutant differs from this script on exactly the one fixture c9a is about"
+  else
+    fail=$((fail+1)); echo "  FAIL c9e3 the cadence mutation reddened the healthy fixture (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
+  # c9f — THE HISTORY-SHAPED INPUT DID NOT BREAK THE ONE-ROW FIXTURES. Every
+  # arm above c9 feeds --runs-file the newest row per workflow and no event
+  # field at all; those must keep meaning exactly what they meant, which is why
+  # the measure refuses to score under 3 rows / 4x the interval rather than
+  # inventing a rate from one sample.
+  out="$(RUNS_FILE="$tmp/fresh.ndjson" NOW_ISO="$NOW" check_overdue 2>&1)"; rc=$?
+  if [ "$rc" = "0" ] && [ "$(grep -c '(cadence): NOT MEASURED' <<<"$out")" = "6" ] \
+     && ! grep -q 'CADENCE  ' <<<"$out"; then
+    pass=$((pass+1)); echo "  ok   c9f the pre-existing one-row-per-workflow fixtures score NO cadence at all — all 6 critical rows print NOT MEASURED, and a rate is never invented from one sample"
+  else
+    fail=$((fail+1)); echo "  FAIL c9f a single run row produced a cadence verdict (rc=$rc):"; printf '%s\n' "$out" | sed 's/^/       /'
+  fi
+
   unset CRON_PROBE_GH CRON_PROBE_POLL_TRIES CRON_PROBE_POLL_SLEEP
 
   echo
