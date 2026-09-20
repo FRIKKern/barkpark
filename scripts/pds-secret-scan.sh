@@ -293,7 +293,7 @@ regex_escape() { # POSIX-ERE-escape a literal value
 sql_quote() { printf '%s' "$1" | sed "s/'/''/g"; }
 
 scan_db() { # conninfo
-  local conn="$1" alt="" label value table count tables=0 errf reason
+  local conn="$1" alt="" label value table count tables=0 errf reason enumerated=0
   command -v psql >/dev/null 2>&1 || die "--db needs psql on PATH"
   errf="$(mktemp "${TMPDIR:-/tmp}/pds-scan-err.XXXXXX")"
   TMP_FILES="$TMP_FILES $errf"
@@ -321,11 +321,26 @@ scan_db() { # conninfo
     die "cannot enumerate schema public — psql failed: $(head -1 "$errf" 2>/dev/null | cut -c1-200). An unreachable or unqueryable DB is an empty corpus; refusing to print CLEAN."
   fi
 
-  while IFS= read -r table; do
+  # COUNT THE LIST BEFORE READING IT. `tables` below counts ITERATIONS; this
+  # counts the ROWS the enumeration actually produced. The two must be equal,
+  # and the check after the loop is the only thing that can tell "scanned 40 of
+  # 40" from "scanned 1 of 40". `awk`, not `grep -c`: under `set -e` a grep that
+  # matches nothing exits 1 and would kill the scan on an empty schema — the one
+  # case that already has its own refusal below.
+  enumerated="$(awk 'NF { n++ } END { print n+0 }' "$tlist")"
+
+  # `</dev/null` on the body's psql is fd HYGIENE, not the fix. The identity
+  # below is the fix: it notices a short scan whoever caused it, including a
+  # future body child nobody remembered reads fd 0.
+  # `|| [ -n "$table" ]` is not decoration: a plain `while read` DROPS a final
+  # line with no trailing newline, and the identity below would then refuse a
+  # perfectly good scan. Found by that identity's own control arm.
+  while IFS= read -r table || [ -n "$table" ]; do
     [ -n "$table" ] || continue
     tables=$((tables + 1))
     count="$(psql "$conn" -At -c \
-      "SELECT count(*) FROM public.\"$table\" t WHERE t::text ~ '$(sql_quote "$alt")'" 2>"$errf" || echo "")"
+      "SELECT count(*) FROM public.\"$table\" t WHERE t::text ~ '$(sql_quote "$alt")'" \
+      </dev/null 2>"$errf" || echo "")"
     if [ -z "$count" ]; then
       # Say WHY it was skipped — a permission-invisible table must be named as
       # such, never blamed on a missing text cast (that false reason is exactly
@@ -353,11 +368,31 @@ scan_db() { # conninfo
   # the database (run-proven with a REVOKE ALL role). pg_class names every
   # ordinary and partitioned table regardless of privilege; a table the role
   # cannot read then lands in the UNSCANNED branch above WITH its reason.
+  # ── THE COUNT IDENTITY ──────────────────────────────────────────────────
+  # FIRST, and before the zero-tables floor, because a loop that died on its
+  # first iteration leaves tables=0 over a NON-empty list: the floor below would
+  # then print "schema public holds ZERO base tables" about a schema holding 40.
+  # Two failures, two messages, and this one names BOTH numbers so the reader
+  # can see how much of the corpus was actually examined.
+  #
+  # WHY IT EXISTS (task-4121ac48f4e4f71e). The loop above reads `$tlist` on fd 0.
+  # Any body child that reads stdin — `psql` without -c/-f, a future `psql -f -`,
+  # an `ssh`, a `read` — swallows the remaining table names and the loop ENDS
+  # EARLY with no error and no non-zero status. The scan then reports a smaller
+  # clean scan IN THE SAME WORDS as a full one. The existing floor cannot see
+  # that: `-eq 0` distinguishes "nothing" from "something", never "some" from
+  # "all".
+  # MUT-ANCHOR: table-count-identity
+  if [ "$tables" -ne "$enumerated" ]; then
+    die "SHORT TABLE SCAN — examined $tables of $enumerated table(s) enumerated from schema public. The scan loop ended before the list did (a loop-body child that reads stdin consumes the remaining names silently); a partial scan must never print CLEAN in the same words as a full one."
+  fi
+  # MUT-END: table-count-identity
+
   if [ "$tables" -eq 0 ]; then
     die "schema public holds ZERO base tables — the DB answered but there is nothing to scan. A scan over nothing proves nothing; refusing to print CLEAN."
   fi
 
-  say "  tables scanned: $tables   ammo values: $(ammo_count)"
+  say "  tables scanned: $tables of $enumerated enumerated   ammo values: $(ammo_count)"
 }
 
 # ── mechanism sentence (PDS-D25 honesty) ────────────────────────────────────
