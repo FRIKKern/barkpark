@@ -4726,6 +4726,58 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── cch-w20-bl: THE LONG INSTANCE NAME, WHICH NO FIXTURE HAD EVER CARRIED ──
+  // `.attention-name` has carried `overflow: hidden; text-overflow: ellipsis;
+  // white-space: nowrap` since cch-w20-s9, and NOTHING in this corpus had ever
+  // made it use them. Every attention-queue fixture names its box in one word
+  // — Reporting, Marketing, Staging — which measure 52-69px at 14px/600, so the
+  // W20-attention-name-column leg's 44 green cells all proved the same thing:
+  // that the ellipsis was never NEEDED. A green that rests on a fixture string
+  // is conditional on that string, and the string was ours, not the server's.
+  //
+  // THIS NAME IS ORDINARY, NOT CRUEL, AND THAT IS THE POINT. `Barkpark.changeset`
+  // validates `name` at max 255 (cloud/lib/barkpark_cloud/registry/barkpark.ex,
+  // `validate_length(:name, min: 1, max: 255)`), and the cruel twins in this
+  // corpus — `fleet-cruel-content`, `members-cruel-content` — sit AT that cap.
+  // This one is 71 characters, well inside it: the shape an operator types when
+  // one word cannot tell two boxes apart. The blind spot was never the 255-char
+  // wall, which overflow-guard already drives elsewhere; it was the ORDINARY
+  // long name, which nothing drove at all.
+  //
+  // Everything else is `overview-attention` verbatim — the same degraded box,
+  // the same production-dominant "Health unknown · Agent offline" pair, the
+  // same `liveInstance` beside it — so the ONE axis between the two fixtures is
+  // the name, and the W20-attention-name-column leg reads them as a pair:
+  // engaged here, never needed there. Registered as breakpoint-sweep RESIDUE
+  // rather than a cell, the same home `overview-attention` and
+  // `overview-never-reported` have: what it exists to measure is one box's
+  // rendered text against its own column, which is overflow-guard's axis.
+  "overview-attention-long-name": {
+    label: "Overview attention — the degraded box wears a 71-character operator name, so .attention-name's ellipsis must engage",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-degraded-long",
+          name: "Reporting — EU customer analytics, billing reconciliation and retention",
+          slug: "reporting-eu",
+          url: "https://reporting-eu-5b2c1e.barkpark.cloud",
+          host: "reporting-eu-5b2c1e.barkpark.cloud",
+          health_status: "unknown",
+          agent_status: "offline",
+          version: "0.9.2",
+          last_seen_at: tMinus(1200),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
   // ── cch-w34-s6 (REVIEW ADDITION): the NEVER-REPORTED box, on screen ────────
   // The slice made `unreported` reachable and proved it through the pure hooks
   // and 26 harness assertions — but shipped no fixture, so the one state a
