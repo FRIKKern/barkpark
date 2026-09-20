@@ -310,7 +310,7 @@ compile_closure() {
   # kill the selector instead of falling back to ALL — the exact inversion this
   # file is written against. `|| rc=$?` keeps the failure a value.
   rc=0
-  out="$(cd -- "$API_DIR" && mix xref graph --sink "$rel" --label compile-connected --format plain 2>&1)" || rc=$?
+  out="$(cd -- "$API_DIR" && mix xref graph --sink "$rel" --label compile-connected --format plain 2>&1 </dev/null)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "elixir-impacted-tests: mix xref failed (rc=$rc) for ${rel} — falling back to ALL." >&2
     return 1
@@ -362,7 +362,7 @@ xref_probe() {
     echo "elixir-impacted-tests: the xref positive control ${probe} is gone — no way to tell a leaf from a blind instrument, falling back to ALL." >&2
     return 1
   fi
-  out="$(cd -- "$API_DIR" && mix xref graph --sink "$probe" --label compile-connected --format plain 2>&1)" || rc=$?
+  out="$(cd -- "$API_DIR" && mix xref graph --sink "$probe" --label compile-connected --format plain 2>&1 </dev/null)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "elixir-impacted-tests: the xref positive control exited rc=${rc} — falling back to ALL." >&2
     return 1
@@ -634,9 +634,55 @@ select_tests() {
     return 0
   fi
 
+  # ── WHY THE CHANGED LIST IS NOT ON STDIN (task-627ab62e43790c0e) ─────────
+  #
+  # This loop used to be fed `done <<EOF\n$changed\nEOF`, which puts the list
+  # on the loop body's fd 0. Every child started inside the body inherits it,
+  # and a child that reads stdin EATS THE REST OF THE LIST. `read` then returns
+  # EOF and the loop ends early — silently, with no non-zero status, no stderr
+  # and no `ALL`: the remaining paths are never classified, so the ones that
+  # would have widened the selection (a changed *_test.exs, an `api/**` path
+  # that forces ALL) are simply not there. The selector narrows over a file set
+  # it never read, which is the exact fault this whole file is written against.
+  #
+  # MEASURED, NOT IMAGINED. #19303 (e58d8bbcd) changed 40 paths: two
+  # `api/lib/**.ex` files, 37 `*_test.exs`, and `api/test/support/
+  # task_brief_fixtures.ex` — that last one is neither a lib .ex nor a
+  # *_test.exs, so the `api/*` arm below MUST have emitted ALL. The gate's own
+  # uploaded selection artifact (run 35432412311, job 105870352514) instead
+  # holds 596 narrowed files, with NO `ALL` token and NOT ONE stderr line from
+  # this script. Every changed path after the two lib files is missing from it —
+  # including `test/barkpark_web/controllers/mutate_task_brief_gate_test.exs`,
+  # which the PR ADDED and which `is_narrowable_test` selects unconditionally.
+  # The only commands between path 2 and path 3 are the `mix xref` calls in
+  # `xref_probe`/`compile_closure`; on the runner the BEAM drains the pipe that
+  # bash 5.x backs a here-document with. The required Elixir gate went green;
+  # elixir-nightly found 31 failures 23 hours later.
+  #
+  # TWO THINGS FIX IT, and the second one is the one that lasts:
+  #
+  #   1. The list is read from a dedicated fd (9), never fd 0, and every child
+  #      in the body gets `</dev/null`. No child can reach the data.
+  #   2. THE COUNT IDENTITY, below: the loop must classify exactly as many
+  #      paths as it was handed. That is a PREDICATE over this run's own input,
+  #      not a list of known-bad children, so it holds for the NEXT stdin-eating
+  #      child too — one nobody has thought of, in a helper added next year.
+  #      A truncated read is then structurally unable to look like a narrow
+  #      answer: it emits ALL, loudly, on stderr.
   local closure_all="" mods_here readers r
-  while IFS= read -r p; do
+  local _in_count=0 _seen_count=0 _feed
+  _in_count="$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  _feed="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-feed.XXXXXX")" || {
+    echo "elixir-impacted-tests: cannot create the changed-path feed file — selecting ALL." >&2
+    echo "ALL"
+    return 0
+  }
+  printf '%s\n' "$changed" | sed '/^$/d' >"$_feed"
+  exec 9<"$_feed"
+  rm -f -- "$_feed"
+  while IFS= read -r p <&9; do
     [ -n "$p" ] || continue
+    _seen_count=$((_seen_count + 1))
     if is_narrowable_test "$p"; then
       sel="${sel}${p#api/}
 "
@@ -691,7 +737,21 @@ select_tests() {
     fi
     readers="$(census_readers "$p")"
     if [ -n "$readers" ]; then
-      while IFS= read -r r; do
+      # Same fd discipline as the outer loop: this body calls `compile_closure`,
+      # which starts `mix`. On fd 0 the reader list would be drained the same
+      # way, and a half-read reader list narrows just as silently.
+      local _r_in=0 _r_seen=0 _r_feed
+      _r_in="$(printf '%s\n' "$readers" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+      _r_feed="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-readers.XXXXXX")" || {
+        echo "elixir-impacted-tests: cannot create the reader feed file — selecting ALL." >&2
+        echo "ALL"
+        return 0
+      }
+      printf '%s\n' "$readers" | sed '/^$/d' >"$_r_feed"
+      exec 8<"$_r_feed"
+      rm -f -- "$_r_feed"
+      while IFS= read -r r <&8; do
+        _r_seen=$((_r_seen + 1))
         [ -n "$r" ] || continue
         case "$r" in
           api/test/*_test.exs) sel="${sel}${r#api/}
@@ -717,9 +777,13 @@ select_tests() {
             return 0
             ;;
         esac
-      done <<EOF
-$readers
-EOF
+      done
+      exec 8<&-
+      if [ "$_r_seen" -ne "$_r_in" ]; then
+        echo "elixir-impacted-tests: classified ${_r_seen} of ${_r_in} census readers of ${p} — the reader list was TRUNCATED mid-loop. Selecting ALL." >&2
+        echo "ALL"
+        return 0
+      fi
       continue
     fi
     if in_set "$p" test; then
@@ -730,9 +794,20 @@ EOF
     # Branch (c). Dispatched on by neither set, named by no census row: the
     # path-escape ratchet's guarantee is that nothing in this suite reads it.
     echo "elixir-impacted-tests: ${p} is in NEITHER path set and in no census row — nothing in the suite reads it; it contributes no tests." >&2
-  done <<EOF
-$changed
-EOF
+  done
+  exec 9<&-
+
+  # THE COUNT IDENTITY. Every path handed in must have been classified. A short
+  # count means the loop stopped before the end of the list — a drained fd, a
+  # read error, a `read` that met a NUL — and whatever the cause, the paths it
+  # did not see cannot be assumed harmless: the one that widens to ALL is
+  # exactly the one most likely to be missing. This is the assertion that makes
+  # a FAILED read impossible to mistake for a narrow answer.
+  if [ "$_seen_count" -ne "$_in_count" ]; then
+    echo "elixir-impacted-tests: classified ${_seen_count} of ${_in_count} changed paths — the changed-path list was TRUNCATED mid-loop, so ${_in_count} minus ${_seen_count} paths were never classified and any one of them could have widened this selection. Selecting ALL." >&2
+    echo "ALL"
+    return 0
+  fi
 
   closure_all="$(printf '%s\n' "$closure_all" | sed '/^$/d' | LC_ALL=C sort -u)"
   if [ -n "$closure_all" ]; then
