@@ -134,12 +134,43 @@ if total is not None and len(items) < total:
 PY
 }
 
+# ── the full-oid gate (task-0a44c3bc96baa8cc) ────────────────────────────────
+# `repos/<r>/actions/runs?head_sha=` matches the FULL 40-character oid ONLY.
+# Handed an abbreviation it returns HTTP 200 with an EMPTY workflow_runs list —
+# well-formed, so no transport or shape guard fires — and the caller then reads
+# "no runs on this head" off a query the endpoint simply refused to match. That
+# is the failed-read-equals-zero class; it was MEASURED on main-gate-watch.sh,
+# where `--sha 769c39bd6` said MISSING/exit 1 in the same minute the full oid
+# said WAITING/exit 2. Widen here, before the feed is queried, or refuse.
+# Prints the 40-character oid, or the single token UNRESOLVED.
+cpf_full_oid() {
+  local sha="$1" full
+  case "$sha" in
+    ""|*[!0-9a-fA-F]*) echo "UNRESOLVED"; return 0 ;;
+  esac
+  if [ "${#sha}" -eq 40 ]; then printf '%s\n' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+  [ "${#sha}" -ge 4 ] || { echo "UNRESOLVED"; return 0; }
+  full="$(git -C "$(cd "$(dirname "$0")/.." && pwd)" rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null)"
+  [ "${#full}" -eq 40 ] || full="$(gh api "repos/$REPO/commits/$sha" 2>/dev/null | jq -r '.sha // ""' 2>/dev/null)"
+  if [ "${#full}" -eq 40 ]; then printf '%s\n' "$full"; else echo "UNRESOLVED"; fi
+}
+
 measure() {
   local ref="$1" sha
   if printf '%s' "$ref" | grep -qE '^[0-9]+$'; then
     sha=$(gh pr view "$ref" --repo "$REPO" --json headRefOid -q .headRefOid) \
       || { echo "REFUSE: cannot read PR $ref" >&2; return 4; }
-  else sha="$ref"; fi
+  else
+    # A bare ref is OPERATOR-SUPPLIED and can arrive abbreviated; headRefOid
+    # above is always 40 chars. Widen or refuse BEFORE the run feed is queried
+    # — see cpf_full_oid.
+    sha="$(cpf_full_oid "$ref")"
+    if [ "$sha" = "UNRESOLVED" ]; then
+      echo "REFUSE: '$ref' is not a full 40-character commit oid and could not be widened to one; actions/runs?head_sha= matches the FULL oid only and would answer an EMPTY feed for it" >&2
+      return 4
+    fi
+    [ "$sha" = "$ref" ] || echo "resolved '$ref' to the full oid $sha (the run feed matches the full oid only)" >&2
+  fi
   [ -n "$sha" ] || { echo "REFUSE: empty sha" >&2; return 4; }
 
   local reqmap; reqmap=$(required_workflows) || return 4
