@@ -83,7 +83,14 @@ defmodule BarkparkWeb.Studio.PdsW42PaperCanvasPathGateTest do
     # A READ-ONLY api token. `create_token` auto-memberships it on the Default
     # workspace, so it IS a member — permissions are ["read"], so the write arm
     # of `Caps.derive/1` is false. Authenticated, not anonymous.
-    {:ok, _} = Auth.create_token(@readonly, "pds w42 canvas readonly", @dataset, ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "pds w42 canvas readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end

@@ -7,8 +7,11 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       an unmirrored blocker is OMITTED (never fabricated).
     * `sync/5` mirrors `content.parent_id` to a native sub-issue: `:noop` with no
       parent, `{:defer, :parent_unmirrored}` when the parent has no issue,
-      `{:flatten, parent}` past the depth cap, and an idempotent `add_sub_issue`
-      (422 tolerated) otherwise.
+      `{:flatten, parent}` past the depth cap, and `{:linked, parent_issue}` after
+      an idempotent `add_sub_issue` (422 tolerated) otherwise — preceded, when the
+      child's `sub_issue_parent` stamp names a DIFFERENT parent, by a
+      `remove_sub_issue` of the OLD link (a re-parent is remove-then-add; without
+      the retraction the child reads as a sub-issue of BOTH parents).
 
   GitHub HTTP is a seam-injected stub — no live client, no Bypass needed here.
   """
@@ -25,7 +28,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
   # the test process and returns a per-test-configurable response.
   # ---------------------------------------------------------------------------
   defmodule StubClient do
-    alias Barkpark.Plugins.Github.Errors.NetworkError
+    alias Barkpark.Plugins.Github.Errors.{NetworkError, NotFound}
 
     def get_issue(_repo, number, opts) do
       notify(opts, {:get_issue, number})
@@ -42,6 +45,17 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       case cfg(:add_sub_issue) do
         nil -> {:ok, %{}}
         :already_linked -> {:error, %NetworkError{reason: {:http, 422}, endpoint: "/sub_issues"}}
+        resp -> resp
+      end
+    end
+
+    def remove_sub_issue(repo, parent_num, child_db_id, opts) do
+      notify(opts, {:remove_sub_issue, repo, parent_num, child_db_id})
+
+      case cfg(:remove_sub_issue) do
+        nil -> {:ok, %{}}
+        :gone -> {:error, %NotFound{status: 404, endpoint: "/sub_issue"}}
+        :not_a_child -> {:error, %NetworkError{reason: {:http, 422}, endpoint: "/sub_issue"}}
         resp -> resp
       end
     end
@@ -193,7 +207,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
     test "links the child db id under the parent number", %{scope: scope, opts: opts} do
       task = mk_task!("child-a", %{"parent_id" => "parent-mir"}, scope)
 
-      assert Relations.sync(task, @repo, 77, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 77, @dataset, opts) == {:linked, 55}
 
       # get_issue on the CHILD number to resolve its db id, then add_sub_issue
       # with the parent NUMBER + child DB id.
@@ -201,11 +215,11 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       assert_received {:add_sub_issue, @repo, 55, 9001}
     end
 
-    test "a 422 'already a sub-issue' is idempotent → :ok", %{scope: scope, opts: opts} do
+    test "a 422 'already a sub-issue' is idempotent → {:linked, _}", %{scope: scope, opts: opts} do
       stub_cfg(%{add_sub_issue: :already_linked})
       task = mk_task!("child-b", %{"parent_id" => "parent-mir"}, scope)
 
-      assert Relations.sync(task, @repo, 78, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 78, @dataset, opts) == {:linked, 55}
       assert_received {:add_sub_issue, @repo, 55, 9001}
     end
 
@@ -218,7 +232,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
 
     # ---- 422 disambiguation (charter 4b): real reject vs idempotent ----------
 
-    test "a 422 whose body says the link ALREADY exists is idempotent → :ok",
+    test "a 422 whose body says the link ALREADY exists is idempotent → {:linked, _}",
          %{scope: scope, opts: opts} do
       stub_cfg(%{
         add_sub_issue:
@@ -226,7 +240,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       })
 
       task = mk_task!("child-idem", %{"parent_id" => "parent-mir"}, scope)
-      assert Relations.sync(task, @repo, 82, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 82, @dataset, opts) == {:linked, 55}
     end
 
     test "a REAL 422 rejection returns a DISTINCT {:sub_issue_rejected, …} the wiring records",
@@ -263,15 +277,117 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       assert detail =~ "not a valid issue type"
     end
 
-    test "a 422 with NO legible detail stays conservatively idempotent → :ok",
+    test "a 422 with NO legible detail stays conservatively idempotent → {:linked, _}",
          %{scope: scope, opts: opts} do
       # The real REST Client discards the 422 body, so a %NetworkError{} carries
       # only reason:{:http,422}. Without a body to judge, we never fabricate a
-      # rejection — same conservative :ok as before this slice.
+      # rejection — same conservative idempotent success as before this slice.
       stub_cfg(%{add_sub_issue: :already_linked})
       task = mk_task!("child-bare", %{"parent_id" => "parent-mir"}, scope)
 
-      assert Relations.sync(task, @repo, 85, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 85, @dataset, opts) == {:linked, 55}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # sync/5 — RE-PARENT: the old native link is RETRACTED before the new one
+  # (gr-bl-github-mirror-reparent-residue). Before this, no remove verb existed
+  # on the client at all, so a moved task stayed a sub-issue of BOTH parents.
+  # ---------------------------------------------------------------------------
+
+  describe "sync/5 — re-parent retraction" do
+    setup %{scope: scope} do
+      mk_task!("rp-old", %{}, scope)
+      {:ok, _} = Link.put("rp-old", @dataset, %{repo: @repo, issue: 601}, scope)
+      mk_task!("rp-new", %{}, scope)
+      {:ok, _} = Link.put("rp-new", @dataset, %{repo: @repo, issue: 602}, scope)
+      :ok
+    end
+
+    # A child whose stamp names the OLD parent and whose parent_id now names the
+    # NEW one. The pass must REMOVE under 601 and ADD under 602 — in THAT order.
+    test "removes the OLD link BEFORE adding the new one", %{scope: scope, opts: opts} do
+      mk_task!("rp-child", %{"parent_id" => "rp-new"}, scope)
+
+      {:ok, moved} =
+        Link.put("rp-child", @dataset, %{repo: @repo, issue: 610, sub_issue_parent: 601}, scope)
+
+      assert Relations.sync(moved, @repo, 610, @dataset, opts) == {:linked, 602}
+
+      # The ORDER is the invariant: two parents are never simultaneously claimed.
+      assert_received {:get_issue, 610}
+      assert_received {:remove_sub_issue, @repo, 601, 9001}
+      assert_received {:add_sub_issue, @repo, 602, 9001}
+    end
+
+    # The add MUST NOT run when the retraction failed for a reason other than
+    # "already absent": one parent or the other, never both. The next
+    # level-triggered reconcile retries the whole pass.
+    test "a FAILED removal aborts the pass and never adds the new link",
+         %{scope: scope, opts: opts} do
+      stub_cfg(%{remove_sub_issue: {:error, :boom}})
+      mk_task!("rp-child-f", %{"parent_id" => "rp-new"}, scope)
+
+      {:ok, moved} =
+        Link.put("rp-child-f", @dataset, %{repo: @repo, issue: 611, sub_issue_parent: 601}, scope)
+
+      assert Relations.sync(moved, @repo, 611, @dataset, opts) == {:error, :boom}
+
+      assert_received {:remove_sub_issue, @repo, 601, 9001}
+      refute_received {:add_sub_issue, _, _, _}
+    end
+
+    test "a 404 on the removal means the link is already gone — the add proceeds",
+         %{scope: scope, opts: opts} do
+      stub_cfg(%{remove_sub_issue: :gone})
+      mk_task!("rp-child-g", %{"parent_id" => "rp-new"}, scope)
+
+      {:ok, moved} =
+        Link.put("rp-child-g", @dataset, %{repo: @repo, issue: 612, sub_issue_parent: 601}, scope)
+
+      assert Relations.sync(moved, @repo, 612, @dataset, opts) == {:linked, 602}
+      assert_received {:add_sub_issue, @repo, 602, 9001}
+    end
+
+    test "a 422 on the removal (not a sub-issue of that parent) also proceeds",
+         %{scope: scope, opts: opts} do
+      stub_cfg(%{remove_sub_issue: :not_a_child})
+      mk_task!("rp-child-h", %{"parent_id" => "rp-new"}, scope)
+
+      {:ok, moved} =
+        Link.put("rp-child-h", @dataset, %{repo: @repo, issue: 613, sub_issue_parent: 601}, scope)
+
+      assert Relations.sync(moved, @repo, 613, @dataset, opts) == {:linked, 602}
+      assert_received {:add_sub_issue, @repo, 602, 9001}
+    end
+
+    # Steady state: the stamp already names the parent we would link under.
+    # ZERO GitHub calls — not even the child GET.
+    test "a re-run with nothing to do makes NO client call at all",
+         %{scope: scope, opts: opts} do
+      mk_task!("rp-child-s", %{"parent_id" => "rp-new"}, scope)
+
+      {:ok, settled} =
+        Link.put("rp-child-s", @dataset, %{repo: @repo, issue: 614, sub_issue_parent: 602}, scope)
+
+      assert Relations.sync(settled, @repo, 614, @dataset, opts) == {:linked, 602}
+
+      refute_received {:get_issue, _}
+      refute_received {:remove_sub_issue, _, _, _}
+      refute_received {:add_sub_issue, _, _, _}
+    end
+
+    # A task mirrored BEFORE the stamp existed has nothing to retract — the old
+    # behaviour byte for byte, so no back-fill is needed.
+    test "no sub_issue_parent stamp → nothing is removed, the add still runs",
+         %{scope: scope, opts: opts} do
+      mk_task!("rp-child-n", %{"parent_id" => "rp-new"}, scope)
+      {:ok, fresh} = Link.put("rp-child-n", @dataset, %{repo: @repo, issue: 615}, scope)
+
+      assert Relations.sync(fresh, @repo, 615, @dataset, opts) == {:linked, 602}
+
+      refute_received {:remove_sub_issue, _, _, _}
+      assert_received {:add_sub_issue, @repo, 602, 9001}
     end
   end
 
@@ -308,7 +424,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       task = mk_task!("cc-twin", %{"parent_id" => "cc-parent"}, scope)
 
       opts = Keyword.put(opts, :max_children, 1)
-      assert Relations.sync(task, @repo, 93, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 93, @dataset, opts) == {:linked, 500}
       assert_received {:add_sub_issue, @repo, 500, 9001}
     end
 
@@ -316,7 +432,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
          %{scope: scope, opts: opts} do
       task = mk_task!("cc-only", %{"parent_id" => "cc-parent"}, scope)
       # default cap is 100 — one child is nowhere near it.
-      assert Relations.sync(task, @repo, 94, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 94, @dataset, opts) == {:linked, 500}
       assert_received {:add_sub_issue, @repo, 500, 9001}
     end
   end
@@ -359,7 +475,7 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
       task = mk_task!("child-shallow", %{"parent_id" => "p2"}, scope)
 
       # default cap (8) — a 1-deep chain does NOT flatten.
-      assert Relations.sync(task, @repo, 91, @dataset, opts) == :ok
+      assert Relations.sync(task, @repo, 91, @dataset, opts) == {:linked, 200}
       assert_received {:add_sub_issue, @repo, 200, 9001}
     end
 

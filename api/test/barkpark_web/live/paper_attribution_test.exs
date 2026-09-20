@@ -79,7 +79,16 @@ defmodule BarkparkWeb.PaperAttributionTest do
 
   defp write_token!(conn) do
     raw = "eol-attr-writer-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "eol attr writer", @dataset, ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "eol attr writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {token, as_token(conn, raw)}
   end
 
