@@ -190,6 +190,77 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
     end
   end
 
+  # THE THREE STATES OF THE FLAG, ON ONE MARKER-WORDED CRITERION.
+  #
+  # The nag steers an author toward `merge_gate: true`. `Criteria.merge_gated?/1`
+  # documents `merge_gate: false` as the EXEMPTION DOOR for that steer's false
+  # positives — a criterion that merely TALKS about merge-gating. The predicate
+  # used to ask `Map.get(entry, "merge_gate") == true`, which reads an explicit
+  # `false` exactly like an absent key, so the documented fix silenced nothing
+  # and the only way to stop the nag was to write `true` — converting a mention
+  # into a lead-only gate that `met` has no un-stamp for.
+  #
+  # MUTATION PROOF (restore `defp merge_gate_flagged?(entry), do:
+  # Map.get(entry, "merge_gate") == true` and call it at the filter): the
+  # `explicit false` arm reds and the other two stay green. Recorded in the PR
+  # body. The absent arm is the FAILURE DIRECTION named on the row: a fix that
+  # silences absent keys too kills the nag, so it is asserted here beside the
+  # other two rather than left to the firing describe block.
+  describe "the flag has THREE states and only ABSENT is unanswered" do
+    @worded "[MERGE-GATED] PR merged to main (LEAD closes this criterion on merge)."
+
+    test "ABSENT: the author has not answered — the nag fires" do
+      codes = Enum.map(warnings_for([%{"criterion" => @worded, "met" => false}]), & &1.code)
+
+      assert codes == ["merge_gate_unflagged"],
+             "an absent merge_gate key on a marker-worded criterion must still nag — " <>
+               "silencing it is the failure direction this arm guards"
+    end
+
+    test "EXPLICIT FALSE: the documented exemption SILENCES the nag" do
+      assert [] ==
+               warnings_for([
+                 %{"criterion" => @worded, "met" => false, "merge_gate" => false}
+               ]),
+             "merge_gate: false is an explicit author declaration that this row is NOT a gate " <>
+               "(Criteria.merge_gated?/1); nagging it steers the author to a false `true`"
+    end
+
+    test "EXPLICIT TRUE: already flagged — the nag never fired here" do
+      assert [] ==
+               warnings_for([
+                 %{"criterion" => @worded, "met" => false, "merge_gate" => true}
+               ])
+    end
+
+    test "the journal copy agrees with the advisory channel on all three" do
+      # NOT `refute log =~ "merge_gate_unflagged"` — that CODE string never
+      # appears in the Logger line (only in `Warnings.put/3`), so the refute
+      # would pass on every input and discriminate nothing. Probe the message
+      # text the journal copy actually carries.
+      refute log_for([%{"criterion" => @worded, "met" => false, "merge_gate" => false}]) =~
+               "carry no `merge_gate: true`"
+
+      assert log_for([%{"criterion" => @worded, "met" => false}]) =~ "carry no `merge_gate: true`"
+    end
+
+    # An explicit false does NOT make the row a gate — it declares it is not
+    # one. The nag going quiet must not be mistaken for the flag being set.
+    test "an exempted row is still NOT merge-gated to the stamp guard" do
+      refute Barkpark.Tasks.Criteria.merge_gated?(%{
+               "criterion" => @worded,
+               "met" => false,
+               "merge_gate" => false
+             })
+
+      assert Barkpark.Tasks.Criteria.merge_gated?(%{
+               "criterion" => @worded,
+               "met" => false,
+               "merge_gate" => true
+             })
+    end
+  end
+
   describe "it is ADVISORY, never a gate" do
     test "the write is never halted by the wording, however many criteria offend" do
       criteria = for i <- 1..5, do: %{"criterion" => "[MERGE-GATED] #{i}", "met" => false}
