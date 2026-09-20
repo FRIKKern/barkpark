@@ -1425,6 +1425,195 @@ else
   bad "the two instruments do not share the tier manifest; a second hand-maintained list is back"
 fi
 
+# ═══ 17. AN ABBREVIATED SHA NEVER ANSWERS OFF AN EMPTY RUN FEED ══════════════
+# task-0a44c3bc96baa8cc. The two endpoints disagree about prefixes and only one
+# says so: `commits/<sha>/check-runs` accepts `a5260f609`; `actions/runs?head_sha=`
+# matches the full oid ONLY and answers HTTP 200 with an EMPTY list. Every guard
+# in read_workflow_runs() fires on transport or shape and NONE on that, so the
+# in-flight set came back empty for the wrong reason and the watch screamed
+# MISSING at a tip that was still running.
+#
+# MEASURED LIVE, 2026-09-20T13:36Z, on tip 769c39bd6959f1adb7428b72d9dde4237421640d
+# with four runs in flight: the full oid printed WAITING and exited 2, while
+# `--sha 769c39bd6` printed MISSING and exited 1. Same commit, same minute.
+#
+# THE STUB BELOW MODELS THAT ASYMMETRY AND NOTHING ELSE. It serves RAW payloads
+# and lets the script apply its own jq — a stub that returned the finished
+# answer would route around the code under test. The run-feed arm compares the
+# `head_sha=` it was handed against the full oid and serves the recorded runs
+# only on an exact match; anything shorter gets `{"total_count":0,...}`, which
+# is precisely what GitHub does.
+section "17. an abbreviated sha is widened before any head_sha= query"
+
+S17="$TMP/s17"; mkdir -p "$S17/bin" "$S17/fx"
+# A synthetic oid that is NOT an object in this checkout, so full_oid()'s local
+# `git rev-parse` arm cannot resolve it and the API arm is the one measured.
+S17_FULL="1234567890abcdef1234567890abcdef12345678"
+S17_SHORT="1234567890a"
+printf '%s' "$S17_FULL" > "$S17/fx/FULL"
+cp "$FX/protection.json" "$S17/fx/protection.json"
+
+cat > "$S17/bin/gh" <<STUB
+#!/usr/bin/env bash
+FXD="$S17/fx"
+STUB
+cat >> "$S17/bin/gh" <<'STUB'
+args="$*"
+full="$(cat "$FXD/FULL")"
+head_sha=""
+for a in "$@"; do case "$a" in head_sha=*) head_sha="${a#head_sha=}" ;; esac; done
+case "$args" in
+  *"/branches/"*"/protection"*)
+    cat "$FXD/protection.json"; exit 0 ;;
+  *"/actions/runs"*)
+    # THE ASYMMETRY. Full oid -> the recorded feed. Anything else -> empty, 200.
+    if [ "$head_sha" = "$full" ]; then cat "$FXD/runs.json"
+    else echo '{"total_count": 0, "workflow_runs": []}'; fi
+    exit 0 ;;
+  *"/check-runs"*)
+    # This endpoint ACCEPTS a prefix: same rows either way. That is why the bug
+    # is invisible from the check-run side alone.
+    cat "$FXD/checks.json"; exit 0 ;;
+  *-q*files*)
+    # changed-files read: unknown, so every paths-filtered context stays OWED.
+    exit 1 ;;
+  *"/commits/"*)
+    s=""
+    for a in "$@"; do case "$a" in */commits/*) s="${a##*/commits/}" ;; esac; done
+    case "$full" in "$s"*) printf '{"sha": "%s"}\n' "$full"; exit 0 ;; esac
+    echo '{"message": "No commit found for SHA"}' >&2; exit 1 ;;
+esac
+echo "gh stub: unrouted args: $args" >&2; exit 97
+STUB
+chmod +x "$S17/bin/gh"
+
+s17_run() { # sha, script
+  PATH="$S17/bin:$PATH" env -u GITHUB_RUN_ID bash "${2:-$WATCH}" \
+    --sha "$1" --repo FRIKKern/barkpark --branch main > "$OUT" 2>&1
+  echo $?
+}
+
+# ── 17a. the stub itself reproduces GitHub's asymmetry ──────────────────────
+# Asserted BEFORE it is used to judge anything: a stub that served the same feed
+# for both forms would make every arm below vacuously green.
+cp "$FX/runs-all-inflight.json" "$S17/fx/runs.json"
+cp "$FX/empty-payload.json"     "$S17/fx/checks.json"
+a="$(PATH="$S17/bin:$PATH" gh api --paginate -X GET -f head_sha="$S17_FULL" -f per_page=100 repos/FRIKKern/barkpark/actions/runs | jq '.workflow_runs | length')"
+b="$(PATH="$S17/bin:$PATH" gh api --paginate -X GET -f head_sha="$S17_SHORT" -f per_page=100 repos/FRIKKern/barkpark/actions/runs | jq '.workflow_runs | length')"
+if [ "$a" = "3" ] && [ "$b" = "0" ]; then
+  ok "the stub reproduces the real asymmetry: head_sha=<full> lists 3 runs, head_sha=<prefix> lists 0"
+else
+  bad "the stub does not reproduce the asymmetry (full=$a, prefix=$b); every arm below would be vacuous"
+fi
+c="$(PATH="$S17/bin:$PATH" gh api --paginate -X GET -f per_page=100 "repos/FRIKKern/barkpark/commits/$S17_SHORT/check-runs" | jq '.check_runs | length')"
+if [ "$c" = "0" ]; then
+  ok "the stub's check-runs arm answers a PREFIX (the endpoint that accepts one) — the bug is invisible from this side"
+else
+  bad "the stub's check-runs arm did not answer a prefix"
+fi
+
+# ── 17b. THE PARITY ASSERTION: both forms, one verdict ──────────────────────
+rc_full="$(s17_run "$S17_FULL")"
+if [ "$rc_full" = "2" ] && grep -q "WAITING " "$OUT"; then
+  ok "full oid + 3 runs in flight -> WAITING (exit 2)"
+else
+  bad "full oid -> expected exit 2 WAITING, got $rc_full"; cat "$OUT" >&2
+fi
+rc_short="$(s17_run "$S17_SHORT")"
+if [ "$rc_short" = "2" ] && grep -q "WAITING " "$OUT"; then
+  ok "ABBREVIATED sha + the same 3 runs in flight -> WAITING (exit 2), the SAME verdict"
+else
+  bad "abbreviated sha -> expected exit 2 WAITING, got $rc_short"; cat "$OUT" >&2
+fi
+if [ "$rc_full" = "$rc_short" ]; then
+  ok "the two sha forms agree (exit $rc_full = exit $rc_short) — INVERTS the measured 2-vs-1 split"
+else
+  bad "the two sha forms disagree: full=$rc_full short=$rc_short"
+fi
+if grep -q "resolved the sha argument '$S17_SHORT' to the full oid $S17_FULL" "$OUT"; then
+  ok "the widening is PRINTED, naming both the argument and the oid it became"
+else
+  bad "the widening is silent; a reader cannot tell which sha was actually queried"; cat "$OUT" >&2
+fi
+if ! grep -q "MISSING  " "$OUT"; then
+  ok "the abbreviated form reaches NO MISSING row — the failed-read-equals-zero answer is gone"
+else
+  bad "the abbreviated form still reports MISSING off an empty run feed"; cat "$OUT" >&2
+fi
+
+# ── 17c. THE CONTROL: a genuinely never-judged tip still screams, both ways ──
+# a5260f609aa2bfe0e76a5983e6992a694776acef, recorded: 3 check runs (none of them
+# a watched context) and 9 workflow runs, ALL terminal. If the fix worked by
+# softening MISSING rather than by widening the sha, this arm reds.
+cp "$FX/a5260f609.json"      "$S17/fx/checks.json"
+cp "$FX/a5260f609-runs.json" "$S17/fx/runs.json"
+rc_full="$(s17_run "$S17_FULL")"
+n_full="$(grep -c "MISSING  " "$OUT")"
+rc_short="$(s17_run "$S17_SHORT")"
+n_short="$(grep -c "MISSING  " "$OUT")"
+if [ "$rc_full" = "1" ] && [ "$n_full" = "3" ]; then
+  ok "CONTROL full oid: 9 terminal runs, no watched row -> MISSING x3, exit 1"
+else
+  bad "CONTROL full oid: expected exit 1 with 3 MISSING rows, got exit $rc_full / $n_full rows"; cat "$OUT" >&2
+fi
+if [ "$rc_short" = "1" ] && [ "$n_short" = "3" ]; then
+  ok "CONTROL abbreviated: the SAME scream survives the widening — MISSING x3, exit 1"
+else
+  bad "CONTROL abbreviated: expected exit 1 with 3 MISSING rows, got exit $rc_short / $n_short rows"; cat "$OUT" >&2
+fi
+
+# ── 17d. MUTATION: remove the widening and 17b reds ─────────────────────────
+# The arms above are only load-bearing if they can fail. Neutralise full_oid()'s
+# result at the one call site and the abbreviated form must fall back to MISSING
+# while the full oid stays WAITING — i.e. exactly the split measured live.
+MUT17="$TMP/main-gate-watch-noresolve.sh"
+# shellcheck disable=SC2016  # the $ is LITERAL: these patterns match shell source
+sed 's/^    full="\$(full_oid "\$sha")"$/    full="$sha"/' "$WATCH" > "$MUT17"
+# shellcheck disable=SC2016  # likewise — grepping for the literal string full="$sha"
+if ! cmp -s "$MUT17" "$WATCH" && grep -q 'full="\$sha"' "$MUT17"; then
+  ok "built the no-widening mutant (full_oid's result replaced by the raw argument)"
+  cp "$FX/runs-all-inflight.json" "$S17/fx/runs.json"
+  cp "$FX/empty-payload.json"     "$S17/fx/checks.json"
+  m_full="$(s17_run "$S17_FULL" "$MUT17")"
+  m_short="$(s17_run "$S17_SHORT" "$MUT17")"
+  if [ "$m_full" = "2" ] && [ "$m_short" = "1" ] && grep -q "MISSING  " "$OUT"; then
+    ok "MUTATION SURVIVED NOTHING: without the widening the abbreviated form reds to MISSING/exit 1 while the full oid still WAITs at exit 2 — 17b measures the fix"
+  else
+    bad "MUTATION SURVIVED: the no-widening mutant answered full=$m_full short=$m_short; §17b would pass with the fix removed"; cat "$OUT" >&2
+  fi
+else
+  bad "could not build the no-widening mutant; §17b measured nothing"
+fi
+
+# ── 17e. a prefix that resolves to nothing is REFUSED, not answered ──────────
+rc="$(s17_run "deadbee")"
+if [ "$rc" = "3" ]; then
+  ok "an unresolvable prefix exits 3 (CONFIGURATION FAULT), not 1"
+else
+  bad "an unresolvable prefix -> expected exit 3, got $rc"; cat "$OUT" >&2
+fi
+if grep -q "the sha argument 'deadbee' is not a full 40-character commit oid" "$OUT"; then
+  ok "the refusal NAMES the argument it refused"
+else
+  bad "the refusal does not name the argument"; cat "$OUT" >&2
+fi
+if ! grep -q "MISSING  " "$OUT"; then
+  ok "the refusal never reaches a MISSING verdict — a query it could not satisfy answers nothing"
+else
+  bad "an unresolvable prefix still produced a MISSING verdict"; cat "$OUT" >&2
+fi
+
+# ── 17f. the hermetic fixture path is untouched by the gate ─────────────────
+# Every arm above §17 drives an ABBREVIATED sha with --check-runs-file, and none
+# of them issues a head_sha= query. The gate must therefore not fire there, or
+# this whole file would red on a change that fixes nothing about it.
+rc="$(run_watch a5260f609 "$FX/a5260f609.json" "$FX/protection.json" "$WATCH" "$FX/a5260f609-runs.json")"
+if [ "$rc" = "1" ] && ! grep -q "is not a full 40-character commit oid" "$OUT"; then
+  ok "the gate does not fire on the hermetic path — recorded payloads are keyed by the sha the harness names"
+else
+  bad "the gate fired on a fixture-fed run (exit $rc); the harness's own shas are not queried against any endpoint"; cat "$OUT" >&2
+fi
+
 bash -n "$WATCH" && ok "main-gate-watch.sh passes bash -n" || bad "main-gate-watch.sh has a syntax error"
 
 echo

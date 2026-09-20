@@ -25,10 +25,15 @@ import (
 // manifest verbs, and `bp capabilities` points at it. The drift guard
 // TestDispatchedVerbLiteralsAreRegisteredOrManifest (noun_builtins_test.go)
 // keeps a future hand-written `if verb == "…"` intercept from re-opening the
-// hole: every verb literal in cli.go's dispatch must be EITHER registered here
-// (help lists it as a built-in) OR a real manifest verb of that noun (help
-// lists it from the manifest). There is no exemption list — both branches are
-// self-justifying.
+// hole: it reads EVERY non-test .go file in internal/cli — cli.go alone would
+// miss an intercept written here, in lookupNounBuiltin, which is where cli.go
+// delegates verb-level dispatch — and every verb literal it judges must be
+// EITHER registered here (help lists it as a built-in) OR a real manifest verb
+// of that noun (help lists it from the manifest). There is no exemption list;
+// what it judges is a predicate (see the test), not a list of blessed files:
+// a literal under a WHOLE-NOUN built-in is out of scope because that built-in
+// renders its own help, and the guard logs each such literal rather than
+// dropping it silently.
 //
 // WHOLE-NOUN built-ins (`bp tasks`, `bp cmux`, `bp paper`, …) are NOT in this
 // table: their noun is not a manifest noun and they own their whole help. This
