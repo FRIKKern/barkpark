@@ -1310,19 +1310,59 @@ says "UNCHECKED: no charter at" "the UNCHECKED names the missing charter"
 # moving commits. On a shallow checkout there is nothing here to measure, and a
 # harness that silently skipped would be the vacuous green this file exists to
 # refuse — so the skip is PRINTED and the reason is named.
-if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f "$CH_F" ]; then
+# OPT-IN, AND THE REASON IS A REQUIRED-GATE ONE. Everything else in this file is
+# hermetic: it runs in a mktemp -d that is not a git repo, reads no live ledger
+# row and no real charter. This block is the exception — it reads THIS CHECKOUT'S
+# charter and THIS CHECKOUT'S git history, so its verdict changes whenever main
+# moves. api/test/barkpark/pds_record_parity_test.exs shells this file from the
+# REQUIRED Elixir gate, and its moduledoc states the invariant this block breaks:
+# "record-parity's harness is HERMETIC … so it gates the ARM's own logic against
+# regression, NOT the epic's record", and warns that a live finding redding a
+# required gate "would be repaired by deleting the baseline inside a day".
+# That is not hypothetical. On 2026-09-20 commit 406978270 moved
+# scripts/pds-pull-proof.sh with no PDS-D recording its blob — a CORRECT axis-F
+# finding — and it redded the required Elixir gate on every open PR in two lanes
+# at once, for authors who had touched none of this.
+# So the dynamic half is now opt-in. The pds-harnesses leg sets
+# PDS_PARITY_DYNAMIC=1; that leg is the REPORTER this file's own header says such
+# reds belong to ("REPORTER, never a gate … must never carry a required check
+# name"). Unset, the block SKIPS AND SAYS SO — never silently.
+if [ "${PDS_PARITY_DYNAMIC:-0}" = "1" ] \
+   && git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f "$CH_F" ]; then
 
   run 0 "axis F is GREEN on this checkout's real charter" -- --axis f
   says "window boundary ....... 1f15017bf" "the live boundary is the pinned floor, not the oldest ledger row"
-  says "IN WINDOW ....... 21" "the pinned floor puts the former anchor 58d1bd3a5 INSIDE the window"
+
+  # DERIVED, NOT PINNED. These counts were literals — 21 in-window and 0
+  # unrecorded — and a literal here is a second, hand-maintained copy of a number
+  # the subject computes from git. Every legitimate thaw of scripts/pds-pull-proof.sh
+  # moves the in-window count by one and reds five arms that have nothing to do
+  # with the change. That is what happened on 2026-09-20 (21 -> 22 via 406978270).
+  # The PROPERTY these arms assert is not "the number is 21"; it is "the boundary
+  # does NOT move when ledger rows are deleted" and "a deletion is counted once
+  # per row". Both are relative, so derive the baseline and assert the DELTA.
+  AF_WINDOW=""; AF_UNREC=""
+  if [[ "$LAST_OUT" =~ IN\ WINDOW\ \.+\ ([0-9]+) ]]; then AF_WINDOW="${BASH_REMATCH[1]}"; fi
+  if [[ "$LAST_OUT" =~ unrecorded\ \.+\ ([0-9]+) ]]; then AF_UNREC="${BASH_REMATCH[1]}"; fi
+  CHECKS=$((CHECKS + 1))
+  if [ -n "$AF_WINDOW" ] && [ -n "$AF_UNREC" ]; then
+    echo "ok    baseline DERIVED from the subject: IN WINDOW ${AF_WINDOW}, unrecorded ${AF_UNREC}"
+  else
+    FAILURES=$((FAILURES + 1))
+    echo "FAIL  could not derive the axis-F baseline from the subject's own output"
+    echo "      An empty baseline would make every delta arm below compare against"
+    echo "      nothing and pass vacuously — refusing instead."
+    AF_WINDOW="__UNDERIVED__"; AF_UNREC="__UNDERIVED__"
+  fi
+  says "IN WINDOW ....... ${AF_WINDOW}" "the pinned floor puts the former anchor 58d1bd3a5 INSIDE the window"
 
   # THE REGRESSION ARM. Delete the row that used to BE the anchor. Under the old
   # derivation this printed `IN WINDOW 19 · unrecorded 0 · PARITY` rc 0.
   sed '/e219e97ccf7f33797c86a2b84d998d599b6bda31/d' "$CH_F" > "$TMP/f-anchor.md"
   run 1 "deleting the OLDEST ledger row REDS axis F (it used to print PARITY)" -- --axis f --charter "$TMP/f-anchor.md"
   says "58d1bd3a5" "the red NAMES the commit whose record was deleted"
-  says "IN WINDOW ....... 21" "the window did NOT shrink to absorb the deletion — that shrink WAS the defect"
-  says "unrecorded .......................... 1" "exactly one row went missing and exactly one is reported"
+  says "IN WINDOW ....... ${AF_WINDOW}" "the window did NOT shrink to absorb the deletion — that shrink WAS the defect"
+  says "unrecorded .......................... $((AF_UNREC + 1))" "exactly one row went missing and exactly one MORE is reported"
 
   # ITERATED. One row could be a special case; four rows in one pass is the shape
   # of a charter split that drops the oldest block as historical noise.
@@ -1331,8 +1371,8 @@ if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f 
       -e '/7a703fd641f77b906dcbd40f004f7639cdc9b2ae/d' \
       -e '/f99216471f9cd914064b9e6fc4bc3b6ee59a6da2/d' "$CH_F" > "$TMP/f-oldest4.md"
   run 1 "deleting the FOUR oldest ledger rows in one pass REDS axis F" -- --axis f --charter "$TMP/f-oldest4.md"
-  says "unrecorded .......................... 4" "all four deletions are counted, not just the newest of them"
-  says "IN WINDOW ....... 21" "four deletions did not move the boundary either"
+  says "unrecorded .......................... $((AF_UNREC + 4))" "all four deletions are counted, not just the newest of them"
+  says "IN WINDOW ....... ${AF_WINDOW}" "four deletions did not move the boundary either"
   says "58d1bd3a5" "the oldest of the four is named"
   says "13c379bcd" "the newest of the four is named"
 
@@ -1348,8 +1388,18 @@ if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f 
   says_not "DIVERGENT" "the copy does not red"
 else
   CHECKS=$((CHECKS + 1))
-  echo "ok    axis F's history fixtures SKIPPED — ${FLOOR_F} is not in this checkout (shallow clone)"
-  echo "      the static and no-fallback checks above still ran; only the 25-commit walk is unmeasurable here"
+  if [ "${PDS_PARITY_DYNAMIC:-0}" != "1" ]; then
+    echo "ok    axis F's history fixtures SKIPPED — PDS_PARITY_DYNAMIC is not 1"
+    echo "      This is the HERMETIC run. The dynamic half reads this checkout's real"
+    echo "      charter and git history, so its verdict moves with main and cannot sit"
+    echo "      under a required gate. The pds-harnesses leg sets PDS_PARITY_DYNAMIC=1"
+    echo "      and is where an axis-F red belongs. Run it by hand the same way:"
+    echo "          PDS_PARITY_DYNAMIC=1 bash scripts/pds-record-parity.test.sh"
+    echo "      Everything above this line ran, and it is the arm's own logic."
+  else
+    echo "ok    axis F's history fixtures SKIPPED — ${FLOOR_F} is not in this checkout (shallow clone)"
+    echo "      the static and no-fallback checks above still ran; only the 25-commit walk is unmeasurable here"
+  fi
 fi
 
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense
