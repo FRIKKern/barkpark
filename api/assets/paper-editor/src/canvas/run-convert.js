@@ -515,7 +515,7 @@ function isCanvasTaskListNode(nodeType) {
 // A container FOLDS INTO a run (it no longer SPLITS one). V1: FORBID container-in-
 // container. Keep aligned with columns-node.js, section-node.js, terminal-node.js and
 // paper_canvas.ex @canvas_container_types (partition-shape tests pin all four).
-const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal", "expandable"]);
+const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal", "expandable", "steps", "tabs"]);
 
 // block.type → its TipTap NODE name (they differ): columns→bpColumns, section→bpSection,
 // terminal→bpTerminal. runToTiptap maps block.type → node.type; runToOps/classifyNode
@@ -525,9 +525,18 @@ const CANVAS_CONTAINER_NODE_NAMES = {
   section: "bpSection",
   terminal: "bpTerminal",
   expandable: "bpExpandable",
+  steps: "bpSteps",
+  tabs: "bpTabs",
 };
 // The expandable (native toggle) container's NODE name (expandable-node.js).
 const CANVAS_EXPANDABLE_NODE_NAME = "bpExpandable";
+// steps / tabs: containers of titled rows (rows-node.js). The row node names are
+// what a container's content holds; the row's title key differs per kind.
+const CANVAS_ROWS = {
+  steps: { containerName: "bpSteps", rowName: "bpStep", rowsKey: "steps", titleKey: "title" },
+  tabs: { containerName: "bpTabs", rowName: "bpTab", rowsKey: "tabs", titleKey: "label" },
+};
+const CANVAS_ROW_NODE_NAMES = new Set(["bpStep", "bpTab"]);
 // The section container's NODE name (singular alias used by sectionBlockToNode).
 const CANVAS_CONTAINER_NODE_NAME = "bpSection";
 // Reverse: node.type → bpType. Used by classifyNode/isCanvasContainerNode to resolve
@@ -537,6 +546,8 @@ const CANVAS_CONTAINER_BP_TYPE_BY_NODE = {
   bpSection: "section",
   bpTerminal: "terminal",
   bpExpandable: "expandable",
+  bpSteps: "steps",
+  bpTabs: "tabs",
 };
 
 // The per-column node name + the verbatim child-carrier atom node name (columns-node.js).
@@ -901,6 +912,7 @@ function blockToNode(block) {
       // node.type is the NODE name (bpSection/bpTerminal/bpColumns), not the bpType.
       if (bpType === "section") return sectionBlockToNode(block, bpId, bpType);
       if (bpType === "expandable") return expandableBlockToNode(block, bpId, bpType);
+      if (bpType === "steps" || bpType === "tabs") return rowsBlockToNode(block, bpId, bpType);
       if (bpType === "terminal") return terminalBlockToNode(block, bpId, bpType);
       return columnsBlockToNode(block, bpId, bpType);
     }
@@ -1129,6 +1141,95 @@ function stableExpandableKey(node) {
   });
 }
 
+// ── steps / tabs ⇄ canvas containers of titled rows (bpSteps / bpTabs) ────────
+//
+// { id, type:"steps", steps:[ { id?, title?, blocks|children } ] } ⇄ bpSteps > bpStep+
+// (tabs: `tabs` rows with `label`). Each row keeps its id (or is minted one), its
+// title on attrs, its body key, and its children as nested nodes (a container child
+// rides bpOpaque). The diff is COARSE like columns: any change → ONE patch-block
+// carrying the whole rebuilt rows array (row and child ids kept, new ones minted off
+// the call-shared `taken`), which patch.ex merges onto the block.
+function rowsBody(row) {
+  if (row && Array.isArray(row.children)) return { key: "children", children: row.children };
+  if (row && Array.isArray(row.blocks)) return { key: "blocks", children: row.blocks };
+  return { key: "blocks", children: [] };
+}
+
+function rowsBlockToNode(block, bpId, bpType) {
+  const spec = CANVAS_ROWS[bpType];
+  const rows = (block && Array.isArray(block[spec.rowsKey]) ? block[spec.rowsKey] : []).filter((r) => r && typeof r === "object");
+  const content = rows.map((row) => {
+    const attrs = { bpId: row.id != null ? row.id : null, bpType: spec.rowName };
+    const t = row[spec.titleKey];
+    if (t != null) attrs.title = String(t);
+    const { key, children } = rowsBody(row);
+    if (key !== "blocks") attrs.bodyKey = key;
+    const kids = children.map((child) =>
+      child && isCanvasContainerType(child.type)
+        ? { type: "bpOpaque", attrs: { bpId: child.id, bpType: child.type, bpBlock: deepClone(child) } }
+        : blockToNode(child),
+    );
+    return { type: spec.rowName, attrs, content: kids.length ? kids : [{ type: "paragraph" }] };
+  });
+  return {
+    type: spec.containerName,
+    attrs: { bpId, bpType },
+    content: content.length ? content : [{ type: spec.rowName, attrs: { bpId: null, bpType: spec.rowName }, content: [{ type: "paragraph" }] }],
+  };
+}
+
+// The rows array from a container node: row ids kept or minted, titles present-only,
+// children reconstructed with ids (an empty seed paragraph strips back to []).
+function rowsNodeToRows(node, bpType, taken) {
+  const spec = CANVAS_ROWS[bpType];
+  const seen = taken || new Set();
+  return ((node && node.content) || []).map((rowNode) => {
+    const a = (rowNode && rowNode.attrs) || {};
+    const row = { id: a.bpId != null ? a.bpId : mintId(seen) };
+    if (a.title != null && a.title !== "") row[spec.titleKey] = a.title;
+    const key = a.bodyKey === "children" ? "children" : "blocks";
+    const only = (rowNode && rowNode.content) || [];
+    const kids = only.map((child) => {
+      const cls = classifyNode(child);
+      const childBpId = child.attrs && child.attrs.bpId;
+      const cid = childBpId != null ? childBpId : mintId(seen);
+      return nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+    });
+    // The paragraph the projection seeds into an empty row (canvas-created, no id)
+    // strips back to [] so an empty row round-trips byte-identically; a server-held
+    // empty paragraph (it has an id) is content and stays.
+    const seeded =
+      only.length === 1 &&
+      only[0].type === "paragraph" &&
+      !(only[0].attrs && only[0].attrs.bpId != null) &&
+      isEmptyParagraphBlock(kids[0]);
+    row[key] = seeded ? [] : kids;
+    return row;
+  });
+}
+
+function rowsNodeToBlock(node, id, taken) {
+  const bpType = CANVAS_CONTAINER_BP_TYPE_BY_NODE[node && node.type] || "steps";
+  const spec = CANVAS_ROWS[bpType];
+  return { id, type: bpType, [spec.rowsKey]: rowsNodeToRows(node, bpType, taken) };
+}
+
+// Canonical shape without minted ids: titles, body keys and the nested content as the
+// node carries it (child bpIds included; a canvas-new child is null on both sides only
+// when unchanged, so an unedited container compares equal).
+function stableRowsKey(node) {
+  return canonicalJSON(((node && node.content) || []).map((r) => ({
+    id: r.attrs && r.attrs.bpId != null ? r.attrs.bpId : null,
+    title: r.attrs && r.attrs.title != null && r.attrs.title !== "" ? r.attrs.title : null,
+    bodyKey: (r.attrs && r.attrs.bodyKey) || "blocks",
+    content: r.content || null,
+  })));
+}
+
+function rowsNodeChanged(prevNode, nextNode) {
+  return stableRowsKey(prevNode) !== stableRowsKey(nextNode);
+}
+
 // The child-id sequence of a section node (each child's bpId, or null for a
 // canvas-created child). Structural equality of this sequence is the coarse-path
 // pivot: ANY difference (add / remove / reorder / reparent / a null-id child) →
@@ -1312,6 +1413,9 @@ function walkBlockIds(blocks, sink) {
     if (block.id != null) sink.add(block.id);
     if (Array.isArray(block.blocks)) walkBlockIds(block.blocks, sink);
     if (Array.isArray(block.children)) walkBlockIds(block.children, sink);
+    // steps / tabs rows: each row is an id-bearing container of its own.
+    if (Array.isArray(block.steps)) walkBlockIds(block.steps, sink);
+    if (Array.isArray(block.tabs)) walkBlockIds(block.tabs, sink);
   }
 }
 
@@ -1322,7 +1426,7 @@ function walkNodeIds(nodes, sink) {
     if (!node) continue;
     const id = node.attrs && node.attrs.bpId;
     if (id != null) sink.add(id);
-    if (isCanvasContainerNode(node.type) && Array.isArray(node.content)) {
+    if ((isCanvasContainerNode(node.type) || CANVAS_ROW_NODE_NAMES.has(node.type)) && Array.isArray(node.content)) {
       walkNodeIds(node.content, sink);
     }
   }
@@ -4008,6 +4112,19 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
 
     if (entry.isContainer) {
       // Canvas container node — sub-route by bpType (section | expandable | terminal | columns).
+      if (entry.bpType === "steps" || entry.bpType === "tabs") {
+        // steps / tabs: the columns strategy — any change → ONE coarse patch-block
+        // carrying the whole rows array (ids kept, new ones minted off `taken`).
+        if (rowsNodeChanged(prevNode, entry.node)) {
+          const spec = CANVAS_ROWS[entry.bpType];
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: { [spec.rowsKey]: rowsNodeToRows(entry.node, entry.bpType, taken) },
+          });
+        }
+        continue;
+      }
       if (entry.bpType === "expandable") {
         // expandable: the section's strategy. A changed child-id sequence → ONE coarse
         // replace-block of the rebuilt subtree; identical → the summary patch, then
@@ -4502,6 +4619,9 @@ function nodeContentEqual(serverNode, liveNode) {
     if (bp === "expandable") {
       return stableExpandableKey(serverNode) === stableExpandableKey(liveNode);
     }
+    if (bp === "steps" || bp === "tabs") {
+      return !rowsNodeChanged(serverNode, liveNode);
+    }
     if (bp === "terminal") {
       return !terminalNodeChanged(serverNode, liveNode);
     }
@@ -4574,6 +4694,9 @@ function nextNodeToBlock(entry, taken) {
     }
     if (entry.bpType === "expandable") {
       return expandableNodeToBlock(node, entry.id, taken || new Set());
+    }
+    if (entry.bpType === "steps" || entry.bpType === "tabs") {
+      return rowsNodeToBlock(node, entry.id, taken || new Set());
     }
     if (entry.bpType === "terminal") {
       return terminalNodeToBlock(node, entry.id);

@@ -28,6 +28,8 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
   { group: "Text", type: "columns", label: "Columns", hint: "▥", desc: "multi-column layout" },
   { group: "Text", type: "expandable", label: "Toggle", hint: "▸", desc: "collapsible details" },
+  { group: "Text", type: "steps", label: "Steps", hint: "①", desc: "numbered steps with bodies" },
+  { group: "Text", type: "tabs", label: "Tabs", hint: "⌸", desc: "labelled panels" },
 
   { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
   { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },

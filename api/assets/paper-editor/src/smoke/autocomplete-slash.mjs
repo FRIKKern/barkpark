@@ -285,7 +285,7 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 27, "exactly 27 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 29, "exactly 29 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs)");
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
