@@ -305,6 +305,7 @@ const DEFECTS = [
   "W21-detail-url-text-page-bound",
   "W21-token-reveal-readable",
   "W20-attention-name-column",
+  "W20-attention-band-wrap-uniform",
   "W24-theater-failed-hostname-whole",
   "W26-instance-track-min-content",
   "W26-deploy-fail-clip",
@@ -8882,13 +8883,32 @@ async function main() {
       // widened band; 905 is the first naturally-clean width and lives OUTSIDE
       // it, so a band widened past its evidence reds here instead of passing.
       const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 905, 1000];
-      const NAME_SCENS = ["overview-attention", "mixed-fleet"];
+      // cch-w20-bl: THE THIRD SCENARIO IS THE ONE THAT MAKES THE OTHER TWO
+      // MEAN SOMETHING. Every green above was string-conditional: the two
+      // fixtures here name their boxes Reporting / Marketing / Staging (52-69px
+      // at 14px/600), so `.attention-name`'s `text-overflow: ellipsis` was
+      // proven never to be NEEDED and never once proven to WORK.
+      // `overview-attention-long-name` is `overview-attention` with ONE string
+      // lengthened to an ordinary 71-character operator name — well inside the
+      // server's own `validate_length(:name, max: 255)` — so the pair is a
+      // two-armed control on one axis: ENGAGED on the long fixture, NEVER
+      // NEEDED on the short ones.
+      // WHY IT IS NOT MEASURED WITH scrollWidth. The remedy this leg guards
+      // carries `overflow: hidden` — so a truncated `.attention-name` reports
+      // scrollWidth == clientWidth and invariant (b) above is SATISFIED BY THE
+      // TRUNCATION. The only witness left is the full string's own width,
+      // measured off a detached clone wearing this element's computed font:
+      // rendered run measurably SHORTER than the whole name == the ellipsis
+      // did work.
+      const LONG_NAME_SCEN = "overview-attention-long-name";
+      const NAME_SCENS = ["overview-attention", "mixed-fleet", LONG_NAME_SCEN];
       const cellCount = NAME_SCENS.length * NAME_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${NAME_SCENS.length} scenarios x ${NAME_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; .attention-name box + text run vs the row's first action button)\n`,
       );
       let cells = 0, namesSeen = 0, collapsed = 0, clipped = 0, painted = 0, pageOver = 0;
+      let engagedCells = 0, sparedCells = 0, engageMiss = 0;
       for (const scen of NAME_SCENS) {
         for (const theme of ["light", "dark"]) {
           // Enter wide and assert the landed view — `?scen=` alone does not
@@ -8906,17 +8926,53 @@ async function main() {
               `(function(){` +
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,names:0,zero:[],cut:[],hit:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,names:0,zero:[],cut:[],hit:[],runs:[]};` +
+              `var long=${JSON.stringify(scen === LONG_NAME_SCEN)};` +
               `[].slice.call(v?v.querySelectorAll('.attention-row'):[]).forEach(function(r,i){` +
               `  var name=r.querySelector('.attention-name'); if(!name) return; out.names++;` +
               `  var label=(name.textContent||'').trim().slice(0,32);` +
+              // The WHOLE string's width, off a detached clone wearing this
+              // element's own computed font — the only thing `overflow: hidden`
+              // cannot hide.
+              `  var cs=getComputedStyle(name); var ghost=document.createElement('span');` +
+              `  ghost.style.cssText='position:absolute;left:-99999px;top:0;white-space:nowrap;visibility:hidden';` +
+              `  ghost.style.font=cs.font; ghost.style.fontWeight=cs.fontWeight; ghost.style.fontSize=cs.fontSize;` +
+              `  ghost.style.fontFamily=cs.fontFamily; ghost.style.letterSpacing=cs.letterSpacing;` +
+              `  ghost.textContent=(name.textContent||''); document.body.appendChild(ghost);` +
+              `  var full=ghost.getBoundingClientRect().width; ghost.remove();` +
+              `  out.runs.push({i:i,cw:name.clientWidth,full:+full.toFixed(2),n:(name.textContent||'').length});` +
               `  if(name.clientWidth<=0) out.zero.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
-              `  else if(name.scrollWidth>name.clientWidth) out.cut.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
+              // cch-w20-bl: `cut` is the KIND fixtures' invariant and only
+              // theirs. On `overview-attention-long-name` a cut name IS the
+              // shipped remedy — the ellipsis doing its job — so asserting
+              // "never cut" there would refuse the very treatment this leg was
+              // extended to prove. What measures the long fixture is the
+              // engagement arm below, and it is STRICTLY STRONGER than this
+              // line: it reads the whole STRING's width, where this reads a box.
+              `  if(name.clientWidth>0 && !long && name.scrollWidth>name.clientWidth) out.cut.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
               // The painted run, not the box: a Range over the name's contents
               // reports where the GLYPHS land even when the box is 0px wide.
               `  var btn=r.querySelector('.attention-acts button, .attention-acts a'); if(!btn) return;` +
               `  var rg=document.createRange(); rg.selectNodeContents(name);` +
               `  var tr=rg.getBoundingClientRect(), br=btn.getBoundingClientRect();` +
+              // cch-w20-bl: A RANGE RECT IS LAYOUT, NOT PAINT. The invariant
+              // this implements is "no glyph is PAINTED across the button", and
+              // a Range reports where the text is LAID OUT — which, under
+              // `overflow: hidden`, is not where any of it is drawn. Measured on
+              // this branch: the 71-character fixture laid a 476px run through a
+              // 234px clipped box and this line reported a 102.42 x 11.75px
+              // "overlap" of a button no glyph can reach. So the rect is clamped
+              // to the element's own border box WHEN AND ONLY WHEN that box
+              // clips. The clamp is a no-op for a box that does not (a collapsed
+              // .attention-name with no overflow:hidden — the exact pre-s9 state
+              // this check was written for — still reports its full run), so the
+              // original detector keeps every bit of its teeth.
+              `  var ox=getComputedStyle(name).overflowX;` +
+              `  if(ox==='hidden'||ox==='clip'||ox==='auto'||ox==='scroll'){` +
+              `    var nb=name.getBoundingClientRect();` +
+              `    tr={left:Math.max(tr.left,nb.left),right:Math.min(tr.right,nb.right),` +
+              `        top:Math.max(tr.top,nb.top),bottom:Math.min(tr.bottom,nb.bottom)};` +
+              `  }` +
               `  var ix=Math.min(tr.right,br.right)-Math.max(tr.left,br.left);` +
               `  var iy=Math.min(tr.bottom,br.bottom)-Math.max(tr.top,br.top);` +
               `  if(ix>0.5&&iy>0.5) out.hit.push({i:i,x:+ix.toFixed(2),y:+iy.toFixed(2),t:label,b:(btn.textContent||'').trim().slice(0,20)});` +
@@ -8955,7 +9011,28 @@ async function main() {
               painted++;
               fail(D, `${scen}/${theme}@${width} row${h.i} .attention-name: the text run of "${h.t}" overlaps the "${h.b}" button by ${h.x} x ${h.y}px — the name is painting THROUGH the row's own actions, not merely truncated`);
             }
-            const bad = m.zero.length + m.cut.length + m.hit.length + (m.psw > m.pcw ? 1 : 0);
+            // cch-w20-bl — the two-armed engagement control. On the long
+            // fixture the rendered run must be measurably shorter than the
+            // whole name at EVERY driven width (the ellipsis did work); on the
+            // two short fixtures it must never be (the ellipsis was never
+            // needed, which is what the 44 cells before this row actually
+            // proved). Either arm failing is a finding: a long name that fits
+            // means the fixture stopped being long, and a short name that is
+            // cut means this leg's kind control stopped being kind.
+            let engageBad = 0;
+            for (const r of m.runs) {
+              const engaged = r.full > r.cw + 0.5;
+              if (scen === LONG_NAME_SCEN) {
+                if (engaged) { engagedCells++; } else {
+                  engageBad++; engageMiss++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i} .attention-name: the whole ${r.n}-character name measures ${r.full}px and the column is ${r.cw}px — the run is NOT shorter than the string, so this fixture proves the ellipsis is never NEEDED, exactly the string-conditional green it was added to end`);
+                }
+              } else if (engaged) {
+                engageBad++; engageMiss++;
+                fail(D, `${scen}/${theme}@${width} row${r.i} .attention-name: the whole ${r.n}-character name measures ${r.full}px against a ${r.cw}px column — the KIND control is being truncated, so it is no longer the control this leg reads ${LONG_NAME_SCEN} against`);
+              } else { sparedCells++; }
+            }
+            const bad = m.zero.length + m.cut.length + m.hit.length + engageBad + (m.psw > m.pcw ? 1 : 0);
             row.push(`${width}:${m.names}n${bad ? " !" + bad : ""}`);
           }
           process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
@@ -8967,6 +9044,16 @@ async function main() {
           `not a pinned one) across ${NAME_WIDTHS.join("/")} on ${NAME_SCENS.join(" + ")}; ` +
           `${collapsed} collapsed name columns, ${clipped} cut names, ${painted} names painting through their own ` +
           `action buttons, ${pageOver} pages scrolling sideways`,
+        );
+        okLine(
+          `the ellipsis on .attention-name is proven to WORK, not merely to be unnecessary: ${engagedCells} row-measurement(s) on ` +
+          `${LONG_NAME_SCEN} rendered a run measurably SHORTER than the whole 71-character name, and ${sparedCells} on the two ` +
+          `short-named fixtures rendered it whole — ${engageMiss} arm(s) of that control missed. cch-w20-bl was FILED saying ` +
+          `"scrollWidth > clientWidth is impossible here"; it is not. Measured on this branch at 769, row0 reads scrollWidth 476 ` +
+          `against clientWidth 234 — Chrome's scrollable overflow keeps the clipped text, ellipsis or no ellipsis. What scrollWidth ` +
+          `cannot say is whether the ELLIPSIS rendered or the glyphs were simply cut off, and on this fixture a cut IS the shipped ` +
+          `remedy — so \`cut\` is scoped to the two kind fixtures and the witness here is the whole string's own width, off a ` +
+          `clone wearing the element's computed font`,
         );
         okLine(
           `769-904 is the DRIVEN band (mixed-fleet was cut through 860; overview-attention through 880 on the ` +
