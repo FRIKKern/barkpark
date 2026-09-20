@@ -378,7 +378,7 @@ func renderTaskHistory(out *writer, docID string, rep historyReport) int {
 // the reader must not be able to read a blank column as "no agent".
 func renderAttributionFields(a attribution) string {
 	if len(a.Fields) == 0 {
-		return " — UNMEASURED: the store recorded no actor column for this mutation"
+		return " — UNMEASURED: the store recorded no actor for this mutation"
 	}
 	return " — " + strings.Join(a.Fields, " ")
 }
