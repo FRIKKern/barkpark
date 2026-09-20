@@ -649,6 +649,134 @@ jobs:
 YML
   _expect '(k) name:+env: step with no run: reds' 1 "$tmp/name-env-step"
 
+  # ── the head-sha clause: BOTH controls, on the REAL file ──────────────────
+  # (l) POSITIVE CONTROL. This repo's own .github/workflows must be green AND
+  # must enumerate a non-empty population that INCLUDES the dispatch job — a
+  # green from a detector that found nothing is the failure this clause exists
+  # to prevent, and it is indistinguishable from a clean tree in the exit code.
+  local real_wf
+  real_wf="${root:-.}/.github/workflows"
+  if [ ! -d "$real_wf" ]; then
+    printf 'FAIL  %-46s\n' '(l) the real .github/workflows is missing'
+    fails=$((fails + 1))
+  else
+    _expect '(l) the real .github/workflows is green' 0 "$real_wf"
+    out="$LAST_OUT"
+    if grep -qE 'OK .*shell-harnesses\.yml: job `changes` step\[1\]' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(l) population NAMES the dispatch job, OK'
+    else
+      printf 'FAIL  %-46s\n' '(l) population does not carry the dispatch job'
+      fails=$((fails + 1))
+    fi
+    if grep -qE 'head-sha script population — [1-9][0-9]* step' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(l) the population printed is non-empty'
+    else
+      printf 'FAIL  %-46s\n' '(l) no non-empty population printed'
+      fails=$((fails + 1))
+    fi
+  fi
+
+  # (m) NEGATIVE CONTROL, on a COPY OF THE REAL shell-harnesses.yml: delete the
+  # two lines that ARE the fallback (the existence test and the base-ref read)
+  # and the very job the fix repaired must red. A synthetic fixture proves the
+  # rule; this proves it on the shape this repo actually ships.
+  local realsh
+  realsh="${root:-.}/.github/workflows/shell-harnesses.yml"
+  if [ ! -f "$realsh" ]; then
+    printf 'FAIL  %-46s\n' '(m) the real shell-harnesses.yml is missing'
+    fails=$((fails + 1))
+  else
+    mkdir -p "$tmp/hs-clean" "$tmp/hs-planted"
+    cp "$realsh" "$tmp/hs-clean/wf.yml"
+    _expect '(m) a copied REAL shell-harnesses is green' 0 "$tmp/hs-clean"
+    local a1 a2 n1 n2
+    a1='if [ -f "$src" ]; then'
+    a2='git show "origin/$base:scripts/'
+    n1="$(grep -c -F -e "$a1" "$tmp/hs-clean/wf.yml" || true)"
+    grep -v -F -e "$a1" -e "$a2" "$tmp/hs-clean/wf.yml" >"$tmp/hs-planted/wf.yml" || true
+    n2="$(grep -c -F -e "$a1" "$tmp/hs-planted/wf.yml" || true)"
+    # ASSERT THE PLANT APPLIED before believing its red.
+    if [ "$n1" -ge 1 ] && [ "$n2" = "0" ]; then
+      printf 'PASS  %-46s (%s -> 0)\n' '(m) the fallback plant APPLIED' "$n1"
+    else
+      printf 'FAIL  %-46s (before=%s after=%s)\n' \
+        '(m) the fallback plant did not apply' "$n1" "$n2"
+      fails=$((fails + 1))
+    fi
+    _expect '(m) the de-fallbacked dispatch job reds' 1 "$tmp/hs-planted"
+    out="$LAST_OUT"
+    if grep -q 'job `changes`' <<<"$out" &&
+       grep -qE 'step\[[12]\]' <<<"$out" &&
+       grep -q 'NO absent-file fallback' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(m) red names workflow:job:step + the clause'
+    else
+      printf 'FAIL  %-46s\n' '(m) the red is not locatable'
+      printf '%s\n' "$out" | sed 's/^/      | /'
+      fails=$((fails + 1))
+    fi
+  fi
+
+  # (n) THE GATING SPLIT, synthetic. The same bare step is a RED in a job other
+  # jobs need (its death DELETES them — an absent check run) and a WARN in a job
+  # nothing depends on (its death is a red check run a human can see).
+  mkdir -p "$tmp/hs-gating" "$tmp/hs-lonely"
+  cat >"$tmp/hs-gating/wf.yml" <<'YML'
+name: gating
+on: [pull_request]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      any: ${{ steps.sets.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: sets
+        name: Compute the changed-path set
+        run: bash scripts/shell-harness-dispatch.sh
+  harness:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YML
+  sed -e 's/^    outputs:$/    # no outputs/' -e 's/^      any: .*$//' \
+      -e 's/^  harness:$/  unrelated:/' -e 's/^    needs: changes$//' \
+      "$tmp/hs-gating/wf.yml" >"$tmp/hs-lonely/wf.yml"
+  _expect '(n) a GATING bare head-sha step reds' 1 "$tmp/hs-gating"
+  out="$LAST_OUT"
+  if grep -q 'GATING' <<<"$out"; then
+    printf 'PASS  %-46s\n' '(n) the red says the job is GATING'
+  else
+    printf 'FAIL  %-46s\n' '(n) the red does not say GATING'
+    fails=$((fails + 1))
+  fi
+  _expect '(n) the same step, non-gating, WARNs (rc 0)' 0 "$tmp/hs-lonely"
+  out="$LAST_OUT"
+  if grep -q 'WARN' <<<"$out"; then
+    printf 'PASS  %-46s\n' '(n) the non-gating twin is still ENUMERATED'
+  else
+    printf 'FAIL  %-46s\n' '(n) the non-gating twin vanished from the census'
+    fails=$((fails + 1))
+  fi
+
+  # (o) THE DETECTOR'S OWN FLOOR. A tree that looks like the real one
+  # (.github/workflows) and yields zero head-sha script steps is the regex
+  # having gone blind — CANNOT MEASURE, never a green.
+  mkdir -p "$tmp/blind/.github/workflows"
+  cat >"$tmp/blind/.github/workflows/wf.yml" <<'YML'
+name: nothing-pinned
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/whatever.sh
+YML
+  _expect '(o) a blind detector = CANNOT MEASURE (rc 2)' 2 "$tmp/blind/.github/workflows"
+
   # (g) a bad flag must never exit 0. Run the SCRIPT, not run_check.
   local rc=0
   bash "$SELF" --no-such-flag >/dev/null 2>&1 || rc=$?
