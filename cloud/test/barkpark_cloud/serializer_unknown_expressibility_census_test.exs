@@ -144,6 +144,7 @@ defmodule BarkparkCloud.SerializerUnknownCensus.Extract do
   defp vocab_has_unknown?(values), do: Enum.any?(values, &unknown_token?/1)
 
   defp unknown_token?(v) when is_binary(v), do: v in @unknown_tokens
+
   defp unknown_token?(v) when is_atom(v) and not is_nil(v),
     do: Atom.to_string(v) in @unknown_tokens
 
@@ -175,7 +176,9 @@ defmodule BarkparkCloud.SerializerUnknownCensus.Extract do
       {_table, body} ->
         {_, cols} =
           Macro.prewalk(body, [], fn
-            {:field, _, [name | _]} = n, acc when is_atom(name) -> {n, [name | acc]}
+            {:field, _, [name | _]} = n, acc when is_atom(name) ->
+              {n, [name | acc]}
+
             {:belongs_to, _, [name | rest]} = n, acc when is_atom(name) ->
               {n, [belongs_to_key(name, rest) | acc]}
 
@@ -393,7 +396,8 @@ defmodule BarkparkCloud.SerializerUnknownCensus.Extract do
     schemas = schemas(root)
     serializers = serializers(root)
 
-    Enum.reduce(serializers, %{findings: [], green: [], unbound: [], subjectless: []}, fn s, acc ->
+    Enum.reduce(serializers, %{findings: [], green: [], unbound: [], subjectless: []}, fn s,
+                                                                                          acc ->
       case subject(s, schemas) do
         nil ->
           %{acc | unbound: [s.name | acc.unbound]}
@@ -520,7 +524,9 @@ defmodule BarkparkCloud.SerializerUnknownExpressibilityCensusTest do
     end
 
     test "PARTIAL CHECKOUT: an absent tree raises loudly, never returns an empty green" do
-      missing = Path.join(System.tmp_dir!(), "cch-w34-absent-#{System.unique_integer([:positive])}")
+      missing =
+        Path.join(System.tmp_dir!(), "cch-w34-absent-#{System.unique_integer([:positive])}")
+
       refute File.exists?(missing)
 
       err = assert_raise RuntimeError, fn -> Extract.census(missing) end
@@ -756,7 +762,11 @@ defmodule BarkparkCloud.SerializerUnknownExpressibilityCensusTest do
 
     test "MUTATION: a rename of the KEY does not green it — the read is what counts" do
       renamed =
-        String.replace(@seeing_serializer, "health_status: w.health_status", "health: w.health_status")
+        String.replace(
+          @seeing_serializer,
+          "health_status: w.health_status",
+          "health: w.health_status"
+        )
 
       c = Extract.census(fixture_tree(renamed))
 
