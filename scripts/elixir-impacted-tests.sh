@@ -231,68 +231,68 @@ census_readers() {
 # scanner bug; elixir-path-escape-check.sh names the class at its
 # `cloud/test/**` entry and pays for it with a declared full-suite trigger.
 #
-# THE HOP, and why it is a rule rather than a list: for every file the census
-# names as a SOURCE, take its own quoted path literals that EXIST ON DISK under
-# the repo root, and give each of them that source's readers. Derived from the
-# tree on every call — a scanner that grows a third root, or an api test that
-# starts requiring a new script, is covered the day it lands.
+# THE HOP, and why it is a rule rather than a list: a file the census names as
+# a SOURCE, which itself writes this path as a quoted literal, is reading it on
+# its readers' behalf — so that source's readers are this path's readers.
+# Derived from the tree on every call, against the census computed on every
+# call: a scanner that grows a third root, or an api test that starts requiring
+# a new script, is covered the day it lands, with no registration step.
 #
 # THREE THINGS KEEP IT TIGHT, so this cannot become "everything reads
 # everything":
-#   * exactly ONE hop. No transitive closure over the extension itself.
-#   * the literal must resolve to a path that EXISTS. `cloud/test/**` (a glob),
-#     a URL, a module name and a prose fragment all fail this test.
+#   * exactly ONE hop. The extension is never fed back into itself.
+#   * the literal must be one of THIS PATH'S OWN ANCESTORS and must EXIST on
+#     disk. `"cloud/test"` covering cloud/test/foo_test.exs qualifies; a URL, a
+#     module name, a glob (`cloud/test/**` is not a file) and a prose fragment
+#     do not, and neither does a SIBLING — internal/taskboard/components.go
+#     being censused says nothing about internal/taskboard/board.go.
 #   * the census producer is excluded as a SOURCE. elixir-path-escape-check.sh
 #     literally contains every declared path in both sets, and DECLARING a path
 #     is not READING it — a self-reference, not a skip list. Its own direct
 #     census rows are untouched.
 #
-# MEASURED 2026-09-20 on 769c39bd6: 150 census rows produce 85 extension rows
-# over 82 distinct targets, and `cloud/test` is one of them.
-EXT_PATH_ERE='"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)+"'
-EXT_CENSUS=""
-EXT_CENSUS_LOADED=0
-load_ext_census() {
-  [ "$EXT_CENSUS_LOADED" -eq 1 ] && return 0
-  EXT_CENSUS_LOADED=1
+# COST. This runs at most once per selector process, and only when a TEST-set
+# path with no direct census row shows up — i.e. never on an ordinary api/ PR.
+# It is ONE `grep -l` over the census's ~60 distinct source files, not a grep
+# per file and not a scan of the tree.
+transitive_readers() {
+  local p="$1" d self n nf srcs files hits
   load_census
   [ -n "$CENSUS" ] || return 0
-  local self s t rows="" srcs targets
-  self="$(basename -- "$SCRIPT_DIR")/elixir-path-escape-check.sh"
-  srcs="$(printf '%s\n' "$CENSUS" | cut -f1 | LC_ALL=C sort -u | sed '/^$/d')"
-  while IFS= read -r s; do
-    [ -n "$s" ] || continue
-    [ "$s" = "$self" ] && continue
-    [ -f "$REPO_ROOT/$s" ] || continue
-    targets="$(grep -ohaE "$EXT_PATH_ERE" -- "$REPO_ROOT/$s" </dev/null 2>/dev/null | tr -d '"' | LC_ALL=C sort -u || true)"
-    [ -n "$targets" ] || continue
-    while IFS= read -r t; do
-      [ -n "$t" ] || continue
-      [ -e "$REPO_ROOT/$t" ] || continue
-      rows="${rows}$(awk -F'\t' -v s="$s" -v t="$t" '$1 == s { print t "\t" $2 }' <<<"$CENSUS")
-"
-    done <<EOT
-$targets
-EOT
-  done <<EOT2
-$srcs
-EOT2
-  EXT_CENSUS="$(printf '%s\n' "$rows" | sed '/^$/d' | LC_ALL=C sort -u)"
-  return 0
-}
 
-# readers of a repo-root path ONE HOP past the census. Same both-directions
-# prefix test as census_readers, and for the same reason: a row can name a
-# directory (`cloud/test`) while the diff names a file inside it.
-transitive_readers() {
-  local p="$1"
-  load_ext_census
-  [ -n "$EXT_CENSUS" ] || return 0
-  awk -F'\t' -v p="$p" '
-    {
-      row = $1
-      if (row == p || index(p, row "/") == 1 || index(row, p "/") == 1) print $2
-    }' <<<"$EXT_CENSUS" | LC_ALL=C sort -u
+  # p's own ancestors, each written the way a source would write it, and only
+  # the ones that exist on disk.
+  nf="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-needles.XXXXXX")" || return 0
+  d="$p"
+  while [ -n "$d" ] && [ "$d" != "." ] && [ "$d" != "/" ]; do
+    [ -e "$REPO_ROOT/$d" ] && printf '"%s"\n' "$d" >>"$nf"
+    case "$d" in */*) d="${d%/*}" ;; *) break ;; esac
+  done
+  if [ ! -s "$nf" ]; then rm -f -- "$nf"; return 0; fi
+
+  self="$(basename -- "$SCRIPT_DIR")/elixir-path-escape-check.sh"
+  srcs="$(printf '%s\n' "$CENSUS" | cut -f1 | LC_ALL=C sort -u | sed '/^$/d' | grep -vxF -- "$self" || true)"
+  files=""
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    [ -f "$REPO_ROOT/$n" ] || continue
+    files="$files $n"
+  done <<EOT
+$srcs
+EOT
+  if [ -z "$files" ]; then rm -f -- "$nf"; return 0; fi
+
+  # ONE grep, and `-l` so a multi-megabyte source stops at its first hit. Census
+  # source paths carry no spaces (they are repo-root paths resolved from Elixir
+  # string literals), so the unquoted expansion here is the file list and not a
+  # word-splitting accident.
+  hits="$( (cd -- "$REPO_ROOT" 2>/dev/null && grep -laF -f "$nf" -- $files 2>/dev/null) </dev/null || true)"
+  rm -f -- "$nf"
+  [ -n "$hits" ] || return 0
+
+  # back to the readers of every source that matched.
+  awk -F'\t' 'NR == FNR { hit[$0] = 1; next } ($1 in hit) { print $2 }' \
+    <(printf '%s\n' "$hits") <(printf '%s\n' "$CENSUS") | LC_ALL=C sort -u
 }
 
 is_narrowable_lib() { case "$1" in api/lib/*.ex) return 0 ;; *) return 1 ;; esac; }
