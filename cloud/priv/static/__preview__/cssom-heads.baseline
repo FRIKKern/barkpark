@@ -670,7 +670,19 @@
 # app.css on this branch (MISSES 0, MULTISET DEFICITS 0, styleguide.html unchanged at 84).
 # The +2 with MISSES 0 is the unrecorded-ADD shape the ratchet's own failure text tells
 # you to confirm before bumping, not a parity defect.
-1331
+#
+# Re-measured 2026-09-20 (cch-w20-bl, the attention-band wrap point): 1332 authored
+# heads, MISSES 0 — a +1 ADD, not a parity defect, which is the distinction this
+# file's own failure text says to confirm before bumping. The one new head is
+# `.attention-row .status-pill` inside the 769-904 band, added so the wrap point is
+# decided by a rule rather than by the reason STRING: the pill takes the whole flex
+# line, so nothing can share it at any width for any string. It is a NEW head rather
+# than declarations on an existing one because that selector had no in-band rule
+# before. RE-DERIVED by RUNNING cssom-parity.mjs and reading the number it PRINTED
+# ("1332 authored rule heads, sidecar baseline is 1331"), never by adding one, and
+# re-run AFTER the final rebase onto origin/main — a baseline shot before the last
+# rebase is stale on arrival and reds the merge nobody re-ran.
+1332
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
