@@ -149,7 +149,7 @@ func TestFailedReadIsNeverAnEmptyTimeline(t *testing.T) {
 	if !strings.Contains(body, "MEASURED FAILURE") {
 		t.Fatalf("a failed read did not announce a measured failure:\n%s", body)
 	}
-	if strings.Contains(body, "ANSWERED and recorded no revisions") {
+	if strings.Contains(body, "ANSWERED and recorded no mutations") {
 		t.Fatalf("a failed read rendered the answered-empty wording:\n%s", body)
 	}
 }
@@ -169,7 +169,7 @@ func TestEmptyReadIsMeasuredEmpty(t *testing.T) {
 		t.Fatalf("an honest empty read exited %d, want %d", code, exitOK)
 	}
 	body := stdout.String() + stderr.String()
-	if !strings.Contains(body, "ANSWERED and recorded no revisions") {
+	if !strings.Contains(body, "ANSWERED and recorded no mutations") {
 		t.Fatalf("an honest empty read did not say the store answered:\n%s", body)
 	}
 	if strings.Contains(body, "MEASURED FAILURE") {
@@ -204,7 +204,7 @@ func TestIdentityVerdictIsMeasuredNotHardcoded(t *testing.T) {
 		{
 			name: "all stamped",
 			revs: []apiclient.Revision{rev("create", apiclient.Revision{ActorKind: sp("agent")})},
-			want: "every one of the 1 revision(s) read was answered",
+			want: "every one of the 1 mutation(s) read was answered",
 		},
 	}
 	for _, tc := range cases {
@@ -330,6 +330,11 @@ func TestHistoryArgParsing(t *testing.T) {
 // measured 2026-09-17). A timeline that does not name which store answered
 // invites the reader to treat the events it cannot see as mutations that never
 // happened.
+//
+// UPDATED for task-3b0be19ef722afef: the blind spot is now READ rather than
+// merely disclosed, so the footer names BOTH stores and every line carries a
+// [store] tag. The assertion moved with the behaviour; the property it guards
+// — a reader can always tell which store answered — did not.
 func TestHistoryNamesItsSourceAndItsBlindSpot(t *testing.T) {
 	out, stdout, _ := historyTestWriter()
 	renderTaskHistory(out, "task-x", historyReport{
@@ -337,7 +342,7 @@ func TestHistoryNamesItsSourceAndItsBlindSpot(t *testing.T) {
 		Revisions: []apiclient.Revision{rev("create", apiclient.Revision{})},
 	})
 	body := stdout.String()
-	for _, want := range []string{"SOURCE:", "/v1/data/history", "bp task events", "task.claimed"} {
+	for _, want := range []string{"SOURCES:", "/v1/data/history", "/v1/tasks/events", "task.claimed", "[revision]"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("the output does not name %q:\n%s", want, body)
 		}

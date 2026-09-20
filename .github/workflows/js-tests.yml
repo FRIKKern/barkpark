@@ -182,6 +182,35 @@ jobs:
       - name: "Turbo task coverage (every published package has a byte ceiling; every test-shipping package runs its tests)"
         run: node scripts/check-turbo-task-coverage.mjs
 
+      # COVERAGE for js/scripts/ ITSELF (task-c0bde7ffbabafb07). The step above
+      # proves every PACKAGE has a runnable task; this one proves every SCRIPT in
+      # js/scripts/ is actually run by something. check-no-node-imports.selftest.sh
+      # sat in that directory with no caller at all and rotted to 10 of 13 cases
+      # failing, while reading to anyone grepping like a second layer of proof for
+      # the edge gate. The two repo censuses that hunt this class
+      # (shell-harnesses.yml, posix-vacuous-green-census.yml) are scoped to the
+      # ROOT scripts/ and reach nothing under js/. Manifest-and-workflow reading
+      # only, so it costs seconds and sits before Build with its sibling.
+      #
+      # The selftest arm is a POSITIVE CONTROL, not decoration: a coverage guard
+      # whose scan enumerates nothing reports no orphans and exits 0. It points
+      # the same audit at a fixture tree with a planted orphan of every shape and
+      # requires it to NAME each one.
+      - name: "Harness wiring selftest (proves the coverage scan can SEE its population)"
+        run: node scripts/check-harness-wiring.mjs --selftest
+
+      - name: "Harness wiring (every script under js/scripts is run by a workflow step, or waived with a reason)"
+        run: node scripts/check-harness-wiring.mjs
+
+      # The changelog gate's own offline selftest. It was DECLARED in
+      # js/package.json as `selftest:changesets` and run by nothing — the second
+      # member of the same un-run class, still green today only because nobody had
+      # yet changed .changeset/changelog-github-batched.cjs under it. A
+      # declaration is not an invocation; this step is the invocation, and
+      # check-harness-wiring above reds if it is ever removed again.
+      - name: "Changeset changelog selftest (concurrency cap + transport-vs-semantic retry, offline)"
+        run: pnpm run selftest:changesets
+
       - name: Cache turbo task outputs (js/.turbo)
         # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
         # change; without this cache every PR run started cold. Key on the lockfile +
