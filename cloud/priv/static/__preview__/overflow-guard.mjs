@@ -306,6 +306,7 @@ const DEFECTS = [
   "W21-token-reveal-readable",
   "W20-attention-name-column",
   "W20-attention-band-wrap-uniform",
+  "W20-attention-band-wrap-uniform",
   "W24-theater-failed-hostname-whole",
   "W26-instance-track-min-content",
   "W26-deploy-fail-clip",
@@ -9062,6 +9063,209 @@ async function main() {
           `measured 67/62 cut before the edge moved; 905 is the first naturally-clean width and is the shoulder ` +
           `that catches a band widened past its own evidence. 768 and 1000 are the outer shoulders — already ` +
           `clean on origin/main, so they detect a remedy that breaks the stack or the desktop row, never a leak`,
+        );
+      }
+    }
+
+    // ── cch-w20-bl: THE WRAP POINT INSIDE 769-904 IS A RULE, NOT A SENTENCE ──
+    //    THE DEFECT, DRIVEN on the tree this lands on, `?scen=mixed-fleet
+    //    #overview` at 800, content box 482px: `.attention-row .status-pill`
+    //    carries no cap, so a row's pill is as wide as `statusOf(bp).detail`
+    //    says. Rows 0 and 1 measure 325.11px and 332.58px of pill and the
+    //    action cluster yields; row 2 measures 200.75px and keeps chip+name
+    //    inline (200.75 + 14 + 192 <= 482). One card, two row shapes, and which
+    //    shape a row wears is a property of its reason SENTENCE. Nothing is
+    //    hidden or unclickable — cch-w20-s9 measured that band clean at 44/44 —
+    //    so this leg measures RHYTHM, and it says so rather than dressing an
+    //    aesthetic finding as a defect.
+    //
+    //    IT IS AN A/B IN ONE BROWSER, NOT A MEMORY OF ANOTHER TREE. The remedy
+    //    is a single ADD (`flex: 0 0 100%` inside the band), so the tree it
+    //    lands on is reproduced EXACTLY by putting the initial `flex: 0 1 auto`
+    //    back over it — same Chrome, same fixture, same instant, one reflow
+    //    apart. A "before" quoted from a previous run of a previous checkout is
+    //    a claim about a tree nobody is measuring.
+    //
+    //    THE THIRD ASSERTION IS THE ONE THIS ROW EXISTS FOR. cch-w20-s9 priced
+    //    a floor-only candidate that bought this same column by taking the
+    //    width straight out of `.attention-row .status-pill-detail` — 165/165
+    //    to 0/165 at 830 — and REFUSED it, because that host belongs to
+    //    cch-w20-s6. So every cell here reads that detail's clientWidth on BOTH
+    //    sides and no cell may lose a pixel. A remedy that quietly robs s6 is
+    //    worse than the inconsistency it fixes, and "worse" is the kind of
+    //    thing only a measurement can say.
+    //
+    //    AND THE FOURTH IS THE CONTROL. A leg that asserts uniformity AFTER,
+    //    over a corpus that was already uniform, is green on an empty subject.
+    //    This one requires that at least one in-band cell be measurably
+    //    NON-uniform BEFORE, and refuses the whole leg if none is.
+    if (requested.includes("W20-attention-band-wrap-uniform")) {
+      const D = "W20-attention-band-wrap-uniform";
+      // BLOCK-SCOPED, like the leg above: 904 is the band's own upper edge
+      // (cch-w18-bl re-derived it), 769 its lower, and 768/905 are the
+      // shoulders either side — they exist to catch a remedy that leaks out of
+      // the band, where the GR109 stack below and the desktop row above each
+      // already give every child its own honest line.
+      const BAND_WIDTHS = [769, 800, 830, 860, 890, 904];
+      const SHOULDER_WIDTHS = [768, 905];
+      const WRAP_WIDTHS = [...SHOULDER_WIDTHS, ...BAND_WIDTHS].sort((a, b) => a - b);
+      // mixed-fleet is the only fixture with more than one attention row, so it
+      // is the only one that can BE non-uniform — the other two are here for
+      // the s6 half, which is per-row and needs no siblings.
+      const WRAP_SCENS = ["mixed-fleet", "overview-attention", "overview-attention-long-name"];
+      // The shape the band is meant to produce, stated rather than merely
+      // compared: the pill owns line one, the identity and its actions share
+      // line two. "All rows agree" alone would also pass on a card where every
+      // row was wrong in the same way.
+      const BAND_SHAPE = "status-pill / attention-main+attention-acts";
+      const wrapCells = WRAP_SCENS.length * WRAP_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${WRAP_SCENS.length} scenarios x ${WRAP_WIDTHS.length} widths x 2 themes` +
+        ` (${wrapCells} cells; flex-line shape per row + .status-pill-detail clientWidth on BOTH sides of the rule)\n`,
+      );
+      let wCells = 0, wRows = 0, mixedShape = 0, wrongShape = 0, robbed = 0, leaked = 0, wPageOver = 0;
+      let nonUniformBefore = 0, detailGained = 0, detailHeld = 0;
+      for (const scen of WRAP_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-overview' && v.querySelector('.attention-row .status-pill'));})()`,
+          );
+          const line = [];
+          for (const width of WRAP_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              // The shape of a flex line, read off geometry rather than off the
+              // rule under test: children sorted by top, a new line starting
+              // where one begins at or below the previous line's bottom.
+              // `align-items: center` puts a short pill BELOW a tall
+              // .attention-main on the SAME line, so a naive equal-tops test
+              // reads row 2 as three lines; the bottom-edge walk does not.
+              `var shapeOf=function(r){` +
+              `  var kids=[].slice.call(r.children);` +
+              `  var rects=kids.map(function(k){return k.getBoundingClientRect();});` +
+              `  var order=kids.map(function(k,j){return j;}).sort(function(a,b){return rects[a].top-rects[b].top;});` +
+              `  var lines=[],cur=null;` +
+              `  order.forEach(function(j){` +
+              `    if(!cur||rects[j].top>=cur.bottom-0.5){cur={bottom:rects[j].bottom,names:[]};lines.push(cur);}` +
+              `    cur.bottom=Math.max(cur.bottom,rects[j].bottom);cur.names.push(kids[j].className.split(' ')[0]);` +
+              `  });` +
+              `  return lines.map(function(l){return l.names.join('+');}).join(' / ');` +
+              `};` +
+              `var read=function(){` +
+              `  var v=document.querySelector('section.view:not([hidden])');` +
+              `  var rows=[].slice.call(v?v.querySelectorAll('.attention-row'):[]);` +
+              `  return {view:v?v.id:'none',rows:rows.map(function(r,i){` +
+              `    var det=r.querySelector('.status-pill-detail');` +
+              `    var pill=r.querySelector('.status-pill');` +
+              `    return {i:i,shape:shapeOf(r),` +
+              `      detCW:det?det.clientWidth:-1,detSW:det?det.scrollWidth:-1,` +
+              `      pillW:+pill.getBoundingClientRect().width.toFixed(2),` +
+              `      pillH:+pill.getBoundingClientRect().height.toFixed(2)};` +
+              `  })};` +
+              `};` +
+              // BEFORE = the tree this lands on, reproduced in place: the rule
+              // is one ADD, so restoring flex's initial value restores it
+              // exactly. It is removed again before AFTER is read, so the
+              // stylesheet the page ships with is what AFTER measures.
+              `var st=document.createElement('style');` +
+              `st.textContent='@media (min-width:769px) and (max-width:904px){.attention-row .status-pill{flex:0 1 auto !important}}';` +
+              `document.head.appendChild(st);` +
+              `var before=read();` +
+              `st.remove();` +
+              `var after=read();` +
+              `after.psw=d.scrollWidth;after.pcw=d.clientWidth;` +
+              `after.theme=d.getAttribute('data-theme');` +
+              `return {before:before,after:after};})()`,
+            );
+            wCells++;
+            const A = m.after, B = m.before;
+            if (A.view !== "view-overview") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${A.view}", asked for "view-overview" — the hash did not route, so nothing below this line measures the attention queue`);
+              line.push(`${width}:?`);
+              continue;
+            }
+            if (A.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${A.theme}" — the theme did not apply`);
+            if (A.rows.length === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero .attention-row rendered — nothing was measured, this is not a pass`);
+              line.push(`${width}:0r`);
+              continue;
+            }
+            if (B.rows.length !== A.rows.length) {
+              fail(D, `${scen}/${theme}@${width}: the A/B read ${B.rows.length} rows before and ${A.rows.length} after — the two sides are not the same card`);
+              line.push(`${width}:??`);
+              continue;
+            }
+            wRows += A.rows.length;
+            const inBand = width >= 769 && width <= 904;
+            let bad = 0;
+            if (A.psw > A.pcw) {
+              wPageOver++; bad++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${A.psw} > clientWidth ${A.pcw} — ${A.psw - A.pcw}px of the overview is off-screen sideways`);
+            }
+            // (1) the shape, in the band: one rule for every row.
+            const shapes = [...new Set(A.rows.map((r) => r.shape))];
+            const beforeShapes = [...new Set(B.rows.map((r) => r.shape))];
+            if (inBand) {
+              if (beforeShapes.length > 1) nonUniformBefore++;
+              if (shapes.length > 1) {
+                mixedShape++; bad++;
+                fail(D, `${scen}/${theme}@${width}: the card shows ${shapes.length} row shapes — ${A.rows.map((r) => `row${r.i} "${r.shape}" (pill ${r.pillW}px)`).join("; ")} — so the break point is still being decided by the reason string, not by a rule`);
+              }
+              for (const r of A.rows) {
+                if (r.shape !== BAND_SHAPE) {
+                  wrongShape++; bad++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i}: flex lines read "${r.shape}", the band's rule is "${BAND_SHAPE}" — uniformly wrong is not uniform`);
+                }
+              }
+            } else {
+              // (3) the shoulders: outside the band nothing may move at all.
+              for (let i = 0; i < A.rows.length; i++) {
+                if (A.rows[i].shape !== B.rows[i].shape || A.rows[i].pillW !== B.rows[i].pillW) {
+                  leaked++; bad++;
+                  fail(D, `${scen}/${theme}@${width} row${i}: OUTSIDE the band the rule changed the row — shape "${B.rows[i].shape}" -> "${A.rows[i].shape}", pill ${B.rows[i].pillW} -> ${A.rows[i].pillW}px. 769-904 is the whole of its business`);
+                }
+              }
+            }
+            // (2) cch-w20-s6's host, on both sides, every cell.
+            for (let i = 0; i < A.rows.length; i++) {
+              const b = B.rows[i], a = A.rows[i];
+              if (a.detCW < b.detCW - 0.01) {
+                robbed++; bad++;
+                fail(D, `${scen}/${theme}@${width} row${i} .attention-row .status-pill-detail: clientWidth ${b.detCW} -> ${a.detCW} — this rule took ${(b.detCW - a.detCW).toFixed(2)}px out of cch-w20-s6's host, which is the exact trade cch-w20-s9 refused (165/165 -> 0/165)`);
+              } else if (a.detCW > b.detCW + 0.01) { detailGained++; } else { detailHeld++; }
+            }
+            line.push(`${width}:${A.rows.length}r/${shapes.length}s${bad ? " !" + bad : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${line.join("  ")}\n`);
+        }
+      }
+      // (4) THE CONTROL. Without it this leg is a sentence about a subject it
+      // never saw.
+      if (nonUniformBefore === 0) {
+        fail(D, `the BEFORE side of every one of the ${wCells} cells was already uniform — so this leg asserted a property of a corpus that never lacked it and measured nothing. Either the A/B override stopped applying or the fixture that carries two row shapes left the roster`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${wCells} / ${wCells} cells clean (${wRows} .attention-row measurement(s) on BOTH sides of the rule) across ` +
+          `${WRAP_WIDTHS.join("/")} on ${WRAP_SCENS.join(" + ")}; ${mixedShape} cards showing more than one row shape, ` +
+          `${wrongShape} rows off the band's rule "${BAND_SHAPE}", ${leaked} shoulder rows moved by a band-scoped rule, ` +
+          `${wPageOver} pages scrolling sideways`,
+        );
+        okLine(
+          `cch-w20-s6's host is NOT robbed: .attention-row .status-pill-detail was read before and after in every cell — ` +
+          `${detailGained} row-measurement(s) GAINED width, ${detailHeld} held it exactly, ${robbed} lost any. The before side ` +
+          `is this tree with flex's initial value put back over the one ADD, read one reflow from the after side in the same ` +
+          `browser — not a number carried from another checkout`,
+        );
+        okLine(
+          `the control fired: ${nonUniformBefore} of the ${BAND_WIDTHS.length * 2 * WRAP_SCENS.length} in-band cells were ` +
+          `measurably NON-uniform BEFORE (mixed-fleet is the only fixture carrying more than one attention row, so it is the ` +
+          `only one that CAN be), which is what makes the AFTER verdict a measurement rather than a property of an empty set`,
         );
       }
     }
