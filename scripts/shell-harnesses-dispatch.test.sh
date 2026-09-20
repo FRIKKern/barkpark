@@ -45,6 +45,14 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="${SHELL_HARNESSES_WORKFLOW:-$REPO_ROOT/.github/workflows/shell-harnesses.yml}"
 SELF_ENTRY=".github/workflows/shell-harnesses.yml"
+# THE DISPATCHER MOVED OUT OF THE WORKFLOW (task-ca50ed283930706a). The
+# `changes` step's body is now a file, because an interpolated `run:` scalar is
+# compiled into ONE expression and capped at 21000 chars. That file inherits
+# the workflow file's property exactly: an edit to it changes what every
+# harness means, so it is implicit in every set, must NOT be a roster row, and
+# must be an on.*.paths entry or an edit to it starts no run at all. Both
+# entries are exempt from clause B for the same reason.
+SELF_SCRIPT="scripts/shell-harness-dispatch.sh"
 
 PASS=0
 FAIL=0
@@ -64,7 +72,7 @@ trap 'rm -rf "$TMP"' EXIT
 # then needs-ok/if-ok flags), outputs.txt (keys of jobs.changes.outputs),
 # body.sh (the dispatcher step with expressions substituted).
 if ! python3 - "$WORKFLOW" "$TMP" <<'PY'
-import json, os, sys, yaml
+import json, os, re, sys, yaml
 wf, out = sys.argv[1], sys.argv[2]
 with open(wf) as fh:
     doc = yaml.safe_load(fh)
@@ -152,21 +160,63 @@ steps = jobs["changes"]["steps"]
 hit = [s for s in steps if s.get("id") == "sets"]
 if len(hit) != 1:
     sys.stderr.write("expected exactly one step with id sets, got %d\n" % len(hit)); sys.exit(2)
-body = hit[0]["run"]
-body = body.replace("${{ github.event_name }}", "${EVENT_NAME}")
-body = body.replace("${{ github.event.pull_request.base.sha }}", "${BASE_SHA}")
+step = hit[0]
+run = step["run"]
+
+# THE BODY IS A FILE NOW, AND THAT IS THE POINT (task-ca50ed283930706a).
+# The dispatcher body used to be this scalar. With the two `${{ }}` values
+# inline GitHub compiled the whole thing into ONE expression against a
+# 21000-char cap, and at 19968 bytes the roster had 32 bytes of headroom — a
+# cap deciding dispatch policy, and over it a STARTUP FAILURE with zero jobs.
+# So THREE things are asserted here, and each one of them failing would put the
+# bomb back:
+#   · the scalar carries NO `${{` at all (it is a literal, never an expression)
+#   · the two GitHub values arrive as step `env:` under the names the script
+#     reads, or the script sees an empty event and an empty base
+#   · the scalar is a thin invocation of a script under scripts/, whose path is
+#     READ FROM HERE rather than hardcoded, so the clauses below measure
+#     whatever the workflow actually runs
+if "${{" in run:
+    sys.stderr.write("the `sets` step's run: scalar carries a ${{ }} expression, so GitHub compiles it "
+                     "into ONE expression under the 21000-char cap. Keep the body in a script file.\n")
+    sys.exit(2)
+env = step.get("env") or {}
+want_env = {"EVENT_NAME": "${{ github.event_name }}",
+            "BASE_SHA": "${{ github.event.pull_request.base.sha }}"}
+for k, v in want_env.items():
+    if str(env.get(k, "")).strip() != v:
+        sys.stderr.write("the `sets` step must pass %s: %s as step env (got %r) — the script reads it "
+                         "from the environment\n" % (k, v, env.get(k)))
+        sys.exit(2)
+m = re.search(r"(scripts/[A-Za-z0-9._/-]+\.sh)", run)
+if not m or len(run.strip().splitlines()) != 1:
+    sys.stderr.write("the `sets` step must be a one-line invocation of a script under scripts/; got %r\n" % run)
+    sys.exit(2)
+script_rel = m.group(1)
+script_abs = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(wf))), "..", script_rel)
+script_abs = os.path.normpath(script_abs)
+if not os.path.isfile(script_abs):
+    sys.stderr.write("the `sets` step invokes %s, which does not exist\n" % script_rel); sys.exit(2)
+with open(out + "/dispatcher-path.txt", "w") as fh:
+    fh.write(script_rel + "\n")
 with open(out + "/body.sh", "w") as fh:
-    fh.write(body)
+    fh.write(open(script_abs).read())
 PY
 then
   unavailable "could not extract the dispatcher from $WORKFLOW (unparseable, or the shape moved)"
 fi
 
 BODY="$TMP/body.sh"
-if grep -q '\${{' "$BODY"; then
-  echo "unsubstituted GitHub expression(s) in the extracted body:" >&2
-  grep -n '\${{' "$BODY" >&2
-  unavailable "add them to the replace() list in this harness before trusting any result"
+# The body is now a FILE the step invokes, and bash does not expand `${{ }}`:
+# one in EXECUTABLE code would be a literal string, silently comparing a path
+# against markup. Comment lines are exempt — this file's own header explains
+# the expression cap, and counting prose would make the guard agree with
+# itself. The scalar's freedom from `${{` is asserted in the extractor above,
+# which is where the 21000-char cap actually applies.
+if grep -v '^[[:space:]]*#' "$BODY" | grep -q '\${{'; then
+  echo "a GitHub expression survives in EXECUTABLE lines of the dispatcher body:" >&2
+  grep -n '\${{' "$BODY" | grep -v ':[[:space:]]*#' >&2
+  unavailable "the dispatcher must read its GitHub values from the environment, never inline"
 fi
 
 # The roster: rows between roster=' and the closing quote, as the dispatcher
@@ -188,9 +238,29 @@ done <"$TMP/roster.txt"
 if [ -z "$missing_up" ]; then ok "A subset: every roster row is a verbatim on.pull_request.paths entry"
 else bad "A subset: roster rows naming paths the workflow never triggers on:$missing_up"; fi
 
-if grep -q "^[^ ]* $SELF_ENTRY\$" "$TMP/roster.txt"; then
-  bad "A: the workflow file is implicit in every set and must not be a roster row"
-else ok "A: the workflow file is not a roster row (it is implicit in every set)"; fi
+implicit_rows=""
+for e in "$SELF_ENTRY" "$SELF_SCRIPT"; do
+  grep -q "^[^ ]* $e\$" "$TMP/roster.txt" && implicit_rows="$implicit_rows $e"
+done
+if [ -z "$implicit_rows" ]; then ok "A: neither the workflow file nor the dispatcher script is a roster row (both are implicit in every set)"
+else bad "A: implicit-in-every-set entries that are ALSO roster rows:$implicit_rows"; fi
+
+# A2: and the dispatcher path the workflow actually invokes is the one this
+# harness exempts. Without this the exemption could drift onto a dead path
+# while the real script silently acquired no trigger at all.
+DISPATCHER="$(cat "$TMP/dispatcher-path.txt" 2>/dev/null)"
+if [ "$DISPATCHER" = "$SELF_SCRIPT" ]; then
+  ok "A2: the changes step invokes $DISPATCHER, the path this harness exempts and runs"
+else bad "A2: the changes step invokes '$DISPATCHER' but this harness exempts '$SELF_SCRIPT'"; fi
+
+# A3: both implicit entries are on.pull_request.paths entries. Implicit in
+# every SET is worthless if an edit to the file starts no RUN.
+untriggered=""
+for e in "$SELF_ENTRY" "$SELF_SCRIPT"; do
+  grep -qxF -- "$e" "$TMP/paths.txt" || untriggered="$untriggered $e"
+done
+if [ -z "$untriggered" ]; then ok "A3: both implicit entries are on.pull_request.paths entries (an edit to either starts a run)"
+else bad "A3: implicit entries that trigger NO run:$untriggered"; fi
 
 # ── B: UNION ─────────────────────────────────────────────────────────────────
 # The roster's path column is MATERIALISED once, never piped per candidate.
@@ -205,6 +275,7 @@ awk '{ print $2 }' "$TMP/roster.txt" >"$TMP/roster-paths.txt"
 missing_down=""
 while IFS= read -r p; do
   [ "$p" = "$SELF_ENTRY" ] && continue
+  [ "$p" = "$SELF_SCRIPT" ] && continue
   grep -qxF -- "$p" "$TMP/roster-paths.txt" || missing_down="$missing_down $p"
 done <"$TMP/paths.txt"
 if [ -z "$missing_down" ]; then ok "B union: every on.pull_request.paths entry has a roster row"
@@ -400,6 +471,15 @@ if [ "$rc" -eq 0 ] && [ "$(count_true "$TMP/e7.out")" -eq "$N_JOBS" ]; then
   ok "E7 the workflow file itself: all $N_JOBS true"
 else bad "E7 the workflow file: rc=$rc true=$(count_true "$TMP/e7.out")"; fi
 
+# E7b THE DISPATCHER SCRIPT ITSELF → all true. It is not a roster row, so if
+#     the implicit branch ever loses it, an edit to the dispatcher would select
+#     NOTHING and every harness would skip on the very PR that changed them.
+make_case selfscript "$SELF_SCRIPT" "b"
+rc=$(run_dispatcher pull_request "$BASE_A" "$TMP/e7b.out")
+if [ "$rc" -eq 0 ] && [ "$(count_true "$TMP/e7b.out")" -eq "$N_JOBS" ]; then
+  ok "E7b the dispatcher script itself: all $N_JOBS true"
+else bad "E7b the dispatcher script: rc=$rc true=$(count_true "$TMP/e7b.out")"; fi
+
 # E8 unresolvable base → exit 1, named refusal, NO outputs
 G checkout -q "case-router" 2>/dev/null
 BOGUS="dddddddddddddddddddddddddddddddddddddddd"
@@ -566,5 +646,5 @@ fi
 echo ""
 echo "shell-harnesses-dispatch: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
-[ "$PASS" -ge 20 ] || { echo "only $PASS assertions ran — the harness shrank" >&2; exit 2; }
+[ "$PASS" -ge 25 ] || { echo "only $PASS assertions ran — the harness shrank" >&2; exit 2; }
 exit 0
