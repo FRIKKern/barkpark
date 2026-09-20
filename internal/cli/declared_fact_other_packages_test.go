@@ -99,10 +99,41 @@ type declaredFactQualifier struct {
 // declaredFactQualifiers are the declaring packages, with live numbers from
 // 2026-09-17 in the comment beside each floor.
 var declaredFactQualifiers = []declaredFactQualifier{
-	{Pkg: "manifest", MinBindingFiles: 30, MinBindings: 60},  // live: 65 files / 146 bindings
+	// manifest reuses the live gate's OWN clearance list rather than a second
+	// copy: both sweeps read the same tree with the same predicate, so a shape
+	// cleared for one is cleared for the other, and one list cannot rot while
+	// its twin stays current.
+	{Pkg: "manifest", MinBindingFiles: 30, MinBindings: 60, // live: 65 files / 146 bindings
+		KnownHits: manifestKnownHits},
 	{Pkg: "apiclient", MinBindingFiles: 15, MinBindings: 25}, // live: 36 / 57
 	{Pkg: "cloudclient", MinBindingFiles: 10, MinBindings: 40, // live: 24 / 111
-		KnownHits: []string{"strings.HasPrefix(u.Unit) on cloudclient.SlotUnit"}},
+		// The EqualFold entries below all arrived with the same widening
+		// (task-0ab3dfa73662ee68): once the callee set became the whole
+		// matching family, a case-insensitive comparison against a literal
+		// became visible to this sweep. Read at the source 2026-09-20, every
+		// one of them compares the WHOLE declared value against a literal —
+		// which is reading the declaration, exactly like the
+		// `cmd.ID == "media.upload"` shape the negative control in
+		// manifest_declared_fact_guard_test.go clears, with a case fold on
+		// top because the control plane's casing is not part of its contract.
+		// None asks about a SUBSTRING, which is the defect class.
+		//
+		// The one Contains entry is different and was read separately:
+		// FailureClass is the control plane's NAMED cause ("BUILD_FAILED",
+		// "BOX_AT_CAPACITY_DEFERRED"), a compound name whose parts ARE its
+		// grammar, and cloudclient declares no deferred flag to read instead.
+		KnownHits: []string{
+			"strings.HasPrefix(u.Unit) on cloudclient.SlotUnit",
+			"strings.EqualFold(d.Overall) on cloudclient.DomainCheck",
+			"strings.EqualFold(strings.TrimSpace(res.Beat.Status)) on cloudclient.MetricsResult",
+			"strings.EqualFold(strings.TrimSpace(d.Status)) on cloudclient.SiteDeployment",
+			"strings.EqualFold(strings.TrimSpace(d.Environment)) on cloudclient.SiteDeployment",
+			"strings.EqualFold(d.Status) on cloudclient.SiteDeployment",
+			"strings.EqualFold(dep.Status) on cloudclient.SiteDeployment",
+			"strings.EqualFold(newest.ID) on cloudclient.SiteDeployment",
+			"strings.Contains(strings.ToUpper(depStr(d.FailureClass))) on cloudclient.SiteDeploymentEmbed",
+			"strings.EqualFold(team.Slug) on cloudclient.Team",
+		}},
 	{Pkg: "taskboard", MinBindingFiles: 5, MinBindings: 10}, // live: 11 / 21
 	{Pkg: "pdrender", MinBindingFiles: 5, MinBindings: 10},  // live: 12 / 24
 	{Pkg: "scaffy", MinBindingFiles: 2, MinBindings: 6},     // live: 4 / 17
