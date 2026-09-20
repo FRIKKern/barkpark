@@ -467,6 +467,11 @@
         "env": {}
       },
       {
+        "name": "pds-artifact-retention keep-N harness (35 arms, hermetic, no network)",
+        "run": "bash scripts/pds-artifact-retention.test.sh",
+        "env": {}
+      },
+      {
         "name": "personal-local cold-reader smoke — the --dry-run arm (no boot)",
         "run": "bash scripts/pds-personal-local-smoke_test.sh --dry-run",
         "env": {}
