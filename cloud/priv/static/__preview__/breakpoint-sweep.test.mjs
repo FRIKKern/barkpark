@@ -1238,13 +1238,18 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // fixtures on a suspended and on a behind box are the 136th and 137th
   // scenarios and the 112th and 113th residue entries (family hash:#instance),
   // and the sweep refused the same way until both entries were written.
-  assert.equal(r.total, 137);
+  // cch-w20-bl moved it by one: `overview-attention-long-name` — the first
+  // fixture in this corpus to give `.attention-name` a string its column cannot
+  // seat, and so the first able to make that ellipsis ENGAGE — is the 138th
+  // scenario and the 114th residue entry (family hash:#overview), and the sweep
+  // refused the same way until the entry was written.
+  assert.equal(r.total, 138);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 113, "113 is the RESIDUE, not the census");
+  assert.equal(r.residue, 114, "114 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 113, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 114, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

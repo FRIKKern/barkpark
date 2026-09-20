@@ -17,16 +17,14 @@
 #
 # EXIT 0 all arms passed · 1 an arm failed · 99 the harness itself could not run.
 #
-# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
-# scripts/pds-artifact-retention.test.sh` step on the `PDS census / parity /
-# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml, and
-# .github/ is the gates lane's fence, not the deploy/PDS lane's. This exemption
-# is a HANDOFF, not a verdict, and it is the WEAKER of the two remedies the
-# census offers: until that line lands, a revert of the keep-window clause is
-# caught by running this file BY HAND, and by nothing else — the arm 10 mutation
-# below proves the clause matters, and nothing proves it is still there. The
-# same shape and the same reason as scripts/pds-charter-anchors-check_test.sh.
-# Wiring row: see the PR body. Baseline at authoring: 35 passed, 0 failed.
+# WIRED: the `PDS census / parity / scratch-target harnesses` leg of
+# .github/workflows/shell-harnesses.yml runs this file — the arm lives in
+# .github/shell-harness-legs.json beside its pds-* siblings, and the
+# `scripts/pds-*.sh` glob in the workflow's paths lists and `changes` dispatcher
+# admits it (task-0dee9077fed25129). shell-harnesses.yml is not a required
+# context, so wiring makes this harness RUN, not BLOCK. Wiring it is what
+# produced the 24/11 Linux reading recorded below: before it, this file had
+# never once started on Linux.
 #
 # 2026-09-20 — THE BASELINE ABOVE WAS A macOS BASELINE, AND IT WAS NOT THE WHOLE
 # TRUTH. The first Linux run of this file (GH Actions run 35504059438, job
