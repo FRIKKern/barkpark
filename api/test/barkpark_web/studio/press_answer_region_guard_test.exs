@@ -43,11 +43,17 @@ defmodule BarkparkWeb.Studio.PressAnswerRegionGuardTest do
   describe "the region is in the SERVED html, outside the LiveView root" do
     setup %{conn: conn} do
       {:ok, _} =
-        Auth.create_token(@admin_token, "press answer guard admin", @dataset, [
-          "read",
-          "write",
-          "admin"
-        ])
+        Auth.create_token(
+          @admin_token,
+          "press answer guard admin",
+          @dataset,
+          [
+            "read",
+            "write",
+            "admin"
+          ],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
     end

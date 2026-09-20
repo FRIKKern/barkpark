@@ -194,7 +194,16 @@ defmodule BarkparkWeb.Studio.CapsPrincipalFreshnessTest do
 
   defp writer_token! do
     raw = slug("freshness-tok")
-    {:ok, token} = Auth.create_token(raw, "principal freshness", @dataset, ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "principal freshness",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {raw, token}
   end
 
@@ -397,7 +406,15 @@ defmodule BarkparkWeb.Studio.CapsPrincipalFreshnessTest do
   describe "Caps.admin?/1 is fresh too" do
     test "a revoked ADMIN token is no longer a Studio admin", %{ws: ws, proj: proj} do
       raw = slug("fresh-admin-tok")
-      {:ok, token} = Auth.create_token(raw, "principal freshness admin", @dataset, ["admin"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "principal freshness admin",
+          @dataset,
+          ["admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       sock = %Phoenix.LiveView.Socket{assigns: assigns(ws, proj, %{api_token: token})}
 

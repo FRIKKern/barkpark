@@ -31,7 +31,13 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
     raw = "technical-writer-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "technical control writer", @dataset, ["read", "write"])
+      Auth.create_token(
+        raw,
+        "technical control writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{slug: slug, writer: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end

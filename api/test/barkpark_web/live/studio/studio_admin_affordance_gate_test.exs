@@ -51,8 +51,23 @@ defmodule BarkparkWeb.Studio.StudioAdminAffordanceGateTest do
   setup %{conn: conn} do
     {_ws, _proj} = TenancyFixtures.ensure_default_scope!()
 
-    {:ok, _} = Auth.create_token(@admin, "affordance admin", @dataset, ["read", "write", "admin"])
-    {:ok, _} = Auth.create_token(@member, "affordance member", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @admin,
+        "affordance admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @member,
+        "affordance member",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} =
       Content.upsert_schema(

@@ -70,7 +70,13 @@ defmodule BarkparkWeb.Studio.MediaAssetAltTextTest do
     raw = "s9-alt-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      Barkpark.Auth.create_token(raw, "s9-alt", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        raw,
+        "s9-alt",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {build_conn() |> Plug.Test.init_test_session(%{"api_token" => raw}), raw}
   end

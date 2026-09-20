@@ -248,11 +248,17 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@admin_token, "nav parity sweep admin", "production", [
-        "read",
-        "write",
-        "admin"
-      ])
+      Auth.create_token(
+        @admin_token,
+        "nav parity sweep admin",
+        "production",
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end

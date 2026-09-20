@@ -122,8 +122,23 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # READ-ONLY api token. `create_token` auto-memberships it on the Default
     # workspace, so it IS a member and CAN read — its permission array is
     # ["read"], so the write arm of `Caps.derive/1` is false.
-    {:ok, _} = Auth.create_token(@readonly, "pds w42 hi readonly", @dataset, ["read"])
-    {:ok, _} = Auth.create_token(@writer, "pds w42 hi writer", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "pds w42 hi readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 hi writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} =
       Content.create_document(

@@ -29,7 +29,16 @@ defmodule BarkparkWeb.PaperContextualCreationTest do
     end
 
     token = "contextual-creation-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(token, "Contextual creation", @dataset, ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        token,
+        "Contextual creation",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => token})}
   end
 

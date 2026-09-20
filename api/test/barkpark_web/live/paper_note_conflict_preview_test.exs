@@ -29,7 +29,16 @@ defmodule BarkparkWeb.PaperNoteConflictPreviewTest do
       )
 
     raw = "note-conflict-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "Note conflict", @dataset, ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        raw,
+        "Note conflict",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     slug = "note-conflict-#{System.unique_integer([:positive])}"
     original = %{"id" => "n", "type" => "note", "label" => "Label", "text" => "Old safe body"}

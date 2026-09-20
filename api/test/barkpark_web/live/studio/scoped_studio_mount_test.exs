@@ -323,11 +323,16 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       raw = "plugin-href-flat-admin-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Barkpark.Auth.create_token(raw, "plugin href flat admin", @dataset, [
-          "read",
-          "write",
-          "admin"
-        ])
+        Barkpark.Auth.create_token(
+          raw,
+          "plugin href flat admin",
+          @dataset,
+          [
+            "read",
+            "write",
+            "admin"
+          ]
+        )
 
       {ws, proj} = ensure_default_scope!()
 
@@ -383,11 +388,17 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       raw = "dcanon-plugin-guard-#{System.unique_integer([:positive])}"
 
       {:ok, _token} =
-        Barkpark.Auth.create_token(raw, "dcanon plugin guard", @dataset, [
-          "read",
-          "write",
-          "admin"
-        ])
+        Barkpark.Auth.create_token(
+          raw,
+          "dcanon plugin guard",
+          @dataset,
+          [
+            "read",
+            "write",
+            "admin"
+          ],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       conn =
         conn

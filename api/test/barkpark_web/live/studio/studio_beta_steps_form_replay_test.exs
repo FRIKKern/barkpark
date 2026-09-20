@@ -66,7 +66,16 @@ defmodule BarkparkWeb.Studio.StudioBetaStepsFormReplayTest do
   test "generic Beta step form replays an identical add after remount without duplicating storage",
        %{conn: conn, doc: doc} do
     raw = "beta-steps-form-replay-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta steps form replay", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta steps form replay",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     path = scoped_studio("/d/#{@dataset}/studio/#{@doc_type}/#{@doc_id}")
     {:ok, view, _html} = live(conn, path)
@@ -171,7 +180,16 @@ defmodule BarkparkWeb.Studio.StudioBetaStepsFormReplayTest do
 
     doc = legacy_document!("legacy-idless", legacy)
     raw = "beta-steps-legacy-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta legacy Steps", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta legacy Steps",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     path = scoped_studio("/d/#{@dataset}/studio/#{@doc_type}/#{Content.published_id(doc.doc_id)}")
     {:ok, view, _html} = live(conn, path)

@@ -56,9 +56,22 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
 
   setup %{conn: conn} do
     {:ok, _} =
-      Auth.create_token(@admin_token, "tmux admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "tmux admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "tmux junior", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "tmux junior",
+        "production",
+        ["read"]
+      )
+
     {:ok, conn: conn}
   end
 

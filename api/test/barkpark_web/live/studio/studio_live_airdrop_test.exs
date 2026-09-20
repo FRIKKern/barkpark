@@ -49,9 +49,22 @@ defmodule BarkparkWeb.Studio.StudioLiveAirdropTest do
     # makes each a member of the default workspace; the ApiToken capability gate
     # is the token's permissions array (a ["read"] token can never confer write).
     {:ok, _} =
-      Auth.create_token(@admin_tok, "airdrop admin", @dataset, ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_tok,
+        "airdrop admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@reader_tok, "airdrop reader", @dataset, ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @reader_tok,
+        "airdrop reader",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, conn: conn, ws: ws}
   end
