@@ -213,6 +213,8 @@ import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection,
 // replace-range mappers. All shipped + browser-verified in the per-block editor;
 // the canvas REUSES them verbatim — only the WC-side wiring is ported below.
 import { WikilinkMenu } from "../wikilink-menu.js";
+// The hover card on a link / wikilink: address, resolved title + first line, Open, Edit (plan #23).
+import { LinkPreview } from "./link-preview.js";
 import {
   parseOpenWikilink,
   wikilinkReplaceRange,
@@ -533,6 +535,8 @@ class BpPaperCanvas extends HTMLElement {
     this._editor = null;
     this._mount = null;
     this._bubble = null; // FormatBubble instance (selection format toolbar)
+    this._linkPreview = null; // LinkPreview instance (hover card on links and wikilinks)
+    this._linkPreviewSource = null; // injected async ({ kind, href, target, docId }) => { title, excerpt, href }
     this._debounceTimer = null;
     // Baseline captured when a local debounce window opens. Server broadcasts may
     // advance `_blocks` while that draft is waiting; the eventual diff must still
@@ -655,6 +659,7 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
     this._upgradeProperty("mediaUploader");
+    this._upgradeProperty("linkPreviewSource");
 
     // Default true; only the literal string "false" disables editing. Mount-time
     // read is authoritative — attributeChangedCallback handles later toggles.
@@ -1087,6 +1092,26 @@ class BpPaperCanvas extends HTMLElement {
       // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
       this._handle = new BlockHandle({ host: this, editor: this._editor, openSlash: () => this._openSlash("") });
     }
+    // The link hover card works in both modes (a reader wants the address too); Edit shows only
+    // when editable. Open is the host's call first (`bp-canvas-open-link`, cancelable) — a plain
+    // link falls back to a new window; a wikilink has nowhere to go without the host.
+    this._linkPreview = new LinkPreview({
+      editor: this._editor,
+      host: this,
+      editable: () => this._editable,
+      resolve: (info) => (typeof this._linkPreviewSource === "function" ? this._linkPreviewSource(info) : null),
+      onOpen: (detail) => {
+        const ev = new CustomEvent("bp-canvas-open-link", { detail, bubbles: true, composed: true, cancelable: true });
+        const go = this.dispatchEvent(ev);
+        if (go && detail.kind === "link" && detail.href && typeof window !== "undefined" && window.open) {
+          try { window.open(detail.href, "_blank", "noopener,noreferrer"); } catch (_e) {}
+        }
+      },
+      onEdit: (detail) => {
+        if (detail.kind === "link" && this._bubble) this._bubble.openLink();
+        else if (this._bubble) this._bubble.update();
+      },
+    });
 
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
     // mirrors ../index.js's bp-ready.
@@ -1285,6 +1310,10 @@ class BpPaperCanvas extends HTMLElement {
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
+    }
+    if (this._linkPreview) {
+      this._linkPreview.destroy();
+      this._linkPreview = null;
     }
     if (this._handle) {
       this._handle.destroy();
@@ -2147,6 +2176,17 @@ class BpPaperCanvas extends HTMLElement {
 
   get wikilinkSource() {
     return this._wikilinkSource;
+  }
+
+  // ── link hover card: what the host knows about a target ────────────────────
+  // async ({ kind: "link" | "wikilink", href, target, docId }) => { title, excerpt, href } | null.
+  // Unset → the card shows the address only.
+  set linkPreviewSource(fn) {
+    this._linkPreviewSource = fn;
+  }
+
+  get linkPreviewSource() {
+    return this._linkPreviewSource;
   }
 
   // ── P4 `#` tag autocomplete ────────────────────────────────────────────────

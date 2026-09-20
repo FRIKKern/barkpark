@@ -1675,6 +1675,57 @@
       color: var(--paper-accent); border-color: var(--paper-accent);
     }
 
+    /* The link hover card (canvas/link-preview.js): the bubble's chrome, laid out as a small card
+       under the hovered link — title (or host), address, an excerpt for a wikilink, Open / Edit. */
+    html[data-theme="light"] .bp-link-preview,
+    .bp-link-preview {
+      --paper-bg:          #fbfaf6;
+      --paper-bg-deep:     #f5f2e9;
+      --paper-ink:         #1f1a14;
+      --paper-ink-soft:    #5b524a;
+      --paper-rule:        rgba(31, 26, 20, 0.08);
+      --paper-accent:      #a23925;
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-chrome-bg:   #fefdf9;
+      --paper-chrome-border: rgba(31, 26, 20, 0.12);
+      --paper-font-sans:   var(--font);
+      --paper-font-mono:   var(--font-mono);
+    }
+    html[data-theme="dark"] .bp-link-preview {
+      --paper-bg:          #1b1815;
+      --paper-bg-deep:     #241f1b;
+      --paper-ink:         #efe7dc;
+      --paper-ink-soft:    #b8ada0;
+      --paper-rule:        rgba(239, 231, 220, 0.10);
+      --paper-accent:      #e07a5f;
+      --paper-accent-soft: rgba(224, 122, 95, 0.16);
+      --paper-chrome-bg:   #211d19;
+      --paper-chrome-border: rgba(239, 231, 220, 0.14);
+    }
+    .bp-link-preview {
+      position: fixed; z-index: 200;
+      width: 320px; max-width: calc(100vw - 16px);
+      padding: 8px 10px 8px;
+      background: var(--paper-chrome-bg);
+      border: 1px solid var(--paper-chrome-border);
+      border-radius: 5px;
+      box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
+      font-family: var(--paper-font-sans); color: var(--paper-ink);
+      animation: bp-paper-format-fade 0.12s ease-out;
+    }
+    .bp-link-preview__title { font-size: 13px; font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: 11px; color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__excerpt { font-size: 12px; line-height: 1.4; color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .bp-link-preview__actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--paper-rule); }
+    .bp-link-preview__btn {
+      height: 22px; border: 1px solid var(--paper-chrome-border); background: transparent;
+      border-radius: 3px; padding: 0 8px;
+      font-family: var(--paper-font-sans); font-size: 11.5px;
+      color: var(--paper-ink-soft); cursor: pointer;
+    }
+    .bp-link-preview__btn:hover { color: var(--paper-accent); border-color: var(--paper-accent); }
+    .bp-link-preview__btn:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+
 /* Native collection controls belong outside the authored card/stat content.
    Closed controls leave reader geometry intact; the fallback opens in flow. */
 .bp-paper-contextual-controls.bp-paper-cards-config,
