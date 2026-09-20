@@ -44,8 +44,15 @@ defmodule BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest do
       (`:api_token` absent, `:current_user` present) and the foreign row really
       is workspace A's. A refusal proved against a socket that turned out to
       hold a bound token would be measuring #14593's fix, not this one.
-  The FLAT `/studio/chat` mount is a SECOND population with its own ruling
-  (see the PR body); its arm lands with the fix, not in this RED-first commit.
+  ## The FLAT mount is a second population, and it is NOT the superuser
+
+  `LiveAuth.authorize_user/3` admits the flat user arm on an owner/admin-grade
+  role in the DEFAULT workspace and says so in its own comment. That is the
+  same grant a Default-BOUND token holds, so it takes the same confinement —
+  the Default workspace plus NULL-owned legacy rows (`K3` below). The genuinely
+  unbound superuser charter D17/D18 reserves is a TOKEN whose `workspace_id` is
+  NULL, which `Auth.create_token/5` will not produce; `K2` proves it keeps its
+  instance-wide reach.
 
   The fake runtime is enabled in every test: `ChatLive.mount/3` refuses when no
   provider is enabled and redirects to the same `/studio` an authz denial does,
@@ -58,6 +65,7 @@ defmodule BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest do
   import Barkpark.AccountsFixtures, only: [register_user: 1]
 
   alias Barkpark.Accounts
+  alias Barkpark.Auth
   alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Session, as: StudioChatSession
@@ -187,7 +195,182 @@ defmodule BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest do
     end
   end
 
+  # ── THE PRINCIPAL-KIND ENUMERATION ────────────────────────────────────────
+  #
+  # DERIVED FROM `BarkparkWeb.LiveAuth`'s on_mount arms, not from the filing.
+  # ChatLive is reachable through exactly two hooks (router.ex: `:admin_studio`
+  # → `{LiveAuth, :admin}`, `:scoped_admin_studio` → `{LiveAuth, :scoped_admin}`),
+  # and each hook has a token arm and a user arm plus the dev fallback:
+  #
+  #   K1 flat  + `authorize/4` token arm, workspace_id SET       → its workspace
+  #   K2 flat  + `authorize/4` token arm, workspace_id NULL      → nil, unbound
+  #   K3 flat  + `authorize_user/3` user arm (Default admin)     → Default ws
+  #   K4 scoped + `scoped_admin_authorize/3` token arm           → the URL ws
+  #   K5 scoped + `scoped_admin_authorize_user/3` user arm       → the URL ws
+  #   K6 either + `dev_browser_token_fallback/0` (dev_root)      → K1/K2, and
+  #      INERT outside :dev — `:dev_browser_token` is set only in config/dev.exs.
+  #
+  # K5 is the class this row is about and is proved in the describe above. The
+  # rest are here so the enumeration is a run, not a list.
+  describe "principal kinds — what the lifecycle guard resolves to for each" do
+    test "K6: the dev_root fallback is INERT in this env, so K1/K2 cover the tokens", _ctx do
+      # Stated as a run because the enumeration would otherwise carry an
+      # untested sixth row. `authorize/4` and `scoped_admin_candidates/1` both
+      # call `dev_browser_token_fallback/0` unconditionally; the config key is
+      # what makes it nil here.
+      assert is_nil(Application.get_env(:barkpark, :dev_browser_token)),
+             "the dev-browser token is configured in this env — K6 is then a LIVE " <>
+               "principal kind and needs its own arm, not this exemption"
+    end
+
+    test "K2: an UNBOUND admin TOKEN keeps its cross-owner delete (the superuser path)", ctx do
+      raw = "usertenancy-unbound-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "usertenancy unbound", "production", ["read", "write", "admin"])
+
+      # `create_token/5` defaults an omitted workspace to Default, so the NULL
+      # binding has to be written directly — which is exactly why this principal
+      # is the dev-root/explicitly-unbound credential and not a customer admin.
+      {:ok, _} = token |> Ecto.Changeset.change(%{workspace_id: nil}) |> Repo.update()
+
+      assert is_nil(Repo.get(Barkpark.Auth.ApiToken, token.id).workspace_id),
+             "the unbound fixture still carries a binding — this arm would not " <>
+               "exercise the nil-principal path at all"
+
+      view = mount_token!(ctx.conn, raw, "/studio/chat")
+
+      assert %StudioChatSession{} = Repo.get(StudioChatSession, ctx.foreign.id)
+
+      render_click(view, "session-delete", %{"id" => ctx.foreign.id})
+
+      refute Repo.get(StudioChatSession, ctx.foreign.id),
+             "the UNBOUND superuser token lost its instance-wide delete — the " <>
+               "deliberate nil branch was closed along with the session-admin one"
+    end
+
+    test "K1: a ws-B-BOUND admin TOKEN on the flat mount is confined to ws B", ctx do
+      raw = "usertenancy-bound-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(
+          raw,
+          "usertenancy bound b",
+          "production",
+          ["read", "write", "admin"],
+          ctx.ws_b.id
+        )
+
+      view = mount_token!(ctx.conn, raw, "/studio/chat")
+
+      render_click(view, "session-delete", %{"id" => ctx.foreign.id})
+
+      assert %StudioChatSession{} = Repo.get(StudioChatSession, ctx.foreign.id)
+
+      # POSITIVE CONTROL on the same socket.
+      render_click(view, "session-delete", %{"id" => ctx.own.id})
+
+      refute Repo.get(StudioChatSession, ctx.own.id),
+             "the ws-B-bound token could not delete its OWN row — the refusal above " <>
+               "would then be a dead feature"
+    end
+
+    test "K3: a user-session admin on the FLAT mount is confined to Default + NULL-owned", ctx do
+      default_row = session_owned_by!(ctx.default_ws, "Default-owned chat")
+      legacy = legacy_unowned_session!(ctx.ws_a, "pre-tenancy chat")
+
+      view = mount!(ctx.conn, ctx.user_flat_raw, "/studio/chat")
+
+      assigns = live_assigns(view)
+
+      assert is_nil(assigns[:api_token]),
+             "the flat mount handed this socket an :api_token — not the user arm"
+
+      refute assigns[:scoped_mount?],
+             "the flat route set :scoped_mount? — then this is not the flat population"
+
+      # REFUSED on a workspace this admin holds no role in.
+      render_click(view, "session-delete", %{"id" => ctx.foreign.id})
+
+      assert %StudioChatSession{} = Repo.get(StudioChatSession, ctx.foreign.id)
+
+      # LANDS on the workspace whose admin role IS the grant
+      # (`LiveAuth.authorize_user/3` checked exactly that role).
+      render_click(view, "session-delete", %{"id" => default_row.id})
+
+      refute Repo.get(StudioChatSession, default_row.id),
+             "the Default admin could not delete a DEFAULT-owned row — the grant it " <>
+               "holds is an admin role in that very workspace"
+
+      # LANDS on a NULL-owned legacy row — the same carve-out a Default-BOUND
+      # token gets, and the reason this is not a wholesale narrowing.
+      render_click(view, "session-delete", %{"id" => legacy.id})
+
+      refute Repo.get(StudioChatSession, legacy.id),
+             "a pre-tenancy NULL-owned row became unmanageable from the flat admin " <>
+               "surface — the legacy carve-out was dropped"
+    end
+
+    test "K4: a Default-bound admin TOKEN on ws B's SCOPED mount acts in ws B", ctx do
+      # The binding that makes this kind distinct: `create_token/5` pins an
+      # omitted workspace to Default, so a scoped admin acting in B routinely
+      # holds a DEFAULT-bound token. The URL workspace is the truth, not the
+      # token's binding — which is why the guard must read the same
+      # `read_workspace_id/1` the LOAD seam does.
+      raw = "usertenancy-scopedtok-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "usertenancy scoped tok", "production", ["read", "write", "admin"])
+
+      assert Repo.get(Barkpark.Auth.ApiToken, token.id).workspace_id == ctx.default_ws.id,
+             "the fixture token is not Default-bound — this arm would not separate " <>
+               "the token binding from the URL workspace"
+
+      {:ok, _} = TenancyAuth.create_membership(ctx.ws_b.id, token.id, "admin")
+
+      view = mount_token!(ctx.conn, raw, ctx.scoped_path)
+
+      render_click(view, "session-delete", %{"id" => ctx.foreign.id})
+
+      assert %StudioChatSession{} = Repo.get(StudioChatSession, ctx.foreign.id)
+
+      # POSITIVE CONTROL — and a second correction: under the token-binding
+      # guard this DEFAULT-bound token was refused its own ws-B row, because the
+      # write axis asked Default while the read axis asked B.
+      render_click(view, "session-delete", %{"id" => ctx.own.id})
+
+      refute Repo.get(StudioChatSession, ctx.own.id),
+             "the scoped ws-B admin could not delete a ws-B row — the write guard is " <>
+               "still reading the token binding instead of the URL workspace"
+    end
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────────────
+
+  defp mount_token!(conn, raw, path) do
+    result = live(init_test_session(conn, %{"api_token" => raw}), path)
+
+    assert match?({:ok, _view, _html}, result),
+           "the token principal failed to mount #{path} — every assertion that " <>
+             "follows would be vacuous (got #{inspect(result)})"
+
+    {:ok, view, _html} = result
+    view
+  end
+
+  # A pre-tenancy row: `create_session/2` always stamps an owner from its scope,
+  # so the NULL owner is written directly.
+  defp legacy_unowned_session!(ws, title) do
+    session = session_owned_by!(ws, title)
+
+    {:ok, session} =
+      session |> Ecto.Changeset.change(%{owner_workspace_id: nil}) |> Repo.update()
+
+    assert is_nil(Repo.get(StudioChatSession, session.id).owner_workspace_id),
+           "the legacy fixture still carries an owner — the NULL carve-out arm is vacuous"
+
+    session
+  end
 
   defp live_assigns(view) do
     %{socket: %Phoenix.LiveView.Socket{assigns: assigns}} = :sys.get_state(view.pid)
