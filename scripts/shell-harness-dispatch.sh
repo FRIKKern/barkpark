@@ -87,8 +87,7 @@ selftest() {
   #    roster, so a roster that failed to parse cannot green this arm.
   run push "" "$tmp/push.out"
   n_legs="$(grep -c '=true$' "$tmp/push.out" | tr -d ' ')"
-  [ "$code" -eq 0 ] && [ "$n_legs" -ge 20 ] && [ "$(grep -c '=false$' "$tmp/push.out" | tr -d ' ')" -eq 0 ]
-  r=$?
+  if [ "$code" -eq 0 ] && [ "$n_legs" -ge 20 ] && [ "$(grep -c '=false$' "$tmp/push.out" | tr -d ' ')" -eq 0 ]; then r=0; else r=1; fi
   arm "a push event dispatches every leg ($n_legs legs, none false)" "$r" "rc=$code true=$n_legs false=$(grep -c '=false$' "$tmp/push.out" | tr -d ' ')"
 
   # 2. A ROSTERED LITERAL selects exactly its own leg. The negative half is
@@ -98,8 +97,7 @@ selftest() {
   g add -A >/dev/null && g commit -qm doctor >/dev/null
   run pull_request "$base" "$tmp/doctor.out"
   out="$(grep '=true$' "$tmp/doctor.out" | sed 's/=true$//' | sort | tr '\n' ' ' | sed 's/ $//')"
-  [ "$code" -eq 0 ] && [ "$out" = "doctor-matrix" ]
-  r=$?
+  if [ "$code" -eq 0 ] && [ "$out" = "doctor-matrix" ]; then r=0; else r=1; fi
   arm "scripts/doctor.sh dispatches doctor-matrix and nothing else" "$r" "rc=$code true={$out}"
 
   # 3. NEGATIVE CONTROL — a path no roster row names selects NOTHING, and every
@@ -108,9 +106,8 @@ selftest() {
   printf 'b\n' >"$repo/README.md"
   g add -A >/dev/null && g commit -qm none >/dev/null
   run pull_request "$base" "$tmp/none.out"
-  [ "$code" -eq 0 ] && [ "$(grep -c '=true$' "$tmp/none.out" | tr -d ' ')" -eq 0 ] \
-    && [ "$(grep -c '=false$' "$tmp/none.out" | tr -d ' ')" -eq "$n_legs" ]
-  r=$?
+  if [ "$code" -eq 0 ] && [ "$(grep -c '=true$' "$tmp/none.out" | tr -d ' ')" -eq 0 ] \
+    && [ "$(grep -c '=false$' "$tmp/none.out" | tr -d ' ')" -eq "$n_legs" ]; then r=0; else r=1; fi
   arm "an unrostered path selects zero legs, all $n_legs outputs still emitted" "$r" \
     "rc=$code true=$(grep -c '=true$' "$tmp/none.out" | tr -d ' ') false=$(grep -c '=false$' "$tmp/none.out" | tr -d ' ')"
 
@@ -121,8 +118,7 @@ selftest() {
   printf 'b\n' >"$repo/scripts/shell-harness-dispatch.sh"
   g add -A >/dev/null && g commit -qm self >/dev/null
   run pull_request "$base" "$tmp/self.out"
-  [ "$code" -eq 0 ] && [ "$(grep -c '=true$' "$tmp/self.out" | tr -d ' ')" -eq "$n_legs" ]
-  r=$?
+  if [ "$code" -eq 0 ] && [ "$(grep -c '=true$' "$tmp/self.out" | tr -d ' ')" -eq "$n_legs" ]; then r=0; else r=1; fi
   arm "an edit to this dispatcher itself dispatches every leg" "$r" \
     "rc=$code true=$(grep -c '=true$' "$tmp/self.out" | tr -d ' ') (want $n_legs)"
 
@@ -131,27 +127,23 @@ selftest() {
   printf 'b\n' >"$repo/.github/workflows/shell-harnesses.yml"
   g add -A >/dev/null && g commit -qm wf >/dev/null
   run pull_request "$base" "$tmp/wf.out"
-  [ "$code" -eq 0 ] && [ "$(grep -c '=true$' "$tmp/wf.out" | tr -d ' ')" -eq "$n_legs" ]
-  r=$?
+  if [ "$code" -eq 0 ] && [ "$(grep -c '=true$' "$tmp/wf.out" | tr -d ' ')" -eq "$n_legs" ]; then r=0; else r=1; fi
   arm "an edit to the workflow file dispatches every leg" "$r" \
     "rc=$code true=$(grep -c '=true$' "$tmp/wf.out" | tr -d ' ')"
 
   # 6. REFUSALS, both named. A missing base and an unresolvable base each exit 1
   #    with ZERO outputs — a partial output file would read as a set of falses.
   run pull_request "" "$tmp/nobase.out"
-  [ "$code" -eq 1 ] && grep -q 'no base sha' "$tmp/nobase.out.log" && [ ! -s "$tmp/nobase.out" ]
-  r=$?
+  if [ "$code" -eq 1 ] && grep -q 'no base sha' "$tmp/nobase.out.log" && [ ! -s "$tmp/nobase.out" ]; then r=0; else r=1; fi
   arm "an empty base sha is refused (rc=1, zero outputs)" "$r" "rc=$code"
   run pull_request "dddddddddddddddddddddddddddddddddddddddd" "$tmp/badbase.out"
-  [ "$code" -eq 1 ] && grep -q 'is not resolvable in this checkout' "$tmp/badbase.out.log" && [ ! -s "$tmp/badbase.out" ]
-  r=$?
+  if [ "$code" -eq 1 ] && grep -q 'is not resolvable in this checkout' "$tmp/badbase.out.log" && [ ! -s "$tmp/badbase.out" ]; then r=0; else r=1; fi
   arm "an unresolvable base sha is refused (rc=1, zero outputs)" "$r" "rc=$code"
 
   # 7. AN UNKNOWN ARGUMENT NEVER PASSES. A typo'd flag that exits 0 is a
   #    dispatcher that silently stopped dispatching.
   out="$( "$self_abs" --nope 2>&1 )"; code=$?
-  [ "$code" -eq 2 ] && printf '%s' "$out" | grep -q "unknown argument"
-  r=$?
+  if [ "$code" -eq 2 ] && printf '%s' "$out" | grep -q "unknown argument"; then r=0; else r=1; fi
   arm "an unknown argument exits 2" "$r" "rc=$code out=$out"
 
   rm -rf "$tmp"

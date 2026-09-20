@@ -15,6 +15,16 @@ name: Shell harnesses
 # per file: D26's finding was that a `pr-task-gate.sh` edit did not even trigger
 # this workflow, so every script a job here executes gets its own entry.
 #
+# D26 HAS EXACTLY ONE AMENDED EXCEPTION, and it is stated where it applies (the
+# pds-* block in the pull_request list): for a family whose membership is a
+# PREDICATE rather than a list, the glob is the honest entry, because an
+# enumeration is a snapshot and the corpus is a rule. That exception is earned
+# by arm B2 of scripts/shell-harnesses-dispatch.test.sh, which re-derives the
+# corpus from the tree and reds if any member is untriggered or unrostered. It
+# is NOT a budget: the 21000-char expression cap that used to force globs here
+# stopped applying when the dispatcher body moved to
+# scripts/shell-harness-dispatch.sh (task-ca50ed283930706a).
+#
 # Third tenant: scripts/release-scan.test.sh, the verdict-derivation matrix for
 # scripts/release-scan.sh — the one machine reader of CI state the
 # release-curation agent trusts. NOTHING in .github/workflows/** invoked
@@ -767,16 +777,39 @@ on:
       # an unrelated PDS PR (#18949's rollup) that could neither have caused it
       # nor repaired it from its own fence.
       #
-      # FIVE GLOBS, NOT ELEVEN FILES, AND D26 IS OVERRULED BY A HARD CAP, not by
-      # taste. Every roster row must be a VERBATIM entry of this list (clause A
-      # of scripts/shell-harnesses-dispatch.test.sh), and the roster lives inside
-      # the `changes` job's `run:` block, which GitHub parses as ONE expression
-      # capped at 21000 characters. That block is ~19.7k on main: eleven
-      # per-file rows plus explanatory comments inside the string pushed it to
-      # 21k and GitHub refused the WHOLE FILE — `Invalid workflow file … Exceeded
-      # max expression length 21000`, a startup failure with zero jobs, which
-      # means EVERY harness in this workflow goes dark, not just pds. The globs
-      # cost five rows instead of eleven and leave the block ~1.1k under.
+      # FIVE GLOBS, NOT ELEVEN FILES — AND AS OF task-ca50ed283930706a THIS IS A
+      # CHOICE AGAIN, NOT A RATION. D26 IS AMENDED HERE, AND THE AMENDMENT IS
+      # THIS: FOR A FAMILY WHOSE MEMBERSHIP IS A PREDICATE, THE GLOB IS THE
+      # HONEST ENTRY AND THE ENUMERATION IS THE DISHONEST ONE — an enumeration
+      # is a snapshot of the corpus on the day it was written, a glob is the
+      # rule the corpus is actually defined by, and the next scripts/pds-*.sh
+      # file is covered by the rule and missed by the snapshot.
+      #
+      # WHAT CHANGED, so nobody re-derives the wrong reason from this comment.
+      # These globs used to be a BUDGET decision. Every roster row must be a
+      # VERBATIM entry of this list (clause A of
+      # scripts/shell-harnesses-dispatch.test.sh), the roster used to live
+      # inside the `changes` job's interpolated `run:` block, and GitHub parses
+      # such a block as ONE expression capped at 21000 characters. That block
+      # was 19968 bytes on main — 32 under the 20000 fail floor of
+      # scripts/workflow-run-block-length-check.sh. Eleven per-file rows pushed
+      # it over and GitHub refused the WHOLE FILE — `Invalid workflow file …
+      # Exceeded max expression length 21000`, a startup failure with zero jobs,
+      # every harness dark, not just pds. #19446 needed two rows and cost 98
+      # bytes against 32, so it backed them out. The roster now lives in
+      # scripts/shell-harness-dispatch.sh and that scalar is 38 literal bytes,
+      # so the cap no longer bounds anything: per-file rows are affordable again
+      # (measured: the two rows #19446 backed out leave the guard at rc=0).
+      #
+      # D26 therefore HOLDS UNAMENDED everywhere else in these lists: a named
+      # script a job executes gets its own entry, and no cap excuses skipping
+      # it — scripts/shell-harness-dispatch.sh above is itself such an entry.
+      # The pds-* family is the ONE exception, and it earns it by having a
+      # predicate: arm B2 of scripts/shell-harnesses-dispatch.test.sh re-derives
+      # the axis-d corpus from the tree on every run and demands of EVERY member
+      # that it match both an entry here and a `pds-harnesses` roster row. A
+      # glob that stopped covering the corpus reds there. An enumeration that
+      # silently fell behind it would not.
       #
       # scripts/pds-*.py is its own entry because `scripts/pds-*.sh` above misses
       # it ON ITS EXTENSION ALONE — a path in a lane that believes itself covered.
