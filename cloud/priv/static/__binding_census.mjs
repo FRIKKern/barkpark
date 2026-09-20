@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 84 write call sites collapse to 73 route keys; 10 of those keys are
+// The 85 write call sites collapse to 73 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -105,14 +105,14 @@
 //     is NOT among them: openSiteEnvModal's guard is `with_team_site(conn, fn)`,
 //     tenancy with no ability term at all, so promoting it would need a
 //     different mistake than this one. A builder who counts `require_ability`
-//     as elevated gets 56, not 49 — those 6 plus the 1 row whose whole
+//     as elevated gets 57, not 50 — those 6 plus the 1 row whose whole
 //     authority lives below the router in Accounts.pat_abilities_allowed?/2,
 //     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor cannot read 15 of the 84 — they build their path from a
+//     path extractor cannot read 15 of the 85 — they build their path from a
 //     variable or a helper — and a census that counted only what it read
-//     literally would call that 69-of-69 and go green over a hole. Two of those
+//     literally would call that 70-of-70 and go green over a hole. Two of those
 //     15 are the console's HIGHEST-privilege writes (fleetRolloutAction and
 //     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
 //     does not drop at all: submitActivateDecision builds
@@ -172,7 +172,7 @@
 //   `fence`, removing the predicate around the call site IS now reachable —
 //   deleting the band read, neutering the decision, or dropping the fence pin
 //   itself each exit 2. The narrowing is exactly as wide as the fence pins go,
-//   and today that is 10 bands over 40 of the 48 predicated rows. Every other
+//   and today that is 10 bands over 41 of the 49 predicated rows. Every other
 //   predicated row is still LIMIT 1.
 //
 //   LIMIT 1b — (2i-4)'s ACCOUNTING IS OVER READ SITES, NOT OVER ROWS. It walks
@@ -319,7 +319,7 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 84 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 85 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
@@ -544,6 +544,7 @@ const PIN = [
   // ── studio / onboarding
   { fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
   { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "ackRunwayStep", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w55-bl: the published-doc step ack; same runway, same canManage gate as dismissRunway" },
 
   // ── instance detail — the console's densest unpredicated cluster
   { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits the LIVE arm's `data-life-name` companion only on that arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). cch-w46-bl RE-POINTED THE HOOK: the refused arm now carries the same `data-life-verb` as the live one (one verb, ONE identity, offered or refused), so bare `data-life-verb` stopped discriminating the two arms and the probe below moved to `data-life-verb=\"decommission\" data-life-name=`, which lifecycleActionHtml writes in the mode===\"live\" branch alone; paintLifecycleActions also binds only a non-disabled control now. Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
@@ -1705,7 +1706,7 @@ if (unresolved.length) {
 // which is the arm working exactly as designed. RE-DERIVED by RUNNING this
 // census on this tree and reading the `found` line it PRINTED (84/49/48/1),
 // never by arithmetic over two branches' numbers.
-const EXPECT = { total: 84, elevated: 49, predicated: 48, unpredicated: 1 };
+const EXPECT = { total: 85, elevated: 50, predicated: 49, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
