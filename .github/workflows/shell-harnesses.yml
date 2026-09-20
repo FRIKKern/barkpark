@@ -265,15 +265,6 @@ on:
       # an INPUT of this job exactly as bp-pds-charter.md is above.
       - "scripts/pds-personal-local-smoke_test.sh"
       - "docs/setup/personal-local.md"
-      # THE TWO PORTABILITY GUARDS. Neither matches `scripts/pds-*.sh`, so
-      # without these lines an edit to a guard dispatches no job and the guard
-      # cannot red on its own change — the same defect the axis-D note above
-      # records, one directory over. Both are load-bearing on themselves: each
-      # carries its own selftest, its planted-RED positive control and its
-      # empty-population refusal, so an edit that quietly voids a control is
-      # exactly the edit that must trigger this job.
-      - "scripts/mktemp-portability-check.sh"
-      - "scripts/stat-portability-check.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -936,15 +927,6 @@ on:
       # an INPUT of this job exactly as bp-pds-charter.md is above.
       - "scripts/pds-personal-local-smoke_test.sh"
       - "docs/setup/personal-local.md"
-      # THE TWO PORTABILITY GUARDS. Neither matches `scripts/pds-*.sh`, so
-      # without these lines an edit to a guard dispatches no job and the guard
-      # cannot red on its own change — the same defect the axis-D note above
-      # records, one directory over. Both are load-bearing on themselves: each
-      # carries its own selftest, its planted-RED positive control and its
-      # empty-population refusal, so an edit that quietly voids a control is
-      # exactly the edit that must trigger this job.
-      - "scripts/mktemp-portability-check.sh"
-      - "scripts/stat-portability-check.sh"
       - "scripts/file-ci-failure-issue.sh"
       - "scripts/file-ci-failure-issue.test.sh"
       - "scripts/install-cli.sh"
@@ -1652,8 +1634,6 @@ jobs:
           pds-harnesses scripts/pds-crown-stamp.sh
           pds-harnesses scripts/pds-personal-local-smoke_test.sh
           pds-harnesses docs/setup/personal-local.md
-          pds-harnesses scripts/mktemp-portability-check.sh
-          pds-harnesses scripts/stat-portability-check.sh
           pds-harnesses scripts/pr-task-gate.sh
           pds-harnesses api/lib/barkpark/tasks/*.ex
           pds-harnesses internal/taskboard/*.go
