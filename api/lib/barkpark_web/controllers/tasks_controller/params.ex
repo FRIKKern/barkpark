@@ -156,11 +156,60 @@ defmodule BarkparkWeb.TasksController.Params do
   # ─── Render / shape ─────────────────────────────────────────────────────
 
   # axi-s1 (R1): parse the optional `?view=` request param into a render view.
-  # ONLY the exact string "brief" opts in; absent, unknown, or non-string
-  # values (Phoenix array/map params) all fall back to :full — the server
-  # default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  # ONLY the exact strings "brief" and "board" opt in; absent, unknown, or
+  # non-string values (Phoenix array/map params) all fall back to :full — the
+  # server default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  #
+  # THE THREE VIEWS, and what each one is FOR:
+  #
+  #   * `full` (default) — the bd-compatible card with the whole `content`
+  #     echo. `bp task get` and every consumer that reads a task's prose.
+  #   * `brief` — the AXI brief card v2: a different KEY SET (criteria_met /
+  #     criteria_total, no `type`, no `dependency_count`), a deliberate diet
+  #     for agent list reads.
+  #   * `board` — the FULL card with the `content` echo REMOVED, and nothing
+  #     else changed. See `render_doc/2`'s `:board` clause for why this is a
+  #     subtraction and not a third key set.
+  @views ~w(full brief board)
+
   def parse_view("brief"), do: :brief
+  def parse_view("board"), do: :board
   def parse_view(_), do: :full
+
+  @doc """
+  The declared `?view=` value set, in manifest order. ONE owner, read by the
+  index route's strict parser below and by the contract tests that pin the
+  accepted set — so a fourth view cannot be added at the renderer and stay
+  invisible to the refusal.
+  """
+  def views, do: @views
+
+  @doc """
+  STRICT `?view=` for `GET /v1/tasks` only: an undeclared value is
+  `{:error, {:unknown_view, value}}` (a named 400 at the controller), never a
+  silent fall back to `:full`.
+
+  WHY THE INDEX AND NOT EVERY ROUTE. A typo'd view on THIS route is the
+  expensive mistake: `?view=boad` silently serves the full corpus echo —
+  measured at ~11 MB per page on the live ledger, which is the exact defect
+  `board` exists to remove — and the caller reads a 200 it cannot tell from a
+  cheap one. It is also the only route where `reject_unknown_flat_params/2`
+  already closed the FLAT namespace, so a strict value check is the same door's
+  other half rather than a new rule.
+
+  `/v1/tasks/ready` and `/v1/tasks/prime` keep the lenient fallback ON PURPOSE:
+  `tasks_controller_test.exs`, "absent and unknown view both return the full
+  shape unchanged", pins `ready?view=bogus` → full today. Flipping that is a
+  wider contract decision (it can break a live CLI), not something to smuggle
+  in beside a projection. The asymmetry is stated here so the next reader finds
+  a decision, not an oversight.
+  """
+  def parse_index_view(%{"view" => v}) when is_binary(v) do
+    if v in @views, do: {:ok, parse_view(v)}, else: {:error, {:unknown_view, v}}
+  end
+
+  def parse_index_view(%{"view" => v}), do: {:error, {:unknown_view, inspect(v)}}
+  def parse_index_view(_), do: {:ok, :full}
 
   # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
   # Keep the field set tight enough that it still maps cleanly onto the
@@ -295,6 +344,49 @@ defmodule BarkparkWeb.TasksController.Params do
     # single canonical owner (Barkpark.Tasks.Criteria). Key OMITTED when
     # criteria are absent/empty (wire §4: omit the segment, never "0/0").
     |> put_criteria_progress(content)
+  end
+
+  # ─── `?view=board` — the FULL card MINUS the content echo ───────────────
+  #
+  # task-1ca34359dc0805df. `bp tasks` re-lists the whole corpus whenever the
+  # ledger moves, and the ledger never stops moving; measured on guerrilla, one
+  # exhaustive walk is ~100 MB over ~10 pages. Almost all of it is ONE key:
+  # `content`, which carries `description`, `operating_instruction` and the
+  # `acceptance_criteria` array with its `evidence` blocks and up-to-five
+  # `attempts` notes per criterion — multi-kilobyte prose per row that the
+  # BOARD does not render. The board draws a row from `doc_id`, `rev`, `title`,
+  # `lifecycle_status`, `kind`, `parent_id`, `priority`, `labels`, `claim`,
+  # `criteria_progress`, `dependency_count`/`dependent_count` and the two
+  # timestamps (`internal/taskboard/fetch.go`, `taskWire`), and fetches a row's
+  # prose separately when a pane opens.
+  #
+  # WHY A SUBTRACTION AND NOT A THIRD KEY SET. `:brief` already exists and is a
+  # DIFFERENT SHAPE — it renames the criteria pair to `criteria_met` /
+  # `criteria_total`, drops `type`, `rev`, `kind` and both dependency counts,
+  # and caps `title` at 96 graphemes. A board built on it would be a client
+  # rewrite plus a truncation-honesty problem, which is why the earlier ruling
+  # on this row (lead-cli-r19, 2026-09-15) recorded that `?view=brief` "is the
+  # two-level-board redesign, not a param flip". `:board` is defined as
+  # `:full` with `content` deleted, so EVERY OTHER KEY IS BYTE-IDENTICAL to the
+  # default card, key for key and value for value: the existing `taskWire`
+  # decode reads it unchanged, and its `Content` field simply arrives absent
+  # (a zero `json.RawMessage`, which `toDetail` already degrades over).
+  #
+  # WHAT IS LOST, SAID OUT LOUD: `content` and everything a caller reads out of
+  # it — `description`, `acceptance_criteria` (texts, evidence, attempts),
+  # `operating_instruction`, `tags`, `engagement`, `disposition`, and any
+  # content field this card does not already promote to the top level. `labels`,
+  # `papers`, `sessions`, `kind`, `lifecycle_status`, `priority`, `assignee`,
+  # `parent_id`, `execution_policy`, `queue_gate`, `execution_class` and
+  # `claim` ARE promoted by `render_doc/2` :full, so they survive. A caller that
+  # needs the prose asks for the row: `GET /v1/tasks/:doc_id`, which is always
+  # full.
+  #
+  # NOT THE DEFAULT, and not proposed as one. The default view is a contract a
+  # great many readers depend on; this is an opt-in the caller that knows it
+  # renders a board asks for by name.
+  def render_doc(%Document{} = doc, :board) do
+    doc |> render_doc(:full) |> Map.delete(:content)
   end
 
   # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
@@ -690,7 +782,11 @@ defmodule BarkparkWeb.TasksController.Params do
     }
   end
 
-  def maybe_put_brief_truncation_help(base, _docs, :full), do: base
+  # `:board` joins `:full` here: it truncates NOTHING (it is the full card with
+  # one key removed), so charter law 2's honesty line would point at a cut the
+  # reader cannot find. The clause is explicit rather than a catch-all so a
+  # fourth view has to decide.
+  def maybe_put_brief_truncation_help(base, _docs, view) when view in [:full, :board], do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
     if Enum.any?(docs, &brief_truncated?/1),
@@ -1002,6 +1098,16 @@ defmodule BarkparkWeb.TasksController.Params do
     |> Map.put(:dependent_count, dependent_count)
     |> Map.put(:comment_count, 0)
     |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
+  end
+
+  # The `?view=board` LIST card: `render_doc_with_counts/3` — the SAME function
+  # the default view uses, so `dependency_count`, `dependent_count`,
+  # `comment_count` and `child_count` are computed by one owner — with the
+  # `content` echo removed. Defined as a wrapper rather than a forked builder
+  # precisely so a future key added to the full card reaches the board card for
+  # free; the ONLY difference between the two is the deleted key.
+  def render_board_with_counts(%Document{} = doc, counts, child_counts \\ %{}) do
+    doc |> render_doc_with_counts(counts, child_counts) |> Map.delete(:content)
   end
 
   # C2: a lightweight child summary — just enough to render the rail without

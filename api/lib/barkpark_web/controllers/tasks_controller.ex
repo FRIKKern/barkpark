@@ -334,6 +334,15 @@ defmodule BarkparkWeb.TasksController do
           &Params.render_brief(&1, child_counts, live_child_counts, live_parents)
         )
 
+      # task-1ca34359dc0805df: `?view=board` runs the SAME two queries and the
+      # SAME builder as `:full` — it differs only in the `content` key being
+      # deleted from each card, so no count, no ordering and no other field can
+      # drift between the default view and the board's.
+      :board ->
+        counts = Params.batch_edge_counts(docs)
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_board_with_counts(&1, counts, child_counts))
+
       :full ->
         counts = Params.batch_edge_counts(docs)
         # task-3e0eda896a247776: the SAME batched grouped query the brief card
@@ -404,11 +413,19 @@ defmodule BarkparkWeb.TasksController do
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
 
-          :full ->
+          # task-1ca34359dc0805df: prime honours `?view=board` on the same terms
+          # the index does — the full card minus the `content` echo. Prime's
+          # `?view=` stays LENIENT (an undeclared value is still `:full`); only
+          # the index fail-closes the value, see `Params.parse_index_view/1`.
+          full_or_board when full_or_board in [:full, :board] ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
             child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            render = &Params.render_doc_with_counts(&1, counts, child_counts)
+            render =
+              case full_or_board do
+                :board -> &Params.render_board_with_counts(&1, counts, child_counts)
+                :full -> &Params.render_doc_with_counts(&1, counts, child_counts)
+              end
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
         end
@@ -552,8 +569,17 @@ defmodule BarkparkWeb.TasksController do
     # fail-closed by #12780 while the top level stayed fail-OPEN, so
     # `?parent_id=X` and `?bogus=1` both returned a 200 carrying the UNFILTERED
     # page — a false confirmation, not a missing feature.
+    # task-1ca34359dc0805df: the `?view=` VALUE is fail-closed on this route,
+    # beside the flat-namespace and filter-container doors above. The flat key
+    # `view` was already accepted; its value was not checked, so `?view=boad`
+    # fell back to the default and served the whole `content` echo — ~11 MB per
+    # page on the live ledger — behind a 200 the caller cannot tell from the
+    # cheap answer it asked for. That silent-expensive-fallback IS the defect
+    # class `view=board` exists to close, so the refusal ships with it.
+    # `Params.parse_index_view/1` documents why ready/prime stay lenient.
     with :ok <- Params.reject_unknown_flat_params(params, :index),
-         {:ok, filters} <- Params.parse_index_filters(params) do
+         {:ok, filters} <- Params.parse_index_filters(params),
+         {:ok, _view} <- Params.parse_index_view(params) do
       # cchi-bl-task-get-needs-a-server-side-prefix-lookup: `id_prefix` is the
       # one narrowing that answers with a DIFFERENT, lean body (doc_id + title),
       # so it branches here rather than composing as another where-clause below.
@@ -573,8 +599,31 @@ defmodule BarkparkWeb.TasksController do
           end
       end
     else
+      {:error, {:unknown_view, value}} -> unknown_view(conn, value)
       {:error, reason} -> invalid_filter(conn, reason)
     end
+  end
+
+  # An undeclared `?view=` on the index (task-1ca34359dc0805df).
+  #
+  # Emitted through `BarkparkWeb.ErrorResponse` — the ONE emitter of the §9
+  # envelope `{"error":{"code","message","request_id"}}` — so the refusal is
+  # correlatable to a log line, not another hand-built body. The code is the
+  # ALREADY-DECLARED `invalid_filter` (`Barkpark.Content.Errors`), because this
+  # IS a refused query narrowing and inventing a code would add a variant the
+  # public `Error.code` enum, the OpenAPI document and every generated SDK have
+  # never been told about (`error_code_coverage_test.exs` guards exactly that).
+  # The machine-readable half rides `details`: the param, what was sent, and
+  # the accepted set — so a client branches without parsing prose.
+  defp unknown_view(conn, value) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :bad_request,
+      "invalid_filter",
+      "view must be one of #{Enum.join(Params.views(), ", ")}; got #{inspect(value)}",
+      %{param: "view", value: value, accepted: Params.views()},
+      "Drop ?view= for the default full card, ?view=board for the full card without the content echo, or ?view=brief for the agent list card."
+    )
   end
 
   # ─── GET /v1/tasks?id_prefix=… ──────────────────────────────────────────
