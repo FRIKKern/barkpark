@@ -7,12 +7,22 @@
 # subject's BP_MIX_TEST_STRICT_DRY_RUN seam stops it one line before `exec`, so
 # this harness needs neither Elixir nor a database and cannot rot into a skip.
 #
-# It has three parts:
-#   1. REFUSAL cases   — each must exit 2 AND name the offending argument.
+# It has four parts:
+#   1. REFUSAL cases   — each must exit REFUSE_EXIT (64) AND name the offending
+#      argument.
 #   2. PASS-THROUGH    — each must exit 0 and print the argv UNCHANGED.
-#   3. MUTATION proof  — each guard is neutralised by its `# MUT:` anchor in a
+#   3. DISTINCTNESS    — the refusal code must be one `mix test` cannot return:
+#      not 0 (pass), not 1 (mix's own failure), and above all NOT 2, which is
+#      ExUnit's "tests failed" status. Mutation-proved by reverting the
+#      constant to 2. See task-620ea822de73bf5e.
+#   4. MUTATION proof  — each guard is neutralised by its `# MUT:` anchor in a
 #      scratch copy, and the case that guard owns must STOP refusing. A guard
 #      whose removal changes nothing was never the detector.
+#
+# WHAT THIS HARNESS CANNOT SEE: it never invokes `mix`, so it cannot observe
+# that a REAL failing suite exits 2. That half lives in
+# scripts/mix-test-strict-live.test.sh, which needs Elixir and a real project
+# and refuses (exit 2, CANNOT MEASURE) rather than skipping when it has neither.
 #
 # EXIT: 0 all cases pass · 1 at least one failed · 2 cannot measure.
 
@@ -21,6 +31,16 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUBJECT="$ROOT/scripts/mix-test-strict.sh"
 [ -f "$SUBJECT" ] || { echo "mix-test-strict.test: CANNOT READ — no $SUBJECT" >&2; exit 2; }
+
+# Read the refusal status OUT OF THE SUBJECT rather than hard-coding it here:
+# a harness that carries its own copy of the number cannot notice the subject
+# changing it. The literal 2 below is ExUnit's, and is hard-coded on purpose —
+# that is the value the refusal must never collide with.
+EXUNIT_FAILED_EXIT=2
+REFUSE_EXIT="$(sed -n 's/^REFUSE_EXIT=\([0-9][0-9]*\)$/\1/p' "$SUBJECT" | head -1)"
+case "$REFUSE_EXIT" in
+  ''|*[!0-9]*) echo "mix-test-strict.test: CANNOT MEASURE — no REFUSE_EXIT=<int> line in $SUBJECT" >&2; exit 2 ;;
+esac
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); echo "  ok   $*"; }
@@ -57,10 +77,10 @@ run() {
 expect_refusal() { # label, expected-substring, args...
   local label="$1" needle="$2"; shift 2
   run "$SUBJECT" "$@"
-  if [ "$RC" -ne 2 ]; then bad "$label — expected exit 2, got $RC"; return; fi
+  if [ "$RC" -ne "$REFUSE_EXIT" ]; then bad "$label — expected exit $REFUSE_EXIT, got $RC"; return; fi
   case "$OUT" in
-    *"$needle"*) ok "$label (exit 2, names '$needle')" ;;
-    *) bad "$label — exit 2 but output never named '$needle'"; printf '%s\n' "$OUT" ;;
+    *"$needle"*) ok "$label (exit $REFUSE_EXIT, names '$needle')" ;;
+    *) bad "$label — exit $REFUSE_EXIT but output never named '$needle'"; printf '%s\n' "$OUT" ;;
   esac
 }
 
@@ -121,10 +141,51 @@ expect_pass "no arguments at all (a whole-suite run stays legal)" ""
 
 echo "CANNOT-MEASURE"
 OUT="$(cd "$TMP" && BP_MIX_TEST_STRICT_DRY_RUN=1 bash "$SUBJECT" 2>&1)"; RC=$?
-if [ "$RC" -eq 2 ] && case "$OUT" in *"CANNOT READ"*"no mix.exs"*) true ;; *) false ;; esac; then
-  ok "outside a mix project: exit 2 and a distinct CANNOT READ line"
+if [ "$RC" -eq "$REFUSE_EXIT" ] && case "$OUT" in *"CANNOT READ"*"no mix.exs"*) true ;; *) false ;; esac; then
+  ok "outside a mix project: exit $REFUSE_EXIT and a distinct CANNOT READ line"
 else
-  bad "outside a mix project: expected exit 2 + CANNOT READ, got $RC / $OUT"
+  bad "outside a mix project: expected exit $REFUSE_EXIT + CANNOT READ, got $RC / $OUT"
+fi
+
+echo "EXIT-CODE DISTINCTNESS (a refusal must not wear ExUnit's failure code)"
+# THE REGRESSION THIS SECTION EXISTS FOR (task-620ea822de73bf5e): both refusal
+# arms used to exit 2, the same code `mix test` returns when the suite RAN and
+# tests FAILED, so `… || echo REFUSED` called a red suite a refusal.
+if [ "$REFUSE_EXIT" -ne "$EXUNIT_FAILED_EXIT" ]; then
+  ok "refusal status $REFUSE_EXIT is not ExUnit's tests-failed status $EXUNIT_FAILED_EXIT"
+else
+  bad "refusal status is $REFUSE_EXIT — the SAME code a failed-but-completed run returns"
+fi
+case "$REFUSE_EXIT" in
+  0|1) bad "refusal status $REFUSE_EXIT collides with mix's own (0 pass / 1 mix failure)" ;;
+  *)   ok "refusal status $REFUSE_EXIT collides with neither 0 (pass) nor 1 (mix's own failure)" ;;
+esac
+
+# Both refusal ARMS, not just the validate_args one, must carry it.
+run "$SUBJECT" test/real/alpha_test.exs test/real/gone_test.exs
+argv_rc=$RC
+OUT="$(cd "$TMP" && BP_MIX_TEST_STRICT_DRY_RUN=1 bash "$SUBJECT" 2>&1)"; guard_rc=$?
+if [ "$argv_rc" -eq "$REFUSE_EXIT" ] && [ "$guard_rc" -eq "$REFUSE_EXIT" ]; then
+  ok "both arms refuse with $REFUSE_EXIT (validate_args=$argv_rc, project-guard=$guard_rc)"
+else
+  bad "arms disagree: validate_args=$argv_rc, project-guard=$guard_rc, wanted $REFUSE_EXIT both"
+fi
+
+# RED-WITHOUT: put the old value back and the distinctness case must fail. A
+# check that passes with the defect restored was never checking anything.
+revert="$TMP/mutant-refuse-exit.sh"
+sed "s/^REFUSE_EXIT=$REFUSE_EXIT\$/REFUSE_EXIT=$EXUNIT_FAILED_EXIT/" "$SUBJECT" > "$revert"
+if ! grep -q "^REFUSE_EXIT=$EXUNIT_FAILED_EXIT\$" "$revert"; then
+  bad "CANNOT MEASURE — reverting REFUSE_EXIT did not change the file"
+elif ! bash -n "$revert"; then
+  bad "CANNOT MEASURE — reverted copy does not parse"
+else
+  run "$revert" test/real/alpha_test.exs test/real/gone_test.exs
+  if [ "$RC" -eq "$EXUNIT_FAILED_EXIT" ]; then
+    ok "REFUSE_EXIT reverted to $EXUNIT_FAILED_EXIT -> the refusal is indistinguishable again (exit $RC): the constant IS the detector"
+  else
+    bad "REFUSE_EXIT reverted but the refusal still exited $RC — something else sets the status"
+  fi
 fi
 
 echo "MUTATION PROOF (neutralise a guard; the case it owns must stop refusing)"
