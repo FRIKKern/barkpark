@@ -325,6 +325,19 @@ defmodule Barkpark.Tasks.Landed do
   # See the moduledoc: this is a PERMIT predicate, so the explicit author
   # declaration wins in BOTH directions and prose decides only its absence.
   #
+  # THE POLARITY IS RULED, NOT UNDECIDED (task-573618865e3c2b3f, 2026-09-17,
+  # by main as orchestrator): an explicit `merge_gate: true` STAYS the
+  # candidate a landing notice may flip. The inversion task-4dca6c8453fb1f7c
+  # asked for (refuse to flip any flagged criterion) is NOT implemented; the
+  # fence it wanted already exists per row as `merge_discharges: false`
+  # (#16619), read by `merge_discharges?/1` below. Effect, measured 2026-09-17
+  # over every row carrying a `landed:pr-*` label and pinned BY ID in
+  # internal/cli/tasks_landed_polarity_fence_test.go: 11 rows carry a
+  # resolvable candidate, 7 of them only because of this polarity, so the
+  # inversion would have cut the cure from 11 rows to 4. The Go mirror of this
+  # predicate, `landedMergeShaped` in internal/cli/tasks_landed_cmd.go, carries
+  # the same note; a reader of either side lands on the ruling.
+  #
   # SHAPE ONLY. "Is this the lead's row rather than the builder's?" — the same
   # question `Tasks.Stamp` and `Tasks.Close.autostamp_merge_gate/6` ask, read
   # off the same field, unchanged. `merge_discharges?/1` asks the other one.

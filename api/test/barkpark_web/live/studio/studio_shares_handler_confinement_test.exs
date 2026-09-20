@@ -75,7 +75,13 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
     raw = "shares-edge-parity-#{System.unique_integer([:positive])}"
 
     {:ok, token} =
-      Auth.create_token(raw, "shares edge parity", @dataset, ~w(read write admin))
+      Auth.create_token(
+        raw,
+        "shares edge parity",
+        @dataset,
+        ~w(read write admin),
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # The VICTIM tenant. Real, resolvable, and foreign to the mounted scope.
     ws_b = create_workspace!("shares-edge-b-#{System.unique_integer([:positive])}")

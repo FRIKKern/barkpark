@@ -31,13 +31,36 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
   setup %{conn: conn} do
     {ws, _proj} = TenancyFixtures.ensure_default_scope!()
 
-    {:ok, _} = Auth.create_token(@admin, "caps admin", @dataset, ["read", "write", "admin"])
-    {:ok, _} = Auth.create_token(@member, "caps member", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @admin,
+        "caps admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @member,
+        "caps member",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     # A READ-ONLY api token: create_token auto-memberships it on the Default ws,
     # so it IS a member — but its permission array is ["read"], so derive/1's
     # write arm (permits?(token, :write)) is false. This is the exact shape of
     # the hole: a member-but-read-only principal on the non-restricted Default.
-    {:ok, _} = Auth.create_token(@readonly, "caps readonly", @dataset, ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "caps readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} =
       Content.upsert_schema(
