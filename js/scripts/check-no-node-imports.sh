@@ -23,8 +23,10 @@
 # second hand-typed copy), gives EVERY declared shape a plant-and-disarm
 # specimen pair, reds on any shape with no specimen (UNCOVERED) and on any
 # specimen whose shape has been deleted (ORPHANED), and reports a denominator
-# computed from the shape count. Plus a clean baseline and the two
-# refused-to-measure corpora.
+# computed from the shape count. Plus a clean baseline and the THREE
+# refused-to-measure corpora — no dirs at all (the floor literal), a dir holding
+# zero source files, and one dir missing while the derived count still meets the
+# floor (scan()'s own per-dir refusal, which the other two cannot reach).
 #
 # Usage: bash js/scripts/check-no-node-imports.sh            # the scan
 #        bash js/scripts/check-no-node-imports.sh --selftest # prove it can lose
@@ -264,9 +266,9 @@ selftest() {
       test "$(grep -cE "$anchor" "$tmp/t/probe.sh")" -eq 0
   }
 
-  # The census is sized off the SHAPES array itself — three fixed arms plus a
+  # The census is sized off the SHAPES array itself — four fixed arms plus a
   # plant and a disarm for every shape the scan declares.
-  total=$((3 + 2 * ${#SHAPES[@]}))
+  total=$((4 + 2 * ${#SHAPES[@]}))
 
   echo "check-no-node-imports --selftest (throwaway corpora under $tmp)"
   echo "  census: ${#SHAPES[@]} shape(s) declared by SHAPES, ${#SPECIMENS[@]} specimen(s) registered"
@@ -356,6 +358,33 @@ selftest() {
     say "a corpus dir with zero source files -> exit 3, never a green" 0
   else
     say "a corpus dir with zero source files -> exit 3 (got $rc)" 1
+    sed 's/^/        /' "$tmp/out"
+  fi
+
+  # 5. REFUSED TO MEASURE — ONE corpus dir is gone while the DERIVED COUNT still
+  #    meets the floor. This is a third, distinct refusal path and arms 3 and 4
+  #    are both blind to it: arm 3 removes the whole tree, which trips the
+  #    CORPUS_FLOOR literal before scan() ever runs, and arm 4 leaves the
+  #    directory in place holding no source files. Only `packages/core/src` can
+  #    reach this branch, because it is the one DIRS entry that is a literal
+  #    rather than a glob result — delete it and the derivation still yields 9
+  #    entries, the floor is satisfied, and the refusal has to come from scan()'s
+  #    own per-dir `! -d` test.
+  #
+  #    MEASURED, not argued: replacing that test's body with `continue` — the
+  #    exact pre-fix defect, a vanished dir read as clean — left this selftest at
+  #    PASS (19/19). The arm below is what that mutation now reds, and it is the
+  #    one assertion the deleted js/scripts/check-no-node-imports.selftest.sh
+  #    carried that nothing else here did.
+  fresh
+  rm -rf "$tmp/t/packages/core/src"
+  plant_check "the single-dir removal did not land" test ! -d "$tmp/t/packages/core/src"
+  rc="$(probe)"
+  if [ "$rc" -eq 3 ] && grep -q "CANNOT READ: packages/core/src missing" "$tmp/out" \
+     && ! grep -q "floor is" "$tmp/out"; then
+    say "ONE corpus dir missing while the count still meets the floor -> exit 3 from scan()'s own per-dir refusal" 0
+  else
+    say "ONE corpus dir missing while the count still meets the floor -> exit 3 naming that dir (got $rc)" 1
     sed 's/^/        /' "$tmp/out"
   fi
 
