@@ -254,6 +254,7 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
                 # `tags`), exactly as the driven rows below satisfy it.
                 "description" => "Anonymous reader census task-list fixture row."
               })
+              |> Barkpark.TaskBriefFixtures.with_brief()
           },
           @dataset,
           scope
@@ -354,6 +355,7 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
                   %{"criterion" => "slope proven", "met" => false}
                 ]
               })
+              |> Barkpark.TaskBriefFixtures.with_brief()
           },
           @dataset,
           scope

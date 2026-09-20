@@ -68,6 +68,7 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
       %{"kind" => "task", "lifecycle_status" => "open"}
       |> Barkpark.LabelFixtures.with_labels()
       |> Map.merge(content_extra)
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     {:ok, _} =
       Content.create_document(

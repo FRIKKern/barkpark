@@ -218,6 +218,7 @@ defmodule Barkpark.Tasks.Board.ClaimForwardTest do
       }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     {:ok, _draft} =
       Content.create_document(

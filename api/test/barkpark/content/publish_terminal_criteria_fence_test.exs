@@ -85,6 +85,7 @@ defmodule Barkpark.Content.PublishTerminalCriteriaFenceTest do
       "acceptance_criteria" => [%{"criterion" => @c0, "met" => false}]
     }
     |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+    |> Barkpark.TaskBriefFixtures.with_brief()
   end
 
   defp doc_write(doc_id, content, scope) do

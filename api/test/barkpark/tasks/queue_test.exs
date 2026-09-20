@@ -81,6 +81,7 @@ defmodule Barkpark.Tasks.QueueTest do
       }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     {:ok, doc} =
       Content.create_document(
