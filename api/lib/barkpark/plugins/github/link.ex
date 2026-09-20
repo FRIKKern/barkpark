@@ -13,10 +13,58 @@ defmodule Barkpark.Plugins.Github.Link do
       }
 
   This is plain task CONTENT (like `code_refs`), NEVER a declared task-schema
-  field — the github plugin must never mutate the tasks plugin's schema. Reads
-  and writes go through `Barkpark.Content.*` ONLY; touching `Barkpark.Repo`
-  directly would bypass the draft/hook/broadcast path the plugin contract
-  depends on.
+  field — the github plugin must never mutate the tasks plugin's schema.
+
+  ## The Repo rule, narrowed by shape (amended 2026-09-20)
+
+  EVERY WRITE that touches a `content.documents` row goes through
+  `Barkpark.Content.*` — `put/4` below, `Intake`, `Adopt`, `Apply`, all of them.
+  That half is absolute: a direct `Barkpark.Repo` write would bypass the
+  draft/hook/broadcast path the plugin contract depends on, and there is no
+  shape for which that is acceptable.
+
+  READS were held to the same "`Content.*` ONLY" wording until 2026-09-20. That
+  wording was never true of this plugin and could not be made true, because a
+  read bypasses NO hook and NO broadcast (there is nothing on the read path to
+  bypass) while the `Content.*` reader surface is deliberately narrower than the
+  set of questions this plugin asks. The wording is therefore replaced by a
+  NAMED ALLOWLIST rather than widened to "writes-only": a raw read is legitimate
+  in this plugin only in the shapes enumerated here, and every site is counted
+  so a new one cannot arrive unnamed. `read_doctrine_test.exs` derives the live
+  site set from the source and reds when it stops matching this table.
+
+    * `acknowledgement.ex` (1) — the reporter-loop census. Needs an OR of TWO
+      `doc_id` prefixes (`gh-%` OR `drafts.gh-%`, because a draft-only intake row
+      must be counted), a FLEET-WIDE read when `dataset` is nil, and an UNCAPPED
+      population (its `total`/`open`/`closed` counts are documented as exact;
+      only the returned `rows` list is capped, and it is capped AFTER the
+      unacknowledged filter). `Content.list_documents/3` clamps to 1000 rows,
+      requires a dataset, and AND-combines one op per field, so it can express
+      none of the three; `collect_all_documents/3` fixes only the cap.
+    * `relations.ex` (1) — the distinct-child cap probe. Counts DISTINCT
+      drafts-prefix-normalized `doc_id`s whose `content.parent_id` matches the
+      parent with the SAME normalization applied to both sides, through a
+      `LIMIT cap+1` subquery so a parent with thousands of children is never
+      scanned. `Content.count_documents/3` has neither the regexp normalization
+      nor the bounded-probe shape, and would turn an O(cap) answer into an O(n)
+      COUNT. The by-id reads in this same module ARE migrated — they go through
+      `Content.get_document/4` (see `load_draft_first/3`), which is the proof
+      that the allowlist is shape-bound and not a blanket exemption.
+    * `health.ex` (4) and `conflicts.ex` (3) — NOT Content documents at all.
+      Three shapes: the plugin's OWN `github_sync_conflicts` table (`Conflict`),
+      the append-only `mutation_events` log (`max(id)` head probe), and
+      `Oban.Job` queue-depth counts. `Content.*` does not read any of the three
+      and must not learn to.
+    * `outbox.ex` (1) — the outbound drain reads `mutation_events`, the same
+      append-only log. An event is not a document; there is no `Content.*`
+      reader for it, and inventing one for a single caller would put plugin
+      concerns inside `Content`.
+
+  So: no read site named above is expressible through an existing `Content.*`
+  reader without changing its result set or its cost, and where a reader DID
+  fit the shape (document-by-id) the migration already happened. A future read
+  that IS a plain typed document lookup must use `Content.*`; adding a row to
+  the table above is the LAST resort, and the test makes it a deliberate act.
 
   ## Why the write is stamped `source: :github`
 
