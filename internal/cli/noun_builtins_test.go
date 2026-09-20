@@ -158,56 +158,110 @@ func TestNounHelpMarksBuiltinsAsBuiltIn(t *testing.T) {
 }
 
 // TestDispatchedVerbLiteralsAreRegisteredOrManifest is the anti-drift guard
-// that keeps the registry honest: it re-derives the verb intercepts from
-// cli.go's SOURCE and requires each to be either a registered built-in (so the
-// help block prints it) or a real manifest verb of that noun (so the manifest
-// block prints it). A future hand-written `if verb == "foo"` intercept for a
-// verb the manifest does not declare fails here — which is precisely how
-// `task create` went invisible. There is no exemption list; both branches are
-// self-justifying, so this guard cannot be widened into a rubber stamp.
+// that keeps the registry honest: it re-derives the verb intercepts from the
+// SOURCE of every non-test .go file in internal/cli — not cli.go alone, because
+// cli.go delegates verb-level dispatch to lookupNounBuiltin one file over — and
+// requires each to be either a registered built-in (so the help block prints
+// it) or a real manifest verb (so the manifest block prints it). A future
+// hand-written `if verb == "foo"` intercept for a verb the manifest does not
+// declare fails here — which is precisely how `task create` went invisible.
+// There is no exemption list; both branches are self-justifying, so this guard
+// cannot be widened into a rubber stamp.
+//
+// WHICH LITERALS IT JUDGES is a predicate, never a list:
+//
+//   - A line naming the noun — `noun == "x"` anywhere in the package, or the
+//     enclosing `case "x":` in cli.go's dispatch switch — is judged against
+//     THAT noun, when x is a manifest noun or a registered built-in's noun.
+//   - A literal with no noun on the line is judged only in a file that
+//     PARTICIPATES in verb-level built-in dispatch (it names nounBuiltins or
+//     lookupNounBuiltin). There the verb must be dispatchable somewhere.
+//   - Everything else belongs to a WHOLE-NOUN built-in (`bp scaffy`,
+//     `bp cloud hetzner`, …): its noun is not a manifest noun and it renders
+//     its own help, so this table's premise does not apply. Those are counted
+//     and logged, not silently dropped — run with -v to read the disposition.
 func TestDispatchedVerbLiteralsAreRegisteredOrManifest(t *testing.T) {
-	src, err := os.ReadFile("cli.go")
-	if err != nil {
-		t.Fatalf("read cli.go: %v", err)
-	}
+	files := packageSourceFiles(t)
 	_, tree := loadTreeFrom(t, fullManifest)
 
 	caseLine := regexp.MustCompile(`^\s*case\s+"([^"]+)"\s*:`)
 	nounGuard := regexp.MustCompile(`noun\s*==\s*"([^"]+)"`)
-	verbLit := regexp.MustCompile(`verb\s*==\s*"([^"]*)"`)
+	// The leading class keeps `r.verb == "x"` (a struct FIELD on some result)
+	// out: only the bare dispatch variable `verb` is an intercept.
+	verbLit := regexp.MustCompile(`(^|[^\w.])verb\s*==\s*"([^"]*)"`)
+	// A file participates in verb-level dispatch if it names the registry or
+	// its lookup. cli.go reaches the built-ins through lookupNounBuiltin, and
+	// lookupNounBuiltin's own file is where an intercept escapes cli.go.
+	dispatchPath := regexp.MustCompile(`nounBuiltins|lookupNounBuiltin`)
 
 	registered := map[string]bool{}
+	registeredVerb := map[string]bool{}
+	builtinNoun := map[string]bool{}
 	for _, b := range nounBuiltins {
 		registered[b.Noun+" "+b.Verb] = true
+		registeredVerb[b.Verb] = true
+		builtinNoun[b.Noun] = true
+	}
+	manifestNoun := map[string]bool{}
+	for _, n := range tree.NounNames() {
+		manifestNoun[n] = true
 	}
 
-	var pairs []string
-	curNoun := ""
-	for _, line := range strings.Split(string(src), "\n") {
-		// Read CODE, not prose: this file's own comments talk ABOUT verb
-		// intercepts, and a doc line quoting one is not a dispatch.
-		if strings.HasPrefix(strings.TrimSpace(line), "//") {
-			continue
+	type site struct {
+		where  string // file:line
+		noun   string // "" when no noun is on the line (and the file is not cli.go)
+		verb   string
+		onPath bool // the file participates in verb-level dispatch
+	}
+	var sites []site
+	var pairs []string // cli.go-attributed pairs, for the non-vacuity anchor
+	var pathFiles []string
+	for _, f := range files {
+		onPath := dispatchPath.MatchString(f.body)
+		if onPath {
+			pathFiles = append(pathFiles, f.name)
 		}
-		if m := caseLine.FindStringSubmatch(line); m != nil {
-			curNoun = m[1]
-		}
-		for _, vm := range verbLit.FindAllStringSubmatch(line, -1) {
-			verb := vm[1]
-			if verb == "" {
-				continue // `verb == ""` is the bare-noun branch, not an intercept
+		curNoun := ""
+		for i, line := range strings.Split(f.body, "\n") {
+			// Read CODE, not prose: these files' own comments talk ABOUT verb
+			// intercepts, and a doc line quoting one is not a dispatch.
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue
 			}
-			noun := curNoun
-			if nm := nounGuard.FindStringSubmatch(line); nm != nil {
-				noun = nm[1]
+			if m := caseLine.FindStringSubmatch(line); m != nil {
+				curNoun = m[1]
 			}
-			pairs = append(pairs, noun+" "+verb)
+			for _, vm := range verbLit.FindAllStringSubmatch(line, -1) {
+				verb := vm[2]
+				if verb == "" {
+					continue // `verb == ""` is the bare-noun branch, not an intercept
+				}
+				if strings.HasPrefix(verb, "-") {
+					continue // `-h`/`--help` in the verb slot is a FLAG, not a verb
+				}
+				noun := ""
+				if nm := nounGuard.FindStringSubmatch(line); nm != nil {
+					noun = nm[1]
+				} else if f.name == "cli.go" {
+					noun = curNoun
+				}
+				sites = append(sites, site{
+					where:  fmt.Sprintf("%s:%d", f.name, i+1),
+					noun:   noun,
+					verb:   verb,
+					onPath: onPath,
+				})
+				if f.name == "cli.go" && noun != "" {
+					pairs = append(pairs, noun+" "+verb)
+				}
+			}
 		}
 	}
 
 	// Non-vacuity: if the switch shape or the regexes stop matching, fail loudly
 	// rather than assert nothing. `task ready` is a manifest-verb intercept that
-	// has been in cli.go since the frontier header shipped.
+	// has been in cli.go since the frontier header shipped. Both arms are pinned
+	// to cli.go so widening the scan cannot satisfy them from elsewhere.
 	if len(pairs) < 4 {
 		t.Fatalf("found only %d verb literal(s) in cli.go's dispatch (%v) — the "+
 			"switch shape or the regex changed; fix this guard before trusting it", len(pairs), pairs)
@@ -216,24 +270,93 @@ func TestDispatchedVerbLiteralsAreRegisteredOrManifest(t *testing.T) {
 		t.Fatalf("guard did not find the known `task ready` intercept in cli.go; "+
 			"extracted %v — the scan is not reading the dispatch", pairs)
 	}
-
-	var orphans []string
-	for _, p := range pairs {
-		if registered[p] {
-			continue
-		}
-		parts := strings.SplitN(p, " ", 2)
-		if _, ok := tree.Lookup(parts[0], parts[1]); ok {
-			continue // a manifest verb — its noun's help lists it from the manifest
-		}
-		orphans = append(orphans, p)
+	// And the scan must have reached past cli.go into the file cli.go delegates
+	// verb dispatch to, or it is the old one-file guard wearing a new name.
+	if len(files) < 2 || !contains(pathFiles, "noun_builtins.go") || !contains(pathFiles, "cli.go") {
+		t.Fatalf("the dispatch-path file set is %v over %d package file(s) — it must contain "+
+			"both cli.go and noun_builtins.go or an intercept one file over stays invisible",
+			pathFiles, len(files))
 	}
+
+	var orphans, outOfScope []string
+	for _, s := range sites {
+		switch {
+		case s.noun != "" && (manifestNoun[s.noun] || builtinNoun[s.noun]):
+			if registered[s.noun+" "+s.verb] {
+				continue
+			}
+			if _, ok := tree.Lookup(s.noun, s.verb); ok {
+				continue // a manifest verb — its noun's help lists it from the manifest
+			}
+			orphans = append(orphans, fmt.Sprintf("%s (%s %s)", s.where, s.noun, s.verb))
+		case s.noun != "":
+			// A noun this manifest does not declare and no built-in registers:
+			// a whole-noun built-in, which renders its own help.
+			outOfScope = append(outOfScope, fmt.Sprintf("%s (%s %s: not a manifest noun)", s.where, s.noun, s.verb))
+		case s.onPath:
+			if registeredVerb[s.verb] || dispatchableUnderSomeNoun(tree, s.verb) {
+				continue
+			}
+			orphans = append(orphans, fmt.Sprintf("%s (%q, no noun on the line, in the dispatch path)", s.where, s.verb))
+		default:
+			outOfScope = append(outOfScope, fmt.Sprintf("%s (%q: whole-noun built-in, off the verb-dispatch path)", s.where, s.verb))
+		}
+	}
+	sort.Strings(outOfScope)
+	t.Logf("scanned %d non-test file(s); %d verb literal(s); dispatch-path files %v; "+
+		"%d literal(s) out of this table's scope:\n  %s",
+		len(files), len(sites), pathFiles, len(outOfScope), strings.Join(outOfScope, "\n  "))
 	if len(orphans) > 0 {
 		sort.Strings(orphans)
-		t.Errorf("cli.go intercepts %v, which is neither a registered nounBuiltin "+
+		t.Errorf("internal/cli intercepts %v, which is neither a registered nounBuiltin "+
 			"nor a manifest verb — the CLI would dispatch a verb no help prints. "+
 			"Register it in noun_builtins.go instead of hand-writing the intercept.", orphans)
 	}
+}
+
+// dispatchableUnderSomeNoun reports whether the manifest declares `verb` under
+// any noun at all. It is the weaker test applied where the source does not name
+// the noun the intercept runs under.
+func dispatchableUnderSomeNoun(tree *manifest.Tree, verb string) bool {
+	for _, noun := range tree.NounNames() {
+		if _, ok := tree.Lookup(noun, verb); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// packageSource is one non-test .go file of internal/cli, kept SEPARATE (not
+// concatenated like readPackageSources) so a finding can cite file:line and so
+// per-file `case` state does not bleed across files.
+type packageSource struct {
+	name string
+	body string
+}
+
+func packageSourceFiles(t *testing.T) []packageSource {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read internal/cli sources: %v", err)
+	}
+	var out []packageSource
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		out = append(out, packageSource{name: name, body: string(body)})
+	}
+	if len(out) == 0 {
+		t.Fatal("read internal/cli sources: no non-test .go files found — the scan would pass vacuously")
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
 }
 
 func contains(ss []string, want string) bool {
