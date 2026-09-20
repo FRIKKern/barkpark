@@ -32,6 +32,10 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Application, as: App
+  alias Barkpark.BootModeSandbox
+
+  # The api/ project root, for the source-reading guards below.
+  @test_root Path.expand(Path.join([__DIR__, "..", ".."]))
 
   # Stand-ins for the three list ARGUMENTS `:one_shot` drops. Deliberately
   # recognisable atoms rather than real child specs: what is asserted is that
@@ -160,31 +164,264 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
 
   describe "boot_mode/0 knows :one_shot" do
     test ":one_shot is an accepted mode, and a typo is still refused" do
-      # RESTORE BY DELETION when it was unset. `put_env(:boot_mode, nil)` is NOT
-      # the same state as "never set": `Barkpark.ApplicationBootModeTest`
-      # asserts `fetch_env(:barkpark, :boot_mode) == :error`, and a nil restore
-      # reddened it from this file. `fetch_env` is what distinguishes the two.
-      original = Application.fetch_env(:barkpark, :boot_mode)
+      # THE WRITE IS SANDBOXED, NOT MERELY UNDONE (task-086261728f14c078).
+      # This test is the ONLY in-VM writer of `:barkpark, :boot_mode` in
+      # api/test, and on 2026-09-18 its value reached
+      # `Barkpark.ApplicationBootModeTest` 43 modules later and reddened two
+      # assertions there. The previous guard — `async: false` plus an `on_exit`
+      # keyed off `fetch_env` — was already in place when that happened.
+      #
+      # `Barkpark.BootModeSandbox.sandboxed/1` restores in a `try … after`,
+      # synchronously, in this process, and then ASSERTS the key came back. Its
+      # moduledoc carries the measurement for why both sides must be
+      # `persistent: true`. There is no raw `Application.put_env` here any more,
+      # and the predicate guard below makes that a property of the TREE rather
+      # than of this file.
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:one_shot)
+        assert App.boot_mode() == :one_shot
 
-      # `persistent: true` on BOTH the write and the restore (2026-09-18). The
-      # production writer is `Barkpark.OneShot.boot!/0`, which is persistent, and
-      # a NON-persistent delete does not retract a persistent record: OTP keeps
-      # the persistent value in its own table and re-applies it the next time
-      # `:barkpark` is loaded. A restore that cannot undo every write this test
-      # makes is not a restore, and the value it leaves behind is node-global —
-      # `Barkpark.ApplicationBootModeTest` is the module that reads it next.
-      on_exit(fn ->
-        case original do
-          {:ok, mode} -> Application.put_env(:barkpark, :boot_mode, mode, persistent: true)
-          :error -> Application.delete_env(:barkpark, :boot_mode, persistent: true)
-        end
+        set.(:one_shot_typo)
+        assert_raise ArgumentError, fn -> App.boot_mode() end
       end)
 
-      Application.put_env(:barkpark, :boot_mode, :one_shot, persistent: true)
-      assert App.boot_mode() == :one_shot
+      # The escape this whole row is about, asserted at its source: by the time
+      # the writer's test returns, the node-global key is back. A reader that
+      # runs next cannot see `:one_shot`.
+      assert BootModeSandbox.current() == :error,
+             "the sandbox returned with :boot_mode still set — this is the leak"
+    end
 
-      Application.put_env(:barkpark, :boot_mode, :one_shot_typo, persistent: true)
-      assert_raise ArgumentError, fn -> App.boot_mode() end
+    test "the sandbox restores even when the block RAISES" do
+      # A restore that only runs on the happy path is not a restore. The
+      # `on_exit` this replaces did run on failure; a `try … after` must too, or
+      # the swap is a downgrade. Asserted, not assumed.
+      assert BootModeSandbox.current() == :error
+
+      assert_raise RuntimeError, "boom", fn ->
+        BootModeSandbox.sandboxed(fn set ->
+          set.(:one_shot)
+          raise "boom"
+        end)
+      end
+
+      assert BootModeSandbox.current() == :error,
+             "the sandbox leaked :boot_mode when its block raised"
+    end
+
+    test "a PRE-EXISTING value is put back, not deleted" do
+      # The restore is `fetch_env`-shaped for a reason: `put_env(:boot_mode, nil)`
+      # is NOT the same state as "never set", and the reader module asserts
+      # `fetch_env(...) == :error` for an ordinary boot. Both directions are
+      # measured here, on the same helper, so a restore-by-deletion that is
+      # correct for one and wrong for the other cannot pass.
+      assert BootModeSandbox.current() == :error
+
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:seed)
+
+        # Inside a sandbox whose `original` is {:ok, :seed}: the inner block
+        # must be put BACK to :seed, not deleted.
+        BootModeSandbox.sandboxed(fn inner -> inner.(:one_shot) end)
+
+        assert BootModeSandbox.current() == {:ok, :seed},
+               "a nested sandbox deleted a value it was supposed to restore"
+      end)
+
+      assert BootModeSandbox.current() == :error,
+             "the outer sandbox left :boot_mode behind"
+    end
+
+    test "absent/1 ESTABLISHES the key's absence rather than observing it" do
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:one_shot)
+
+        # The state the 2026-09-18 readers were in when they reddened: the node
+        # holds :one_shot. `absent/1` must not care.
+        assert BootModeSandbox.absent(fn -> App.boot_mode() end) == :full
+
+        assert BootModeSandbox.current() == {:ok, :one_shot},
+               "absent/1 did not put back the value it displaced"
+      end)
+
+      assert BootModeSandbox.current() == :error
+    end
+  end
+
+  describe "the restore is PERSISTENT, and that is a measured requirement" do
+    # A NEGATIVE RESULT, STATED RATHER THAN HIDDEN (task-086261728f14c078):
+    # dropping `persistent: true` from the sandbox's restore and running this
+    # whole file leaves it GREEN — 31 tests, 0 failures, measured 2026-09-20.
+    # No `mix test` run loads `:barkpark` again, so the resurrection never
+    # happens in-VM and no assertion about `:barkpark` can see it.
+    #
+    # An unmeasurable requirement decays into a style preference and gets
+    # "simplified" away. So it is measured HERE, on a throwaway application, on
+    # the only thing that can actually show it: the OTP semantics themselves.
+    @probe_app :bp_boot_mode_persistence_probe
+
+    defp probe_spec do
+      {:application, @probe_app,
+       [
+         {:description, ~c"boot-mode persistence probe"},
+         {:vsn, ~c"1"},
+         {:modules, []},
+         {:registered, []},
+         {:applications, []},
+         {:env, []}
+       ]}
+    end
+
+    setup do
+      on_exit(fn ->
+        Application.delete_env(@probe_app, :k, persistent: true)
+        Application.unload(@probe_app)
+      end)
+
+      :ok
+    end
+
+    test "a NON-persistent delete does not retract a PERSISTENT write — it is resurrected by load" do
+      Application.put_env(@probe_app, :k, :one_shot, persistent: true)
+
+      # Non-persistent delete, the shape the restore would have without the
+      # flag. It LOOKS clean...
+      Application.delete_env(@probe_app, :k)
+
+      assert Application.fetch_env(@probe_app, :k) == :error,
+             "precondition: the delete must read as clean, or this proves nothing"
+
+      # ...until the next load re-applies OTP's own persistent record.
+      :application.load(probe_spec())
+
+      assert Application.fetch_env(@probe_app, :k) == {:ok, :one_shot},
+             "the persistent record was NOT resurrected — OTP's semantics changed and " <>
+               "the `persistent: true` on the sandbox's restore can be reconsidered"
+
+      Application.unload(@probe_app)
+    end
+
+    test "control: a PERSISTENT delete does retract it, and load brings nothing back" do
+      # The arm that makes the one above a statement about PERSISTENCE rather
+      # than about `load/1` inventing values. Same writes, same load, one flag
+      # different, opposite answer.
+      Application.put_env(@probe_app, :k, :one_shot, persistent: true)
+      Application.delete_env(@probe_app, :k, persistent: true)
+
+      assert Application.fetch_env(@probe_app, :k) == :error
+
+      :application.load(probe_spec())
+
+      assert Application.fetch_env(@probe_app, :k) == :error,
+             "a persistent delete left a record behind"
+
+      Application.unload(@probe_app)
+    end
+
+    test "the sandbox's every :boot_mode write carries persistent: true" do
+      # The source-level half. `Barkpark.OneShot.boot!/0` — the PRODUCTION
+      # writer — is persistent, so a restore that is not persistent cannot undo
+      # what it does. Read off disk, so a future edit that drops the flag reds
+      # here instead of in a nightly three weeks later.
+      source = File.read!(Path.join(@test_root, "test/support/boot_mode_sandbox.ex"))
+
+      writes =
+        ~r/Application\.(?:put_env|delete_env)\(:barkpark, :boot_mode[^\n]*/
+        |> Regex.scan(source)
+        |> Enum.map(&hd/1)
+
+      # Control: the scan found the writes at all. Without this an empty list
+      # passes the loop below on nothing.
+      assert length(writes) >= 3,
+             "found #{length(writes)} :boot_mode write(s) in the sandbox — the scan is blind"
+
+      for w <- writes do
+        assert w =~ "persistent: true",
+               "a sandbox write of :boot_mode is not persistent, so it cannot undo " <>
+                 "Barkpark.OneShot.boot!/0: #{w}"
+      end
+    end
+  end
+
+  describe "no test outside the sandbox may write :boot_mode" do
+    # A PREDICATE OVER THE TREE, not a fix to one file (the same shape as the
+    # app.start guard below, and for the same reason). The 2026-09-18 escape
+    # needed exactly one raw `Application.put_env(:barkpark, :boot_mode, …)` in
+    # a test, and the NEXT one someone writes would be born outside any fix
+    # applied here. The rule is: `Barkpark.BootModeSandbox` is the only module
+    # under api/test that writes the key.
+    @sandbox "test/support/boot_mode_sandbox.ex"
+    @write_re ~r/Application\.(put_env|delete_env)\(\s*:barkpark\s*,\s*:boot_mode/
+
+    defp test_sources do
+      Path.wildcard(Path.join(@test_root, "test/**/*.{ex,exs}"))
+      |> Enum.map(&Path.relative_to(&1, @test_root))
+      |> Enum.sort()
+    end
+
+    # COMMENTS ARE NOT CODE. Three files in this walk DISCUSS the write in
+    # prose — including this one, two lines above — and a predicate that counts
+    # prose reports a violation nobody committed, gets waived, and the waiver
+    # becomes the policy. Strip `#`-leading lines before matching, exactly as
+    # the app.start guard's sibling does ("the parser reads commands, not
+    # prose"). The control test below is what proves the stripping did not also
+    # blind the match.
+    defp writes_boot_mode?(rel) do
+      @test_root
+      |> Path.join(rel)
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+      |> Enum.join("\n")
+      |> String.match?(@write_re)
+    end
+
+    test "the walk is reading a real, populated test tree" do
+      # PRECONDITION. Every assertion below is about a SET, and an empty set
+      # satisfies all of them vacuously — a moved directory would otherwise turn
+      # this describe block green.
+      files = test_sources()
+
+      assert length(files) > 100,
+             "only #{length(files)} test source(s) under #{@test_root}/test — the walk is blind"
+
+      assert @sandbox in files, "#{@sandbox} is not in the walk"
+      assert "test/barkpark/application_one_shot_boot_mode_test.exs" in files
+    end
+
+    test "control: the pattern finds a write where one really is" do
+      # An absence assertion needs a positive specimen, or it can pass because
+      # the regex is wrong rather than because the tree is clean.
+      assert writes_boot_mode?(@sandbox),
+             "the sandbox itself no longer writes :boot_mode — the predicate below measures nothing"
+
+      refute writes_boot_mode?("test/barkpark/application_boot_mode_test.exs"),
+             "the reader module writes :boot_mode directly again"
+
+      # The comment-stripping arm, measured on a file that NAMES the call in
+      # prose and does not make it. Without this the control above passes while
+      # the predicate reads documentation.
+      refute writes_boot_mode?("test/barkpark/application_one_shot_boot_mode_test.exs"),
+             "this file's PROSE is being read as a write — the comment stripping is broken"
+    end
+
+    test "Barkpark.BootModeSandbox is the ONLY writer under api/test" do
+      writers = Enum.filter(test_sources(), &writes_boot_mode?/1)
+
+      assert writers == [@sandbox],
+             """
+             these test sources write the NODE-GLOBAL `:barkpark, :boot_mode` directly:
+
+                 #{writers |> List.delete(@sandbox) |> Enum.join("\n    ")}
+
+             That value is ONE value for the WHOLE NODE. A direct write makes an
+             unrelated module fail later, chosen by the ExUnit seed — which is
+             how elixir-nightly 35323296944 reddened two assertions in
+             application_boot_mode_test.exs on 2026-09-18.
+
+             Go through `Barkpark.BootModeSandbox.sandboxed/1` (or `absent/1`),
+             which restores in a `try … after` and asserts the restore landed.
+             """
     end
   end
 
