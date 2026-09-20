@@ -327,6 +327,7 @@ const DEFECTS = [
   "W22-url-remedy-pricing",
   "W34-sites-read-failed-bounded",
   "W16-site-freshness-agrees-with-production-ladder",
+  "W21m-member-head-title-floor",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -829,6 +830,9 @@ const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
 // pins WHICH instance sub-tab landed, because all three instance routes share
 // the single #view-instance section.
 const INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+// The BEHIND box (IDS.behindInstance) — `instance-behind-member` deep-links it,
+// and it is a different row from INST above, not the same box in another state.
+const INST_BEHIND = "5b2c1e00-0000-4000-8000-0000000000a2";
 const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
 //
 // cchi-w23 — THE RAIL POPULATION IS DECLARED PER ROUTE, NEVER TALLIED AFTER THE
@@ -13773,6 +13777,231 @@ async function main() {
           `and be measuring the shipped sheet under another name: that is an exit-2 refusal here, not a pass), ` +
           `measured, and restored with the sheet removed inside the same synchronous pass. The DOM walk is scoped ` +
           `to \`section.view:not([hidden])\` and PLURAL`,
+        );
+      }
+    }
+
+    // ── W21m-member-head-title-floor ────────────────────────────────────────
+    //    THE HOLE THIS FILLS. Every instance-head leg in this file measures the
+    //    OWNER's header: W21-inst-head-320-copy-reachable drives `mixed-fleet`
+    //    and `panel-overview` (both owner fixtures) and asserts the PAGE plus
+    //    the copy controls; W13 sweeps 721-1024. None of them drives a MEMBER,
+    //    and the member is the only reader whose header carries a second
+    //    element — `.inst-life-reason`, the server's own "team admins only"
+    //    sentence that D428 disable-and-explain puts beside the strip. So the
+    //    one fixture where the head row holds a long sentence had never been
+    //    measured at desktop width by any instrument here.
+    //
+    //    WHAT IT MEASURES, driven on the pre-fix tree: `.detail-head--inst
+    //    .detail-actions` is authored `flex: 0 0 auto` while its own box wraps,
+    //    so its flex BASE size is the max-content sum of every chip plus that
+    //    whole sentence on one line, and `flex-shrink: 0` forbids it to give
+    //    any of it back. The sibling `.detail-head-main` carries `min-width: 0`
+    //    and therefore absorbs the entire deficit: the H1 is squeezed toward
+    //    its min-content width and the instance name wraps ONE LETTER PER LINE,
+    //    leaving the right-hand column of the header empty under the strip.
+    //    The numbers are printed per cell rather than typed here, because every
+    //    literal a header in this file has typed about pixels has rotted.
+    //
+    //    TWO QUESTIONS, both from the filed criterion. (1) the title's own
+    //    height: how many LINE BOXES its text occupies, measured with a Range
+    //    over the text node — the element's own rect merges every line into one
+    //    box and is green on the defect by construction. (2) the gap below the
+    //    actions strip inside the header: with the title collapsed the header
+    //    grows to the title's height while the strip stays two rows tall, so
+    //    the dead band is `head.bottom - actions.bottom`.
+    //
+    //    THE BAND IS THE ROW BAND, AND THE 768 CELL IS THE NO-REGRESSION
+    //    CONTROL. `.detail-head--inst` stacks to a column at <=899 (app.css's
+    //    899 block), where `.detail-head-main` already spans the head and the
+    //    title cannot be squeezed — so 768 must stay clean both before and
+    //    after, and a remedy expressed as a flex-BASIS would become a HEIGHT
+    //    basis there if it were not scoped above the stack.
+    if (requested.includes("W21m-member-head-title-floor")) {
+      const D = "W21m-member-head-title-floor";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      const MEM_CASES = [
+        { scen: "panel-overview-member", hash: `#instance/${INST}` },
+        { scen: "timeline-events-only", hash: `#instance/${INST}/timeline` },
+        { scen: "instance-behind-member", hash: `#instance/${INST_BEHIND}` },
+      ];
+      const MEM_WIDTHS = [1440, 1280, 1024, 900, 768];
+      // A title is allowed TWO lines; a third is the wrap this leg exists for.
+      const TITLE_LINE_CAP = 2;
+      // "no dead band taller than one row", and the number is DERIVED FROM
+      // THE MEASUREMENT IN BOTH DIRECTIONS rather than chosen a priori. Driven
+      // on origin/main bytes the SMALLEST pre-fix band in the row band is
+      // 131px (panel-overview-member / timeline-events-only at 1440 and 1280)
+      // and the largest is 533px; driven on the remedy the LARGEST band left
+      // is 66px, on `instance-behind-member` at 900 — where the left column is
+      // legitimately the taller one because the behind box's `.status-pill`
+      // wraps under its own title inside `.detail-title-row`, which is CONTENT
+      // and not dead space (the row prints main/acts widths so a reader can
+      // see it). 96 sits strictly between those two populations: every pre-fix
+      // cell reds, every post-fix cell passes, and it is ~45% above the worst
+      // surviving band so a font or platform that paints a little taller does
+      // not flip it.
+      const DEAD_BAND_CAP = 96;
+      // ANTI-VACUITY 0 — the axis itself. The defect was filed at 1440; a leg
+      // that dropped it would pass having never visited the width it is named
+      // for, and the 768 control alone is clean on both trees.
+      for (const want of [1440, 768]) {
+        if (!MEM_WIDTHS.includes(want)) {
+          fail(D, `axis check: ${want} is not in this leg's width set — 1440 is the width the defect was filed at and 768 is the stacked no-regression control; a leg missing either cannot make the claim its ok-line makes`);
+        }
+      }
+      const memCells = MEM_CASES.length * MEM_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${MEM_CASES.length} member scenarios x ${MEM_WIDTHS.length} widths x 2 themes` +
+        ` (${memCells} cells; .detail-title-row h1 LINE BOXES + the gap under .detail-actions)\n`,
+      );
+      let cells = 0, headsSeen = 0, reasonsSeen = 0, overWrapped = 0, deadBands = 0, pageOver = 0;
+      let worstLines = 0, worstDead = 0;
+      for (const c of MEM_CASES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter AT the widest cell and pin the hash: `?scen=` alone renders
+          // #overview (the W13 routing trap), and an overview screen measured
+          // under an instance heading is a phantom table.
+          await setViewport(MEM_WIDTHS[0]);
+          await nav(
+            `${BASE}/?scen=${c.scen}&theme=${theme}${c.hash}`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-instance' && v.querySelector('.detail-head--inst .detail-title-row h1'));})()`,
+          );
+          const row = [];
+          for (const width of MEM_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var head=v?v.querySelector('.detail-head--inst'):null;` +
+              `var main=head?head.querySelector('.detail-head-main'):null;` +
+              `var h1=head?head.querySelector('.detail-title-row h1'):null;` +
+              `var acts=head?head.querySelector('.detail-actions'):null;` +
+              `var reason=head?head.querySelector('.inst-life-reason'):null;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),` +
+              ` hasHead:!!head,hasH1:!!h1,hasActs:!!acts,hasReason:!!reason,` +
+              ` psw:d.scrollWidth,pcw:d.clientWidth};` +
+              `if(!head||!h1) return out;` +
+              // LINE BOXES, not the element rect. A Range over the text node
+              // reports one rect per line box; the H1's own getBoundingClientRect
+              // merges them and reads ONE box however many lines are painted.
+              `var lines=0,lh=0,tn=null;` +
+              `for(var i=0;i<h1.childNodes.length;i++){var n=h1.childNodes[i];` +
+              ` if(n.nodeType===3&&n.nodeValue.trim()){tn=n;break;}}` +
+              `if(tn){var rg=document.createRange();rg.selectNodeContents(tn);` +
+              ` var rs=rg.getClientRects(),tops=[];` +
+              ` for(var j=0;j<rs.length;j++){var t=Math.round(rs[j].top*2)/2;` +
+              `  if(tops.indexOf(t)===-1)tops.push(t);` +
+              `  if(rs[j].height>lh)lh=rs[j].height;}` +
+              ` lines=tops.length;}` +
+              `var hr=head.getBoundingClientRect();` +
+              `out.titleLines=lines;out.lineH=+lh.toFixed(2);` +
+              `out.title=(h1.textContent||'').replace(/\\s+/g,' ').trim().slice(0,48);` +
+              `out.h1H=h1.clientHeight;out.headH=+hr.height.toFixed(2);` +
+              `out.mainW=main?+main.getBoundingClientRect().width.toFixed(2):null;` +
+              `out.actsW=acts?+acts.getBoundingClientRect().width.toFixed(2):null;` +
+              `out.deadBand=acts?+(hr.bottom-acts.getBoundingClientRect().bottom).toFixed(2):null;` +
+              `out.stacked=getComputedStyle(head).flexDirection==='column';` +
+              `if(reason){var r2=document.createRange();r2.selectNodeContents(reason);` +
+              ` var rr=r2.getClientRects(),t2=[];` +
+              ` for(var k=0;k<rr.length;k++){var tt=Math.round(rr[k].top*2)/2;` +
+              `  if(t2.indexOf(tt)===-1)t2.push(tt);}` +
+              ` out.reasonLines=t2.length;` +
+              ` out.reason=(reason.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40);}` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-instance") {
+              fail(D, `${c.scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace header`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) {
+              fail(D, `${c.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply, so the dark half of this run measured the light one`);
+            }
+            // VACUITY, three shapes. Each is a tree on which this leg would
+            // score a perfect zero having measured nothing it is named for.
+            if (!m.hasHead || !m.hasH1) {
+              fail(D, `${c.scen}/${theme}@${width}: \`.detail-head--inst\` ${m.hasHead ? "is present but carries no" : "is ABSENT, so there is no"} \`.detail-title-row h1\` — the header this leg measures is not in the DOM. An empty walk is not a clean walk`);
+              row.push(`${width}:0h`);
+              continue;
+            }
+            if (!m.hasActs) {
+              fail(D, `${c.scen}/${theme}@${width}: no \`.detail-actions\` in the head — the strip whose unshrinkable base size squeezes the title is the SUBJECT here, and with it gone the title has the whole row by default. This leg would pass having measured the absence of its own cause`);
+              row.push(`${width}:0a`);
+              continue;
+            }
+            if (!m.hasReason) {
+              fail(D, `${c.scen}/${theme}@${width}: no \`.inst-life-reason\` in the head — these three fixtures are MEMBER fixtures precisely because a member is answered with the server's own permission sentence (D428 disable-and-explain). Without it the strip is chips only, which is the OWNER header W21-inst-head-320-copy-reachable already covers, and this leg has no subject`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            headsSeen++;
+            reasonsSeen++;
+            if (m.titleLines === 0) {
+              fail(D, `${c.scen}/${theme}@${width}: the H1 "${m.title}" reported ZERO line boxes from a Range over its text node — the measurement did not bind (an empty or element-only H1), so the line cap below could not have fired`);
+              row.push(`${width}:0l`);
+              continue;
+            }
+            if (m.titleLines > worstLines) worstLines = m.titleLines;
+            if (m.deadBand != null && m.deadBand > worstDead) worstDead = m.deadBand;
+            // (1) THE TITLE. At most two lines, at every width in the band.
+            if (m.titleLines > TITLE_LINE_CAP) {
+              overWrapped++;
+              fail(D, `${c.scen}/${theme}@${width}: the instance name "${m.title}" is painted over ${m.titleLines} line boxes (H1 clientHeight ${m.h1H}px at a ${m.lineH}px line) — cap is ${TITLE_LINE_CAP}. \`.detail-head-main\` measures ${m.mainW}px beside a ${m.actsW}px \`.detail-actions\` in a ${m.pcw}px viewport: the strip took the row and the title is wrapping toward its min-content width`);
+            }
+            // (2) THE DEAD BAND. The header's own height past the strip.
+            if (m.deadBand != null && m.deadBand > DEAD_BAND_CAP) {
+              deadBands++;
+              fail(D, `${c.scen}/${theme}@${width}: ${m.deadBand}px of empty header sits under \`.detail-actions\` (head ${m.headH}px tall, H1 ${m.h1H}px) — the right-hand column of the header is dead space the collapsed title paid for, and everything below the header starts that far down the page`);
+            }
+            // (3) THE PAGE, the same strict equality every leg here asserts.
+            if (m.psw !== m.pcw) {
+              pageOver++;
+              fail(D, `${c.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways at rest`);
+            }
+            row.push(`${width}:${m.titleLines}L/h${m.h1H}/dead${m.deadBand}/main${m.mainW}/acts${m.actsW}/r${m.reasonLines}${m.stacked ? "/col" : ""}`);
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // RUN-LEVEL VACUITY: a leg whose every cell `continue`d must not reach
+      // the ok-line. Both counters are incremented only past the three
+      // presence refusals above.
+      if (headsSeen === 0) {
+        fail(D, `${D}: measured ZERO instance headers across all ${cells} cells — the member fixtures stopped painting \`.detail-head--inst\`, so nothing this leg is named for was measured`);
+      }
+      if (reasonsSeen === 0) {
+        fail(D, `${D}: measured ZERO \`.inst-life-reason\` sentences across all ${cells} cells — the permission copy that makes these fixtures MEMBER fixtures never rendered`);
+      }
+      if (cells !== memCells) {
+        fail(D, `${D}: ${cells} of ${memCells} cells measured — a half-driven run does not certify the band`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${headsSeen} \`.detail-head--inst\` measured, each carrying the ` +
+          `\`.inst-life-reason\` permission sentence) across ${MEM_WIDTHS.join("/")} on ` +
+          `${MEM_CASES.map((c) => c.scen).join(" + ")}: worst title ${worstLines} line box(es) against a cap of ` +
+          `${TITLE_LINE_CAP}, worst dead band under \`.detail-actions\` ${worstDead}px against a cap of ` +
+          `${DEAD_BAND_CAP}px, ${overWrapped} over-wrapped titles, ${deadBands} dead bands, ${pageOver} pages ` +
+          `scrolling sideways`,
+        );
+        okLine(
+          `THE TITLE IS MEASURED IN LINE BOXES, NOT IN ITS OWN RECT. \`h1.getBoundingClientRect()\` merges every ` +
+          `line into one box and reads identically on a one-line title and a one-letter-per-line one, so this leg ` +
+          `asks a \`Range\` over the H1's TEXT NODE and counts distinct rect tops. Restore ` +
+          `\`flex: 0 0 auto\` on \`.detail-head--inst .detail-actions\` (drop the min-width:900 block this PR adds ` +
+          `to app.css) and every 900-1440 cell reds naming the instance name, its line count and the pixels of ` +
+          `dead header under the strip — driven both ways`,
+        );
+        okLine(
+          `THE ${768}px CELL IS THE NO-REGRESSION CONTROL, and it is printed with a \`/col\` marker so the reader ` +
+          `can see it took the stacked branch: \`.detail-head--inst\` computes \`flex-direction: column\` at <=899 ` +
+          `(app.css's 899 block), where \`.detail-head-main\` already spans the head. That is why the remedy is ` +
+          `scoped to a \`min-width: 900px\` block — an unscoped \`flex-basis\` on a column item is a HEIGHT basis, ` +
+          `and would have bought the wide band at the cost of the stacked one`,
         );
       }
     }
