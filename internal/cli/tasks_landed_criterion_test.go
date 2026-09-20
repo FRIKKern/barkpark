@@ -190,8 +190,12 @@ func TestTaskLanded_NoMergeShapedCriterionLandsAndSaysSo(t *testing.T) {
 // MORE THAN ONE — send NONE and name them. Picking the first would be the client
 // adjudicating on the lead's behalf.
 func TestTaskLanded_AmbiguousCriteriaSendNoneAndNameThem(t *testing.T) {
+	// BOTH candidates carry the FLAG. Before task-b40af0580ec7deb6 index 0 was
+	// a candidate on its wording alone; it no longer is, so a fixture that left
+	// it unflagged would now present ONE candidate and this test would silently
+	// stop exercising the ambiguity arm — a green with no subject.
 	cap := landedCriterionServer(t, []landedCrit{
-		{text: "MERGE-GATED: the lead closes this on merge"},
+		{text: "MERGE-GATED: the lead closes this on merge", mergeGate: boolPtr(true)},
 		{text: "A decision is recorded before code"},
 		{text: "PR merged to main", mergeGate: boolPtr(true)},
 	})
