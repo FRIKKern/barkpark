@@ -607,6 +607,76 @@ else
 fi
 
 echo
+echo "=== §6  A CHILD THAT READS STDIN MUST NOT TRUNCATE THE CHANGED-PATH LIST"
+# THE DEFECT THIS SECTION EXISTS FOR (task-627ab62e43790c0e). The classify loop
+# was fed `done <<EOF $changed EOF`, putting the changed-path list on the loop
+# body's fd 0. `compile_closure`/`xref_probe` start `mix` inside that body; on
+# the runner the BEAM drains the pipe bash 5.x backs a here-document with, so
+# `read` hit EOF and every path after the first lib file went UNCLASSIFIED —
+# with no non-zero status, no stderr, and no `ALL`. #19303 (e58d8bbcd) narrowed
+# to 596 files that way, the required Elixir gate went green, and the nightly
+# found 31 failures 23 hours later.
+#
+# WHY §1-§5 COULD NOT SEE IT: every case above runs under BP_IMPACTED_NO_XREF=1
+# (line ~34), so no child process is ever started inside the loop and the loop's
+# fd is never at risk. The harness was structurally blind to the one failure
+# mode the selector exists to prevent. This section is the only one that starts
+# a real child, so it must NOT inherit that export.
+sec6_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-impacted-sec6.XXXXXX")"
+# Two `mix` stand-ins, identical but for ONE line: whether the child reads stdin.
+# That single-line difference IS the mutation.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "lib/barkpark/content/lifecycle.ex" "lib/barkpark/repo.ex"\n' >"$sec6_dir/mix-quiet"
+printf '#!/usr/bin/env bash\ncat >/dev/null 2>&1 || true\nprintf "%%s\\n" "lib/barkpark/content/lifecycle.ex" "lib/barkpark/repo.ex"\n' >"$sec6_dir/mix-greedy"
+chmod +x "$sec6_dir/mix-quiet" "$sec6_dir/mix-greedy"
+
+# A lib file FIRST (so a child runs), then a changed test file that
+# `is_narrowable_test` selects unconditionally. If the list is truncated, that
+# second path silently disappears — which is exactly the shape to catch.
+sec6_input='api/lib/barkpark/content/lifecycle.ex
+api/test/barkpark/tasks/queue_test.exs'
+sec6_want='test/barkpark/tasks/queue_test.exs'
+
+sec6_run() {
+  mkdir -p "$sec6_dir/bin" && cp "$sec6_dir/$1" "$sec6_dir/bin/mix"
+  printf '%s\n' "$sec6_input" | \
+    env -u BP_IMPACTED_NO_XREF \
+        BP_IMPACTED_ROOT="$ROOT" \
+        PATH="$sec6_dir/bin:$PATH" \
+        bash "$SEL" --select 2>/dev/null
+}
+
+if [ ! -f "$ROOT/api/lib/barkpark/content/lifecycle.ex" ] || [ ! -f "$ROOT/api/$sec6_want" ]; then
+  bad "§6 fixtures are present" "lifecycle.ex or $sec6_want is gone — §6 measured NOTHING"
+else
+  # THE CONTROL, AND IT IS NOT OPTIONAL. Without it a selector that answered
+  # ALL to everything would pass the greedy case below while measuring nothing.
+  sec6_quiet="$(sec6_run mix-quiet)"
+  if is_all "$sec6_quiet"; then
+    bad "§6 control: a quiet child still narrows" "got ALL — §6's greedy arm can no longer mean anything"
+  elif grep -qxF -- "$sec6_want" <<<"$sec6_quiet"; then
+    ok "§6 control: a child that does NOT read stdin leaves the list intact ($sec6_want selected)"
+  else
+    bad "§6 control: a quiet child keeps $sec6_want" "it is missing even with a non-draining child"
+  fi
+
+  # THE MUTATION. Same input, same script, one greedy child. Two answers are
+  # acceptable and they are the two SAFE ones: the list survived (the fd fix
+  # held), or the selector noticed it did not and widened to ALL (the count
+  # identity held). The one answer that must never occur is the one CI gave:
+  # a narrow selection that quietly lacks the path it never read.
+  sec6_greedy="$(sec6_run mix-greedy)"
+  if is_all "$sec6_greedy"; then
+    ok "§6 a stdin-reading child is caught and widens to ALL (the count identity held)"
+  elif grep -qxF -- "$sec6_want" <<<"$sec6_greedy"; then
+    ok "§6 a stdin-reading child cannot reach the list ($sec6_want still selected)"
+  else
+    bad "§6 a stdin-reading child must not silently truncate the changed-path list" \
+        "the selection NARROWED to $(grep -c . <<<"$sec6_greedy") files and $sec6_want — a path handed in on stdin — is not among them. This is the #19303 fault: a green gate over code it never ran."
+  fi
+fi
+rm -rf -- "$sec6_dir"
+
+echo
 echo "=== $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0

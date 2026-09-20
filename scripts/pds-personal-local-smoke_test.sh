@@ -169,7 +169,12 @@ cmd_boot() {
   else bad 'BARKPARK_KEK absent from .env — :prod raises without it'; fi
   if grep -q '^BARKPARK_ALLOW_BUNDLE_IMPORT=1' "$home/.env" 2>/dev/null; then ok 'BARKPARK_ALLOW_BUNDLE_IMPORT=1 written'
   else bad 'BARKPARK_ALLOW_BUNDLE_IMPORT=1 absent from .env'; fi
-  local mode; mode="$(stat -f '%Lp' "$home/.env" 2>/dev/null || stat -c '%a' "$home/.env" 2>/dev/null)"
+  # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+  # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+  # report instead of failing, and a BSD-first `||` chain never reaches the
+  # GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on
+  # the wrong platform instead of quietly.
+  local mode; mode="$(stat -c '%a' "$home/.env" 2>/dev/null || stat -f '%Lp' "$home/.env" 2>/dev/null)"
   if [ "$mode" = 600 ]; then ok '.env is chmod 0600'; else bad ".env mode is '$mode', doc says 0600"; fi
 
   step 'S5 token creation — `bin/barkpark token`'

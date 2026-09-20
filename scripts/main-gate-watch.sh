@@ -100,6 +100,46 @@
 # one level. The run-status rule has no such property. So NO age arm ships here:
 # `grep -c 'GRACE' scripts/main-gate-watch.sh` is 0.
 #
+# THE FOURTH OUTCOME: NOT_OWED (task-2253e13aba12fbe8)
+#
+# A watched context whose workflow carries a `paths:` filter on its `push:` arm
+# is not owed by every main push. `Console gate` is rendered by
+# .github/workflows/console-harness.yml, whose push arm was paths-filtered on
+# 2026-09-10 (task-7ef9d81ed33d2b9c) — the pull_request arm was NOT, so every PR
+# head still renders the context and branch protection still evaluates it. There
+# is no merge-safety hole; a main push that touched no console path was simply
+# never owed a run.
+#
+# MEASURED 2026-09-20, the last 50 main pushes: FORTY-TWO carry no `Console
+# gate` check run at all. Before #19414 that was muted by this watch counting
+# its own in-flight run as a reason to WAIT. After #19414 — a correct fix — it
+# became `MISSING Console gate`, exit 1, on 84% of main tips: a false alarm on a
+# scheduled instrument, which is how a real red gets ignored.
+#
+# THE ALARM IS NARROWED, NOT SILENCED, AND THAT DISTINCTION IS THE WHOLE POINT.
+# The tempting repair — "CONDITIONAL tier and nothing rendered, so stay quiet" —
+# is what scripts/main-verdict-presence.sh does for its own, different question,
+# and adopting it HERE would make the MISSING arm unreachable for every
+# paths-filtered workflow. That silences the detector whose entire job is to
+# notice an unjudged tip. So owed-ness is decided from what the commit TOUCHED:
+#
+#   the sha touched a path the filter watches, and still nothing rendered
+#                                     -> MISSING, exit 1, exactly as before
+#   the sha touched none of them      -> NOT_OWED, printed, exit 0
+#   owed-ness could not be determined -> OWED. Fail closed, always.
+#
+# Both directions are proven by mutation in scripts/main-gate-watch.test.sh
+# against three real shas: 9980425e6 (internal/cli only) and 56e0dbca4
+# (.claude/skills only) read NOT_OWED; a5260f609, which touched cloud/lib/**,
+# KEEPS reading MISSING and exit 1 on all three contexts.
+#
+# NO SECOND HAND-MAINTAINED LIST SHIPS HERE. The tier comes from
+# .github/main-push-workflows.txt, the transcript main-verdict-presence.sh
+# already ratchets; the context-to-workflow mapping is DERIVED by finding the
+# job whose `name:` is the context; the glob matching lives in
+# scripts/lib/main-push-owedness.sh, the FIRST copy of those semantics in the
+# tree, sourced rather than duplicated.
+#
 # EXIT CODES  0 = every watched context PRESENT and green
 #             1 = SCREAM — at least one watched context RED, or MISSING with
 #                 every workflow run on the tip already terminal
@@ -109,6 +149,10 @@
 #                 unreadable, or a live required context that is neither watched
 #                 nor excluded
 #
+#   NOT_OWED is not an exit code. It removes a context from the verdict set for
+#   this sha, so a tip owing nothing else exits 0 — and it is PRINTED, so the
+#   silence is always accounted for on a line somebody can read.
+#
 # USAGE
 #   scripts/main-gate-watch.sh
 #   scripts/main-gate-watch.sh --repo O/R --branch main
@@ -116,12 +160,21 @@
 #   scripts/main-gate-watch.sh --self-run-id <id>
 #   # hermetic (the test harness; no network at all):
 #   scripts/main-gate-watch.sh --sha <sha> \
-#       --protection-file <f> --check-runs-file <f> [--runs-file <f>]
+#       --protection-file <f> --check-runs-file <f> [--runs-file <f>] \
+#       [--changed-files-file <f>] [--workflows-dir <d>] [--manifest <f>]
 
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC="$REPO_ROOT/.github/required-checks.json"
+
+# Owed-ness: the tier list, the glob matcher and the context->workflow mapping
+# all live here, shared rather than copied. See its header for the stated bound.
+# shellcheck source=scripts/lib/main-push-owedness.sh
+. "$REPO_ROOT/scripts/lib/main-push-owedness.sh"
+
+WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
+MANIFEST="$REPO_ROOT/.github/main-push-workflows.txt"
 
 # ── the two named constants ──────────────────────────────────────────────────
 # WATCHED: the post-merge-reproducible required contexts. Every one of these is
@@ -140,6 +193,7 @@ EXCLUDED_CONTEXTS="PR references an active task"
 PROTECTION_FILE=""
 CHECK_RUNS_FILE=""
 RUNS_FILE=""
+CHANGED_FILES_FILE=""
 SHA_OVERRIDE=""
 REPO_OVERRIDE=""
 BRANCH_OVERRIDE=""
@@ -284,6 +338,35 @@ read_workflow_runs() {
   ' <<<"$body"
 }
 
+# ── authority 4: the files this sha touched ──────────────────────────────────
+# Prints the path of a file holding one repo-relative filename per line, or
+# NOTHING. Nothing means "unknown", and every caller of mpo_owed treats unknown
+# as OWED, so a failure of this read can only make the watch LOUDER — never
+# quieter. That asymmetry is deliberate: the three authorities above exit 3 when
+# they go blind because a blind read of them could manufacture a false green,
+# and this one cannot.
+read_changed_files() {
+  local sha="$1" repo out
+  if [ -n "$CHANGED_FILES_FILE" ]; then
+    [ -f "$CHANGED_FILES_FILE" ] && printf '%s\n' "$CHANGED_FILES_FILE"
+    return 0
+  fi
+  # Hermetic (the harness supplies check runs but no file list): unknown, so
+  # every paths-filtered context stays OWED and the pre-existing arms of
+  # scripts/main-gate-watch.test.sh keep measuring exactly what they measured.
+  [ -n "$CHECK_RUNS_FILE" ] && return 0
+  repo="${REPO_OVERRIDE:-$(spec_repo)}"
+  [ -n "$repo" ] || return 0
+  out="$(mktemp)" || return 0
+  if gh api "repos/$repo/commits/$sha" -q '.files[].filename' > "$out" 2>/dev/null \
+     && [ -s "$out" ]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  rm -f "$out"
+  return 0
+}
+
 resolve_tip_sha() {
   local repo branch
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
@@ -297,6 +380,9 @@ main() {
       --protection-file) PROTECTION_FILE="${2:-}"; shift 2 ;;
       --check-runs-file) CHECK_RUNS_FILE="${2:-}"; shift 2 ;;
       --runs-file)       RUNS_FILE="${2:-}"; shift 2 ;;
+      --changed-files-file) CHANGED_FILES_FILE="${2:-}"; shift 2 ;;
+      --workflows-dir)   WORKFLOWS_DIR="${2:-}"; shift 2 ;;
+      --manifest)        MANIFEST="${2:-}"; shift 2 ;;
       --sha)             SHA_OVERRIDE="${2:-}"; shift 2 ;;
       --repo)            REPO_OVERRIDE="${2:-}"; shift 2 ;;
       --branch)          BRANCH_OVERRIDE="${2:-}"; shift 2 ;;
@@ -364,6 +450,9 @@ EOF
     red "CONFIGURATION FAULT — could not resolve the tip sha of ${BRANCH_OVERRIDE:-$(spec_branch)}."
     return 3
   fi
+
+  local changed_files
+  changed_files="$(read_changed_files "$sha")"
 
   local runs
   if ! runs="$(read_check_runs "$sha")"; then
@@ -433,7 +522,7 @@ EOF
     printf '%s' "$inflight" | while IFS= read -r line; do [ -n "$line" ] && say "    $line"; done
   fi
 
-  local screams="" waits="" name status conclusion found
+  local screams="" waits="" not_owed="" name status conclusion found ctx_wf owed
   while IFS= read -r ctx; do
     [ -n "$ctx" ] || continue
     found=""
@@ -445,6 +534,22 @@ EOF
 $runs
 EOF
     if [ -z "$found" ]; then
+      # NOT OWED, rather than NEVER (task-2253e13aba12fbe8). Asked BEFORE
+      # WAITING: a context this sha was never owed is not pending either, and
+      # reporting it as in flight would leave it waiting forever. The workflow
+      # is found by the job whose `name:` IS the context, the tier comes from
+      # the committed manifest, and the filter is matched against what this
+      # commit touched. Anything unknown answers OWED and falls through to the
+      # arms below, so this branch can only ever subtract a context it can
+      # POSITIVELY show was declined.
+      ctx_wf="$(mpo_workflow_for_context "$WORKFLOWS_DIR" "$ctx")"
+      owed="$(mpo_owed "$WORKFLOWS_DIR" "$MANIFEST" "$ctx_wf" "$changed_files")"
+      if [ "$owed" = "NOT_OWED" ]; then
+        say "  NOT_OWED $ctx — $ctx_wf is CONDITIONAL in $(basename "$MANIFEST") and this sha touched none of its push paths, so no run was ever owed"
+        not_owed="$not_owed$ctx (declined by the paths: filter of $ctx_wf)
+"
+        continue
+      fi
       if [ -n "$first_inflight" ]; then
         # NOT YET, rather than NEVER (cch-w61). A workflow run on this tip has
         # not reached a terminal state, so a row that does not exist may still
@@ -497,6 +602,28 @@ EOF
     say "::notice::WAITING — main's tip has contexts still in flight. Not a pass and not a scream; the next run decides."
     printf '%s' "$waits" | while IFS= read -r line; do [ -n "$line" ] && say "  waiting: $line"; done
     return 2
+  fi
+
+  if [ -n "$not_owed" ]; then
+    say "  (not owed on this sha, and therefore not watched on it:)"
+    printf '%s' "$not_owed" | while IFS= read -r line; do [ -n "$line" ] && say "    $line"; done
+
+    # A TIP THAT OWED NOTHING IS NOT A GREEN TIP. If NOT_OWED ever subtracts the
+    # entire watched set, this watch has measured nothing and must not say ok —
+    # that is the vacuous green in the header, re-created one level down. It
+    # cannot happen while cloud.yml and elixir.yml are ALWAYS in the manifest,
+    # which is precisely why it is asserted rather than assumed: the manifest is
+    # regenerated by a tool and a tier can move without anybody deciding to.
+    local n_watched n_not_owed
+    n_watched="$(printf '%s' "$watched" | grep -c .)"
+    n_not_owed="$(printf '%s' "$not_owed" | grep -c .)"
+    if [ "$n_not_owed" -ge "$n_watched" ]; then
+      red "CONFIGURATION FAULT — every watched required context was NOT_OWED on $sha."
+      red "This watch then measured nothing at all, and reporting green off an empty set is the"
+      red "vacuous green it exists to abolish. A tier in $(basename "$MANIFEST") most likely moved"
+      red "from ALWAYS to CONDITIONAL. A human decides what this watch watches, not a regenerated file."
+      return 3
+    fi
   fi
 
   say "ok — every watched required context is PRESENT and green on $sha"
