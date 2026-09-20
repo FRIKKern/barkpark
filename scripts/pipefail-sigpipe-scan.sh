@@ -671,6 +671,42 @@ SH
 pid="$(lsof -nP -iTCP:4000 -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
 SH
 
+  # ── head INSIDE A COMMAND SUBSTITUTION, all four spellings (task-cb57c7ff5f6d6479)
+  # THE LIVE SITE: scripts/required-checks-ack-derive.sh:271 shipped
+  #     VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"
+  # under `set -euo pipefail`. `head -1` closes the pipe after one line, `comm`
+  # takes SIGPIPE, pipefail adopts 141, and the assignment's status IS the
+  # substitution's, so errexit kills the run. MEASURED on console #19336, and
+  # reproduced directly here: a 200k-line intersection through that exact shape
+  # returned rc=141 on 20 of 20 runs under 4x `yes >/dev/null`; the pipe-free
+  # replacement returned 0 on 20 of 20 in the same loop.
+  # `-1`, `-n1` and `-c N` were already reported; the BARE `head` was not, because
+  # the matcher required a trailing space and a bare `head` ends the `$( … )`.
+  # These four arms pin all of it, and the two MISS arms are the discrimination.
+  sayhigh head-in-subst-dash-one HIT <<'SH'
+VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"
+SH
+  # THE ARM THE NEW RULE OWNS. Remove the `rdr` delimiter fold above and this is
+  # the arm that reds — the other three are reported by the pre-existing pair.
+  sayhigh head-in-subst-bare HIT <<'SH'
+VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head)"
+SH
+  # CONTROL (1) — an UNPIPED head. It truncates, it is inside the same `$( … )`
+  # under the same pipefail, and there is no pipe for it to close, so there is
+  # no 141 and must be no finding. A scanner that flags the word `head` gets
+  # switched off; this is the arm that proves it does not.
+  sayhigh head-unpiped-control MISS <<'SH'
+VICTIM="$(head -1 "$DERIVED")"
+SH
+  # CONTROL (2) — the byte-identical hazard with pipefail OFF. Without pipefail
+  # the substitution's status is head's, which is 0, so there is nothing to
+  # report. This is the arm that reds if the new rule ever stops honouring
+  # condition (a).
+  sayhigh head-in-subst-no-pipefail MISS <<'SH'
+set +o pipefail
+VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"
+SH
+
   # ── the WORKFLOW arm (task-b090e1c603d686ba) ──────────────────────────────
   # `.github` was a default target that could never produce a finding, so these
   # fixtures are the whole proof that it now can — AND that it does not
@@ -1860,7 +1896,25 @@ for f in "${files[@]}"; do
     case "$bare" in
     *'|'*grep*-m\ [0-9]* | *'|'*grep*-m[0-9]*) reader="grep -m N" ;;
     esac
-    case "$bare" in
+    # `head` TRUNCATES under every flag and under none, so what makes it a
+    # reader is the WORD, not what follows it. The pair above required a
+    # trailing SPACE, and bash `case` has no word boundary, so the one position
+    # where a `head` can carry no argument and no trailing space — the END of a
+    # command substitution or of the line — read as NO READER AT ALL:
+    #     x="$(producer | head)"      bare `head` stops at 10 lines
+    #     producer | head             same, at end of line
+    # `| head -1`, `|head -n1` and `| head -c 40` inside a `$( … )` were already
+    # caught (strip_quoted_keep_subst above restarts quoting for them, and the
+    # truncating-reader block below forces them to HIGH); this closes the one
+    # spelling of the same shape the matcher could not see. MEASURED while
+    # fixing scripts/required-checks-ack-derive.sh:271 — `VICTIM="$(comm -12 …
+    # | head -1)"` returned 141 20/20 under load, and probing the neighbouring
+    # spellings found `| head)` silent at every tier.
+    # The delimiters are folded to spaces on a COPY, and the copy is PADDED, so
+    # the word boundary is a space in every position; `bare` is untouched
+    # because the reported text comes from it.
+    rdr=" ${bare//[);&\`]/ } "
+    case "$rdr" in
     *'| head '* | *'|head '*) reader="head" ;;
     esac
     case "$bare" in

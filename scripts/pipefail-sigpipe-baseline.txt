@@ -421,4 +421,51 @@
 # must be banked — and may never RISE. A rise is a NEW site; fix the site.
 #
 # Filed under task-e3a2a8341256b805.
-90
+
+# ── RE-MEASURED 2026-09-20 (task-cb57c7ff5f6d6479): 90 → 89 ───────────────────
+# ONE SITE FIXED, AND THE SCANNER CHANGE MOVED THE NUMBER BY ZERO.
+# This lands directly on top of #19574 (task-e3a2a8341256b805), which banked the
+# seven counts of arrears this file had been carrying and bounded the slack at
+# PIPEFAIL_SCAN_MAX_SLACK=2. Main is TIGHT at 90 as of that merge; the arrears
+# story belongs to the block above and is not repeated here. This change is one
+# high-confidence site converted, so the number falls by exactly one.
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 89 finding(s) — high 89 · medium 0 · low 0 — over 466 file(s)
+#     (all confidences on the same tree: 261 — high 89 · medium 168 · low 4)
+#     base    origin/main e922f67e6cb0af763c75210e1e12ba19370644d1, which MEASURES 90 and BANKS 90.
+#     utc     2026-09-20T20:03:06Z
+#
+# THE SITE FIXED — the only one this number moves:
+#   scripts/required-checks-ack-derive.sh:271
+#     VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"   under set -euo pipefail
+#   reported here as `[high] reader=head; status captured into an assignment
+#   under set -e; truncating reader (head closes the pipe at N) on a producer not
+#   provably bounded`. `comm` writes 166 names into a pipe `head -1` closes after
+#   the first; pipefail adopts comm's 141 and errexit kills the selftest.
+#   MEASURED on console #19336 (the ratchet reddened on a PR whose diff never
+#   touched it) and reproduced directly: a 200k-line intersection through that
+#   exact shape returned rc=141 on 20/20 runs under 4x `yes >/dev/null`; the
+#   pipe-free replacement (comm > file; one `read`) returned 0 on 20/20 in the
+#   same loop. A CONTROL at the REAL tree size — a 166-line intersection, 40 runs
+#   under 8x load — passed 40/40: at ~5KB the whole output fits the 64KB pipe
+#   buffer, so this site is LATENT at today's size, not firing. It is fixed
+#   because the exclusions ledger only grows, and because an instrument that reds
+#   by LOAD teaches its readers to rerun rather than to read.
+#
+# THE SCANNER ALSO CHANGED IN THIS COMMIT, AND IT MOVED THE NUMBER BY ZERO.
+# The `head` reader pattern required a trailing space, so a BARE `head` ending a
+# command substitution or a line (`x="$(producer | head)"`) matched no reader at
+# any tier. The delimiters are now folded to spaces on a copy before the match.
+# PROVED to be a no-op on this tree rather than asserted: the full finding list
+# at --min-confidence low was captured from the PRE-change scanner and from the
+# post-change scanner over the same tree and diffed —
+#     old=261  new=261  ·  comm -13 → empty  ·  comm -23 → empty
+# so the 90 → 89 move is the site fix alone and nothing is laundered in behind a
+# widened detector.
+#
+# THE VARIABLE-PRODUCER BASELINE NEEDS NO RE-BANK: it reads 105 against a banked
+# 105 on this tree (exact, rc 0), before and after both halves of this change.
+#
+# Filed under task-cb57c7ff5f6d6479.
+89
