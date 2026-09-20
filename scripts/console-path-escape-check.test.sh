@@ -1391,7 +1391,13 @@ gate_denies() {
 # the first `%0A` belongs to a later clause (the measured-defect list).
 gate_names() {
   local ann named nl='%0A'
-  ann="$(grep '^::error' "$GATE_OUT" | tr '\n' ' ')"
+  # `|| true` IS LOAD-BEARING under `set -euo pipefail`: a green step output has
+  # no `::error` line, grep exits 1, pipefail propagates it and `set -e` kills
+  # the whole harness MID-RUN — no summary line, so the very branch below that
+  # exists to say "the annotation names no job at all" could never be reached.
+  # That branch was dead until the (s2) adjacency cases first drove a mutation
+  # that greened the gate; keep it reachable or the crash replaces the verdict.
+  ann="$( { grep '^::error' "$GATE_OUT" || true; } | tr '\n' ' ')"
   named="${ann#*NOT IN THE ALLOW-SET: }"
   if [ -z "$ann" ] || [ "$named" = "$ann" ]; then
     no "  …but the annotation names no job at all: ${ann:-<no ::error:: line>}"
@@ -1618,6 +1624,30 @@ gate "modal-oracle REFUSED" 1 \
   O_CONSOLE=true V_MODAL=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the oracle refused, not that the modal is broken"
 gate_names "modal-oracle" "cssom-parity"
+
+# (s2) THE ADJACENCY GUARD'S TWO ARMS, BOTH DRIVEN, AND THE MUTATION THEY EXIST
+#      FOR. Modelled on (s) above, and added for the same reason one commit
+#      later: `adjacency-guard` was wired into `needs:`, `env:` and the decide
+#      ladder, but until these two cases `R_ADJACENCY` was EQUAL to `R_MODAL`
+#      on every fixture line in this file. Under that equality the decide line
+#      could read "${R_MODAL}" by mistype and EVERY case here would still pass
+#      — the Console gate would then green over a failed adjacency-guard, which
+#      is the whole failure this job was added to prevent. These two are the
+#      only lines where the two variables DISAGREE, so they are what turns that
+#      mistype red. Same verdict-channel discipline as (s): exit 1 and exit 2
+#      are indistinguishable at the aggregator, so drive both arms by verdict.
+gate "adjacency-guard MEASURED_DEFECT" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=failure R_ESCAPE=success \
+  O_CONSOLE=true V_ADJACENCY=MEASURED_DEFECT
+gate_says "This one IS about the console's own bytes" "…and says the adjacency defect is real and console-side"
+gate_denies "REFUSED TO MEASURE" "…and does not call a measured adjacency defect a refusal"
+gate_names "adjacency-guard" "cssom-parity"
+
+gate "adjacency-guard REFUSED" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=failure R_ESCAPE=success \
+  O_CONSOLE=true V_ADJACENCY=REFUSED
+gate_says "REFUSED TO MEASURE" "…and says the guard refused, not that the adjacency is broken"
+gate_names "adjacency-guard" "cssom-parity"
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0
