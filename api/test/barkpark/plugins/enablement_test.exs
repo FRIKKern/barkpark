@@ -316,7 +316,15 @@ defmodule Barkpark.Plugins.EnablementTest do
   end
 
   describe "collect_top_menu_entries/1 enablement filter" do
-    test "a disabled top_menu plugin's tab is dropped under a workspace" do
+    # RESTATED for task-e34595f816cd4bd2 (was: "a disabled top_menu plugin's tab
+    # is dropped under a workspace"). The ENABLEMENT verdict this test pinned is
+    # unchanged — the workspace does not SURFACE the plugin. What changed is the
+    # rendering of that verdict: a plugin another workspace DOES enable (here:
+    # TopMenuPlugin is on by declaration, so every override-free workspace
+    # enables it) no longer VANISHES from the top menu — it arrives carrying
+    # `disabled: true` so nav.ex can paint a non-navigable, explained tab. The
+    # assertion therefore moves from "absent" to "present but not enabled".
+    test "a disabled top_menu plugin's tab is not ENABLED under a workspace" do
       # TopMenuPlugin is enabled by default, so disable it via override.
       top = register!(TopMenuPlugin, "fake-top-#{unique()}")
       ws = create_workspace!()
@@ -326,15 +334,24 @@ defmodule Barkpark.Plugins.EnablementTest do
         Registry.collect_top_menu_entries(baseline: [], ctx: %{dataset: "production"})
         |> Enum.map(& &1.label)
 
-      labels_ws =
+      entries_ws =
         Registry.collect_top_menu_entries(
           baseline: [],
           ctx: %{dataset: "production", workspace_id: ws.id}
         )
-        |> Enum.map(& &1.label)
+
+      enabled_labels_ws =
+        entries_ws |> Enum.reject(& &1.disabled) |> Enum.map(& &1.label)
 
       assert "TopFake" in labels_no_ws
-      refute "TopFake" in labels_ws
+      refute "TopFake" in enabled_labels_ws
+
+      # …and when it IS surfaced elsewhere, it is present in the explained
+      # disabled state rather than silently gone.
+      case Enum.find(entries_ws, &(&1.label == "TopFake")) do
+        nil -> :ok
+        tab -> assert tab.disabled == true and is_binary(tab.reason)
+      end
     end
   end
 
