@@ -2031,7 +2031,7 @@ class BpPaperCanvas extends HTMLElement {
     // remember the PM range to replace on pick — anchored to the DOCUMENT position
     // (selection.from), not the block-local offset hit carries.
     this._openWikilink(this._caretRect(), hit.query);
-    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query);
+    this._wlRange = wikilinkReplaceRange(this._editor.state.selection.from, hit.query, hit.trigger);
 
     // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
     // resolved batch is dropped unless it is still the latest request AND the menu

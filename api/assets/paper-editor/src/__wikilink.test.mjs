@@ -33,27 +33,27 @@ function check(name, fn) {
 // ── what opens the popup ───────────────────────────────────────────────────
 
 check("opens on `[[ab` with caret at end", () => {
-  assert.deepEqual(parseOpenWikilink("[[ab", 4), { query: "ab", from: 0, to: 4 });
+  assert.deepEqual(parseOpenWikilink("[[ab", 4), { query: "ab", from: 0, to: 4, trigger: "[[" });
 });
 
 check("opens MID-PROSE (not just start-of-block)", () => {
-  assert.deepEqual(parseOpenWikilink("see [[No", 8), { query: "No", from: 4, to: 8 });
+  assert.deepEqual(parseOpenWikilink("see [[No", 8), { query: "No", from: 4, to: 8, trigger: "[[" });
 });
 
 check("empty query immediately after `[[`", () => {
-  assert.deepEqual(parseOpenWikilink("[[", 2), { query: "", from: 0, to: 2 });
+  assert.deepEqual(parseOpenWikilink("[[", 2), { query: "", from: 0, to: 2, trigger: "[[" });
 });
 
 check("caret inside the query yields the prefix only", () => {
-  assert.deepEqual(parseOpenWikilink("[[abcd", 4), { query: "ab", from: 0, to: 4 });
+  assert.deepEqual(parseOpenWikilink("[[abcd", 4), { query: "ab", from: 0, to: 4, trigger: "[[" });
 });
 
 check("nearest unclosed `[[` wins after a closed one", () => {
-  assert.deepEqual(parseOpenWikilink("[[a]] then [[b", 14), { query: "b", from: 11, to: 14 });
+  assert.deepEqual(parseOpenWikilink("[[a]] then [[b", 14), { query: "b", from: 11, to: 14, trigger: "[[" });
 });
 
 check("a second `[[` resets the query (no nesting)", () => {
-  assert.deepEqual(parseOpenWikilink("[[a[[b", 6), { query: "b", from: 3, to: 6 });
+  assert.deepEqual(parseOpenWikilink("[[a[[b", 6), { query: "b", from: 3, to: 6, trigger: "[[" });
 });
 
 // ── what keeps it closed ───────────────────────────────────────────────────
@@ -87,10 +87,30 @@ check("non-string / non-number args => null", () => {
 
 check("caretOffset is clamped into range", () => {
   // Offset past the end clamps to text.length (caret at end).
-  assert.deepEqual(parseOpenWikilink("[[ab", 99), { query: "ab", from: 0, to: 4 });
+  assert.deepEqual(parseOpenWikilink("[[ab", 99), { query: "ab", from: 0, to: 4, trigger: "[[" });
 });
 
 // ── replace-range PM-position mapping (pick seam) ──────────────────────────
+
+// ── `@` as an alias for `[[` (plan: Barkdown #19) ────────────────────────────
+check("`@Mult` at block start opens with query 'Mult' and trigger '@'", () => {
+  assert.deepEqual(parseOpenWikilink("@Mult", 5), { query: "Mult", from: 0, to: 5, trigger: "@" });
+});
+check("`see @Mult` mid-prose opens (after whitespace)", () => {
+  assert.deepEqual(parseOpenWikilink("see @Mult", 9), { query: "Mult", from: 4, to: 9, trigger: "@" });
+});
+check("a bare `@` opens with an empty query", () => {
+  assert.deepEqual(parseOpenWikilink("hi @", 4), { query: "", from: 3, to: 4, trigger: "@" });
+});
+check("an address (`me@example`) does NOT open — the `@` is inside a word", () => {
+  assert.equal(parseOpenWikilink("me@example", 10), null);
+});
+check("`[[` still wins over an `@` inside it, and carries trigger '[['", () => {
+  assert.deepEqual(parseOpenWikilink("[[a @b", 6), { query: "a @b", from: 0, to: 6, trigger: "[[" });
+});
+check("replace range for '@': caretPos 8, query 'Mult' => from 3 (the one `@`)", () => {
+  assert.deepEqual(wikilinkReplaceRange(8, "Mult", "@"), { from: 3, to: 8 });
+});
 
 check("caretPos 7, query 'abc' => { from: 2, to: 7 }", () => {
   // The typed span "[[abc" ends at the caret: 2 brackets + 3 query chars back.
