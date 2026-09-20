@@ -63,13 +63,22 @@ import (
 // 2668 criteria are marker-worded, and on 1587 of them NO `merge_gate` key is
 // present, so the prose arm alone decides. That is 1587 criteria a field-only
 // fence would leave unfenced — which is why the second test exists.
+//
+// UPDATED 2026-09-20 (task-b40af0580ec7deb6). Those 1587 are exactly the
+// population the IMPLICIT candidate door now declines to volunteer, and the
+// prose-arm test below was INVERTED to pin the decline. The two-arm reading
+// above still governs, with one seam moved: `landedMergeShaped` keeps BOTH arms
+// verbatim (it is the stamp refusal's reader and must stay wide), while
+// `landedImplicitCandidate` — a strictly later question — reads the FIELD arm
+// only. So the arms are now fenced on two different surfaces: the field arm by
+// the flip it still produces, the prose arm by the SKIP receipt it produces.
 
 // FIELD ARM. An explicit `merge_gate: true` is MERGE-SHAPED and therefore the
 // candidate. This is the ruled polarity itself.
 //
 // MUTATION (verified): in `landedMergeShaped`, replace `return *c.mergeGate`
 // with `return false`. This test reds on the missing `criterion=2`;
-// TestTaskLanded_MergeGateWordingWithNoFieldIsTheCandidate stays GREEN, which
+// TestTaskLanded_MergeGateWordingWithNoFieldIsNotVolunteered stays GREEN, which
 // is the whole point of splitting them.
 func TestTaskLandedPolarity_FieldMergeGateTrueIsStillTheCandidate(t *testing.T) {
 	cap := landedCriterionServer(t, []landedCrit{
@@ -99,41 +108,113 @@ func TestTaskLandedPolarity_FieldMergeGateTrueIsStillTheCandidate(t *testing.T) 
 	}
 }
 
-// PROSE ARM. NO `merge_gate` key at all — the marker wording alone admits the
-// criterion, which is how 1587 of the corpus's marker-bearing criteria are
-// decided. The text is deliberately marker-worded WITHOUT being landing-worded
-// ("merged to main" / "PR merged" would admit it through `landingWordedRe`
-// instead and this test would then pin the wrong regex).
+// ─── THE PROSE DOOR, SHUT (task-b40af0580ec7deb6, 2026-09-20) ───────────────
 //
-// MUTATION (verified): in `landedMergeShaped`, drop the
-// `mergeGateWordedRe.MatchString(c.text) ||` term. This test reds on the
-// missing `criterion=1`; TestTaskLandedPolarity_FieldMergeGateTrueIsStillTheCandidate
-// stays GREEN.
+// THIS SECTION REPLACES A TEST THAT ASSERTED THE OPPOSITE.
+// `TestTaskLanded_MergeGateWordingWithNoFieldIsTheCandidate` used to pin that a
+// criterion carrying the MERGE-GATED marker and NO `merge_gate` key WAS the
+// implicit candidate. That is the defect task-b40af0580ec7deb6 measured on a
+// scratch row on 2026-09-20: `bp task landed` with no `--criterion` flipped
+// such a criterion to met=true with the landing note as its evidence, while the
+// lead's own close-time readers (`Close.merge_gate_synthetics/3`,
+// `reconcile_locked/4`) are flag-only and would have refused the identical
+// criterion. The two halves of the ledger disagreed about which criteria a
+// merge seals, and the half that never asks won.
 //
-// DISARM BOTH (verified): make `landedMergeShaped` `return false` outright and
-// BOTH tests red, which is c4's "disarm the fence and both must red".
-func TestTaskLanded_MergeGateWordingWithNoFieldIsTheCandidate(t *testing.T) {
+// WHAT IS NOT CHANGED, and it is the part worth reading twice: the WIDE
+// predicate `landedMergeShaped` is untouched. It still mirrors
+// `Tasks.Landed.merge_shaped?/1` and `Criteria.merge_gated?/1` exactly, wording
+// arm and all, and the field-arm test above still passes unchanged — the
+// 2026-09-17 KEEP ruling is not disturbed. What narrowed is one strictly later
+// question, `landedImplicitCandidate`: whether the client VOLUNTEERS an index
+// no human typed. Narrowing the wide reader itself is the FAILURE DIRECTION the
+// row names, and the mis-fire test below still exercises the wording arm to
+// prove the prose reader is still wide.
+//
+// THE COST LEDGER, both directions: a false negative here costs one typed
+// `--criterion N`; the false positive it removes cost a met on a criterion
+// nobody verified, on the population the backfill measured at ~65% unflagged.
+
+// THE MUTATION TARGET. Restore the prose door — in `landedImplicitCandidate`,
+// replace the body with `return landedMergeShaped(c)` (or with
+// `c.mergeGate == nil || *c.mergeGate`, the other natural way to re-widen it) —
+// and this test reds on the `criterion=1` that comes back.
+// TestTaskLandedPolarity_FieldMergeGateTrueIsStillTheCandidate stays GREEN under
+// that mutation, which is the whole reason the two live apart.
+func TestTaskLanded_MergeGateWordingWithNoFieldIsNotVolunteered(t *testing.T) {
 	cap := landedCriterionServer(t, []landedCrit{
 		{text: "The reconciler is proven by test, red-without and green-with"},
+		// Marker-worded and NOT landing-worded, and carrying no `merge_gate`
+		// key at all: the PROSE arm is the only thing that could admit it, so
+		// this fixture measures the prose door and nothing else.
 		{text: "MERGE-GATED (the LEAD closes this criterion): the Elixir gate is green on the head sha and the squash sha is recorded here."},
 	})
 
-	_, code := landWithNote(t)
+	out, code := landWithNote(t)
 	if code != exitOK {
-		t.Fatalf("exit = %d, want exitOK (%d)", code, exitOK)
+		t.Fatalf("exit = %d, want exitOK (%d) — shutting the prose door must not fail the landing itself", code, exitOK)
 	}
 	posts := cap.posts()
-	if len(posts) != 1 || !strings.Contains(posts[0], "criterion=1") {
-		t.Fatalf("queries = %v — index 1 carries NO merge_gate key, so the PROSE arm of "+
-			"landedMergeShaped (mergeGateWordedRe, mirroring Barkpark.Tasks.Criteria's "+
-			"@merge_gate_worded) is the only thing that can admit it. Measured 2026-09-17: "+
-			"1587 of the live corpus's 2668 marker-worded criteria are decided this way, so a "+
-			"fence that covers only the FIELD shape leaves that many criteria unfenced.", posts)
+	if len(posts) != 1 {
+		t.Fatalf("landing POSTed %d times, want 1; queries = %v", len(posts), posts)
+	}
+	if strings.Contains(posts[0], "criterion=") {
+		t.Fatalf("query = %q — index 1 carries the MERGE-GATED marker and NO merge_gate key. "+
+			"A landing that names no criterion must not volunteer it: the close-time readers are "+
+			"flag-only, so flipping it here records a met the lead's own close would have refused. "+
+			"If this reds, the prose door was re-opened — see task-b40af0580ec7deb6.", posts[0])
+	}
+	// The omission must be SPOKEN. A silent skip reads as "nothing here was
+	// merge-shaped", which is a different and false statement.
+	if !strings.Contains(out, "did NOT volunteer") {
+		t.Errorf("the run skipped a merge-gate-WORDED criterion and never said so; out:\n%s", out)
+	}
+	if !strings.Contains(out, "skipped #2 (index 1)") {
+		t.Errorf("the receipt did not name WHICH criterion it declined to volunteer; out:\n%s", out)
+	}
+	if !strings.Contains(out, "--criterion N") {
+		t.Errorf("the receipt named no way forward for an author who meant it; out:\n%s", out)
 	}
 }
 
-// THE QUIET ARM — the exemption door, and the one thing the prose arm's
-// deliberate WIDTH costs.
+// THE WIDE READER IS STILL WIDE — the control for the paragraph above. If
+// `landedMergeShaped`'s wording arm were narrowed instead of the implicit door
+// (the FAILURE DIRECTION the row names), the criterion below would fall out of
+// the prose-only SKIP list entirely and the receipt would go quiet about it.
+// Asserting the skip is therefore an assertion about the wide predicate, made
+// through the one surface that reports it.
+func TestTaskLanded_ProseArmStaysWideAndTheSkipProvesIt(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"marker, hyphenated", "MERGE-GATED: a lead closes this after the squash."},
+		{"marker, spaced", "This is the MERGE GATE for the row and the lead owns it."},
+		{"landing wording", "PR merged and the sha recorded on the row."},
+		{"merged to main", "The change is merged to main with the gates green."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := landedCriterionServer(t, []landedCrit{{text: tc.text}})
+			out, code := landWithNote(t)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want exitOK (%d)", code, exitOK)
+			}
+			if posts := cap.posts(); len(posts) != 1 || strings.Contains(posts[0], "criterion=") {
+				t.Fatalf("queries = %v — unflagged, so never volunteered", posts)
+			}
+			if !strings.Contains(out, "skipped #1 (index 0)") {
+				t.Fatalf("the wide reader no longer reads %q as merge-gate-worded, so the receipt "+
+					"said nothing about it. Narrowing landedMergeShaped is the FAILURE DIRECTION "+
+					"task-b40af0580ec7deb6 names: it stays wide for the stamp refusal, and only "+
+					"landedImplicitCandidate is narrow.\nout:\n%s", tc.text, out)
+			}
+		})
+	}
+}
+
+// THE QUIET ARM — the prose arm's known mis-fires, and what the narrow implicit
+// door did and did NOT change about them.
 //
 // The prose arm is wide on purpose (`Criteria.merge_gated?/1`'s moduledoc says
 // so and has the measurement): a false positive is a loud refusal, a false
@@ -142,38 +223,45 @@ func TestTaskLanded_MergeGateWordingWithNoFieldIsTheCandidate(t *testing.T) {
 // prose-arm-decided criteria merely mention it — 4.16%, against the moduledoc's
 // 3.51% of 2026-08-22, so the rate has held while the denominator shrank.
 //
-// The documented remedy is `merge_gate: false`, NOT the `--merge-gated`
-// override, and this test proves the door actually shuts: the SAME text, with
-// and without the field, resolves differently. Take-up is the finding worth
-// carrying: only 23 criteria in the corpus use the door against 66 that need
-// it.
+// SINCE 2026-09-20 the mis-fire can no longer be RESOLVED INTO A FLIP by an
+// unnamed landing — nothing unflagged can be — so its remaining cost is one
+// line of receipt noise. `merge_gate: false` is still the documented door and
+// still does strictly more: it takes the criterion out of the merge-shaped set
+// entirely, so it is not even mentioned. That difference is what this test
+// measures, and it is also a live assertion that the wide reader still reads the
+// text at all.
 func TestTaskLanded_ProseMisfireIsShutByMergeGateFalse(t *testing.T) {
 	// A real mis-fire shape, taken verbatim from the live corpus: a criterion
 	// ABOUT merge-gating, which a merge cannot discharge.
 	mention := "An audit reports how many existing tasks carry a merge-gate-worded criterion WITHOUT merge_gate:true. Evidence: the count and the query that produced it."
 
-	t.Run("without the door the mis-fire IS resolved", func(t *testing.T) {
+	t.Run("with no flag the mis-fire is skipped, loudly", func(t *testing.T) {
 		cap := landedCriterionServer(t, []landedCrit{
 			{text: "The reconciler is proven by test, red-without and green-with"},
 			{text: mention},
 		})
-		if _, code := landWithNote(t); code != exitOK {
+		out, code := landWithNote(t)
+		if code != exitOK {
 			t.Fatalf("exit = %d, want exitOK (%d)", code, exitOK)
 		}
 		posts := cap.posts()
-		if len(posts) != 1 || !strings.Contains(posts[0], "criterion=1") {
-			t.Fatalf("queries = %v — this is the MIS-FIRE the wide prose arm is known to "+
-				"produce. If it stopped firing, the prose arm was narrowed: re-measure before "+
-				"calling that an improvement (the narrowing has been measured-refuted twice).", posts)
+		if len(posts) != 1 || strings.Contains(posts[0], "criterion=") {
+			t.Fatalf("queries = %v — before task-b40af0580ec7deb6 this mis-fire WAS resolved into "+
+				"a flip on its wording alone. It must not be: it carries no merge_gate key.", posts)
+		}
+		if !strings.Contains(out, "skipped #2 (index 1)") {
+			t.Fatalf("the mis-fire was skipped SILENTLY, or the wide reader stopped matching it "+
+				"at all (the FAILURE DIRECTION); out:\n%s", out)
 		}
 	})
 
-	t.Run("merge_gate:false shuts it, per row, by the author", func(t *testing.T) {
+	t.Run("merge_gate:false shuts it entirely, per row, by the author", func(t *testing.T) {
 		cap := landedCriterionServer(t, []landedCrit{
 			{text: "The reconciler is proven by test, red-without and green-with"},
 			{text: mention, mergeGate: boolPtr(false)},
 		})
-		if _, code := landWithNote(t); code != exitOK {
+		out, code := landWithNote(t)
+		if code != exitOK {
 			t.Fatalf("exit = %d, want exitOK (%d)", code, exitOK)
 		}
 		posts := cap.posts()
@@ -184,6 +272,14 @@ func TestTaskLanded_ProseMisfireIsShutByMergeGateFalse(t *testing.T) {
 			t.Fatalf("query = %q — an explicit merge_gate:false is the documented exemption "+
 				"door for the prose arm's false positives. It must veto the wording outright, "+
 				"and it is the remedy an author reaches for INSTEAD of `--merge-gated`.", posts[0])
+		}
+		// Strictly more than the narrow door: an explicit false leaves the
+		// merge-shaped set, so it is not even reported as a skip. This is the
+		// one assertion that separates "unflagged" from "declared not-a-gate".
+		if strings.Contains(out, "skipped #2 (index 1)") {
+			t.Fatalf("merge_gate:false was reported as a merge-gate-worded SKIP — an explicit "+
+				"false is not a missing flag, it is a declaration that the criterion is not a "+
+				"gate at all, and it must leave the merge-shaped set outright.\nout:\n%s", out)
 		}
 	})
 }
