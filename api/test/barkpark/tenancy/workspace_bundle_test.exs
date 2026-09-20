@@ -322,7 +322,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
-  # ── :full means full — bare-slug E3 fidelity under a shared slug (PDS-D45/D74)
+  # ── :full means full — bare-slug E3 fidelity under a shared slug (PDS-D45/PDS-D74)
 
   # THE PROPERTY BELOW STATES ITS OWN CARVE-OUTS. For every E3-dataset table, the
   # rows sitting under a slug this workspace's projects OWN fall in exactly three
@@ -360,7 +360,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     "preview_token_jti" => "$2::text IS NULL"
   }
 
-  describe "a :full bundle is LOSS-EXPLICIT for the bare-slug E3 family (PDS-D45/D74)" do
+  describe "a :full bundle is LOSS-EXPLICIT for the bare-slug E3 family (PDS-D45/PDS-D74)" do
     test "PROPERTY: every bare-slug E3 row under an owned slug travels, is declared, or is provably foreign" do
       f = seed_shared_slug_fixture!()
 
@@ -1008,7 +1008,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
-  # ── merge import mode (PDS-D8/D9) ─────────────────────────────────────────────
+  # ── merge import mode (PDS-D8/PDS-D9) ─────────────────────────────────────────────
 
   describe "merge import mode (PDS-D8): ON CONFLICT (order_columns) DO UPDATE convergence" do
     test "merge over a POPULATED workspace converges — mutated rows restored, deleted rows resurrected, 2nd AND 3rd import md5-stable" do
@@ -1420,9 +1420,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
-  # ── transport: file-to-file packing (PDS-D204/D207) ──────────────────────────
+  # ── transport: file-to-file packing (PDS-D204/PDS-D207) ──────────────────────────
 
-  describe "transport parity (PDS-D204/D207)" do
+  describe "transport parity (PDS-D204/PDS-D207)" do
     test "export_to_file/2 produces the same bundle export/2 does and leaves NO spill behind" do
       %{ws_a: ws_a} = seed_two_workspaces!()
       dir = Archive.spill_dir()
@@ -2714,7 +2714,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
-  # ── bare-slug E3 fidelity fixture (PDS-D45/D74) ──────────────────────────────
+  # ── bare-slug E3 fidelity fixture (PDS-D45/PDS-D74) ──────────────────────────────
 
   # Two workspaces colliding on ONE dataset slug, with a bare-slug E3 row of each
   # kind on BOTH sides of the collision plus an exclusive-slug control. This is

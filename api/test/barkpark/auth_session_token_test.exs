@@ -182,6 +182,127 @@ defmodule Barkpark.AuthSessionTokenTest do
     end
   end
 
+  # ── workspace attribution fails CLOSED (task-1db81c1568866df8) ───────────
+  #
+  # `create_claude_session_token/3` used to resolve
+  # `opts[:workspace_id] || minter_workspace_id(minter) || default_workspace_id()`,
+  # which made its own `{:error, :no_workspace}` arm unreachable: an UNBOUND
+  # minter called with no explicit scope was issued a credential stamped with
+  # the seeded Default workspace it never selected. Not an escalation — the
+  # `TenancyAuth.authorize/3` gate still had to pass for Default — a
+  # MIS-ATTRIBUTION, and the attribution is what the audit trail later reads.
+  #
+  # THE RECONCILIATION, so the next reader does not restore the fallback as a
+  # convenience: `Barkpark.StudioChat.Provider.Claude.cloud_workspace_id!/1`
+  # refuses the SAME three shapes (nil, "", "global") before it will spawn a
+  # cloud turn, raising "refusing to spawn an unattributed cloud turn". Two
+  # halves of one boundary; the provider's answer was always the right one, and
+  # the mint now gives it too. The last test below pins that agreement by
+  # shape, not by prose.
+
+  describe "create_claude_session_token/3 workspace attribution" do
+    setup do
+      {default_ws, _project} = ensure_default_scope!()
+      %{default_ws: default_ws}
+    end
+
+    # An ApiToken that is a write-capable MEMBER of `ws` but carries no
+    # `workspace_id` binding of its own — exactly the shape whose
+    # `minter_workspace_id/1` answers nil. Pre-fix this minter minted happily
+    # into Default; the point of the arm is that it no longer does.
+    defp unbound_member_minter!(ws) do
+      {:ok, bound} =
+        Auth.create_token(
+          "unbound-#{System.unique_integer([:positive])}",
+          "unbound chat admin",
+          "production",
+          ["read", "write"],
+          ws.id
+        )
+
+      bound |> Ecto.Changeset.change(workspace_id: nil) |> Repo.update!()
+    end
+
+    test "ARM: an unbound minter with no :workspace_id is REFUSED, not attributed to Default",
+         %{default_ws: default_ws} do
+      minter = unbound_member_minter!(default_ws)
+
+      # PRECONDITIONS — without these the refusal could come from want of
+      # rights rather than from want of attribution, and the arm would pass
+      # for the wrong reason (and stay green on the pre-fix code).
+      assert minter.workspace_id == nil,
+             "precondition: the minter must carry NO workspace binding"
+
+      assert Barkpark.Tenancy.Auth.authorize(minter, default_ws.id, :write) == :ok,
+             "precondition: this minter MAY write to Default — pre-fix it minted there"
+
+      sid = Ecto.UUID.generate()
+
+      assert {:error, :no_workspace} = Auth.create_claude_session_token(minter, sid)
+
+      refute Repo.exists?(from(t in ApiToken, where: t.label == ^"claude-session #{sid}")),
+             "a refused mint must leave NO row — least of all one stamped with Default"
+    end
+
+    test "ARM: an explicit workspace_id: nil is the same absence, not an override",
+         %{default_ws: default_ws} do
+      # runtime.ex and runtime/codex/session.ex both pass `workspace_id:` as a
+      # PRESENT key whose value may be nil (a :global session). A present-but-nil
+      # key must refuse exactly like an absent one.
+      minter = unbound_member_minter!(default_ws)
+
+      assert {:error, :no_workspace} =
+               Auth.create_claude_session_token(minter, Ecto.UUID.generate(), workspace_id: nil)
+    end
+
+    test "CONTROL: an EXPLICITLY-scoped mint still succeeds, from that same unbound minter",
+         %{default_ws: default_ws} do
+      minter = unbound_member_minter!(default_ws)
+      sid = Ecto.UUID.generate()
+
+      assert {:ok, {raw, %ApiToken{} = token}} =
+               Auth.create_claude_session_token(minter, sid, workspace_id: default_ws.id)
+
+      assert token.workspace_id == default_ws.id
+      assert String.starts_with?(raw, "bpcs_")
+    end
+
+    test "CONTROL: a minter WITH a workspace binding still mints into ITS workspace",
+         %{ws: ws, minter: minter} do
+      assert minter.workspace_id == ws.id
+      sid = Ecto.UUID.generate()
+
+      assert {:ok, {_raw, %ApiToken{} = token}} =
+               Auth.create_claude_session_token(minter, sid)
+
+      assert token.workspace_id == ws.id
+    end
+
+    test "the refused shapes are the SAME three provider/claude.ex cloud_workspace_id!/1 refuses",
+         %{ws: ws, minter: minter} do
+      # nil / "" / "global": the mint answers {:error, :no_workspace} where the
+      # cloud profile raises ArgumentError. The binding minter carries ws.id, so
+      # a fall-through to it would mask the refusal — assert the OPT is what is
+      # being judged by ALSO checking the bound minter still mints (above).
+      %ApiToken{} = bound = minter
+      unbound = %{bound | workspace_id: nil}
+
+      for bad <- [nil, "", "global"] do
+        # Bound first so the message is reachable: `assert pattern = expr, msg`
+        # never prints msg (the unreachable-assert-message ratchet reds on it).
+        verdict =
+          Auth.create_claude_session_token(unbound, Ecto.UUID.generate(), workspace_id: bad)
+
+        assert verdict == {:error, :no_workspace},
+               "workspace_id: #{inspect(bad)} must be refused, exactly as cloud_workspace_id!/1 refuses it — got #{inspect(verdict)}"
+      end
+
+      # and the control in the same breath: a concrete one passes.
+      assert {:ok, _} =
+               Auth.create_claude_session_token(minter, Ecto.UUID.generate(), workspace_id: ws.id)
+    end
+  end
+
   # ── revocation (the primary teardown; TTL is only the backstop) ──────────
 
   describe "revoke_token/1 on a session token" do

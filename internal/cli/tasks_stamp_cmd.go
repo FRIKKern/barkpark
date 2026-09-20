@@ -49,7 +49,7 @@ import (
 //     runs — see `stampMergeGateFallback` — so a rollout never leaves the gate
 //     unguarded in either direction.
 //
-//  3. READ-BACK (PDS-D359/D361, wave 26) — after a 2xx, RE-READ the criterion
+//  3. READ-BACK (PDS-D359/PDS-D361, wave 26) — after a 2xx, RE-READ the criterion
 //     from the store and render the receipt from what the store holds, never
 //     from what was asked. The epic has watched this verb return exit 0 with a
 //     normal envelope on a stamp that did not land (read-back: met:false,
@@ -198,7 +198,7 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// and the fallback branch above.
 	rc := runCommand(out, g, ctx, m, cmd, forward)
 
-	// THE READ-BACK (PDS-D359/D361). A 2xx is not a landed write: the epic has
+	// THE READ-BACK (PDS-D359/PDS-D361). A 2xx is not a landed write: the epic has
 	// now watched this exact verb return exit 0 with a normal envelope on a
 	// stamp the store did not hold. So after the POST, ASK THE STORE what the
 	// row holds and render the verdict from THAT — for a clean 2xx (rc==exitOK)

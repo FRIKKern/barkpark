@@ -17,16 +17,29 @@
 #
 # EXIT 0 all arms passed · 1 an arm failed · 99 the harness itself could not run.
 #
-# MANUAL PROOF — not wired: the one-line CI tenancy this needs is a `run: bash
-# scripts/pds-artifact-retention.test.sh` step on the `PDS census / parity /
-# scratch-target harnesses` job in .github/workflows/shell-harnesses.yml, and
-# .github/ is the gates lane's fence, not the deploy/PDS lane's. This exemption
-# is a HANDOFF, not a verdict, and it is the WEAKER of the two remedies the
-# census offers: until that line lands, a revert of the keep-window clause is
-# caught by running this file BY HAND, and by nothing else — the arm 10 mutation
-# below proves the clause matters, and nothing proves it is still there. The
-# same shape and the same reason as scripts/pds-charter-anchors-check_test.sh.
-# Wiring row: see the PR body. Baseline at authoring: 35 passed, 0 failed.
+# WIRED: the `PDS census / parity / scratch-target harnesses` leg of
+# .github/workflows/shell-harnesses.yml runs this file — the arm lives in
+# .github/shell-harness-legs.json beside its pds-* siblings, and the
+# `scripts/pds-*.sh` glob in the workflow's paths lists and `changes` dispatcher
+# admits it (task-0dee9077fed25129). shell-harnesses.yml is not a required
+# context, so wiring makes this harness RUN, not BLOCK. Wiring it is what
+# produced the 24/11 Linux reading recorded below: before it, this file had
+# never once started on Linux.
+#
+# 2026-09-20 — THE BASELINE ABOVE WAS A macOS BASELINE, AND IT WAS NOT THE WHOLE
+# TRUTH. The first Linux run of this file (GH Actions run 35504059438, job
+# 106061128225, via the wiring PR) read 24 passed, 11 FAILED — the same tree,
+# the same arms. The cause was a BSD-ism in the SUBJECT and in this file's own
+# store_fingerprint: `stat -f %m` is BSD's mtime, but on GNU coreutils `-f`
+# means FILE SYSTEM status, so the BSD form prints a block-count report to
+# STDOUT and only then fails, and the `|| stat -c …` fallback appends the right
+# number to that garbage. Every mtime and uid downstream was nonsense, so every
+# directory read as "owned by another unix user" and nothing was ever retained
+# or removed. Fixed by probing stat's flavour ONCE in the subject and by
+# GNU-first ordering here; scripts/stat-portability-check.sh now refuses the
+# spelling tree-wide. Baseline is now 35/0 on macOS AND 35/0 under a
+# GNU-semantics stat. An arm that has only ever run on ONE platform has a
+# baseline from one platform, and this header should say which.
 
 set -uo pipefail
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
@@ -41,7 +54,8 @@ check(){ # got want label
 }
 rule() { printf -- '─%.0s' $(seq 1 72); printf '\n'; }
 
-TMPTOP="$(mktemp -d -t pds-art-retention-test)" || { echo "TEST HARNESS FAIL: mktemp" >&2; exit 99; }
+# PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only.
+TMPTOP="$(mktemp -d "${TMPDIR:-/tmp}/pds-art-retention-test.XXXXXX")" || { echo "TEST HARNESS FAIL: mktemp" >&2; exit 99; }
 cleanup() { [ -n "${TMPTOP:-}" ] && [ -d "$TMPTOP" ] && rm -rf "$TMPTOP"; }
 trap cleanup EXIT
 
@@ -87,7 +101,12 @@ plant_full_store() { # root
 store_fingerprint() { # root -> a stable description of the parked store
   local f="$1/pds-full-export"
   find "$f" -mindepth 0 2>/dev/null | LC_ALL=C sort | while IFS= read -r e; do
-    printf '%s\t%s\n' "$(basename "$e")" "$(stat -f %z "$e" 2>/dev/null || stat -c %s "$e" 2>/dev/null)"
+    # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+    # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a
+    # block-count report instead of failing, and a BSD-first `||` chain
+    # never reaches the GNU form. BSD stat rejects `-c` outright, so
+    # GNU-first fails loudly on the wrong platform instead of quietly.
+    printf '%s\t%s\n' "$(basename "$e")" "$(stat -c %s "$e" 2>/dev/null || stat -f %z "$e" 2>/dev/null)"
   done
 }
 

@@ -6120,6 +6120,66 @@ export const SCENARIOS = {
     },
   },
 
+  // ── cch-w45-s5-fu · THE INSTANCE SCREEN WITH /v1/me UNANSWERED ─────────────
+  // The corpus had never booted the instance screen on a FAILED /v1/me at all
+  // (meFault appeared only on #billing and the operator console), so every
+  // claim about the instance screen's unknown arm — including "the still-
+  // checking control has an exit" — was argued from the render conditions and
+  // never measured.
+  //
+  // THE ACTOR IS AN OWNER. The role is irrelevant here on purpose: the read
+  // never lands, so instanceAdminAuthority() answers "unknown" for everybody
+  // and the arm under test is the one that claims NOTHING about the role.
+  //
+  // THE BOX IS SUSPENDED AND HOSTED, which is the whole point. The Updates
+  // panel renders for every box with a host, while the header's actions strip
+  // draws only the CLI disclosure in the suspended arm — no adminWriteControlHtml
+  // control at all, so the strip emits no group reason and therefore no exit.
+  // (The filing named a live box with a custom host as the reachable case. It is
+  // not: Connect agent is gated on lc.live ALONE, so a live box always draws a
+  // grouped control and always gets the header exit. The lifecycle arms that
+  // draw no grouped control while still rendering the Updates panel are the
+  // reachable ones, and `suspended` is the committed fixture that is both.)
+  //
+  // times: 1 — the fault is ONE-SHOT (the billing-me-recovers precedent), so the
+  // same fixture measures both halves: the first read fails and the panel paints
+  // the still-checking Rollback, and the exit's re-read can then LAND, which is
+  // the only way to prove the exit exits rather than merely renders.
+  "instance-suspended-me-unreadable": {
+    label: "Instance Updates panel with /v1/me unanswered on a SUSPENDED box — the still-checking Roll back needs an exit the header strip cannot provide (its suspended arm draws no grouped control)",
+    authed: true,
+    deepLink: "#instance/" + IDS.suspendedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [suspendedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // THE TWIN THAT MAKES THE BINDING LOAD-BEARING. Same one-shot /v1/me fault,
+  // but a LIVE box one release behind: its header strip DOES draw grouped
+  // controls (Update / Connect agent), so the header carries an exit AND the
+  // Updates strip now carries its own — two [data-me-retry] in one subtree,
+  // which is exactly the shape the old first-match binding made impossible to
+  // ship. Without this fixture "bind every match" is a change no committed
+  // scenario can tell apart from the code it replaced.
+  "instance-behind-me-unreadable": {
+    label: "Instance screen with /v1/me unanswered on a LIVE behind box — TWO still-checking strips, TWO exits, and the second one must not be dead bytes",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [behindInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
   // ── cch-w50-s4: THE TWO BILLING ACTORS THE CORPUS HAS NEVER HELD ────────────
   // The plan card's bullets rendered in five of the committed scenarios before
   // this pair, ALL of them paid-or-member. Two arms of renderPlanState had ZERO

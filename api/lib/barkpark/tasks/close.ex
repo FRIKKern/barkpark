@@ -5,7 +5,7 @@ defmodule Barkpark.Tasks.Close do
   # already-terminal guard, and the dependent-unblock walk all live together so
   # the close contract is one cohesive unit.
   #
-  # THE CLOSE HONESTY GATES (PDS-D288/D289/D290) — READ THIS BEFORE CHANGING THEM.
+  # THE CLOSE HONESTY GATES (PDS-D288/PDS-D289/PDS-D290) — READ THIS BEFORE CHANGING THEM.
   # Three checks ride the same in-lock `with` chain as the epoch fence:
   #
   #   * HOLDER — the closer must be (or have been) the lease holder. A foreign
@@ -81,7 +81,7 @@ defmodule Barkpark.Tasks.Close do
       fenced_content_write: 4,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
       actor_stamp: 2,
       merge_criteria: 2,
       merge_landed: 2,
@@ -167,7 +167,7 @@ defmodule Barkpark.Tasks.Close do
     # the wall — by the time it reaches here it is either a validated binary or
     # `nil`, and `nil` writes NO key (see FlightRecorder.put_context_compact/2).
     context_compact = Keyword.get(opts, :context_compact)
-    # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
+    # The two LOUD overrides (PDS-D288/PDS-D289). Each is a non-empty reason string;
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
       holder: override_reason(Keyword.get(opts, :holder_override)),
@@ -681,7 +681,7 @@ defmodule Barkpark.Tasks.Close do
                       # WRITTEN (`updated`) rather than from the request, so
                       # the event records what committed. A claimless close
                       # (container / root rows) stamps no `actor` key at all.
-                      caller_stamp(caller_token_id)
+                      caller_stamp(caller_token_id, session)
                       |> Map.put("closed_by", worker_id)
                       |> Map.merge(
                         actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
@@ -990,7 +990,7 @@ defmodule Barkpark.Tasks.Close do
   # zero-criteria task; it fired on 9 of those 11 births and changed nothing,
   # because its only reader is the server journal. A second warning would have
   # been the same instrument aimed at the same blind spot. So this REFUSES — in the exact
-  # PDS-D288/D289 idiom, which means "refuse UNLESS you say why on the record",
+  # PDS-D288/PDS-D289 idiom, which means "refuse UNLESS you say why on the record",
   # not a wall: `--set ack_override="<reason>"` always lands.
   #
   # `blocked` is exempt BY NAME (the same honest-partial reasoning as the criteria

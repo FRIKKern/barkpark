@@ -90,13 +90,22 @@ defmodule Barkpark.Content.Lifecycle do
 
     case Content.get_document(did, type, dataset, opts) do
       {:ok, draft} ->
+        # THE INCUMBENT, READ ONCE (task-c1f155da34d3338f). The published row
+        # this publish is about to replace — `nil` when there is none, which is
+        # the definition of a FIRST publish (a birth). It was already being read
+        # here, inside `ensure_task_publish_transition_legal/5`, purely to decide
+        # the same question ("First publish — a birth" — see its `_ ->` clause);
+        # hoisting the read makes that fact available to the `:before_publish`
+        # payload as well, and costs no extra query.
+        published = read_incumbent(pid, type, dataset, opts)
+
         # The publish-door lifecycle gate — immediately after the draft read,
         # BEFORE the wall and the :before_publish hook fire, so a refusal is
         # side-effect-free (the Writer-seam gate-position precedent).
         with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
              :ok <- ensure_bound_title_agrees(draft),
-             :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
-          publish_after_gate(draft, pid, type, dataset, opts)
+             :ok <- ensure_task_publish_transition_legal(type, draft, published, opts) do
+          publish_after_gate(draft, pid, type, dataset, opts, published)
         end
 
       {:error, :not_found} ->
@@ -255,14 +264,20 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
-  defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts) do
+  defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts, published) do
     ctx = WriteScope.build_ctx(opts)
 
+    # `published_doc` (task-c1f155da34d3338f): the row this publish REPLACES, or
+    # `nil` on a first publish. `prev_doc` cannot answer that question — it is
+    # the draft, the same value as `doc` — so a hook that needs to tell a birth
+    # from a re-publish had nothing to read and no way to know it was missing.
+    # Additive: a hook that does not name the key is unaffected.
     payload = %{
       event: :before_publish,
       doc: draft,
       dataset: dataset,
       prev_doc: draft,
+      published_doc: published,
       ctx: ctx
     }
 
@@ -854,7 +869,7 @@ defmodule Barkpark.Content.Lifecycle do
   #     the github bookkeeping collapse) carries the claim byte-identical and
   #     passes untouched.
   #   * a CLAIM-IDENTICAL draft can STILL erase evidence (PDS wave 26,
-  #     PDS-D360/D362, observed end-to-end): `bp task stamp` writes the
+  #     PDS-D360/PDS-D362, observed end-to-end): `bp task stamp` writes the
   #     PUBLISHED row directly (`Tasks.Stamp`, `Repo.update_all`) and never
   #     touches the draft twin, and a draft NEVER rebases. So a draft minted
   #     DURING an active claim carries that claim verbatim, sails past
@@ -917,25 +932,39 @@ defmodule Barkpark.Content.Lifecycle do
   #     criteria fence all apply to `:github`, and only `:sync` is exempt from
   #     the first two. `pds-bl-github-linkput-auto-publish-erasure` stays open
   #     for the audit-trail half it does not answer.
-  defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
-    case Content.get_document(pid, "task", dataset, opts) do
-      {:ok, %Document{content: pub_content}} ->
-        if Keyword.get(opts, :source, :api) == :sync do
-          # Mirror-verbatim: transition + claim exempt, criteria fence NOT —
-          # see the :sync coverage note above.
-          criteria_fence(pub_content || %{}, draft.content || %{})
-        else
-          gate_task_publish(pub_content || %{}, draft.content || %{})
-        end
+  # The incumbent is now READ BY THE CALLER and handed in (see `read_incumbent/4`
+  # at the top of `do_publish_document/4`) rather than re-read here. Same value,
+  # same verdicts — `nil` still means "first publish — a birth", and `legal?/2`
+  # is still never consulted for one (`legal?(nil, x)` is false by design and
+  # would refuse every birth).
+  defp ensure_task_publish_transition_legal(
+         "task",
+         %Document{} = draft,
+         %Document{} = published,
+         opts
+       ) do
+    pub_content = published.content
 
-      _ ->
-        # First publish — a birth. Never consult legal?/2 (legal?(nil, x)
-        # is false by design and would refuse every first publish).
-        :ok
+    if Keyword.get(opts, :source, :api) == :sync do
+      # Mirror-verbatim: transition + claim exempt, criteria fence NOT —
+      # see the :sync coverage note above.
+      criteria_fence(pub_content || %{}, draft.content || %{})
+    else
+      gate_task_publish(pub_content || %{}, draft.content || %{})
     end
   end
 
-  defp ensure_task_publish_transition_legal(_type, _draft, _pid, _dataset, _opts), do: :ok
+  defp ensure_task_publish_transition_legal(_type, _draft, _published, _opts), do: :ok
+
+  # `nil` when this doc_id has no published row yet. Deliberately total: every
+  # non-`{:ok, %Document{}}` answer (including a scoping miss) is read as "no
+  # incumbent", which is exactly how the clause it replaced behaved.
+  defp read_incumbent(pid, type, dataset, opts) do
+    case Content.get_document(pid, type, dataset, opts) do
+      {:ok, %Document{} = published} -> published
+      _ -> nil
+    end
+  end
 
   defp gate_task_publish(pub_content, draft_content) do
     was = pub_content["lifecycle_status"]

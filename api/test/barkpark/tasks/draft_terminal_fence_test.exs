@@ -56,6 +56,7 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
   defp content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
     }

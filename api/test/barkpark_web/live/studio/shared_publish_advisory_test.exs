@@ -47,7 +47,14 @@ defmodule BarkparkWeb.Studio.SharedPublishAdvisoryTest do
           "doc_id" => "adv-task",
           "title" => "Advisory task",
           "content" =>
-            LabelFixtures.with_labels(%{"kind" => "task", "lifecycle_status" => "open"}, 1)
+            LabelFixtures.with_labels(
+              %{
+                "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
+                "lifecycle_status" => "open"
+              },
+              1
+            )
         },
         @dataset,
         scope

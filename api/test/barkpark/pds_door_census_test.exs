@@ -47,7 +47,7 @@ defmodule Barkpark.PdsDoorCensusTest do
 
   ## The meter blind spot
 
-  PDS-D633/D646 obliges every meter-derived number in this epic to carry the
+  PDS-D633/PDS-D646 obliges every meter-derived number in this epic to carry the
   blind-spot sentence in the instrument's `@moduledoc` AND its printed output.
   A green ExUnit case prints nothing, so the printed half can only land on the
   instrument — and it is asserted here so a copy-paste cannot drop it:
@@ -320,8 +320,17 @@ defmodule Barkpark.PdsDoorCensusTest do
     # this bump are paid together, and the count below reads 13 ON PURPOSE.
     # RE-DERIVED by running the census on this tree: it prints
     # `harnesses : 13` and names all three files.
-    assert out =~ ~r/harnesses\s+: 13 /,
-           "the derived harness count moved off 13. Harness-hood is derived from the " <>
+    #
+    # A FOURTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-19):
+    # scripts/pds-citation-expand.test.sh, the harness for the compressed-citation
+    # guard scripts/pds-citation-expand.sh (task-b92409dc562dc20c, #19227). It is a
+    # harness by the same derived *.test.sh rule, it is wired into the pds-harnesses
+    # leg via .github/shell-harness-legs.json (not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. RE-DERIVED by running the census on this tree: it prints
+    # `harnesses : 14` and names the file — never by adding a delta to main's 13.
+    assert out =~ ~r/harnesses\s+: 14 /,
+           "the derived harness count moved off 14. Harness-hood is derived from the " <>
              "*_test.sh / *.test.sh name; if a fourteenth harness landed (or one left), " <>
              "say so on purpose.\n#{out}"
 
@@ -443,6 +452,14 @@ defmodule Barkpark.PdsDoorCensusTest do
        ctx do
     out = ctx.check_out
 
+    # NOT EXPANDED, AND THE COMPRESSION IS THE POINT: this is not prose, it is a
+    # byte-for-byte pin on what scripts/pds-door-census.sh PRINTS, and that
+    # script lives in another lane's fence (scripts/pds-*). The deploy lane
+    # already expanded it once and had to REVERT, because this line is the
+    # contract. Expanding either half alone reds the other; the repair is a
+    # coordinated change in both trees. scripts/pds-citation-expand.sh --check
+    # classifies the script's token BLOCKED by finding this exact literal here,
+    # so re-prefixing it would also blind that guard.
     assert out =~ "METER BLIND SPOT (PDS-D633/D646)",
            "the blind-spot sentence is gone from the census's printed output. D633's own " <>
              "closing clause is that the sentence must ship in the instrument's @moduledoc AND " <>
