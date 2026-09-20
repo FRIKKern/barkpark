@@ -221,6 +221,8 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-secret-scan.sh"
+      - "scripts/pds-secret-scan_test.sh"
       # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
       # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
       # reads the charter AND this checkout's git log. An edit to either FILE can
@@ -914,6 +916,8 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-secret-scan.sh"
+      - "scripts/pds-secret-scan_test.sh"
       # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
       # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
       # reads the charter AND this checkout's git log. An edit to either FILE can

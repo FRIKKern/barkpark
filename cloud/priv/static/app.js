@@ -16494,6 +16494,36 @@
     // The chip is exactly the arm a non-admin already gets — one grammar, one
     // .set-chip, no new CSS.
     //
+    // cch-w48-bl-site-repo-chip-visual-weight — AND THE CHIP IS NOW GONE FROM
+    // THE BADGES ROW, because the fact it was carrying is ALREADY on this
+    // screen and always was. The Details rail's "Repository" row (see
+    // `railRowHtml("Repository", repo)` below) renders `owner/repo@branch` in
+    // mono for EVERY actor, unpredicated on authority or readiness — a strict
+    // SUPERSET of the chip's text, since the chip omitted the branch. So the
+    // withheld arms delete no information: they delete a DUPLICATE, and the
+    // rail row is the honest home for a read-only fact.
+    //
+    // WHY NOT A BADGES-SCOPED RULE. The alternative was a
+    // `.fleet-badges .set-chip` rule sized to btn-sm. Measured in headless
+    // Chrome on this screen, the chip computes font-size 12px — the SAME as
+    // #site-deploy — and differs on height (22 vs 28) and colour (muted-text,
+    // transparent ground). So a restyle would have to grow it to button height
+    // and button colour, i.e. make a non-interactive span look like the
+    // buttons on either side of it, which is the worse outcome: .fleet-badges
+    // is a row of CONTROLS, and the honest fix is that it stops carrying a
+    // non-control at all. It also costs a CSS rule and a cssom-heads baseline
+    // regeneration for a duplicate of a row two inches away.
+    //
+    // AND IT WAS NOT ONLY A WEIGHT PROBLEM. `.set-chip` carries
+    // `white-space: nowrap`, and github_repo's only server-side ceiling is the
+    // varchar(255) column (registry/site.ex `validate_github_repo/1` is a
+    // FORMAT check with no length clause). Driven at a 320px viewport on the
+    // preview's 255-char cruel repo fixture, the chip measured 1658px wide and
+    // put documentElement.scrollWidth at 2688 against a 320 clientWidth — a
+    // 2368px sideways scroll on the whole page. The rail row held the FULL
+    // 511-char `repo@branch` span in 250px at the same width, because `.v`
+    // wraps. Removing the chip removes the overhang with it.
+    //
     // NO SENTENCE, at either withholding. This function's own s2 note settles
     // it: sentences belong to the POST-hoc refusal (the server's own words
     // through friendly()); a sentence at a PRE-hoc omit invents a refusal for
@@ -16503,7 +16533,7 @@
     var githubOffered = authority === "grant" && githubReady === "ready";
     var githubControl = githubOffered
       ? '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>"
-      : (site.github_repo ? '<span class="set-chip">' + githubLabel + "</span>" : "");
+      : "";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
