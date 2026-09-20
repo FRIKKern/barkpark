@@ -190,7 +190,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # emit a patch-block on a body edit and no longer SPLITS a run.
   #
   # KEEP LOCKSTEP with run-convert.js CANVAS_ROLE_TYPES and role-nodes.js.
-  @canvas_role_types ~w(eyebrow byline ingress pullquote)
+  @canvas_role_types ~w(eyebrow byline ingress pullquote blockquote)
 
   # New mounts use the lossless contextual Table editor. JS retains the node,
   # coarse save receiver and slash insertion for already-mounted legacy runs.

@@ -148,7 +148,7 @@ import { TaskList } from "./task-list-node.js";
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
 // PM derives the contentDOM from the content hole; getJSON round-trips the styled
 // element + bpId/bpType, and run-convert.js maps the block ⇄ node. See ./role-nodes.js.
-import { Eyebrow, Byline, Ingress, Pullquote } from "./role-nodes.js";
+import { Eyebrow, Byline, Ingress, Pullquote, Blockquote } from "./role-nodes.js";
 // editable table: the `table` block as FOUR hand-rolled NESTED nodes (bpTable >
 // bpTableRow > bpTableHeaderCell|bpTableCell), NOT @tiptap/extension-table. Cell bodies
 // are PM `inline*` holes reusing the shared inline serializer (marks round-trip); the
@@ -908,6 +908,7 @@ class BpPaperCanvas extends HTMLElement {
         Byline,
         Ingress,
         Pullquote,
+        Blockquote,
         // editable table: the four nested nodes (bpTable > bpTableRow >
         // bpTableHeaderCell|bpTableCell). Registers the container + row/cell types so
         // runToTiptap's { type:"bpTable", content:[rows…] } tree mounts with editable
@@ -2176,14 +2177,15 @@ class BpPaperCanvas extends HTMLElement {
     const code = /^```$/.test(blockText);
     const quote = /^>\s$/.test(blockText);
     if (quote) {
-      // `> ` → the quote block (pullquote is the canvas's authored quote). The callout gesture
-      // `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside the quote.
+      // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
+      // quote; the pullquote stays article chrome, reached from the slash menu). The callout
+      // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
       const { state, view } = this._editor;
       const start = $from.before(1);
       const end = $from.after(1);
       // Keep the block's id so the save is a same-id replace-block, not remove + insert.
-      const quoteNode = state.schema.nodes.pullquote
-        ? state.schema.nodes.pullquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "pullquote" })
+      const quoteNode = state.schema.nodes.blockquote
+        ? state.schema.nodes.blockquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "blockquote" })
         : null;
       if (!quoteNode) return false;
       let tr = state.tr.replaceWith(start, end, quoteNode);
@@ -2248,7 +2250,9 @@ class BpPaperCanvas extends HTMLElement {
     // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body, and still rejects a paragraph nested in a list item. See
     // slashTriggerAllowsParent.
-    const inQuote = $from.depth === 1 && $from.parent.type.name === "pullquote";
+    // `> ` has already become a quote block (the plain blockquote now; a pullquote when one
+    // was authored from the menu), so the `[!note] ` that follows arrives inside it.
+    const inQuote = $from.depth === 1 && ($from.parent.type.name === "blockquote" || $from.parent.type.name === "pullquote");
     if (!inQuote && !slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
     const blockText = $from.parent.textContent;
     const atEnd = $from.parentOffset === blockText.length;

@@ -52,6 +52,7 @@ const NATURAL_BLOCK_TYPES = new Set([
   "paragraph",
   "list",
   "callout",
+  "blockquote",
   "code",
   "diagram",
   "divider",
@@ -95,6 +96,8 @@ function serializeBlock(block) {
       return serializeList(block);
     case "callout":
       return serializeCallout(block);
+    case "blockquote":
+      return serializeBlockquote(block);
     case "code":
       return serializeCode(block);
     case "diagram":
@@ -236,6 +239,17 @@ function serializeList(block) {
 // collapsible adds a "+"/"-" suffix after the ]: "+" = expandable-but-open,
 // "-" = collapsed. A non-collapsible callout has NO suffix. Mirrors the editor's
 // _maybeCalloutShorthand regex  ^>\s*\[!(\w+)\]([+-]?)\s$  (canvas/index.js:1096).
+// A plain quote is `> ` lines. A quote carrying a cite/attribution has no markdown
+// form that survives the round trip, so it rides the sentinel like any other extra.
+function serializeBlockquote(block) {
+  const cite = block.cite ?? block.attribution;
+  if (typeof cite === "string" && cite.trim() !== "") return sentinel(block);
+  const content = Array.isArray(block.content) ? block.content : [];
+  if (!inlineIsLossless(content)) return sentinel(block);
+  const md = inlineToMarkdown(content);
+  return md.split("\n").map((line) => (line ? "> " + line : ">")).join("\n");
+}
+
 function serializeCallout(block) {
   const content = block.content || [];
   if (!inlineIsLossless(content)) return sentinel(block);
@@ -707,11 +721,9 @@ export function markdownToBlocks(md) {
       continue;
     }
 
-    // 6) BLOCKQUOTE — > lines that are NOT a callout. (We emit a callout block of
-    //    a neutral tone so the quote round-trips through our own vocabulary; the
-    //    serializer has no separate blockquote kind. A plain "> x" the USER typed
-    //    becomes an info callout. This matches the editor, which has no bare
-    //    blockquote block — quotes are callouts.)
+    // 6) BLOCKQUOTE — > lines that are NOT a callout become the plain `blockquote`
+    //    block (the server element the BPML parser and Studio write; the canvas
+    //    mounts it as a role-shaped node). `> [!tone]` above still wins as a callout.
     if (/^>\s?/.test(line)) {
       const { block, next } = scanBlockquote(lines, i);
       blocks.push(block);
@@ -893,8 +905,7 @@ function scanBlockquote(lines, i) {
   }
   const block = {
     id: mintId(),
-    type: "callout",
-    tone: "info",
+    type: "blockquote",
     content: tokenizeInline(bodyLines.join("\n")),
   };
   return { block, next: j };
