@@ -134,11 +134,13 @@ defmodule BarkparkWeb.Contract.ErrorEnvelopeRequestIdParityTest do
 
     setup do
       {:ok, _} =
-        Auth.create_token(@sweep_admin_token, "sweep-parity-admin", "test", [
-          "read",
-          "write",
-          "admin"
-        ])
+        Auth.create_token(
+          @sweep_admin_token,
+          "sweep-parity-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       :ok
     end

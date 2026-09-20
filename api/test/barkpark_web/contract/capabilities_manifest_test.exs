@@ -1922,7 +1922,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "app_token.* (mobile app-token exchange) live routes" do
     setup do
       admin = "ucv-appt-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-appt-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          admin,
+          "ucv-appt-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       reader = "ucv-appt-reader-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(reader, "ucv-appt-reader", "test", ["read"])
 
@@ -2044,7 +2053,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "fleet_support_token.* (Personal Dev Fleet) live routes" do
     setup do
       admin = "ucv-fst-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-fst-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          admin,
+          "ucv-fst-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       junior = "ucv-fst-junior-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(junior, "ucv-fst-junior", "test", ["read", "write"])
 

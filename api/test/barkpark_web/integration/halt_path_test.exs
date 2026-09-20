@@ -65,7 +65,8 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
       "barkpark-dev-token",
       "dev",
       "halt-path-integration",
-      ["read", "write", "admin"]
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
     )
 
     {:ok, _schema} =

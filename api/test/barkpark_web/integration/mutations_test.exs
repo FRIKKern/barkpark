@@ -32,7 +32,8 @@ defmodule BarkparkWeb.Integration.MutationsTest do
       "barkpark-dev-token",
       "dev",
       "mutations-integration",
-      ["read", "write", "admin"]
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
     )
 
     # Drain the boot-time codelist seeder Task before grabbing the DB —
