@@ -1088,6 +1088,73 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "server.version + server.min_cli are honest values (task-ae75712d581fda87)" do
+    # The prod box answered server.version "0.1.0" (mix.exs, frozen) while its
+    # own /status.json said "0.2.26.929" — two public surfaces, two numbers.
+    # The envelope cannot gain a key (previous describe), so the fix is the
+    # VALUE: the same resolver /status.json reads.
+
+    defp server_envelope(conn) do
+      conn
+      |> put_req_header("authorization", "Bearer #{@token}")
+      |> get("/v1/capabilities")
+      |> json_response(200)
+      |> Map.fetch!("server")
+    end
+
+    test "server.version equals /status.json version on the same box", %{conn: conn} do
+      server = server_envelope(conn)
+      status = conn |> get("/status.json") |> json_response(200)
+
+      assert server["version"] == status["version"],
+             "capabilities server.version #{inspect(server["version"])} != /status.json version #{inspect(status["version"])}"
+
+      # Same source, stated by name: BuildInfo, "A.B.C.D" or "unknown" — never
+      # the mix.exs project version, which is what the old code published.
+      assert server["version"] == Barkpark.BuildInfo.version()
+      assert server["version"] =~ ~r/^(\d+\.\d+\.\d+\.\d+|unknown)$/
+    end
+
+    test "server.version is not the mix.exs project version", %{conn: conn} do
+      # mix.exs says "0.1.0" and is never bumped; a release is "A.B.C.D". The
+      # guard is shape-keyed (four segments), not value-keyed, so it holds even
+      # if mix.exs is ever bumped to a real three-segment release.
+      server = server_envelope(conn)
+      mix_vsn = :barkpark |> Application.spec(:vsn) |> List.to_string()
+
+      refute server["version"] == mix_vsn,
+             "server.version still reports the mix.exs project version #{inspect(mix_vsn)}"
+    end
+
+    test "min_cli defaults to 1.0.0 and reads the :capabilities_min_cli app-env VALUE", %{
+      conn: conn
+    } do
+      previous = Application.get_env(:barkpark, :capabilities_min_cli)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:barkpark, :capabilities_min_cli)
+          value -> Application.put_env(:barkpark, :capabilities_min_cli, value)
+        end
+      end)
+
+      Application.delete_env(:barkpark, :capabilities_min_cli)
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+
+      # An operator raises the floor by VALUE: the one channel a strict-decoding
+      # released bp can hear (serverFloorStaleness on the doctor/whoami leg).
+      Application.put_env(:barkpark, :capabilities_min_cli, "1.21.0")
+      assert server_envelope(conn)["min_cli"] == "1.21.0"
+
+      # Not `A.B.C` -> never published; a client cannot compare "latest".
+      Application.put_env(:barkpark, :capabilities_min_cli, "latest")
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+
+      Application.put_env(:barkpark, :capabilities_min_cli, 121)
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+    end
+  end
+
   describe "command-level `views` descriptor (wave axi-brief-views, ?views=1 opt-in)" do
     # The commands that support the brief/full projection.
     @views_commands ~w(task.ready task.prime search.query)

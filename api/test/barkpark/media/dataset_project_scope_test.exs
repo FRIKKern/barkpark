@@ -370,4 +370,90 @@ defmodule Barkpark.Media.DatasetProjectScopeTest do
       assert is_nil(Tenancy.scope_project_id(workspace_id: "not-a-uuid"))
     end
   end
+
+  # ── CRITERION 3 — the UNRESOLVED arm's pin (task-96d8720de593d82a) ─────────
+  #
+  # `scope_media_to_dataset/3` has two arms. The RESOLVED one (a binary
+  # dataset_id) is guarded by 25 tests in this fence. The UNRESOLVED one —
+  # `m.dataset == ^dataset and is_nil(m.dataset_id)` — had ZERO: reverting it to
+  # the exact pre-fix predicate its own code comment names, a bare
+  # `m.dataset == ^dataset`, left all 366 media-fence tests green.
+  #
+  # Every fixture above gives its workspace a `"default"`-slugged project, so
+  # `Tenancy.scope_project_id/1` resolves one and the RESOLVED arm runs. The
+  # unresolved arm needs a workspace with NO default-slugged project — the shape
+  # a token-bound non-Default workspace actually has — and that precondition is
+  # ASSERTED below, not assumed.
+  describe "the UNRESOLVED arm is pinned to dataset_id IS NULL" do
+    test "a sibling project's STAMPED blob never answers a read whose dataset_id is nil" do
+      # No `"default"`-slugged project: `scope_project_id/1` finds none and
+      # `resolve_dataset_id/2` therefore returns nil — the unresolved arm.
+      ws = create_workspace!()
+      sibling = create_project!(ws, "sibling")
+
+      {:ok, _} = Tenancy.create_dataset(sibling, %{slug: @dataset, name: @dataset})
+      sibling_ds = Tenancy.get_dataset(sibling, @dataset)
+
+      refute Tenancy.scope_project_id(workspace_id: ws.id),
+             "FIXTURE NOT ARMED: the workspace resolved a project, so the RESOLVED arm " <>
+               "runs and the pin under test is never evaluated"
+
+      # The sibling project's WELL-STAMPED blob. This is the exact row the code
+      # comment says the bare string predicate swallowed: two projects in one
+      # workspace, each with a dataset slugged `production`, returning each
+      # other's media.
+      {:ok, theirs} =
+        create_media_file_in!(ws, sibling, %{dataset_id: sibling_ds.id}, @dataset)
+
+      refute is_nil(theirs.dataset_id),
+             "FIXTURE NOT ARMED: an UNSTAMPED row is admitted by BOTH arms, so it cannot " <>
+               "tell the pinned predicate from the bare one"
+
+      # An unstamped row in the same workspace — the ARMED control. It proves
+      # the read reaches rows at all and that the `dataset` STRING matches, so
+      # the refutation below is about the pin and not about an empty result.
+      {:ok, unstamped} = create_media_file_in!(ws, sibling, %{dataset_id: nil}, @dataset)
+
+      # WORKSPACE HELD CONSTANT: both rows carry ws.id and the read passes no
+      # project, so `scope_to_workspace/3` applies `m.workspace_id == ^ws` only.
+      # The workspace rung cannot be the excluder here.
+      ids = search_ids(workspace_id: ws.id)
+
+      assert MapSet.member?(ids, unstamped.id),
+             "FIXTURE NOT ARMED: not even the unstamped row came back, so the refutation " <>
+               "below would pass vacuously against an empty result"
+
+      refute MapSet.member?(ids, theirs.id),
+             """
+             A STAMPED sibling-project blob (#{theirs.id}, dataset_id
+             #{inspect(theirs.dataset_id)}) answered a read scoped to workspace
+             #{ws.id} whose own dataset_id resolution returned nil.
+
+             `scope_media_to_dataset/3`'s unresolved arm is pinned to
+             `is_nil(m.dataset_id)` precisely so the two arms stay DISJOINT — a
+             stamped row is reachable only through the project that owns its
+             stamp. Drop the pin and the arm degrades to the pre-fix
+             `m.dataset = '#{@dataset}'`, which is what returned each project's
+             media to the other.
+             """
+    end
+
+    test "NEVER-WORSE — the sibling's OWN project scope still reaches its stamped blob" do
+      ws = create_workspace!()
+      sibling = create_project!(ws, "sibling")
+
+      {:ok, _} = Tenancy.create_dataset(sibling, %{slug: @dataset, name: @dataset})
+      sibling_ds = Tenancy.get_dataset(sibling, @dataset)
+
+      {:ok, theirs} =
+        create_media_file_in!(ws, sibling, %{dataset_id: sibling_ds.id}, @dataset)
+
+      ids = search_ids(workspace_id: ws.id, project_id: sibling.id)
+
+      assert MapSet.member?(ids, theirs.id),
+             "the row refused above is unreachable from its OWN project too — the pin " <>
+               "would be hiding the row rather than scoping it, and the refutation above " <>
+               "would prove nothing about the project boundary"
+    end
+  end
 end

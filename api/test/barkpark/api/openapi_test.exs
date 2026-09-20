@@ -309,4 +309,128 @@ defmodule Barkpark.Api.OpenApiTest do
              "this is the exact edit shape that drifted main on 2026-07-13, so the " <>
              "gate must be able to see it"
   end
+
+  # ── The artifact must carry NO per-commit / per-build value ────────────────
+  #
+  # WHY THE DETERMINISM ASSERT ABOVE CANNOT SEE THIS CLASS OF BUG.
+  #
+  # `artifact_bytes(spec()) == artifact_bytes(spec())` is two calls in ONE
+  # process in ONE build. Every per-build value — `BuildInfo.version/0`,
+  # `BuildInfo.commit/0`, `BuildInfo.built_at/0` — is a module attribute frozen
+  # at COMPILE time, so it is a constant within that process and the assert
+  # passes with a happy green while the artifact is nondeterministic ACROSS
+  # COMMITS. That is exactly how #19384 sailed past it: it pointed
+  # `server.version` at `BuildInfo.version/0` ("A.B.C.D", D = commits since the
+  # vA.B.C tag) and `info/1` read `server["version"]`, so `info.version` moved
+  # on every commit ANYWHERE in the repo. CI generates from `refs/pull/N/merge`
+  # — one commit beyond the PR head — so no committed byte sequence could
+  # reproduce it, and the drift gate would have been unwinnable for every open
+  # PR. Measured at the time: head 0.2.26.3824, main 0.2.26.3821, merge 3825.
+  #
+  # The assert that CAN see it is source-shaped, not repetition-shaped: name the
+  # deterministic source, assert the artifact equals it, and sweep the whole
+  # document for anything a build could have injected.
+
+  # Every build-identity value, by the name a failure should print.
+  defp build_identity_values do
+    Barkpark.BuildInfo.info()
+    |> Enum.reject(fn {_k, v} -> v == "unknown" end)
+    |> Enum.map(fn {k, v} -> {"BuildInfo." <> k, v} end)
+  end
+
+  # Every string leaf of the artifact, keys included (a build value could land
+  # in either position).
+  defp string_leaves(%{} = map) do
+    Enum.flat_map(map, fn {k, v} -> string_leaves(k) ++ string_leaves(v) end)
+  end
+
+  defp string_leaves(list) when is_list(list), do: Enum.flat_map(list, &string_leaves/1)
+  defp string_leaves(s) when is_binary(s), do: [s]
+  defp string_leaves(_other), do: []
+
+  defp app_vsn do
+    case Application.spec(:barkpark, :vsn) do
+      vsn when is_list(vsn) -> List.to_string(vsn)
+      other -> flunk("the :barkpark app has no vsn to compare against: #{inspect(other)}")
+    end
+  end
+
+  test "info.version is the deterministic app vsn, never a build-derived value" do
+    version = OpenApi.spec()["info"]["version"]
+
+    assert version == app_vsn(),
+           "docs/openapi.json's info.version must be the mix.exs app vsn " <>
+             "(#{app_vsn()}), the one version source with NO build-environment " <>
+             "input — no `git describe`, no BARKPARK_BUILD_VERSION, no file " <>
+             "outside the Mix project. Got #{inspect(version)}."
+
+    refute version == Barkpark.BuildInfo.version(),
+           "info.version is BuildInfo.version/0 — the RUNNING RELEASE. That is " <>
+             "the right value for /v1/capabilities and a gate-breaker here: it " <>
+             "carries D (commits since the vA.B.C tag) and moves on every commit " <>
+             "anywhere in the repo, so the OpenAPI drift check can never be " <>
+             "satisfied by any committed bytes."
+
+    refute version =~ ~r/^\d+\.\d+\.\d+\.\d+$/,
+           "info.version has the A.B.C.D build shape (#{inspect(version)}); D is " <>
+             "a commit COUNT, which is not a property of the API surface."
+  end
+
+  test "no value anywhere in the artifact is a build identity (whole-document sweep)" do
+    identities = build_identity_values()
+
+    refute identities == [],
+           "every BuildInfo value degraded to \"unknown\", so this sweep would " <>
+             "have nothing to look for and would pass vacuously"
+
+    leaves = string_leaves(OpenApi.spec())
+
+    # POSITIVE CONTROL: the sweep must be able to FIND a planted value. Plant
+    # each build identity in a nested position of a copy of the artifact and
+    # assert the same walker reports it — otherwise an empty or broken walker
+    # would make the real sweep below pass by seeing nothing.
+    for {name, value} <- identities do
+      planted =
+        OpenApi.spec()
+        |> put_in(["info", "x-plant-control"], %{"nested" => [%{"deep" => value}]})
+        |> string_leaves()
+
+      assert value in planted,
+             "the leaf walker did not find a DELIBERATELY planted #{name} " <>
+               "(#{inspect(value)}) — the sweep below proves nothing"
+    end
+
+    for {name, value} <- identities do
+      refute value in leaves,
+             "docs/openapi.json carries #{name} = #{inspect(value)}. Every " <>
+               "BuildInfo value is per-build (a commit count, a sha, a compile " <>
+               "timestamp), so committing it makes the CI drift gate unwinnable: " <>
+               "CI generates from refs/pull/N/merge, a commit no author can hold."
+    end
+  end
+
+  test "spec/1 does not propagate the manifest's server.version into the artifact", %{
+    manifest: manifest
+  } do
+    # The exact coupling #19384 introduced, staged directly: a manifest whose
+    # server.version is a build-shaped value. The artifact must be blind to it.
+    planted = "9.9.9.4242"
+    mutated = put_in(manifest, ["server", "version"], planted)
+
+    assert get_in(mutated, ["server", "version"]) == planted,
+           "the mutation did not take — this test would prove nothing"
+
+    spec = OpenApi.spec(mutated)
+
+    assert spec["info"]["version"] == app_vsn()
+
+    refute artifact_bytes(spec) =~ planted,
+           "the artifact carries the manifest's server.version (#{planted}). " <>
+             "server.version is the RUNNING RELEASE (Barkpark.BuildInfo) and " <>
+             "moves per commit; docs/openapi.json must not be derived from it."
+
+    assert artifact_bytes(spec) == artifact_bytes(OpenApi.spec(manifest)),
+           "changing only server.version moved the artifact bytes — the checked-in " <>
+             "descriptor is coupled to the running release"
+  end
 end
