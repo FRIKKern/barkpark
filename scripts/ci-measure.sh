@@ -94,6 +94,13 @@ JL_RAW_OUT=""; JL_RAW_IN=""
 # asking for page 11 returns nothing and says nothing (see THE 1000-ITEM CAP).
 PJ_RUNS="${CI_MEASURE_PJ_RUNS:-50}"
 PJ_PAGES="${CI_MEASURE_PJ_PAGES:-10}"
+# --per-step defaults. This mode answers a question --per-job structurally cannot:
+# --per-job projects each step to {started_at, completed_at} and throws the step
+# NAME away, so it can tell you a job costs 15.8 minutes and never tell you which
+# 15.8. PS_SPLIT_AT, when set, additionally partitions the SAME population at an
+# instant (a merge, a config change) and prints both halves side by side, because
+# a before/after built from two separate invocations is two populations.
+PS_SPLIT_AT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) SINCE="${2:-}"; shift 2 ;;
@@ -103,6 +110,8 @@ while [ $# -gt 0 ]; do
     --sample) SAMPLE="${2:-}"; shift 2 ;;
     --job-latency) MODE=joblat; shift ;;
     --per-job) MODE=perjob; shift ;;
+    --per-step) MODE=perstep; shift ;;
+    --split-at) PS_SPLIT_AT="${2:-}"; shift 2 ;;
     --runs) PJ_RUNS="${2:-}"; shift 2 ;;
     --pages) PJ_PAGES="${2:-}"; shift 2 ;;
     --workflow) JL_WORKFLOW="${2:-}"; shift 2 ;;
@@ -1249,6 +1258,83 @@ FIX
     pass=$((pass+1)); echo "  ok   j7 a zero-job feed REFUSES (rc $jl_erc) with a CANNOT READ line — an empty collection never prints as a measured zero"
   else
     fail=$((fail+1)); echo "  FAIL j7 rc=$jl_erc msg=$jl_emsg — a zero-job feed printed a table instead of refusing"
+  fi
+
+  # ── --per-step arms ──────────────────────────────────────────────────────
+  # p1 — THE BUCKET IS POSITIONAL, NOT A NAME LIST. Two jobs, the same step
+  # names, but one of them has an EXTRA setup step in front. A list-based
+  # classifier would need to know that step; the positional rule must bucket it
+  # as PRE without being told, and must not leak it into TEST.
+  cat > "$tmp/ps-basic.jsonl" <<'FIX'
+{"run_id":"1","created_at":"2026-09-20T09:00:00Z","head_sha":"aaa","head_branch":"x/y","name":"Test (Elixir 1.18.4 / OTP 27.0)","conclusion":"success","steps":[{"name":"Run actions/checkout@v4","conclusion":"success","started_at":"2026-09-20T09:10:00Z","completed_at":"2026-09-20T09:10:30Z"},{"name":"Test","conclusion":"success","started_at":"2026-09-20T09:10:30Z","completed_at":"2026-09-20T09:20:30Z"},{"name":"Stop containers","conclusion":"success","started_at":"2026-09-20T09:20:30Z","completed_at":"2026-09-20T09:20:40Z"}]}
+{"run_id":"2","created_at":"2026-09-20T09:05:00Z","head_sha":"bbb","head_branch":"x/z","name":"Test (Elixir 1.18.4 / OTP 27.0)","conclusion":"success","steps":[{"name":"Run actions/checkout@v4","conclusion":"success","started_at":"2026-09-20T09:10:00Z","completed_at":"2026-09-20T09:10:30Z"},{"name":"A NEWLY ADDED SETUP STEP","conclusion":"success","started_at":"2026-09-20T09:10:30Z","completed_at":"2026-09-20T09:11:30Z"},{"name":"Test","conclusion":"success","started_at":"2026-09-20T09:11:30Z","completed_at":"2026-09-20T09:21:30Z"},{"name":"Stop containers","conclusion":"success","started_at":"2026-09-20T09:21:30Z","completed_at":"2026-09-20T09:21:40Z"}]}
+{"run_id":"3","created_at":"2026-09-20T09:06:00Z","head_sha":"ccc","head_branch":"x/w","name":"Some OTHER job in the same run","conclusion":"success","steps":[{"name":"Test","conclusion":"success","started_at":"2026-09-20T09:00:00Z","completed_at":"2026-09-20T10:00:00Z"}]}
+{"__pswindow__":true,"first":"2026-09-20T09:00:00Z","last":"2026-09-20T09:06:00Z","runs_listed":3}
+FIX
+  local ps_out ps_testtot ps_pre
+  ps_out=$(bash "$0" --per-step --raw-in "$tmp/ps-basic.jsonl" 2>/dev/null)
+  # TEST total must be 20.0 min (2 jobs x 10 min) — the 60-minute sibling job
+  # whose name does not match the prefix must contribute NOTHING.
+  ps_testtot=$(printf '%s\n' "$ps_out" | awk '$1=="TEST" && $2=="Test" {print $(NF-1)}')
+  if [ "$ps_testtot" = "20.0" ]; then
+    pass=$((pass+1)); echo "  ok   p1 the job prefix discriminates — the 60-min sibling job named 'Test' in the same feed contributes 0 (TEST total 20.0 min, not 80.0)"
+  else
+    fail=$((fail+1)); echo "  FAIL p1 TEST total is '$ps_testtot' — expected 20.0 (the non-matching sibling job leaked in)"
+  fi
+  ps_pre=$(printf '%s\n' "$ps_out" | awk '$1=="PRE" && /A NEWLY ADDED SETUP STEP/ {print $1}')
+  if [ "$ps_pre" = "PRE" ]; then
+    pass=$((pass+1)); echo "  ok   p2 a step the classifier has never seen is bucketed PRE by POSITION alone — no name list to go stale"
+  else
+    fail=$((fail+1)); echo "  FAIL p2 the unknown setup step was not bucketed PRE (got '$ps_pre') — the rule fell back to a list"
+  fi
+
+  # p3 — A FAILED READ IS NOT A ZERO. A __psfail__ marker must be REPORTED as a
+  # read failure and must never become a zero-minute job row dragging a median down.
+  cat > "$tmp/ps-fail.jsonl" <<'FIX'
+{"run_id":"1","created_at":"2026-09-20T09:00:00Z","head_sha":"aaa","head_branch":"x/y","name":"Test (Elixir 1.18.4 / OTP 27.0)","conclusion":"success","steps":[{"name":"Test","conclusion":"success","started_at":"2026-09-20T09:10:00Z","completed_at":"2026-09-20T09:20:00Z"}]}
+{"__psfail__":true,"run_id":"99"}
+{"__psfail__":true,"run_id":"98"}
+{"__pswindow__":true,"first":"2026-09-20T09:00:00Z","last":"2026-09-20T09:00:00Z","runs_listed":3}
+FIX
+  local ps_f ps_fmed
+  ps_f=$(bash "$0" --per-step --raw-in "$tmp/ps-fail.jsonl" 2>/dev/null)
+  ps_fmed=$(printf '%s\n' "$ps_f" | awk '$1=="JOB"{print $2}')
+  if printf '%s\n' "$ps_f" | grep -q "2 read FAILURES" && [ "$ps_fmed" = "600.0" ]; then
+    pass=$((pass+1)); echo "  ok   p3 two unreadable jobs pages are DISCLOSED as read failures and the median stays 600.0s — a failed read never becomes a zero row"
+  else
+    fail=$((fail+1)); echo "  FAIL p3 read failures not disclosed, or the median moved (JOB med '$ps_fmed', expected 600.0)"
+  fi
+
+  # p4 — ZERO MATCHED JOBS REFUSES. Same rule as j7: an empty collection prints
+  # nothing tidy, it exits non-zero, because a table of zeroes reads like a win.
+  cat > "$tmp/ps-none.jsonl" <<'FIX'
+{"run_id":"1","created_at":"2026-09-20T09:00:00Z","head_sha":"aaa","head_branch":"x/y","name":"Something else entirely","conclusion":"success","steps":[{"name":"Test","conclusion":"success","started_at":"2026-09-20T09:10:00Z","completed_at":"2026-09-20T09:20:00Z"}]}
+{"__pswindow__":true,"first":"2026-09-20T09:00:00Z","last":"2026-09-20T09:00:00Z","runs_listed":1}
+FIX
+  local ps_nrc ps_nmsg
+  ps_nmsg=$(bash "$0" --per-step --raw-in "$tmp/ps-none.jsonl" 2>&1 >/dev/null); ps_nrc=$?
+  if [ "$ps_nrc" != "0" ] && printf '%s' "$ps_nmsg" | grep -q "REFUSING"; then
+    pass=$((pass+1)); echo "  ok   p4 a feed where nothing matches the prefix REFUSES (rc $ps_nrc) instead of printing an empty table that reads as 'no cost'"
+  else
+    fail=$((fail+1)); echo "  FAIL p4 rc=$ps_nrc — zero matched jobs printed a table instead of refusing"
+  fi
+
+  # p5 — CANCELLED AND ZERO-STEP ARE COUNTS, NEVER MINUTES. A cancelled job that
+  # nonetheless carries step spans, and a job with an empty steps array, must both
+  # be counted in their own columns and excluded from the median.
+  cat > "$tmp/ps-cancel.jsonl" <<'FIX'
+{"run_id":"1","created_at":"2026-09-20T09:00:00Z","head_sha":"a","head_branch":"x","name":"Test (Elixir 1.18.4 / OTP 27.0)","conclusion":"success","steps":[{"name":"Test","conclusion":"success","started_at":"2026-09-20T09:10:00Z","completed_at":"2026-09-20T09:20:00Z"}]}
+{"run_id":"2","created_at":"2026-09-20T09:01:00Z","head_sha":"b","head_branch":"x","name":"Test (Elixir 1.18.4 / OTP 27.0)","conclusion":"cancelled","steps":[{"name":"Test","conclusion":"cancelled","started_at":"2026-09-20T09:10:00Z","completed_at":"2026-09-20T10:10:00Z"}]}
+{"run_id":"3","created_at":"2026-09-20T09:02:00Z","head_sha":"c","head_branch":"x","name":"Test (Elixir 1.18.4 / OTP 27.0)","conclusion":"success","steps":[]}
+{"__pswindow__":true,"first":"2026-09-20T09:00:00Z","last":"2026-09-20T09:02:00Z","runs_listed":3}
+FIX
+  local ps_c ps_cmed
+  ps_c=$(bash "$0" --per-step --raw-in "$tmp/ps-cancel.jsonl" 2>/dev/null)
+  ps_cmed=$(printf '%s\n' "$ps_c" | awk '$1=="JOB"{print $2}')
+  if [ "$ps_cmed" = "600.0" ] && printf '%s\n' "$ps_c" | grep -q "1 executed, 1 cancelled, 1 zero-step"; then
+    pass=$((pass+1)); echo "  ok   p5 a cancelled 60-min job and a zero-step job are COUNTED and excluded — the median is 600.0s, not 1800.0s"
+  else
+    fail=$((fail+1)); echo "  FAIL p5 JOB median '$ps_cmed' (expected 600.0) — a cancelled or zero-step job was pooled into the minutes"
   fi
 
   echo "SELFTEST: $pass passed, $fail failed."
@@ -2539,6 +2625,227 @@ PY
   return $rc
 }
 
+# ---------------------------------------------------------------------------
+# --per-step — WHERE INSIDE ONE JOB THE MINUTES GO.
+#
+# WHY THIS EXISTS. --per-job answers "which job costs most" and deliberately
+# throws the step NAME away (it projects each step to {started_at, completed_at}).
+# That is the right projection for ranking jobs and the wrong one for dieting the
+# job that wins: it can say `Test (Elixir 1.18.4 / OTP 27.0)` costs 15.8 median
+# minutes and cannot say whether that is the test suite or the four minutes of
+# checkout + BEAM + deps + compile in front of it. Those have OPPOSITE remedies.
+#
+# THE CLASSIFICATION IS A RULE, NOT A LIST. Steps are bucketed by their POSITION
+# relative to the step named by --test-step (default "Test") inside their own job:
+# everything before it is PRE, it is TEST, everything after is POST. A hardcoded
+# list of setup step names would go stale the first time a step is renamed and
+# would silently reclassify it as test time.
+#
+# SAME RULES AS EVERY OTHER MODE. Minutes are STEP-derived. Cancelled jobs and
+# zero-step jobs are counted in their own columns and never summed into a minute
+# column. A jobs page that cannot be READ is counted as a read failure and is
+# never allowed to become a zero-minute row.
+#
+#   bash scripts/ci-measure.sh --per-step --workflow elixir.yml --pages 3
+#   bash scripts/ci-measure.sh --per-step --split-at 2026-09-20T11:23:09Z
+#   bash scripts/ci-measure.sh --per-step --raw-in steps.ndjson     # no network
+# ---------------------------------------------------------------------------
+per_step_mode() {
+  local raw; raw="$(mktemp)"
+
+  if [ -n "$JL_RAW_IN" ]; then
+    [ -r "$JL_RAW_IN" ] || { echo "ci-measure --per-step: --raw-in '$JL_RAW_IN' is unreadable" >&2; rm -f "$raw"; return 1; }
+    cat "$JL_RAW_IN" > "$raw"
+  else
+    local listing; listing="$(mktemp)"
+    local page
+    for page in $(seq 1 "$PJ_PAGES"); do
+      gh api "repos/$REPO/actions/workflows/$JL_WORKFLOW/runs?event=$JL_EVENT&status=completed&per_page=100&page=$page" \
+        -q '.workflow_runs[] | [.id, .created_at, .head_sha, .head_branch, .run_attempt] | @tsv' 2>/dev/null
+    done > "$listing"
+    if [ ! -s "$listing" ]; then
+      echo "ci-measure --per-step: the $JL_WORKFLOW/$JL_EVENT run feed came back EMPTY." >&2
+      echo "  That is an unauthenticated or rate-limited gh, not a quiet repo. REFUSING." >&2
+      rm -f "$raw" "$listing"; return 1
+    fi
+    head -n "$PJ_RUNS" "$listing" > "$listing.capped"; mv "$listing.capped" "$listing"
+
+    # One jobs call PER RUN. A call that fails emits a __psfail__ marker rather
+    # than nothing, so a failed read can never be mistaken for a run with no jobs.
+    xargs -P 8 -I{} sh -c '
+        set -- $1
+        rid=$1; created=$2; sha=$3; br=$4; att=$5
+        out=$(gh api "repos/'"$REPO"'/actions/runs/$rid/jobs?per_page=100" \
+          -q "[.jobs[] | {name, conclusion, started_at, completed_at, steps: [.steps[]? | {name, conclusion, started_at, completed_at}]}] | .[] | @json" 2>/dev/null)
+        if [ -z "$out" ]; then
+          printf "{\"__psfail__\":true,\"run_id\":\"%s\"}\n" "$rid"
+        else
+          # jq, NOT sed: a branch name contains "/" and would break a sed
+          # s/// replacement, corrupting the very rows it was meant to label.
+          printf "%s\n" "$out" | jq -c --arg rid "$rid" --arg created "$created" \
+            --arg sha "$sha" --arg br "$br" --arg att "$att" \
+            '"'"'. + {run_id:$rid, created_at:$created, head_sha:$sha, head_branch:$br, run_attempt:$att}'"'"'
+        fi
+      ' _ {} < "$listing" > "$raw"
+
+    awk -F'\t' 'NR==1{f=$2;l=$2} {if($2<f)f=$2; if($2>l)l=$2; n++}
+      END{printf "{\"__pswindow__\":true,\"first\":\"%s\",\"last\":\"%s\",\"runs_listed\":%d}\n", f, l, n}' \
+      "$listing" >> "$raw"
+    rm -f "$listing"
+    [ -n "$JL_RAW_OUT" ] && cp "$raw" "$JL_RAW_OUT"
+  fi
+
+  PS_JOB_PREFIX="$JL_JOB_PREFIX" PS_TEST_STEP="${CI_MEASURE_PS_TEST_STEP:-Test}" \
+    PS_WORKFLOW="$JL_WORKFLOW" PS_EVENT="$JL_EVENT" \
+    PS_SPLIT_AT="$PS_SPLIT_AT" per_step_analyze < "$raw"
+  local rc=$?
+  rm -f "$raw"
+  return $rc
+}
+
+per_step_analyze() {
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'PY'
+import json, sys, os, datetime, collections, statistics
+
+PREFIX   = os.environ.get("PS_JOB_PREFIX", "Test (Elixir")
+TESTSTEP = os.environ.get("PS_TEST_STEP", "Test")
+SPLIT    = os.environ.get("PS_SPLIT_AT", "").strip()
+
+def parse(ts):
+    if not ts: return None
+    try: return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError: return None
+
+window = None; read_failures = 0
+jobs = []            # matched, executed jobs
+cancelled = 0; zero_step = 0; matched = 0; all_job_rows = 0
+runs_seen = set()
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: j = json.loads(line)
+    except json.JSONDecodeError: continue
+    if j.get("__pswindow__"): window = j; continue
+    if j.get("__psfail__"):   read_failures += 1; continue
+    all_job_rows += 1
+    runs_seen.add(j.get("run_id"))
+    if not (j.get("name") or "").startswith(PREFIX): continue
+    matched += 1
+    if j.get("conclusion") == "cancelled": cancelled += 1; continue
+    steps = []
+    for s in (j.get("steps") or []):
+        a, b = parse(s.get("started_at")), parse(s.get("completed_at"))
+        if a and b: steps.append((s.get("name") or "?", s.get("conclusion"), (b - a).total_seconds()))
+    if not steps: zero_step += 1; continue
+    jobs.append({"run_id": j.get("run_id"), "created_at": j.get("created_at"),
+                 "branch": j.get("head_branch"), "conclusion": j.get("conclusion"),
+                 "steps": steps})
+
+if not jobs:
+    print("ci-measure --per-step: ZERO executed jobs matched prefix %r." % PREFIX, file=sys.stderr)
+    print("  A per-step table over nothing is a broken read, not a small table. REFUSING.", file=sys.stderr)
+    sys.exit(1)
+
+def bucket(steps):
+    """PRE / TEST / POST by POSITION relative to the step named TESTSTEP."""
+    idx = next((i for i, (n, _, _) in enumerate(steps) if n == TESTSTEP), None)
+    for i, (n, c, d) in enumerate(steps):
+        if idx is None:     yield "PRE?", n, c, d
+        elif i < idx:       yield "PRE",  n, c, d
+        elif i == idx:      yield "TEST", n, c, d
+        else:               yield "POST", n, c, d
+
+per_step = collections.defaultdict(lambda: {"secs": [], "buck": "", "red": 0})
+per_bucket = collections.defaultdict(list)
+job_total = []
+for jb in jobs:
+    tot = {"PRE": 0.0, "TEST": 0.0, "POST": 0.0, "PRE?": 0.0}
+    for b, n, c, d in bucket(jb["steps"]):
+        r = per_step[n]; r["secs"].append(d); r["buck"] = b
+        if c == "failure": r["red"] += 1
+        tot[b] += d
+    for b in ("PRE", "TEST", "POST", "PRE?"): per_bucket[b].append(tot[b])
+    job_total.append(sum(tot.values()))
+    jb["bucket_secs"] = tot
+
+def med(v): return statistics.median(v) if v else 0.0
+
+print("CI PER-STEP TABLE — job prefix %r in workflow %s (event %s)"
+      % (PREFIX, os.environ.get("PS_WORKFLOW", "?"), os.environ.get("PS_EVENT", "?")))
+if window:
+    print("  window (run created_at): %s .. %s" % (window["first"], window["last"]))
+    print("  population: %d runs listed and descended into; %d job rows read; %d read FAILURES (excluded, never zeroed)"
+          % (window["runs_listed"], all_job_rows, read_failures))
+else:
+    print("  WINDOW UNKNOWN (no __pswindow__ meta row in the input)")
+print("  %d job rows matched the prefix: %d executed, %d cancelled, %d zero-step."
+      % (matched, len(jobs), cancelled, zero_step))
+print("  Cancelled and zero-step jobs are COUNTS and are excluded from every second column.")
+print("  Bucket is POSITIONAL: PRE = before the step named %r, TEST = it, POST = after." % TESTSTEP)
+print()
+hdr = "%-7s%-62s%6s%9s%9s%8s%6s" % ("bucket", "step", "n", "med_s", "mean_s", "tot_min", "red")
+print(hdr); print("-" * len(hdr))
+for n, r in sorted(per_step.items(), key=lambda kv: -sum(kv[1]["secs"])):
+    v = r["secs"]
+    print("%-7s%-62s%6d%9.1f%9.1f%8.1f%6d"
+          % (r["buck"], n[:61], len(v), med(v), sum(v)/len(v), sum(v)/60.0, r["red"]))
+print("-" * len(hdr))
+print()
+print("BUCKET ROLLUP — per JOB, over %d executed jobs" % len(jobs))
+print("%-8s%10s%10s%10s%9s" % ("bucket", "med_s", "mean_s", "med_min", "share"))
+jt_med = med(job_total)
+for b in ("PRE", "TEST", "POST", "PRE?"):
+    v = per_bucket[b]
+    if not any(v): continue
+    print("%-8s%10.1f%10.1f%10.2f%8.1f%%" % (b, med(v), sum(v)/len(v), med(v)/60.0,
+                                             100.0 * med(v) / jt_med if jt_med else 0.0))
+print("%-8s%10.1f%10.1f%10.2f%8.1f%%" % ("JOB", jt_med, sum(job_total)/len(job_total), jt_med/60.0, 100.0))
+
+if SPLIT:
+    cut = parse(SPLIT)
+    if cut is None:
+        print("\nci-measure --per-step: --split-at %r is not an ISO instant; SKIPPING the split." % SPLIT, file=sys.stderr)
+    else:
+        before = [j for j in jobs if (parse(j["created_at"]) or cut) <  cut]
+        after  = [j for j in jobs if (parse(j["created_at"]) or cut) >= cut]
+        print()
+        print("SPLIT AT %s — the SAME population, partitioned by run created_at." % SPLIT)
+        print("  A run CREATED before the cut but still running at read time is absent from this")
+        print("  feed (status=completed), so the AFTER window is biased toward runs that FINISHED.")
+        print("  That bias cuts AGAINST detecting a slowdown; read a null result with that in mind.")
+        print()
+        print("%-8s%6s%10s%10s%10s%10s%10s%10s" % ("window", "n", "JOB_med", "JOB_mean", "TEST_med", "TEST_mean", "PRE_med", "POST_med"))
+        for label, grp in (("BEFORE", before), ("AFTER", after)):
+            if not grp:
+                print("%-8s%6d   (empty — no executed job in this half)" % (label, 0)); continue
+            jt  = [sum(j["bucket_secs"].values()) for j in grp]
+            tst = [j["bucket_secs"]["TEST"] for j in grp]
+            pre = [j["bucket_secs"]["PRE"] for j in grp]
+            pst = [j["bucket_secs"]["POST"] for j in grp]
+            print("%-8s%6d%10.1f%10.1f%10.1f%10.1f%10.1f%10.1f"
+                  % (label, len(grp), med(jt), sum(jt)/len(jt), med(tst), sum(tst)/len(tst), med(pre), med(pst)))
+        if before and after:
+            b = med([j["bucket_secs"]["TEST"] for j in before])
+            a = med([j["bucket_secs"]["TEST"] for j in after])
+            print()
+            print("  TEST step median: %.1fs BEFORE -> %.1fs AFTER  (%+.1fs, %+.1f%%)"
+                  % (b, a, a - b, 100.0 * (a - b) / b if b else 0.0))
+            print("  n=%d before, n=%d after. Two medians over %d and %d samples; a difference"
+                  % (len(before), len(after), len(before), len(after)))
+            print("  smaller than the spread between them is not a finding.")
+            for label, grp in (("BEFORE", before), ("AFTER", after)):
+                v = sorted(j["bucket_secs"]["TEST"] for j in grp)
+                print("  %-6s TEST deciles: min %.0f  p25 %.0f  med %.0f  p75 %.0f  max %.0f"
+                      % (label, v[0], v[len(v)//4], med(v), v[(3*len(v))//4], v[-1]))
+PY
+  python3 "$pyf"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
 if [ "$MODE" = joblat ]; then
   [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --job-latency needs --since and --until" >&2; usage; }
   job_latency; exit $?
@@ -2547,6 +2854,10 @@ fi
 
 if [ "$MODE" = perjob ]; then
   per_job_mode; exit $?
+fi
+
+if [ "$MODE" = perstep ]; then
+  per_step_mode; exit $?
 fi
 
 if [ "$MODE" = value ]; then

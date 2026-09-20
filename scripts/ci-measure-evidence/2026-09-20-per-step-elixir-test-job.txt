@@ -1,0 +1,201 @@
+CI PER-STEP MEASUREMENT — where the minutes go INSIDE elixir.yml's Test job
+lead-gates-r21j / gates-w13 · 2026-09-20 · measurement only, no remedy shipped
+
+HOW TO RE-DERIVE THIS FILE, exactly:
+
+    bash scripts/ci-measure.sh --per-step --workflow elixir.yml --runs 300 --pages 3 \
+      --split-at 2026-09-20T11:23:09Z --raw-out steps.ndjson
+    bash scripts/ci-measure.sh --per-step --raw-in steps.ndjson --split-at 2026-09-20T11:23:09Z
+
+WHY A NEW MODE. --per-job (the sibling evidence file, 2026-09-20-per-job-pull-request.txt)
+ranks Test (Elixir 1.18.4 / OTP 27.0) first at 15.82 median job-minutes and
+STRUCTURALLY cannot say which 15.82: it projects every step to
+{started_at, completed_at} and throws the step NAME away. Setup and test
+execution have opposite remedies, so the ranking alone cannot pick one.
+
+WHAT IT IS. Same rules as every other mode in this harness. Minutes are
+STEP-derived. Every conclusion comes from actions/runs/<id>/jobs; no run
+rollup is read, so there is nothing for continue-on-error to launder.
+Cancelled jobs and zero-step jobs are COUNTS in their own columns and are
+never summed into a minute column. A jobs page that could not be fetched is
+counted as a read FAILURE and is never allowed to become a zero-minute row.
+
+WHAT IT IS NOT. It is not a sample: inside the stated window every completed
+elixir.yml pull_request run the feed lists was descended into.
+
+THE BUCKET IS POSITIONAL, NOT A NAME LIST. Steps are PRE / TEST / POST by
+their position relative to the step named "Test" INSIDE THEIR OWN JOB. A
+hardcoded list of setup step names would silently reclassify the first step
+anyone renames. Selftest arm p2 holds this: a step the classifier has never
+seen is still bucketed PRE.
+
+=============================================================================
+CI PER-STEP TABLE — job prefix 'Test (Elixir' in workflow elixir.yml (event pull_request)
+  window (run created_at): 2026-09-18T00:43:33Z .. 2026-09-20T12:00:58Z
+  population: 300 runs listed and descended into; 2360 job rows read; 5 read FAILURES (excluded, never zeroed)
+  295 job rows matched the prefix: 157 executed, 31 cancelled, 107 zero-step.
+  Cancelled and zero-step jobs are COUNTS and are excluded from every second column.
+  Bucket is POSITIONAL: PRE = before the step named 'Test', TEST = it, POST = after.
+
+bucket step                                                               n    med_s   mean_s tot_min   red
+-----------------------------------------------------------------------------------------------------------
+TEST   Test                                                             157    994.0    939.5  2458.4    48
+PRE    Compile (dev, --warnings-as-errors)                              157     45.0     41.5   108.5     1
+PRE    Run actions/checkout@v4                                          154     27.0     28.2    72.3     0
+PRE    The test-env-leak guard must be able to fail                     157     24.0     22.1    57.8     0
+POST   Plugins-off boot invariant (boot_test — separate step, NOT in    157     14.0     12.9    33.9     1
+PRE    Initialize containers                                            157     11.0     11.4    29.9     0
+PRE    Install libxml2-utils for ONIX XSD validation (Phase 6 WI5)      157     10.0     10.5    27.6     0
+PRE    The comment-status-literal guard must be able to fail            157      9.0      8.1    21.1     0
+PRE    The unreachable-assert-message guard must be able to fail        157      8.0      8.0    21.0     6
+PRE    Setup BEAM                                                       157      6.0      6.0    15.7     0
+PRE    DB setup                                                         157      5.0      5.3    13.9     0
+PRE    Setup Node (js_harness_test.exs shells node over api/assets/s    157      4.0      4.3    11.3     0
+PRE    No NEW unrestored global-state mutation in api/test (never-wo    157      4.0      3.9    10.1     0
+PRE    Which tests does this pull request need?                         157      2.0      3.3     8.7     0
+PRE    No NEW unreachable assert messages (never-worse ratchet)         157      3.0      2.8     7.2     0
+PRE    No NEW status literals in comments (never-worse ratchet)         157      3.0      2.7     7.1     0
+POST   OpenAPI drift check (docs/openapi.json must match the manifes    157      2.0      1.8     4.6     2
+PRE    Fetch deps                                                       157      2.0      1.6     4.3     0
+PRE    Cache deps                                                       157      2.0      1.6     4.1     0
+PRE    Set up job                                                       157      1.0      1.5     3.9     0
+POST   Upload the selection (what this run actually executed)           157      1.0      1.3     3.5     0
+POST   Paper-component golden-parity freshness (3 mirrors must match    157      1.0      0.8     2.0     0
+PRE    Is the compile-closure instrument alive?                         157      1.0      0.8     2.0     0
+POST   Stop containers                                                  157      0.0      0.5     1.4     0
+PRE    Run actions/checkout@v7                                            3     25.0     25.0     1.2     0
+POST   Post Run actions/checkout@v4                                     154      0.0      0.2     0.5     0
+POST   Post Cache deps                                                  151      0.0      0.1     0.3     0
+POST   Post Setup Node (js_harness_test.exs shells node over api/ass    157      0.0      0.1     0.2     0
+PRE    The client-ip resolver guard must be able to fail                157      0.0      0.1     0.1     0
+PRE    No conn.remote_ip read outside the canonical resolver            157      0.0      0.1     0.1     0
+POST   Complete job                                                     157      0.0      0.0     0.1     0
+POST   Publish this job's refusal verdict                               157      0.0      0.0     0.0     0
+POST   Post Run actions/checkout@v7                                       3      0.0      0.0     0.0     0
+-----------------------------------------------------------------------------------------------------------
+
+BUCKET ROLLUP — per JOB, over 157 executed jobs
+bucket       med_s    mean_s   med_min    share
+PRE          168.0     163.6      2.80    14.7%
+TEST         994.0     939.5     16.57    87.0%
+POST          18.0      17.8      0.30     1.6%
+JOB         1143.0    1120.9     19.05   100.0%
+
+SPLIT AT 2026-09-20T11:23:09Z — the SAME population, partitioned by run created_at.
+  A run CREATED before the cut but still running at read time is absent from this
+  feed (status=completed), so the AFTER window is biased toward runs that FINISHED.
+  That bias cuts AGAINST detecting a slowdown; read a null result with that in mind.
+
+window       n   JOB_med  JOB_mean  TEST_med TEST_mean   PRE_med  POST_med
+BEFORE     149    1221.0    1141.3    1025.0     959.4     168.0      18.0
+AFTER        8     708.0     740.9     532.0     569.2     168.0      17.5
+
+  TEST step median: 1025.0s BEFORE -> 532.0s AFTER  (-493.0s, -48.1%)
+  n=149 before, n=8 after. Two medians over 149 and 8 samples; a difference
+  smaller than the spread between them is not a finding.
+  BEFORE TEST deciles: min 0  p25 527  med 1025  p75 1393  max 1515
+  AFTER  TEST deciles: min 0  p25 498  med 532  p75 756  max 1070
+
+=============================================================================
+THE HEADLINE. Setup is NOT the cost. Over 157 executed jobs the whole PRE
+bucket — checkout, BEAM, Node, six guard steps, deps cache+fetch, libxml2,
+compile, DB setup — is 168s median, 14.7% of the job. The single step named
+"Test" is 994s median, 87.0%. A setup diet cannot move this job; only the
+size of the test selection can.
+
+=============================================================================
+A. SELECTION vs Test-step cost -- 2026-09-20, elixir.yml PR runs with an executed Test step
+   total test files in api/test = 1892 (what the token ALL means)
+
+   selection    n   min_s   p25_s   med_s   p75_s    max_s
+   ALL         14     818    1015    1272    1399     1433
+   NARROW      17     339     495     506     754      797
+
+   Saving when the selector narrows: 1272s - 506s = 766s = 12.8 min per run.
+
+B. DID PR #19443 (d65e837, merged 2026-09-20T11:23:09Z) RAISE THE ALL-RATE?
+   Predicate: is d65e837 an ancestor of the run's merge commit?
+   gh api compare/d65e837...<head_sha> -> ahead = contains it, diverged = does not.
+
+   cohort       runs   ALL  NARROW     ALL-rate  TEST_med_s
+   HAS-FIX         6     1       4    1/5 = 20%         529
+   LACKS-FIX      26    13      13  13/26 = 50%         808
+
+   VERDICT: n=5 readable selections in the HAS-FIX cohort. That cannot support a
+   verdict in either direction. Nothing here shows the merge raised the ALL-rate;
+   nothing here could have shown it if it did.
+
+C. WHY DO RUNS SELECT ALL? The 11 distinct PRs behind the 14 ALL-selecting runs:
+
+   branch                                                PR   files    api/  api/lib/
+   cli-r21j-boxerror                                 #19418       7       0         0
+   console-r21g-adjacency-guard                      #19336       7       0         0
+   dependabot/github_actions/actions/checkout-7      #16722      78       0         0
+   dependabot/github_actions/actions/setup-node-7    #16720      32       0         0
+   gates/r21i-ratelimit-window                       #19377      10       0         0
+   gates/r21j-cidiet                                 #19422       7       0         0
+   gates/r21j-selector                               #19443       2       0         0
+   gates/r21j-ssrfratchet                            #19465       1       0         0
+   api/r21g-hook-shape                               #19333       2       2         0
+   gates/r21j-docgates                               #19458       5       3         1
+   api/r21j-create-token-scope                       #19424      41      41         2
+
+   8 of 11 distinct ALL-selecting PRs changed ZERO api/ files.
+   9 of 14 ALL-selecting RUNS belong to such a PR.
+   Each spent the ALL median (1272s) running 1892 api test files for a pull request
+   that edited no file under api/ at all.
+
+   Wasted Test-step compute on 2026-09-20 alone:
+     valued at the ALL-vs-NARROW delta: 9 x 766s = 114.8 min
+     valued at the FULL Test step (what a correct skip saves): 190.7 min
+
+=============================================================================
+D. WHAT THE QUEUE IS MADE OF — read 2026-09-20T12:24:42Z
+   Source: actions/runs?status=queued and ?status=in_progress, 3 pages each,
+   71 rows, 71 distinct run ids (no double-count).
+
+   THE RAW "queued" COUNT IS NOT QUEUE PRESSURE. 30 of the 44 queued rows were
+   created more than 24h ago; the oldest is 2026-08-07T09:08:43Z, 44 days
+   stale. Median age of the raw queued population is 10,294 minutes. Those are
+   permanently-stuck rows (20 push, 9 pull_request, 1 workflow_run, spread
+   across 23 workflows) and any "N runs queued" figure that includes them is
+   measuring sediment, not load.
+
+   LIVE in-flight (created < 60 min ago): 41 of 71 rows
+     by status     in_progress=27, queued=14
+     by event      pull_request=23, push=17, workflow_run=1
+     by workflow   elixir.yml=12, shell-harnesses=4, console-harness=3,
+                   cloud=3, required-checks-drift=3, compose-smoke=2,
+                   security=2, doc-gates=2
+     by branch     main=18, deploy/r21j-pdsd-thaw=7, dependabot setup-node=4,
+                   dependabot checkout=4, api/r21j-owner-clamp=3, others 1-2
+     by attempt    1=41  (ZERO reruns)
+
+   READ THIS THREE WAYS:
+     - RERUNS ARE NOT THE PROBLEM. 0 of 41 live rows is a second attempt.
+     - It is NOT dominated by one campaign lane. 23 lanes' PRs vs 17 push runs;
+       no single PR branch holds more than 7 rows.
+     - The largest single source is main itself: 18 of 41 live rows (44%) are
+       on branch main, i.e. the post-merge re-run of the gate suite. elixir.yml
+       accounts for 5 of those. Every merge pays the gate a second time.
+     - dependabot is 8 of 41 (20%) and both its PRs select ALL (section C).
+
+=============================================================================
+E. WHAT THIS FILE DOES NOT MEASURE
+
+   - QUEUE WAIT. Every number above is COMPUTE (step spans). The reason a PR
+     sits at three-of-four green for half an hour is latency, which this mode
+     does not separate from concurrency. --job-latency is the mode for that.
+   - WHICH TESTS ARE SLOW. The Test step is one step; this file proves it is
+     87% of the job and says nothing about which of the 1892 files dominate it.
+   - PUSH-EVENT RUNS. Section A-C are event=pull_request only. Section D shows
+     push is 44% of live load; its per-step cost is UNMEASURED.
+   - WHETHER #19443 RAISED THE ALL-RATE. n=5. See section B. The honest answer
+     is that the question is not yet answerable, not that the answer is no.
+   - THE 33 NOARTIFACT RUNS. 33 of 64 runs on 2026-09-20 had no
+     elixir-impacted-selection artifact (cancelled before upload, or expired).
+     Section C's denominators are the 31 that had one, and are stated as such.
+
+   API CALLS SPENT: ~510 (300 jobs pages, 64 ancestry compares, ~128 artifact
+   list+download, ~15 run-feed and queue pages, 4 rate_limit probes).
+   Core budget at start 3,317 remaining; the hourly window reset mid-run.
