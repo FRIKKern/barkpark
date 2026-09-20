@@ -719,13 +719,25 @@ defmodule Barkpark.Auth do
   ("admin" perm → "admin", else "member"). The token + membership commit
   atomically, so a failed membership insert rolls the token back.
 
-  When `workspace_id` is `nil` the token falls back to the seeded Default
-  Workspace if one exists (the backfill's target); when no Default Workspace
-  exists the token is created un-bound (no membership) for back-compat with
-  pre-tenancy callers and the existing test suite.
+  ## `workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
+
+  When `workspace_id` is `nil` (or omitted) the token is minted WORKSPACE-LESS:
+  `insert_token_with_membership/3` is skipped entirely and NO
+  `Barkpark.Tenancy.Membership` row is ever created. This is the same posture
+  `create_personal_access_token/3` and `create_claude_session_token/3` already
+  hold — `create_token/5` was the last of the three mints still carrying the
+  fallback (task-e0e6454b8b2045ae).
+
+  There used to be an unconditional `|| default_workspace_id()` here. It bound
+  the token to the seeded Default Workspace AND handed it a membership row in
+  that workspace with ZERO relationship check between the caller and it: a
+  caller that simply forgot to thread a workspace got a seat at whatever tenant
+  happens to hold the default seat. A caller that WANTS the instance default
+  must now resolve it itself and pass it — `Barkpark.Auth.PublicRead`, the one
+  caller that meant it, does exactly that. There is no default to fall into.
   """
   def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil) do
-    ws_id = workspace_id || default_workspace_id()
+    ws_id = workspace_id
 
     token_attrs = %{
       token_hash: ApiToken.hash_token(raw_token),
@@ -867,13 +879,6 @@ defmodule Barkpark.Auth do
         {:error, changeset} -> Repo.rollback(changeset)
       end
     end)
-  end
-
-  defp default_workspace_id do
-    case Tenancy.get_default_workspace() do
-      nil -> nil
-      ws -> ws.id
-    end
   end
 
   @doc """
