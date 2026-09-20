@@ -39,8 +39,12 @@ defmodule BarkparkWeb.LiveAuthTest do
     ensure_default_scope!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "wi5 admin", "production", ["read", "write", "admin"],
-        workspace_id: Barkpark.TenancyFixtures.default_workspace_id!()
+      Auth.create_token(
+        @admin_token,
+        "wi5 admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
       )
 
     {:ok, _} = Auth.create_token(@ops_token, "wi5 ops", "production", ["read", "ops"])

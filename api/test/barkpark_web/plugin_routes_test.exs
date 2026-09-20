@@ -154,8 +154,12 @@ defmodule BarkparkWeb.PluginRoutesTest do
       raw = "scoped-plugin-admin-token-#{System.unique_integer([:positive])}"
 
       {:ok, _api_token} =
-        Auth.create_token(raw, "scoped plugin admin", "production", ["read", "write", "admin"],
-          workspace_id: Barkpark.TenancyFixtures.default_workspace_id!()
+        Auth.create_token(
+          raw,
+          "scoped plugin admin",
+          "production",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
         )
 
       {:ok, other_ws} =

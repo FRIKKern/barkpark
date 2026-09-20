@@ -16,8 +16,12 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"],
-        workspace_id: Barkpark.TenancyFixtures.default_workspace_id!()
+      Auth.create_token(
+        @admin_token,
+        "test admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
       )
 
     :ok

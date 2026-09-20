@@ -72,8 +72,12 @@ defmodule BarkparkWeb.PluginPublicMountTest do
       # leaves this case green: it was always a real admin of the workspace the
       # flat chrome labels it with.
       {:ok, _} =
-        Auth.create_token(raw, "plugin public admin", "production", ["read", "write", "admin"],
-          workspace_id: Barkpark.TenancyFixtures.default_workspace_id!()
+        Auth.create_token(
+          raw,
+          "plugin public admin",
+          "production",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
         )
 
       mounted = mount_plugin_public(%{"api_token" => raw})

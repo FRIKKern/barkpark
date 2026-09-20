@@ -37,8 +37,12 @@ defmodule BarkparkWeb.ScopedRoutingTest do
     raw = "scoped-routing-token-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "scoped routing", @dataset, ["read", "write"],
-        workspace_id: Barkpark.TenancyFixtures.default_workspace_id!()
+      Auth.create_token(
+        raw,
+        "scoped routing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
       )
 
     {:ok, raw_token: raw}

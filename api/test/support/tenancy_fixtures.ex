@@ -181,9 +181,19 @@ defmodule Barkpark.TenancyFixtures do
   module's `setup` runs, which is why it works. A test that MEANS the default
   workspace should now say so:
 
-      Barkpark.Auth.create_token(raw, "label", "test", perms,
-        workspace_id: TenancyFixtures.default_workspace_id!()
+      Barkpark.Auth.create_token(
+        raw,
+        "label",
+        "test",
+        perms,
+        TenancyFixtures.default_workspace_id!()
       )
+
+  The workspace is `create_token/5`'s FIFTH POSITIONAL argument, a bare
+  `binary()` — not a `workspace_id:` option. Passing a keyword list there casts
+  to `{:error, %Ecto.Changeset{errors: [workspace_id: {"is invalid", ...}]}}`
+  and the caller's `{:ok, _}` match blows up in setup, which is exactly what
+  the first draft of this migration did.
 
   It refuses rather than returning `nil` on a vacant seat on purpose: a `nil`
   workspace_id is not an error at the mint, it is a WORKSPACE-LESS token, and
