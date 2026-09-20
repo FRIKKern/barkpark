@@ -365,6 +365,10 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
+      // A level beyond the three the canvas offers (an import, an agent) is shown at the
+      // nearest level and carried on the source, so an edit to the text never rewrites it
+      // (D-headings: three levels to author, a deeper stored level is never restructured).
+      if (Number.isFinite(Number(block.level)) && clampLevel(block.level) !== Number(block.level)) source.level = Number(block.level);
       const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
       const inline = headingInline(source);
       if (inline.length) node.content = inline;
@@ -1034,10 +1038,14 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
 
   switch (blockType) {
     case "heading": {
-      const level = clampLevel(top.attrs && top.attrs.level);
+      const shown = clampLevel(top.attrs && top.attrs.level);
       const source = top.attrs?.bpHeadingSource;
+      // The carried deeper level stands while the canvas still shows its nearest level; a
+      // turn-into to another level is the author's change and wins.
+      const level = source && typeof source === "object" && Number.isFinite(source.level) && clampLevel(source.level) === shown ? source.level : shown;
       if (source && typeof source === "object") {
         const fields = deepCloneJson(source);
+        delete fields.level;
         if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return { ...fields, level };
         const content = tiptapInlineToPd(top.content);
         const rich = content.some(node => node.type !== "text");
