@@ -83,9 +83,21 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     Barkpark.ChatSessionResidue.purge!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "chat admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "chat junior", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "chat junior",
+        "production",
+        ["read"]
+      )
 
     Application.put_env(:barkpark, :studio_chat_title_http_adapter, NullTitleAdapter)
     Application.put_env(:barkpark, :studio_chat_title_cli, NullTitleCli)

@@ -263,7 +263,7 @@ check("S-slash: /divider into an EMPTY run → append-block of a divider", () =>
 // (c) THE ALLOWLIST — every insertable type is IN, every excluded type is OUT.
 check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   for (const t of [
-    "paragraph", "heading", "list", "checklist", "callout", "note", "code", "divider", "diagram",
+    "paragraph", "heading", "list", "checklist", "callout", "blockquote", "note", "code", "divider", "diagram",
     "action", "figure", "columns", "section", "terminal", "table", "stage", "card",
     "field-string", "field-slug", "field-text", "field-boolean",
     "field-select", "field-datetime", "field-color",
@@ -285,7 +285,7 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 24, "exactly 24 insertable types (+ note, + stage, + card, + checklist)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 25, "exactly 25 insertable types (+ note, + stage, + card, + checklist, + quote)");
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node

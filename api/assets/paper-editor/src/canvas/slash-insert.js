@@ -62,6 +62,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "section",
   "terminal",
   "table",
+  "blockquote",
   "stage",
   "card",
   "field-string",
@@ -256,6 +257,8 @@ export const CANVAS_SLASH_TEXTABLE_NODES = new Set([
   "orderedList",
   "taskList",
   "callout",
+  // A quote is inline content the caret should land inside, like a callout body.
+  "blockquote",
   // note.type === "note" is a content node whose body is an editable inline hole —
   // the caret should land in the body after insert (the callout precedent).
   "note",

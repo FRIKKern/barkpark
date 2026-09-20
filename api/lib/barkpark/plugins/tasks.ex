@@ -381,7 +381,7 @@ defmodule Barkpark.Plugins.Tasks do
       list
       |> Enum.with_index()
       |> Enum.filter(fn {entry, _i} ->
-        merge_gate_worded?(entry) and not merge_gate_flagged?(entry)
+        merge_gate_worded?(entry) and not merge_gate_declared?(entry)
       end)
       |> Enum.map(fn {_entry, i} -> i end)
 
@@ -390,7 +390,8 @@ defmodule Barkpark.Plugins.Tasks do
         "acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
           "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
           "the wording, so a lead merge will not flip them. Add \"merge_gate\": true to each " <>
-          "gate entry (soft warning, save proceeds)"
+          "gate entry — or \"merge_gate\": false if the criterion merely MENTIONS merge-gating " <>
+          "and is not one (either explicit value silences this) (soft warning, save proceeds)"
 
       # Journal copy (grep-able in prod logs) AND the advisory channel: the
       # Logger line alone let 669 unflagged rows accumulate in silence — its
@@ -413,7 +414,27 @@ defmodule Barkpark.Plugins.Tasks do
     end
   end
 
-  defp merge_gate_flagged?(entry), do: Map.get(entry, "merge_gate") == true
+  # THREE STATES, NOT TWO — and the nag must read PRESENCE, not truth.
+  #
+  # This asked `Map.get(entry, "merge_gate") == true`, which folds an EXPLICIT
+  # `merge_gate: false` into the same bucket as an absent key, so the nag kept
+  # firing after the author had already answered it. `Criteria.merge_gated?/1`
+  # documents `false` as the per-row EXEMPTION DOOR: an author declaring that a
+  # marker-worded criterion merely TALKS about merge-gating (65 of 1853 corpus
+  # matches). The documented fix for a false positive therefore did not silence
+  # the instrument that manufactures them, and the only way to make the nag stop
+  # was to write `true` — converting a mention into a lead-only gate that `met`
+  # has no un-stamp for. MEASURED 2026-09-20 on task-e12850ea45a3d6a0.
+  #
+  #   key ABSENT        -> the author has not answered; nag.
+  #   `merge_gate` false -> answered "not a gate"; silent.
+  #   `merge_gate` true  -> answered "a gate"; silent.
+  #
+  # `fetch/2` (bottom of this file) exists for exactly this distinction: it
+  # returns `:absent` only when the key is missing from the map entirely.
+  # Nothing else changes — this widens no wording rule and halts nothing; it
+  # only stops nagging an author who has already declared an answer.
+  defp merge_gate_declared?(entry), do: fetch(entry, "merge_gate") != :absent
 
   # String-or-atom key fetch that distinguishes an ABSENT key from a present
   # nil/false value (write paths string-key their attrs; the atom fallback is
