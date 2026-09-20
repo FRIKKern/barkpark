@@ -74,7 +74,20 @@ export const Image = Node.create({
         parseHTML: (el) => el.getAttribute("data-role"),
         renderHTML: (attrs) => (attrs.role != null ? { "data-role": attrs.role } : {}),
       },
-      // Every other block key (width, height, unknown) verbatim, as JSON.
+      // The rendered width in px (the reader's `width` attr); null = natural size.
+      width: {
+        default: null,
+        parseHTML: (el) => { const n = parseInt(el.getAttribute("data-width"), 10); return Number.isFinite(n) ? n : null; },
+        renderHTML: (attrs) => (attrs.width != null ? { "data-width": String(attrs.width) } : {}),
+      },
+      // Upload state — TRANSIENT (never persisted, never in the stable key): an image
+      // pasted or dropped shows its local preview while the file uploads, then `src`
+      // lands and these clear; a failure stays on the node, not in a toast.
+      uploading: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
+      previewUrl: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
+      uploadError: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
+      uploadKey: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
+      // Every other block key (height, unknown) verbatim, as JSON.
       bpRest: {
         default: null,
         parseHTML: (el) => {
@@ -123,9 +136,12 @@ export const Image = Node.create({
       img.draggable = false;
       const empty = document.createElement("div");
       empty.className = "bp-canvas-image-empty";
-      empty.textContent = "No image yet — paste an image URL below";
+      empty.textContent = "No image yet — paste or drop a picture, or enter a URL below";
+      const badge = document.createElement("div");
+      badge.className = "bp-canvas-image-badge";
       frame.appendChild(img);
       frame.appendChild(empty);
+      frame.appendChild(badge);
       dom.appendChild(frame);
 
       // The two edit inputs, in a row that hides at rest like the figure caption.
@@ -143,8 +159,12 @@ export const Image = Node.create({
       };
       const altInput = mkInput("bp-canvas-image-alt", "alt text", "image alt text");
       const srcInput = mkInput("bp-canvas-image-src", "image url", "image url");
+      const widthInput = mkInput("bp-canvas-image-width", "width px", "image width in pixels");
+      widthInput.type = "number";
+      widthInput.min = "16";
       chrome.appendChild(altInput);
       chrome.appendChild(srcInput);
+      chrome.appendChild(widthInput);
       dom.appendChild(chrome);
 
       let hovered = false;
@@ -163,22 +183,29 @@ export const Image = Node.create({
         const a = n.attrs || {};
         const src = a.src || "";
         const alt = a.alt || "";
+        const shown = src || a.previewUrl || "";
         if (srcInput.value !== src) srcInput.value = src;
         if (altInput.value !== alt) altInput.value = alt;
-        if (src) {
-          if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+        const w = a.width != null ? String(a.width) : "";
+        if (widthInput.value !== w) widthInput.value = w;
+        if (shown) {
+          if (img.getAttribute("src") !== shown) img.setAttribute("src", shown);
           img.alt = alt;
           img.style.display = "";
+          img.style.width = a.width != null ? a.width + "px" : "";
           empty.style.display = "none";
         } else {
           img.removeAttribute("src");
           img.style.display = "none";
           empty.style.display = "";
         }
+        if (a.uploading) { badge.textContent = "Uploading…"; badge.style.display = ""; badge.className = "bp-canvas-image-badge"; }
+        else if (a.uploadError) { badge.textContent = "Upload failed: " + a.uploadError; badge.style.display = ""; badge.className = "bp-canvas-image-badge bp-canvas-image-badge--error"; }
+        else { badge.style.display = "none"; }
         const locked = a.locked === true;
-        dom.classList.toggle("bp-canvas-image--empty", !src);
+        dom.classList.toggle("bp-canvas-image--empty", !shown);
         dom.classList.toggle("bp-canvas-image--locked", locked);
-        srcInput.readOnly = altInput.readOnly = !editor.isEditable;
+        srcInput.readOnly = altInput.readOnly = widthInput.readOnly = !editor.isEditable;
         syncChrome();
       };
       paint(node);
@@ -214,11 +241,13 @@ export const Image = Node.create({
         if (!cur) return;
         const nextSrc = srcInput.value.trim() === "" ? null : srcInput.value.trim();
         const nextAlt = altInput.value === "" ? null : altInput.value;
-        if ((cur.attrs.src || null) === nextSrc && (cur.attrs.alt || null) === nextAlt) return;
+        const parsedWidth = parseInt(widthInput.value, 10);
+        const nextWidth = Number.isFinite(parsedWidth) && parsedWidth >= 16 ? parsedWidth : null;
+        if ((cur.attrs.src || null) === nextSrc && (cur.attrs.alt || null) === nextAlt && (cur.attrs.width ?? null) === nextWidth) return;
         editor
           .chain()
           .command(({ tr }) => {
-            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, src: nextSrc, alt: nextAlt });
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, src: nextSrc, alt: nextAlt, width: nextWidth });
             return true;
           })
           .run();
@@ -246,8 +275,10 @@ export const Image = Node.create({
       };
       altInput.addEventListener("input", scheduleWrite);
       srcInput.addEventListener("input", scheduleWrite);
+      widthInput.addEventListener("input", scheduleWrite);
       srcInput.addEventListener("keydown", onKey);
       altInput.addEventListener("keydown", onKey);
+      widthInput.addEventListener("keydown", onKey);
       dom.addEventListener("bp-flush-node", flushWrite);
 
       return {
@@ -266,8 +297,10 @@ export const Image = Node.create({
           dom.removeEventListener("bp-flush-node", flushWrite);
           altInput.removeEventListener("input", scheduleWrite);
           srcInput.removeEventListener("input", scheduleWrite);
+          widthInput.removeEventListener("input", scheduleWrite);
           srcInput.removeEventListener("keydown", onKey);
           altInput.removeEventListener("keydown", onKey);
+          widthInput.removeEventListener("keydown", onKey);
           dom.removeEventListener("mouseenter", onEnter);
           dom.removeEventListener("mouseleave", onLeave);
           dom.removeEventListener("focusin", onFocusIn);

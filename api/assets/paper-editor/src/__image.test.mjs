@@ -41,7 +41,8 @@ check("runToTiptap: an image projects to a bpImage node with src/alt as attrs, n
     assert.equal(node.attrs.alt, b.alt == null ? null : b.alt, `${b.id}: alt`);
   }
   const sized = runToTiptap([SIZED]).content[0];
-  assert.deepEqual(sized.attrs.bpRest, { width: 640, height: 320 }, "width/height ride bpRest");
+  assert.equal(sized.attrs.width, 640, "width is an editable attr");
+  assert.deepEqual(sized.attrs.bpRest, { height: 320 }, "height rides bpRest");
   const featured = runToTiptap([FEATURED]).content[0];
   assert.equal(featured.attrs.locked, true, "locked stamped");
   assert.equal(featured.attrs.role, "featured", "role stamped");
@@ -63,7 +64,7 @@ check("runToOps: editing alt emits EXACTLY one patch-block{src, alt}", () => {
   const doc = runToTiptap([PLAIN]);
   doc.content[0].attrs.alt = "A better description";
   assert.deepEqual(runToOps([PLAIN], doc), [
-    { op: "patch-block", id: "i1", patch: { src: PLAIN.src, alt: "A better description" } },
+    { op: "patch-block", id: "i1", patch: { src: PLAIN.src, alt: "A better description", width: null } },
   ]);
 });
 
@@ -71,7 +72,7 @@ check("runToOps: setting a url on the featured template image patches src only (
   const doc = runToTiptap([FEATURED]);
   doc.content[0].attrs.src = "/hero.png";
   const ops = runToOps([FEATURED], doc);
-  assert.deepEqual(ops, [{ op: "patch-block", id: "i3", patch: { src: "/hero.png", alt: "" } }]);
+  assert.deepEqual(ops, [{ op: "patch-block", id: "i3", patch: { src: "/hero.png", alt: "", width: null } }]);
   assert.ok(!("locked" in ops[0].patch) && !("role" in ops[0].patch));
 });
 

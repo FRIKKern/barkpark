@@ -3279,7 +3279,7 @@ function islandNodeChanged(prevNode, nextNode) {
 // { type:"bpImage", attrs:{ bpId, bpType, src, alt, locked, role, bpRest } }.
 // src/alt: ""/absent → null (byte-fidelity: an absent alt reconstructs absent).
 // bpRest: every other key except id/type/src/alt/locked/role, deep-cloned, or null.
-const IMAGE_OWN_KEYS = new Set(["id", "type", "src", "alt", "locked", "role"]);
+const IMAGE_OWN_KEYS = new Set(["id", "type", "src", "alt", "width", "locked", "role"]);
 
 function imageBlockToNode(block, bpId, bpType) {
   const rest = {};
@@ -3295,6 +3295,7 @@ function imageBlockToNode(block, bpId, bpType) {
       bpType,
       src: block && block.src != null && block.src !== "" ? String(block.src) : null,
       alt: block && block.alt != null && block.alt !== "" ? String(block.alt) : null,
+      width: block && Number.isFinite(parseInt(block.width, 10)) ? parseInt(block.width, 10) : null,
       bpRest: hasRest ? rest : null,
     },
     block,
@@ -3308,6 +3309,7 @@ function imageNodeToBlock(node, id) {
   const block = { id, type: "image" };
   if (attrs.src != null && attrs.src !== "") block.src = attrs.src;
   if (attrs.alt != null && attrs.alt !== "") block.alt = attrs.alt;
+  if (attrs.width != null) block.width = attrs.width;
   if (attrs.bpRest && typeof attrs.bpRest === "object") {
     for (const k of Object.keys(attrs.bpRest)) {
       if (!IMAGE_OWN_KEYS.has(k)) block[k] = deepClone(attrs.bpRest[k]);
@@ -3321,7 +3323,7 @@ function imageNodeToBlock(node, id) {
 // an empty src as scaffolding and skips the block).
 function imageNodeToPatch(node) {
   const attrs = (node && node.attrs) || {};
-  return { src: attrs.src == null ? "" : attrs.src, alt: attrs.alt == null ? "" : attrs.alt };
+  return { src: attrs.src == null ? "" : attrs.src, alt: attrs.alt == null ? "" : attrs.alt, width: attrs.width == null ? null : attrs.width };
 }
 
 function stableImageKey(node) {
@@ -3329,6 +3331,7 @@ function stableImageKey(node) {
   return canonicalJSON({
     src: a.src == null || a.src === "" ? null : a.src,
     alt: a.alt == null || a.alt === "" ? null : a.alt,
+    width: a.width == null ? null : a.width,
     rest: a.bpRest != null ? a.bpRest : null,
   });
 }

@@ -571,6 +571,10 @@ class BpPaperCanvas extends HTMLElement {
     this._tag = null; // WikilinkMenu instance reused for tags (lazy)
     this._tagSeq = 0; // monotonic open/query counter — stale async-result guard
     this._tagSource = null; // injected async (query) => [ "design", "obsidian", … ]
+    // injected async (file) => { src, alt?, width?, height? } — where a pasted or dropped
+    // picture goes (the host's Barkpark media); unset → the image node says so.
+    this._mediaUploader = null;
+    this._uploadSeq = 0;
     this._tagRange = null; // { from, to } PM range to replace on the current pick
     // P4 S-slash: the "/" insert popup (lazy, created on first trigger). UNLIKE the
     // wikilink/tag popups it needs no injected source — the item list is the static
@@ -637,6 +641,7 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("acknowledgedSaves");
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
+    this._upgradeProperty("mediaUploader");
 
     // Default true; only the literal string "false" disables editing. Mount-time
     // read is authoritative — attributeChangedCallback handles later toggles.
@@ -989,6 +994,9 @@ class BpPaperCanvas extends HTMLElement {
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
+        // Image files dropped onto the canvas land as image nodes at the drop point
+        // and upload through the host's mediaUploader (see _insertImageFiles).
+        handleDrop: (view, event, _slice, moved) => this._onDrop(view, event, moved),
         // pdd-t2: the doctrine template-lock veto. Reject any transaction that
         // deletes or moves a locked mandated block (returning false from
         // filterTransaction drops the whole tx). Content edits inside a locked
@@ -1796,6 +1804,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _onPaste(view, _event, slice) {
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
     const plan = figurePastePlan(slice);
@@ -1813,6 +1822,106 @@ class BpPaperCanvas extends HTMLElement {
   // Plain-text paste that carries markdown block syntax (headings, lists, quotes, fences, rules)
   // lands as the corresponding blocks instead of literal `## ` and `- ` paragraphs. HTML on the
   // clipboard keeps the native path (the browser already structured it); a single plain line too.
+  // ── pasted / dropped pictures ────────────────────────────────────────────────
+  //
+  // A picture on the clipboard or dropped on the canvas becomes a bpImage node at
+  // once (its alt is the file name, its src is empty, a local object URL previews
+  // it), then uploads through the host-injected mediaUploader; when the upload
+  // lands the node's src is set (one patch-block), a failure stays on the node.
+  // Without an uploader the node says so instead of storing a data: URL.
+  static _imageFiles(list) {
+    return [...(list || [])].filter((f) => f && typeof f.type === "string" && f.type.startsWith("image/"));
+  }
+
+  _pasteImageFiles(view, event) {
+    const files = BpPaperCanvas._imageFiles(event && event.clipboardData && event.clipboardData.files);
+    if (!files.length) return false;
+    this._insertImageFiles(view, files, null);
+    return true;
+  }
+
+  _onDrop(view, event, moved) {
+    if (!this._editable || moved || isFigureSingletonCanvas(this)) return false;
+    const files = BpPaperCanvas._imageFiles(event && event.dataTransfer && event.dataTransfer.files);
+    if (!files.length) return false;
+    const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
+    this._insertImageFiles(view, files, at ? at.pos : null);
+    event.preventDefault();
+    return true;
+  }
+
+  _insertImageFiles(view, files, atPos) {
+    const { state } = view;
+    const imageType = state.schema.nodes.bpImage;
+    if (!imageType) return;
+    const $pos = atPos != null ? state.doc.resolve(atPos) : state.selection.$from;
+    // Insert after the block the position sits in (top-level), never inside it.
+    let insertAt = $pos.depth >= 1 ? $pos.after(1) : $pos.pos;
+    const tr = state.tr;
+    const nodes = files.map((file) => {
+      const key = "up-" + (++this._uploadSeq) + "-" + Date.now().toString(36);
+      const alt = String(file.name || "image").replace(/\.[a-z0-9]+$/i, "");
+      let previewUrl = null;
+      try { previewUrl = URL.createObjectURL(file); } catch (_) {}
+      return { key, file, node: imageType.create({ bpId: null, bpType: "image", src: null, alt, uploading: true, previewUrl, uploadKey: key }) };
+    });
+    for (const n of nodes) { tr.insert(insertAt, n.node); insertAt += n.node.nodeSize; }
+    view.dispatch(tr.scrollIntoView());
+    for (const n of nodes) this._uploadImage(n.key, n.file, n.node.attrs.previewUrl);
+  }
+
+  _findUploadNode(key) {
+    let found = null;
+    this._editor.state.doc.descendants((node, pos) => {
+      if (found) return false;
+      if (node.type.name === "bpImage" && node.attrs.uploadKey === key) { found = { node, pos }; return false; }
+      return true;
+    });
+    return found;
+  }
+
+  _patchUploadNode(key, patch) {
+    const hit = this._findUploadNode(key);
+    if (!hit) return;
+    this._editor
+      .chain()
+      .command(({ tr }) => {
+        tr.setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, ...patch });
+        return true;
+      })
+      .run();
+  }
+
+  async _uploadImage(key, file, previewUrl) {
+    const uploader = this._mediaUploader;
+    const release = () => { if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch (_) {} } };
+    if (typeof uploader !== "function") {
+      this._patchUploadNode(key, { uploading: null, uploadError: "no media uploader is connected" });
+      return;
+    }
+    try {
+      const result = await uploader(file);
+      const src = result && typeof result === "object" ? result.src || result.url || "" : String(result || "");
+      if (!src) throw new Error("the uploader returned no url");
+      const patch = { src, uploading: null, uploadError: null, uploadKey: null, previewUrl: null };
+      if (result && result.alt) patch.alt = String(result.alt);
+      this._patchUploadNode(key, patch);
+      // Let the <img> switch to the uploaded source before the object URL goes.
+      setTimeout(release, 2000);
+    } catch (e) {
+      this._patchUploadNode(key, { uploading: null, uploadError: (e && e.message) || String(e) });
+      setTimeout(release, 60000);
+    }
+  }
+
+  set mediaUploader(fn) {
+    this._mediaUploader = fn;
+  }
+
+  get mediaUploader() {
+    return this._mediaUploader;
+  }
+
   _pasteMarkdown(view, event) {
     const data = event && event.clipboardData;
     if (!data) return false;
