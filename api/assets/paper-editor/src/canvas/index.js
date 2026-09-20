@@ -1462,21 +1462,12 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
-    if (saved !== true) {
-      // REJECTED (a lifecycle veto, a failed request): drop the in-flight batch WITHOUT
-      // advancing the baseline. `_blocks` still holds the last SAVED snapshot, so the
-      // next local edit diffs against it and carries the refused change along — the
-      // author keeps what they see, and it lands as soon as the server will take it
-      // (a batch that would hollow the paper saves once they write again). Edits made
-      // while the batch was travelling are emitted now: that diff already differs from
-      // the refused one. Nothing else is resent here — an unchanged vetoed batch would
-      // just be vetoed again.
-      this._inflightOps = null;
-      const dirty = this._dirtyWhileInflight;
-      this._dirtyWhileInflight = false;
-      if (dirty) this._emitOps();
-      return true;
-    }
+    // A `saved:false` acknowledgement keeps the batch in flight: the Studio host's
+    // contract is that a failed head stays pending and its Retry resends the same
+    // batch verbatim, with later edits waiting behind it (__save_ack_mounted). A host
+    // that wants the other behaviour — drop the refused batch and fold it into the
+    // next edit — calls discardInflightOps(seq) instead.
+    if (saved !== true) return false;
 
     // Diff against the local snapshot the author still sees. A canonical reply
     // can contain remote sibling changes queued for later display; advancing
@@ -1514,6 +1505,40 @@ class BpPaperCanvas extends HTMLElement {
     if (dirty) this._emitOps();
     else this._flushPendingServerBlocks();
     return true;
+  }
+
+  // The host's OTHER answer to a refused batch (a lifecycle veto such as "a published
+  // paper cannot be hollowed out", or a request that will not succeed by retrying):
+  // drop the in-flight batch WITHOUT advancing the baseline. `_blocks` still holds the
+  // last SAVED snapshot, so the next local edit diffs against it and carries the
+  // refused change along — the author keeps what they see, and it lands as soon as
+  // the server will take it (a batch that would hollow the paper saves once they
+  // write again). Edits made while the batch was travelling are emitted now: that
+  // diff already differs from the refused one. An unchanged vetoed batch is never
+  // resent on its own; resendPendingOps() is the host's explicit "try again".
+  // Without this seam a refused batch pinned the pipeline: every later edit queued
+  // behind it, never sent (found by Barkdown's editor-multiblock row: cut all, type).
+  discardInflightOps(seq) {
+    if (!this._acknowledgedSaves) return false;
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq) return false;
+    this._inflightOps = null;
+    const dirty = this._dirtyWhileInflight;
+    this._dirtyWhileInflight = false;
+    if (dirty) this._emitOps();
+    return true;
+  }
+
+  // Re-diff the live document against the saved baseline and emit the batch, if any
+  // and if nothing is in flight. The host's Retry after discardInflightOps: it must
+  // NOT resend the discarded ops (an insert would land twice); it asks for a fresh diff.
+  resendPendingOps() {
+    if (this._inflightOps || !this._editor) return false;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    return this._emitOps() === true;
   }
 
   // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────

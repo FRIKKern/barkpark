@@ -63,10 +63,16 @@ try {
   assert.equal(typeof first.seq, "number", "acknowledged mode stamps a seq");
   assert.equal(canvas.hasPendingChanges(), true, "the batch is in flight");
 
-  assert.equal(canvas.acknowledgeOps(first.seq + 100, false), false, "an unknown seq is ignored");
-  assert.equal(canvas.acknowledgeOps(first.seq, false), true, "a rejection of the in-flight batch is taken");
-  assert.equal(canvas.hasPendingChanges(), false, "nothing is in flight after the rejection");
-  assert.equal(batches.length, 1, "an unchanged vetoed batch is not resent on its own");
+  assert.equal(canvas.acknowledgeOps(first.seq, false), false, "a saved:false acknowledgement keeps the batch in flight (the Studio retry contract)");
+  assert.equal(canvas.hasPendingChanges(), true, "still in flight");
+  assert.equal(canvas.discardInflightOps(first.seq + 100), false, "an unknown seq is ignored");
+  assert.equal(canvas.discardInflightOps(first.seq), true, "a discard of the in-flight batch is taken");
+  assert.equal(canvas.hasPendingChanges(), false, "nothing is in flight after the discard");
+  assert.equal(canvas.resendPendingOps(), true, "an explicit resend re-diffs against the saved baseline");
+  assert.equal(batches.length, 2, "and emits the refused change as a fresh batch");
+  assert.equal(patchText(batches[1]), "Before one");
+  assert.equal(canvas.discardInflightOps(batches[1].seq), true);
+  assert.equal(batches.length, 2, "an unchanged vetoed batch is not resent on its own after a discard");
   assert.equal(
     canvas._editor.getJSON().content[0].content[0].text, "Before one",
     "the author keeps what they see",
@@ -75,25 +81,25 @@ try {
   // 2. The next edit carries the refused change along: its diff is against the last SAVED baseline.
   type(" two");
   assert.equal(canvas.flushPendingChanges(), true);
-  assert.equal(batches.length, 2);
-  assert.equal(patchText(batches[1]), "Before one two", "the second batch includes the refused edit");
-  assert.equal(canvas.acknowledgeOps(batches[1].seq, true), true, "and it saves normally");
+  assert.equal(batches.length, 3);
+  assert.equal(patchText(batches[2]), "Before one two", "the next batch includes the refused edit");
+  assert.equal(canvas.acknowledgeOps(batches[2].seq, true), true, "and it saves normally");
   assert.equal(canvas.hasPendingChanges(), false);
 
-  // 3. Typing while a batch travels, then a rejection: the newer typing emits at once, as one diff
+  // 3. Typing while a batch travels, then a discard: the newer typing emits at once, as one diff
   //    from the saved baseline, so the refused change rides along with it.
   type(" three");
   assert.equal(canvas.flushPendingChanges(), true);
-  assert.equal(batches.length, 3);
+  assert.equal(batches.length, 4);
   type(" four");
   // The edit sits in the 300 ms debounce; when that fires with a batch in flight it is
   // marked dirty-while-inflight rather than emitted.
   await new Promise((resolve) => setTimeout(resolve, 350));
-  assert.equal(batches.length, 3, "an edit during flight waits");
-  assert.equal(canvas.acknowledgeOps(batches[2].seq, false), true);
-  assert.equal(batches.length, 4, "the edit made during flight emits right after the rejection");
-  assert.equal(patchText(batches[3]), "Before one two three four", "as one diff from the saved baseline");
-  assert.equal(canvas.acknowledgeOps(batches[3].seq, true), true);
+  assert.equal(batches.length, 4, "an edit during flight waits");
+  assert.equal(canvas.discardInflightOps(batches[3].seq), true);
+  assert.equal(batches.length, 5, "the edit made during flight emits right after the discard");
+  assert.equal(patchText(batches[4]), "Before one two three four", "as one diff from the saved baseline");
+  assert.equal(canvas.acknowledgeOps(batches[4].seq, true), true);
 
   // 4. A rejection never touches the saved baseline: a later revert to it emits no ops.
   assert.deepEqual(
