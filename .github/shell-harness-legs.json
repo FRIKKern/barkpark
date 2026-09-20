@@ -434,7 +434,7 @@
       {
         "name": "pds-record-parity 108-check matrix",
         "run": "bash scripts/pds-record-parity.test.sh",
-        "env": {}
+        "env": { "PDS_PARITY_DYNAMIC": "1" }
       },
       {
         "name": "pds-scratch-target two-root coexistence + teardown",
@@ -464,6 +464,11 @@
       {
         "name": "PDS citation precedes merge — 10-case paired test (throwaway git repos, no network)",
         "run": "bash scripts/pds-citation-precedes-merge_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-artifact-retention keep-N harness (35 arms, hermetic, no network)",
+        "run": "bash scripts/pds-artifact-retention.test.sh",
         "env": {}
       },
       {
