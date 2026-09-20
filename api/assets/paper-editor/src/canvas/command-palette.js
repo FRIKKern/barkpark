@@ -398,6 +398,15 @@ export function buildCommandRegistry(editor, opts) {
       run: (ed) => ed.chain().focus().toggleUnderline().run(),
     });
   }
+  if (editor && editorHasCommand(editor, "toggleHighlight")) {
+    cmds.push({
+      id: "format-highlight",
+      label: "Format Highlight",
+      group: "Format",
+      hint: "H",
+      run: (ed) => ed.chain().focus().toggleHighlight().run(),
+    });
+  }
   // Clear formatting — unset every mark on the selection.
   if (editorHasCommand(editor, "unsetAllMarks")) {
     cmds.push({

@@ -119,6 +119,7 @@ export class FormatBubble {
     el.appendChild(this._mkBtn("bold", "B", "bp-paper-format__btn--bold", "Bold"));
     el.appendChild(this._mkBtn("italic", "I", "bp-paper-format__btn--italic", "Italic"));
     el.appendChild(this._mkBtn("underline", "U", "bp-paper-format__btn--underline", "Underline"));
+    el.appendChild(this._mkBtn("highlight", "H", "bp-paper-format__btn--highlight", "Highlight"));
     el.appendChild(this._mkBtn("strike", "S", "bp-paper-format__btn--strike", "Strikethrough"));
     el.appendChild(this._mkBtn("code", "</>", "bp-paper-format__btn--code", "Inline code"));
 
@@ -241,6 +242,9 @@ export class FormatBubble {
       case "underline":
         if (this._editor.can().toggleUnderline?.()) this._editor.chain().focus().toggleUnderline().run();
         break;
+      case "highlight":
+        if (this._editor.can().toggleHighlight?.()) this._editor.chain().focus().toggleHighlight().run();
+        break;
       case "code":
         this._editor.chain().focus().toggleCode().run();
         break;
@@ -312,6 +316,7 @@ export class FormatBubble {
     set("italic", this._editor.isActive("italic"));
     set("strike", this._editor.isActive("strike"));
     set("underline", this._editor.isActive("underline"));
+    set("highlight", this._editor.isActive("highlight"));
     set("code", this._editor.isActive("code"));
     // Link button stays pressed while its input row is open OR a link is active.
     set("link", this._linkOpen || this._editor.isActive("link"));

@@ -65,6 +65,11 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
+    case "highlight": {
+      const next = [...marks, { type: "highlight" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
     case "link": {
       const next = [...marks, { type: "link", attrs: { href: node.href || "" } }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
@@ -190,6 +195,7 @@ const MARK_ORDER = [
   "em",
   "underline",
   "strikethrough",
+  "highlight",
   "code",
   "blockref",
   "tag",
@@ -209,6 +215,8 @@ function markToPd(mark) {
       return { kind: "strikethrough" };
     case "underline":
       return { kind: "underline" };
+    case "highlight":
+      return { kind: "highlight" };
     case "link":
       return { kind: "link", href: (mark.attrs && mark.attrs.href) || "" };
     case "wikilink": {
@@ -319,6 +327,7 @@ function pdKindToMark(kind) {
   if (kind === "strong") return "strong";
   if (kind === "em") return "em";
   if (kind === "underline") return "underline";
+  if (kind === "highlight") return "highlight";
   if (kind === "strikethrough") return "strikethrough";
   if (kind === "link") return "link";
   if (kind === "wikilink") return "wikilink";
@@ -507,7 +516,7 @@ function exactObjectKeys(value, expected) {
 
 const TABLE_CELL_KINDS = new Set(["inline-array", "content-map"]);
 const TABLE_PROTECTED_CHAIN_TYPES = new Set([
-  "link", "wikilink", "strong", "em", "underline", "strikethrough", "text",
+  "link", "wikilink", "strong", "em", "underline", "strikethrough", "highlight", "text",
 ]);
 
 function tableCellDescriptor(cellShape) {
@@ -616,7 +625,7 @@ function tableProtectedInlineSupported(inline, sourceInline, descriptor) {
 }
 
 const TABLE_MARKS = new Set([
-  "bold", "italic", "underline", "strike", "code", "link", "wikilink",
+  "bold", "italic", "underline", "strike", "highlight", "code", "link", "wikilink",
   "blockref", "tag", "valueref",
 ]);
 
@@ -628,7 +637,7 @@ function tableAttrsHaveOnly(attrs, allowed) {
 function validTableMark(mark) {
   if (!mark || typeof mark !== "object" || Array.isArray(mark) ||
       !TABLE_MARKS.has(mark.type)) return false;
-  if (["bold", "italic", "underline", "strike", "code"].includes(mark.type)) {
+  if (["bold", "italic", "underline", "strike", "highlight", "code"].includes(mark.type)) {
     return exactObjectKeys(mark, ["type"]);
   }
   if (!exactObjectKeys(mark, ["type", "attrs"])) return false;

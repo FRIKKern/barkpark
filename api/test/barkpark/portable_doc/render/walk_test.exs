@@ -95,6 +95,20 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ "text-decoration:line-through"
     end
 
+    test "highlight rides inline off-surface (email) — survives with no stylesheet" do
+      node = %{"kind" => "PdText", "highlight" => true, "children" => ["x"]}
+      html = Walk.render_body(node, @width, @email)
+      assert html =~ "background-color:#fff2a8"
+      refute html =~ "<mark"
+    end
+
+    test "article highlight is the semantic <mark class=\"bp-highlight\"> the surface stylesheet paints — no inline property" do
+      node = %{"kind" => "PdText", "highlight" => true, "children" => ["x"]}
+      html = Walk.render_body(node, @width, @article)
+      assert html =~ ~s(<mark class="bp-highlight">x</mark>)
+      refute html =~ "background-color"
+    end
+
     test "escapes HTML in string children" do
       node = %{"kind" => "PdText", "children" => ["<script>"]}
       html = Walk.render_body(node, @width, @email)

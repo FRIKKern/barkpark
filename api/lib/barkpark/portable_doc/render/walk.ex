@@ -346,6 +346,20 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # is nil → byte-identical span.
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
 
+    # A highlight is author DATA like `color`. On the surface it is the semantic
+    # <mark> the stylesheet paints (no inline property — the article inline-style
+    # ratchet); off-surface (email, a bare export) it rides inline so it survives
+    # with no stylesheet. The class is the same selector the editor renders.
+    {out, inner} =
+      if Map.get(n, "highlight") do
+        case pal do
+          %{style: :article} -> {out, ~s(<mark class="bp-highlight">) <> inner <> "</mark>"}
+          _ -> {["background-color:#fff2a8" | out], inner}
+        end
+      else
+        {out, inner}
+      end
+
     out = Enum.reverse(out)
 
     # Trap: emit NO style= attr when the style list is empty; NO class= when no

@@ -39,6 +39,9 @@ import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import Underline from "@tiptap/extension-underline";
+// The highlight mark: `==text==` shorthand and Mod-Shift-h come with the extension; it persists as the
+// portable-doc `highlight` wrapper (convert.js) and renders as <mark> on both surfaces.
+import Highlight from "@tiptap/extension-highlight";
 import TiptapTaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 // ProseMirror selection constructors — used by the slash direct-insert to place the
@@ -744,6 +747,7 @@ class BpPaperCanvas extends HTMLElement {
         // Underline (Mod-u) — the PortableDoc inline wire already carries an `underline`
         // wrapper (convert.js), so this only adds the mark the schema was missing.
         Underline,
+        Highlight.configure({ HTMLAttributes: { class: "bp-highlight" } }),
         // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
         // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
         // ordinary transaction, so runToOps patches the item's `checked`.

@@ -395,7 +395,8 @@ function inlineNodeIsLossless(node) {
   if (!node || typeof node !== "object") return false;
   switch (node.type) {
     case "text":
-      return typeof node.value === "string";
+      // A literal "==" would read back as a highlight delimiter; sentinel that leaf.
+      return typeof node.value === "string" && !node.value.includes("==");
     case "code": {
       if (typeof node.value !== "string") return false;
       // An inline-code value containing a newline can't ride a single-line span.
@@ -415,6 +416,11 @@ function inlineNodeIsLossless(node) {
       // reachable projection fixed point via strike>em>strike etc.).
       const kids = node.children || [];
       if (kids.some((k) => k && k.type === "strikethrough")) return false;
+      return inlineIsLossless(kids);
+    }
+    case "highlight": {
+      const kids = node.children || [];
+      if (kids.some((k) => k && k.type === "highlight")) return false;
       return inlineIsLossless(kids);
     }
     case "link":
@@ -509,6 +515,10 @@ function inlineNodeToMarkdown(node, parentEmphChar) {
       // inside a strike is gated to a sentinel by inlineNodeIsLossless — "~~" has
       // no alternate delimiter, so "~~~~" can't be disambiguated.)
       return "~~" + inlineToMarkdown(node.children || [], null) + "~~";
+    case "highlight":
+      // "==" has no alternate delimiter either; a highlight directly inside a highlight is
+      // gated to a sentinel by inlineNodeIsLossless, like strike-in-strike.
+      return "==" + inlineToMarkdown(node.children || [], null) + "==";
     case "link":
       return "[" + inlineToMarkdown(node.children || [], null) + "](" + (node.href || "") + ")";
     case "wikilink": {
@@ -1147,6 +1157,20 @@ function parseInline(s, start, end) {
       if (res) {
         flush();
         out.push(res.node);
+        i = res.next;
+        continue;
+      }
+      buf += ch;
+      i += 1;
+      continue;
+    }
+
+    // Highlight ==x==.
+    if (ch === "=" && s[i + 1] === "=") {
+      const res = scanDelimited(s, i, end, "==");
+      if (res) {
+        flush();
+        out.push({ type: "highlight", children: coalesce(parseInline(s, res.innerStart, res.innerEnd)) });
         i = res.next;
         continue;
       }

@@ -111,6 +111,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "em" => "em",
     "code" => "code",
     "u" => "underline",
+    "mark" => "highlight",
     "s" => "strike"
   }
 

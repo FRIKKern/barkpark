@@ -165,6 +165,17 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
+  # `highlight` — a marked run (`==text==` in the editor, `<mark>` in BPML). Author
+  # data like `color`: the walker paints it as a semantic <mark> on the surface and
+  # as an inline background off-surface.
+  def compose_inline(%{"type" => "highlight"} = n, inside_link) do
+    %{
+      "kind" => "PdText",
+      "highlight" => true,
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
   # Inline `code` leaf. The chip body is a FLAT STRING, never inlines — but a
   # sizeable slice of the live corpus authors it as `children` inline nodes with
   # no `value` at all (66 published paragraphs at the 2026-07-25 census), and
@@ -402,6 +413,10 @@ defmodule Barkpark.PortableDoc.Render.Inline do
 
   defp apply_mark(%{"type" => "underline"}, acc, _il) do
     %{"kind" => "PdText", "underline" => true, "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => "highlight"}, acc, _il) do
+    %{"kind" => "PdText", "highlight" => true, "children" => wrap_children(acc)}
   end
 
   defp apply_mark(%{"type" => t}, acc, _il) when t in ["strike", "s", "strikethrough"] do
