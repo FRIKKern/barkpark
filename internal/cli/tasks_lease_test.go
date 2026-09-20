@@ -300,3 +300,93 @@ func TestTaskStampExecute_ReceiptIsNeverAmbiguous(t *testing.T) {
 		})
 	}
 }
+
+// --- a SWEPT lease is not a stale epoch ------------------------------------
+//
+// task-32a37bd92afdb79f measured the honest close path fencing on a lapsed
+// lease three times in one session. `TtlSweeper.apply_reap/1` keeps the claim
+// map (bumps epoch, clears `worker`, stamps `expired_at` + `previous_worker`,
+// flips lifecycle to `open`), so the read-back after that refusal answers
+// epoch > 0 with an EMPTY holder — and the explanation fell through to the
+// same-holder line, asserting "you still hold this claim" and offering a retry
+// that cannot work. The row's criterion is explicit: the message must say the
+// row was NOT taken by anyone else and name the one-line recovery.
+func TestTaskCloseExecute_FencedOffOnASweptLeaseSaysNobodyTookIt(t *testing.T) {
+	sweptLeaseServer(t, map[string]any{
+		"worker":          nil,
+		"epoch":           2,
+		"expired_at":      "2026-09-20T15:01:57Z",
+		"previous_worker": "w",
+	}, "open")
+	out, code := captureExecuteCode(t, []string{"task", "close", "bp-task-x", "w", "1", "done"})
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want exitConflict; out:\n%s", code, out)
+	}
+	if strings.Contains(out, "you still hold this claim") {
+		t.Errorf("a swept lease must NOT be explained as the caller's own pulse; got:\n%s", out)
+	}
+	for _, want := range []string{
+		"LAPSED",
+		"nobody else has taken it",
+		"bp task claim bp-task-x w",
+		"previous holder w",
+		"2026-09-20T15:01:57Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("swept-lease explanation missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// The weaker, TRUE line: a holder-less claim carrying NEITHER reap mark is not
+// reported as a sweep — the CLI says what it can see and still names the
+// recovery.
+func TestTaskCloseExecute_HolderlessClaimWithoutReapMarksSaysTheWeakerThing(t *testing.T) {
+	sweptLeaseServer(t, map[string]any{"worker": "", "epoch": 7}, "")
+	out, code := captureExecuteCode(t, []string{"task", "close", "bp-task-x", "w", "1", "done"})
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want exitConflict; out:\n%s", code, out)
+	}
+	if strings.Contains(out, "LAPSED") || strings.Contains(out, "you still hold this claim") {
+		t.Errorf("without a reap mark the CLI must claim neither a sweep nor continued holding; got:\n%s", out)
+	}
+	if !strings.Contains(out, "NO holder") || !strings.Contains(out, "bp task claim bp-task-x w") {
+		t.Errorf("output must name the holder-less state and the recovery; got:\n%s", out)
+	}
+}
+
+// sweptLeaseServer refuses every close 409 fenced_off and serves the row back
+// with the given raw claim map and lifecycle_status.
+func sweptLeaseServer(t *testing.T, claim map[string]any, lifecycle string) {
+	t.Helper()
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/close"):
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"ok":false,"reason":"fenced_off"}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
+			doc := map[string]any{
+				"doc_id":  "bp-task-x",
+				"status":  "published",
+				"content": map[string]any{"acceptance_criteria": []any{}},
+				"claim":   claim,
+			}
+			if lifecycle != "" {
+				doc["lifecycle_status"] = lifecycle
+			}
+			body, _ := json.Marshal(map[string]any{"ok": true, "doc": doc})
+			_, _ = w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(backend.Close)
+
+	mf := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(mf, []byte(minimalClosePulseManifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	t.Setenv("BARKPARK_MANIFEST", mf)
+	t.Setenv("BARKPARK_API_URL", backend.URL)
+	t.Setenv("BARKPARK_API_TOKEN", "lease-stub")
+}
