@@ -56,6 +56,7 @@ const NATURAL_BLOCK_TYPES = new Set([
   "code",
   "diagram",
   "divider",
+  "image",
 ]);
 
 // The sentinel marker. A whole-block JSON payload rides between the open/close so
@@ -104,9 +105,23 @@ function serializeBlock(block) {
       return serializeDiagram(block);
     case "divider":
       return "---";
+    case "image":
+      return serializeImage(block);
     default:
       return sentinel(block);
   }
+}
+
+// ![alt](src) — only for a plain image (id/type/src/alt and nothing else) whose src
+// and alt cannot break the syntax; a sized, locked or otherwise decorated image
+// rides the sentinel so it comes back byte-identical.
+function serializeImage(block) {
+  const keys = Object.keys(block).filter((k) => k !== "id" && k !== "type");
+  if (keys.some((k) => k !== "src" && k !== "alt")) return sentinel(block);
+  const src = typeof block.src === "string" ? block.src : "";
+  const alt = typeof block.alt === "string" ? block.alt : "";
+  if (src === "" || /[\s()]/.test(src) || /[\]\[\n\r]/.test(alt)) return sentinel(block);
+  return "![" + alt + "](" + src + ")";
 }
 
 // The sentinel: a one-line HTML comment carrying the whole block JSON verbatim.
@@ -711,6 +726,17 @@ export function markdownToBlocks(md) {
         level: heading.level,
         text: heading.text,
       });
+      i += 1;
+      continue;
+    }
+
+    // 3b) IMAGE — a line that is exactly ![alt](src) becomes an image block (the
+    //     inverse of serializeImage); an image inside a sentence stays inline text.
+    const image = /^!\[([^\]\n]*)\]\(([^\s()]+)\)\s*$/.exec(line);
+    if (image) {
+      const block = { id: mintId(), type: "image", src: image[2] };
+      if (image[1] !== "") block.alt = image[1];
+      blocks.push(block);
       i += 1;
       continue;
     }

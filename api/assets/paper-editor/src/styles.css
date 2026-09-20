@@ -1214,6 +1214,17 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * --paper-ink-soft) plus an input reset. An <input> inherits none of it, which is why
  * the copy is here at all. The empty-caption resting-hide is JS (configControlHidden
  * toggles the <figcaption> display), NOT CSS — same as the diagram caption. */
+/* editable-image: the bpImage atom — the picture, or an empty frame, over an alt + url row. */
+.bp-canvas-image { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; position: relative; }
+.bp-canvas-image-frame { position: relative; }
+.bp-canvas-image-img { display: block; max-width: 100%; height: auto; border-radius: 4px; }
+.bp-canvas-image-empty { display: none; padding: 1.4rem 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-image--empty .bp-canvas-image-empty { display: block; }
+.bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
+.bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
+.bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
+.ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
 .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
 .bp-canvas-figure-caption-input {
   display: block; width: 100%; box-sizing: border-box;
@@ -1561,8 +1572,6 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-block-menu__glyph { width: 22px; text-align: center; font-size: 11px; color: var(--paper-ink-soft); }
 .bp-paper-format__btn--strike { text-decoration: line-through; }
 .bp-paper-format__btn--underline { text-decoration: underline; text-underline-offset: 2px; }
-.bp-paper-format__btn--highlight { background: #fff2a8; color: #1a1a1a; border-radius: 3px; }
-/* The highlight mark inside the canvas; the reader's paper-surface.css carries the same rule. */
-bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: #fff2a8; color: inherit; padding: 0 0.12em; border-radius: 2px; box-decoration-break: clone; }
-@media (prefers-color-scheme: dark) { bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: #6b5a12; } }
-[data-theme="dark"] bp-paper-canvas .bp-highlight, [data-theme="dark"] bp-paper-canvas mark { background: #6b5a12; }
+.bp-paper-format__btn--highlight { background: hsl(var(--warn-hsl) / 0.35); color: var(--paper-ink); border-radius: 3px; }
+/* The highlight mark inside the canvas; the reader's paper-surface.css carries the same rule (mirrored above). */
+bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn-hsl) / 0.35); color: inherit; padding: 0 0.12em; border-radius: 2px; box-decoration-break: clone; }

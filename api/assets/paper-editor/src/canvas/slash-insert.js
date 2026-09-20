@@ -58,6 +58,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "diagram",
   "action",
   "figure",
+  "image",
   "columns",
   "section",
   "terminal",
@@ -146,6 +147,10 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "diagram", source: "", caption: "" };
     case "action":
       return { id: null, type: "action", href: "", label: "" };
+    case "image":
+      // An empty image: the node-view shows the "no image yet" frame with the url
+      // input open, so the author pastes a url (uploads are the next plan item).
+      return { id: null, type: "image", src: "", alt: "" };
     case "figure":
       return {
         id: null,

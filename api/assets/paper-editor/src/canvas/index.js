@@ -144,6 +144,8 @@ import { Action } from "./action-node.js";
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
 import { Sheet, Embed, Fleet } from "./embed-node.js";
 import { Figure } from "./figure-node.js";
+// editable-image: the `image` block as a self-painting atom with alt + url inputs.
+import { Image } from "./image-node.js";
 // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
 import { TaskList } from "./task-list-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
@@ -889,6 +891,7 @@ class BpPaperCanvas extends HTMLElement {
         // by construction). Parses ONLY its own <figure data-bp-type='figure'>. See
         // ./figure-node.js.
         Figure,
+        Image,
         // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom
         // (`bpTaskList`). Registers the single node so runToTiptap's { type:"bpTaskList",
         // attrs:{query, title, config} } mounts as a widget whose ROWS paint hole

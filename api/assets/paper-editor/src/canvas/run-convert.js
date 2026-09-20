@@ -442,6 +442,19 @@ const CANVAS_DATAVIZ_TYPES = new Set([
 const CANVAS_FIGURE_TYPES = new Set(["figure"]);
 const CANVAS_FIGURE_NODE_NAME = "bpFigure";
 
+// editable-image: the `image` block as a self-painting atom (`bpImage`; image-node.js).
+// src + alt are the editable data (one patch-block{src, alt}); width/height/unknown keys
+// ride verbatim on bpRest; locked/role ride the doctrine template attrs. KEEP LOCKSTEP
+// with image-node.js BP_IMAGE_NODE_NAME.
+const CANVAS_IMAGE_TYPES = new Set(["image"]);
+const CANVAS_IMAGE_NODE_NAME = "bpImage";
+function isCanvasImageType(t) {
+  return CANVAS_IMAGE_TYPES.has(t);
+}
+function isCanvasImageNode(nodeType) {
+  return nodeType === CANVAS_IMAGE_NODE_NAME;
+}
+
 // True when a portable-doc BLOCK type is the figure (runToTiptap dispatch).
 function isCanvasFigureType(t) {
   return CANVAS_FIGURE_TYPES.has(t);
@@ -853,6 +866,13 @@ function blockToNode(block) {
       // HTML (bp:block-html) rather than a client-computed chip. NOTE the node.type
       // is the NODE name (bpFleet), not the bpType.
       return fleetBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasImageType(bpType)) {
+      // A canvas IMAGE atom (editable-image): the picture paints itself; src + alt
+      // are typed attrs, the rest of the block rides verbatim. node.type is the NODE
+      // name (bpImage), not the bpType (image).
+      return imageBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasFigureType(bpType)) {
@@ -2972,6 +2992,70 @@ function stableFigureKey(node) {
   });
 }
 
+// ── image ⇄ canvas self-painting atom ─────────────────────────────────────────
+//
+// { id, type:"image", src?, alt?, width?, height?, locked?, role?, …rest } ⇄
+// { type:"bpImage", attrs:{ bpId, bpType, src, alt, locked, role, bpRest } }.
+// src/alt: ""/absent → null (byte-fidelity: an absent alt reconstructs absent).
+// bpRest: every other key except id/type/src/alt/locked/role, deep-cloned, or null.
+const IMAGE_OWN_KEYS = new Set(["id", "type", "src", "alt", "locked", "role"]);
+
+function imageBlockToNode(block, bpId, bpType) {
+  const rest = {};
+  let hasRest = false;
+  for (const k of Object.keys(block || {})) {
+    if (IMAGE_OWN_KEYS.has(k)) continue;
+    rest[k] = deepClone(block[k]);
+    hasRest = true;
+  }
+  const attrs = stampTemplateAttrs(
+    {
+      bpId,
+      bpType,
+      src: block && block.src != null && block.src !== "" ? String(block.src) : null,
+      alt: block && block.alt != null && block.alt !== "" ? String(block.alt) : null,
+      bpRest: hasRest ? rest : null,
+    },
+    block,
+  );
+  return { type: CANVAS_IMAGE_NODE_NAME, attrs };
+}
+
+// The inverse: src/alt only when set, then the carried rest, then locked/role.
+function imageNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "image" };
+  if (attrs.src != null && attrs.src !== "") block.src = attrs.src;
+  if (attrs.alt != null && attrs.alt !== "") block.alt = attrs.alt;
+  if (attrs.bpRest && typeof attrs.bpRest === "object") {
+    for (const k of Object.keys(attrs.bpRest)) {
+      if (!IMAGE_OWN_KEYS.has(k)) block[k] = deepClone(attrs.bpRest[k]);
+    }
+  }
+  return carryTemplateAttrs(block, attrs);
+}
+
+// The mutable-fields patch: src + alt only. patch.ex's patch-block is a shallow merge,
+// so width/height/role stay untouched; a cleared value rides as "" (the reader treats
+// an empty src as scaffolding and skips the block).
+function imageNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return { src: attrs.src == null ? "" : attrs.src, alt: attrs.alt == null ? "" : attrs.alt };
+}
+
+function stableImageKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    src: a.src == null || a.src === "" ? null : a.src,
+    alt: a.alt == null || a.alt === "" ? null : a.alt,
+    rest: a.bpRest != null ? a.bpRest : null,
+  });
+}
+
+function imageNodeChanged(prevNode, nextNode) {
+  return stableImageKey(prevNode) !== stableImageKey(nextNode);
+}
+
 // ── task-list ⇄ canvas editable-query + server-painted-rows atom ──────────────
 //
 // The LIVE `task-list` block { id, type:"task-list", query:{…}, title?, config? } ⇄
@@ -3509,6 +3593,8 @@ function classifyNode(node) {
   // editable-figure: a canvas figure atom (bpFigure). Its bpType resolves to "figure"
   // off node.attrs.bpType (the isFigure fallback below).
   const isFigure = isCanvasFigureNode(node.type);
+  // editable-image: the self-painting image atom (bpImage); bpType resolves to "image".
+  const isImage = isCanvasImageNode(node.type);
   // live-data task-list: a canvas task-list widget (bpTaskList). Its bpType resolves
   // to "task-list" off node.attrs.bpType (the isTaskList fallback below).
   const isTaskList = isCanvasTaskListNode(node.type);
@@ -3531,6 +3617,8 @@ function classifyNode(node) {
         ? "tasks"
         : isFigure
           ? "figure"
+          : isImage
+            ? "image"
           : isTaskList
             ? "task-list"
             : isCard
@@ -3563,6 +3651,7 @@ function classifyNode(node) {
     isReadOnlyAtom,
     isFleet,
     isFigure,
+    isImage,
     isTaskList,
     isContainer,
     isRole,
@@ -3926,6 +4015,19 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
       continue;
     }
 
+    if (entry.isImage) {
+      // Canvas image atom (editable-image): src + alt are the editable interior;
+      // one patch-block{src, alt} when either changed, nothing for a pure reorder.
+      if (imageNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: imageNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (entry.isFigure) {
       // Canvas figure atom (editable-figure): the caption is the WHOLE editable
       // interior (the child is immutable in v1). Emit ONE patch-block{caption} when
@@ -4267,6 +4369,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasFigureNode(type)) {
     return !figureNodeChanged(serverNode, liveNode);
   }
+  // Image (editable-image: bpImage): src + alt + the carried rest.
+  if (isCanvasImageNode(type)) {
+    return !imageNodeChanged(serverNode, liveNode);
+  }
   // Task-list (live-data: bpTaskList): query + title + config (rows server-painted,
   // never on the node). The own-echo of a query edit — and the id-wildcard for a
   // just-minted task-list — is recognized by the SAME stable-key compare runToOps uses.
@@ -4436,6 +4542,10 @@ function nextNodeToBlock(entry, taken) {
     // absent (mirrors the persist default); NO snapshot (a live task-list has none —
     // the rows are server-resolved at read).
     return taskListNodeToBlock(node, entry.id);
+  }
+  if (entry.isImage) {
+    // Image insert/move (editable-image): src/alt when set, the carried rest, locked/role.
+    return imageNodeToBlock(node, entry.id);
   }
   if (entry.isFigure) {
     // Figure insert/move (editable-figure): reconstruct the figure block (its
