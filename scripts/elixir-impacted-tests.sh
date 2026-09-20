@@ -157,10 +157,34 @@ API_DIR="${BP_IMPACTED_XREF_DIR:-$REPO_ROOT/api}"
 #       If that ratchet is ever wrong, it is wrong for the dispatcher too — the
 #       whole suite is already skipped on such a path today.
 #
-#   (d) in the TEST-ONLY set but NOT in the census -> ALL. The set says the
-#       suite reads it; the census cannot say WHO reads it (a computed path, a
-#       shelled-out binary). Unknown reader, so unknown impact, so everything.
-#       `cloud/test/**` and `web/node_modules/**` land here.
+#   (d1) in the TEST-ONLY set, no census row, but the census's OWN SOURCE FILES
+#       name it ONE HOP FURTHER -> those rows' readers ARE the impact, exactly
+#       as in (b). This is the documented blind spot of the census, not a new
+#       policy: list_escapes resolves the path literals it finds IN api/lib and
+#       api/test, so an api test that shells a repo-root script gets a row for
+#       THE SCRIPT and none for what the script itself opens.
+#       `scripts/elixir-path-escape-check.sh` states the case in full at its
+#       `cloud/test/**` entry: async_global_seam_guard_test.exs requires
+#       `../../../scripts/async_env_seam_scan.exs` (a literal the census DOES
+#       resolve) and that scanner reads `Path.join(repo_root(), "cloud/test")`
+#       (a literal the census CANNOT). `extended_census` takes that one step:
+#       for every census source file, its own quoted repo-root path literals
+#       that EXIST ON DISK inherit that source's readers. It is derived from
+#       the tree on every run, so a reader added tomorrow is in the net
+#       tomorrow, with no registration step and no list to rot.
+#       MEASURED 2026-09-20 on 769c39bd6: `cloud/test/**` went from ALL (1,892
+#       api test files) to 3 derived readers plus the ALWAYS set.
+#       ONE SELF-EXCLUSION, and it is a self-reference rather than a list: the
+#       census producer itself (`elixir-path-escape-check.sh`) DECLARES every
+#       path in both sets, and declaring a path is not reading it. Its own
+#       direct census rows are untouched.
+#
+#   (d2) in the TEST-ONLY set and named by NEITHER the census nor its one-hop
+#       extension -> ALL. The set says the suite reads it; nothing can say WHO
+#       (a path computed at runtime, a shelled-out binary, a name assembled
+#       from parts). Unknown reader, so unknown impact, so everything.
+#       `internal/taskboard/board.go` — a sibling of three censused files, but
+#       itself unread — and `web/node_modules/**` land here.
 #
 # Branch (c) is the only one that can shrink a selection on a path nobody
 # classified, and it shrinks it to "no tests OF ITS OWN" — the ALWAYS set still
@@ -196,6 +220,79 @@ census_readers() {
       row = $1
       if (row == p || index(p, row "/") == 1 || index(row, p "/") == 1) print $2
     }' <<<"$CENSUS" | LC_ALL=C sort -u
+}
+
+
+# ── THE ONE-HOP EXTENSION OF THE CENSUS — branch (d1) ─────────────────────
+# `--list-escapes` resolves the repo-root path literals it finds IN api/lib and
+# api/test. An api test that hands its reading to a repo-root script therefore
+# gets a row for THE SCRIPT and no row at all for what the script opens, and
+# the path the script opens is exactly the one a PR changes. That is not a
+# scanner bug; elixir-path-escape-check.sh names the class at its
+# `cloud/test/**` entry and pays for it with a declared full-suite trigger.
+#
+# THE HOP, and why it is a rule rather than a list: for every file the census
+# names as a SOURCE, take its own quoted path literals that EXIST ON DISK under
+# the repo root, and give each of them that source's readers. Derived from the
+# tree on every call — a scanner that grows a third root, or an api test that
+# starts requiring a new script, is covered the day it lands.
+#
+# THREE THINGS KEEP IT TIGHT, so this cannot become "everything reads
+# everything":
+#   * exactly ONE hop. No transitive closure over the extension itself.
+#   * the literal must resolve to a path that EXISTS. `cloud/test/**` (a glob),
+#     a URL, a module name and a prose fragment all fail this test.
+#   * the census producer is excluded as a SOURCE. elixir-path-escape-check.sh
+#     literally contains every declared path in both sets, and DECLARING a path
+#     is not READING it — a self-reference, not a skip list. Its own direct
+#     census rows are untouched.
+#
+# MEASURED 2026-09-20 on 769c39bd6: 150 census rows produce 85 extension rows
+# over 82 distinct targets, and `cloud/test` is one of them.
+EXT_PATH_ERE='"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)+"'
+EXT_CENSUS=""
+EXT_CENSUS_LOADED=0
+load_ext_census() {
+  [ "$EXT_CENSUS_LOADED" -eq 1 ] && return 0
+  EXT_CENSUS_LOADED=1
+  load_census
+  [ -n "$CENSUS" ] || return 0
+  local self s t rows="" srcs targets
+  self="$(basename -- "$SCRIPT_DIR")/elixir-path-escape-check.sh"
+  srcs="$(printf '%s\n' "$CENSUS" | cut -f1 | LC_ALL=C sort -u | sed '/^$/d')"
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    [ "$s" = "$self" ] && continue
+    [ -f "$REPO_ROOT/$s" ] || continue
+    targets="$(grep -ohaE "$EXT_PATH_ERE" -- "$REPO_ROOT/$s" </dev/null 2>/dev/null | tr -d '"' | LC_ALL=C sort -u || true)"
+    [ -n "$targets" ] || continue
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      [ -e "$REPO_ROOT/$t" ] || continue
+      rows="${rows}$(awk -F'\t' -v s="$s" -v t="$t" '$1 == s { print t "\t" $2 }' <<<"$CENSUS")
+"
+    done <<EOT
+$targets
+EOT
+  done <<EOT2
+$srcs
+EOT2
+  EXT_CENSUS="$(printf '%s\n' "$rows" | sed '/^$/d' | LC_ALL=C sort -u)"
+  return 0
+}
+
+# readers of a repo-root path ONE HOP past the census. Same both-directions
+# prefix test as census_readers, and for the same reason: a row can name a
+# directory (`cloud/test`) while the diff names a file inside it.
+transitive_readers() {
+  local p="$1"
+  load_ext_census
+  [ -n "$EXT_CENSUS" ] || return 0
+  awk -F'\t' -v p="$p" '
+    {
+      row = $1
+      if (row == p || index(p, row "/") == 1 || index(row, p "/") == 1) print $2
+    }' <<<"$EXT_CENSUS" | LC_ALL=C sort -u
 }
 
 is_narrowable_lib() { case "$1" in api/lib/*.ex) return 0 ;; *) return 1 ;; esac; }
@@ -735,7 +832,19 @@ select_tests() {
       echo "ALL"
       return 0
     fi
+    local is_test_path=0
+    in_set "$p" test && is_test_path=1
     readers="$(census_readers "$p")"
+    if [ -z "$readers" ] && [ "$is_test_path" -eq 1 ]; then
+      # BRANCH (d1). The census has no row for this path, but a file the census
+      # DOES have rows for opens it one hop further. Those rows' readers are the
+      # impact, and they are classified below by exactly the same rules as a
+      # direct census reader — no separate, weaker path through this function.
+      readers="$(transitive_readers "$p")"
+      if [ -n "$readers" ]; then
+        echo "elixir-impacted-tests: ${p} has no direct census row, but the census's own source files open it one hop further; its DERIVED readers are: $(printf '%s' "$readers" | tr '\n' ' ')" >&2
+      fi
+    fi
     if [ -n "$readers" ]; then
       # Same fd discipline as the outer loop: this body calls `compile_closure`,
       # which starts `mix`. On fd 0 the reader list would be drained the same
@@ -786,8 +895,10 @@ select_tests() {
       fi
       continue
     fi
-    if in_set "$p" test; then
-      echo "elixir-impacted-tests: ${p} is in the TEST path set but the escape census names no reader for it — unknown reader, unknown impact, selecting ALL." >&2
+    if [ "$is_test_path" -eq 1 ]; then
+      # BRANCH (d2), the unchanged fail-safe: in the TEST set, and named by
+      # NEITHER the census nor its one-hop extension.
+      echo "elixir-impacted-tests: ${p} is in the TEST path set but neither the escape census nor its one-hop extension names a reader for it — unknown reader, unknown impact, selecting ALL." >&2
       echo "ALL"
       return 0
     fi
