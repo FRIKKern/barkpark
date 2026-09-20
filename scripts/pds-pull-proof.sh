@@ -1014,7 +1014,12 @@ cmd_plan() {
 # each removal names one path the loop proved it owns.
 
 art_uid_of() { # dir -> numeric owner uid ('' when unreadable)
-  stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true
+  # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+  # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+  # report instead of failing, and a BSD-first `||` chain never reaches the
+  # GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on
+  # the wrong platform instead of quietly.
+  stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || true
 }
 
 art_dir_age_hours_ok() { # dir min_hours -> 0 when OLDER than min_hours
