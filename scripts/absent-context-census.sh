@@ -841,7 +841,7 @@ if [ "${#SHAS[@]}" -gt 0 ]; then
       fi
       if [ "$_full" != "${SHAS[$_i]}" ]; then
         warn "resolved --sha ${SHAS[$_i]} to the full oid $_full (the run feed matches the full oid only)"
-        SHAS[$_i]="$_full"
+        SHAS[_i]="$_full"
       fi
     done
   fi

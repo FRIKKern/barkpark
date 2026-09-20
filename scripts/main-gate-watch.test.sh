@@ -1567,7 +1567,9 @@ fi
 # result at the one call site and the abbreviated form must fall back to MISSING
 # while the full oid stays WAITING — i.e. exactly the split measured live.
 MUT17="$TMP/main-gate-watch-noresolve.sh"
+# shellcheck disable=SC2016  # the $ is LITERAL: these patterns match shell source
 sed 's/^    full="\$(full_oid "\$sha")"$/    full="$sha"/' "$WATCH" > "$MUT17"
+# shellcheck disable=SC2016  # likewise — grepping for the literal string full="$sha"
 if ! cmp -s "$MUT17" "$WATCH" && grep -q 'full="\$sha"' "$MUT17"; then
   ok "built the no-widening mutant (full_oid's result replaced by the raw argument)"
   cp "$FX/runs-all-inflight.json" "$S17/fx/runs.json"
