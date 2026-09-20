@@ -2694,15 +2694,23 @@ const wrapTmp = (name, css) => {
   fs.writeFileSync(f, css, "utf8");
   return f;
 };
-// The FOUR PINNED copies, byte-identical cores under four DIFFERENT jackets.
+// The FIVE PINNED copies, byte-identical cores under DIFFERENT jackets.
 // Every synthetic case below is built on top of these so the two anti-vacuity
 // guards (zero copies, missing pinned host) never mask the leg under test.
 // `.attention-row` joined the pin in W20-S6's review commit, in the same change
 // that added it to WRAP_REQUIRED_HOSTS — the fourth copy was counted but not
 // required, so a scan losing exactly that copy still read clean.
+// `.detail-title-row` joined it the same way one wave later
+// (cch-w24-bl-detail-title-row-not-a-required-wrap-host): cch-w24-s2 authored
+// the fifth copy and bumped the app.css COUNT pin below 4 -> 5, but left it out
+// of WRAP_REQUIRED_HOSTS, so a scan degrading to 4-of-5 that lost exactly the
+// failed instance's own detail header still read clean. It is spelt as its own
+// line here (app.css ships it as a comma member of the `.instance-card-head`
+// prelude) because the survivor loop below filters these lines by host prefix.
 const WRAP_SURVIVORS = [
   ".attention-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".detail-rail .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; }",
+  ".detail-title-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".fleet-status .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".instance-card-head .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
 ].join("\n");
@@ -2734,7 +2742,7 @@ test("cch-w19-s4: E14 does NOT assert the jacket — a jacketless fourth host gr
   const f = wrapTmp("jacketless.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { " + WRAP_CORE_TEXT + " }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 0, "a jacketless fourth host with the full core must GREEN:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the next copy:\n" + r.out);
+  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the next copy:\n" + r.out);
   assert.match(r.out, /0 E14 error\(s\)/, r.out);
 });
 
@@ -2746,9 +2754,9 @@ test("cch-w19-s4: a fourth host dropping one core declaration reds under BOTH co
     const f = wrapTmp("drift.css", WRAP_SURVIVORS + "\n" + sel + " { white-space: normal; height: auto; padding-top: 2px; padding-bottom: 2px; }\n");
     const r = runCssCheck("--wrap-parity-check", f);
     assert.equal(r.status, 1, sel + " drops min-height and must RED:\n" + r.out);
-    assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the three survivors stay ok:\n" + r.out);
+    assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the other survivors stay ok:\n" + r.out);
     assert.match(r.out, /\.op-gate/, "and the error must name the drifting host:\n" + r.out);
-    for (const ok of [".detail-rail", ".fleet-status", ".instance-card-head"]) {
+    for (const ok of [".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
       assert.ok(!new RegExp("E14 [^\\n]*\\" + ok + " \\.status-pill declares").test(r.out), ok + " must not be blamed:\n" + r.out);
     }
   }
@@ -2762,7 +2770,7 @@ test("cch-w19-s4: the trigger is the DECLARATION, not the selector", () => {
   const f = wrapTmp("outofscope.css", WRAP_SURVIVORS + "\n.some-rail .status-pill { margin-left: 4px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 0, "a wrapper-scoped rule declaring no core property must not red:\n" + r.out);
-  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
+  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
   assert.ok(!/some-rail/.test(r.out), "and must not be mentioned at all:\n" + r.out);
 });
 
@@ -2778,13 +2786,13 @@ test("cch-w19-s4: a vacuous green is refused — zero copies is an ERROR", () =>
   assert.match(r.out, /0 wrapper-scoped wrap copy\(ies\)/, "the bare .status-pill must not count as a copy:\n" + r.out);
 });
 
-test("cch-w19-s4: the three survivor selectors are pinned — losing one reds", () => {
+test("cch-w19-s4: the survivor selectors are pinned — losing one reds", () => {
   // The zero-guard cannot see PARTIAL blindness: a scan degrading to 1 of 4
   // still reports clean. These pins close that, and they are same-file pins of
   // this repo's OWN selectors (pin-your-own, derive-foreign). `.attention-row`
   // joined the loop with W20-S6's fourth copy — a pin that is not driven here
   // is a pin nobody has proven can bite.
-  for (const host of [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"]) {
+  for (const host of [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
     const kept = WRAP_SURVIVORS.split("\n").filter((l) => !l.startsWith(host + " ")).join("\n");
     const f = wrapTmp("missing.css", kept + "\n");
     const r = runCssCheck("--wrap-parity-check", f);
@@ -2815,11 +2823,16 @@ test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all five copies there"
   // a rule-head count and visible to this one, which is the whole point of
   // keeping both.
   //
-  // NOT ALSO ADDED TO `WRAP_REQUIRED_HOSTS` (__css_check.mjs). Doing so is the
-  // stronger pin and W20-S6's precedent — counted-but-not-required cannot see a
-  // scan degrading to 4-of-5 — but it cascades into every E14 fixture
-  // stylesheet, which is a deliberate edit to a curated oracle rather than a
-  // review repair. Filed as `cch-w24-bl-detail-title-row-not-a-required-wrap-host`.
+  // NOW ALSO IN `WRAP_REQUIRED_HOSTS` (__css_check.mjs), which is the stronger
+  // pin and W20-S6's precedent: counted-but-not-required could not see a scan
+  // degrading to 4-of-5. That was deferred from the w24 review because it
+  // cascades into every E14 fixture stylesheet — a deliberate edit to a curated
+  // oracle — and landed as its own slice,
+  // `cch-w24-bl-detail-title-row-not-a-required-wrap-host`. THE COUNT BELOW AND
+  // THE REQUIRED-HOST LIST ARE NOT REDUNDANT: the count notices a NEW copy
+  // (nothing requires a host that does not exist yet), the required list
+  // notices a LOST one. This test drives both, and the survivor loop above
+  // drives the new pin against a synthetic stylesheet that omits it.
   const appCss = fileURLToPath(new URL("./app.css", import.meta.url));
   const r = runCssCheck("--wrap-parity-check", appCss);
   assert.equal(r.status, 0, "app.css must be green under E14:\n" + r.out);
@@ -2846,8 +2859,8 @@ test("cch-w19-bl-e14: a shorthand-only fourth copy is COUNTED and REDS", () => {
   const f = wrapTmp("shorthand.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { padding: 2px 11px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 1, "a shorthand fourth copy must RED, not vanish:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED — invisibility was the defect:\n" + r.out);
-  assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the four survivors stay ok:\n" + r.out);
+  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED — invisibility was the defect:\n" + r.out);
+  assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the five survivors stay ok:\n" + r.out);
   assert.match(r.out, /\.op-gate \.status-pill declares padding —/, "the error must name the host AND the shorthand:\n" + r.out);
   assert.match(r.out, /set through the shorthand `padding: 2px 11px`/, "and say WHY, not just 'not declared':\n" + r.out);
 });
@@ -2859,8 +2872,8 @@ test("cch-w19-bl-e14: shorthand plus the core RESTATED in longhand after it gree
   const f = wrapTmp("legal.css", WRAP_SURVIVORS +
     "\n.op-gate .status-pill { white-space: normal; height: auto; min-height: 24px; padding: 2px 11px; padding-top: 2px; padding-bottom: 2px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 0, "shorthand + longhand restatement is a legal fifth copy:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it is still COUNTED:\n" + r.out);
+  assert.equal(r.status, 0, "shorthand + longhand restatement is a legal sixth copy:\n" + r.out);
+  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it is still COUNTED:\n" + r.out);
   assert.match(r.out, /0 E14 error\(s\)/, r.out);
 });
 

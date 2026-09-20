@@ -9,11 +9,18 @@
    other pill on the screen. Nothing in this repo could see that before E14: the
    bytes are all present and every one of them is a legal declaration.
 
-   The three PINNED survivor copies are reproduced above it — byte-identical
-   cores wearing three DIFFERENT jackets (`.detail-rail` carries no jacket at
-   all) — because they are what proves the check greens jacket variation and
-   reds only DIVERGENCE. They also satisfy E14's two anti-vacuity guards, which
-   is why this file reds with EXACTLY ONE error rather than five.
+   The PINNED survivor copies are reproduced above it — byte-identical cores
+   wearing DIFFERENT jackets (`.detail-rail` carries no jacket at all) — because
+   they are what proves the check greens jacket variation and reds only
+   DIVERGENCE. They also satisfy E14's two anti-vacuity guards, which is why
+   this file reds with EXACTLY ONE error rather than six.
+
+   THE FIFTH SURVIVOR IS A COMMA MEMBER, NOT A FIFTH BLOCK, and that is not
+   decoration: `.detail-title-row .status-pill` ships in app.css appended to the
+   `.instance-card-head` prelude (Δheads 0 — cch-w24-s2, D291), so reproducing
+   it as its own block would give the oracle a shape the stylesheet it guards
+   does not have. A comma member is invisible to a rule-head count and visible
+   to E14, and this file is now the committed proof of that.
 
    `.some-rail .status-pill` at the bottom is the OUT-OF-SCOPE leg: wrapper-
    scoped but declaring none of the five core properties, so it is not a wrap
@@ -63,9 +70,19 @@
 }
 .fleet-status .status-pill-dot { margin-top: 5.5px; }
 
-/* Survivor 3 — same core, flex-start jacket plus a wrapping host. */
+/* Survivors 3 and 4 — same core, flex-start jacket plus a wrapping host, and
+   the SECOND SCOPE sharing that one prelude. `.detail-title-row` joined
+   WRAP_REQUIRED_HOSTS with cch-w24-bl-detail-title-row-not-a-required-wrap-
+   host; before that it was counted and not required, so a scan degrading to
+   4-of-5 that lost exactly the failed instance's own detail header still read
+   clean. It is reproduced here for the same reason as the other four: so this
+   fixture reds with EXACTLY ONE error (the drifting `.op-gate`) instead of also
+   tripping the missing-pinned-host guard, which would mask the leg under test.
+   `.detail-title-row` declares its own `flex-wrap: wrap` in app.css, so the
+   `.instance-card-head { flex-wrap: wrap }` head below stays single-scoped. */
 .instance-card-head { flex-wrap: wrap; }
-.instance-card-head .status-pill {
+.instance-card-head .status-pill,
+.detail-title-row .status-pill {
   white-space: normal;
   height: auto;
   min-height: 24px;
@@ -73,6 +90,8 @@
   padding-bottom: 2px;
   align-items: flex-start;
 }
+.instance-card-head .status-pill-dot,
+.detail-title-row .status-pill-dot { margin-top: 5.5px; }
 
 /* THE DEFECT — the fourth copy that drifts. Four of the five; `min-height`
    never made it. This is the ONE error this fixture must produce. */

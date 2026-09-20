@@ -2,6 +2,8 @@
 
 # Fleet migration-lag re-census — 2026-09-19 (READ-ONLY)
 
+> HISTORICAL RECORD (2026-09-19) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Re-read of the six boxes the 2026-09-02 box census (PR #14844, lead-pds worker
 pds-w3) reported as stopped between `20260705260000` and `20260709203417`.
 Task: `task-99db9faeb9576253`. Worker: deploy-w2 (lead-deploy, session s24).
