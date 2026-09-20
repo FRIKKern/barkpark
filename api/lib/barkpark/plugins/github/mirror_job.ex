@@ -862,6 +862,8 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   end
 
   # D11: native `parent_id` → sub-issue linking. `:ok`/`:noop` → continue;
+  # `{:linked, parent_num}` → the child now hangs natively under `parent_num`, so
+  # record it and CLEAR any residue of a previous placement (below);
   # `{:flatten, parent_id}` → stamp a `parent_marker` link key + re-enqueue once
   # so the body marker lands (cap-flatten fallback); `{:defer, :parent_unmirrored}`
   # → enqueue the parent's mirror + re-enqueue THIS child (relink, bounded);
@@ -874,6 +876,9 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         case mod.sync(task_doc, repo, num, dataset, opts) do
           ok when ok in [:ok, :noop] ->
             :ok
+
+          {:linked, parent_num} ->
+            handle_linked(doc_id, dataset, link, parent_num, opts)
 
           {:flatten, parent_id} ->
             handle_flatten(doc_id, dataset, link, parent_id, opts)
@@ -1038,6 +1043,67 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
       :ok
     end
   end
+
+  # The NATIVE link is in place under `parent_num` — the exit transition from
+  # cap-flatten, and the landing half of a re-parent. Two pieces of residue are
+  # settled here, both on the link stamp, both idempotent:
+  #
+  #   * `sub_issue_parent` — the parent issue number the link was made under.
+  #     `Relations.sync` reads it back next pass to know WHICH old link to remove
+  #     (and to short-circuit when nothing moved).
+  #   * `parent_marker` — a cap-flatten leftover. A row that qualified for a
+  #     native link is NOT cap-flattened, so a marker still sitting on it is
+  #     STALE: the issue body renders `Parent: <old epic>` while the native tree
+  #     shows the new one. Erase it (an explicit nil merges over the stored key,
+  #     and `hydrate_parent_marker/2` treats a nil as absent).
+  #
+  # The body of THIS pass was already PATCHed from the stale marker, so a marker
+  # clear re-enqueues ONCE (same shape as `handle_flatten/5`: `relink` so the
+  # synced coalesce guard is bypassed, `relink_attempt` pinned at the cap so it
+  # cannot start a fresh retry cycle) for the body to be re-rendered without it.
+  #
+  # Nothing to settle → NO stamp and NO enqueue: a steady-state reconcile writes
+  # nothing and cannot chase its own rev.
+  defp handle_linked(doc_id, dataset, link, parent_num, opts) do
+    link = if is_map(link), do: link, else: %{}
+    stale_marker? = stale_parent_marker?(link)
+    record_parent? = Map.get(link, "sub_issue_parent") != parent_num
+
+    patch =
+      %{}
+      |> put_if(record_parent?, :sub_issue_parent, parent_num)
+      |> put_if(stale_marker?, :parent_marker, nil)
+
+    if map_size(patch) == 0 do
+      :ok
+    else
+      _ = stamp(doc_id, dataset, patch, opts)
+
+      if stale_marker? do
+        _ =
+          reenqueue(
+            carry_scope(
+              %{doc_id: doc_id, dataset: dataset, relink: true, relink_attempt: @relink_cap},
+              opts
+            ),
+            @relink_delay_seconds,
+            opts
+          )
+      end
+
+      :ok
+    end
+  end
+
+  defp stale_parent_marker?(link) do
+    case Map.get(link, "parent_marker") do
+      m when is_binary(m) and m != "" -> true
+      _ -> false
+    end
+  end
+
+  defp put_if(map, true, key, value), do: Map.put(map, key, value)
+  defp put_if(map, false, _key, _value), do: map
 
   # Cap-flatten (D11): skip the native sub-issue, record a `parent_marker` link
   # key (source:"github", outbox-excluded) and re-enqueue ONCE as a relink so the
