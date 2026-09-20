@@ -225,10 +225,20 @@ filter_exclusions() {
   done
 }
 
+# THIS FILE IS HELD OUT OF THE TREE SCAN, and for a reason worth stating: its
+# selftest fixtures and its own refusal message are FULL of deliberately
+# violating lines, so scanning itself it would red permanently — and a guard
+# that reds on its own fixtures gets switched off, which is worse than no guard.
+# The hold-out is NOT amnesty: SELF CONTROL below scans this file with its
+# fixture/message heredocs stripped, so every mktemp this script actually RUNS
+# is still checked by the very scanner it ships.
+SELF_PATH="$REPO_ROOT/scripts/mktemp-portability-check.sh"
+
 list_tracked() {
   git -C "$REPO_ROOT" ls-files -z -- '*.sh' '*.bash' \
     | tr '\0' '\n' \
-    | sed "s|^|$REPO_ROOT/|"
+    | sed "s|^|$REPO_ROOT/|" \
+    | grep -vxF "$SELF_PATH"
 }
 
 run_tree_scan() {
@@ -345,6 +355,32 @@ FIX
     echo "  FAIL  empty-population control produced hits" >&2; fails=$((fails+1))
   fi
 
+  # SELF CONTROL — this script is held out of the tree scan (see SELF_PATH), so
+  # prove the hold-out costs nothing: strip the fixture and message heredocs,
+  # then scan what is LEFT — the code that actually runs — and demand 0 hits.
+  local selfsrc
+  selfsrc="$root/self-stripped.sh"
+  awk '
+    # Generic quoted-heredoc skipper: a line ending in <<\x27WORD\x27 opens a
+    # block that ends at a line which is exactly WORD. Everything between is
+    # fixture or message text, never code this script runs.
+    !skip && match($0, /<<-?[ \t]*\x27[A-Za-z_][A-Za-z0-9_]*\x27[ \t]*$/) {
+      w = substr($0, RSTART, RLENGTH); gsub(/[^A-Za-z0-9_]/, "", w)
+      term = w; skip = 1; next
+    }
+    skip { if ($0 == term) skip = 0; next }
+    { print }
+  ' "$SELF_PATH" > "$selfsrc"
+  out="$(printf '%s\n' "$selfsrc" | scan_files)"
+  n="$(printf '%s' "$out" | grep -c . || true)"
+  cases=$((cases+1))
+  if [ "${n:-0}" -eq 0 ]; then
+    echo "  PASS  self control — every mktemp this script RUNS is portable (held out of the tree scan only because its fixtures violate ON PURPOSE)"
+  else
+    echo "  FAIL  self control — this guard uses ${n:-0} non-portable mktemp itself" >&2
+    printf '%s\n' "$out" >&2; fails=$((fails+1))
+  fi
+
   # STALE-EXCLUSION CONTROL — a ratchet has two failure directions. Every
   # excluded site must STILL violate; one fixed elsewhere must be deleted from
   # the list, or the list quietly grants permanent amnesty to a clean file.
@@ -371,7 +407,7 @@ FIX
   fi
 
   # The selftest refuses its own vacuous run.
-  [ "$cases" -ge 5 ] || die "selftest ran only $cases case(s); an empty tally is not a pass"
+  [ "$cases" -ge 6 ] || die "selftest ran only $cases case(s); an empty tally is not a pass"
   printf '\n=== selftest: %s case(s), %s failure(s) ===\n' "$cases" "$fails"
   [ "$fails" -eq 0 ] || return "$EX_VIOLATION"
   return "$EX_OK"
