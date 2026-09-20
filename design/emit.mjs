@@ -649,10 +649,14 @@ function cloudAccentVars(theme, indent, t = tokens) {
     `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
     `--ring: hsl(${t.color.ring[theme]});`,
     `--primary-hsl: ${p};`,
-    // --primary-soft retired (GUI-remake GR22, gr-p2-launch-theater): its sole
-    // consumer (.size-opt selected tint) now reads --ok-soft — the identical
-    // channel/alpha, since --ok TRACKS accent.primary (GR6). The Studio
-    // surface's primaryVars copy is untouched (root.html.heex still consumes it).
+    // --primary-soft UN-RETIRED (cch DEFECT-A). GR22 retired it because its sole
+    // consumer, the .size-opt selected tint, could read --ok-soft for the
+    // identical channel/alpha while --ok TRACKED accent.primary (GR6). Breaking
+    // that binding below breaks GR22's premise with it: --ok-soft is now a green
+    // wash, and a SELECTED size is a brand state, not a success state, so it
+    // would have rendered a green fill inside an ember border. The token comes
+    // back with the consumer it always had. The Studio surface's primaryVars copy
+    // is untouched (root.html.heex still consumes it).
     // --ring-hsl/--ring-soft PROMOTED (gr-p5r7-ring-soft-accent-invariant): the
     // focus ring's soft tint was hand-stamped TWICE outside the generated region
     // (evergreen green in both modes), so :focus-visible stayed green under
@@ -661,6 +665,7 @@ function cloudAccentVars(theme, indent, t = tokens) {
     // convention, exactly as the login surface derives it in authRows().
     `--ring-hsl: ${t.color.ring[theme]};`,
     `--ring-soft: hsl(var(--ring-hsl) / ${a});`,
+    `--primary-soft: hsl(var(--primary-hsl) / ${a});`,
   ];
   return lines.map((l) => indent + l).join("\n");
 }
