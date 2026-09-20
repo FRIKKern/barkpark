@@ -1151,7 +1151,25 @@ mutation_blocks() {
   set -e
   say "  piped   : bp … | head -1 && echo OK   ->  $(printf '%s' "$piped" | tr '\n' ' ')"
   say "  unpiped : bp …                        ->  rc=$unpiped"
-  if printf '%s' "$piped" | grep -q 'OK' && [ "$unpiped" = "4" ]; then
+  # NO PIPE IN THIS TEST, and the irony is the reason. Under `set -euo pipefail`
+  # (line 109) `printf … | grep -q` is the exact defect this block exists to
+  # demonstrate: GNU `grep -q` exits on its FIRST match, `printf` then takes
+  # EPIPE, and pipefail adopts printf's non-zero as the pipeline's status — so
+  # the condition is FALSE even though grep matched. A pipe-trap demonstration
+  # defeated by the pipe trap.
+  # Measured on main, not theorised: run 35506090814 / job 106066292298 at
+  # f867e60f9 printed `line 1154: printf: write error: Broken pipe` and then
+  # `FAIL … did not reproduce (piped=OK rc=0 unpiped=4)` — operands that SATISFY
+  # the condition. 1 failure in 21798 tests; 7 of 8 post-#19417 main pushes were
+  # clean, because it is a scheduling race and a loaded runner loses it.
+  # scripts/pipefail-sigpipe-scan.sh already flags this line at [medium] with the
+  # note "this is the shape of the live bug"; the gate reads --min-confidence
+  # high only, which is why nobody acted on it. Bash `case` matches in-process.
+  case "$piped" in
+    *OK*) piped_printed_ok=1 ;;
+    *)    piped_printed_ok=0 ;;
+  esac
+  if [ "$piped_printed_ok" = 1 ] && [ "$unpiped" = "4" ]; then
     ok "the trap is real: the pipeline printed OK at rc=0 for a command that exited $unpiped. Every rc in this runner is taken unpiped."
   else
     printf '  FAIL   the pipe-trap demonstration did not reproduce (piped=%s unpiped=%s)\n' "$piped" "$unpiped"

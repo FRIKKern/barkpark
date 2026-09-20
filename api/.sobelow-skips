@@ -15,7 +15,6 @@ DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:380
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:930,49EB1CC
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:861,5D94F51
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github.ex:192,15B2898
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/search/golden_eval.ex:23,4D27E0F
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:221,2A61EA
 Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:237,39D2F51

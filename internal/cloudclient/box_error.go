@@ -162,3 +162,35 @@ func (b BoxError) Line() string {
 
 // String makes the type printable wherever the old `string` field was.
 func (b BoxError) String() string { return b.Line() }
+
+// BoxErrorLine renders the box's refusal from EVERY key the producer's reducer
+// puts on the wire, not just the one this type decodes.
+//
+// WHY IT IS NOT A METHOD. `BoxErrorEnvelope.fields/1` REDUCES the envelope:
+// since #19341 the box's generic-500 shape no longer reaches `box_error` as an
+// object at all — `box_error` carries the code SLUG and the two facts that
+// route an incident travel as SIBLING top-level keys `box_error_message` and
+// `box_error_request_id`. A BoxError value therefore cannot see them, and
+// `BoxError.Line()` alone now renders "internal_error" and drops the
+// request_id — the exact loss the whole box_error work existed to stop, in a
+// new spelling.
+//
+// The legacy object shape still renders through BoxError.Line(); the sibling
+// arguments only ADD what that shape already carried in-band, and are skipped
+// when they would repeat it.
+func BoxErrorLine(boxError BoxError, message, requestID string) string {
+	line := boxError.Line()
+	if message != "" && message != boxError.Message {
+		if line != "" {
+			line += ": "
+		}
+		line += message
+	}
+	if requestID != "" && requestID != boxError.RequestID {
+		if line != "" {
+			line += " "
+		}
+		line += fmt.Sprintf("[box request_id %s]", requestID)
+	}
+	return line
+}
