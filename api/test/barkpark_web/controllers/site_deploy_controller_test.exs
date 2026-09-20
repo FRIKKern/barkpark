@@ -975,6 +975,57 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       refute body["log_state"] in ["evicted", "missing", "available"]
     end
 
+    # THE ORPHAN CASE, through the HTTP door (dr-w22 c2). `tombstone/2` normally
+    # REWRITES an existing record in place; when the log is evicted before the
+    # run was ever finalized there is nothing to rewrite, so
+    # `orphan_tombstone/2` fabricates one with no build identity and no exit
+    # code. That record must reach an operator as an explicit unknown — keys
+    # present, values null — and never as an omission or as `never_recorded`,
+    # which would claim the deployment never happened.
+    test "an orphaned run answers through the door as an explicit unknown, not an omission",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+
+      put_runner_cfg(
+        enabled: true,
+        run_state_dir: run_state,
+        command: stub("exit 0"),
+        max_build_logs: 0
+      )
+
+      # A run that never reached finalize: bytes on disk, no terminal record.
+      File.write!(Path.join(run_state, "orphandoor-o1.log"), "partial output\n")
+      refute File.exists?(Path.join(run_state, "orphandoor-o1.terminal.json"))
+
+      assert %{evicted: 1} = DeployRunner.retention_sweep()
+
+      # PRECONDITION: the sweep fabricated the tombstone. Without it the
+      # assertions below would be measuring `never_recorded` and passing on the
+      # `refute` for the wrong reason.
+      assert File.exists?(Path.join(run_state, "orphandoor-o1.terminal.json"))
+
+      body =
+        conn
+        |> admin_conn()
+        |> get("/v1/admin/site-deploy?slug=orphandoor&build_id=o1&record=1")
+        |> json_response(200)
+
+      for key <- ~w(build_id exit_code unit_name started_at finished_at) do
+        assert Map.has_key?(body, key), "#{key} is absent from the door's orphan answer"
+        assert body[key] == nil, "#{key} was invented for a run that never recorded one"
+      end
+
+      assert body["record"] == "terminal"
+      assert body["log_state"] == "evicted"
+
+      refute body["log_state"] == "never_recorded",
+             "an orphaned run answered like a slug that never deployed"
+
+      assert body["failure_reason"] =~ "no exit code was ever recorded"
+    end
+
     test "a recorded failure exposes the CAUSE — stages, exit code, journal command — and NEVER raw log bytes",
          %{conn: conn} do
       run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
