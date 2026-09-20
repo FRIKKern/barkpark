@@ -1467,6 +1467,7 @@ fi
 SPECIMEN_BODY="$(printf 'fix(cli): brief fixtures (#19417)\n\nTask: active\n')"
 SPECIMEN_COMMITS="$(printf 'fix(cli): brief fixtures\n\nTask: ghost\n')"
 BOTH_RESOLVE_COMMITS="$(printf 'fix(a): one\n\nTask: active\n\nfix(b): two\n\nTask: doneclosed\n')"
+# shellcheck disable=SC2034  # read by name inside MODE_ENV, which mode_check evals
 NO_TRAILER_COMMITS="$(printf 'chore: no trailer anywhere\n\njust prose\n')"
 
 mode_check() { # mode_check <label> <expected_exit> <substring|-> <script> <args...> ; env via MODE_ENV
@@ -1581,7 +1582,11 @@ cp scripts/lib/task-trailers.sh "$BLIND"
 printf '\ntask_trailer_ids() { :; }\ntask_trailer_count() { printf 0; }\n' >> "$BLIND"
 blind_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=\"$BLIND\" LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\" bash \"$GATE\" --check-landing-trailers" 2>&1 )"
 blind_rc=$?
-if [ "$blind_rc" = "0" ] && ! printf '%s' "$blind_out" | grep -qF 'scanned 2 distinct'; then
+# NO PIPE INTO `grep -q` HERE. grep -q exits on its first match and the writer
+# takes SIGPIPE; under a caller's pipefail that pipeline returns 141, which is
+# neither "found" nor "not found" — a test that decides on it is a coin flip
+# under load. Shell substring removal answers the same question with no pipe.
+if [ "$blind_rc" = "0" ] && [ "${blind_out#*scanned 2 distinct}" = "$blind_out" ]; then
   pass=$((pass+1)); printf 'ok   %-46s (blind scan still exits 0 — only the scan-size assertion sees it)\n' "mutation: blind scan reds c2"
 else
   fail=$((fail+1)); printf 'FAIL %-46s blind rc=%s; the vacuity guard is not doing the work\n' "mutation: blind scan reds c2" "$blind_rc"
@@ -1607,6 +1612,33 @@ else
   fail=$((fail+1)); printf 'FAIL %-46s the trailer regex reappeared in: %s\n' "one grammar, one file" "$dupes"
 fi
 MODE_ENV=""
+
+# ── THE WORKFLOW MUST ACTUALLY CALL THE NEW MODE ────────────────────────────
+# Every arm above proves the SCRIPT refuses. None of them proves the gate runs
+# it: delete the two steps from the YAML and this whole section stays green
+# while the required check is back to reading only the PR body. These assert
+# the plumbing, against $WORKFLOW (overridable, so the same fixtures can be
+# pointed at a PRE-FIX copy and shown red).
+wf_want() { # wf_want <label> <substring>
+  if grep -qF -- "$2" "$WORKFLOW"; then
+    pass=$((pass+1)); printf 'ok   %-46s\n' "$1"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s %s lacks [%s]\n' "$1" "$WORKFLOW" "$2"
+  fi
+}
+wf_want "workflow runs --check-landing-trailers" "--check-landing-trailers"
+wf_want "workflow feeds it the commit messages"  "LANDING_COMMIT_MESSAGES_FILE:"
+wf_want "workflow passes the body id for naming" "BODY_TASK_ID:"
+wf_want "workflow reads BASE..HEAD, no merges"   'git log --no-merges --format=%B "${BASE_SHA}..${HEAD_SHA}"'
+# The `|| rc=$?` form, for the same reason the verify step needs it: GitHub
+# runs step bodies under `bash -e {0}`, which `set -uo pipefail` does not
+# clear, so a bare call would abort the step and make every handler dead code.
+wf_want "landing step is -e-safe"                'bash scripts/pr-task-gate.sh --check-landing-trailers 2>"$err" || rc=$?'
+# An unresolvable sha must be UNKNOWN, never an empty file — an empty file
+# reads as "no trailers", which passes, which is this gate green having looked
+# at nothing.
+wf_want "landing step fails closed on a bad sha" "could not read what this PR will land"
+
 
 echo "---"
 echo "passed: $pass  failed: $fail"
