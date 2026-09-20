@@ -82,15 +82,62 @@
 #
 # USAGE:  pipefail-sigpipe-scan.sh [PATH ...]      (default: scripts .github deploy)
 #         --min-confidence high|medium|low         (default: low = report everything)
+#         --only-shape variable-producer           (report ONLY that producer shape)
 #         --count-only
 #         --fail-on-finding                        (exit 1 if anything is reported)
 #         --baseline FILE                          (ratchet: FILE's integer may only fall)
 #         --verify-against-origin-main              (measure a SNAPSHOT, never the checkout)
 #         --check-provenance FILE                   (the banked number carries cmd+date+sha)
+#         --read-banked FILE                        (print what THIS script reads as banked)
 #         --selftest
 #
-# EXIT: 0 clean scan, findings or not · 1 findings and --fail-on-finding, or the
-#       --baseline ratchet BROKEN · 2 CANNOT READ.
+# EXIT: 0 clean scan, findings or not · 1 findings and --fail-on-finding, the
+#       --baseline ratchet BROKEN, or its arrears past PIPEFAIL_SCAN_MAX_SLACK
+#       (default 2 — see the baseline file's header) · 2 CANNOT READ.
+#
+# ── THE SHAPE TIER, AND WHY IT IS NOT `--min-confidence medium` ───────────────
+# (added 2026-09-20, task-7fccc7b8cf1c6f6c)
+#
+# scripts/pds-live-hetzner-placement-group.sh:1154 reddened main on 2026-09-20
+# (fixed by #19478, 29f36fdcc6). This scanner had already flagged it, in these
+# words: `[medium] reader=grep -q; status condition of if; printf/echo of a
+# VARIABLE — size unknown; this is the shape of the live bug`. The CI ratchet
+# reads `--min-confidence high` only, so the one finding that took main red was
+# in a tier nothing enforced.
+#
+# THE OBVIOUS FIX IS THE WRONG ONE. `medium` is not one class, it is two:
+#   101  printf/echo of a VARIABLE  — the :1154 shape exactly
+#    67  producer not classified    — the "I could not tell" bucket, which holds
+#                                     real false positives (a `case` pattern's
+#                                     `-h|--help)` alternation is read as a pipe;
+#                                     `shellcheck --version | grep -m1` is a
+#                                     one-line producer)
+# (measured on origin/main 5cd9243e1, 2026-09-20). Ratcheting all of medium
+# banks 67 sites nobody has classified, and a ratchet whose number includes
+# unclassified noise is a ratchet people regenerate rather than obey.
+#
+# So the enforced unit is the SHAPE, selected by `--only-shape`, with its own
+# baseline file (scripts/pipefail-sigpipe-variable-producer-baseline.txt) and
+# its own ratchet step. `--min-confidence high` and its baseline are untouched:
+# high read 89 before this change and 89 after, on the same tree.
+#
+# WHY SIZE IS NOT A DEFENCE FOR THIS SHAPE, which is the whole argument for
+# enforcing it. The live :1154 failure carried `piped='OK rc=0'` — nine bytes,
+# three orders of magnitude inside the 64KB pipe buffer — and still produced
+# `printf: write error: Broken pipe` on ubuntu-latest. GNU `grep -q` exits at
+# its first match; whether the producer has written yet is a SCHEDULING race,
+# not a size threshold. "The variables are usually short today" (the 2026-09-09
+# reason for leaving medium unenforced, recorded in the high baseline's header)
+# is therefore not protection, and the site that reddened main is the specimen.
+#
+# THE GUARD PREFIX (same change). `if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q x`
+# has the same producer as the bare form, but the classifier took everything
+# left of the pipe as the producer, so a `[ … ] &&` guard pushed the site out of
+# `printf/echo of a VARIABLE` and into `producer not classified`. 42 of the 109
+# unclassified sites were this shape wearing a prefix. The producer is now read
+# after the LAST `&&`/`||` before the pipe, which is where the shell starts it.
+# This moves sites WITHIN medium only: 59+109 becomes 101+67, medium total 168
+# either way, high 89 either way.
 #
 # A FAILED READ IS NEVER BYTE-IDENTICAL TO ZERO FINDINGS: an unreadable input prints a
 # `CANNOT READ:` line to stderr and exits 2.
@@ -99,11 +146,13 @@ set -uo pipefail
 
 PROG="pipefail-sigpipe-scan"
 min_conf="low"
+only_shape=""
 count_only=0
 fail_on_finding=0
 selftest=0
 verify_origin=0
 provenance_file=""
+read_banked_file=""
 baseline_file=""
 targets=()
 
@@ -123,6 +172,11 @@ while [ $# -gt 0 ]; do
     min_conf="$2"
     shift 2
     ;;
+  --only-shape)
+    [ $# -ge 2 ] || die "--only-shape needs a value"
+    only_shape="$2"
+    shift 2
+    ;;
   --count-only)
     count_only=1
     shift
@@ -140,6 +194,11 @@ while [ $# -gt 0 ]; do
     provenance_file="$2"
     shift 2
     ;;
+  --read-banked)
+    [ $# -ge 2 ] || die "--read-banked needs a baseline file"
+    read_banked_file="$2"
+    shift 2
+    ;;
   --fail-on-finding)
     fail_on_finding=1
     shift
@@ -151,7 +210,7 @@ while [ $# -gt 0 ]; do
     ;;
   -h | --help)
     # 2,96p — the whole header block; re-measure it when the header grows
-    sed -n '2,96p' "$0"
+    sed -n '2,98p' "$0"
     exit 0
     ;;
   -*) die "unknown option: $1" ;;
@@ -167,11 +226,91 @@ high | medium | low) ;;
 *) die "--min-confidence must be high, medium or low (got: $min_conf)" ;;
 esac
 
+# Only ONE shape is selectable today, and an unknown value DIES rather than
+# silently selecting nothing: a filter that matches nothing reports 0 findings,
+# and 0 against any baseline is a green. A typo'd `--only-shape` must never be
+# the cheapest way to pass this gate.
+case "$only_shape" in
+'' | variable-producer) ;;
+*) die "--only-shape must be variable-producer (got: $only_shape)" ;;
+esac
+
 if [ "${#targets[@]}" -eq 0 ]; then
   ROOT="${PIPEFAIL_SCAN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
   targets=("$ROOT/scripts" "$ROOT/.github" "$ROOT/deploy")
 fi
 
+
+# ── ONE READER FOR THE BANKED NUMBER, AND ONE BOUND ON THE SLACK ─────────────
+#
+# task-e3a2a8341256b805.  Two defects, one file, both about the number this
+# script enforces.
+#
+# (a) TWO READERS.  Until now the ratchet and --check-provenance took the FIRST
+#     non-comment line while --verify-against-origin-main took `tail -1`.  Those
+#     agree on a file with exactly one payload line and on no other file — and a
+#     baseline file is edited by hand, under a header of 200 comment lines, by
+#     people appending.  A second payload line makes the enforced number and the
+#     verified number DIFFERENT numbers out of the same file, with nothing in
+#     either output saying so.  read_banked_number() is now the only way any
+#     path in this script learns what is banked; the selftest plants a
+#     two-payload-line file and requires both paths to name the same number.
+#
+# (b) UNBOUNDED SLACK.  A FALL printed RATCHET LOOSE and exited 0, on the sound
+#     reasoning that a check which reds when the world gets better teaches its
+#     readers to regenerate the number.  But "does not red" and "unbounded" are
+#     different choices, and only the second was made.  On 2026-09-20 the file
+#     banked 97 while origin/main f6ff8b589 measured 90: SEVEN counts of slack,
+#     i.e. a PR could add seven NEW high-confidence sites and this gate stayed
+#     green.  A ratchet that only stops regressions bigger than its own arrears
+#     is not measuring the property it claims.
+#
+#     So the fall is still not an instant red — it is a red once the arrears
+#     exceed PIPEFAIL_SCAN_MAX_SLACK.  Inside the bound you get the old LOOSE
+#     notice and rc 0, so a PR that fixes one or two sites is not forced to
+#     re-bank mid-review; beyond it the gate reds and names the number to bank.
+#     The bound and its dated reason live in the baseline file's header, which
+#     is where a reader of the number looks.
+PIPEFAIL_SCAN_MAX_SLACK="${PIPEFAIL_SCAN_MAX_SLACK:-2}"
+case "$PIPEFAIL_SCAN_MAX_SLACK" in '' | *[!0-9]*) die "PIPEFAIL_SCAN_MAX_SLACK must be a non-negative integer (got: $PIPEFAIL_SCAN_MAX_SLACK)" ;; esac
+
+# read_banked_number FILE — prints the banked integer, or returns 2 having said
+# on stderr why it could not.  THE definition of "the banked number": the first
+# line that carries anything once its `#` comment and all whitespace are
+# stripped.  Every caller — the ratchet, --check-provenance, --read-banked and
+# --verify-against-origin-main (on the SNAPSHOT's copy of the file) — goes
+# through here, so "which line is the baseline" has exactly one answer.
+read_banked_number() {
+  local file="$1" label="${2:-baseline}" bl want=""
+  if [ ! -r "$file" ]; then
+    printf 'CANNOT READ: %s (%s)\n' "$file" "$label" >&2
+    return 2
+  fi
+  while IFS= read -r bl || [ -n "$bl" ]; do
+    bl="${bl%%#*}"
+    bl="${bl//[[:space:]]/}"
+    [ -n "$bl" ] || continue
+    want="$bl"
+    break
+  done <"$file"
+  case "$want" in
+  '' | *[!0-9]*)
+    printf 'CANNOT READ: %s carries no integer baseline (read: %s)\n' "$file" "${want:-<nothing>}" >&2
+    return 2
+    ;;
+  esac
+  printf '%s\n' "$want"
+  return 0
+}
+
+# --read-banked FILE: the reader, exposed.  It exists so a test can ask THIS
+# script what it thinks is banked without inferring it from a ratchet message,
+# and so a human debugging a two-number file gets the answer from the code that
+# enforces it rather than from their own eye.
+if [ -n "$read_banked_file" ]; then
+  read_banked_number "$read_banked_file" || exit $?
+  exit 0
+fi
 
 # ── --check-provenance: a banked number carries the command, the date and the sha
 #
@@ -196,25 +335,20 @@ fi
 # that arrives with no way to check it at all, which is the shape every wrong
 # number in this class has had.
 check_provenance() {
-  local file="$1" want body missing=""
-  [ -r "$file" ] || {
-    printf 'CANNOT READ: %s (provenance)\n' "$file" >&2
-    return 2
-  }
-  want=""
-  while IFS= read -r bl || [ -n "$bl" ]; do
-    bl="${bl%%#*}"
-    bl="${bl//[[:space:]]/}"
-    [ -n "$bl" ] || continue
-    want="$bl"
-    break
-  done <"$file"
-  case "$want" in
-  '' | *[!0-9]*)
-    printf 'CANNOT READ: %s carries no integer baseline (read: %s)\n' "$file" "${want:-<nothing>}" >&2
-    return 2
-    ;;
-  esac
+  local file="$1" want body missing="" want_cmd
+  # The command a baseline must quote is the command that PRODUCES its number,
+  # so it follows the option state of THIS invocation. The high baseline is
+  # checked with no --only-shape and its required string is byte-identical to
+  # what it has always been; the shape baseline is checked with
+  # `--only-shape variable-producer` and must quote that command instead. A
+  # single hard-coded string would have let the shape file bank its number
+  # while quoting a command that does not produce it.
+  if [ -n "$only_shape" ]; then
+    want_cmd="bash scripts/pipefail-sigpipe-scan.sh --only-shape $only_shape --count-only"
+  else
+    want_cmd="bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only"
+  fi
+  want="$(read_banked_number "$file" provenance)" || return 2
 
   # the text after the LAST re-measurement banner.  `sed -n '/RE-MEASURED/,$p'`
   # would start at the FIRST one; this keeps only the final block, which is the
@@ -235,9 +369,9 @@ check_provenance() {
   grep -qE "pipefail-sigpipe-scan: $want finding" <<<"$body" ||
     missing="$missing
   - the scanner's own output line quoting $want (\"pipefail-sigpipe-scan: $want finding(s) …\")"
-  grep -qF 'bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only' <<<"$body" ||
+  grep -qF "$want_cmd" <<<"$body" ||
     missing="$missing
-  - the literal command: bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only"
+  - the literal command: $want_cmd"
   grep -qE '20[0-9][0-9]-[01][0-9]-[0-3][0-9]' <<<"$body" ||
     missing="$missing
   - an ISO date (20YY-MM-DD) for the measurement"
@@ -299,9 +433,12 @@ if [ "$verify_origin" -eq 1 ]; then
     die "the snapshot scan did not complete — nothing was measured"
   vn="$(sed -nE 's/.*: ([0-9]+) finding.*/\1/p' <<<"$vout")"
   case "$vn" in '' | *[!0-9]*) die "could not read a count out of: $vout" ;; esac
-  vbank="$(tail -1 "$vscratch/scripts/pipefail-sigpipe-baseline.txt")"
-  vbank="${vbank//[[:space:]]/}"
-  case "$vbank" in '' | *[!0-9]*) die "the snapshot baseline's last line is not an integer: ${vbank:-<empty>}" ;; esac
+  # THE SAME READER THE RATCHET USES.  This was `tail -1` until
+  # task-e3a2a8341256b805: two readers over one hand-edited file, agreeing only
+  # while it happens to hold exactly one payload line.  A second payload line
+  # made this mode verify a number the gate does not enforce.
+  vbank="$(read_banked_number "$vscratch/scripts/pipefail-sigpipe-baseline.txt" "snapshot baseline")" ||
+    die "the origin/main snapshot's baseline carries no integer — nothing was verified"
 
   wout="$(bash "${BASH_SOURCE[0]}" --min-confidence high --count-only)" || wout="(the working-tree scan failed)"
   wn="$(sed -nE 's/.*: ([0-9]+) finding.*/\1/p' <<<"$wout")"
@@ -310,7 +447,8 @@ if [ "$verify_origin" -eq 1 ]; then
   printf '  sha        %s\n' "$vsha"
   printf '  command    (cd <snapshot> && bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only)\n'
   printf '  scan       %s\n' "$vout"
-  printf '  baseline   %s   (tail -1 scripts/pipefail-sigpipe-baseline.txt OF THAT SNAPSHOT)\n' "$vbank"
+  printf '  baseline   %s   (read_banked_number scripts/pipefail-sigpipe-baseline.txt OF THAT SNAPSHOT —\n' "$vbank"
+  printf '             the same reader the --baseline ratchet uses, not a second one)\n'
   printf '  date       %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '\n'
   printf '  this checkout reads %s — NOT quotable, shown only so a drift is visible.\n' "${wn:-?}"
@@ -325,9 +463,17 @@ if [ "$verify_origin" -eq 1 ]; then
     exit 1
   fi
   if [ "$vn" -lt "$vbank" ]; then
-    printf '%s: RATCHET LOOSE ON origin/main — %s finding(s), baseline still says %s.\n' "$PROG" "$vn" "$vbank" >&2
+    vslack=$((vbank - vn))
+    printf '%s: RATCHET LOOSE ON origin/main — %s finding(s), baseline still says %s (slack %s, bound %s).\n' \
+      "$PROG" "$vn" "$vbank" "$vslack" "$PIPEFAIL_SCAN_MAX_SLACK" >&2
     printf '%s: bank it: put %s in scripts/pipefail-sigpipe-baseline.txt with the command, the date\n' "$PROG" "$vn" >&2
     printf '%s: and %s in the SAME commit. Slack is where the next regression hides.\n' "$PROG" "$vsha" >&2
+    if [ "$vslack" -gt "$PIPEFAIL_SCAN_MAX_SLACK" ]; then
+      printf '%s: SLACK EXCEEDED ON origin/main — arrears %s, documented bound %s. %s NEW site(s)\n' \
+        "$PROG" "$vslack" "$PIPEFAIL_SCAN_MAX_SLACK" "$vslack" >&2
+      printf '%s: could land on main inside that slack with this gate green.\n' "$PROG" >&2
+      exit 1
+    fi
     exit 0
   fi
   printf '%s: origin/main %s measures %s and banks %s — they agree.\n' "$PROG" "$vsha" "$vn" "$vbank"
@@ -842,11 +988,16 @@ SH
   bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" >/dev/null 2>&1 &&
     sno "ratchet: 1 finding vs baseline 0 exited 0 — the ratchet does not hold" ||
     sok "ratchet: 1 finding vs baseline 0 reds"
-  printf '9\n' >"$bl"
+  # A fall WITHIN the documented slack bound still says LOOSE and still exits 0 —
+  # that is the old behaviour and it is deliberately kept. This arm banked 9
+  # against 1 finding until task-e3a2a8341256b805: 8 counts of arrears, which is
+  # now itself a red, so the fixture moves to the largest fall that is still
+  # inside the bound. (10d) pins BOTH sides of that boundary.
+  printf '%d\n' "$((1 + PIPEFAIL_SCAN_MAX_SLACK))" >"$bl"
   loose_rc=0
   loose="$(bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" 2>&1 >/dev/null)" || loose_rc=$?
   if [ "$loose_rc" -eq 0 ] && grep -q 'RATCHET LOOSE' <<<"$loose"; then
-    sok "ratchet: a FALL says RATCHET LOOSE and does NOT red (rc 0)"
+    sok "ratchet: a FALL inside the bound says RATCHET LOOSE and does NOT red (rc 0)"
   else
     sno "ratchet: a fall printed rc=$loose_rc / $(tr '\n' ' ' <<<"$loose")"
   fi
@@ -854,6 +1005,178 @@ SH
   bash "${BASH_SOURCE[0]}" --baseline "$bl" "$std/block-reset.yml" >/dev/null 2>&1
   [ "$?" -eq 2 ] && sok "ratchet: an unreadable baseline is CANNOT READ (exit 2), never a pass" ||
     sno "ratchet: a non-numeric baseline did not exit 2"
+
+  # ── (9) THE SHAPE TIER (task-7fccc7b8cf1c6f6c) ────────────────────────────
+  # `--only-shape variable-producer` is the enforced unit for the class that
+  # reddened main on 2026-09-20 (:1154, fixed by #19478). These arms are the
+  # discrimination: a selector satisfied by "medium" would pass the HIT arms and
+  # fail (9c)/(9d), and a selector that matched everything would fail them too.
+  sayshape() { # sayshape <name> <HIT|MISS>; BODY on stdin, under `set -uo pipefail`
+    local n
+    {
+      printf '#!/usr/bin/env bash\nset -uo pipefail\n'
+      cat
+    } >"$std/$1.sh"
+    n="$(PIPEFAIL_SCAN_ROOT="$std" bash "${BASH_SOURCE[0]}" --only-shape variable-producer --count-only "$std/$1.sh" 2>/dev/null | sed -E 's/.*: ([0-9]+) finding.*/\1/')"
+    case "$2:$n" in
+    HIT:0) sno "$1: wanted a shape finding, got none" ;;
+    MISS:0) sok "$1: correctly silent under --only-shape" ;;
+    HIT:*) sok "$1: reported under --only-shape ($n)" ;;
+    MISS:*) sno "$1: wanted silence under --only-shape, reported $n" ;;
+    esac
+  }
+
+  # (9a) THE LIVE SITE, verbatim in shape from
+  # scripts/pds-live-hetzner-placement-group.sh:1154 as it shipped: a grep -q
+  # reader on a printf of a VARIABLE, in an `if` condition under pipefail.
+  sayshape shape-live-1154 HIT <<'SH'
+if printf '%s' "$piped" | grep -q 'OK' && [ "$unpiped" = "4" ]; then :; fi
+SH
+
+  # (9b) THE SAME SHAPE BEHIND A `[ … ] &&` GUARD. Before 2026-09-20 the
+  # classifier read everything left of the pipe as the producer, so this fell to
+  # `producer not classified` and a shape-selected ratchet would not have seen
+  # it — i.e. prefixing `[ true ] &&` would have been a way past the gate.
+  sayshape shape-guarded-producer HIT <<'SH'
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'OK'; then :; fi
+SH
+
+  # (9c) NOT THE SHAPE — printf of a LITERAL. It is inside the buffer and the
+  # classifier already calls it low; the selector must not take it.
+  sayshape shape-literal-producer MISS <<'SH'
+if printf 'OK' | grep -q 'OK'; then :; fi
+SH
+
+  # (9d) NOT THE SHAPE — an unbounded producer. This site IS a finding, at HIGH,
+  # and the high ratchet is what owns it. If the selector took it, the two
+  # baselines would move together and neither would mean what it says.
+  sayshape shape-unbounded-producer MISS <<'SH'
+if git log --format=%H | grep -q 'deadbeef'; then :; fi
+SH
+
+  # (9e) THE RATCHET ON THE SHAPE TIER, both directions, on a fixture whose
+  # count is known to be 1 from (9a).
+  shbl="$std/shape-bl.txt"
+  printf '# reason lives here\n1\n' >"$shbl"
+  bash "${BASH_SOURCE[0]}" --only-shape variable-producer --baseline "$shbl" "$std/shape-live-1154.sh" >/dev/null 2>&1 &&
+    sok "shape ratchet: 1 finding vs baseline 1 exits 0" ||
+    sno "shape ratchet: 1 finding vs baseline 1 did not exit 0"
+  printf '0\n' >"$shbl"
+  bash "${BASH_SOURCE[0]}" --only-shape variable-producer --baseline "$shbl" "$std/shape-live-1154.sh" >/dev/null 2>&1 &&
+    sno "shape ratchet: 1 finding vs baseline 0 exited 0 — a NEW site of the live shape can enter green" ||
+    sok "shape ratchet: a NEW site of the live shape reds (1 vs baseline 0)"
+
+  # (9f) A TYPO'D SHAPE IS A REFUSAL, NEVER AN EMPTY SELECTION. A filter that
+  # matched nothing would report 0 findings, and 0 passes every baseline — the
+  # cheapest possible fake green for this whole gate.
+  bash "${BASH_SOURCE[0]}" --only-shape variable-producers --count-only "$std/shape-live-1154.sh" >/dev/null 2>&1
+  [ "$?" -eq 2 ] && sok "shape: an unknown --only-shape value REFUSES (exit 2), never selects nothing" ||
+    sno "shape: an unknown --only-shape value did not exit 2"
+
+  # (9g) PROVENANCE FOLLOWS THE OPTION STATE. A shape baseline that quotes the
+  # HIGH command does not describe its own number, and must be refused.
+  shprov="$std/shape-prov.txt"
+  printf '# ── RE-MEASURED\n# pipefail-sigpipe-scan: 1 finding(s)\n# bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only\n# 2026-09-20 deadbeef123\n1\n' >"$shprov"
+  bash "${BASH_SOURCE[0]}" --only-shape variable-producer --check-provenance "$shprov" >/dev/null 2>&1 &&
+    sno "shape provenance: a file quoting the HIGH command PASSED for a shape baseline" ||
+    sok "shape provenance: a shape baseline quoting the HIGH command is refused"
+  printf '# ── RE-MEASURED\n# pipefail-sigpipe-scan: 1 finding(s)\n# bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --count-only\n# 2026-09-20 deadbeef123\n1\n' >"$shprov"
+  bash "${BASH_SOURCE[0]}" --only-shape variable-producer --check-provenance "$shprov" >/dev/null 2>&1 &&
+    sok "shape provenance: the right command, date and sha passes" ||
+    sno "shape provenance: a complete shape block was refused"
+
+  # ── (10) ONE READER, AND A BOUND ON THE SLACK (task-e3a2a8341256b805) ─────
+  #
+  # (10a) THE FIXTURE, and the assertion that it can discriminate at all.  Two
+  # payload lines: the first is what a reader-of-the-first says, the last is what
+  # `tail -1` says.  A one-payload-line file — every baseline this repo has ever
+  # shipped — makes both readers agree and measures NOTHING, so the precondition
+  # is asserted before the verdicts that rest on it.
+  two="$std/two-payload-baseline.txt"
+  {
+    printf '# a baseline file is hand-edited under 200 comment lines; people append.\n'
+    printf '3\n'
+    printf '# ── RE-MEASURED 2026-09-20 on 1234567890abcdef ──\n'
+    printf '9\n'
+  } >"$two"
+  # (no pipeline into `head` here — this script is one of the files it scans, and
+  # a fixture that adds a finding to the tree it measures is its own regression.)
+  if [ "$(tail -1 "$two")" = "9" ] && [ "$(sed -nE '/^[[:space:]]*#/d; /^[[:space:]]*$/d; p; q' "$two")" = "3" ]; then
+    sok "one-reader fixture: the two-payload file DISCRIMINATES (first payload 3, tail -1 9)"
+  else
+    sno "one-reader fixture: the fixture does not discriminate — every arm below measures nothing"
+  fi
+
+  rb="$(bash "${BASH_SOURCE[0]}" --read-banked "$two" 2>/dev/null)"
+  [ "$rb" = "3" ] && sok "one reader: --read-banked names the FIRST payload line (3)" ||
+    sno "one reader: --read-banked said '${rb:-<nothing>}', expected 3"
+
+  # (10b) THE RATCHET reads through it.  block-reset.yml has exactly 1 finding,
+  # so the number in the ratchet's own message is the only thing under test.
+  ratchet_says="$(bash "${BASH_SOURCE[0]}" --baseline "$two" "$std/block-reset.yml" 2>/dev/null |
+    sed -nE 's/.*baseline ([0-9]+) \(.*/\1/p')"
+  [ "$ratchet_says" = "$rb" ] &&
+    sok "one reader: the ratchet enforces the same number --read-banked reports ($rb)" ||
+    sno "one reader: the ratchet enforced '${ratchet_says:-<nothing>}' while the reader said '$rb'"
+
+  # (10c) --verify-against-origin-main reads through it TOO — the path that used
+  # `tail -1`.  No new env door to make this testable: PIPEFAIL_SCAN_ROOT already
+  # picks the repo whose origin/main is archived, so the arm builds a REAL one-
+  # commit repo with an origin/main ref, a two-payload baseline and a stub
+  # scanner that reports 3.  With one reader: snapshot 3 vs banked 3, "they
+  # agree", rc 0.  With `tail -1`: 3 vs 9 — a 6-count phantom slack past the
+  # bound, rc 1.  The two outcomes are different numbers AND different exit codes.
+  vrepo="$std/verify-repo"
+  mkdir -p "$vrepo/scripts"
+  cp "$two" "$vrepo/scripts/pipefail-sigpipe-baseline.txt"
+  cat >"$vrepo/scripts/pipefail-sigpipe-scan.sh" <<'STUBEOF'
+#!/usr/bin/env bash
+# selftest stub: the snapshot's OWN scanner, pinned to a known count.
+printf 'pipefail-sigpipe-scan: 3 finding(s) — high 3 · medium 0 · low 0 — over 1 file(s)\n'
+STUBEOF
+  vgit_ok=1
+  (
+    cd "$vrepo" &&
+      git init -q . &&
+      git -c user.email=s@s -c user.name=s add -A &&
+      git -c user.email=s@s -c user.name=s commit -qm fixture &&
+      git update-ref refs/remotes/origin/main HEAD
+  ) >/dev/null 2>&1 || vgit_ok=0
+  if [ "$vgit_ok" -ne 1 ]; then
+    sno "one reader: could not build the verify fixture repo — the --verify arm measured nothing"
+  else
+    vrc=0
+    vout_t="$(PIPEFAIL_SCAN_ROOT="$vrepo" bash "${BASH_SOURCE[0]}" --verify-against-origin-main 2>&1)" || vrc=$?
+    vsaw="$(sed -nE 's/^  baseline[[:space:]]+([0-9]+).*/\1/p' <<<"$vout_t")"
+    if [ "$vsaw" = "$rb" ] && [ "$vrc" -eq 0 ] && grep -q 'they agree' <<<"$vout_t"; then
+      sok "one reader: --verify-against-origin-main reads the SAME line as the ratchet ($rb) and agrees"
+    else
+      sno "one reader: --verify read baseline '${vsaw:-<nothing>}' (ratchet reads $rb), rc=$vrc — two readers are back"
+    fi
+  fi
+
+  # (10d) THE SLACK BOUND, both directions, at the boundary.  Under the bound the
+  # old behaviour is preserved exactly (LOOSE, rc 0); one past it reds.  Stated
+  # as bound and bound+1 off PIPEFAIL_SCAN_MAX_SLACK rather than as literals, so
+  # the arm follows the constant instead of pinning a copy of it.
+  sbl="$std/slack-bl.txt"
+  atbound=$((1 + PIPEFAIL_SCAN_MAX_SLACK))
+  printf '%d\n' "$atbound" >"$sbl"
+  srca=0
+  souta="$(bash "${BASH_SOURCE[0]}" --baseline "$sbl" "$std/block-reset.yml" 2>&1 >/dev/null)" || srca=$?
+  if [ "$srca" -eq 0 ] && grep -q 'RATCHET LOOSE' <<<"$souta" && ! grep -q 'SLACK EXCEEDED' <<<"$souta"; then
+    sok "slack bound: arrears exactly $PIPEFAIL_SCAN_MAX_SLACK stays LOOSE and rc 0 — a small fix is not forced to re-bank"
+  else
+    sno "slack bound: arrears $PIPEFAIL_SCAN_MAX_SLACK gave rc=$srca / $(tr '\n' ' ' <<<"$souta")"
+  fi
+  printf '%d\n' "$((atbound + 1))" >"$sbl"
+  srcb=0
+  soutb="$(bash "${BASH_SOURCE[0]}" --baseline "$sbl" "$std/block-reset.yml" 2>&1 >/dev/null)" || srcb=$?
+  if [ "$srcb" -eq 1 ] && grep -q 'SLACK EXCEEDED' <<<"$soutb"; then
+    sok "slack bound: arrears $((PIPEFAIL_SCAN_MAX_SLACK + 1)) REDS (rc 1, SLACK EXCEEDED) — unbanked slack is no longer free"
+  else
+    sno "slack bound: arrears $((PIPEFAIL_SCAN_MAX_SLACK + 1)) gave rc=$srcb / $(tr '\n' ' ' <<<"$soutb")"
+  fi
 
   echo
   echo "# pass $sp / # fail $sf"
@@ -1465,7 +1788,13 @@ for f in "${files[@]}"; do
     esac
 
     # a `rc=$?` / `status=$?` immediately after a pipeline CONSUMES its status.
+    # `[ -z "$only_shape" ]` for the same reason the rank test is on this branch
+    # (2026-09-20, task-7fccc7b8cf1c6f6c): this branch never classifies the
+    # producer — `prev_pipe_conf` is a fixed `low` — so it has NO shape, and a
+    # shape-selected run that counted it would bank sites its own flag name
+    # excludes. Measured: 3 such findings on origin/main 5cd9243e1.
     if [ "$prev_pipe_line" -ne 0 ] && [ "$lineno" -eq $((prev_pipe_line + 1)) ] &&
+      [ -z "$only_shape" ] &&
       [ "$(rank "$prev_pipe_conf")" -ge "$min_rank" ]; then
       # The rank test is on this branch too (added 2026-09-09).  Without it
       # `--min-confidence high` printed `17 finding(s) — high 16 · low 1`: this
@@ -1642,8 +1971,23 @@ for f in "${files[@]}"; do
     case "$ptrim" in
     if\ * | elif\ * | while\ * | until\ * | !\ *) ptrim="${ptrim#* }" ;;
     esac
+    # THE GUARD PREFIX (2026-09-20, task-7fccc7b8cf1c6f6c). In
+    #   if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q x
+    # the producer of the pipe is `printf`, not the whole text left of the pipe.
+    # Taking the whole text pushed this — the live :1154 shape wearing a guard —
+    # out of `printf/echo of a VARIABLE` and into `producer not classified`; 42
+    # sites on origin/main 5cd9243e1 were exactly that. `\002`/`\003` are the
+    # scrubbed forms of `&&`/`||` (see scrub_expr), so the last one of either is
+    # where the shell starts the producer. Measured: this moves sites WITHIN
+    # medium (59+109 -> 101+67) and leaves high at 89.
+    plast="${ptrim//$'\003'/$'\002'}"
+    case "$plast" in
+    *$'\002'*) ptrim="${plast##*$'\002'}" ;;
+    esac
+    ptrim="${ptrim#"${ptrim%%[![:space:]]*}"}"
     conf="medium"
     why=""
+    shape=""
     case "$ptrim" in
     *find\ * | *git\ * | *curl\ * | *ls\ * | *jq\ * | *cat\ * | *awk\ * | *sed\ * | *tail\ * | *docker\ * | *gh\ * | *ssh\ * | *systemctl\ * | *grep\ * | *for\ * | *while\ * | *done*)
       conf="high"
@@ -1652,7 +1996,7 @@ for f in "${files[@]}"; do
     printf* | echo*)
       # a VARIABLE usually holds captured command output: size unknown.
       case "$producer$line" in
-      *'$'*) conf="medium" why="printf/echo of a VARIABLE — size unknown; this is the shape of the live bug" ;;
+      *'$'*) conf="medium" shape="variable-producer" why="printf/echo of a VARIABLE — size unknown; this is the shape of the live bug" ;;
       *) conf="low" why="printf/echo of a LITERAL — very likely inside the 64KB pipe buffer" ;;
       esac
       ;;
@@ -1691,6 +2035,13 @@ for f in "${files[@]}"; do
       esac
     fi
 
+    # ── --only-shape: the ENFORCED UNIT is the shape, not the tier ────────
+    # See the header. `medium` is two populations; only one of them is the
+    # class that reddened main, and only that one is ratcheted.
+    if [ -n "$only_shape" ]; then
+      [ "$shape" = "$only_shape" ] || continue
+    fi
+
     [ "$(rank "$conf")" -ge "$min_rank" ] || continue
 
     findings=$((findings + 1))
@@ -1725,41 +2076,43 @@ fi
 # where a real regression gets laundered in.  It prints RATCHET LOOSE instead,
 # loudly, so the next PR through here lowers it on purpose.
 if [ -n "$baseline_file" ]; then
-  if [ ! -r "$baseline_file" ]; then
-    printf 'CANNOT READ: %s (baseline)\n' "$baseline_file" >&2
-    exit 2
+  want="$(read_banked_number "$baseline_file" baseline)" || exit 2
+  # NAME THE SELECTOR THE NUMBER WAS MEASURED UNDER. A shape ratchet printing
+  # "--min-confidence low" reads as "everything", and the next person to quote
+  # this line would quote the wrong scope for the number beside it.
+  if [ -n "$only_shape" ]; then
+    sel="--only-shape $only_shape"
+  else
+    sel="--min-confidence $min_conf"
   fi
-  want=""
-  while IFS= read -r bl || [ -n "$bl" ]; do
-    bl="${bl%%#*}"
-    bl="${bl//[[:space:]]/}"
-    [ -n "$bl" ] || continue
-    want="$bl"
-    break
-  done <"$baseline_file"
-  case "$want" in
-  '' | *[!0-9]*)
-    printf 'CANNOT READ: %s carries no integer baseline (read: %s)\n' "$baseline_file" "${want:-<nothing>}" >&2
-    exit 2
-    ;;
-  esac
-  printf '%s: baseline %s (%s, --min-confidence %s) vs %d found\n' \
-    "$PROG" "$want" "$baseline_file" "$min_conf" "$findings"
+  printf '%s: baseline %s (%s, %s) vs %d found\n' \
+    "$PROG" "$want" "$baseline_file" "$sel" "$findings"
   if [ "$findings" -gt "$want" ]; then
-    printf '%s: RATCHET BROKEN — %d finding(s) at confidence >= %s, baseline is %d.\n' \
-      "$PROG" "$findings" "$min_conf" "$want" >&2
+    printf '%s: RATCHET BROKEN — %d finding(s) at %s, baseline is %d.\n' \
+      "$PROG" "$findings" "$sel" "$want" >&2
     printf '%s: a NEW pipefail/SIGPIPE site was added. Fix it (here-string, or drop -q and redirect —\n' "$PROG" >&2
     printf '%s: see the FIXES block at the top of this script). Do NOT raise the number in %s.\n' "$PROG" "$baseline_file" >&2
     exit 1
   fi
   if [ "$findings" -lt "$want" ]; then
-    printf '%s: RATCHET LOOSE — %d finding(s) at confidence >= %s, baseline still says %d.\n' \
-      "$PROG" "$findings" "$min_conf" "$want" >&2
+    slack=$((want - findings))
+    printf '%s: RATCHET LOOSE — %d finding(s) at %s, baseline still says %d (slack %d, bound %s).\n' \
+      "$PROG" "$findings" "$sel" "$want" "$slack" "$PIPEFAIL_SCAN_MAX_SLACK" >&2
     printf '%s: this is not a failure, it is progress that has not been banked. Lower the number in\n' "$PROG" >&2
     printf '%s: %s to %d (and date the change) so the next regression cannot hide in the slack.\n' "$PROG" "$baseline_file" "$findings" >&2
     printf '%s: BEFORE YOU BANK IT: a LOOSE ratchet is also what a STALE CHECKOUT looks like (this repo\n' "$PROG" >&2
     printf '%s: read 107 against a banked 108 on 2026-09-16 while 38 commits behind). Measure a snapshot:\n' "$PROG" >&2
     printf '%s:   bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main\n' "$PROG" >&2
+    if [ "$slack" -gt "$PIPEFAIL_SCAN_MAX_SLACK" ]; then
+      printf '%s: SLACK EXCEEDED — the arrears are %d, the documented bound is %s.\n' \
+        "$PROG" "$slack" "$PIPEFAIL_SCAN_MAX_SLACK" >&2
+      printf '%s: %d NEW site(s) could land here and this gate would still say green, so it is no\n' \
+        "$PROG" "$slack" >&2
+      printf '%s: longer measuring the property it claims. Bank %d in %s with the command, the date\n' \
+        "$PROG" "$findings" "$baseline_file" >&2
+      printf '%s: and the sha (see --verify-against-origin-main and --check-provenance), in this change.\n' "$PROG" >&2
+      exit 1
+    fi
   fi
 fi
 

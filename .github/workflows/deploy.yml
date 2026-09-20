@@ -281,25 +281,55 @@ jobs:
           # run with a leg-proven deploy is ever written here.
           last_deployed=""
           anchor_widest=""
+          # ── A SHORT SCAN IS NEVER A NARROWED BASE (task-5c4cd03a726b0a0c) ──
+          #
+          # The loop below reads its candidates from fd 0. Any child in the body
+          # that also reads fd 0 — an `ssh` without -n, a `-` operand, a
+          # `docker exec -i` — swallows the rest of the heredoc; the loop then
+          # ends after ONE iteration and NOTHING says so, because "read returned
+          # non-zero" looks identical whether stdin was exhausted or STOLEN.
+          # The list is NEWEST FIRST, so $anchor_widest is left holding the
+          # NEWEST candidate instead of the oldest scanned: the diff NARROWS,
+          # and :171 above says what that costs — a narrowed base strands a
+          # commit (the 2026-09-18 incident, task-220b847a8072f82e).
+          #
+          # So COUNT, do not merely guard. The `</dev/null` redirections added
+          # to today's children are fd discipline the next edit can undo; the
+          # identity below notices a short scan whoever caused it, including a
+          # cause nobody has thought of. $anchor_broke records the ONE
+          # legitimate early exit — a leg-proven anchor was found — where
+          # examined < listed is CORRECT and the unscanned tail cannot matter
+          # because $base is already set.
+          anchor_candidates="$(gh run list --workflow=deploy.yml --branch=main --status=success \
+              --limit=30 --json databaseId,headSha \
+              --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)"
+          anchor_listed="$(printf '%s\n' "$anchor_candidates" | awk 'NF' | wc -l | tr -d ' ')"
+          anchor_examined=0
+          anchor_broke=0
           while read -r cand_id cand_sha; do
             [ -n "$cand_id" ] && [ -n "$cand_sha" ] || continue
-            git cat-file -e "$cand_sha^{commit}" 2>/dev/null || continue
+            anchor_examined=$((anchor_examined + 1))
+            git cat-file -e "$cand_sha^{commit}" </dev/null 2>/dev/null || continue
             anchor_widest="$cand_sha"
             cand_legs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${cand_id}/jobs?per_page=100" \
                            --jq '[.jobs[] | select(.name == "control-plane" or .name == "instance") | select(.conclusion == "success")] | length' \
-                         2>/dev/null || echo 0)"
+                         </dev/null 2>/dev/null || echo 0)"
             if [ "${cand_legs:-0}" -gt 0 ] 2>/dev/null; then
               base="$cand_sha"
               last_deployed="$cand_sha"
+              anchor_broke=1
               echo "anchor: run $cand_id ($cand_sha) is the newest run whose control-plane/instance job concluded success"
               break
             fi
             echo "anchor: run $cand_id ($cand_sha) succeeded but no deploy leg ran (superseded-at-start / already-covered) — not an anchor"
           done <<ANCHOR_RUNS
-          $(gh run list --workflow=deploy.yml --branch=main --status=success \
-              --limit=30 --json databaseId,headSha \
-              --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)
+          $anchor_candidates
           ANCHOR_RUNS
+          echo "anchor: candidates examined ${anchor_examined} of ${anchor_listed} listed"
+          if [ "$anchor_broke" -eq 0 ] && [ "$anchor_examined" -ne "$anchor_listed" ]; then
+            echo "::warning title=anchor scan short read::examined ${anchor_examined} of ${anchor_listed} listed candidates and proved no deploy leg — the scan ended BEFORE its input was exhausted, so \$anchor_widest holds the NEWEST candidate, not the oldest scanned. Widening to it would NARROW the diff and strand a commit; falling back to the safe base instead."
+            anchor_widest=""
+          fi
           if [ -z "$base" ] && [ -n "$anchor_widest" ]; then
             base="$anchor_widest"
             echo "anchor: no run in the scanned window proved a deploy leg — widening to the OLDEST scanned success $base (already-covered stays disarmed)"

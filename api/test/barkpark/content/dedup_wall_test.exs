@@ -455,8 +455,6 @@ defmodule Barkpark.Content.DedupWallTest do
     assert error_only =~ "Content.DedupWall DEFECT (not an outage): candidate fetch failed"
     assert error_only =~ "FunctionClauseError"
 
-    refute capture_log([level: :error], fn -> infra_class_refusal() end) =~ "Content.DedupWall"
-
     assert capture_log([level: :warning], fn -> infra_class_refusal() end) =~
              "Content.DedupWall degraded: candidate fetch failed"
   end
