@@ -119,6 +119,11 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "heading", text: "New heading", level: 2 };
     case "paragraph":
       return { id: null, type: "paragraph", content: [{ type: "text", value: "" }] };
+    case "blockquote":
+      // The plain quote: an empty inline body, like a paragraph (the catch-all below
+      // used to swallow this into a paragraph, so "/Quote" inserted no quote at all —
+      // found by Barkdown's row 12 slash sweep).
+      return { id: null, type: "blockquote", content: [{ type: "text", value: "" }] };
     case "list":
       return {
         id: null,
