@@ -433,15 +433,48 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
       refute Constraints.satisfied?(columns, [string_decl])
     end
 
-    test "validate/2 is deterministic — the dual index appends in block order" do
+    test "validate/2 returns errors as an EXACT list: decl errors, then slot errors, then query errors, each in block order" do
+      # The previous version of this test asserted `validate(b, d) == validate(b, d)`
+      # under a name promising block order. X == X holds under ANY ordering rule, and
+      # the old fixture yielded ONE error, so order was unobservable even in principle.
+      # This fixture spans all THREE concatenated sources and is pinned as an exact
+      # list, so reversing (or re-grouping) validate/2's return fails here.
       decls = [
         %{
-          kind: :section,
-          presence: :optional,
-          count: {:min, 0},
+          kind: "title",
+          presence: :required,
+          count: {:min, 1},
           position: [:free],
           locked: false
-        },
+        }
+      ]
+
+      blocks = [
+        # block 0 — a slot error (a widget nested in an element-only slot)
+        typed("callout", %{"slots" => %{"body" => [typed("callout")]}}),
+        # block 1 — a DIFFERENT slot error, so slot-error order is block order
+        typed("card", %{"slots" => %{"title" => [typed("section", %{"children" => []})]}}),
+        # block 2 — a query error (a present-but-non-map task-list query)
+        typed("task-list", %{"query" => "proj:x"})
+      ]
+
+      assert Constraints.validate(blocks, decls) == [
+               # decl_errors — presence, then cardinality, for the one declaration
+               ~s|the required "title" block is missing|,
+               ~s|at least 1 "title" block required, found 0|,
+               # slot_errors — block 0 before block 1
+               ~s|the "body" slot accepts only element blocks, got a widget ("callout")|,
+               ~s|the "title" slot accepts only element blocks, got a section ("section")|,
+               # query_errors — last
+               ~s|the "task-list" query must be a map (a filter like %{"label" => "proj:x"}), got a non-map value|
+             ]
+    end
+
+    test "validate/2 is deterministic — the same blocks and declarations twice give the same list" do
+      # Determinism with a REAL subject: a pinned multi-error expectation (above)
+      # plus a repeat-call check whose result is a known, non-empty value — not
+      # `validate(b, d) == validate(b, d)`, which asserts nothing about validate/2.
+      decls = [
         %{
           kind: :widget,
           presence: :optional,
@@ -452,7 +485,10 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
       ]
 
       blocks = [typed("callout"), typed("columns"), typed("paragraph")]
-      assert Constraints.validate(blocks, decls) == Constraints.validate(blocks, decls)
+      expected = [~s|a "widget" block may not be at block 0|]
+
+      assert Constraints.validate(blocks, decls) == expected
+      assert Constraints.validate(blocks, decls) == expected
     end
 
     test "a relation can anchor on a whole tier — {:after, :element}" do
