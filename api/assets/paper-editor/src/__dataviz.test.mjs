@@ -352,13 +352,13 @@ check("fleetChipLabel: each data-viz kind has a terse human label for the loadin
   assert.equal(fleetChipLabel({ type: "chart" }), "Chart");
 });
 
-// ── D4: no slash insert — CANVAS_SLASH_TYPES untouched at 26 (23 + checklist + quote + image) ──
+// ── D4: no slash insert — CANVAS_SLASH_TYPES untouched at 27 (23 + checklist + quote + image + toggle) ──
 
-check("D4: data-viz kinds are NOT slash-insertable and CANVAS_SLASH_TYPES stays at 26", () => {
+check("D4: data-viz kinds are NOT slash-insertable and CANVAS_SLASH_TYPES stays at 27", () => {
   for (const type of DATAVIZ_TYPES) {
     assert.ok(!CANVAS_SLASH_TYPES.has(type), `${type} must not be slash-insertable (D4)`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 26, "the slash allowlist must stay at 26 types (23 + checklist + the plain quote + image)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 27, "the slash allowlist must stay at 27 types (23 + checklist + the plain quote + image + toggle)");
 });
 
 

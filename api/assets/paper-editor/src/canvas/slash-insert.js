@@ -59,6 +59,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "action",
   "figure",
   "image",
+  "expandable",
   "columns",
   "section",
   "terminal",
@@ -169,6 +170,14 @@ export function canvasDefaultBlock(type) {
         id: null,
         type: "section",
         title: "New section",
+        blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
+      };
+    case "expandable":
+      // A toggle with a summary and one empty paragraph (the `+` body must hold a child).
+      return {
+        id: null,
+        type: "expandable",
+        summary: "Details",
         blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
       };
     case "terminal":

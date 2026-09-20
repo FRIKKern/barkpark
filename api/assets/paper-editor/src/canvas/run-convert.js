@@ -515,7 +515,7 @@ function isCanvasTaskListNode(nodeType) {
 // A container FOLDS INTO a run (it no longer SPLITS one). V1: FORBID container-in-
 // container. Keep aligned with columns-node.js, section-node.js, terminal-node.js and
 // paper_canvas.ex @canvas_container_types (partition-shape tests pin all four).
-const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal"]);
+const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal", "expandable"]);
 
 // block.type → its TipTap NODE name (they differ): columns→bpColumns, section→bpSection,
 // terminal→bpTerminal. runToTiptap maps block.type → node.type; runToOps/classifyNode
@@ -524,7 +524,10 @@ const CANVAS_CONTAINER_NODE_NAMES = {
   columns: "bpColumns",
   section: "bpSection",
   terminal: "bpTerminal",
+  expandable: "bpExpandable",
 };
+// The expandable (native toggle) container's NODE name (expandable-node.js).
+const CANVAS_EXPANDABLE_NODE_NAME = "bpExpandable";
 // The section container's NODE name (singular alias used by sectionBlockToNode).
 const CANVAS_CONTAINER_NODE_NAME = "bpSection";
 // Reverse: node.type → bpType. Used by classifyNode/isCanvasContainerNode to resolve
@@ -533,6 +536,7 @@ const CANVAS_CONTAINER_BP_TYPE_BY_NODE = {
   bpColumns: "columns",
   bpSection: "section",
   bpTerminal: "terminal",
+  bpExpandable: "expandable",
 };
 
 // The per-column node name + the verbatim child-carrier atom node name (columns-node.js).
@@ -896,6 +900,7 @@ function blockToNode(block) {
       //     non-first-class child rides a read-only bpColumnAtom (columns-node.js).
       // node.type is the NODE name (bpSection/bpTerminal/bpColumns), not the bpType.
       if (bpType === "section") return sectionBlockToNode(block, bpId, bpType);
+      if (bpType === "expandable") return expandableBlockToNode(block, bpId, bpType);
       if (bpType === "terminal") return terminalBlockToNode(block, bpId, bpType);
       return columnsBlockToNode(block, bpId, bpType);
     }
@@ -1047,6 +1052,81 @@ function sectionNodeToBlock(node, id, taken) {
     return built;
   });
   return block;
+}
+
+// ── expandable ⇄ canvas toggle container (bpExpandable) ───────────────────────
+//
+// { id, type:"expandable", summary?, open?, blocks|children:[child, …] } ⇄ the
+// bpExpandable CONTAINER (expandable-node.js): summary/open on attrs, the body as
+// nested content, and the persisted body KEY on attrs.bodyKey (patch.ex visible_alias:
+// a `children` body stays `children`; the default is `blocks`). Diff strategy, echo
+// key and reconstruction mirror the section (child-id sequence → coarse replace, else
+// summary patch + per-child interior patches). A container child rides bpOpaque (V1).
+function expandableBody(block) {
+  if (block && Array.isArray(block.children)) return { key: "children", children: block.children };
+  if (block && Array.isArray(block.blocks)) return { key: "blocks", children: block.blocks };
+  return { key: "blocks", children: [] };
+}
+
+function expandableBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "expandable" };
+  if (block && block.summary != null) attrs.summary = block.summary;
+  if (block && block.open != null) attrs.open = block.open === true;
+  const { key, children } = expandableBody(block);
+  if (key !== "blocks") attrs.bodyKey = key;
+  const content = children.map((child) =>
+    child && isCanvasContainerType(child.type)
+      ? { type: "bpOpaque", attrs: { bpId: child.id, bpType: child.type, bpBlock: deepClone(child) } }
+      : blockToNode(child),
+  );
+  const node = { type: CANVAS_EXPANDABLE_NODE_NAME, attrs };
+  if (content.length) node.content = content;
+  return node;
+}
+
+function expandableNodeToBlock(node, id, taken) {
+  const seen = taken || new Set();
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "expandable" };
+  if (attrs.summary != null) block.summary = attrs.summary;
+  if (attrs.open != null) block.open = attrs.open === true;
+  const key = attrs.bodyKey === "children" ? "children" : "blocks";
+  block[key] = ((node && node.content) || []).map((child) => {
+    const cls = classifyNode(child);
+    const childBpId = child.attrs && child.attrs.bpId;
+    const cid = childBpId != null ? childBpId : mintId(seen);
+    return nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+  });
+  return block;
+}
+
+function expandableSummaryChanged(prevNode, nextNode) {
+  const norm = (n) => {
+    const t = n && n.attrs && n.attrs.summary;
+    return t == null || t === "" ? null : t;
+  };
+  return norm(prevNode) !== norm(nextNode);
+}
+
+function expandableSummaryPatch(nextNode) {
+  const t = nextNode && nextNode.attrs && nextNode.attrs.summary;
+  return { summary: t == null || t === "" ? null : t };
+}
+
+// Per-child interior patches when the child-id sequence is unchanged — the section's
+// helper, fed the body under whichever key the persisted block keeps it.
+function expandableChildPatchOps(prevNode, nextNode, prevBlock) {
+  const { children } = expandableBody(prevBlock);
+  return sectionChildPatchOps(prevNode, nextNode, { blocks: children });
+}
+
+function stableExpandableKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    summary: a.summary == null || a.summary === "" ? null : a.summary,
+    open: a.open == null ? null : a.open === true,
+    content: node.content || null,
+  });
 }
 
 // The child-id sequence of a section node (each child's bpId, or null for a
@@ -1231,6 +1311,7 @@ function walkBlockIds(blocks, sink) {
     if (!block) continue;
     if (block.id != null) sink.add(block.id);
     if (Array.isArray(block.blocks)) walkBlockIds(block.blocks, sink);
+    if (Array.isArray(block.children)) walkBlockIds(block.children, sink);
   }
 }
 
@@ -3926,7 +4007,27 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
     }
 
     if (entry.isContainer) {
-      // Canvas container node — sub-route by bpType (section | terminal | columns).
+      // Canvas container node — sub-route by bpType (section | expandable | terminal | columns).
+      if (entry.bpType === "expandable") {
+        // expandable: the section's strategy. A changed child-id sequence → ONE coarse
+        // replace-block of the rebuilt subtree; identical → the summary patch, then
+        // each changed child's interior patch (nested ids resolve in patch.ex).
+        if (sectionChildSeqChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "replace-block",
+            id: entry.id,
+            block: expandableNodeToBlock(entry.node, entry.id, taken),
+          });
+        } else {
+          if (expandableSummaryChanged(prevNode, entry.node)) {
+            ops.push({ op: "patch-block", id: entry.id, patch: expandableSummaryPatch(entry.node) });
+          }
+          for (const childOp of expandableChildPatchOps(prevNode, entry.node, prevBlock)) {
+            ops.push(childOp);
+          }
+        }
+        continue;
+      }
       if (entry.bpType === "section") {
         // section: op strategy hinges on whether the child-id SEQUENCE changed:
         //   * DIFFERS (child add/remove/reorder/reparent, or a canvas-created null-id
@@ -4398,6 +4499,9 @@ function nodeContentEqual(serverNode, liveNode) {
     if (bp === "section") {
       return stableSectionKey(serverNode) === stableSectionKey(liveNode);
     }
+    if (bp === "expandable") {
+      return stableExpandableKey(serverNode) === stableExpandableKey(liveNode);
+    }
     if (bp === "terminal") {
       return !terminalNodeChanged(serverNode, liveNode);
     }
@@ -4467,6 +4571,9 @@ function nextNodeToBlock(entry, taken) {
     //     with the minted id; a NEW columns carries no unknown sibling keys, lossless.
     if (entry.bpType === "section") {
       return sectionNodeToBlock(node, entry.id, taken || new Set());
+    }
+    if (entry.bpType === "expandable") {
+      return expandableNodeToBlock(node, entry.id, taken || new Set());
     }
     if (entry.bpType === "terminal") {
       return terminalNodeToBlock(node, entry.id);

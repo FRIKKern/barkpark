@@ -27,6 +27,7 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
   { group: "Text", type: "columns", label: "Columns", hint: "▥", desc: "multi-column layout" },
+  { group: "Text", type: "expandable", label: "Toggle", hint: "▸", desc: "collapsible details" },
 
   { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
   { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },
