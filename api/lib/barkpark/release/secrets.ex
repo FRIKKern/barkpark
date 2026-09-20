@@ -4,11 +4,18 @@ defmodule Barkpark.Release.Secrets do
 
   `config/runtime.exs` raises in `:prod` when any of these env vars are
   missing: `BARKPARK_CLOAK_KEY`, `BARKPARK_KEK`, `DATABASE_URL`,
-  `SECRET_KEY_BASE`, `PHX_HOST`, `PREVIEW_JWT_SECRET`, and
-  `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`. This module generates the five
-  cryptographic secrets and writes a `~/.barkpark/.env` template
-  idempotently so a personal-local install can boot without hand-rolling
-  `openssl rand` invocations.
+  `SECRET_KEY_BASE`, `PHX_HOST` and `PREVIEW_JWT_SECRET`. This module
+  generates the five cryptographic secrets and writes a `~/.barkpark/.env`
+  template idempotently so a personal-local install can boot without
+  hand-rolling `openssl rand` invocations.
+
+  `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` is generated here too, but it is
+  NOT in that raising set: it is a FEATURE secret, and runtime.exs only
+  warns when it is absent (a boot refusal there also refused
+  `mix ecto.migrate`, which stranded three fleet boxes on a 28-52 day old
+  schema — fleet migration-lag census, 2026-09-19). Absent, the CycleFleet
+  release-capture surface refuses with
+  `:release_capture_signing_unavailable`; everything else serves.
 
   This is intentionally **separate** from `Barkpark.Release` (the
   migrate/seed release-task module) — it never touches the database and

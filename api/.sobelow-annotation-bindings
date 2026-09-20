@@ -45,6 +45,7 @@ lib/barkpark/release.ex	seed
 lib/barkpark/release/secrets.ex	read_existing
 lib/barkpark/release/secrets.ex	write_env
 lib/barkpark/repo.ex	set_local_statement_timeout!
+lib/barkpark/search/golden_eval.ex	run
 lib/barkpark/self_update/runner.ex	bounded_preflight
 lib/barkpark/sites/build_log_scrub.ex	do_scrub_file
 lib/barkpark/sites/build_log_scrub.ex	fail

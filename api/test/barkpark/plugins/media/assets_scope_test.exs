@@ -143,6 +143,22 @@ defmodule Barkpark.Plugins.Media.AssetsScopeTest do
     |> Enum.sort()
   end
 
+  # Same clause pair as `visible_doc_ids/3`, but the DATASET envelope's project
+  # and the WORKSPACE envelope's project rung are supplied SEPARATELY. That is
+  # what lets the ARMED control drop the project RUNG on its own while leaving
+  # the dataset resolution byte-identical — otherwise the control would move two
+  # things at once and prove neither.
+  defp visible_doc_ids(media_file_id, ws_id, dataset_project_id, envelope_project_id) do
+    Document
+    |> where([d], d.type == ^@asset_type)
+    |> Assets.scope_asset_dataset(@dataset, workspace_id: ws_id, project_id: dataset_project_id)
+    |> Assets.scope_asset_workspace(ws_id, envelope_project_id)
+    |> where([d], fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id))
+    |> Repo.all()
+    |> Enum.map(& &1.doc_id)
+    |> Enum.sort()
+  end
+
   describe "find_by_media_file_id/3 — never-worse (legacy NULL dataset_id)" do
     test "returns a legacy asset doc whose dataset_id is NULL on the default path" do
       {default_ws, default_project} = ensure_default_scope!()
@@ -227,6 +243,114 @@ defmodule Barkpark.Plugins.Media.AssetsScopeTest do
       assert visible_doc_ids(media_file_id, ws_b, proj_b) == [doc_b.doc_id],
              "CROSS-WORKSPACE LEAK: the batch scope left workspace A's doc visible; " <>
                "the map collapse hid it behind a single key"
+    end
+  end
+
+  describe "scope_asset_workspace/3 — the PROJECT rung" do
+    # The envelope's is_binary/is_binary clause stacks TWO rungs in one
+    # parenthesis. Both cross-tenant fixtures above stand two rows in DIFFERENT
+    # WORKSPACES, so the WORKSPACE rung answers them and the inner project rung
+    # is never consulted: appending `or not is_nil(d.project_id)` to it — making
+    # it unconditionally true, workspace rung byte-identical — left all 366
+    # media-fence tests green (task-96d8720de593d82a).
+    #
+    # This fixture is the same shape one rung down: ONE workspace, TWO projects.
+    # The foreign doc shares the reader's workspace_id, so the workspace rung
+    # admits it by construction, and carries dataset_id=NULL, so
+    # `scope_asset_dataset/3` admits it on its NULL-tolerant leg. The project
+    # rung is the only thing left that can refuse it.
+    test "a SIBLING PROJECT's asset doc in the SAME workspace never resolves" do
+      ws = create_workspace!()
+      proj_reader = create_project!(ws)
+      proj_foreign = create_project!(ws)
+
+      {:ok, ds_reader} = Tenancy.get_or_create_dataset(proj_reader, @dataset)
+      {:ok, ds_foreign} = Tenancy.get_or_create_dataset(proj_foreign, @dataset)
+
+      refute ds_reader.id == ds_foreign.id,
+             "FIXTURE NOT ARMED: the two projects resolved the SAME dataset row"
+
+      media_file_id = "shared-blob-#{System.unique_integer([:positive])}"
+
+      mine =
+        insert_asset_doc!(media_file_id, %{
+          workspace_id: ws.id,
+          project_id: proj_reader.id,
+          dataset_id: ds_reader.id
+        })
+
+      foreign =
+        insert_asset_doc!(media_file_id, %{
+          workspace_id: ws.id,
+          project_id: proj_foreign.id,
+          dataset_id: nil
+        })
+
+      assert is_nil(foreign.dataset_id),
+             "FIXTURE NOT ARMED: a stamped dataset_id is refused by scope_asset_dataset/3 " <>
+               "before the workspace envelope is reached, so the project rung is untested"
+
+      assert foreign.workspace_id == mine.workspace_id,
+             "FIXTURE NOT ARMED: the foreign doc must share the reader's workspace, or " <>
+               "the WORKSPACE rung is the excluder"
+
+      refute foreign.project_id == mine.project_id
+
+      # As in `cross_tenant_fixture!/0`: push the foreign row's updated_at past
+      # the reader's own, so an un-runged query does not merely ADMIT the leak —
+      # the `desc: updated_at limit 1` single-doc read PREFERS it.
+      {1, _} =
+        Repo.update_all(
+          from(d in Document, where: d.id == ^foreign.id),
+          set: [updated_at: DateTime.add(mine.updated_at, 60, :second)]
+        )
+
+      # ARMED — drop the project rung alone (the envelope's 2-arg clause) and
+      # the foreign doc IS visible. Everything but the rung admits this row.
+      assert visible_doc_ids(media_file_id, ws.id, proj_reader.id, nil) ==
+               Enum.sort([mine.doc_id, foreign.doc_id]),
+             "FIXTURE NOT ARMED: the foreign doc is not visible even with the project rung " <>
+               "off, so its absence below proves nothing about the rung"
+
+      assert visible_doc_ids(media_file_id, ws.id, proj_reader.id, proj_reader.id) == [
+               mine.doc_id
+             ],
+             "CROSS-PROJECT ASSET-DOC LEAK: a sibling project's mediaAsset doc stayed " <>
+               "visible to a read scoped to this project inside the same workspace. Only " <>
+               "the project rung of scope_asset_workspace/3 can refuse it."
+
+      found =
+        Assets.find_by_media_file_id(media_file_id, @dataset,
+          workspace_id: ws.id,
+          project_id: proj_reader.id
+        )
+
+      assert found.doc_id == mine.doc_id,
+             "CROSS-PROJECT ASSET-DOC LEAK: find_by_media_file_id/3 resolved " <>
+               "#{inspect(found.doc_id)} — the sibling project's doc, freshly updated, " <>
+               "won the `desc: updated_at limit 1` read"
+    end
+
+    test "NEVER-WORSE — a legacy NULL-project doc stays visible under a project scope" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      {:ok, _ds} = Tenancy.get_or_create_dataset(proj, @dataset)
+
+      media_file_id = "legacy-blob-#{System.unique_integer([:positive])}"
+
+      # `Content.WriteScope.put_scope_attrs/2` degrades to no project key when
+      # no project resolves, so a workspace-only write lands exactly here. The
+      # rung's `is_nil(d.project_id)` leg is what keeps it visible.
+      legacy =
+        insert_asset_doc!(media_file_id, %{
+          workspace_id: ws.id,
+          project_id: nil,
+          dataset_id: nil
+        })
+
+      assert visible_doc_ids(media_file_id, ws.id, proj.id, proj.id) == [legacy.doc_id],
+             "NEVER-WORSE REGRESSION: a legacy NULL-project asset doc vanished from its " <>
+               "own tenant's scoped read — the rung's `is_nil(d.project_id)` leg is gone"
     end
   end
 end
