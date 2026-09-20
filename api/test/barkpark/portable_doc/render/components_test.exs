@@ -585,13 +585,18 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     assert html =~ "left:90%;width:10%"
   end
 
-  test "roadmap escapes titles + handles missing geometry" do
+  test "roadmap escapes titles + REFUSES to place a geometry-less row" do
+    # pp-b-offline-degrade: this row has no geometry of any kind, and the clamp
+    # default used to paint it as `left:0%;width:100%` — a full-width bar that,
+    # repeated per row, reads as a confident timeline nobody authored.
     html =
       Components.roadmap_html(%{"snapshot" => [%{"title" => "<b>x</b>", "status" => "open"}]})
 
     refute html =~ "<b>x</b>"
     assert html =~ "&lt;b&gt;x&lt;/b&gt;"
-    assert html =~ "left:0%"
+    refute html =~ "left:0%"
+    refute html =~ "bp-rm__bar"
+    assert html =~ Components.roadmap_unplaced_copy()
   end
 end
 
@@ -808,6 +813,12 @@ defmodule Barkpark.PortableDoc.Render.ComponentsRoadmapV2Test do
   end
 
   # A malformed span must not activate the v2 path at all.
+  #
+  # RESTATED for pp-b-offline-degrade. The claim under test is unchanged — a bad
+  # span never derives geometry from the row dates — but "falls back to the pct
+  # path" is now proven by a row that HAS a pct, and the dates-only row proves
+  # the other half: with the v2 path shut off it has no geometry left, so it
+  # renders the explicit unplaced lane instead of the clamp's full-width bar.
   test "a malformed or inverted block span leaves every lane on the pct path" do
     for {s, e} <- [{"2026-06-30", "2026-01-01"}, {"not-a-date", "2026-06-30"}, {"2026-01-01", ""}] do
       html =
@@ -815,12 +826,26 @@ defmodule Barkpark.PortableDoc.Render.ComponentsRoadmapV2Test do
           "start" => s,
           "end" => e,
           "snapshot" => [
+            %{
+              "title" => "pct",
+              "status" => "open",
+              "left" => 20,
+              "width" => 30,
+              "start" => "2026-02-01",
+              "end" => "2026-03-01"
+            },
             %{"title" => "x", "status" => "open", "start" => "2026-02-01", "end" => "2026-03-01"}
           ]
         })
 
-      assert html =~ ~s(style="left:0%;width:100%"),
-             "span #{inspect({s, e})} must NOT derive geometry"
+      assert html =~ ~s(style="left:20%;width:30%"),
+             "span #{inspect({s, e})} must NOT derive geometry — the literal pct wins"
+
+      assert html =~ "bp-rm__lane--unplaced",
+             "span #{inspect({s, e})}: the dates-only row has no geometry left to use"
+
+      refute html =~ ~s(style="left:0%;width:100%"),
+             "span #{inspect({s, e})}: a geometry-less row must not clamp to a full-width bar"
     end
   end
 end

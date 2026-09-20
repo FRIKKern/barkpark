@@ -346,7 +346,9 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
     assert FleetEmail.tasks_email_html(%{"type" => "tasks", "snapshot" => []}) =~ "No tasks yet."
     assert FleetEmail.task_board_email_html(%{"type" => "task-board"}) =~ "No tasks yet."
     assert FleetEmail.roadmap_email_html(%{"type" => "roadmap"}) =~ "No roadmap items."
-    assert FleetEmail.task_detail_email_html(%{"type" => "task-detail"}) == ""
+    # An unresolved task-detail is NAMED, not erased (pp-b-offline-degrade): the
+    # article twin renders `bp-tdetail--empty`, so the email must not answer "".
+    assert FleetEmail.task_detail_email_html(%{"type" => "task-detail"}) =~ "No matching tasks."
     assert FleetEmail.tasks_email_html(nil) =~ "No tasks yet."
   end
 
