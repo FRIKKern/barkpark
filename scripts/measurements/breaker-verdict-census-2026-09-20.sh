@@ -109,8 +109,20 @@ while IFS=$'\t' read -r win wf run_id created concl; do
     # Literal-tab key, built explicitly so an editor cannot collapse it silently.
     key=$(printf '%s\t%s' "$wf" "$jname")
     grep -qxF "$key" "$OUT/jobs-$win.tsv" || continue
-    log=$(gh api "repos/$REPO/actions/jobs/$jid/logs" 2>/dev/null)
-    if   [ -z "$log" ];                                                  then v=LOG-UNREADABLE
+    # RETRY, and do not trust a SHORT body. A job whose log does not exist --
+    # a SKIPPED job, or a transient failure -- gets a ~215-byte BlobNotFound XML
+    # document on STDOUT, not an empty string, so `[ -z "$log" ]` lets it through
+    # and it lands in NO-BREAKER-OUTPUT as if the job had run and said nothing.
+    # That is how two real THIS-PRS-OWN verdicts were lost on the first census
+    # pass. The error is ONE-DIRECTIONAL (a verdict needs its sentence literally
+    # present), so every classification below can only ever be understated.
+    log=""
+    for _try in 1 2 3; do
+      log=$(gh api "repos/$REPO/actions/jobs/$jid/logs" 2>/dev/null)
+      [ "${#log}" -gt 1000 ] && break
+      sleep 2
+    done
+    if   [ "${#log}" -le 1000 ];                                         then v=NO-LOG
     elif printf '%s' "$log" | grep -qF 'main-red-breaker: INHERITED-FROM-MAIN';    then v=INHERITED-FROM-MAIN
     elif printf '%s' "$log" | grep -qF 'main-red-breaker: OWNERSHIP-UNDETERMINED'; then v=OWNERSHIP-UNDETERMINED
     elif printf '%s' "$log" | grep -qF 'main-red-breaker: RUNNER-LOCAL';           then v=RUNNER-LOCAL
