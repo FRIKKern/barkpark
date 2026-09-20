@@ -1449,6 +1449,165 @@ else
   pass=$((pass+1)); printf 'ok   %-40s (no false accusation)\n' "outage is not a PR fault"
 fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# THE LANDING-TRAILER ARMS (task-ee5b82efaee0fb0b)
+#
+# The gate reads the PR BODY. The commit message that squashes onto main is a
+# SEPARATE text — this repo's squash setting is COMMIT_MESSAGES — and nothing
+# read it. Specimen, measured 2026-09-20: PR #19417 merged as 9f931a6f8 whose
+# landed message ends `Task: task-PENDING-nightly` (not_found) while its body
+# named task-f902a5f2f6e3bcb3 (real). The gate went green, correctly by its own
+# contract, and main now carries a commit whose only durable ledger pointer is
+# dead.
+#
+# The specimen is reproduced here in SHAPE against the local fixture server:
+# `active` stands for the real body row, `ghost` (no fixture file → HTTP 404)
+# for task-PENDING-nightly.
+# ════════════════════════════════════════════════════════════════════════════
+SPECIMEN_BODY="$(printf 'fix(cli): brief fixtures (#19417)\n\nTask: active\n')"
+SPECIMEN_COMMITS="$(printf 'fix(cli): brief fixtures\n\nTask: ghost\n')"
+BOTH_RESOLVE_COMMITS="$(printf 'fix(a): one\n\nTask: active\n\nfix(b): two\n\nTask: doneclosed\n')"
+NO_TRAILER_COMMITS="$(printf 'chore: no trailer anywhere\n\njust prose\n')"
+
+mode_check() { # mode_check <label> <expected_exit> <substring|-> <script> <args...> ; env via MODE_ENV
+  local label="$1" want="$2" sub="$3" script="$4"; shift 4
+  local out="$fixtures/mode.out" got
+  ( eval "LEDGER_BASE=\"$BASE\" ${MODE_ENV:-} bash \"$script\" $*" ) > "$out" 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    fail=$((fail+1)); printf 'FAIL %-46s want exit %s got %s\n' "$label" "$want" "$got"
+    sed -e 's/^/       | /' "$out" | tail -6; return
+  fi
+  if [ "$sub" != "-" ] && ! grep -qF -- "$sub" "$out"; then
+    fail=$((fail+1)); printf 'FAIL %-46s exit %s ok, output lacks [%s]\n' "$label" "$got" "$sub"
+    sed -e 's/^/       | /' "$out" | tail -6; return
+  fi
+  pass=$((pass+1)); printf 'ok   %-46s (exit %s)\n' "$label" "$got"
+}
+
+# ── c0 — THE HOLE, on the specimen shape, as the gate behaves WITHOUT the new
+# step. Two facts, and it is their CONJUNCTION that is the defect:
+#   (1) the body-only decision path — every byte of the gate the workflow ran
+#       before this change — PASSES this PR, and
+#   (2) the text that will actually land names an id the ledger 404s.
+# Neither alone is a finding. Together they are a green required check over a
+# commit whose durable pointer is dead.
+MODE_ENV="LEDGER_TOKEN=harness-token PR_BODY=\"\$SPECIMEN_BODY\""
+: > "$fixtures/mode.out"
+body_id="$(PR_BODY="$SPECIMEN_BODY" bash "$GATE" --extract-task-id 2>/dev/null)"
+commit_id="$(PR_BODY="$SPECIMEN_COMMITS" bash "$GATE" --extract-task-id 2>/dev/null)"
+( TASK_ID="$body_id" LEDGER_BASE="$BASE" LEDGER_TOKEN=harness-token bash "$GATE" ) >/dev/null 2>&1
+body_rc=$?
+( TASK_ID="$commit_id" LEDGER_BASE="$BASE" LEDGER_TOKEN=harness-token bash "$GATE" ) >/dev/null 2>&1
+commit_rc=$?
+if [ "$body_id" = "active" ] && [ "$commit_id" = "ghost" ] && [ "$body_rc" = "0" ] && [ "$commit_rc" = "1" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s (body=%s passes rc0; landing=%s is rc1 and was never read)\n' "c0: the body-only gate passes the specimen" "$body_id" "$commit_id"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s body_id=%s(rc %s) commit_id=%s(rc %s) — want active/0 and ghost/1\n' "c0: the body-only gate passes the specimen" "$body_id" "$body_rc" "$commit_id" "$commit_rc"
+fi
+
+# ── c1 — the same shape is now REFUSED, and the refusal NAMES which of the two
+# trailers was unresolvable and what was read. Four separate assertions,
+# because an exit code alone cannot tell this refusal from any other exit 1 and
+# the WORDS are the deliverable: an author told only "a task does not exist"
+# goes and edits the PR body, which is the trailer that is fine.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$SPECIMEN_COMMITS\""
+mode_check "c1: dead landing trailer is REFUSED"   1 "ghost"                          "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the COMMIT, not body" 1 "COMMIT MESSAGE that will squash" "$GATE" --check-landing-trailers
+mode_check "c1: refusal quotes what was READ"      1 "does not exist on the ledger"    "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the body's own id"   1 "the body names 'active'"         "$GATE" --check-landing-trailers
+
+# ── c2 — THE POSITIVE CONTROL, and the vacuity guard on it. "every landing
+# trailer resolves" is satisfied by a scan that read ZERO of them, so the
+# control asserts the SCAN SIZE as well as the exit code. Without the second
+# assertion this row would stay green with the extractor deleted.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\""
+mode_check "c2: both landing trailers resolve"     0 "scanned 2 distinct"              "$GATE" --check-landing-trailers
+mode_check "c2: and it says every one resolved"    0 "every one of the 2 Task: trailer" "$GATE" --check-landing-trailers
+# A branch whose commits name no task is SILENT, not refused — that is the
+# measured choice (38 of 52 open PRs on 2026-09-20 are this shape, every
+# dependabot PR among them) and it is why the rule is "every landing trailer
+# resolves" and not "the landing trailers must include the body's id".
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$NO_TRAILER_COMMITS\""
+mode_check "c2: no landing trailer is silent"      0 "scanned 0 distinct"              "$GATE" --check-landing-trailers
+
+# A FILE that is not there is a REFUSAL, never an empty scan — an unreadable
+# input reading as "no trailers" is this gate going green having looked at
+# nothing, which is the whole defect reintroduced one level up.
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES_FILE=$fixtures/nope.txt"
+mode_check "landing: missing input file REFUSES"   1 "were NOT read"                   "$GATE" --check-landing-trailers
+printf '%s' "$BOTH_RESOLVE_COMMITS" > "$fixtures/landing.txt"
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES_FILE=$fixtures/landing.txt"
+mode_check "landing: file input is read"           0 "scanned 2 distinct"              "$GATE" --check-landing-trailers
+
+# The ledger's OWN failure modes must survive the recursion: an outage on a
+# landing trailer is exit 2 (UNCHECKED), never a false accusation against the PR.
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\" LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=1"
+mode_check "landing: ledger outage is UNCHECKED"   2 "-"                               "$GATE" --check-landing-trailers
+# EXISTENCE, NOT ACTIVE CLAIM. `openone` is open and never claimed: the main
+# gate reds it (proven above) and --resolve-only must NOT, because a landed
+# commit legitimately points at a row that is not being worked right now.
+MODE_ENV="LEDGER_TOKEN=harness-token TASK_ID=openone"
+mode_check "resolve-only: existence, not claim"    0 "RESOLVED"                        "$GATE" --resolve-only
+MODE_ENV="LEDGER_TOKEN=harness-token TASK_ID=ghost"
+mode_check "resolve-only: a 404 is still rc 1"     1 "does not exist"                  "$GATE" --resolve-only
+
+# ── MUTATION PROOF ──────────────────────────────────────────────────────────
+# A fixture nobody has seen fail is not evidence. Two mutants, each reverting
+# ONE half of the change, each expected to turn a specific arm above green-when-
+# it-should-be-red. PR_TASK_GATE_TRAILER_LIB is why the mutant can live in a
+# temp directory without losing the grammar.
+MUTANT="$fixtures/mutant-gate.sh"
+sed -e 's/^  if \[ -n "\$landing_bad" \]; then$/  if false; then/' "$GATE" > "$MUTANT"
+if ! grep -q 'if false; then' "$MUTANT"; then
+  fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the refusal guard was renamed\n' "mutation: refusal removed reds c1"
+else
+  MODE_ENV="PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$SPECIMEN_COMMITS\""
+  ( eval "LEDGER_BASE=\"$BASE\" $MODE_ENV bash \"$MUTANT\" --check-landing-trailers" ) >/dev/null 2>&1
+  mut_rc=$?
+  if [ "$mut_rc" = "0" ]; then
+    pass=$((pass+1)); printf 'ok   %-46s (mutant passes the dead trailer: the c1 arms are what catch it)\n' "mutation: refusal removed reds c1"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s mutant exited %s, so c1 is NOT what refuses — something else is, and c1 proves nothing\n' "mutation: refusal removed reds c1" "$mut_rc"
+  fi
+fi
+
+# Mutant 2 — a BLIND SCAN. The grammar is redefined to see nothing, which is
+# how a positive control goes vacuous: the exit code stays 0 while the gate
+# reads no trailers at all. The c2 arm must be the thing that notices, and it
+# notices via the SCAN SIZE, not the exit code.
+BLIND="$fixtures/blind-lib.sh"
+cp scripts/lib/task-trailers.sh "$BLIND"
+printf '\ntask_trailer_ids() { :; }\ntask_trailer_count() { printf 0; }\n' >> "$BLIND"
+blind_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=\"$BLIND\" LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\" bash \"$GATE\" --check-landing-trailers" 2>&1 )"
+blind_rc=$?
+if [ "$blind_rc" = "0" ] && ! printf '%s' "$blind_out" | grep -qF 'scanned 2 distinct'; then
+  pass=$((pass+1)); printf 'ok   %-46s (blind scan still exits 0 — only the scan-size assertion sees it)\n' "mutation: blind scan reds c2"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s blind rc=%s; the vacuity guard is not doing the work\n' "mutation: blind scan reds c2" "$blind_rc"
+fi
+
+# ── THE SHARED RESOLVER'S OWN SELFTEST ──────────────────────────────────────
+# scripts/lib/task-trailers.sh is the ONE grammar both pr-task-gate.sh and
+# scripts/landed-mark.sh read through. It runs here, inside the `PR task gate
+# self-test` job, which has NO paths filter — so it is covered on every PR,
+# including the ones that edit it, without a shell-harnesses.yml row.
+if bash scripts/lib/task-trailers.sh --selftest >"$fixtures/lib.out" 2>&1; then
+  pass=$((pass+1)); printf 'ok   %-46s (%s)\n' "shared trailer resolver selftest" "$(tail -1 "$fixtures/lib.out")"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s\n' "shared trailer resolver selftest"
+  sed -e 's/^/       | /' "$fixtures/lib.out"
+fi
+# THE GRAMMAR IS NOT DUPLICATED. The regex lives in exactly one file; a copy in
+# either reader is how #5290 went red on a correct trailer.
+dupes="$(grep -l "\\^task:\\[\\[:space:\\]\\]\\*" scripts/pr-task-gate.sh scripts/landed-mark.sh 2>/dev/null | tr '\n' ' ')"
+if [ -z "$dupes" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s (neither reader carries a second copy)\n' "one grammar, one file"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s the trailer regex reappeared in: %s\n' "one grammar, one file" "$dupes"
+fi
+MODE_ENV=""
+
 echo "---"
 echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]
