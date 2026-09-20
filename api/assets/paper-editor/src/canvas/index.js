@@ -148,6 +148,8 @@ import { Figure } from "./figure-node.js";
 import { Expandable } from "./expandable-node.js";
 // steps / tabs: containers of titled rows (a title input over a block+ body each).
 import { Steps, Step, Tabs, Tab } from "./rows-node.js";
+// The "data + island" atoms: equation, footnotes, contents, video.
+import { Equation, Footnote, Toc, Video } from "./island-node.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
 // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
@@ -957,6 +959,10 @@ class BpPaperCanvas extends HTMLElement {
         Step,
         Tabs,
         Tab,
+        Equation,
+        Footnote,
+        Toc,
+        Video,
         // The mountable bpOpaque verbatim carry. Registers `bpOpaque` (atom, bpBlock
         // whole-block attr, a read-only chip) so run-convert's opaque projection —
         // a section's non-canvas child (nested section / composite / codelist / …) —

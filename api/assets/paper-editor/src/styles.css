@@ -1236,6 +1236,19 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head { padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
 .bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head > input.bp-tabs__tab { font-weight: 700; color: var(--paper-ink); border-bottom: var(--bp-rule-hairline) solid var(--paper-accent); padding: 6px 12px; }
 .bp-canvas-tabs > .bp-canvas-row + .bp-canvas-row { border-top: 1px solid var(--paper-chrome-border); }
+/* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
+   row that hides at rest once the block has data. */
+.bp-canvas-island { position: relative; margin: 1rem 0 0; }
+.bp-canvas-island__empty { padding: 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-island__fields { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0.5rem 0 0; }
+.bp-canvas-island__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 220px; min-width: 0; font: 0.8rem/1.4 var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink-soft); }
+.bp-canvas-island__field--bool { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.bp-canvas-island__input { border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; min-width: 0; }
+.bp-canvas-island__input:focus { outline: none; border-color: var(--paper-accent); }
+textarea.bp-canvas-island__input { resize: vertical; }
+.bp-canvas-island__mono, .bp-canvas-equation__tex { font-family: var(--paper-font-mono, ui-monospace, monospace); }
+.bp-canvas-video video { max-width: 100%; border-radius: 6px; }
+.ProseMirror-selectednode.bp-canvas-island { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
 /* editable-image: the bpImage atom — the picture, or an empty frame, over an alt + url row. */
 .bp-canvas-image { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; position: relative; }
 .bp-canvas-image-frame { position: relative; }

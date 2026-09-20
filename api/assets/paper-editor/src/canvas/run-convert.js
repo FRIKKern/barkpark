@@ -447,6 +447,25 @@ const CANVAS_FIGURE_NODE_NAME = "bpFigure";
 // ride verbatim on bpRest; locked/role ride the doctrine template attrs. KEEP LOCKSTEP
 // with image-node.js BP_IMAGE_NODE_NAME.
 const CANVAS_IMAGE_TYPES = new Set(["image"]);
+
+// The "data + island" atoms (island-node.js): equation / footnote / toc / video. Each
+// is a bag of editable keys on typed attrs (`fields`), everything else verbatim on
+// bpRest, one patch-block of the fields on change. KEEP LOCKSTEP with ISLAND_SPECS.
+const CANVAS_ISLAND_SPECS = {
+  equation: { nodeName: "bpEquation", fields: ["tex", "display"] },
+  footnote: { nodeName: "bpFootnote", fields: ["notes"] },
+  toc: { nodeName: "bpToc", fields: ["items", "numbered"] },
+  video: { nodeName: "bpVideo", fields: ["src", "poster", "loop"] },
+};
+const CANVAS_ISLAND_BP_TYPE_BY_NODE = Object.fromEntries(
+  Object.entries(CANVAS_ISLAND_SPECS).map(([t, s]) => [s.nodeName, t]),
+);
+function isCanvasIslandType(t) {
+  return Object.hasOwn(CANVAS_ISLAND_SPECS, t);
+}
+function isCanvasIslandNode(nodeType) {
+  return Object.hasOwn(CANVAS_ISLAND_BP_TYPE_BY_NODE, nodeType);
+}
 const CANVAS_IMAGE_NODE_NAME = "bpImage";
 function isCanvasImageType(t) {
   return CANVAS_IMAGE_TYPES.has(t);
@@ -881,6 +900,12 @@ function blockToNode(block) {
       // HTML (bp:block-html) rather than a client-computed chip. NOTE the node.type
       // is the NODE name (bpFleet), not the bpType.
       return fleetBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasIslandType(bpType)) {
+      // A "data + island" atom (equation / footnote / toc / video): editable keys on
+      // typed attrs, the rest verbatim. node.type is the NODE name, not the bpType.
+      return islandBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasImageType(bpType)) {
@@ -1346,6 +1371,12 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     // A stage child of a section (a pipeline flow) — diff the five scalars; emit the
     // present-or-null patch when it changed (same detector/builder as the top-level pass).
     return stageNodeChanged(prevChild, nextChild) ? stageNodeToPatch(nextChild) : null;
+  }
+  if (cls.isIsland) {
+    return islandNodeChanged(prevChild, nextChild) ? islandNodeToPatch(nextChild) : null;
+  }
+  if (cls.isImage) {
+    return imageNodeChanged(prevChild, nextChild) ? imageNodeToPatch(nextChild) : null;
   }
   if (cls.isAttrAtom) {
     if (nextChild.type === "bpDiagram") {
@@ -3177,6 +3208,71 @@ function stableFigureKey(node) {
   });
 }
 
+// ── island atoms ⇄ typed attrs + verbatim rest ────────────────────────────────
+const islandEmpty = (v) => v == null || v === "" || (Array.isArray(v) && v.length === 0);
+
+function islandBlockToNode(block, bpId, bpType) {
+  const spec = CANVAS_ISLAND_SPECS[bpType];
+  const attrs = { bpId, bpType };
+  const rest = {};
+  let hasRest = false;
+  for (const k of Object.keys(block || {})) {
+    if (k === "id" || k === "type") continue;
+    if (spec.fields.includes(k)) continue;
+    rest[k] = deepClone(block[k]);
+    hasRest = true;
+  }
+  for (const k of spec.fields) {
+    const v = block ? block[k] : undefined;
+    attrs[k] = v === undefined || v === "" ? null : deepClone(v);
+  }
+  attrs.bpRest = hasRest ? rest : null;
+  return { type: spec.nodeName, attrs };
+}
+
+function islandNodeToBlock(node, id) {
+  const bpType = CANVAS_ISLAND_BP_TYPE_BY_NODE[node && node.type];
+  const spec = CANVAS_ISLAND_SPECS[bpType];
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: bpType };
+  for (const k of spec.fields) {
+    if (attrs[k] != null && attrs[k] !== "") block[k] = deepClone(attrs[k]);
+  }
+  if (attrs.bpRest && typeof attrs.bpRest === "object") {
+    for (const k of Object.keys(attrs.bpRest)) {
+      if (k !== "id" && k !== "type" && !spec.fields.includes(k)) block[k] = deepClone(attrs.bpRest[k]);
+    }
+  }
+  return block;
+}
+
+// The patch: every editable key, present or cleared ("" for a string, [] for a list,
+// false for a flag) — patch-block merges keys, so a cleared field must ride, not vanish.
+function islandNodeToPatch(node) {
+  const bpType = CANVAS_ISLAND_BP_TYPE_BY_NODE[node && node.type];
+  const spec = CANVAS_ISLAND_SPECS[bpType];
+  const attrs = (node && node.attrs) || {};
+  const patch = {};
+  for (const k of spec.fields) {
+    const v = attrs[k];
+    patch[k] = v == null ? (k === "notes" || k === "items" ? [] : k === "display" || k === "numbered" || k === "loop" ? false : "") : deepClone(v);
+  }
+  return patch;
+}
+
+function stableIslandKey(node) {
+  const bpType = CANVAS_ISLAND_BP_TYPE_BY_NODE[node && node.type];
+  const spec = CANVAS_ISLAND_SPECS[bpType] || { fields: [] };
+  const a = (node && node.attrs) || {};
+  const data = {};
+  for (const k of spec.fields) data[k] = islandEmpty(a[k]) ? null : a[k];
+  return canonicalJSON({ data, rest: a.bpRest != null ? a.bpRest : null });
+}
+
+function islandNodeChanged(prevNode, nextNode) {
+  return stableIslandKey(prevNode) !== stableIslandKey(nextNode);
+}
+
 // ── image ⇄ canvas self-painting atom ─────────────────────────────────────────
 //
 // { id, type:"image", src?, alt?, width?, height?, locked?, role?, …rest } ⇄
@@ -3780,6 +3876,8 @@ function classifyNode(node) {
   const isFigure = isCanvasFigureNode(node.type);
   // editable-image: the self-painting image atom (bpImage); bpType resolves to "image".
   const isImage = isCanvasImageNode(node.type);
+  // island atoms (equation / footnote / toc / video); bpType off the node-name map.
+  const isIsland = isCanvasIslandNode(node.type);
   // live-data task-list: a canvas task-list widget (bpTaskList). Its bpType resolves
   // to "task-list" off node.attrs.bpType (the isTaskList fallback below).
   const isTaskList = isCanvasTaskListNode(node.type);
@@ -3804,6 +3902,8 @@ function classifyNode(node) {
           ? "figure"
           : isImage
             ? "image"
+          : isIsland
+            ? CANVAS_ISLAND_BP_TYPE_BY_NODE[node.type]
           : isTaskList
             ? "task-list"
             : isCard
@@ -3837,6 +3937,7 @@ function classifyNode(node) {
     isFleet,
     isFigure,
     isImage,
+    isIsland,
     isTaskList,
     isContainer,
     isRole,
@@ -4233,6 +4334,14 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
       continue;
     }
 
+    if (entry.isIsland) {
+      // Island atom: one patch-block of the editable keys when any changed.
+      if (islandNodeChanged(prevNode, entry.node)) {
+        ops.push({ op: "patch-block", id: entry.id, patch: islandNodeToPatch(entry.node) });
+      }
+      continue;
+    }
+
     if (entry.isImage) {
       // Canvas image atom (editable-image): src + alt are the editable interior;
       // one patch-block{src, alt} when either changed, nothing for a pure reorder.
@@ -4591,6 +4700,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasImageNode(type)) {
     return !imageNodeChanged(serverNode, liveNode);
   }
+  // Island atoms: the editable keys + the carried rest.
+  if (isCanvasIslandNode(type)) {
+    return !islandNodeChanged(serverNode, liveNode);
+  }
   // Task-list (live-data: bpTaskList): query + title + config (rows server-painted,
   // never on the node). The own-echo of a query edit — and the id-wildcard for a
   // just-minted task-list — is recognized by the SAME stable-key compare runToOps uses.
@@ -4776,6 +4889,9 @@ function nextNodeToBlock(entry, taken) {
   if (entry.isImage) {
     // Image insert/move (editable-image): src/alt when set, the carried rest, locked/role.
     return imageNodeToBlock(node, entry.id);
+  }
+  if (entry.isIsland) {
+    return islandNodeToBlock(node, entry.id);
   }
   if (entry.isFigure) {
     // Figure insert/move (editable-figure): reconstruct the figure block (its

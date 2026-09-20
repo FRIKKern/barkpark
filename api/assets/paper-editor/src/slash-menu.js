@@ -30,6 +30,8 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "expandable", label: "Toggle", hint: "▸", desc: "collapsible details" },
   { group: "Text", type: "steps", label: "Steps", hint: "①", desc: "numbered steps with bodies" },
   { group: "Text", type: "tabs", label: "Tabs", hint: "⌸", desc: "labelled panels" },
+  { group: "Text", type: "footnote", label: "Footnotes", hint: "¹", desc: "numbered notes" },
+  { group: "Text", type: "toc", label: "Contents", hint: "☰", desc: "outline of entries" },
 
   { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
   { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },
@@ -38,6 +40,8 @@ export const SLASH_ITEMS = [
 
   { group: "Visual", type: "diagram", label: "Diagram", hint: "⬡", desc: "Mermaid diagram" },
   { group: "Visual", type: "image", label: "Image", hint: "▣", desc: "picture from a url" },
+  { group: "Visual", type: "video", label: "Video", hint: "▶", desc: "video from a url" },
+  { group: "Visual", type: "equation", label: "Equation", hint: "∑", desc: "TeX math" },
   { group: "Visual", type: "figure", label: "Figure", hint: "▤", desc: "captioned block" },
   { group: "Visual", type: "table", label: "Table", hint: "▦", desc: "rows and columns" },
   { group: "Visual", type: "terminal", label: "Terminal", hint: "⌘", desc: "console frame" },

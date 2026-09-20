@@ -62,6 +62,10 @@ export const CANVAS_SLASH_TYPES = new Set([
   "expandable",
   "steps",
   "tabs",
+  "equation",
+  "footnote",
+  "toc",
+  "video",
   "columns",
   "section",
   "terminal",
@@ -174,6 +178,14 @@ export function canvasDefaultBlock(type) {
         title: "New section",
         blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
       };
+    case "equation":
+      return { id: null, type: "equation", tex: "" };
+    case "footnote":
+      return { id: null, type: "footnote", notes: [] };
+    case "toc":
+      return { id: null, type: "toc", items: [] };
+    case "video":
+      return { id: null, type: "video", src: "" };
     case "steps":
       return { id: null, type: "steps", steps: [{ title: "Step 1", blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }] }] };
     case "tabs":
