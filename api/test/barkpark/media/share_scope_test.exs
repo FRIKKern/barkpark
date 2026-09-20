@@ -256,10 +256,14 @@ defmodule Barkpark.Media.Storage.ShareScopeTest do
           DateTime.add(DateTime.utc_now(), 3600, :second)
         )
 
-      assert {:ok, %Document{} = resolved} = Share.resolve(live_token, @dataset),
-             "the hand-written shareLink fixture is unreadable by Share.resolve/2, " <>
-               "so the :expired assertion below would prove nothing about expiry"
+      live_result = Share.resolve(live_token, @dataset)
 
+      assert match?({:ok, %Document{}}, live_result),
+             "the hand-written shareLink fixture is unreadable by Share.resolve/2 " <>
+               "(got #{inspect(live_result)}), so the :expired assertion below " <>
+               "would prove nothing about expiry"
+
+      {:ok, resolved} = live_result
       assert resolved.doc_id == live.doc_id
 
       # THE SUBJECT. Same helper, same enabled flag, same parseable ISO8601 —
