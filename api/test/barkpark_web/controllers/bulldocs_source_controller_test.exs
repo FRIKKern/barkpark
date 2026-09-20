@@ -119,6 +119,7 @@ defmodule BarkparkWeb.BulldocsSourceControllerTest do
             "content" =>
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "lifecycle_status" => "open",
                 "parent_id" => epic
               })

@@ -66,7 +66,11 @@ defmodule Barkpark.Tasks.ExpectationsTest do
 
   defp mk_task!(doc_id, scope, content_extra) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
 

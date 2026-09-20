@@ -412,6 +412,7 @@ internal/chat/testdata/**
 internal/pdrender/testdata/**
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
+internal/wasmimages/imagemap.go
 js/packages/core/src/errors.ts
 js/packages/react/src/blocks/sheet.ts
 js/packages/react/tests/fixtures/**

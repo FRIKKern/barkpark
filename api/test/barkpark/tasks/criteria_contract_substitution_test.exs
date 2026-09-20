@@ -101,6 +101,7 @@ defmodule Barkpark.Tasks.CriteriaContractSubstitutionTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "description" => "fixture #{doc_id}",
         "acceptance_criteria" => criteria

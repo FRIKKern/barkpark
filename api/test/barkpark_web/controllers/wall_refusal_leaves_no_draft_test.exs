@@ -139,6 +139,7 @@ defmodule BarkparkWeb.WallRefusalLeavesNoDraftTest do
       insert_draft!("task-no-spine", "A task with no label spine at all",
         content: %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "lifecycle_status" => "open",
           "priority" => 1,
           "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
@@ -165,6 +166,7 @@ defmodule BarkparkWeb.WallRefusalLeavesNoDraftTest do
   defp task_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "priority" => 1,
       "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
