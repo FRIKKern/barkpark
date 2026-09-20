@@ -435,14 +435,32 @@ defmodule BarkparkWeb.StudioComponents.Nav do
               dev/prod while RAISING in :test, and a truthy non-binary
               (`:folder || "file"` is `:folder`) did the same. Both shapes
               collapse here, at the call site, where "file" is a decision. --%>
-        <a
-          href={tab.path}
-          class={"studio-tab #{if active, do: "active"}"}
-          aria-current={if active, do: "page"}
-          title={tab.label}
-          aria-label={tab.label}
-          data-test-id="top-menu-tab"
-        ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
+        <%!-- task-e34595f816cd4bd2: a tab the current workspace does not
+              surface, but another workspace does, arrives carrying
+              `disabled: true` + `reason`. It renders as a NON-link — a
+              <span>, no href, aria-disabled — so it cannot navigate, and the
+              reason rides the same title/aria-label channel the enabled tab
+              uses for its label. Anything without the flag renders exactly as
+              before. --%>
+        <%= if tab[:disabled] do %>
+          <span
+            class="studio-tab studio-tab-disabled"
+            aria-disabled="true"
+            style="opacity:0.45;cursor:not-allowed;"
+            title={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
+            aria-label={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
+            data-test-id="top-menu-tab-disabled"
+          ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></span>
+        <% else %>
+          <a
+            href={tab.path}
+            class={"studio-tab #{if active, do: "active"}"}
+            aria-current={if active, do: "page"}
+            title={tab.label}
+            aria-label={tab.label}
+            data-test-id="top-menu-tab"
+          ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
+        <% end %>
       <% end %>
     </div>
     """
