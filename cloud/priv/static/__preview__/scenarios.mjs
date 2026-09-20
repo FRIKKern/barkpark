@@ -3325,6 +3325,48 @@ const teamMembersCruel = teamMembers.concat([
 const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
   mem.user_id === "usr_ada" ? Object.assign({}, mem, { role: "member" }) : mem);
 
+// ── DEFECT-E · THE `drive` FIELD (task-7bd507ea989ef248) ────────────────────
+// Nine scenarios below (fleet-support-*, offload-*, verify-no-credentials) shot
+// BYTE-IDENTICAL to shell-instance in all 20 accent x theme x width cells, in
+// four independent runs. The filing guessed "their data never reaches route()
+// or their screen is gone"; MEASURED, both guesses are wrong. Their data DOES
+// reach route() and their screens DO exist — two other causes were hiding:
+//
+//   BELOW THE FOLD. fleetSupportCardHtml mounts at the TAIL of the instance
+//   Overview main column (after the verify slot, the update panel and the Sites
+//   card). shoot.sh shoots a VIEWPORT (`--window-size="${width},1000"`), so a
+//   card that paints perfectly is simply not in frame. Proof: booted in
+//   smoke.mjs's DOM, #instance-body is 8811 / 9120 / 7304 bytes for
+//   fleet-support-{provisioning,online,failed} against shell-instance's 7049.
+//
+//   CLICK-GATED, and no label said so. `orderTask`/`fleetRoster` are read only
+//   by pollOffloadWatch, which mounts after Offload -> File the order; the
+//   `instanceVerify` 404 is read only by runVerifyNow, i.e. behind [data-vf-run].
+//   Those five scenarios render their PRE-click state, which is shell-instance.
+//
+// `drive` is the declarative repair: an ordered step list mock.js replays after
+// load against the REAL app (nothing is faked into the DOM), so the shot shows
+// the state the label promises. Steps:
+//   { reveal: sel }          scroll the element into frame
+//   { click: sel }           click it — the app's own handler runs
+//   { fill: sel, value: v }  set an input's value
+//   { await: sel }           wait for it to exist (an arrival assertion)
+// Every step waits for its selector; a step that never arrives paints the red
+// PREVIEW DRIVE FAILED banner (mock.js's driveGaveUp), so a drive that did not
+// land can never again collapse back into a byte-identical twin. smoke.mjs
+// reads this field too — see assertDefectEScenariosAreNotShellInstance.
+const REVEAL_FLEET_CARD = [{ reveal: ".fleet-support-card" }];
+// The offload ladder, driven through the REAL flow: Offload -> the order modal
+// -> File the order -> offloadFiled mounts the watch panel and polls the
+// scenario's own roster + orderTask, so each rung paints its own frame.
+const DRIVE_OFFLOAD_LADDER = [
+  { click: "[data-offload-support]" },
+  { fill: "#offload-title", value: "Summarise the release notes" },
+  { click: "#offload-go" },
+  { await: "[data-offload-watch]" },
+  { reveal: "[data-offload-watch]" },
+];
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -5893,7 +5935,8 @@ export const SCENARIOS = {
   },
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
-    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main",
+    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main [below the fold — driven into frame]",
+    drive: REVEAL_FLEET_CARD,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5905,7 +5948,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-online": {
-    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step",
+    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step [below the fold — driven into frame]",
+    drive: REVEAL_FLEET_CARD,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5918,7 +5962,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-failed": {
-    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online)",
+    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online) [below the fold — driven into frame]",
+    drive: REVEAL_FLEET_CARD,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5930,7 +5975,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-empty": {
-    label: "Fleet card — no supports yet: the add-a-support CTA on a live main (+ nested #fleet list)",
+    label: "Fleet card — no supports yet: the add-a-support CTA on a live main [below the fold — driven into frame; its DOM IS shell-instance's, the shot is not]",
+    drive: REVEAL_FLEET_CARD,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5946,7 +5992,8 @@ export const SCENARIOS = {
   // the task read + the roster read into filed -> claimed -> working -> done with
   // honest blocked/failed terminals. Each scenario pins one rung.
   "offload-filing": {
-    label: "Offload — the order is filed (open), waiting for the support to claim it",
+    label: "Offload — the order is filed (open), waiting for the support to claim it [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5958,7 +6005,8 @@ export const SCENARIOS = {
     },
   },
   "offload-working": {
-    label: "Offload — the support has claimed AND is WORKING the order (roster beats working)",
+    label: "Offload — the support has claimed AND is WORKING the order (roster beats working) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5970,7 +6018,8 @@ export const SCENARIOS = {
     },
   },
   "offload-done": {
-    label: "Offload — the order is DONE (terminal success; the poll stops)",
+    label: "Offload — the order is DONE (terminal success; the poll stops) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5982,7 +6031,8 @@ export const SCENARIOS = {
     },
   },
   "offload-blocked": {
-    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps)",
+    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -6072,7 +6122,8 @@ export const SCENARIOS = {
     },
   },
   "verify-no-credentials": {
-    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
+    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision [click-gated: the 404 is read only by runVerifyNow, behind Run first check]",
+    drive: [{ click: "[data-vf-run]" }, { await: "[data-vf-reprovision]" }],
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {

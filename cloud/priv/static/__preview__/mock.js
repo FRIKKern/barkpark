@@ -191,7 +191,7 @@
   // failed drive can never again be byte-identical to the twin it failed to
   // differ from — it fails LOUDLY instead of collapsing back into a collision.
   function driveGaveUp(sel) {
-    console.error('[preview] 2FA drive gave up waiting for "' + sel + '"');
+    console.error('[preview] drive gave up waiting for "' + sel + '"');
     var b = document.createElement("div");
     b.setAttribute("data-preview-drive-failed", sel);
     b.style.cssText =
@@ -266,6 +266,56 @@
       })();
     });
   }
+
+  // 4d) DEFECT-E (task-7bd507ea989ef248) — the declarative per-scenario DRIVE.
+  //     Nine scenarios shot byte-identical to shell-instance in every one of
+  //     their 20 cells. Neither cause the filing guessed was the real one: their
+  //     data DOES reach route() and their screens DO exist. Two other causes —
+  //     the fleet card mounts at the TAIL of the instance Overview column and
+  //     shoot.sh shoots a 1000px VIEWPORT (below the fold), and the offload /
+  //     verify fixtures are read only by pollOffloadWatch / runVerifyNow, i.e.
+  //     behind a CLICK. Both are now declared where the fixture lives:
+  //     `SCENARIOS[scen].drive`, an ordered step list (reveal/click/fill/await —
+  //     the vocabulary is documented above SCENARIOS in scenarios.mjs).
+  //
+  //     Two properties this inherits from the 2FA drive above, deliberately:
+  //     every step waits on a selector the REAL app painted (never a timer, so
+  //     no step can race the mocked fetch), and a step that never arrives paints
+  //     driveGaveUp's red banner IN THE FRAME — so a drive that did not land
+  //     announces itself in the PNG instead of collapsing back into the very
+  //     byte-identical twin it exists to break. The table is in scenarios.mjs
+  //     rather than here because smoke.mjs has to read it too (it imports the
+  //     module; it cannot import this classic script) — that is what makes
+  //     "this scenario is gated, and here is its gate" assertable in node.
+  function driveStep(step, done) {
+    var sel = step.reveal || step.click || step.fill || step.await;
+    if (!sel) { done(); return; }
+    whenPresent(sel, function (el) {
+      if (step.reveal) {
+        try { el.scrollIntoView({ block: "center" }); } catch (e) { el.scrollIntoView(); }
+      } else if (step.click) {
+        el.click();
+      } else if (step.fill) {
+        el.value = step.value == null ? "" : String(step.value);
+      }
+      done();
+    });
+  }
+
+  function runDrive(steps, i) {
+    if (!steps || i >= steps.length) return;
+    driveStep(steps[i], function () { runDrive(steps, i + 1); });
+  }
+
+  // The account modal has its own seam above (?modal=account, a shoot.sh name
+  // convention); this one is keyed on the scenario's OWN field, so nothing has
+  // to be taught twice.
+  window.addEventListener("load", function () {
+    scenariosReady.then(function (mod) {
+      var def = mod && mod.SCENARIOS && mod.SCENARIOS[scen];
+      if (def && def.drive && def.drive.length) runDrive(def.drive, 0);
+    });
+  });
 
   // 5) Inert EventSource — the SPA opens one live stream at boot. It never fires
   //    on its own (a screenshot must be deterministic), but exposes a manual
