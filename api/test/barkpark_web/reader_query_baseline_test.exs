@@ -248,6 +248,9 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
                 "lifecycle_status" => "open",
+                # The Tasks plugin's :before_publish brief wall (inert until
+                # #19303) fires on the first publish these rows take below.
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "parent_id" => epic,
                 # The `label_spine` publish gate requires a >=20-char
                 # `description` (and `with_labels` supplies the required weighted
@@ -348,6 +351,9 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
                 "lifecycle_status" => "open",
+                # The Tasks plugin's :before_publish brief wall (inert until
+                # #19303) fires on the first publish these rows take below.
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "design_doc" => slug,
                 "acceptance_criteria" => [
                   %{"criterion" => "budget proven", "met" => true, "evidence" => "harness run"},

@@ -225,7 +225,18 @@ cmd_boot() {
   return 0
 }
 
-PLAN_OUT="$(mktemp -t pds-pl-plan)"; PLAN_ERR="$(mktemp -t pds-pl-planerr)"
+# PORTABLE mktemp, AND a hard failure. `mktemp -t NAME` with no XXXXXX is a
+# BSD-only form: GNU coreutils (every ubuntu CI runner) refuses it. This site
+# used to swallow that refusal — $(...) yielded "", every redirect below wrote
+# to the empty filename, resolve_plan grepped nothing, and the run reported
+# "0 of  doc anchor(s) resolved" while its ARM went green. An mktemp refusal is
+# now a named, fatal error; it must never be survivable.
+PLAN_OUT="$(mktemp "${TMPDIR:-/tmp}/pds-pl-plan.XXXXXX")" || {
+  echo "pds-personal-local-smoke: REFUSING — mktemp failed for the plan file" >&2; exit 2; }
+PLAN_ERR="$(mktemp "${TMPDIR:-/tmp}/pds-pl-planerr.XXXXXX")" || {
+  echo "pds-personal-local-smoke: REFUSING — mktemp failed for the plan error file" >&2; exit 2; }
+[ -n "$PLAN_OUT" ] && [ -n "$PLAN_ERR" ] || {
+  echo "pds-personal-local-smoke: REFUSING — mktemp returned an EMPTY path" >&2; exit 2; }
 trap 'rm -f "$PLAN_OUT" "$PLAN_ERR"' EXIT
 
 case "${1:---dry-run}" in
