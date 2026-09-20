@@ -73,8 +73,23 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
     seed_paper_schema!()
     seed_codelist!()
 
-    {:ok, _} = Auth.create_token(@readonly, "pds w42 tree readonly", @dataset, ["read"])
-    {:ok, _} = Auth.create_token(@writer, "pds w42 tree writer", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "pds w42 tree readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 tree writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end

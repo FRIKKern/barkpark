@@ -24,10 +24,21 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
       takes no scope argument at all and reads `:global` by default).
 
   A workspace-B-bound admin token could therefore rename, archive and DELETE a
-  chat session owned by workspace A. `ChatLive.principal_chat_scope/1` closes
-  it: a workspace-BOUND token acts only inside its own workspace, while an
-  unbound token and a user-session admin keep the `:global` superuser path
-  (charter D17/D18), so the admin sidebar is unchanged for them.
+  chat session owned by workspace A. `ChatLive`'s `tenancy_permits?/2` — with
+  `principal_permits_owner?/2`, `acting_workspace_id/1` and
+  `delete_within_tenancy/2` — closes it: a workspace-BOUND token acts only
+  inside its own workspace, while an UNBOUND token (a NULL `workspace_id`,
+  which `Auth.create_token/5` will not produce) keeps the `:global` superuser
+  path, so the admin sidebar is unchanged for it.
+
+  (The moduledoc used to name `ChatLive.principal_chat_scope/1`. No such symbol
+  has ever existed — `grep -rn principal_chat_scope lib/` returns zero — and it
+  sent readers hunting for an absent function. It also said a USER-SESSION
+  admin keeps the `:global` superuser path; task-787766c0cf6604f1 proved by run
+  that this was the unclosed half of the same defect, and that claim is
+  withdrawn: a session admin is confined like the Default-BOUND token whose
+  grant it actually holds. See
+  `test/barkpark_web/live/studio/chat_live_user_session_tenancy_test.exs`.)
 
   ## Why every clause is tested TWICE
 

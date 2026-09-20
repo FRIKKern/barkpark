@@ -653,6 +653,14 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1497 — bumped 2026-09-20 from 1496 on console-r21k-w48-chip (cch-w48-bl):
+      # +1 test. The site badges row stops carrying a metadata pill (the repo
+      # fact is already in the rail); one new test in
+      # cloud/priv/static/__app.test.mjs pins the badge row's composition.
+      # RE-MEASURED after the rebase onto ae4e35a14 (pin 1496, #19497):
+      # `sh scripts/console-harness.sh` printed `# tests 1497 / # pass 1497 /
+      # # fail 0`. The figure is the instrument's, not 1496 + 1.
+      #
       # PIN 1495 — bumped 2026-09-17 from 1492 on console-r21-w22-scenario-denominators:
       # +3 tests. Two headers in cloud/priv/static/__app.test.mjs declined a
       # corpus-level guard on the strength of a sweep and each typed its own
@@ -891,7 +899,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1495-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1497-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -907,14 +915,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1495 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1495 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1497 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1497 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1495 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1495 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1495 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1497 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1497 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1497 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1495 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1497 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -2848,6 +2856,91 @@ jobs:
               ;;
           esac
 
+  # adjacency-guard (D815, cch-w67-bl-a-destructive-control-under-a-primary-
+  # action-is-untested): the geometry NO instrument in this repo measured. The
+  # jobs above ask whether a box spills, whether a layout drifts, whether a rule
+  # head survived and whether one dialog can be dismissed. None of them can tell
+  # a person that the control which DESTROYS their site is rendered a misclick's
+  # distance below the control which deploys it, at the same right edge — which
+  # is what `.fleet-badges` does when it wraps, and which D815 accepted as a
+  # known cost precisely BECAUSE no gate could see it.
+  #
+  # Modelled on `overflow-guard` above, deliberately: node 22 (node 20 has no
+  # global `WebSocket` and CDP bring-up exits 2 there), an explicit CHROME,
+  # `actions/checkout@v4` with no `ref:`, and the same 0/1/2/* ladder in which
+  # anything outside the instrument's vocabulary is UNINTERPRETABLE and
+  # therefore red. Never `continue-on-error` — `needs.<job>.result` reads
+  # `success` for such a job even when it failed, laundering the lie straight
+  # into `Console gate`.
+  #
+  # ONE INVOCATION, THE DEFAULT ROSTER. The guard prints its own route roster,
+  # its derived control population and its width axis on every run; a count
+  # baked into a step name here would be a sentence nothing re-derives, which is
+  # the disease this epic keeps curing. Measured on a developer host at 15.8s
+  # wall for 112 cells over the two site routes plus the instance detail, and
+  # 4.5s for the webhooks route alone — the same order as `overflow-guard`'s
+  # single run.
+  #
+  # ITS EXIT 2 IS A POPULATION FLOOR AS WELL AS AN ENVIRONMENT ONE, and that is
+  # the half a reader must not skip: a run that derives ZERO destroy-tier
+  # controls has swept every width and judged nothing, so it REFUSES rather than
+  # printing a clean sweep. Do not read a refusal here as "the runner is sick".
+  #
+  # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
+  # protection through, is a REQUIRED context on `main` — a red here BLOCKS the
+  # merge. `.github/required-checks.json` is the single committed source of
+  # truth for what protection enforces, and scripts/required-checks-verify.sh
+  # reds when a workflow's prose contradicts that file. Nothing is registered
+  # here.
+  adjacency-guard:
+    name: Destroy-vs-primary adjacency (rendered)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    # See the verdict-channel note on `cssom-parity` — same contract, same
+    # fail-closed guarantee: this output NAMES the fault, it never grades it.
+    outputs:
+      verdict: ${{ steps.adjacency.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Adjacency guard — is a destroy-tier control beside a primary action?
+        id: adjacency
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          # Guarded exactly as in `cssom-parity` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          rc=0
+          node cloud/priv/static/__preview__/adjacency-guard.mjs || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "Adjacency guard: every destroy-tier control it DERIVED is clear of every primary action, across the width axis it printed. Allowed pairs, if any, are listed above WITH their reason."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=Adjacency guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT, COVERAGE or POPULATION fault, not a layout defect. NO claim is being made about any screen. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a foreign worktree squatting the preview port, a font pin that would not take, an unknown ROUTE/THEME — or, and read this one before blaming the runner, an EMPTY CONTROL POPULATION: the guard derives its destroy-tier controls from the console's own bytes and by gesture in the browser, and a run that classifies none has swept every width having judged nothing. That cause lives in cloud/priv/static, not on the runner."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=Adjacency guard DEFECT::A measured misclick geometry in a real browser (exit 1) — a destroy-tier control rendered directly above or below a primary action at the same edge, within the guard's gap budget; or a per-route population floor that came back short; or an allowlist entry that has gone STALE. See the ✗ lines above for the route, theme, width, both boxes and the measured gap."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=Adjacency guard UNINTERPRETABLE::adjacency-guard.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
   console-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
     #
@@ -2879,7 +2972,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Console gate
     if: always()
-    needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, modal-oracle, path-escape]
+    needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, modal-oracle, adjacency-guard, path-escape]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -2890,6 +2983,7 @@ jobs:
           R_TIER: ${{ needs.tier-floor-render.result }}
           R_OVERFLOW: ${{ needs.overflow-guard.result }}
           R_MODAL: ${{ needs.modal-oracle.result }}
+          R_ADJACENCY: ${{ needs.adjacency-guard.result }}
           R_ESCAPE: ${{ needs.path-escape.result }}
           O_CONSOLE: ${{ needs.changes.outputs.console }}
           # ── THE VERDICT CHANNEL (deploy-reliability wave 8) ──────────────
@@ -2904,6 +2998,7 @@ jobs:
           V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
           V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
           V_MODAL: ${{ needs.modal-oracle.outputs.verdict }}
+          V_ADJACENCY: ${{ needs.adjacency-guard.outputs.verdict }}
           V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
           # D776, wave 64: the DISPATCHER, the last exit-2-capable job to get a
           # channel and the one that used to be the emitter's single named
@@ -3070,7 +3165,7 @@ jobs:
           # `set -u` (LOUD); OMITTING THE `decide` LINE IS SILENTLY IGNORED —
           # this gate then greens over a job it never read. So the review
           # instruction is a COUNT, independently re-derived, not a reading:
-          # `decide` calls must equal the length of `needs:`. Today: 7 and 7.
+          # `decide` calls must equal the length of `needs:`. Today: 8 and 8.
           # (The D36 emitter in scripts/console-path-escape-check.test.sh walks
           # that whole chain per job and is mutation-proven in four directions.)
           #
@@ -3091,6 +3186,7 @@ jobs:
           decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"   "${V_TIER:-}"
           decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}" "${V_OVERFLOW:-}"
           decide "modal-oracle"            "${R_MODAL}"     "${O_CONSOLE}" "${V_MODAL:-}"
+          decide "adjacency-guard"         "${R_ADJACENCY}" "${O_CONSOLE}" "${V_ADJACENCY:-}"
 
           echo
           if [ "$bad" -ne 0 ]; then

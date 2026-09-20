@@ -340,4 +340,132 @@
 # printed count, its date and its sha in this header in the same commit.
 #
 # Filed under task-bf9d623529d86a86.
-97
+
+# ── RE-MEASURED 2026-09-20 (task-e3a2a8341256b805): 97 → 90, AND THE SLACK
+#    ITSELF IS NOW BOUNDED ──────────────────────────────────────────────────
+# THE ARREARS WERE THE FINDING, NOT THE NUMBER. This file banked 97 while
+# origin/main measured 90, and the ratchet printed RATCHET LOOSE and exited 0.
+# Seven counts of arrears means seven NEW high-confidence sites could have
+# landed with this gate green; it could not red until a single PR added eight at
+# once. A ratchet that only stops regressions larger than its own arrears is not
+# measuring the property it claims. The 97 → 90 drop is not a fix landed here —
+# it is conversions that landed since 2026-09-17 (#18560/#18621/#18861 and the
+# deploy fixes) and were never banked, which is exactly the designed LOOSE path
+# working as designed and nobody walking through the door it opens.
+#
+# THE MEASUREMENT, on a git archive SNAPSHOT of the commit — never a checkout:
+#
+#     git archive <this branch's head> | tar -x -C <scratch> && cd <scratch>
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 90 finding(s) — high 90 · medium 0 · low 0 — over 465 file(s)
+#     (all confidences on the same tree: 262 — high 90 · medium 168 · low 4)
+#     base    origin/main 6dede137f7b7178d1157e26518e5038c43a00cc7, which MEASURES 90
+#             and BANKS 97 on its own scanner — a snapshot of the base alone reads
+#             `90 finding(s) — high 90`, and --verify-against-origin-main says the
+#             same (its output is quoted below). So this is banking an existing
+#             fall, not a re-baselining: not one site changed.
+#     change  2f3bf2612 — the scanner commit, and the ONLY commit on this branch
+#             that touches code. A snapshot of 2f3bf2612 alone also measures 90
+#             (262 at all confidences), so the scanner change adds no site and
+#             removes none; the commit carrying THIS text adds comment lines to
+#             this file and cannot move a count.
+#     utc     2026-09-20T19:11:17Z
+#
+#     $ bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main
+#       sha        f6ff8b58927bcef43bfee8f3ecd7557a82adad36   (the pre-rebase base;
+#                  6dede137f reads identically — 90 against a banked 97)
+#       scan       pipefail-sigpipe-scan: 90 finding(s) — high 90 · medium 0 · low 0
+#       baseline   97
+#     pipefail-sigpipe-scan: RATCHET LOOSE ON origin/main — 90 finding(s), baseline still says 97 (slack 7, bound 2).
+#     pipefail-sigpipe-scan: SLACK EXCEEDED ON origin/main — arrears 7, documented bound 2.
+#
+#     That last line is this change's own subject reporting main's state, and it
+#     is the reason the mode exits 1 against main until this merges. Nothing in
+#     CI runs --verify-against-origin-main (git grep says so); the enforced step
+#     is the --baseline ratchet, which reads 90 vs 90 on this branch.
+#
+# ── THE BOUND: PIPEFAIL_SCAN_MAX_SLACK = 2, and why it is 2 and not 0 ────────
+# DATED REASON, 2026-09-20. A fall still does NOT red on sight. That choice is
+# argued three blocks up and it stands: a check that fails when the world gets
+# better teaches its readers to regenerate the number, and regeneration is where
+# a real regression gets laundered in. What was never argued — only inherited —
+# is that the fall could be ANY SIZE. So the fall is bounded:
+#
+#     arrears (banked − measured) ≤ 2   → RATCHET LOOSE, exit 0, as before
+#     arrears ≥ 3                       → SLACK EXCEEDED, exit 1
+#
+# TWO, because it is the largest number that keeps the LOOSE escape hatch doing
+# its job and the smallest that still bounds the hole. A PR that converts one or
+# two sites is not forced to re-bank mid-review (the notice tells it to, and the
+# next PR through can); a PR-sized fix cannot open a hole a PR-sized regression
+# fits through. At 0 every improving PR reds, which is the failure mode the LOOSE
+# design exists to avoid. At 7 — where this file actually sat — the gate was
+# green over seven new sites.
+#
+# THE BOUND IS ENFORCED, NOT DESCRIBED: scripts/pipefail-sigpipe-scan.sh pins
+# both sides of it in --selftest (arrears == bound stays LOOSE rc 0; arrears ==
+# bound + 1 reds rc 1), and --selftest runs in CI on every run of
+# .github/workflows/pipefail-sigpipe-scan.yml. Overridable for a test by
+# PIPEFAIL_SCAN_MAX_SLACK; the shipped default is 2.
+#
+# ── ALSO FIXED HERE: THIS FILE HAD TWO READERS ───────────────────────────────
+# The ratchet and --check-provenance read the FIRST non-comment line;
+# --verify-against-origin-main read `tail -1`. They agree only while this file
+# holds exactly one payload line — and this file is hand-edited, under 200
+# comment lines, by appending. A second payload line would have made the
+# ENFORCED number and the VERIFIED number different numbers out of this same
+# file, with nothing in either output saying so. One reader now
+# (read_banked_number), pinned by a two-payload-line fixture in --selftest.
+#
+# THE RULE IS UNCHANGED: from here the number may FALL — by at most 2 before it
+# must be banked — and may never RISE. A rise is a NEW site; fix the site.
+#
+# Filed under task-e3a2a8341256b805.
+
+# ── RE-MEASURED 2026-09-20 (task-cb57c7ff5f6d6479): 90 → 89 ───────────────────
+# ONE SITE FIXED, AND THE SCANNER CHANGE MOVED THE NUMBER BY ZERO.
+# This lands directly on top of #19574 (task-e3a2a8341256b805), which banked the
+# seven counts of arrears this file had been carrying and bounded the slack at
+# PIPEFAIL_SCAN_MAX_SLACK=2. Main is TIGHT at 90 as of that merge; the arrears
+# story belongs to the block above and is not repeated here. This change is one
+# high-confidence site converted, so the number falls by exactly one.
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 89 finding(s) — high 89 · medium 0 · low 0 — over 466 file(s)
+#     (all confidences on the same tree: 261 — high 89 · medium 168 · low 4)
+#     base    origin/main e922f67e6cb0af763c75210e1e12ba19370644d1, which MEASURES 90 and BANKS 90.
+#     utc     2026-09-20T20:03:06Z
+#
+# THE SITE FIXED — the only one this number moves:
+#   scripts/required-checks-ack-derive.sh:271
+#     VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"   under set -euo pipefail
+#   reported here as `[high] reader=head; status captured into an assignment
+#   under set -e; truncating reader (head closes the pipe at N) on a producer not
+#   provably bounded`. `comm` writes 166 names into a pipe `head -1` closes after
+#   the first; pipefail adopts comm's 141 and errexit kills the selftest.
+#   MEASURED on console #19336 (the ratchet reddened on a PR whose diff never
+#   touched it) and reproduced directly: a 200k-line intersection through that
+#   exact shape returned rc=141 on 20/20 runs under 4x `yes >/dev/null`; the
+#   pipe-free replacement (comm > file; one `read`) returned 0 on 20/20 in the
+#   same loop. A CONTROL at the REAL tree size — a 166-line intersection, 40 runs
+#   under 8x load — passed 40/40: at ~5KB the whole output fits the 64KB pipe
+#   buffer, so this site is LATENT at today's size, not firing. It is fixed
+#   because the exclusions ledger only grows, and because an instrument that reds
+#   by LOAD teaches its readers to rerun rather than to read.
+#
+# THE SCANNER ALSO CHANGED IN THIS COMMIT, AND IT MOVED THE NUMBER BY ZERO.
+# The `head` reader pattern required a trailing space, so a BARE `head` ending a
+# command substitution or a line (`x="$(producer | head)"`) matched no reader at
+# any tier. The delimiters are now folded to spaces on a copy before the match.
+# PROVED to be a no-op on this tree rather than asserted: the full finding list
+# at --min-confidence low was captured from the PRE-change scanner and from the
+# post-change scanner over the same tree and diffed —
+#     old=261  new=261  ·  comm -13 → empty  ·  comm -23 → empty
+# so the 90 → 89 move is the site fix alone and nothing is laundered in behind a
+# widened detector.
+#
+# THE VARIABLE-PRODUCER BASELINE NEEDS NO RE-BANK: it reads 105 against a banked
+# 105 on this tree (exact, rc 0), before and after both halves of this change.
+#
+# Filed under task-cb57c7ff5f6d6479.
+89

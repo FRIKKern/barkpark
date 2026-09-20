@@ -112,6 +112,7 @@ const PRESET_OVERTYPE_NODES = new Set([
   "byline",
   "ingress",
   "pullquote",
+  "blockquote",
 ]);
 
 export function insertSectionPresetAtSelection(editor, kind) {
@@ -240,6 +241,7 @@ const INSERT_META = {
   list: { label: "List", hint: "•" },
   checklist: { label: "Checklist", hint: "☑" },
   callout: { label: "Callout", hint: "!" },
+  blockquote: { label: "Quote", hint: "❝" },
   note: { label: "Note", hint: "❡" },
   code: { label: "Code", hint: "</>" },
   divider: { label: "Divider", hint: "—" },
@@ -269,6 +271,7 @@ const INSERT_ORDER = [
   "list",
   "checklist",
   "callout",
+  "blockquote",
   "note",
   "code",
   "divider",

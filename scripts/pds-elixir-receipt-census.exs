@@ -1468,13 +1468,13 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
-      basis_spans: [{378, 403}],
+      basis_spans: [{417, 442}],
       basis_token: "no failure reaches this receipt",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis:
-        "the in-code ruling at :378-403, added by #18899 — three stated grounds, of which " <>
-          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :395.",
+        "the in-code ruling at :417-442, added by #18899 — three stated grounds, of which " <>
+          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :434.",
       why:
         "the arm fires and this row withholds the finding. The `_ws_id` head is NOT a " <>
           "failure sink: it is the non-nil half of the two-way split on token_workspace_id/1 " <>

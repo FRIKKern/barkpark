@@ -1,0 +1,88 @@
+# pipefail-sigpipe-scan.sh — the VARIABLE-PRODUCER SHAPE ratchet.
+#
+# This is NOT a second copy of the high ratchet and NOT "medium, enforced". It
+# ratchets ONE producer shape: `printf`/`echo` of a VARIABLE into an early-exit
+# reader whose status is consumed as a boolean under `set -o pipefail`.
+# Selected by `--only-shape variable-producer`; the high tier and
+# scripts/pipefail-sigpipe-baseline.txt are untouched by it.
+#
+# ── WHY THIS FILE EXISTS ──────────────────────────────────────────────────────
+# scripts/pds-live-hetzner-placement-group.sh:1154 took main red on 2026-09-20
+# (fixed by #19478, 29f36fdcc6). The scanner had ALREADY flagged that exact
+# line, in these words:
+#
+#     :1154: [medium] reader=grep -q; status condition of if; printf/echo of a
+#     VARIABLE — size unknown; this is the shape of the live bug
+#
+# and the CI ratchet reads `--min-confidence high` only, so the one finding that
+# reddened main sat in a tier nothing enforced. A gate that cannot move on the
+# site that reddened main is not honest about its own class.
+#
+# ── WHY NOT JUST RATCHET `medium` ────────────────────────────────────────────
+# Because `medium` is two populations, and only one of them is this class.
+# MEASURED on origin/main 5cd9243e18408af234b68e20fa94e9dcac41fb1f, 2026-09-20:
+#
+#     medium 168 = 101  printf/echo of a VARIABLE   ← this shape, the :1154 one
+#                +  67  producer not classified     ← the "could not tell" bucket
+#
+# The 67 is where the false positives live. A sample of 13 taken across it found
+# `-h|--help) awk … "$0"; exit 0 ;;` twice — a `case` pattern's alternation read
+# as a pipe, no pipeline on the line at all — and `shellcheck --version |
+# grep -m1 version:`, a one-line producer. Banking 67 unclassified sites would
+# put noise inside the enforced number, and a number with noise in it is a
+# number people regenerate instead of obeying. So the enforced unit is the
+# shape, not the tier.
+#
+# ── WHY THIS SHAPE IS ENFORCEABLE AT ALL, against the 2026-09-09 reasoning ────
+# scripts/pipefail-sigpipe-baseline.txt records the original decision to leave
+# medium unenforced: "its variables are usually short today". The live specimen
+# refutes that. #19478's own measurement of the failing run:
+#
+#     scripts/pds-live-hetzner-placement-group.sh: line 1154: printf: write error: Broken pipe
+#     FAIL   the pipe-trap demonstration did not reproduce (piped=OK rc=0 unpiped=4)
+#
+# `piped` was `OK rc=0` — NINE BYTES, three orders of magnitude inside the 64KB
+# pipe buffer — and it still took EPIPE on ubuntu-latest. GNU `grep -q` exits at
+# its first match; whether the producer has written yet is a SCHEDULING race,
+# not a size threshold. Shortness is not protection for this shape.
+#
+# ── THE RULE ─────────────────────────────────────────────────────────────────
+# The number may FALL freely and may NEVER RISE. A rise is a NEW site of the
+# class that reddened main, and it reds on the PR that adds it. A fall prints
+# RATCHET LOOSE and does not red — a ratchet that fails when the world gets
+# better teaches its readers to regenerate the number, and regeneration is where
+# a real regression gets laundered in.
+#
+# TO LOWER IT: fix a site (no pipe at all — `case "$s" in *pat*)` or
+# `[[ $s =~ re ]]`; or a here-string `grep -q … <<<"$s"`), re-run the command
+# below, put its printed count here, and update the date, the sha and the
+# composition in this header in the SAME commit. `--check-provenance` refuses a
+# number whose block does not carry all four.
+#
+# ── RE-MEASURED 2026-09-20 ───────────────────────────────────────────────────
+# TREE: origin/main 5cd9243e18408af234b68e20fa94e9dcac41fb1f
+# COMMAND:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --count-only
+#     → pipefail-sigpipe-scan: 105 finding(s) — high 4 · medium 101 · low 0 — over 464 file(s)
+#
+# COMPOSITION, so the number is checkable and not merely quoted:
+#     101  at medium — the shape itself: a variable printf/echo into grep -q /
+#                      grep -m N / awk-with-exit, status consumed as a boolean.
+#                      59 of these were already labelled with this shape before
+#                      2026-09-20; the other 42 wore a `[ … ] &&` guard that the
+#                      old producer extraction misread (see the scanner header,
+#                      "THE GUARD PREFIX").
+#       4  at high   — the same producer shape into a TRUNCATING `head` reader,
+#                      which the 2026-09-12 rule already promotes to high. They
+#                      are counted by BOTH ratchets on purpose: fixing one site
+#                      lowers both numbers, and a fall never reds.
+#       0  at low    — a printf of a LITERAL is a different shape and is not
+#                      selected.
+#
+# The `rc=$?`-on-the-next-line branch reports sites it never classified, so it
+# has no shape and is EXCLUDED under --only-shape (3 such findings on this
+# tree). Counting them would bank sites the flag's own name excludes.
+#
+# Filed under task-7fccc7b8cf1c6f6c.
+105

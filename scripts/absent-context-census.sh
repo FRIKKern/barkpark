@@ -428,6 +428,27 @@ read_head_runs() { # <sha>
 # queued run's head is judged against open-PR heads PLUS this; an unreadable
 # answer disables the orphan downgrade entirely (fail closed — a run nobody can
 # prove dead keeps screaming).
+# ── the full-oid gate (task-0a44c3bc96baa8cc) ────────────────────────────────
+# `repos/<r>/actions/runs?head_sha=` matches the FULL 40-character oid ONLY.
+# Handed an abbreviation it returns HTTP 200 with an EMPTY workflow_runs list —
+# well-formed, so no transport or shape guard fires — and the caller then reads
+# "no runs on this head" off a query the endpoint simply refused to match. That
+# is the failed-read-equals-zero class; it was MEASURED on main-gate-watch.sh,
+# where `--sha 769c39bd6` said MISSING/exit 1 in the same minute the full oid
+# said WAITING/exit 2. Widen here, before the feed is queried, or refuse.
+# Prints the 40-character oid, or the single token UNRESOLVED.
+acc_full_oid() {
+  local sha="$1" full
+  case "$sha" in
+    ""|*[!0-9a-fA-F]*) echo "UNRESOLVED"; return 0 ;;
+  esac
+  if [ "${#sha}" -eq 40 ]; then printf '%s\n' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+  [ "${#sha}" -ge 4 ] || { echo "UNRESOLVED"; return 0; }
+  full="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null)"
+  [ "${#full}" -eq 40 ] || full="$(gh api "repos/$REPO/commits/$sha" 2>/dev/null | jq -r '.sha // ""' 2>/dev/null)"
+  if [ "${#full}" -eq 40 ]; then printf '%s\n' "$full"; else echo "UNRESOLVED"; fi
+}
+
 read_main_head() {
   local f
   if [ -n "$FIXTURES" ]; then
@@ -805,6 +826,25 @@ LIVE_OK=0
 
 HEADS_SEEN=0
 if [ "${#SHAS[@]}" -gt 0 ]; then
+  # --sha is OPERATOR-SUPPLIED, so unlike read_main_head (which reads
+  # commits/main -> .sha, always 40 chars) it can arrive abbreviated. Widen or
+  # refuse BEFORE the run feed is queried — see acc_full_oid above. Under
+  # --fixtures nothing is queried and the recorded payloads are keyed by
+  # whatever sha the harness named, so the gate is skipped there.
+  if [ -z "$FIXTURES" ]; then
+    for _i in "${!SHAS[@]}"; do
+      _full="$(acc_full_oid "${SHAS[$_i]}")"
+      if [ "$_full" = "UNRESOLVED" ]; then
+        warn "REFUSE: --sha ${SHAS[$_i]} is not a full 40-character commit oid and could not be widened to one;"
+        warn "        actions/runs?head_sha= matches the FULL oid only and would answer an EMPTY feed for it."
+        exit 2
+      fi
+      if [ "$_full" != "${SHAS[$_i]}" ]; then
+        warn "resolved --sha ${SHAS[$_i]} to the full oid $_full (the run feed matches the full oid only)"
+        SHAS[_i]="$_full"
+      fi
+    done
+  fi
   for s in "${SHAS[@]}"; do
     HEADS_SEEN=$((HEADS_SEEN + 1))
     census_head "$s" "sha" ""

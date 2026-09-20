@@ -158,7 +158,16 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
       assert fleet_desk[:path] == "/admin/fleet"
     end
 
-    test "the Fleet desk link + top-menu tab VANISH when the Tasks plugin is disabled" do
+    # RESTATED for task-e34595f816cd4bd2. The GATING verdict is unchanged — a
+    # workspace with `tasks` off surfaces no working Fleet entry. What changed
+    # is the top menu's rendering of that verdict: `tasks` is on by
+    # declaration, so every override-free workspace enables it, and a tab that
+    # silently VANISHES reads as a broken app rather than a scoping decision.
+    # The top-menu half therefore asserts "no ENABLED Fleet tab" (plus the
+    # explained disabled shape when it is present); the DESK half is untouched
+    # — `Barkpark.Structure` still tiers desk items itself and Fleet is still
+    # absent there.
+    test "the Fleet desk link vanishes and the top-menu tab is never ENABLED when the Tasks plugin is disabled" do
       ws = create_workspace!()
       ctx = %{dataset: @dataset, workspace_id: ws.id}
 
@@ -178,14 +187,25 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
       off_desk =
         Enum.map(Registry.collect_desk_items(baseline: [], ctx: ctx), &Map.get(&1, :label))
 
-      off_menu =
-        Enum.map(Registry.collect_top_menu_entries(baseline: [], ctx: ctx), &Map.get(&1, :label))
+      off_menu_entries = Registry.collect_top_menu_entries(baseline: [], ctx: ctx)
+
+      off_menu_enabled =
+        off_menu_entries |> Enum.reject(& &1.disabled) |> Enum.map(&Map.get(&1, :label))
 
       refute "Fleet" in off_desk,
              "the Fleet desk link must disappear when the Tasks plugin is off"
 
-      refute "Fleet" in off_menu,
-             "the Fleet top-menu tab must disappear when the Tasks plugin is off"
+      refute "Fleet" in off_menu_enabled,
+             "the Fleet top-menu tab must not be an ENABLED tab when the Tasks plugin is off"
+
+      case Enum.find(off_menu_entries, &(&1.label == "Fleet")) do
+        nil ->
+          :ok
+
+        tab ->
+          assert tab.disabled == true and is_binary(tab.reason),
+                 "a surfaced-but-off Fleet tab must carry the explained disabled state"
+      end
     end
   end
 

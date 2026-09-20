@@ -40,6 +40,16 @@ name: pipefail SIGPIPE scan
 #                                  file carries the number, the command that
 #                                  produced it, its date, its composition, and
 #                                  the reason it is a baseline and not a zero.
+#   2b. the VARIABLE-PRODUCER SHAPE ratchet — fails this job when the count of
+#                                  `printf/echo of a VARIABLE into an early-exit
+#                                  reader` RISES above
+#                                  scripts/pipefail-sigpipe-variable-producer-baseline.txt.
+#                                  Added 2026-09-20 because the site that took
+#                                  main red that day (:1154, #19478) was flagged
+#                                  at [medium] and (2) above reads high only.
+#                                  It is a SHAPE, not the medium TIER — medium
+#                                  also holds 67 unclassified sites and their
+#                                  false positives, which stay unenforced.
 #   3. the full inventory        — never fails. medium/low are printed so the
 #                                  debt is visible, and enforced at neither.
 #
@@ -171,6 +181,32 @@ jobs:
       # (task-bf9d623529d86a86)
       - name: the banked number carries its command, date and sha (fails this job)
         run: bash scripts/pipefail-sigpipe-scan.sh --check-provenance scripts/pipefail-sigpipe-baseline.txt
+
+      # ── THE SHAPE RATCHET (2026-09-20, task-7fccc7b8cf1c6f6c) ───────────────
+      # The site that took main red on 2026-09-20 —
+      # scripts/pds-live-hetzner-placement-group.sh:1154, fixed by #19478 — was
+      # flagged by this very scanner BEFORE it reddened anything, at [medium],
+      # and the only tier enforced above is high. So the finding that cost a
+      # session sat in a tier nothing read.
+      #
+      # This does NOT enforce "medium". medium is two populations (101 of this
+      # shape, 67 `producer not classified`, measured on 5cd9243e1) and the
+      # second one holds the false positives. The enforced unit is the SHAPE:
+      # a printf/echo of a VARIABLE into an early-exit reader whose status is a
+      # boolean. Composition, reasoning and the refutation of the 2026-09-09
+      # "the variables are usually short" argument live in the baseline file.
+      #
+      # The high ratchet above is UNCHANGED and reads its own file: high was 89
+      # on this tree before this step existed and 89 after.
+      - name: variable-producer shape ratchet (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --baseline scripts/pipefail-sigpipe-variable-producer-baseline.txt
+
+      # Same rule as the high baseline: a bare integer is not a measurement.
+      # --check-provenance derives the command it demands from the option state,
+      # so this one requires the --only-shape command and NOT the high one — a
+      # shape file quoting the high command is refused (selftest arm 9g).
+      - name: the shape number carries its command, date and sha (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --check-provenance scripts/pipefail-sigpipe-variable-producer-baseline.txt
 
       # Advisory: the whole inventory, so medium/low debt is visible in the log
       # rather than only in someone's memory. Never fails.

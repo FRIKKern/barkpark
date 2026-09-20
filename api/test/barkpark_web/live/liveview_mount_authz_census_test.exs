@@ -40,7 +40,11 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
   needs an enabled Claude/Codex runtime). The positive control enables that
   runtime via config so `{:ok, …}` genuinely holds and the authz pass is real,
   not masked by the runtime gate. Wrong-role for this tier is a `read`-only
-  token (no `admin` permission).
+  token (no `admin` permission) — a class that, being a TOKEN, structurally
+  cannot express the OTHER principal this tier admits: a user-session admin,
+  which carries `:current_user` and NO `:api_token` at all. That class is
+  recorded by its own arm below (task-787766c0cf6604f1); a tier whose only
+  wrong-role shape is a token can never fail for it.
 
   ### SCOPED-ADMIN tier — TARGET-workspace admin (`LiveAuth.:scoped_admin`), deny → /studio
 
@@ -120,6 +124,8 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
 
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures, only: [ensure_default_scope!: 0]
+
+  alias Barkpark.AccountsFixtures
 
   alias Barkpark.Auth
   alias Barkpark.Content
@@ -302,9 +308,13 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
     # TRUTH, which is a mount SUCCESS: `on_mount(:admin)` is a global-permission
     # gate and a workspace-bound admin token clears it. Recorded here so the
     # census stops implying the flat route filters by tenancy — it does not, and
-    # the confinement for this module lives at the CLAUSES
-    # (`ChatLive.principal_chat_scope/1`, guarded by
-    # pds_w42_chatlive_flat_lifecycle_global_test.exs).
+    # the confinement for this module lives at the CLAUSES — `ChatLive`'s
+    # `tenancy_permits?/2` / `principal_permits_owner?/2` /
+    # `acting_workspace_id/1` / `delete_within_tenancy/2` (there is no
+    # `principal_chat_scope/1`; the name this comment used to carry has never
+    # existed in lib/), guarded by
+    # pds_w42_chatlive_flat_lifecycle_global_test.exs and, for the
+    # user-session principal, chat_live_user_session_tenancy_test.exs.
     test "ChatLive flat: an admin token BOUND to another workspace still mounts", ctx do
       %{conn: conn} = ctx
 
@@ -326,6 +336,49 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
                "if this now denies, the flat gate gained a tenancy check and the " <>
                "clause-level scope guard should be re-examined, not silently kept " <>
                "(got #{inspect(bound_result)})"
+    end
+
+    # THE CLASS THIS TIER'S WRONG-ROLE TOKEN CANNOT EXPRESS (task-787766c0cf6604f1).
+    # `LiveAuth.on_mount(:admin)` has TWO arms: `authorize/4` (token) and
+    # `authorize_user/3` (account session). Every other case in this describe
+    # drives the token arm, so an `admin`-with-no-workspace — a User whose grant
+    # is an admin ROLE in the Default workspace and who carries no `:api_token`
+    # assign whatsoever — was invisible here. It MOUNTS, which is correct; what
+    # its lifecycle writes may touch is confined to the Default workspace plus
+    # NULL-owned legacy rows, proved by
+    # `BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest` ("K3").
+    test "ChatLive flat: a USER-SESSION admin (no :api_token) is its own principal class", ctx do
+      %{conn: conn} = ctx
+
+      default_ws = Tenancy.get_default_workspace()
+
+      user =
+        AccountsFixtures.register_user(
+          "census-user-#{System.unique_integer([:positive])}@example.test"
+        )
+
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      {:ok, _} = TenancyAuth.create_membership(default_ws.id, user.id, "admin", "user")
+
+      enable_chat_runtime!()
+
+      result = live(Plug.Test.init_test_session(conn, %{"user_session" => raw}), "/studio/chat")
+
+      assert match?({:ok, _view, _html}, result),
+             "the flat admin gate refused a Default-workspace admin USER — " <>
+               "`authorize_user/3` grants exactly that role, so this tier admits " <>
+               "the class and the census must say so (got #{inspect(result)})"
+
+      {:ok, view, _html} = result
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+
+      assert is_nil(assigns[:api_token]),
+             "this socket carries an :api_token — then it is the token arm again " <>
+               "and the class is STILL unexpressed by this census"
+
+      assert match?(%Barkpark.Accounts.User{}, assigns[:current_user]),
+             "the user arm did not assign :current_user (got #{inspect(assigns[:current_user])})"
     end
   end
 
