@@ -77,13 +77,44 @@ defmodule Barkpark.Api.OpenApi do
 
     %{
       "title" => "#{name} CMS API",
-      "version" => Map.get(server, "version", "0.0.0"),
+      "version" => document_version(),
       "description" =>
         "The Barkpark headless-CMS `/v1` REST surface, generated from the " <>
           "capabilities manifest served at `GET /v1/capabilities`. Auth is a " <>
           "bearer token (`Authorization: Bearer <token>`); the minimum required " <>
           "permission for each operation is annotated as `x-barkpark-scope`."
     }
+  end
+
+  # THE DOCUMENT'S VERSION, DELIBERATELY NOT THE RUNNING RELEASE.
+  #
+  # This used to read the manifest's `server.version`, which was itself the
+  # mix.exs app vsn — so the value was deterministic by coincidence. On
+  # 2026-09-20 `server.version` became `Barkpark.BuildInfo.version/0`
+  # ("A.B.C.D", D = commits since the vA.B.C tag) so that `/v1/capabilities`
+  # reports the RUNNING RELEASE, which is right for a live endpoint and fatal
+  # for a checked-in artifact: D moves on EVERY commit anywhere in the repo, and
+  # CI generates from `refs/pull/N/merge` — one commit beyond the PR head — so
+  # NO committed byte sequence can reproduce what the drift gate computes.
+  # (Measured: PR head 0.2.26.3824, origin/main 0.2.26.3821, merge ref
+  # 0.2.26.3825.) Every other open PR would have gone red too.
+  #
+  # So the artifact reads the app vsn DIRECTLY, and the live endpoint keeps its
+  # build identity. The app vsn is the one candidate with no build-environment
+  # input at all: no `git describe`, no `BARKPARK_BUILD_VERSION` env override,
+  # no file outside this Mix project — the VERSION file is read through
+  # BuildInfo, whose env tier OUTRANKS it, so routing the artifact through
+  # VERSION would leave an operator's environment able to move these bytes.
+  # An OpenAPI document version is a document version; the SURFACE's version is
+  # `api_version` and the paths themselves.
+  #
+  # Guarded by "info.version is the deterministic app vsn, never a build-derived
+  # value" in `test/barkpark/api/openapi_test.exs`.
+  defp document_version do
+    case Application.spec(:barkpark, :vsn) do
+      vsn when is_list(vsn) -> List.to_string(vsn)
+      _ -> "0.0.0"
+    end
   end
 
   defp servers(server) do

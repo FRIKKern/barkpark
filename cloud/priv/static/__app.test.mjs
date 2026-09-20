@@ -8043,9 +8043,39 @@ test("webhookCardHtml reflects active state (Active pill + Disable) and carries 
   assert.match(html, /data-wh-rotate/);
   assert.match(html, /data-wh-deliveries/);
   assert.match(html, /data-wh-delete/);
-  for (const verb of ["show", "toggle", "rotate", "deliveries", "rm"]) {
+  for (const verb of ["show", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
     assert.match(html, new RegExp("bp cloud webhook " + verb + " abc"));
   }
+});
+
+// The `Send test` button's copy-as-CLI twin. This is the pair the card used to
+// break: the button shipped while `bp cloud webhook` had no test-send verb, so
+// the chip was deliberately withheld. The verb landed (internal/cli/
+// cloud_webhook_cmd.go, `case "test-send", "test":`), and the CLI side pins the
+// same prefix as webhookTestSendChip in internal/cli/cloud_webhook_cmd_test.go.
+// What is asserted here is the EXACT clipboard payload, inside the .wh-cli row —
+// not merely "the string appears somewhere in the card" — so removing the
+// cliChipHtml(webhookCliChip("test-send", …)) call from webhookCardHtml reds it.
+test("webhookCardHtml: the Send test button has a CLI twin whose copied command is exactly `bp cloud webhook test-send <instance>`", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", url: "https://x/h", active: true }, "abc", "production");
+  // Precondition: the action this chip is the twin OF is actually rendered.
+  assert.match(html, /data-wh-test>Send test</,
+    "precondition: the Send test action button is missing, so this test would pass vacuously");
+
+  const cli = html.split('<div class="wh-cli">')[1].split("</div>")[0];
+  assert.ok(cli.includes('data-copy="bp cloud webhook test-send abc"'),
+    "the .wh-cli row carries no test-send chip: " + cli);
+  assert.ok(cli.includes(">bp cloud webhook test-send abc<"),
+    "the test-send chip's visible command text is not the copied command: " + cli);
+
+  // Off-default dataset rides the ratified `--dataset <ds>` suffix, same as the
+  // sibling chips — a staging card must not copy a production command.
+  const staging = hooks.webhookCardHtml(
+    { id: "wh1", url: "https://x/h", active: true }, "abc", "staging");
+  const stagingCli = staging.split('<div class="wh-cli">')[1].split("</div>")[0];
+  assert.ok(stagingCli.includes('data-copy="bp cloud webhook test-send abc --dataset staging"'),
+    "the test-send chip does not forward an off-default dataset: " + stagingCli);
 });
 
 test("webhookCardHtml reflects disabled state (neutral pill + Enable)", () => {
@@ -21843,12 +21873,17 @@ test("REVIEW FIX (GR80 leg 3): the verdict is three-way and the toast never cont
   assert.match(pending.body, /hasn't answered yet/);
 });
 
-test("GR80 leg 3: the webhook action bar offers Send test, and no CLI chip for a verb bp lacks", () => {
+// AMENDED (gr-bl-cli-test-send): this test used to assert the INVERSE of its
+// second half — `!/webhook test-send acme/` — because `bp cloud webhook` had no
+// test-send verb and a chip for a non-existent command is worse than no chip.
+// The verb landed (internal/cli/cloud_webhook_cmd.go, `case "test-send", "test":`),
+// so the absence assertion was the stale half and is now the presence assertion.
+test("GR80 leg 3: the webhook action bar offers Send test, and the CLI chip for the verb bp now has", () => {
   const card = hooks.webhookCardHtml(
     { id: "wh_1", url: "https://example.com/hook", active: true }, "acme", "production");
   assert.match(card, /data-wh-test/, "the action bar carries the test-send affordance");
   assert.match(card, />Send test</);
-  assert.ok(!/webhook test-send acme/.test(card), "no copy-as-CLI chip: bp cloud webhook has no test-send verb");
+  assert.ok(/webhook test-send acme/.test(card), "the copy-as-CLI chip for test-send is missing from the card");
   // The existing bar is intact — this is an addition, not a re-composition.
   for (const hook of ["data-wh-edit", "data-wh-toggle", "data-wh-rotate", "data-wh-deliveries", "data-wh-delete"]) {
     assert.ok(card.includes(hook), "the bar keeps " + hook);

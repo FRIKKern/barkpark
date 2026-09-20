@@ -2311,12 +2311,21 @@ defmodule Barkpark.CycleFleet do
   defp pass_public_smoke(smoke, proof) do
     unsigned = %{"request" => smoke.request, "proof" => proof}
     digest = EpicFleet.canonical_digest(unsigned)
-    attestation = release_hmac(digest)
 
     Repo.transaction(fn ->
+      # The availability check comes FIRST and `release_hmac/1` after it.
+      # `release_hmac/1` reads the secret with `Application.fetch_env!/2`, so
+      # computing the attestation ahead of this guard turned a missing secret
+      # into an unnamed ArgumentError instead of the named
+      # :release_capture_signing_unavailable refusal this rollback exists for.
+      # Since config/runtime.exs no longer refuses the BOOT on a missing
+      # release-capture secret, this ordering is the only thing keeping the
+      # public-smoke refusal explicit.
       unless put_release_capture_hmac_secret() == :ok do
         Repo.rollback(:release_capture_signing_unavailable)
       end
+
+      attestation = release_hmac(digest)
 
       root = Promotion.lock_root(smoke.root_wave_id)
       event = Repo.get!(Event, smoke.promotion_event_id)
