@@ -1,0 +1,129 @@
+name: Barkdown parity
+# The Barkdown editor-parity rows (FRIKKern/barkdown, docs/EDITOR-PARITY.md) against THIS checkout's
+# Barkpark, on a PR that touches the paper editor or the PortableDoc render/schema it rides on. Each row
+# drives Barkdown's real Electron app against Phoenix booted from the PR head and compares the canvas
+# with the server; a green row going red fails the check (Barkdown plan #4).
+#
+# Barkdown is a private repository: the checkout needs a read token in the BARKDOWN_READ_TOKEN secret
+# (a fine-grained PAT with Contents: read on FRIKKern/barkdown). Without it the job says so and skips,
+# so the PR is not red for a reason unrelated to its code — add the secret to make this a gate.
+on:
+  pull_request:
+    paths:
+      - 'api/assets/paper-editor/**'
+      - 'api/priv/static/assets/bp-paper-editor*'
+      - 'api/lib/barkpark/portable_doc/**'
+      - '.github/workflows/barkdown-parity.yml'
+  workflow_dispatch:
+    inputs:
+      barkdown_ref:
+        description: Barkdown branch or commit (default codex/electron-prototype)
+        required: false
+      rows:
+        description: Comma-separated rows (default all)
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: barkdown-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  parity:
+    name: Barkdown parity rows
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: barkpark_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - id: token
+        name: Is the Barkdown read token configured?
+        env:
+          TOKEN: ${{ secrets.BARKDOWN_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::BARKDOWN_READ_TOKEN is not set: the Barkdown parity rows cannot run (FRIKKern/barkdown is private). Add a fine-grained PAT with Contents: read as that secret to turn this into a gate."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          path: barkpark
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          repository: FRIKKern/barkdown
+          ref: ${{ github.event.inputs.barkdown_ref || 'codex/electron-prototype' }}
+          token: ${{ secrets.BARKDOWN_READ_TOKEN }}
+          path: barkdown
+      - uses: erlef/setup-beam@v1
+        if: steps.token.outputs.present == 'true'
+        with:
+          version-file: barkpark/.tool-versions
+          version-type: strict
+      - uses: actions/setup-go@v5
+        if: steps.token.outputs.present == 'true'
+        with:
+          go-version-file: barkpark/go.mod
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          node-version: '22'
+      - name: Cache deps and build
+        if: steps.token.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            barkpark/api/deps
+            barkpark/api/_build
+          key: barkdown-parity-${{ runner.os }}-${{ hashFiles('barkpark/api/mix.lock') }}
+          restore-keys: |
+            barkdown-parity-${{ runner.os }}-
+      - name: System libraries (libvips, Xvfb, Electron's shared libraries)
+        if: steps.token.outputs.present == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libvips-dev xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2 libgtk-3-0 || sudo apt-get install -y -q libvips-dev xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 libgtk-3-0
+      - name: Boot this checkout's Barkpark
+        if: steps.token.outputs.present == 'true'
+        run: bash barkdown/app/tests/ci/boot-barkpark.sh "$GITHUB_WORKSPACE/barkpark"
+      - name: Barkdown app
+        if: steps.token.outputs.present == 'true'
+        working-directory: barkdown/app
+        run: |
+          npm ci
+          npm run build
+      - name: Parity rows
+        if: steps.token.outputs.present == 'true'
+        working-directory: barkdown/app
+        env:
+          PARITY_ROWS: ${{ github.event.inputs.rows }}
+          BARKDOWN_PROVIDER: api
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node tests/parity.mjs
+      - name: Phoenix log
+        if: always() && steps.token.outputs.present == 'true'
+        run: tail -n 200 /tmp/barkpark-phx.log || true
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.token.outputs.present == 'true'
+        with:
+          name: barkdown-parity-results
+          path: |
+            barkdown/app/test-results/parity.md
+            barkdown/app/test-results/parity.json
+            barkdown/app/test-results/parity-*.log
+            barkdown/app/test-results/*.png
+          if-no-files-found: ignore
