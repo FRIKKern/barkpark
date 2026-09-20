@@ -434,7 +434,7 @@
       {
         "name": "pds-record-parity 108-check matrix",
         "run": "bash scripts/pds-record-parity.test.sh",
-        "env": {}
+        "env": { "PDS_PARITY_DYNAMIC": "1" }
       },
       {
         "name": "pds-scratch-target two-root coexistence + teardown",
