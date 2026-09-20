@@ -4051,6 +4051,39 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .attention-row { flex-wrap: wrap; row-gap: 10px; }
   .attention-main { min-width: 12rem; }
   .attention-acts { margin-left: auto; }
+  /* cch-w20-bl: THE WRAP POINT IS A RULE, NOT A REASON STRING. The three
+     declarations above make the row wrap; they do not say WHERE, and the
+     answer they left behind was arithmetic over a fixture: the action cluster
+     yields only once `pill + gap + 12rem` no longer fits, so the pill's width
+     — which is `statusOf(bp).detail`, a sentence — decided it per row. DRIVEN
+     on the bytes above at 800 on `mixed-fleet`, content box 482px: rows 0 and
+     1 carry 325.11px and 332.58px of pill and break AFTER the chip, row 2
+     carries 200.75px and keeps chip+name inline (200.75 + 14 + 192 = 406.75 <=
+     482). One card, two row shapes, and which shape a row wears is a property
+     of its reason sentence.
+
+     ONE DECLARATION, AND IT IS A FLEX-LINE RULE RATHER THAN A WIDTH. `flex: 0
+     0 100%` makes the pill's outer hypothetical main size the whole content
+     box, so nothing can ever share its flex line — at EVERY width in the band,
+     for EVERY reason string, present or future. A `min-width` floor was the
+     other candidate and was refused: it only reaches uniformity while the
+     floor out-measures the longest sentence in the corpus (21rem clears
+     today's 332.58px and nothing clears tomorrow's), so it re-decides the
+     shape by string the moment a longer reason ships. This is uniform BY
+     CONSTRUCTION, which is what the row asked for.
+
+     IT CANNOT ROB cch-w20-s6 (that row's host, and the failure mode s9 refused
+     when it priced the floor-only candidate at 165/165 -> 0/165). The pill is
+     the only element this touches and the rule only ever WIDENS it — from its
+     natural width to the full content box — so `.attention-row
+     .status-pill-detail` gains room or keeps what it had; it can never lose
+     any. The W20-attention-band-wrap-uniform leg measures that before/after
+     across s6's own cells rather than asserting it.
+
+     BOUNDED TO THE BAND, as its three siblings are. Below 769 the GR109 stack
+     already gives every child its own line; above 904 the row is a row and the
+     pill sits inline beside a name the ellipsis bounds. */
+  .attention-row .status-pill { flex: 0 0 100%; }
 }
 /* v4 instances grid — auto-fill cards. */
 .overview-instances { margin-top: 4px; }
