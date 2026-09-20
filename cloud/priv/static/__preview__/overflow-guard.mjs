@@ -266,7 +266,7 @@ import { cuePaints, cueWhy, CUE_METRICS_FN } from "./cue-paint-verdict.mjs";
 // copied as a numeral would go stale the day the stylesheet grows a boundary
 // below 620, silently re-opening the gap in both files. breakpoint-sweep.mjs
 // guards its own main behind `process.argv[1]`, so importing it runs nothing.
-import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
+import { WIDTHS as SWEEP_WIDTHS, accentIdentities } from "./breakpoint-sweep.mjs";
 import { edgeCoverSentence } from "./edge-cover-verdict.mjs";
 import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
@@ -283,6 +283,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const DEFECTS = [
   "GR108-tablet-topbar-overflow",
+  "GRBLK-accent-scenario-matrix",
   "W20-phone-band-billing-chip",
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
@@ -1726,6 +1727,183 @@ async function main() {
         // the band above the breakpoint had been cleared for the chip too; the
         // chip was only ever read at 768. The chip now answers for itself above.
         okLine(`0/${checks} PAGE-overflow cells across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint). The chip's own question is answered per-width above, not by this line.`);
+      }
+    }
+
+    // ── GRBLK: THE ACCENT AXIS. Every leg above this one drives exactly ONE
+    //    identity — the evergreen default — because no cell in this file has
+    //    ever carried `?accent=`. `grep -n -i accent cloud/priv/static/
+    //    __preview__/overflow-guard.mjs` returned NOTHING before this leg.
+    //    breakpoint-sweep.mjs's theme derivation says so in its own words
+    //    ("Identity is a SEPARATE AXIS with its own owner —
+    //    gr-blk-accent-scenario-sweep — and this sweep does not claim it");
+    //    this is that owner, living in the committed guard rather than in the
+    //    /tmp instrument the round-8 sweep used and lost.
+    //
+    //    THE ROSTER IS DERIVED, NEVER TYPED, on both axes:
+    //      · scenarios   from scenarios.mjs's own SCENARIO_NAMES (135 today).
+    //        The round-8 record and the filing row both say "86 scenarios /
+    //        860 runs"; the corpus has grown since and the filed denominator
+    //        is STALE. A typed 86 would have printed a plausible tally over a
+    //        roster it no longer matches, which is the failure this file's
+    //        "print the count, never narrate it" rule exists for. The module
+    //        is import()ed HERE rather than at the top of the file because it
+    //        is ~340KB and this is the only leg that needs the whole roster.
+    //      · accents     from app.css's own `[data-bp-theme="…"]` selectors
+    //        via breakpoint-sweep.mjs's accentIdentities(). A sixth skin
+    //        generated into BP_THEMES and app.css joins this matrix the day it
+    //        lands, with no edit here.
+    //
+    //    THE READ-BACK IS THE POINT, NOT CEREMONY (the W13 "a route is not a
+    //    query string" shape, one axis over). `?accent=` is consumed by
+    //    mock.js (`grep -n 'var accent = params.get' cloud/priv/static/
+    //    __preview__/mock.js`), which seeds localStorage and the root
+    //    attribute before app.js boots. If that pre-seed ever stops applying,
+    //    a sweep that only reads geometry prints a full, plausible five-accent
+    //    table in which all five columns are evergreen. So every cell reads
+    //    `data-bp-theme` and `data-theme` BACK off the root and reds when the
+    //    identity or the mode it measured is not the one it asked for.
+    //
+    //    ONE WIDTH, 768, ON PURPOSE. The accent switch changes COLOUR tokens,
+    //    not the layout algebra — but it also changes rendered TEXT nowhere,
+    //    so the only way it can move geometry is through a token that feeds a
+    //    border, a shadow or a font stack. 768 is the tablet breakpoint the
+    //    seal's tablet claim is about; widening this to the full WIDTHS ladder
+    //    would multiply an already 1350-cell matrix by eleven for a question
+    //    the other legs already answer at one identity.
+    //
+    //    THE DEFAULT IS THE SAMPLE, AND IT SAYS SO. The full matrix is 1350
+    //    page loads; this leg runs inside `Console gate` on every
+    //    console-touching PR, and a required gate is not the place to spend
+    //    that. Unset, the leg drives ONE scenario per DISTINCT ROUTE — a
+    //    predicate, not a hand-kept list, so a new route joins the sample by
+    //    existing — across every accent and both themes, and prints the
+    //    fraction of the corpus that is. `OVERFLOW_GUARD_ACCENT_MATRIX=full`
+    //    drives all of it. Either way the covered/total line is PRINTED from
+    //    the counters, and every cell prints its own row, so a reader can
+    //    recount the tally out of the transcript rather than trust it.
+    if (requested.includes("GRBLK-accent-scenario-matrix")) {
+      const D = "GRBLK-accent-scenario-matrix";
+      const { SCENARIO_NAMES, SCENARIOS } = await import("./scenarios.mjs");
+      const ACCENTS = accentIdentities(fs.readFileSync(path.join(ROOT, "app.css"), "utf8"));
+      // AUDITED (exit 2): a roster of fewer than two identities means the
+      // derivation stopped working, not that the console lost its skins — and
+      // a one-member "matrix" would print a green over an axis it never drove.
+      if (ACCENTS.length < 2) {
+        return die(
+          `${D}: the accent roster derived from app.css's [data-bp-theme="…"] selectors has ` +
+          `${ACCENTS.length} member(s) (${ACCENTS.join(", ") || "none"}). This leg's whole subject is the ` +
+          `identity axis, so a roster that small is a broken derivation — re-derive with ` +
+          `\`grep -n 'data-bp-theme=' cloud/priv/static/app.css\` and \`grep -n 'var BP_THEMES' cloud/priv/static/app.js\`. ` +
+          `Refusing to print a one-identity table under a five-identity name.`,
+        );
+      }
+      const ACCENT_MODE = String(process.env.OVERFLOW_GUARD_ACCENT_MATRIX || "").toLowerCase();
+      const FULL = ACCENT_MODE === "full";
+      // The route a scenario lands on, with instance/site UUIDs folded to <id>
+      // so two fixtures of the same screen are one route and not two.
+      const routeOf = (n) =>
+        SCENARIOS[n].pathname
+          ? `path:${SCENARIOS[n].pathname}`
+          : String(SCENARIOS[n].deepLink || "#overview").replace(/[0-9a-f]{8}-[0-9a-f-]{20,}/g, "<id>");
+      const sampleRoster = [];
+      {
+        const seenRoute = new Set();
+        for (const n of SCENARIO_NAMES) {
+          const r = routeOf(n);
+          if (seenRoute.has(r)) continue;
+          seenRoute.add(r);
+          sampleRoster.push(n);
+        }
+      }
+      const roster = FULL ? SCENARIO_NAMES.slice() : sampleRoster;
+      const total = roster.length * ACCENTS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${roster.length} scenarios x ${ACCENTS.length} accents x 2 themes @768 = ${total} cells` +
+        ` · accents DERIVED from app.css: ${ACCENTS.join(", ")}` +
+        ` · mode ${FULL
+          ? `FULL (OVERFLOW_GUARD_ACCENT_MATRIX=full) — the whole ${SCENARIO_NAMES.length}-scenario corpus`
+          : `SAMPLE (default) — ${roster.length} of ${SCENARIO_NAMES.length} scenarios, one per distinct route; ` +
+            `OVERFLOW_GUARD_ACCENT_MATRIX=full drives all ${SCENARIO_NAMES.length}`}\n`,
+      );
+      // The per-cell offender probe: the element whose right edge reaches
+      // furthest past the viewport, with its OWN scrollWidth/clientWidth, so a
+      // finding names a cell AND an element instead of handing the reader a
+      // page number to go hunting with.
+      const ACCENT_PROBE =
+        `(function(){var d=document.documentElement;var worst=null;` +
+        `if(d.scrollWidth>d.clientWidth){var cw=d.clientWidth;var all=document.querySelectorAll('body *');` +
+        `for(var i=0;i<all.length;i++){var e=all[i];var r=e.getBoundingClientRect();` +
+        `if(r.width===0&&r.height===0)continue;var right=Math.round(r.right);if(right<=cw)continue;` +
+        `if(!worst||right>worst.right){var cls=(typeof e.className==='string'&&e.className)?('.'+e.className.trim().split(/\\s+/).join('.')):'';` +
+        `worst={right:right,sw:e.scrollWidth,cw:e.clientWidth,sel:e.tagName.toLowerCase()+(e.id?('#'+e.id):'')+cls};}}}` +
+        `return {sw:d.scrollWidth,cw:d.clientWidth,theme:d.getAttribute('data-theme'),` +
+        `accent:d.getAttribute('data-bp-theme'),worst:worst};})()`;
+      let measured = 0, pageOver = 0, wrongAccent = 0, wrongTheme = 0;
+      for (const name of roster) {
+        const sc = SCENARIOS[name];
+        const pathPart = sc.pathname || "/";
+        const q = sc.search ? `${sc.search}&` : "?";
+        // A pathname scenario IS its own page (/new, /activate) and carries no
+        // hash; a hash scenario needs its deepLink or it renders #overview.
+        const hash = sc.pathname ? "" : String(sc.deepLink || "#overview");
+        for (const accent of ACCENTS) {
+          for (const theme of ["light", "dark"]) {
+            await setViewport(768);
+            const url = `${BASE}${pathPart}${q}scen=${name}&theme=${theme}&accent=${accent}${hash}`;
+            await nav(
+              url,
+              `document.querySelectorAll('section.view:not([hidden]), main.auth-screen:not([hidden]), main.new-screen:not([hidden])').length > 0`,
+            );
+            const m = await evalJs(ACCENT_PROBE);
+            measured++;
+            const over = m.sw > m.cw;
+            if (over) {
+              pageOver++;
+              fail(
+                D,
+                `${name}/${accent}/${theme}@768: documentElement scrollWidth ${m.sw} > clientWidth ${m.cw}` +
+                (m.worst
+                  ? ` — furthest element \`${m.worst.sel}\` right edge ${m.worst.right}px (its own scrollWidth ${m.worst.sw} / clientWidth ${m.worst.cw})`
+                  : ` — no descendant's right edge exceeded the viewport, so the overhang is the root box itself`),
+              );
+            }
+            if (m.accent !== accent) {
+              wrongAccent++;
+              fail(
+                D,
+                `${name}/${accent}/${theme}@768: the shell's data-bp-theme reads "${m.accent}" — the \`?accent=\` ` +
+                `pre-seed did NOT apply, so this cell measured a DIFFERENT identity than the one it asked for. ` +
+                `Every green in this column would be the same evergreen run wearing five names.`,
+              );
+            }
+            if (m.theme !== theme) {
+              wrongTheme++;
+              fail(D, `${name}/${accent}/${theme}@768: the shell's data-theme reads "${m.theme}" — the \`?theme=\` did not apply.`);
+            }
+            process.stdout.write(
+              `   cell ${name} ${accent} ${theme} 768 sw=${m.sw} cw=${m.cw} bp=${m.accent} mode=${m.theme} ` +
+              `${over ? `OVER ${m.worst ? m.worst.sel : "root"}` : "ok"}\n`,
+            );
+          }
+        }
+      }
+      // UNCONDITIONAL, on a clean run and a red one alike: a denominator a
+      // reader has to infer is a denominator the next summary gets to round.
+      process.stdout.write(
+        `   ${D}: MEASURED ${measured} of ${total} cells · ${pageOver} page-overflow offender(s) · ` +
+        `identity read back correct in ${measured - wrongAccent} of ${measured} · ` +
+        `mode read back correct in ${measured - wrongTheme} of ${measured}\n`,
+      );
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `0/${measured} page-overflow cells at 768px across ${roster.length} scenario(s) x ` +
+          `${ACCENTS.length} accents (${ACCENTS.join("/")}) x 2 themes` +
+          `${FULL ? ` — the WHOLE ${SCENARIO_NAMES.length}-scenario corpus` : ` — ${roster.length} of ${SCENARIO_NAMES.length} scenarios (one per distinct route)`}. ` +
+          `Every cell read its identity back off the root: ${measured} of ${measured} rendered under the accent asked for, ` +
+          `so this is five identities measured and not one measured five times. ` +
+          `THIS CLAIM IS 768px ONLY — the other widths in this file are driven at the default identity alone.`,
+        );
       }
     }
 
