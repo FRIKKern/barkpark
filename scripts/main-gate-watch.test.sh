@@ -1178,6 +1178,253 @@ else
   bad "SELF_RUN_ID does not default from GITHUB_RUN_ID; the fix is inert in production"
 fi
 
+
+# ═══ 16. NOT_OWED: the alarm is narrowed, and it is narrowed BOTH ways ═══════
+# task-2253e13aba12fbe8. #19414 stopped this watch counting its own run as a
+# reason to WAIT — correct — and thereby converted a MUTED problem into a LOUD
+# false one: 42 of the last 50 main tips carry no `Console gate` check run at
+# all, because .github/workflows/console-harness.yml is paths-filtered on its
+# `push:` arm (and ONLY there — every PR head still renders the context).
+#
+# EVERY ARM BELOW IS DRIVEN BY A REAL SHA'S REAL FILE LIST, and the two
+# directions are proven against each other, because the easy way to "fix" this
+# is to make the MISSING arm unreachable — which silences the detector.
+#
+#   9980425e6  internal/cli/... only        -> NOT_OWED, exit 0
+#   56e0dbca4  .claude/skills/... only      -> NOT_OWED, exit 0
+#   a5260f609  cloud/lib/** (a WATCHED path) -> STILL MISSING x3, exit 1
+section "16. NOT_OWED — a paths-declined context is silent, a touched one still screams"
+
+CF="$TMP/changed"; mkdir -p "$CF"
+printf '%s\n' 'internal/cli/manifest_declared_fact_guard_test.go' > "$CF/9980425e6.txt"
+printf '%s\n' '.claude/skills/orchestrate-tasks/helpers/held-liveness.sh' > "$CF/56e0dbca4.txt"
+cat > "$CF/a5260f609.txt" <<'FILES'
+cloud/lib/barkpark_cloud/publish_clock.ex
+cloud/lib/barkpark_cloud/web/router.ex
+cloud/test/barkpark_cloud/deploy_ledger_reachability_test.exs
+cloud/test/barkpark_cloud/publish_clock_test.exs
+cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs
+internal/cli/cloud_deploy_census_cmd.go
+FILES
+
+# The console-harness push arm really is the thing under test, so the fixture is
+# the REPO'S OWN workflow directory and the REPO'S OWN manifest. A synthetic
+# workflow would prove the matcher and nothing about the live filter.
+WFDIR="$REPO_ROOT/.github/workflows"
+MFST="$REPO_ROOT/.github/main-push-workflows.txt"
+
+# The ground the whole section stands on. If console-harness.yml stops being
+# CONDITIONAL, or its Console gate job is renamed, every arm below goes vacuous
+# while still passing — so both are asserted, not assumed.
+if grep -q '^\.github/workflows/console-harness\.yml	CONDITIONAL$' "$MFST"; then
+  ok "PRECONDITION: console-harness.yml is CONDITIONAL in the committed manifest — the tier is read, not invented"
+else
+  bad "PRECONDITION FAILED: console-harness.yml is not CONDITIONAL in $MFST; section 16 measures nothing"
+fi
+if grep -q 'name: Console gate' "$WFDIR/console-harness.yml"; then
+  ok "PRECONDITION: the job named 'Console gate' lives in console-harness.yml — the mapping is DERIVED from the tree"
+else
+  bad "PRECONDITION FAILED: no job named 'Console gate' in console-harness.yml; the context->workflow derivation is stale"
+fi
+
+# ── direction 1: a declined sha goes silent ─────────────────────────────────
+# Fixture: the recorded 56e0dbca4 payload, whose Console gate row never existed,
+# with NOTHING in flight. Before this change that is `MISSING Console gate`,
+# exit 1 — proven by section 15's `--self-run-id` arm on this very payload.
+for sha in 9980425e6 56e0dbca4; do
+  rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha "$sha" \
+    --protection-file "$FX/protection.json" \
+    --check-runs-file "$FX/self-inflight-checks.json" \
+    --runs-file "$FX/self-inflight-runs.json" \
+    --self-run-id 35492442980 \
+    --workflows-dir "$WFDIR" --manifest "$MFST" \
+    --changed-files-file "$CF/$sha.txt" > "$OUT" 2>&1; echo $?)"
+  if [ "$rc" = "0" ]; then
+    ok "$sha touched no console path -> exit 0; the 84% false alarm is gone"
+  else
+    bad "$sha still exits $rc; the declined sha is not silent"; cat "$OUT" >&2
+  fi
+  if grep -q "NOT_OWED Console gate" "$OUT"; then
+    ok "$sha names Console gate NOT_OWED — the silence is PRINTED, never merely absent"
+  else
+    bad "$sha does not print NOT_OWED; a silent subtraction is unauditable"; cat "$OUT" >&2
+  fi
+  if grep -q "MISSING  Console gate" "$OUT"; then
+    bad "$sha still reports MISSING Console gate"
+  else
+    ok "$sha no longer reports MISSING Console gate"
+  fi
+done
+
+# ── direction 2: THE NEGATIVE CONTROL. It must keep failing. ────────────────
+# a5260f609 touched cloud/lib/** , which console-harness.yml's push arm watches,
+# and STILL rendered no Console gate row. That is a genuinely unjudged tip and
+# the whole reason the MISSING arm exists. If this arm ever passes at exit 0,
+# the repair has silenced the detector wholesale and section 3 above is the only
+# thing standing between that and production.
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha a5260f609 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/a5260f609.json" \
+  --runs-file "$FX/a5260f609-runs.json" \
+  --workflows-dir "$WFDIR" --manifest "$MFST" \
+  --changed-files-file "$CF/a5260f609.txt" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ]; then
+  ok "a5260f609 touched cloud/lib/** and still rendered nothing -> STILL exit 1; the alarm is narrowed, not silenced"
+else
+  bad "a5260f609 exits $rc WITH its real file list; the MISSING arm has been made unreachable"; cat "$OUT" >&2
+fi
+n="$(grep -c "MISSING  " "$OUT")"
+if [ "$n" = "3" ]; then
+  ok "a5260f609 still reports MISSING on all THREE watched contexts, file list and all"
+else
+  bad "a5260f609 reports $n MISSING rows with its file list, expected 3"; cat "$OUT" >&2
+fi
+if grep -q "NOT_OWED" "$OUT"; then
+  bad "a5260f609 produced a NOT_OWED row; a sha that TOUCHED a watched path was excused"; cat "$OUT" >&2
+else
+  ok "a5260f609 produces NO NOT_OWED row — owed-ness is decided by the file list, not by the tier alone"
+fi
+
+# ── the discriminator IS the file list, proven by swapping only it ──────────
+# Same sha, same payloads, same argv — only the changed-files fixture differs.
+# If the verdict does not move, the file list is decorative and both arms above
+# are passing for a reason that has nothing to do with paths.
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha a5260f609 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/a5260f609.json" \
+  --runs-file "$FX/a5260f609-runs.json" \
+  --workflows-dir "$WFDIR" --manifest "$MFST" \
+  --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "NOT_OWED Console gate" "$OUT" && [ "$(grep -c "MISSING  " "$OUT")" = "2" ]; then
+  ok "swapping ONLY the file list moves Console gate from MISSING to NOT_OWED (3 MISSING -> 2 + 1 NOT_OWED) — the file list is the discriminator"
+else
+  bad "the file list did not move the verdict on a5260f609; it is decorative, got exit $rc"; cat "$OUT" >&2
+fi
+if grep -q "MISSING  Cloud gate" "$OUT" && grep -q "MISSING  Elixir gate" "$OUT"; then
+  ok "...and the two ALWAYS-tier contexts are untouched by the swap — only the CONDITIONAL one moves"
+else
+  bad "an ALWAYS-tier context moved with the file list; the tier is not being read"; cat "$OUT" >&2
+fi
+
+# ── FAIL CLOSED: no file list must buy no silence ───────────────────────────
+# Every pre-existing arm of this harness passes no --changed-files-file, so this
+# is what keeps the other 109 measuring what they measured. Asserted directly
+# rather than inferred from their totals.
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 56e0dbca4 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs.json" \
+  --self-run-id 35492442980 \
+  --workflows-dir "$WFDIR" --manifest "$MFST" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+  ok "with NO --changed-files-file the verdict is MISSING, exit 1 — unknown owed-ness fails CLOSED"
+else
+  bad "an unknown file list bought silence (exit $rc); the matcher fails OPEN"; cat "$OUT" >&2
+fi
+
+# ── FAIL CLOSED: an unreadable manifest must not excuse anything ────────────
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 9980425e6 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs.json" \
+  --self-run-id 35492442980 \
+  --workflows-dir "$WFDIR" --manifest "$TMP/no-such-manifest.txt" \
+  --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+  ok "a missing manifest yields UNKNOWN -> OWED -> MISSING; the tier list cannot be deleted into silence"
+else
+  bad "a missing manifest silenced the watch (exit $rc)"; cat "$OUT" >&2
+fi
+
+# ── MUTATION: the tier must actually be READ from the manifest ──────────────
+# A copy of the manifest with console-harness.yml demoted to ALWAYS must make
+# the declined sha scream again. If it does not, the manifest read is inert and
+# the script is deciding owed-ness some other way.
+sed 's|^\.github/workflows/console-harness\.yml	CONDITIONAL$|.github/workflows/console-harness.yml	ALWAYS|' \
+  "$MFST" > "$TMP/manifest-always.txt"
+if grep -q '^\.github/workflows/console-harness\.yml	ALWAYS$' "$TMP/manifest-always.txt"; then
+  rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 9980425e6 \
+    --protection-file "$FX/protection.json" \
+    --check-runs-file "$FX/self-inflight-checks.json" \
+    --runs-file "$FX/self-inflight-runs.json" \
+    --self-run-id 35492442980 \
+    --workflows-dir "$WFDIR" --manifest "$TMP/manifest-always.txt" \
+    --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+  if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+    ok "MUTATION: demoting console-harness.yml to ALWAYS in the manifest restores the scream — the tier is genuinely read from the file"
+  else
+    bad "MUTATION SURVIVED: the manifest tier is inert (exit $rc); owed-ness is being decided elsewhere"; cat "$OUT" >&2
+  fi
+else
+  bad "could not build the ALWAYS-mutant manifest; the mutation arm measured nothing"
+fi
+
+# ── MUTATION: the paths list must actually be READ from the workflow ────────
+# A copy of the workflow tree whose console-harness push paths are replaced by a
+# pattern matching 9980425e6's one file must flip it from NOT_OWED to MISSING.
+MUTWF="$TMP/wf-mutant"; rm -rf "$MUTWF"; mkdir -p "$MUTWF"
+cp "$WFDIR"/console-harness.yml "$MUTWF/" 2>/dev/null
+python3 - "$MUTWF/console-harness.yml" <<'MUT'
+import sys, re
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+# Replace the whole push-arm paths: block with a single pattern that matches
+# internal/cli/**, which 9980425e6 touched and the real filter does not select.
+out, seen, skipping = [], False, False
+for line in src.splitlines(True):
+    if not seen and re.match(r"^    paths:\s*$", line):
+        out.append("    paths:\n"); out.append('      - "internal/cli/**"\n')
+        seen, skipping = True, True
+        continue
+    if skipping:
+        if re.match(r'^      - ', line):
+            continue
+        skipping = False
+    out.append(line)
+open(p, "w", encoding="utf-8").write("".join(out))
+sys.stderr.write("mutated\n" if seen else "NOT MUTATED\n")
+MUT
+if grep -q 'internal/cli/\*\*' "$MUTWF/console-harness.yml"; then
+  ok "built the paths-mutant workflow (push paths -> internal/cli/**)"
+  rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 9980425e6 \
+    --protection-file "$FX/protection.json" \
+    --check-runs-file "$FX/self-inflight-checks.json" \
+    --runs-file "$FX/self-inflight-runs.json" \
+    --self-run-id 35492442980 \
+    --workflows-dir "$MUTWF" --manifest "$MFST" \
+    --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+  if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+    ok "MUTATION: a push paths: list that DOES select 9980425e6's file restores the scream — the glob is matched against the real workflow, not hardcoded"
+  else
+    bad "MUTATION SURVIVED: rewriting the workflow's paths: did not change the verdict (exit $rc); the matcher is not reading the file"; cat "$OUT" >&2
+  fi
+else
+  bad "could not build the paths-mutant workflow; the mutation arm measured nothing"
+fi
+
+# The library is SOURCED, so a PR that changes only it changes this watch's
+# verdict — and must dispatch this harness. An undispatched target is how a
+# matcher gets edited with nothing measuring it.
+if grep -q '"scripts/lib/main-push-owedness.sh"' "$WF"; then
+  ok "the pull_request paths: filter lists scripts/lib/main-push-owedness.sh — a PR touching only the matcher still runs this harness"
+else
+  bad "scripts/lib/main-push-owedness.sh is not in $WF's paths: filter; editing the matcher dispatches nothing"
+fi
+
+bash -n "$REPO_ROOT/scripts/lib/main-push-owedness.sh" \
+  && ok "scripts/lib/main-push-owedness.sh passes bash -n" \
+  || bad "scripts/lib/main-push-owedness.sh has a syntax error"
+
+# The sharing is the point: one manifest, read by BOTH instruments. Before this
+# change `grep -c main-push-workflows scripts/main-gate-watch.sh` was 0 and the
+# two answered differently on the same sha BY CONSTRUCTION.
+if [ "$(grep -c 'main-push-workflows' "$WATCH")" -ge 1 ] \
+   && [ "$(grep -c 'main-push-workflows' "$REPO_ROOT/scripts/main-verdict-presence.sh")" -ge 1 ]; then
+  ok "both main-gate-watch.sh and main-verdict-presence.sh read .github/main-push-workflows.txt — one tier list, not two"
+else
+  bad "the two instruments do not share the tier manifest; a second hand-maintained list is back"
+fi
+
 bash -n "$WATCH" && ok "main-gate-watch.sh passes bash -n" || bad "main-gate-watch.sh has a syntax error"
 
 echo
