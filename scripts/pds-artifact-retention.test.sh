@@ -41,7 +41,8 @@ check(){ # got want label
 }
 rule() { printf -- '─%.0s' $(seq 1 72); printf '\n'; }
 
-TMPTOP="$(mktemp -d -t pds-art-retention-test)" || { echo "TEST HARNESS FAIL: mktemp" >&2; exit 99; }
+# PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only.
+TMPTOP="$(mktemp -d "${TMPDIR:-/tmp}/pds-art-retention-test.XXXXXX")" || { echo "TEST HARNESS FAIL: mktemp" >&2; exit 99; }
 cleanup() { [ -n "${TMPTOP:-}" ] && [ -d "$TMPTOP" ] && rm -rf "$TMPTOP"; }
 trap cleanup EXIT
 
