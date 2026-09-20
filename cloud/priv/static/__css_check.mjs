@@ -1098,7 +1098,16 @@ const WRAP_CORE_SHORTHANDS = [
 // REQUIRED — a scan degrading to 3-of-4 that lost exactly the attention
 // queue's copy would still have reported clean, which is the partial
 // blindness these pins exist to close.
-const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"];
+// cch-w24-s2 added `.detail-title-row` as the FIFTH copy — a COMMA MEMBER of
+// the `.instance-card-head` prelude, not a new block (Δheads 0). It was
+// COUNTED (the harness's same-file count pin went 4 -> 5) but not REQUIRED,
+// so a scan degrading to 4-of-5 that lost exactly the failed instance's OWN
+// detail header — the one screen a person opens to read WHY provisioning
+// failed — still reported clean. `cch-w24-bl-detail-title-row-not-a-required-
+// wrap-host` closes that, and the cascade is the point: every fixture
+// stylesheet E14 runs against now owes the fifth copy, which is what makes a
+// required host a pin rather than a note.
+const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"];
 // WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
 // NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
 // and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
