@@ -65,11 +65,17 @@ defmodule BarkparkWeb.Studio.SelectDeadDestinationTest do
 
   setup %{conn: conn} do
     {:ok, _} =
-      Auth.create_token(@admin_token, "dead destination admin", @dataset, [
-        "read",
-        "write",
-        "admin"
-      ])
+      Auth.create_token(
+        @admin_token,
+        "dead destination admin",
+        @dataset,
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     for {type, title} <- [{@dead_type, "Dead Dest Note"}, {@good_type, "Live Dest Note"}] do
       {:ok, _} =

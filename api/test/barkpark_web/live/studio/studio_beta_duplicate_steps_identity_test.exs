@@ -34,7 +34,13 @@ defmodule BarkparkWeb.Studio.StudioBetaDuplicateStepsIdentityTest do
     raw = "beta-duplicate-steps-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "Beta duplicate Steps identity", @dataset, ["read", "write"])
+      Auth.create_token(
+        raw,
+        "Beta duplicate Steps identity",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
@@ -85,7 +91,16 @@ defmodule BarkparkWeb.Studio.StudioBetaDuplicateStepsIdentityTest do
   test "an already-Beta editor refreshes identities and refuses a newly ambiguous document",
        %{conn: conn} do
     raw = "beta-stale-toggle-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta stale toggle", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta stale toggle",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     id = "beta-stale-toggle-#{System.unique_integer([:positive])}"
     canonical = [steps(%{"id" => "row", "title" => "Before", "children" => []})]

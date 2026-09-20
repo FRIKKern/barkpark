@@ -72,7 +72,16 @@ defmodule BarkparkWeb.PaperPresenceTest do
 
   defp token_conn!(conn, name, perms \\ ["read"]) do
     raw = "eol-pres-#{name}-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, name, @dataset, perms)
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        name,
+        @dataset,
+        perms,
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {token, as_token(conn, raw)}
   end
 

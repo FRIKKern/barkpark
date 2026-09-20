@@ -36,9 +36,32 @@ defmodule BarkparkWeb.Studio.StudioLiveAccessPanelTest do
     # auto-memberships each on the Default workspace, so both are authorized to
     # READ the workspace (the workspace section's gate). Only the admin's
     # permissions satisfy the :admin action Access.revoke re-checks.
-    {:ok, _} = Auth.create_token(@admin, "access admin", @dataset, ["read", "write", "admin"])
-    {:ok, _} = Auth.create_token(@member, "access member", @dataset, ["read", "write"])
-    {:ok, _} = Auth.create_token(@reader, "access reader", @dataset, ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @admin,
+        "access admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @member,
+        "access member",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @reader,
+        "access reader",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, conn: conn, ws: ws}
   end

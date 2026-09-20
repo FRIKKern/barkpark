@@ -177,7 +177,16 @@ defmodule BarkparkWeb.Studio.PdsW43CapsDeriveCostTest do
 
   defp token_principal do
     raw = "w43-cost-token-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "w43 cost", @dataset, ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "w43 cost",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     token
   end
 

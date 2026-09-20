@@ -29,9 +29,21 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     ensure_default_scope!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "test admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "test junior", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "test junior",
+        "production",
+        ["read"]
+      )
 
     {:ok, conn: conn}
   end
@@ -983,7 +995,12 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # the coarse mount gate. The per-write re-gate is the ONLY thing that
       # separates them at the target workspace.
       {:ok, admin_tok} =
-        Auth.create_token("ep-admin-raw", "ep admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          "ep-admin-raw",
+          "ep admin",
+          "production",
+          ["read", "write", "admin"]
+        )
 
       {:ok, outsider_tok} =
         Auth.create_token(
@@ -1116,7 +1133,12 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   describe "per-write workspace_admin? re-gate — theme/plugin writes (W34, D268)" do
     setup %{conn: conn} do
       {:ok, admin_tok} =
-        Auth.create_token("w34-admin-raw", "w34 admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          "w34-admin-raw",
+          "w34 admin",
+          "production",
+          ["read", "write", "admin"]
+        )
 
       {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "w34-ws", name: "W34 Belt WS"})
       {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "W34P"})
@@ -1227,7 +1249,12 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # role-only W26 mount gate — but WITHOUT the flat global "admin"
       # permission, so it holds no installation-level authority.
       {:ok, b_admin_tok} =
-        Auth.create_token("w35-b-admin-raw", "w35 b-only admin", "production", ["read", "write"])
+        Auth.create_token(
+          "w35-b-admin-raw",
+          "w35 b-only admin",
+          "production",
+          ["read", "write"]
+        )
 
       {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35-wb", name: "W35 Cred WS B"})
       {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35PB"})
@@ -1405,10 +1432,15 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # membership role (clears the `:scoped_admin` mount gate) with NO global
       # "admin" permission, hence no installation-level authority.
       {:ok, b_admin_tok} =
-        Auth.create_token("w35l-b-admin-raw", "w35 load b-only admin", "production", [
-          "read",
-          "write"
-        ])
+        Auth.create_token(
+          "w35l-b-admin-raw",
+          "w35 load b-only admin",
+          "production",
+          [
+            "read",
+            "write"
+          ]
+        )
 
       {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35l-wb", name: "W35L Cred WS B"})
       {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35LPB"})

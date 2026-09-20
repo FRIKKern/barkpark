@@ -10,7 +10,15 @@ defmodule BarkparkWeb.PublicPaperAddMenuTest do
     ensure_default_scope!()
     slug = "public-add-menu-#{System.unique_integer([:positive])}"
     token = "public-add-menu-token-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(token, "public add menu", "production", ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        token,
+        "public add menu",
+        "production",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     blocks = [
       %{"id" => "title", "type" => "heading", "level" => 1, "text" => "Public add menu"},

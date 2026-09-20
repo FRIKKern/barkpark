@@ -86,7 +86,14 @@ defmodule BarkparkWeb.Studio.MediaAssetEditMetadataAuthorityTest do
   defp editor_conn!(label) do
     raw = "s9-auth-#{System.unique_integer([:positive])}"
 
-    {:ok, _} = Barkpark.Auth.create_token(raw, label, @dataset, ["read", "write"])
+    {:ok, _} =
+      Barkpark.Auth.create_token(
+        raw,
+        label,
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # ConnCase.scoped_conn/0, not a bare build_conn/0: this conn reaches a route
     # the RateLimit plug meters before any credential plug, and the suite-wide

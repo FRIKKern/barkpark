@@ -65,7 +65,15 @@ defmodule BarkparkWeb.StudioAnonLockdownTest do
 
     test "a session token still enters", %{conn: conn} do
       raw = "lockdown-token-entry"
-      {:ok, _} = Barkpark.Auth.create_token(raw, "t", "production", ["read", "write"])
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(
+          raw,
+          "t",
+          "production",
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       conn = post(conn, "/login", %{"token" => raw})
 

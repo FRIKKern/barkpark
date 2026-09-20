@@ -102,7 +102,16 @@ defmodule BarkparkWeb.BulldocsContextualHistoryHostTest do
              )
 
     raw = "public-history-#{System.unique_integer([:positive])}"
-    assert {:ok, token} = Auth.create_token(raw, "Public history", @dataset, ["read", "write"])
+
+    assert {:ok, token} =
+             Auth.create_token(
+               raw,
+               "Public history",
+               @dataset,
+               ["read", "write"],
+               Barkpark.TenancyFixtures.default_workspace_id!()
+             )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     {:ok, view, _html} = live(conn, "/papers/#{slug}")
     render_click(view, "paper-toggle-edit", %{})

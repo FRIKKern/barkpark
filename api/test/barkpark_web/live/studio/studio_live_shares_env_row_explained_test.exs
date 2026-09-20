@@ -40,7 +40,13 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesEnvRowExplainedTest do
 
   setup %{conn: conn} do
     {:ok, admin_tok} =
-      Auth.create_token(@admin, "shares env row admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin,
+        "shares env row admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     prior_shares = Application.get_env(:barkpark, :shares)
     prior_env = Application.get_env(:barkpark, :shares_env)

@@ -27,11 +27,17 @@ defmodule BarkparkWeb.Studio.SettingsFlashSingleSinkTest do
     ensure_default_scope!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "flash sink admin", "production", [
-        "read",
-        "write",
-        "admin"
-      ])
+      Auth.create_token(
+        @admin_token,
+        "flash sink admin",
+        "production",
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     conn = init_test_session(conn, %{"api_token" => @admin_token})
     {:ok, view, _html} = live(conn, @settings_path)
