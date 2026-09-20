@@ -96,6 +96,27 @@
 # title, criteria_progress, execution_class, inserted_at, updated_at). That is
 # why descent uses `bp task ls --parent` rather than the epic payload.
 #
+# THE INFLOW IS THE FINDING, NOT THE STOCK (added 2026-09-20, cch-w31).
+# A stock count answers "how many are there"; it cannot answer "who put them
+# there", and on this epic that is the whole question. Wave 39's own Decide
+# filed SEVEN of the ten criteria-less rows standing when wave 39 was measuring
+# them — the hole was not a historical residue being drained, it was being
+# REFILLED by the very wave counting it. A census that only ever prints a stock
+# reports the same number twice and never once says a wave caused it.
+# So `--inflow-baseline <file>` diffs THIS run's live criteria-less set against
+# an EARLIER saved ledger payload classified by the SAME `shape()` and the same
+# LIVE predicate (one classifier, no second implementation to drift), and names:
+#   ADDED    ids in the criteria-less set NOW that were not in it at baseline —
+#            the rows a wave put there. Grouped by the wave token in the id, so
+#            "wave 39 added 7" is printed rather than reconstructed by eye.
+#   CARRIED  in both — the stock the earlier run already named.
+#   DRAINED  at baseline, not now — the rows someone actually paid.
+# ATTRIBUTION IS A PREDICATE, NOT A LIST: the wave comes from a `w<N>` token in
+# the row's own id, and a row without one is printed under `unattributed` rather
+# than dropped. A baseline that cannot be READ is exit 2, never an empty BEFORE
+# set — an unreadable baseline would report every row as ADDED and blame the
+# newest wave for the whole corpus.
+#
 # EXIT CODES
 #   0  SILENT — every live row in a FULLY WALKED tree carries a criterion
 #   1  SCREAM — at least one live row carries zero; they are named, by class
@@ -131,6 +152,12 @@
 #                                                             # GitHub runner)
 #   scripts/epic-zero-criteria-census.sh --token-free         # the default,
 #                                                             # stated explicitly
+#   scripts/epic-zero-criteria-census.sh --inflow-baseline <f>
+#                                                             # also diff the live
+#                                                             # criteria-less set
+#                                                             # against an earlier
+#                                                             # saved ledger and NAME
+#                                                             # the rows a wave ADDED
 #   scripts/epic-zero-criteria-census.sh --self-test          # proves it can lose
 #
 # HERMETIC MODE reads one file — the JSON body of `bp task get <epic> -o json`
@@ -152,8 +179,13 @@ READER="${CENSUS_READER:-token-free}"
 # exists so "the ported reader answers the SAME question" is a DIFF, not a
 # claim: run it on both rails in the same minute and compare the two sets.
 PRINT_ROSTER=0
+# An earlier saved ledger payload (same shape as --fixture input). When set,
+# the classifier also prints the ADDED/CARRIED/DRAINED diff of the live
+# criteria-less set against it — the inflow, attributed to the wave that filed
+# each new row. Empty means "stock only".
+INFLOW_BASELINE="${CENSUS_INFLOW_BASELINE:-}"
 
-usage() { sed -n '2,129p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,156p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -164,6 +196,7 @@ while [ $# -gt 0 ]; do
     --descend)    DESCEND=1; shift ;;
     --token-free) READER="token-free"; shift ;;
     --print-roster) PRINT_ROSTER=1; shift ;;
+    --inflow-baseline) INFLOW_BASELINE="$2"; shift 2 ;;
     --via-bp)     READER="bp"; shift ;;
     --no-descend) DESCEND=0; shift ;;
     -h|--help)    usage; exit 0 ;;
@@ -195,7 +228,7 @@ fi
 # having one.
 # shellcheck disable=SC2016  # single quotes are the point: this is python source, not shell
 CLASSIFY_PY='
-import json, sys
+import json, os, re, sys
 
 label = sys.argv[1]
 raw = sys.stdin.read()
@@ -333,6 +366,80 @@ for name in CLASS_ORDER:
               % (c.get("lifecycle_status", "?"), c.get("doc_id", "?"),
                  (c.get("title") or "")[:70]))
 
+# ---------------------------------------------------------------------------
+# INFLOW. Which of these rows did a WAVE put here since the last reading? The
+# BEFORE set is classified by the same shape()/LIVE predicate as the AFTER set,
+# so the diff cannot drift away from the census it belongs to.
+# ---------------------------------------------------------------------------
+WAVE_TOKEN = re.compile(r"(?:^|[-_])w([0-9]+)(?:[-_]|$)")
+
+
+def wave_of(doc_id):
+    hit = WAVE_TOKEN.search(doc_id or "")
+    return ("wave %s" % hit.group(1)) if hit else "unattributed"
+
+
+baseline_path = os.environ.get("INFLOW_BASELINE") or ""
+if baseline_path:
+    try:
+        with open(baseline_path) as fh:
+            base_doc = json.load(fh)
+    except Exception as exc:
+        print("")
+        print("UNKNOWN: the inflow baseline %s could not be read (%s). An "
+              "unreadable baseline is NOT an empty one — treating it as empty "
+              "would report every row in the set as ADDED and blame the newest "
+              "wave for the whole corpus. Refusing to report an inflow."
+              % (baseline_path, exc))
+        sys.exit(2)
+    base_children = (base_doc.get("children")
+                     if isinstance(base_doc, dict) else None)
+    if not isinstance(base_children, list):
+        print("")
+        print("UNKNOWN: the inflow baseline %s carries no `children` list, so "
+              "the BEFORE set is unknown rather than empty. Refusing to report "
+              "an inflow." % baseline_path)
+        sys.exit(2)
+
+    base_ids = set()
+    for c in base_children:
+        if not isinstance(c, dict):
+            continue
+        if c.get("lifecycle_status") not in LIVE:
+            continue
+        if shape(c) != "has" and c.get("doc_id"):
+            base_ids.add(c["doc_id"])
+    now_ids = set(c.get("doc_id") for s_, c in live_zero if c.get("doc_id"))
+
+    added = sorted(now_ids - base_ids)
+    carried = sorted(now_ids & base_ids)
+    drained = sorted(base_ids - now_ids)
+
+    print("")
+    print("INFLOW vs %s: %d ADDED, %d carried, %d drained"
+          % (baseline_path, len(added), len(carried), len(drained)))
+    by_wave = {}
+    for doc_id in added:
+        by_wave.setdefault(wave_of(doc_id), []).append(doc_id)
+    for wave in sorted(by_wave):
+        rows = by_wave[wave]
+        print("")
+        print("  %s ADDED %d row(s) to the criteria-less set:"
+              % (wave, len(rows)))
+        for doc_id in rows:
+            print("    %s" % doc_id)
+    if drained:
+        print("")
+        print("  drained since the baseline (%d): %s"
+              % (len(drained), ", ".join(drained)))
+    if added:
+        print("")
+        print("INFLOW SCREAM: the hole is being REFILLED, not drained. The "
+              "wave(s) named above filed live rows with no acceptance criteria "
+              "into this epic — a stock count would have printed a similar "
+              "number and never said who caused it. Fix the FILING path for "
+              "those waves, not just the rows.")
+
 if live_zero:
     print("")
     print("SCREAM: a live task with no criteria cannot be PROVEN done on a "
@@ -370,7 +477,7 @@ sys.exit(0)
 '
 
 classify() {
-  python3 -c "$CLASSIFY_PY" "$1"
+  INFLOW_BASELINE="$INFLOW_BASELINE" python3 -c "$CLASSIFY_PY" "$1"
 }
 
 # The population, as ids, sorted — the thing two rails must agree on.
@@ -874,6 +981,118 @@ STUB
           --descend reparented 2>/dev/null)"; rc=$?
   check "a failed sub-parent read is UNKNOWN, not green" 2 "$rc"
   expect "the unreadable subtree is reported UNWALKED" "$out" "1 UNWALKED"
+
+  # 14. THE STRIP MUTATION — the criterion this whole instrument owes: take a
+  #     corpus the census calls CLEAN, strip the acceptance criteria from ONE
+  #     open row, and it must go red AND NAME THAT ROW. Same file, one field
+  #     different. If the green arm and the stripped arm ever agree, the
+  #     verdict is not reading the field it claims to read.
+  cat >"$tmp/strip-before.json" <<'JSON'
+{"children": [
+  {"doc_id": "row-keeps-criteria", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published",
+           "content": {"acceptance_criteria": [{"criterion": "a", "met": false}]}}},
+  {"doc_id": "row-about-to-be-stripped", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published",
+           "content": {"acceptance_criteria": [{"criterion": "b", "met": false}]}}}
+]}
+JSON
+  out="$(bash "$0" --fixture "$tmp/strip-before.json" stripbefore)"; rc=$?
+  check "BEFORE the strip: a fully-criteria'd corpus is green" 0 "$rc"
+  refute "BEFORE the strip nothing is named" "$out" "row-about-to-be-stripped"
+  python3 - "$tmp/strip-before.json" "$tmp/strip-after.json" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+for child in doc["children"]:
+    if child["doc_id"] == "row-about-to-be-stripped":
+        child["doc"]["content"].pop("acceptance_criteria")
+json.dump(doc, open(sys.argv[2], "w"))
+PY
+  out="$(bash "$0" --fixture "$tmp/strip-after.json" stripafter)"; rc=$?
+  check "AFTER stripping ONE open row's criteria the census reds" 1 "$rc"
+  expect "the stripped row is REFUSED BY NAME, not skipped" \
+    "$out" "row-about-to-be-stripped"
+  expect "the stripped row lands in ABSENT, its real class" "$out" "ABSENT (1)"
+  refute "the row that KEPT its criteria is not named" "$out" "row-keeps-criteria"
+
+  # 15. THE INFLOW ARM. A stock count prints the same number whether a wave
+  #     drained ten rows or filed ten new ones. Given a BEFORE ledger, the
+  #     census must name the rows the newer waves ADDED, grouped by wave.
+  cat >"$tmp/inflow-baseline.json" <<'JSON'
+{"children": [
+  {"doc_id": "cch-w31-bl-old-stock-row", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published", "content": {"title": "already criteria-less"}}},
+  {"doc_id": "cch-w31-bl-row-that-gets-paid", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published", "content": {"title": "criteria-less for now"}}},
+  {"doc_id": "cch-w31-bl-fine", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published",
+           "content": {"acceptance_criteria": [{"criterion": "a"}]}}}
+]}
+JSON
+  cat >"$tmp/inflow-now.json" <<'JSON'
+{"children": [
+  {"doc_id": "cch-w31-bl-old-stock-row", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published", "content": {"title": "still criteria-less"}}},
+  {"doc_id": "cch-w31-bl-row-that-gets-paid", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published",
+           "content": {"acceptance_criteria": [{"criterion": "paid"}]}}},
+  {"doc_id": "cch-w39-bl-filed-by-the-measuring-wave", "lifecycle_status": "open",
+   "child_count": 0,
+   "doc": {"status": "published", "content": {"title": "no criteria"}}},
+  {"doc_id": "cch-w39-bl-and-another", "lifecycle_status": "in_progress", "child_count": 0,
+   "doc": {"status": "published", "content": {"acceptance_criteria": []}}},
+  {"doc_id": "task-9f9f9f9f9f9f9f9f", "lifecycle_status": "open", "child_count": 0,
+   "doc": {"status": "published", "content": {"title": "no wave token in the id"}}}
+]}
+JSON
+  out="$(bash "$0" --fixture "$tmp/inflow-now.json" \
+          --inflow-baseline "$tmp/inflow-baseline.json" inflow)"; rc=$?
+  check "an inflow run still reds on the stock" 1 "$rc"
+  expect "the diff is stated as added/carried/drained" \
+    "$out" "3 ADDED, 1 carried, 1 drained"
+  expect "the wave that filed them is NAMED, with its count" \
+    "$out" "wave 39 ADDED 2 row(s)"
+  expect "the added rows are named individually" \
+    "$out" "cch-w39-bl-filed-by-the-measuring-wave"
+  expect "an added row with no wave token is kept, not dropped" \
+    "$out" "unattributed ADDED 1 row(s)"
+  expect "the row someone actually paid is reported drained" \
+    "$out" "cch-w31-bl-row-that-gets-paid"
+  refute "the carried row is not miscounted as inflow" \
+    "$out" "wave 31 ADDED"
+  expect "the inflow verdict says the hole is being refilled" \
+    "$out" "INFLOW SCREAM"
+
+  # 16. THE INFLOW CONTROL — it has to be able to say ZERO. Diffed against
+  #     ITSELF, a run must report no inflow and print no wave line; otherwise
+  #     arm 15 would pass on an instrument that shouts at every corpus.
+  out="$(bash "$0" --fixture "$tmp/inflow-now.json" \
+          --inflow-baseline "$tmp/inflow-now.json" inflowsame)"; rc=$?
+  check "a corpus diffed against itself still reds on the stock" 1 "$rc"
+  expect "but the inflow is zero" "$out" "0 ADDED, 4 carried, 0 drained"
+  refute "no wave is blamed when nothing was added" "$out" "ADDED 1 row(s)"
+  refute "no inflow scream when nothing was added" "$out" "INFLOW SCREAM"
+
+  # 17. AN UNREADABLE BASELINE IS UNKNOWN, NOT AN EMPTY BEFORE SET. Reading a
+  #     missing baseline as empty would report the entire stock as ADDED and
+  #     blame the newest wave for the whole corpus.
+  out="$(bash "$0" --fixture "$tmp/inflow-now.json" \
+          --inflow-baseline "$tmp/no-such-baseline.json" inflowmissing)"; rc=$?
+  check "a missing inflow baseline is UNKNOWN, not zero-inflow" 2 "$rc"
+  expect "the refusal says an unreadable baseline is not an empty one" \
+    "$out" "unreadable baseline is NOT an empty one"
+  refute "no inflow is reported off a baseline that was never read" \
+    "$out" "ADDED, "
+  printf 'not json' >"$tmp/garbage-baseline.json"
+  out="$(bash "$0" --fixture "$tmp/inflow-now.json" \
+          --inflow-baseline "$tmp/garbage-baseline.json" inflowgarbage)"; rc=$?
+  check "an unparseable inflow baseline is UNKNOWN" 2 "$rc"
+  printf '{"doc_id":"b","title":"no children key"}' >"$tmp/shapeless-baseline.json"
+  out="$(bash "$0" --fixture "$tmp/inflow-now.json" \
+          --inflow-baseline "$tmp/shapeless-baseline.json" inflowshapeless)"; rc=$?
+  check "a baseline with no children key is UNKNOWN, not an empty BEFORE" 2 "$rc"
+  expect "the refusal names the shape it could not find" \
+    "$out" "list, so the BEFORE set is unknown rather than empty"
 
   echo ""
   if [ "$fails" -eq 0 ]; then
