@@ -465,6 +465,9 @@ function inlineNodeIsLossless(node) {
       return typeof node.name === "string" && /^[^\s#*_~`\[\]\\<|()]+$/.test(node.name);
     case "underline":
       return false; // no clean markdown for underline
+    case "sub":
+    case "sup":
+      return false; // no clean markdown for sub/superscript either — the sentinel carries them
     case "blockref":
       return false; // target/anchor not expressible inline
     default:

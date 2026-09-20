@@ -360,6 +360,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         {out, inner}
       end
 
+    # Subscript / superscript: the semantic tags on every surface (a mail client and
+    # the paper page render <sub>/<sup> alike; no inline property, no class).
+    inner = if Map.get(n, "sub"), do: "<sub>" <> inner <> "</sub>", else: inner
+    inner = if Map.get(n, "sup"), do: "<sup>" <> inner <> "</sup>", else: inner
+
     out = Enum.reverse(out)
 
     # Trap: emit NO style= attr when the style list is empty; NO class= when no

@@ -70,6 +70,16 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
+    case "sub": {
+      const next = [...marks, { type: "subscript" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "sup": {
+      const next = [...marks, { type: "superscript" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
     case "link": {
       const next = [...marks, { type: "link", attrs: { href: node.href || "" } }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
@@ -196,6 +206,8 @@ const MARK_ORDER = [
   "underline",
   "strikethrough",
   "highlight",
+  "sub",
+  "sup",
   "code",
   "blockref",
   "tag",
@@ -217,6 +229,10 @@ function markToPd(mark) {
       return { kind: "underline" };
     case "highlight":
       return { kind: "highlight" };
+    case "subscript":
+      return { kind: "sub" };
+    case "superscript":
+      return { kind: "sup" };
     case "link":
       return { kind: "link", href: (mark.attrs && mark.attrs.href) || "" };
     case "wikilink": {
@@ -328,6 +344,8 @@ function pdKindToMark(kind) {
   if (kind === "em") return "em";
   if (kind === "underline") return "underline";
   if (kind === "highlight") return "highlight";
+  if (kind === "sub") return "subscript";
+  if (kind === "sup") return "superscript";
   if (kind === "strikethrough") return "strikethrough";
   if (kind === "link") return "link";
   if (kind === "wikilink") return "wikilink";
@@ -520,7 +538,7 @@ function exactObjectKeys(value, expected) {
 
 const TABLE_CELL_KINDS = new Set(["inline-array", "content-map"]);
 const TABLE_PROTECTED_CHAIN_TYPES = new Set([
-  "link", "wikilink", "strong", "em", "underline", "strikethrough", "highlight", "text",
+  "link", "wikilink", "strong", "em", "underline", "strikethrough", "highlight", "sub", "sup", "text",
 ]);
 
 function tableCellDescriptor(cellShape) {
@@ -629,7 +647,7 @@ function tableProtectedInlineSupported(inline, sourceInline, descriptor) {
 }
 
 const TABLE_MARKS = new Set([
-  "bold", "italic", "underline", "strike", "highlight", "code", "link", "wikilink",
+  "bold", "italic", "underline", "strike", "highlight", "subscript", "superscript", "code", "link", "wikilink",
   "blockref", "tag", "valueref",
 ]);
 
@@ -641,7 +659,7 @@ function tableAttrsHaveOnly(attrs, allowed) {
 function validTableMark(mark) {
   if (!mark || typeof mark !== "object" || Array.isArray(mark) ||
       !TABLE_MARKS.has(mark.type)) return false;
-  if (["bold", "italic", "underline", "strike", "highlight", "code"].includes(mark.type)) {
+  if (["bold", "italic", "underline", "strike", "highlight", "subscript", "superscript", "code"].includes(mark.type)) {
     return exactObjectKeys(mark, ["type"]);
   }
   if (!exactObjectKeys(mark, ["type", "attrs"])) return false;

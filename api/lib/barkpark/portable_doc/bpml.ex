@@ -35,7 +35,7 @@ defmodule Barkpark.PortableDoc.Bpml do
   Block tags: `paper section p pullquote ingress eyebrow h1 h2 h3 byline/item
   ul/li table/tr/th/td code diagram route stats/stat notes/note note steps/step
   callout figure asciicast columns/column`.
-  Inline tags: `b i code u s mark a` (→ marks `strong em code underline strike highlight`,
+  Inline tags: `b i code u s mark sub sup a` (→ marks `strong em code underline strike highlight sub sup`,
   and `<a href>` → a `link` node).
   """
 

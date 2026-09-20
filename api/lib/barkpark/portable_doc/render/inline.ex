@@ -176,6 +176,24 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     }
   end
 
+  # `sub` / `sup` — subscript and superscript runs (`<sub>`/`<sup>` in BPML and on
+  # both surfaces: semantic tags, no inline property).
+  def compose_inline(%{"type" => "sub"} = n, inside_link) do
+    %{
+      "kind" => "PdText",
+      "sub" => true,
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
+  def compose_inline(%{"type" => "sup"} = n, inside_link) do
+    %{
+      "kind" => "PdText",
+      "sup" => true,
+      "children" => Enum.map(Map.get(n, "children", []), &compose_inline(&1, inside_link))
+    }
+  end
+
   # Inline `code` leaf. The chip body is a FLAT STRING, never inlines — but a
   # sizeable slice of the live corpus authors it as `children` inline nodes with
   # no `value` at all (66 published paragraphs at the 2026-07-25 census), and
@@ -417,6 +435,14 @@ defmodule Barkpark.PortableDoc.Render.Inline do
 
   defp apply_mark(%{"type" => "highlight"}, acc, _il) do
     %{"kind" => "PdText", "highlight" => true, "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => "sub"}, acc, _il) do
+    %{"kind" => "PdText", "sub" => true, "children" => wrap_children(acc)}
+  end
+
+  defp apply_mark(%{"type" => "sup"}, acc, _il) do
+    %{"kind" => "PdText", "sup" => true, "children" => wrap_children(acc)}
   end
 
   defp apply_mark(%{"type" => t}, acc, _il) when t in ["strike", "s", "strikethrough"] do

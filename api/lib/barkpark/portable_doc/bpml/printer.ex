@@ -780,6 +780,8 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp mark_tag("code"), do: "code"
   defp mark_tag("underline"), do: "u"
   defp mark_tag("highlight"), do: "mark"
+  defp mark_tag("sub"), do: "sub"
+  defp mark_tag("sup"), do: "sup"
   defp mark_tag("strike"), do: "s"
   # The corpus's HTML-ish aliases for the same two marks; the parser returns
   # the canonical name, so a `bold` mark canonicalizes to `strong` on push the

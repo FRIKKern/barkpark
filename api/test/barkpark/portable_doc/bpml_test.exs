@@ -722,7 +722,7 @@ defmodule Barkpark.PortableDoc.BpmlTest do
           1 ->
             %{
               "type" => "text",
-              "marks" => [Enum.random(~w(strong em code underline strike highlight))],
+              "marks" => [Enum.random(~w(strong em code underline strike highlight sub sup))],
               "value" => gen_text()
             }
 

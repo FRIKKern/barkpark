@@ -93,7 +93,7 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
   end
 
   describe "kind: :mark" do
-    test "a mark outside strong|em|code|underline|strike|highlight names the mark" do
+    test "a mark outside strong|em|code|underline|strike|highlight|sub|sup names the mark" do
       e = refusal([p([%{"type" => "text", "value" => "x", "marks" => ["sparkle"]}])])
 
       assert e.kind == :mark

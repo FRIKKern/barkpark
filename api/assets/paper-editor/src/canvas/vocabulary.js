@@ -34,6 +34,8 @@ const MARK_TO_PD = {
   strike: "strikethrough",
   underline: "underline",
   highlight: "highlight",
+  subscript: "sub",
+  superscript: "sup",
   code: "code",
   link: "link",
   wikilink: "wikilink",

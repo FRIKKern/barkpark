@@ -484,7 +484,7 @@ defmodule Barkpark.PortableDoc.TableEditing do
   end
 
   defp protected_inline_node(%{"type" => type, "children" => [child]} = node, rank)
-       when type in ~w(strong em underline strikethrough highlight) do
+       when type in ~w(strong em underline strikethrough highlight sub sup) do
     protected_wrapper(node, child, rank, type, ~w(type children), %{})
   end
 
@@ -639,7 +639,7 @@ defmodule Barkpark.PortableDoc.TableEditing do
   end
 
   defp inline_node_signature(%{"type" => type, "children" => [child]} = node, rank)
-       when type in ~w(strong em underline strikethrough highlight) do
+       when type in ~w(strong em underline strikethrough highlight sub sup) do
     node_rank = inline_rank(type)
 
     with true <- node_rank > rank,
@@ -725,10 +725,12 @@ defmodule Barkpark.PortableDoc.TableEditing do
   defp inline_rank("underline"), do: 4
   defp inline_rank("strikethrough"), do: 5
   defp inline_rank("highlight"), do: 6
-  defp inline_rank("code"), do: 7
-  defp inline_rank("blockref"), do: 8
-  defp inline_rank("tag"), do: 9
-  defp inline_rank("valueref"), do: 10
+  defp inline_rank("sub"), do: 7
+  defp inline_rank("sup"), do: 8
+  defp inline_rank("code"), do: 9
+  defp inline_rank("blockref"), do: 10
+  defp inline_rank("tag"), do: 11
+  defp inline_rank("valueref"), do: 12
 
   defp exact_keys?(map, keys), do: MapSet.new(Map.keys(map)) == MapSet.new(keys)
 

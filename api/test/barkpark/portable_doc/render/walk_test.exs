@@ -109,6 +109,16 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute html =~ "background-color"
     end
 
+    test "subscript and superscript are the semantic tags on both surfaces, no inline property" do
+      sub = %{"kind" => "PdText", "sub" => true, "children" => ["2"]}
+      sup = %{"kind" => "PdText", "sup" => true, "children" => ["2"]}
+      assert Walk.render_body(sub, @width, @article) =~ "<sub>2</sub>"
+      assert Walk.render_body(sub, @width, @email) =~ "<sub>2</sub>"
+      assert Walk.render_body(sup, @width, @article) =~ "<sup>2</sup>"
+      assert Walk.render_body(sup, @width, @email) =~ "<sup>2</sup>"
+      refute Walk.render_body(sup, @width, @article) =~ "vertical-align"
+    end
+
     test "escapes HTML in string children" do
       node = %{"kind" => "PdText", "children" => ["<script>"]}
       html = Walk.render_body(node, @width, @email)
