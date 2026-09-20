@@ -49,7 +49,7 @@ defmodule Barkpark.Tasks.Internal do
   # THE RETAINED EPOCH IS LOAD-BEARING, NOT RESIDUE. `Tasks.Claim` computes the
   # next lease as `current_epoch(doc) + 1` (claim.ex, `current_epoch/1` call sites), reading it straight
   # off the released row, so the epoch is what keeps the fence MONOTONIC across
-  # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex:741-742)
+  # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex, its `{:error, :fenced_off}` arm)
   # refuses `:fenced_off` whenever a claim map carries an epoch that does not
   # match the caller's. Clearing it would let a stale holder's old-epoch close
   # land on the next worker's lease. DO NOT "CLEAN IT UP".

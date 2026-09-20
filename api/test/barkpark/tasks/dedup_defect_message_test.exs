@@ -132,9 +132,23 @@ defmodule Barkpark.Tasks.DedupDefectMessageTest do
       assert error_only =~ "FunctionClauseError"
     end
 
-    test "an infra-class failure stays at :warning and never says DEFECT" do
-      refute capture_log([level: :error], fn -> infra_class_refusal() end) =~ "Tasks.Dedup"
-
+    test "an infra-class failure logs the degraded line at :warning" do
+      # WHY THIS TEST MAKES NO ABSENCE CLAIM. `capture_log` mutes and
+      # captures the whole Logger DEVICE, so under `async: true` a module
+      # running beside this one can only ADD lines to what we read. Added lines
+      # can only turn a `refute ... =~` red, which makes the absence claim a
+      # flake whose cause lives in another file. A PRESENCE assert is sound
+      # under exactly the same concurrency: a foreign line cannot make a
+      # present line absent. (`async: true` is load-bearing here — see the
+      # moduledoc: `async: false` shares the sandbox connection and the
+      # bare-spawn infra injector then SUCCEEDS — so going synchronous is not
+      # available as the remedy either.)
+      #
+      # The half this test used to claim by absence is not lost, it is claimed
+      # SOUNDLY somewhere better: `refute outage =~ "DEFECT"` in "a code-class
+      # failure reads as a DEFECT; an infra one reads as an outage" asserts it
+      # against the RETURNED message, a process-local value no concurrent
+      # module can write to.
       assert capture_log([level: :warning], fn -> infra_class_refusal() end) =~
                "Tasks.Dedup degraded: candidate fetch failed"
     end
