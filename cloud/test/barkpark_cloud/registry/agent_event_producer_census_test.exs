@@ -126,6 +126,8 @@ defmodule BarkparkCloud.Registry.AgentEventProducerCensusTest do
 
       sites = producer_sites()
 
+      # A PATTERN generator (`{type, true}`) — sound, unlike an assignment
+      # qualifier: it filters by MATCH, not by truthiness of a binding.
       for {type, true} <- @expected_producer do
         found = Map.get(sites, type, [])
 
@@ -172,14 +174,27 @@ defmodule BarkparkCloud.Registry.AgentEventProducerCensusTest do
     test "PER TYPE: a declared type gaining or losing its producer reds this test" do
       sites = producer_sites()
 
+      # Enum.flat_map, NOT a `for` with `expected = ...` as a qualifier. An
+      # assignment used as a comprehension qualifier is a FILTER on its own
+      # value, so `expected = false` would DISCARD the consumer-only types —
+      # every word this test exists for. That exact defect shipped in this
+      # file's first draft and was caught only because the gain-direction
+      # mutation below was actually run: the guard was green with a `content`
+      # producer in the tree. Bind in the BODY, filter explicitly.
       drift =
-        for type <- AgentEvent.types(),
-            expected = Map.fetch!(@expected_producer, type),
-            actual = Map.has_key?(sites, type),
-            actual != expected do
-          "#{type}: recorded as #{if expected, do: "PRODUCER-BACKED", else: "consumer-only"}, " <>
-            "but the scan found #{if actual, do: "producers at " <> Enum.join(sites[type], ", "), else: "NO producer"}"
-        end
+        Enum.flat_map(AgentEvent.types(), fn type ->
+          expected = Map.fetch!(@expected_producer, type)
+          actual = Map.has_key?(sites, type)
+
+          if actual == expected do
+            []
+          else
+            [
+              "#{type}: recorded as #{if expected, do: "PRODUCER-BACKED", else: "consumer-only"}, " <>
+                "but the scan found #{if actual, do: "producers at " <> Enum.join(sites[type], ", "), else: "NO producer"}"
+            ]
+          end
+        end)
 
       assert drift == [],
              """

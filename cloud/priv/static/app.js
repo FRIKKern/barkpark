@@ -9092,8 +9092,12 @@
           ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
               esc(opts.studioId) + '">' + esc(st.action) + "</button>"
           : "") +
+        // Styled by the SAME .runway-step-action rule as the Studio nudge (no
+        // new class: E12 requires every emitted class to have an app.css rule,
+        // and this button wants that rule's exact look). The click hook is the
+        // data attribute, which E12 does not govern.
         (st.ack
-          ? '<button class="btn-link runway-step-action runway-step-ack" type="button" data-runway-ack="' +
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-ack="' +
               esc(st.key) + '">' + esc(st.ack) + "</button>"
           : "") +
       "</div>";
