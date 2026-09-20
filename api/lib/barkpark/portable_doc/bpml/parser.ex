@@ -22,7 +22,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     # (task-2957c0caa1ffd1b0: both fire on eight-minute-erasure).
     "code" => ~w(id lang),
     "eyebrow" => ~w(id),
-    "p" => ~w(id),
+    "p" => ~w(id align),
     "pullquote" => ~w(id),
     "ingress" => ~w(id),
     "byline" => ~w(id),
@@ -30,9 +30,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "stats" => ~w(id),
     "steps" => ~w(id),
     "table" => ~w(id),
-    "h1" => ~w(id),
-    "h2" => ~w(id),
-    "h3" => ~w(id),
+    "h1" => ~w(id align),
+    "h2" => ~w(id align),
+    "h3" => ~w(id align),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
     "stat" => ~w(label value denom verdict),
@@ -244,7 +244,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     do: text_block("eyebrow", %{"type" => "eyebrow"}, attrs, sc, cur)
 
   defp build_block(<<"h", l>>, attrs, sc, cur) when l in ?1..?3 do
-    base = %{"type" => "heading", "level" => l - ?0}
+    base = %{"type" => "heading", "level" => l - ?0} |> put_attr("align", attrs)
     text_block(<<"h", l>>, base, attrs, sc, cur, "text")
   end
 
@@ -290,7 +290,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     type = if tag == "p", do: "paragraph", else: tag
 
     with {:ok, nodes, cur} <- tag_inline(tag, sc, cur) do
-      {:ok, %{"type" => type, "content" => nodes} |> put_attr("id", attrs), cur}
+      block = %{"type" => type, "content" => nodes} |> put_attr("id", attrs)
+      # `align` (center | right) is a paragraph-only attribute; the printer spells it only on <p>.
+      block = if tag == "p", do: put_attr(block, "align", attrs), else: block
+      {:ok, block, cur}
     end
   end
 

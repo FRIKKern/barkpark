@@ -387,7 +387,9 @@ export function blockToTiptap(block) {
       // nearest level and carried on the source, so an edit to the text never rewrites it
       // (D-headings: three levels to author, a deeper stored level is never restructured).
       if (Number.isFinite(Number(block.level)) && clampLevel(block.level) !== Number(block.level)) source.level = Number(block.level);
+      if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
+      if (block.align === "center" || block.align === "right") node.attrs.textAlign = block.align;
       const inline = headingInline(source);
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
@@ -401,7 +403,11 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
+      // The key's presence rides the source even when cleared (align:null), so a re-projection of
+      // a live doc (the diff runs on one) still knows the block carries an align to drop.
+      if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "paragraph", attrs: { bpParagraphSource: source } };
+      if (block.align === "center" || block.align === "right") node.attrs.textAlign = block.align;
       const inline = inlineArrayToTiptap(listItemToInlineArray(source));
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
@@ -1064,7 +1070,7 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
       if (source && typeof source === "object") {
         const fields = deepCloneJson(source);
         delete fields.level;
-        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return { ...fields, level };
+        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return withAlign({ ...fields, level }, top, source);
         const content = tiptapInlineToPd(top.content);
         const rich = content.some(node => node.type !== "text");
         if ((Array.isArray(source.content) && source.content.length) || rich) {
@@ -1073,12 +1079,12 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
         } else {
           fields.text = plainText(top.content);
         }
-        return { ...fields, level };
+        return withAlign({ ...fields, level }, top, source);
       }
       const content = tiptapInlineToPd(top.content);
-      if (content.some(node => node.type !== "text")) return { content, level };
+      if (content.some(node => node.type !== "text")) return withAlign({ content, level }, top, null);
       const text = plainText(top.content);
-      return { text, level };
+      return withAlign({ text, level }, top, null);
     }
     case "list": {
       const task = top.type === "taskList";
@@ -1091,8 +1097,8 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
     case "paragraph":
     default: {
       const source = top.attrs?.bpParagraphSource;
-      if (source && typeof source === "object") return inlineCarrierFromTiptap(source, top.content);
-      return { content: tiptapInlineToPd(top.content) };
+      if (source && typeof source === "object") return withAlign(inlineCarrierFromTiptap(source, top.content), top, source);
+      return withAlign({ content: tiptapInlineToPd(top.content) }, top, null);
     }
   }
 }
@@ -1114,6 +1120,18 @@ export function buildPatchBlockOp(editorJSON, blockId, blockType) {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
+
+// The author's alignment on the way back: "center" | "right" ride as `align`; left drops the
+// key — as `align: null` on a block whose source carried one (the patch merge drops it),
+// as nothing on a fresh block.
+function withAlign(fields, top, source) {
+  const out = fields && typeof fields === "object" ? fields : {};
+  const align = top && top.attrs && top.attrs.textAlign;
+  if (align === "center" || align === "right") out.align = align;
+  else if (source && Object.hasOwn(source, "align")) out.align = null;
+  else delete out.align;
+  return out;
+}
 
 function clampLevel(level) {
   const n = Number(level);

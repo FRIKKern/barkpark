@@ -122,6 +122,9 @@ export class FormatBubble {
     el.appendChild(this._mkBtn("highlight", "H", "bp-paper-format__btn--highlight", "Highlight"));
     el.appendChild(this._mkBtn("subscript", "x₂", "bp-paper-format__btn--subscript", "Subscript (Ctrl+,)"));
     el.appendChild(this._mkBtn("superscript", "x²", "bp-paper-format__btn--superscript", "Superscript (Ctrl+.)"));
+    el.appendChild(this._mkBtn("align-left", "⇤", "bp-paper-format__btn--align-left", "Align left"));
+    el.appendChild(this._mkBtn("align-center", "≡", "bp-paper-format__btn--align-center", "Align centre"));
+    el.appendChild(this._mkBtn("align-right", "⇥", "bp-paper-format__btn--align-right", "Align right"));
     el.appendChild(this._mkBtn("strike", "S", "bp-paper-format__btn--strike", "Strikethrough"));
     el.appendChild(this._mkBtn("code", "</>", "bp-paper-format__btn--code", "Inline code"));
 
@@ -253,6 +256,11 @@ export class FormatBubble {
       case "superscript":
         if (this._editor.can().toggleSuperscript?.()) this._editor.chain().focus().toggleSuperscript().run();
         break;
+      case "align-left":
+      case "align-center":
+      case "align-right":
+        if (this._editor.can().setTextAlign?.(name.slice(6))) this._editor.chain().focus().setTextAlign(name.slice(6)).run();
+        break;
       case "code":
         this._editor.chain().focus().toggleCode().run();
         break;
@@ -327,6 +335,9 @@ export class FormatBubble {
     set("highlight", this._editor.isActive("highlight"));
     set("subscript", this._editor.isActive("subscript"));
     set("superscript", this._editor.isActive("superscript"));
+    set("align-center", this._editor.isActive({ textAlign: "center" }));
+    set("align-right", this._editor.isActive({ textAlign: "right" }));
+    set("align-left", !this._editor.isActive({ textAlign: "center" }) && !this._editor.isActive({ textAlign: "right" }));
     set("code", this._editor.isActive("code"));
     // Link button stays pressed while its input row is open OR a link is active.
     set("link", this._linkOpen || this._editor.isActive("link"));

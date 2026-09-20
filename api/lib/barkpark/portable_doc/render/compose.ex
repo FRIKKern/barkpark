@@ -207,6 +207,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # paper deserves the same typographic skeleton the reader shows.
     _ = style
     %{"kind" => "PdHeading", "level" => level, "children" => children}
+    |> maybe_put("align", block_align(b))
   end
 
   def compose_block(%{"type" => "eyebrow"} = b, style) do
@@ -308,6 +309,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # paragraph into one unbroken run (gp-w3 email-view wave).
     _ = style
     %{"kind" => "PdParagraph", "children" => compose_inline_children(paragraph_inline(b))}
+    |> maybe_put("align", block_align(b))
+  end
+
+  # The author's text alignment on a paragraph or heading: "center" | "right" ride to the
+  # walker as `align`; "left" and anything else are the default and add nothing.
+  defp block_align(b) do
+    case Map.get(b, "align") do
+      a when a in ["center", "right"] -> a
+      _ -> nil
+    end
   end
 
   # ── Authoring-drift type aliases (the choke point) ─────────────────────────

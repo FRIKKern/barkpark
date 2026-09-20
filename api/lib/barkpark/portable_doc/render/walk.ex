@@ -462,6 +462,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
         else: out
 
+    # Author alignment is DATA (like `color`): an inline text-align on every surface —
+    # the :article allowlist already carries the property.
+    out = if Map.get(n, "align") in ["center", "right"], do: ["text-align:#{Map.get(n, "align")}" | out], else: out
+
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
 
@@ -530,7 +534,24 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # same contract as PdText.
   defp heading(n, width, %{style: :article} = pal) do
     level = heading_level(Map.get(n, "level"))
-    "<h#{level}>#{heading_inner(n, width, pal)}</h#{level}>"
+    "<h#{level}#{heading_align_attr(n)}>#{heading_inner(n, width, pal)}</h#{level}>"
+  end
+
+  # The author's alignment on a heading is DATA (like `color` on a run): an inline
+  # text-align on every surface — the only inline property an article heading carries,
+  # and one the :article allowlist already holds.
+  defp heading_align_style(n) do
+    case Map.get(n, "align") do
+      a when a in ["center", "right"] -> ["text-align:#{a}"]
+      _ -> []
+    end
+  end
+
+  defp heading_align_attr(n) do
+    case heading_align_style(n) do
+      [] -> ""
+      styles -> ~s( style="#{Enum.join(styles, ";")}")
+    end
   end
 
   # Non-article fallback: a PdHeading reaching the walker under a stylesheet-less
@@ -539,7 +560,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # (headings render as bold PdText spans), so this stays byte-frozen for email.
   defp heading(n, width, pal) do
     level = heading_level(Map.get(n, "level"))
-    style = heading_style(level, pal) |> Enum.join(";")
+    style = (heading_style(level, pal) ++ heading_align_style(n)) |> Enum.join(";")
     ~s(<h#{level} style="#{style}">#{heading_inner(n, width, pal)}</h#{level}>)
   end
 

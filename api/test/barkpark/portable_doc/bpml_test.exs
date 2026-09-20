@@ -106,6 +106,20 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       assert bpml =~ ~s(<a href="/papers/rollout-plan">the rollout paper</a>)
     end
 
+    test "author alignment rides <p> and <h1..3> as align and comes back exactly (plan #21)" do
+      blocks = [
+        %{"id" => "h1", "type" => "heading", "level" => 2, "align" => "right", "text" => "Right"},
+        %{"id" => "p1", "type" => "paragraph", "align" => "center", "content" => [%{"type" => "text", "value" => "Centred."}]},
+        %{"id" => "p2", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "Plain."}]}
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert parsed == blocks
+      assert bpml =~ ~s(<h2 id="h1" align="right">Right</h2>)
+      assert bpml =~ ~s(<p id="p1" align="center">Centred.</p>)
+      assert bpml =~ ~s(<p id="p2">Plain.</p>)
+    end
+
     test "hand-written BPML parses to the same blocks (minus ids it omits)" do
       bpml = """
       <eyebrow>OPS · LIVE</eyebrow>

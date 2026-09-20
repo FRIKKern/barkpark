@@ -87,6 +87,8 @@ function serializeBlock(block) {
   const type = block.type;
 
   if (!NATURAL_BLOCK_TYPES.has(type)) return sentinel(block);
+  // Author alignment has no markdown; the sentinel carries the block byte-identically.
+  if ((type === "paragraph" || type === "heading") && block.align != null) return sentinel(block);
 
   switch (type) {
     case "heading":

@@ -12,6 +12,12 @@ content also clears a stale string fallback so erased prose cannot reappear.
 Unchanged inline source fields are retained exactly; unrelated block metadata
 and IDs remain outside the emitted field patch.
 
+A paragraph may carry `align: "center" | "right"`; left is the absence of the
+key, never stored. The canvas maps it to Tiptap's `textAlign` and back: setting
+an alignment patches `align`, returning to left patches `align: null` (the
+shallow merge drops the key). The reader renders it as an inline `text-align`
+on every surface, and BPML spells it as `<p align="center">`.
+
 `bpParagraphSource` is editor-only history state, never rendered into HTML or
 imported from pasted HTML. Native splits may retain the text carrier while the
 canvas assigns the new block its own identity. This introduces no document

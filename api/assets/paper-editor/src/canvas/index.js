@@ -45,6 +45,8 @@ import Highlight from "@tiptap/extension-highlight";
 // Subscript (Mod-,) and superscript (Mod-.): the portable-doc `sub` / `sup` wrappers.
 import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
+// Text alignment on paragraphs and headings: the portable-doc `align` attribute.
+import TextAlign from "@tiptap/extension-text-align";
 import TiptapTaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 // ProseMirror selection constructors — used by the slash direct-insert to place the
@@ -774,6 +776,7 @@ class BpPaperCanvas extends HTMLElement {
         Highlight.configure({ HTMLAttributes: { class: "bp-highlight" } }),
         Subscript,
         Superscript,
+        TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"], defaultAlignment: "left" }),
         // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
         // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
         // ordinary transaction, so runToOps patches the item's `checked`.

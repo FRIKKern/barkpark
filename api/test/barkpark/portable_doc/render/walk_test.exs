@@ -119,6 +119,20 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute Walk.render_body(sup, @width, @article) =~ "vertical-align"
     end
 
+    test "a paragraph's author alignment rides inline on both surfaces; left adds nothing" do
+      centred = %{"kind" => "PdParagraph", "align" => "center", "children" => ["x"]}
+      assert Walk.render_body(centred, @width, @article) =~ "text-align:center"
+      assert Walk.render_body(centred, @width, @email) =~ "text-align:center"
+      plain = %{"kind" => "PdParagraph", "children" => ["x"]}
+      refute Walk.render_body(plain, @width, @article) =~ "text-align"
+    end
+
+    test "a heading's author alignment rides inline on both surfaces" do
+      right = %{"kind" => "PdHeading", "level" => 2, "align" => "right", "children" => ["x"]}
+      assert Walk.render_body(right, @width, @article) =~ ~s(<h2 style="text-align:right">x</h2>)
+      assert Walk.render_body(right, @width, @email) =~ "text-align:right"
+    end
+
     test "escapes HTML in string children" do
       node = %{"kind" => "PdText", "children" => ["<script>"]}
       html = Walk.render_body(node, @width, @email)

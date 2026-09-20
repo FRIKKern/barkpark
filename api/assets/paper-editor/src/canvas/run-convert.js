@@ -1421,7 +1421,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     const patch = buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
     // A checklist turned back into a plain list must clear task (patch-block merges keys).
     if (bpType === "list" && prevBlock && prevBlock.task === true && patch.task !== true) patch.task = false;
-    return patch;
+    return withAlignDrop(patch, nextChild, prevBlock);
   }
   return null;
 }
@@ -3840,9 +3840,12 @@ export function hasOverlappingOps(ops, baseline, remote) {
 // editor's getJSON compare EQUAL despite their differing attr/text key order.
 function stableProseKey(node) {
   const level = node.attrs && node.attrs.level;
+  const align = node.attrs && node.attrs.textAlign;
   return canonicalJSON({
     type: node.type,
     level: level == null ? null : level,
+    // Author alignment is diff-relevant (a patch must follow it); left and absent are one.
+    align: align === "center" || align === "right" ? align : null,
     content: node.content || null,
   });
 }
@@ -4547,11 +4550,28 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
 
     if (proseNodeChanged(prevNode, entry.node)) {
       const bpType = entry.bpType || (prevBlock && prevBlock.type);
-      ops.push(buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType));
+      const op = buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType);
+      ops.push({ ...op, patch: withAlignDrop(op.patch, entry.node, prevBlock) });
     }
   }
 
   return ops;
+}
+
+// Back to left on a block the BASELINE holds centred or flushed right: the node's source
+// only carries `align` when the block mounted with one, and a block aligned earlier in this
+// session and acknowledged since has a baseline with the key but a source without it - so
+// tiptapToBlock drops the key from the patch and the server would keep the old alignment.
+// The baseline is the truth the patch merges onto; when it has an alignment the node no
+// longer shows, the patch says align:null (the shallow merge then drops it).
+function withAlignDrop(patch, node, prevBlock) {
+  if (!patch || typeof patch !== "object" || !prevBlock) return patch;
+  const prev = prevBlock.align;
+  if (prev !== "center" && prev !== "right") return patch;
+  const now = node && node.attrs && node.attrs.textAlign;
+  if (now === "center" || now === "right") return patch;
+  if (Object.hasOwn(patch, "align")) return patch;
+  return { ...patch, align: null };
 }
 
 // ── echo reconciliation: server-confirmed blocks ⇄ live doc (S4a) ────────────

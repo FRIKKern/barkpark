@@ -72,7 +72,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3),
     do: heading_line(String.to_integer(l), b, d)
 
-  defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d)
+  # `align` rides the row on <p> and <h1..3> (Barkdown plan #21): render/compose.ex reads it
+  # ("center" | "right"), so a pulled paper that lost it came back flush left on push.
+  defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d, ["id", "align"])
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
   defp block(%{"type" => "ingress"} = b, d), do: inline_tag("ingress", b, d)
 
@@ -877,15 +879,17 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp heading_line(l, b, d),
-    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
+    do:
+      pad(d) <>
+        "<h#{l}#{attr_str(b, ["id", "align"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
 
   defp text_tag(tag, b, d),
     do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</#{tag}>"
 
-  defp inline_tag(tag, b, d),
+  defp inline_tag(tag, b, d, attrs \\ ["id"]),
     do:
       pad(d) <>
-        "<#{tag}#{attr_str(b, ["id"])}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
+        "<#{tag}#{attr_str(b, attrs)}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
 
   defp wrap(tag, attrs, [], d), do: pad(d) <> "<#{tag}#{attrs}/>"
 
