@@ -418,6 +418,38 @@ const ORACLE_CI_SCOPE =
   "BLOCK a merge. A hand-run still buys the same evidence; it just is not the " +
   "only reader any more.";
 
+// ── WHAT THIS FILE HAS A PLAN FOR (gr-blk-oracle-modal-callsite-coverage) ───
+// THE SECOND HALF OF THE ROSTER GUARD, and it was missing. The guard checked
+// "is this a key of scenarios.mjs" and stopped there, which was sufficient
+// while every state rode the one `&modal=account` plan. It is not sufficient
+// now. MEASURED on this branch, before this set existed:
+//
+//   $ SCEN=billing-trial THEME=light node cloud/priv/static/__preview__/modal-oracle.mjs
+//    ok   billing-trial · light · 1440x900   rules exact=1 substr=9 · pos=fixed …
+//   ORACLE PASS — 1 state(s) asserted, 0 failing
+//
+// `billing-trial` is a REAL key, so the guard waved it through, planFor() fell
+// through to the account plan, and `&modal=account` painted the account modal
+// over the billing screen. The run measured the account dialog and printed the
+// billing scenario's name: the identical "right CSS on the WRONG screen" false
+// green the typo case documents, reached without a typo. A roster that now
+// INVITES non-account names makes that reachable by hand, so the guard must
+// refuse a name this file has no plan for — before Chrome, like everything
+// else in it.
+//
+// The `account-modal*` prefix is NOT a loophole: the fallback plan IS the
+// account family's plan (`&modal=account`, MODAL_OPEN_PROBE, no contract), so
+// every member of that family is genuinely planned for.
+const PLANNED_SCENS = new Set([
+  TOKEN_REVEAL_SCEN,
+  ME_UNREADABLE_SCEN,
+  CONFIRM_SHEET_SCEN,
+  PALETTE_SCEN,
+  LAUNCH_SCEN,
+]);
+const ACCOUNT_FAMILY_RE = /^account-modal/;
+const hasPlan = (s) => PLANNED_SCENS.has(s) || ACCOUNT_FAMILY_RE.test(s);
+
 // Viewport. 900px tall on purpose: it is shorter than the 9-session account
 // card, which is what makes assertion 3 meaningful.
 const VIEW_W = Number(process.env.WIDTH || 1440);
@@ -451,6 +483,15 @@ function rosterGuard() {
       problems.push(
         `unknown SCEN "${s}" — not a key of scenarios.mjs → SCENARIOS ` +
           `(did you mean one of: ${DEFAULT_SCEN.join(", ")}?)`,
+      );
+    } else if (!hasPlan(s)) {
+      problems.push(
+        `UNPLANNED SCEN "${s}" — it IS a key of scenarios.mjs, but this file has no ` +
+          `plan for it, so planFor() would fall through to the account plan and ` +
+          `&modal=account would paint the ACCOUNT modal over that scenario's screen. ` +
+          `The run would print "${s}" and measure the account dialog. Planned: ` +
+          `${[...PLANNED_SCENS].join(", ")}, plus any account-modal* name. Add a ` +
+          `planFor() branch (suffix/land/drive/open/cells/cfg) before naming it here.`,
       );
     }
   }
