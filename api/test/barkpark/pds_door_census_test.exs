@@ -329,9 +329,25 @@ defmodule Barkpark.PdsDoorCensusTest do
     # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
     # denominator. RE-DERIVED by running the census on this tree: it prints
     # `harnesses : 14` and names the file — never by adding a delta to main's 13.
-    assert out =~ ~r/harnesses\s+: 14 /,
-           "the derived harness count moved off 14. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a fourteenth harness landed (or one left), " <>
+    #
+    # A FIFTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-20):
+    # scripts/pds-secret-scan_test.sh, the count-identity harness for the DB value
+    # scan scripts/pds-secret-scan.sh (task-4121ac48f4e4f71e, #19577, 342c912a7).
+    # It is a harness by the same derived *_test.sh rule, it is wired into the
+    # pds-harnesses leg via .github/shell-harness-legs.json and named twice in
+    # .github/workflows/shell-harnesses.yml (not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. LIKE the seventh and eighth and the three of 2026-09-16, and
+    # UNLIKE the tenth, it reddened main first: it arrived with NEITHER this bump
+    # NOR its disposition row, so the census read UNDISPOSED 1 of 59 and this pin
+    # refuted 14 on every PR that dispatched the Elixir matrix (cli #19575, run
+    # 35535399928). Both halves are paid together here, in the same PR
+    # (task-55a3ae340f30fd17). RE-DERIVED by running the census on this tree: it
+    # prints `harnesses : 15` and names the file — never by adding a delta to
+    # main's 14.
+    assert out =~ ~r/harnesses\s+: 15 /,
+           "the derived harness count moved off 15. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a sixteenth harness landed (or one left), " <>
              "say so on purpose.\n#{out}"
 
     for named <- [
