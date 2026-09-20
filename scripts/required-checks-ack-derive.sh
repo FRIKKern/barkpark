@@ -268,7 +268,27 @@ if [ "$SELFTEST" -eq 1 ]; then
   printf '\n-- selftest: the ACK_EX side, mutated --\n'
   # The victim is drawn from DERIVED ∩ ACKED so the mutation always has a real
   # line to delete, even on a tree this check is currently RED on.
-  VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"
+  # NO PIPE ON THIS LINE, and the reason is the bug it used to carry. The shape
+  # that shipped here was `VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"`
+  # under `set -euo pipefail` (line 52). `head -1` prints the first line and
+  # CLOSES the pipe; when the intersection is more than one line — it is 166 on
+  # this tree — `comm` then writes into a closed pipe, takes SIGPIPE, and exits
+  # 141. Under pipefail 141 becomes the PIPELINE's status, an assignment's status
+  # IS its substitution's status, and errexit kills the selftest right there. It
+  # is a scheduling race: `head` usually exits after `comm` has already finished
+  # writing 166 short lines into the 64KB buffer, so it passes — until a loaded
+  # runner loses the race. MEASURED on console #19336, where this ratchet went
+  # red on a PR whose diff never touched this file.
+  # scripts/pipefail-sigpipe-scan.sh reports the old form at [high]:
+  #   "truncating reader (head closes the pipe at N) on a producer not provably
+  #    bounded — 141 needs no buffer overrun".
+  # comm writes the whole intersection to a FILE, and one `read` takes the first
+  # line off it. Nothing can close a pipe that does not exist; an empty
+  # intersection leaves VICTIM empty and the refusal below still fires.
+  BOTH="$TMP/derived-and-acked.txt"
+  comm -12 "$DERIVED" "$ACKED" > "$BOTH"
+  VICTIM=""
+  IFS= read -r VICTIM < "$BOTH" || VICTIM=""
   [ -n "$VICTIM" ] || cannot_read "selftest has no derived-and-acknowledged name to delete — DERIVED and ACK_EX share nothing, so the mutation would be vacuous"
   # The mutation is applied to a SCRATCH COPY OF THE HARNESS FILE and then
   # re-parsed by the same extract_acked() above — not to the parsed name list —
