@@ -12,6 +12,14 @@ defmodule Mix.Tasks.Barkpark.Openapi do
   timestamp (`info.version` is the app vsn, not a `generated_at`), so generation
   is deterministic and the drift check is meaningful.
 
+  `info.version` is read from the app vsn DIRECTLY, not from the manifest's
+  `server.version` — that field is the RUNNING RELEASE (`Barkpark.BuildInfo`,
+  `"A.B.C.D"` where D is commits since the release tag) and moves on every
+  commit anywhere in the repo. CI generates from `refs/pull/N/merge`, a commit
+  no author holds, so a per-commit value in the artifact makes this gate
+  unwinnable for EVERY open PR. See "info.version is the deterministic app vsn"
+  in the test file below.
+
   That determinism is not a promise, it is an assert: see "generation is
   byte-deterministic" in `test/barkpark/api/openapi_test.exs`, alongside the
   two mutation asserts proving that a new route and an edited help string each
