@@ -79,8 +79,18 @@
 #                     cap does it for you, with zero jobs and no message.
 #
 # The row that filed this read 19654 on an earlier main and 19865 after #19291.
-# It is 19968 now. The block grows ~100-300 bytes a wave; at that rate it
-# reaches FAIL_FLOOR in roughly four to ten waves.
+# It was 19968 at that measurement. The block grew ~100-300 bytes a wave; at
+# that rate it would have reached FAIL_FLOOR in four to ten waves.
+#
+# RESOLVED 2026-09-20 (task-ca50ed283930706a). It did not get there: that body
+# moved to scripts/shell-harness-dispatch.sh and the two GitHub values are
+# passed as step `env:`, so the scalar is 38 LITERAL bytes and the expression
+# parser never sees it. The subject above is therefore HISTORY, not the current
+# tree — the largest interpolated block today is deploy.yml's `changes` step at
+# 16118. Nothing about this gate changes: the population is still DERIVED (every
+# `run:` scalar containing `${{`), so whichever block grows next is measured
+# without anyone updating a list. The fix the red asks for is the fix that was
+# taken, which is the whole point of naming it in the FAIL text below.
 #
 # ── BOTH FAILURE DIRECTIONS, NAMED ───────────────────────────────────────────
 # RED (exit 1): an INTERPOLATED block is over FAIL_FLOOR. That is the real bomb.
