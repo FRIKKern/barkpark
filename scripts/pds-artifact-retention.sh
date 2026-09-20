@@ -314,7 +314,10 @@ if [ "$FULL_BEFORE" != "$FULL_AFTER" ]; then
   # NOT process substitution: this file is run under whatever bash the operator
   # has, and bash 3.2 in POSIX mode refuses `<(…)` at EXPANSION time — which
   # would abort the very branch that exists to report the worst outcome.
-  _b="$(mktemp -t pds-art-before)"; _a="$(mktemp -t pds-art-after)"
+  # PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only
+  # and GNU coreutils refuses it outright.
+  _b="$(mktemp "${TMPDIR:-/tmp}/pds-art-before.XXXXXX")" || { say "FATAL: mktemp failed"; exit 3; }
+  _a="$(mktemp "${TMPDIR:-/tmp}/pds-art-after.XXXXXX")"  || { say "FATAL: mktemp failed"; exit 3; }
   printf '%s\n' "$FULL_BEFORE" >"$_b"; printf '%s\n' "$FULL_AFTER" >"$_a"
   diff "$_b" "$_a" | sed 's/^/    /'
   rm -f "$_b" "$_a"
