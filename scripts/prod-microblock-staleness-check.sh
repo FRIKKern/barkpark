@@ -119,7 +119,11 @@ if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$served" "$ref_sha" 2>/dev/nu
 fi
 
 behind="$(git -C "$REPO_ROOT" rev-list --count "${served}..${ref_sha}")"
-migrations="$(git -C "$REPO_ROOT" diff --name-only --diff-filter=A "${served}..${ref_sha}" -- "$MIGRATION_PATH" | grep -c . || true)"
+# ONLY *.exs. `git diff --diff-filter=A` over the migrations directory also
+# catches api/priv/repo/migrations/MANIFEST.sha256, which is a checksum file,
+# not a migration — counting it overstates the pending set by exactly one (24
+# vs the true 23 across ca4534461..origin/main on 2026-09-20).
+migrations="$(git -C "$REPO_ROOT" diff --name-only --diff-filter=A "${served}..${ref_sha}" -- "$MIGRATION_PATH" | grep -cE '\.exs$' || true)"
 
 echo "behind   $behind commits"
 echo "pending  $migrations migrations under $MIGRATION_PATH"
