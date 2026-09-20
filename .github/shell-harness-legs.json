@@ -472,6 +472,16 @@
         "env": {}
       },
       {
+        "name": "mktemp portability guard — selftest (6 controls incl. a planted RED), tree scan, and the personal-local doc-anchor tally asserted NON-ZERO",
+        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why it runs on THIS runner and not a Mac.\n# `mktemp -t NAME` with a template carrying fewer than three consecutive X is a\n# BSD/macOS-only form. GNU coreutils — this ubuntu runner — refuses it:\n#     mktemp: too few X's in template 'NAME'\n# The LOUD sites red their arm. The SILENT ones do not: a failing command\n# substitution inside an assignment does NOT trip `set -e`, so the variable\n# becomes the EMPTY string and the script runs on, redirecting into \"\".\n# scripts/pds-personal-local-smoke_test.sh did exactly that — run 35435212884\n# printed `0 of  doc anchor(s) resolved` and its leg still reported SUCCESS.\n# A guard whose own home is a Mac would never have seen it.\n\necho \"── 1. the guard proves it can SEE (positive control) ──\"\nbash scripts/mktemp-portability-check.sh --selftest\n\necho \"── 2. the guard over the tracked tree ──\"\nbash scripts/mktemp-portability-check.sh\n\n# 3. THE ORIGINAL VACUOUS GREEN, asserted by its NUMBER and not by an exit code.\n# The regression's signature was a PASSING run that measured nothing, so the\n# only honest assertion is that the count is non-zero.\necho \"── 3. personal-local --dry-run resolves a NON-ZERO number of doc anchors ──\"\nout=\"$(bash scripts/pds-personal-local-smoke_test.sh --dry-run 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-personal-local-smoke_test.sh --dry-run exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E 'doc anchor\\(s\\) resolved' || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no doc-anchor tally at all\" >&2\n  exit 1\n}\nn=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\1/p' | tail -1)\"\ntot=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\2/p' | tail -1)\"\n[ -n \"${n:-}\" ] && [ -n \"${tot:-}\" ] || {\n  echo \"RED: could not parse the tally; a 0-of-EMPTY denominator is exactly the bug\" >&2\n  exit 1\n}\necho \"  parsed: $n of $tot doc anchor(s) resolved\"\n[ \"$tot\" -gt 0 ] || { echo \"RED: denominator is 0 — the plan file was never written\" >&2; exit 1; }\n[ \"$n\" -gt 0 ]   || { echo \"RED: 0 anchors resolved — a green that measured nothing\" >&2; exit 1; }\n",
+        "env": {}
+      },
+      {
+        "name": "pds-citation-expand 4-arm harness (the guard's 16 selftest arms + its LIVE --check over the PDS fence)",
+        "run": "bash scripts/pds-citation-expand.test.sh\n",
+        "env": {}
+      },
+      {
         "name": "pds-idle-sampler --selftest — 3 arms (killed-mid-window, clean cleanup, KEEP control); fake ssh on PATH, no host",
         "run": "bash scripts/pds-idle-sampler.sh --selftest\n",
         "env": {}

@@ -92,6 +92,7 @@ defmodule BarkparkWeb.BulldocsReaderDatasetTest do
           "content" =>
             Barkpark.LabelFixtures.with_labels(%{
               "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => "open",
               "labels" => [label]
             })

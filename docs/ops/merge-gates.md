@@ -311,7 +311,7 @@ is harmless:
   is not required, not `needs:`-ed by any required aggregator, and structurally
   ineligible to be required because go-format.yml is paths-filtered (the venue
   rule below). Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 26 `(fails this job)` steps below (that label
+  the same sense as doc-gates' `(fails this job)` steps below (that label
   replaced `(blocking)` there in #12631). It is now filed under
   **S4 PATHS-FILTERED**, and until 2026-08-08 it appeared in **neither**
   `.github/required-checks.json` nor this page. `required-checks.json` is
@@ -662,7 +662,7 @@ Elixir security gates, path-triggered on `api/**` — items **9 (`sobelow`)** an
 **10 (`mix-audit`)** of this page's roster. Their policy of record moved out to
 [security-gates.md](security-gates.md) under its own `canonical-for`: the
 reviewed `api/.sobelow-skips` baseline, the amended flip precondition and the
-9-entry unannotatable floor, the `Security gate` aggregator's shape and why
+unannotatable floor, the `Security gate` aggregator's shape and why
 `sobelow` is deliberately not in its `needs:`, and the single esaml
 `--ignore-advisory-ids` suppression. Nothing was retired — the split was made
 because this page was 5 bytes under its 64000B cap and the remedy for overflow
@@ -733,10 +733,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-nine)
+### The doc-gates roster (it is not two scripts)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **29 steps labelled `(fails this job)`** plus 10
+undersells it: it runs **29 steps labelled `(fails this job)`** plus the
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -756,12 +756,12 @@ whole of its authority.
 
 (The count read 17 until 2026-08-07, two steps short; it read 26 until #18707
 added the doc-drift pair, and 28 until #19266 added the charter adoption
-census. The 29 is derived by
+census. The current count is derived by
 running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 29
-grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml   # → 10
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml
+grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml
 ```
 
 §20 CLAUSE
@@ -769,7 +769,7 @@ grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gate
 below, and the workflow drift apart, and it counts the UNION of both labels so a
 revert to the old name is still counted rather than read as zero. RESIDUE, named
 rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
-returns **30**, because `.github/workflows/doc-gates.yml` quotes both labels
+returns MORE, because `.github/workflows/doc-gates.yml` quotes both labels
 inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
 11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
 so its verdict is unaffected.) In workflow order:

@@ -53,6 +53,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
       }
@@ -316,7 +317,11 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
       "type" => "task",
       "title" => "Gate fixture #{doc_id}",
       "content" =>
-        %{"kind" => "task", "lifecycle_status" => "open"}
+        %{
+          "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
+          "lifecycle_status" => "open"
+        }
         |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
         |> Map.put("acceptance_criteria", [
           %{"criterion" => "it works", "met" => false, "evidence" => ""}
