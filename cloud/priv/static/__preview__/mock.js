@@ -274,9 +274,9 @@
   //     the fleet card mounts at the TAIL of the instance Overview column and
   //     shoot.sh shoots a 1000px VIEWPORT (below the fold), and the offload /
   //     verify fixtures are read only by pollOffloadWatch / runVerifyNow, i.e.
-  //     behind a CLICK. Both are now declared where the fixture lives:
-  //     `SCENARIOS[scen].drive`, an ordered step list (reveal/click/fill/await —
-  //     the vocabulary is documented above SCENARIOS in scenarios.mjs).
+  //     behind a CLICK. The fold half is `shotHeight` (shoot.sh); THIS is the
+  //     click half: `SCENARIOS[scen].drive`, an ordered step list
+  //     (click/fill/await — documented above SCENARIOS in scenarios.mjs).
   //
   //     Two properties this inherits from the 2FA drive above, deliberately:
   //     every step waits on a selector the REAL app painted (never a timer, so
@@ -288,16 +288,11 @@
   //     module; it cannot import this classic script) — that is what makes
   //     "this scenario is gated, and here is its gate" assertable in node.
   function driveStep(step, done) {
-    var sel = step.reveal || step.click || step.fill || step.await;
+    var sel = step.click || step.fill || step.await;
     if (!sel) { done(); return; }
     whenPresent(sel, function (el) {
-      if (step.reveal) {
-        try { el.scrollIntoView({ block: "center" }); } catch (e) { el.scrollIntoView(); }
-      } else if (step.click) {
-        el.click();
-      } else if (step.fill) {
-        el.value = step.value == null ? "" : String(step.value);
-      }
+      if (step.click) el.click();
+      else if (step.fill) el.value = step.value == null ? "" : String(step.value);
       done();
     });
   }

@@ -3347,7 +3347,6 @@ const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
 // `drive` is the declarative repair: an ordered step list mock.js replays after
 // load against the REAL app (nothing is faked into the DOM), so the shot shows
 // the state the label promises. Steps:
-//   { reveal: sel }          scroll the element into frame
 //   { click: sel }           click it — the app's own handler runs
 //   { fill: sel, value: v }  set an input's value
 //   { await: sel }           wait for it to exist (an arrival assertion)
@@ -3355,7 +3354,16 @@ const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
 // PREVIEW DRIVE FAILED banner (mock.js's driveGaveUp), so a drive that did not
 // land can never again collapse back into a byte-identical twin. smoke.mjs
 // reads this field too — see assertDefectEScenariosAreNotShellInstance.
-const REVEAL_FLEET_CARD = [{ reveal: ".fleet-support-card" }];
+// And `shotHeight` is the OTHER half of the repair, for the below-the-fold
+// cause: shoot.sh's default viewport is `${width},1000`, so a card mounting at
+// the tail of the instance Overview column is simply not in frame. Scrolling it
+// in was BUILT AND MEASURED FIRST, and rejected: the scroll lands, but the
+// headless capture composites the pre-scroll raster, so the PNG carries a blank
+// band and the subject still off-frame — a shot no reviewer should trust, under
+// a filename promising the state. A taller window has no such race.
+// 2400 is measured, not guessed: at 1440/light the offload ladder's last rung
+// sits at y≈1340 and the 6-rung support theater is taller still.
+const SHOT_TALL = 2400;
 // The offload ladder, driven through the REAL flow: Offload -> the order modal
 // -> File the order -> offloadFiled mounts the watch panel and polls the
 // scenario's own roster + orderTask, so each rung paints its own frame.
@@ -3364,7 +3372,6 @@ const DRIVE_OFFLOAD_LADDER = [
   { fill: "#offload-title", value: "Summarise the release notes" },
   { click: "#offload-go" },
   { await: "[data-offload-watch]" },
-  { reveal: "[data-offload-watch]" },
 ];
 
 export const SCENARIOS = {
@@ -5936,7 +5943,7 @@ export const SCENARIOS = {
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
     label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main [below the fold — driven into frame]",
-    drive: REVEAL_FLEET_CARD,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5949,7 +5956,7 @@ export const SCENARIOS = {
   },
   "fleet-support-online": {
     label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step [below the fold — driven into frame]",
-    drive: REVEAL_FLEET_CARD,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5963,7 +5970,7 @@ export const SCENARIOS = {
   },
   "fleet-support-failed": {
     label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online) [below the fold — driven into frame]",
-    drive: REVEAL_FLEET_CARD,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5976,7 +5983,7 @@ export const SCENARIOS = {
   },
   "fleet-support-empty": {
     label: "Fleet card — no supports yet: the add-a-support CTA on a live main [below the fold — driven into frame; its DOM IS shell-instance's, the shot is not]",
-    drive: REVEAL_FLEET_CARD,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5994,6 +6001,7 @@ export const SCENARIOS = {
   "offload-filing": {
     label: "Offload — the order is filed (open), waiting for the support to claim it [click-gated: the ladder mounts only after File the order]",
     drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -6007,6 +6015,7 @@ export const SCENARIOS = {
   "offload-working": {
     label: "Offload — the support has claimed AND is WORKING the order (roster beats working) [click-gated: the ladder mounts only after File the order]",
     drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -6020,6 +6029,7 @@ export const SCENARIOS = {
   "offload-done": {
     label: "Offload — the order is DONE (terminal success; the poll stops) [click-gated: the ladder mounts only after File the order]",
     drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -6033,6 +6043,7 @@ export const SCENARIOS = {
   "offload-blocked": {
     label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps) [click-gated: the ladder mounts only after File the order]",
     drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {

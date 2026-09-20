@@ -109,6 +109,15 @@ fi
 #             renders the logged-out card and files it under an activate name.
 #   search    app.js reads ?code=, ?template=, ?bp= and ?billing=portal out of
 #             location.search; dropping it silently voids the scenario's state.
+#   shotHeight  the VIEWPORT HEIGHT this scenario's subject needs. The default
+#             1000 is a FOLD, not a page: fleetSupportCardHtml and the offload
+#             watch ladder mount at the tail of the instance Overview column and
+#             fell below it, so nine scenarios shot byte-identical to
+#             shell-instance for as long as this matrix has existed
+#             (task-7bd507ea989ef248). Scrolling them into frame was tried and
+#             REJECTED: the scroll lands but the capture composites the old
+#             raster, leaving a blank band and a shot no reviewer should trust.
+#             A taller window has no such race.
 #
 # ── \x1f, NEVER TAB ──────────────────────────────────────────────────────────
 # The fields are joined and split on \x1f (US, the ASCII unit separator).
@@ -124,7 +133,7 @@ SCEN_TABLE="$(HERE="$HERE" node --input-type=module -e '
   const m = await import(new URL("scenarios.mjs", "file://" + process.env.HERE + "/").href);
   const US = String.fromCharCode(31);
   for (const [name, s] of Object.entries(m.SCENARIOS)) {
-    console.log([name, s.deepLink || "", s.pathname || "", s.search || ""].join(US));
+    console.log([name, s.deepLink || "", s.pathname || "", s.search || "", s.shotHeight || ""].join(US));
   }
 ')"
 THEMES=(light dark)
@@ -317,7 +326,18 @@ SHOTS_FAILED=0
 exec 3>&2
 
 shot() {
-  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}"
+  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}" sheight="${8:-}"
+  # The viewport HEIGHT. 1000 is the shipped default and stays the default for
+  # every scenario that does not ask for more; a scenario whose subject mounts
+  # below that fold declares `shotHeight` in scenarios.mjs (see the field list
+  # above). A non-numeric value is refused rather than silently defaulted — a
+  # field-shift would otherwise hand this a scenario NAME and shoot 1000 anyway.
+  if [[ -n "$sheight" && ! "$sheight" =~ ^[0-9]+$ ]]; then
+    echo "!! shoot.sh: scenario '$scen' produced shotHeight '$sheight' (not a number)." >&2
+    echo "!! The scenario table split misaligned — check the \\x1f join, not a tab." >&2
+    exit 1
+  fi
+  local height="${sheight:-1000}"
   local accent_q="" accent_sfx=""
   if [[ -n "$accent" ]]; then accent_q="&accent=$accent"; accent_sfx="-$accent"; fi
   # The scenario's own query string, folded in as extra params (its leading "?"
@@ -382,7 +402,7 @@ shot() {
     --no-default-browser-check \
     --user-data-dir="$profile" \
     --force-device-scale-factor=2 \
-    --window-size="${width},1000" \
+    --window-size="${width},${height}" \
     --virtual-time-budget=5000 \
     --timeout=15000 \
     --screenshot="$png" \
@@ -452,14 +472,14 @@ shot() {
 
 # IFS is \x1f (US) — see the SCEN_TABLE note above for why a tab here is a
 # silent-corruption bug, not a style choice.
-while IFS=$'\x1f' read -r scen deep spath ssearch; do
+while IFS=$'\x1f' read -r scen deep spath ssearch sheight; do
   [[ -z "$scen" ]] && continue
   # SCEN filter: when set, skip any scenario not on the list.
   if [[ -n "$WANT_SCEN" && "$WANT_SCEN" != *" $scen "* ]]; then continue; fi
   for theme in "${THEMES[@]}"; do
     for width in "${WIDTHS[@]}"; do
       for accent in "${ACCENTS[@]}"; do
-        shot "$scen" "$theme" "$width" "$deep" "$accent" "$spath" "$ssearch"
+        shot "$scen" "$theme" "$width" "$deep" "$accent" "$spath" "$ssearch" "$sheight"
       done
     done
   done
