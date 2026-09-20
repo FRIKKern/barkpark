@@ -75,7 +75,15 @@ defmodule Barkpark.SheetsM3M5ProofTest do
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
     Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
-    Barkpark.Auth.create_token(@write_token, "m3-m5-proof", @dataset, ["read", "write"])
+
+    Barkpark.Auth.create_token(
+      @write_token,
+      "m3-m5-proof",
+      @dataset,
+      ["read", "write"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     :ok
   end
 

@@ -22,10 +22,22 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
 
   setup do
     {:ok, alpha} =
-      Barkpark.Auth.create_token("tca-alpha-token", "alpha", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        "tca-alpha-token",
+        "alpha",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, beta} =
-      Barkpark.Auth.create_token("tca-beta-token", "beta", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        "tca-beta-token",
+        "beta",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{alpha: alpha, beta: beta}
   end

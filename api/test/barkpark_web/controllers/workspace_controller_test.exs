@@ -26,7 +26,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     # Workspace AND inserts a membership — so this token is a member of
     # "default" only.
     raw = "ws-list-token-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "ws list", "test", ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "ws list",
+        "test",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # A SECOND workspace the caller IS additionally made a member of — proves
     # the list surfaces every membership, not just Default.
@@ -433,7 +441,13 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       admin_raw = "ws-mint-admin-#{System.unique_integer([:positive])}"
 
       {:ok, admin} =
-        Auth.create_token(admin_raw, "mint admin", "test", ["read", "write", "admin"])
+        Auth.create_token(
+          admin_raw,
+          "mint admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, _} = TenancyAuth.create_membership(member_ws.id, admin.id, "admin")
 
@@ -485,7 +499,16 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       member_ws: member_ws
     } do
       raw = "ws-noperm-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "no perms", "test", [])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "no perms",
+          "test",
+          [],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       {:ok, _} = TenancyAuth.create_membership(member_ws.id, token.id, "member")
 
       assert TenancyAuth.member?(token, member_ws.id)
@@ -568,7 +591,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   describe "DELETE /api/workspaces/:workspace_slug" do
     test "200 for an admin — deletes the workspace and it is gone from the DB", %{conn: conn} do
       raw_admin = "ws-admin-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Throwaway WS"}, admin_token(raw_admin))
@@ -617,7 +648,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
     test "404 for an unknown workspace slug (admin)", %{conn: conn} do
       raw_admin = "ws-admin-404-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       resp =
         conn
@@ -631,7 +670,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "ZERO-ORPHAN through the HTTP path — no workspace_id-scoped row survives the delete",
          %{conn: conn} do
       raw_admin = "ws-admin-orphan-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # A throwaway workspace bootstrapped through the real owner path (owner
       # membership + Default project + production dataset) …
@@ -683,14 +730,30 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     # fail: caller and target in DIFFERENT tenants.
     test "CROSS-TENANT: a ws-A admin cannot delete ws-B — B survives", %{conn: conn} do
       raw_a = "ws-xtenant-a-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_a,
+          "ws A admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # A's OWN workspace — the caller is an `owner` here and nowhere else.
       {:ok, _own} = Tenancy.create_workspace_with_owner(%{name: "A Home WS"}, admin_token(raw_a))
 
       # B — a different tenant, owned by a different admin token.
       raw_b = "ws-xtenant-b-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_b,
+          "ws B admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, victim} =
         Tenancy.create_workspace_with_owner(%{name: "B Victim WS"}, admin_token(raw_b))
@@ -720,10 +783,26 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "CROSS-TENANT predicate strength: a global admin holding a plain `member` row in B cannot delete B",
          %{conn: conn} do
       raw_a = "ws-xtenant-mem-a-#{System.unique_integer([:positive])}"
-      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, token_a} =
+        Auth.create_token(
+          raw_a,
+          "ws A admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       raw_b = "ws-xtenant-mem-b-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_b,
+          "ws B admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, victim} =
         Tenancy.create_workspace_with_owner(%{name: "B Member-Only WS"}, admin_token(raw_b))
@@ -748,7 +827,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "200 for an admin — application/x-tar attachment with a non-empty bundle body",
          %{conn: conn} do
       raw_admin = "ws-export-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Export WS"}, admin_token(raw_admin))
@@ -780,7 +867,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "the profile / dataset / source_server query params REACH the engine (they were silently discarded before)",
          %{conn: conn} do
       raw_admin = "ws-export-scoped-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Scoped Export WS"}, admin_token(raw_admin))
@@ -809,7 +904,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "422 with an honest reason when a scope option cannot be resolved — never a 500, never a silently wrong bundle",
          %{conn: conn} do
       raw_admin = "ws-export-422-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Refusing Export WS"}, admin_token(raw_admin))
@@ -834,7 +937,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "503 export_transport_failed with a retry hint when the COPY dies of a transport failure — never a bare 500 internal_error",
          %{conn: conn} do
       raw_admin = "ws-export-503-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Dying Export WS"}, admin_token(raw_admin))
@@ -862,7 +973,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "503 storage_unavailable when a tar member cannot be written — a DISTINCT reason from database_unavailable (PDS-D209)",
          %{conn: conn} do
       raw_admin = "ws-export-enospc-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Full Disk WS"}, admin_token(raw_admin))
@@ -902,7 +1021,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "an engine error inside export/2 answers a LOGGED 500 internal_error — never 404",
          %{conn: conn} do
       raw_admin = "ws-export-engine-500-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Engine Fault WS"}, admin_token(raw_admin))
@@ -940,7 +1067,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "GENUINE ABSENCE is still 404: the engine's :workspace_not_found keeps its status",
          %{conn: conn} do
       raw_admin = "ws-export-gone-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Vanishing WS"}, admin_token(raw_admin))
@@ -963,7 +1098,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "POSITIVE CONTROL: with no fault configured the same admin still exports 200",
          %{conn: conn} do
       raw_admin = "ws-export-ok-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Healthy Export WS"}, admin_token(raw_admin))
@@ -996,7 +1139,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "409 export_already_running while THIS workspace is already exporting — with Retry-After",
          %{conn: conn} do
       raw_admin = "ws-export-409-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "In Flight WS"}, admin_token(raw_admin))
@@ -1028,7 +1179,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "409 export_capacity_reached for a DIFFERENT workspace — and the body never names the in-flight one",
          %{conn: conn} do
       raw_admin = "ws-export-cap-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, mine} =
         Tenancy.create_workspace_with_owner(%{name: "My Export WS"}, admin_token(raw_admin))
@@ -1056,7 +1215,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "POSITIVE CONTROL: once the slot is released the very same request exports 200",
          %{conn: conn} do
       raw_admin = "ws-export-freed-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Freed Export WS"}, admin_token(raw_admin))
@@ -1088,10 +1255,26 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "the guard is taken AFTER the tenant gate: a refused caller gets 403, never a 409 that reveals a live export",
          %{conn: conn} do
       raw_a = "ws-export-gate-a-#{System.unique_integer([:positive])}"
-      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, token_a} =
+        Auth.create_token(
+          raw_a,
+          "ws A admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       raw_b = "ws-export-gate-b-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_b,
+          "ws B admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, victim} =
         Tenancy.create_workspace_with_owner(%{name: "Gate Order WS"}, admin_token(raw_b))
@@ -1114,7 +1297,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
     test "404 for an unknown workspace slug (admin)", %{conn: conn} do
       raw_admin = "ws-export-404-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       resp =
         conn
@@ -1153,13 +1344,29 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "CROSS-TENANT: a ws-A admin cannot export ws-B — and not one byte of B reaches the wire",
          %{conn: conn} do
       raw_a = "ws-xexport-a-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_a,
+          "ws A admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, _own} =
         Tenancy.create_workspace_with_owner(%{name: "A Home Export WS"}, admin_token(raw_a))
 
       raw_b = "ws-xexport-b-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_b,
+          "ws B admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       sentinel = "B Secret Export WS #{System.unique_integer([:positive])}"
       {:ok, victim} = Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_b))
@@ -1191,10 +1398,26 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "CROSS-TENANT predicate strength: a global admin holding a plain `member` row in B cannot export B",
          %{conn: conn} do
       raw_a = "ws-xexport-mem-a-#{System.unique_integer([:positive])}"
-      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, token_a} =
+        Auth.create_token(
+          raw_a,
+          "ws A admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       raw_b = "ws-xexport-mem-b-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_b,
+          "ws B admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       sentinel = "B Member-Only Export WS #{System.unique_integer([:positive])}"
       {:ok, victim} = Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_b))
@@ -1236,14 +1459,28 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       raw_op = "ws-export-op-#{System.unique_integer([:positive])}"
 
       {:ok, token_op} =
-        Auth.create_token(raw_op, "operator", "test", ["read", "write", "admin"])
+        Auth.create_token(
+          raw_op,
+          "operator",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # The target is created by a DIFFERENT principal — the production shape
       # the provisioner/support chain actually faces (a workspace that arrived
       # by seeds, a migration, an import, or another operator). The operator
       # token is therefore NOT its owner.
       raw_owner = "ws-export-op-owner-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_owner, "ws owner", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_owner,
+          "ws owner",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       sentinel = "Operator Grant Export WS #{System.unique_integer([:positive])}"
 
@@ -1276,7 +1513,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "200 for an admin — imports a bundle into a clean scope and returns {tables,total_rows}",
          %{conn: conn} do
       raw_admin = "ws-import-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # Seed a real workspace with scoped content so the round-trip is NOT vacuous.
       {:ok, target} =
@@ -1328,7 +1573,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
            "never a bare internal_error 500 (pds-bl-clean-import-ungated-500)",
          %{conn: conn} do
       raw_admin = "ws-clean-collide-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Clean Collide WS"}, admin_token(raw_admin))
@@ -1387,7 +1640,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
            "that had NO gate at all",
          %{conn: conn} do
       raw_admin = "ws-import-413-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       Application.put_env(:barkpark, :max_import_body_bytes, 1_024)
 
@@ -1414,7 +1675,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
            "NOT refused (the 413 is not a constant)",
          %{conn: conn} do
       raw_admin = "ws-import-413b-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # Same 4 KB body, ceiling above it: it gets past the gate and dies on the
       # engine's honest invalid_bundle instead (4 KB of "x" is not a tar).
@@ -1430,7 +1699,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
     test "413 also gates mode=merge", %{conn: conn} do
       raw_admin = "ws-import-413m-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       Application.put_env(:barkpark, :allow_bundle_import, true)
       Application.put_env(:barkpark, :max_import_body_bytes, 1_024)
@@ -1452,7 +1729,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
     test "the success receipt says whether the disk precondition actually RAN", %{conn: conn} do
       raw_admin = "ws-import-disk-#{System.unique_integer([:positive])}"
-      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _admin} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Disk RX WS"}, admin_token(raw_admin))
@@ -1511,7 +1796,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       Application.delete_env(:barkpark, :allow_bundle_import)
 
       raw_admin = "ws-merge-off-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       resp =
         conn
@@ -1529,7 +1822,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
 
       raw_admin = "ws-merge-false-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       resp =
         conn
@@ -1547,7 +1848,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
 
       raw_admin = "ws-merge-on-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Merge RT WS"}, admin_token(raw_admin))
@@ -1584,7 +1893,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
 
       raw_admin = "ws-merge-conflict-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # SOURCE workspace carrying a NULL-dataset_id schema row — the slot the
       # partial unique index (name, dataset) WHERE dataset_id IS NULL guards.
@@ -1647,7 +1964,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
 
       raw_admin = "ws-slug-conflict-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       # SOURCE workspace, exported, then deleted — its slug becomes vacant.
       {:ok, source} =
@@ -1713,7 +2038,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       end)
 
       raw_admin = "ws-merge-fault-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, target} =
         Tenancy.create_workspace_with_owner(%{name: "Fault RT WS"}, admin_token(raw_admin))
@@ -1743,7 +2076,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     test "unknown mode → 422 invalid_import_mode (never silently treated as clean)",
          %{conn: conn, member_ws: member_ws} do
       raw_admin = "ws-merge-bad-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          raw_admin,
+          "ws admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       resp =
         conn
@@ -1804,7 +2145,15 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
   defp owned_token(user) do
     raw = "owned-token-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "owned", "test", ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "owned",
+        "test",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, token} =
       token |> Ecto.Changeset.change(%{owner_user_id: user.id}) |> Repo.update()

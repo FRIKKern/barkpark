@@ -29,8 +29,25 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
   setup do
     admin = "apptok-admin-#{System.unique_integer([:positive])}"
     reader = "apptok-reader-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(admin, "apptok-admin", @dataset, ["read", "write", "admin"])
-    {:ok, _} = Auth.create_token(reader, "apptok-reader", @dataset, ["read"])
+
+    {:ok, _} =
+      Auth.create_token(
+        admin,
+        "apptok-admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        reader,
+        "apptok-reader",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{admin: admin, reader: reader}
   end
 

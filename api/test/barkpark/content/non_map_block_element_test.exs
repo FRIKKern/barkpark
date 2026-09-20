@@ -36,7 +36,13 @@ defmodule Barkpark.Content.NonMapBlockElementTest do
   @dataset "test"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     # A schema with a STORED, non-empty layout is what routes a create through
     # `Writer.scaffold_expectation/3` → `Projection.project/4` → the renderer.

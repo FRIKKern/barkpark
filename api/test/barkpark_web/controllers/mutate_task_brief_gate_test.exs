@@ -53,11 +53,17 @@ defmodule BarkparkWeb.MutateTaskBriefGateTest do
 
   setup do
     {:ok, _} =
-      Barkpark.Auth.create_token(@token, "test-mutate-brief-gate", "test", [
-        "read",
-        "write",
-        "admin"
-      ])
+      Barkpark.Auth.create_token(
+        @token,
+        "test-mutate-brief-gate",
+        "test",
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     register_task_schemas!()
     LabelFixtures.register_tags!(@dataset)

@@ -66,7 +66,15 @@ defmodule BarkparkWeb.QueryIdPrefixTest do
     seed!()
 
     raw = "id-prefix-token-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "id_prefix test", @ds, ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        raw,
+        "id_prefix test",
+        @ds,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, raw_token: raw}
   end

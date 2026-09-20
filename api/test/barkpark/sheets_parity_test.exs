@@ -455,7 +455,14 @@ defmodule Barkpark.SheetsParityTest do
   # `d == a` assertion prints C1 => "Q4" against C1 => "DRAFT-ONLY".
   test "A↔A′: a write-denied member reads the SAME live session as a write-capable one, in a read-only STUDIO",
        %{conn: conn} do
-    {:ok, _} = Auth.create_token(@denied_token, "parity write-denied", @dataset, ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @denied_token,
+        "parity write-denied",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # A — the write-capable member commits an edit that is NEVER published, so
     # the live session and the published row now disagree by construction.

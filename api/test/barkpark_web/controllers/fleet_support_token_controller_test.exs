@@ -31,9 +31,23 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@admin_token, "fleet-admin-actor", "test", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "fleet-admin-actor",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "fleet-junior-actor", "test", ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "fleet-junior-actor",
+        "test",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     :ok
   end
 
@@ -181,7 +195,16 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
   # administers — so the workspace check passes and only FAMILY can deny.
   defp foreign_family_token do
     raw = "barkpark-test-victim-pat-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "user-pat-victim", "test", ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "user-pat-victim",
+        "test",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {raw, token}
   end
 
