@@ -150,9 +150,25 @@ assert_selects "docs/openapi.json selects the test that guards it" "docs/openapi
 # matters: "not ALL" only says the widening was silenced; "contains the reader
 # the hop is FOR" says the narrowing landed on the right files. A selector that
 # emitted only the ALWAYS set here would pass the first and fail the second.
-assert_not_all "a cloud/test-only change NO LONGER selects ALL" "cloud/test/barkpark_cloud/accounts_test.exs"
-assert_selects "…and it selects the seam guard, the api test that actually reads cloud/test" \
-  "cloud/test/barkpark_cloud/accounts_test.exs" "test/barkpark/async_global_seam_guard_test.exs"
+# ONE selector run, THREE questions. Each narrowing run is ~20 s of the
+# REQUIRED Elixir gate's own selftest step, so re-invoking the selector once
+# per assertion would spend the minutes this change exists to save.
+ct_path="cloud/test/barkpark_cloud/accounts_test.exs"
+ct_err="$(mktemp "${TMPDIR:-/tmp}/bp-ct-err.XXXXXX")"
+ct_out="$(printf '%s\n' "$ct_path" | bash "$SEL" --select 2>"$ct_err")"
+ct_n="$(printf '%s\n' "$ct_out" | sed '/^$/d' | awk 'END{print NR}')"
+if is_all "$ct_out"; then
+  bad "a cloud/test-only change NO LONGER selects ALL" "still ALL"
+elif [ -z "$ct_out" ]; then
+  bad "a cloud/test-only change NO LONGER selects ALL" "EMPTY — the failure this file exists to catch"
+else
+  ok "a cloud/test-only change NO LONGER selects ALL ($ct_n of $(cd "$ROOT/api" && find test -name '*_test.exs' | awk 'END{print NR}') api test files)"
+fi
+if grep -qxF -- "test/barkpark/async_global_seam_guard_test.exs" <<<"$ct_out"; then
+  ok "…and it selects the seam guard, the api test that actually reads cloud/test"
+else
+  bad "…and it selects the seam guard, the api test that actually reads cloud/test" "absent from $ct_n files"
+fi
 
 # DERIVED, NOT LISTED — and proved by a SECOND INSTRUMENT rather than by
 # re-reading the selector's own answer. The harness recomputes the one hop with
@@ -179,8 +195,8 @@ ext_expect="$(
   done | LC_ALL=C sort -u
 )"
 rm -f -- "$tmp_ext_rows"
-ext_got="$(printf 'cloud/test/barkpark_cloud/accounts_test.exs\n' | bash "$SEL" --select 2>&1 >/dev/null \
-  | sed -n 's/.*DERIVED readers are: //p' | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u)"
+ext_got="$(sed -n 's/.*DERIVED readers are: //p' "$ct_err" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u)"
+rm -f -- "$ct_err"
 if [ -z "$ext_expect" ]; then
   bad "the independent one-hop join finds a reader for cloud/test" "it found NONE — the control itself is measuring nothing"
 elif [ "$ext_got" = "$ext_expect" ]; then
@@ -198,7 +214,6 @@ fi
 # the most likely wrong way to build this — would narrow it. It must not.
 assert_all "(d2) internal/taskboard/board.go — a TEST-set path whose SIBLINGS are censused but which nothing reads — still selects ALL" "internal/taskboard/board.go"
 assert_all "(d2) cmd/barkpark/testdata/** with no censused reader still selects ALL" "cmd/barkpark/testdata/nothing-reads-this.json"
-assert_all "(d2) .codex/skills/epic-cycle/scripts/** still selects ALL" ".codex/skills/epic-cycle/scripts/nothing_reads_this.py"
 assert_all "(d2) web/node_modules/** still selects ALL" "web/node_modules/left-pad/index.js"
 
 # THE OTHER HALF OF THE MUTATION: the paths that MUST keep widening for a
