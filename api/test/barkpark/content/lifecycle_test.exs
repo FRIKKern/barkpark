@@ -109,7 +109,11 @@ defmodule Barkpark.Content.LifecycleTest do
 
   defp task_draft!(doc_id, scope, extra) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(extra)
 

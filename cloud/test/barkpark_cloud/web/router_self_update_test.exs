@@ -304,6 +304,79 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
       assert json_body(conn)["error"]["code"] == "pinned"
     end
 
+    # cch-w60-bl — THE `:forbidden` RUNG IS A DECIDED, RE-MEASURED DEFERRAL
+    # (charter D715, re-ruled D901). This test is the pin: it holds the guard's
+    # one-rung set from BELOW, by asserting what the OTHER rung does instead, so
+    # nobody re-litigates the widening from scratch.
+    #
+    # THE MEASUREMENT, RE-DERIVED ON main @ fedf38aed (the row's 3483/3490
+    # figures were measured against a 3483-test suite and are STALE — the cloud
+    # suite is 5462 tests today). Whole suite, `MIX_TEST_PARTITION=csw4
+    # CC=/usr/bin/clang ../scripts/mix-test-strict.sh`, from cloud/:
+    #
+    #   one rung, as shipped                      5462 tests, 0 failures
+    #   two rungs ["identity_refused","forbidden"] 5462 tests, 1 failure
+    #
+    # The single failure is registry_autoupdate_test.exs:342 — the wave's own
+    # iterated rung test ("rung \"forbidden\" must PERMIT the trigger"), i.e. the
+    # corpus detecting the widening, not objecting to it. BOTH VARIANTS ARE
+    # FREE; it stays a doctrine call, and the doctrine is D715's: a 401 means the
+    # box does not know our token, so the address may not be our box and an
+    # EXECUTE ask goes to a STRANGER — the leak the refusal exists to stop. A 403
+    # means the box KNOWS the token and denies the principal: no stranger, no
+    # leak, and the box's own router puts the self-update READ and WRITE in one
+    # `[:api, :require_admin]` pipeline, so the trigger fails anyway.
+    #
+    # WHAT A 403 BOX SEES INSTEAD — asserted below, not asserted in prose. The
+    # ask REACHES the wire, the box answers 403, and `self_update_relay/3`'s
+    # `{:ok, _status, _body}` catch-all relays `502 instance_error`. The console
+    # has no named arm for that code (`updateConflict` falls to `kind: "other"`),
+    # so the toast reads "Couldn't start the update" / "Please try again in a
+    # moment." and the Update button stays LIVE. That is a retry promise about a
+    # permanent authority refusal — honest about reachability, wrong about
+    # recovery — and it is exactly why widening the guard is NOT free-standing:
+    # a widened guard 409s `identity_refused` and the 403 box would then be told
+    # "The instance refused our credential", which is the wrong fact. The rung
+    # needs its OWN sentence ("this box does not grant our token admin —
+    # re-provision it") plus a re-provision affordance, and both live in
+    # cloud/priv/static/app.js. Widen the guard and this test reds by design.
+    test "the :forbidden rung PERMITS the ask and the 403 box sees 502 instance_error (D901)" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(
+          update_state: "unknown",
+          update_unavailable_reason: "forbidden"
+        )
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # The 403 the box itself answers — the fact the rung is named for.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 403, body: ~s({"error":"forbidden"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", token)
+
+      # THE WIRE FIRST, and here it is the OPPOSITE assertion to the
+      # identity_refused test above: the ask is SPENT. An empty wire means the
+      # guard was widened.
+      assert length(StudioLinkFakeHttpClient.requests()) == 1,
+             "the :forbidden rung must PERMIT the ask (charter D715/D901 — one rung, not two). " <>
+               "An empty wire means the guard widened; before it may, the rung needs its OWN " <>
+               "console sentence and a re-provision affordance in app.js, or every 403 box is " <>
+               "told \"The instance refused our credential\" — the wrong fact."
+
+      # And what the operator is told today, pinned verbatim so the follow-up
+      # that changes it has to change this line and say so.
+      assert conn.status == 502
+      assert json_body(conn) == %{"error" => %{"code" => "instance_error"}}
+      refute conn.resp_body =~ @instance_admin_token
+    end
+
     test "no token → 401" do
       {_user, team} = user_with_team()
       bp = live_barkpark(team)

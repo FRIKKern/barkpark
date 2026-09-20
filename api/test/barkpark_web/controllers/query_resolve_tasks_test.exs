@@ -67,6 +67,7 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
           "content" =>
             Barkpark.LabelFixtures.with_labels(%{
               "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => lifecycle,
               "labels" => [label]
             })

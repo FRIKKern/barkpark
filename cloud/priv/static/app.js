@@ -20324,10 +20324,33 @@
     // Always read the real subscription before deciding what to show — the plan
     // state is the server's truth, never assumed.
     if (!subLoaded && !subError) {
-      box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
+      // cch-w49-bl-repaint — THE COLD ARM IS ENTERED MORE THAN ONCE PER BOOT,
+      // and every entry used to buy a whole extra render chain. A #billing deep
+      // link reaches renderBilling from applyRoute, and loadMe's billing seam
+      // re-enters it the moment /v1/me lands — both while the subscription is
+      // still in flight. Each entry re-wrote this placeholder AND attached its
+      // own `.then(renderBilling)`, so the FINAL card was painted once per cold
+      // entry, and each of those paints started its own ceiling read, doubling
+      // again. Measured on the shipped bytes: 6 / 8 / 6 writes to
+      // #billing-recommended for billing-past-due / -portal-return /
+      // -cancelling.
+      //
+      // Two guards, both about the SECOND caller doing nothing:
+      //   • the placeholder is written only when it is not already on screen.
+      //     Safe HERE and nowhere else on this screen: the loading div carries
+      //     no listener and no state, so skipping the write cannot strand a
+      //     handler (the plan card below DOES carry handlers, which is why its
+      //     paint is deduped by not RE-RENDERING, never by skipping a write).
+      //   • only the caller that STARTS the read subscribes the re-render. A
+      //     caller that merely joins an in-flight read is already covered by
+      //     the initiator's continuation.
+      var loadingHtml = '<div class="loading">Loading your plan&hellip;</div>';
+      if (box.innerHTML !== loadingHtml) box.innerHTML = loadingHtml;
       showBillingSection("#billing-manage-section", false);
       showBillingSection("#billing-cancel-section", false);
-      loadSubscription().then(renderBilling);
+      var startsSubRead = !subInflight;
+      var subRead = loadSubscription();
+      if (startsSubRead) subRead.then(renderBilling);
       return;
     }
 
@@ -20384,7 +20407,22 @@
     // is one line under it, and holding the card behind a second read would
     // trade a real absence for a spinner. The repaint is once — the loaded flag
     // makes the recursion terminal.
-    if (!billingQuotaLoaded) { loadBillingCeiling().then(function () { renderBilling(); }); }
+    // cch-w49-bl-repaint — the recursion is still terminal, and now it is also
+    // SINGLE. Two things changed: only the caller that STARTS the ceiling read
+    // subscribes a re-render (a second renderBilling arriving while the read is
+    // open used to attach a second one, so the card was repainted once per
+    // entry), and the re-render fires only when the answer actually MOVED the
+    // screen. `planCeilingHtml(billingQuota)` is the ceiling's only consumer,
+    // so a read that lands on the same value — overwhelmingly nil → nil, which
+    // is every team without an ACTIVE subscription, past_due included — would
+    // repaint byte-identical markup and destroy the card's live handlers to do
+    // it.
+    if (!billingQuotaLoaded && !ceilingInflight) {
+      var quotaBefore = billingQuota;
+      loadBillingCeiling().then(function () {
+        if (billingQuota !== quotaBefore) renderBilling();
+      });
+    }
 
     var band = billingOwnerAuthority();
     if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
@@ -21726,13 +21764,22 @@
   // leaves `billingQuotaLoaded` false — an unanswered ceiling must never render
   // as an absent one and must never render as a number either, and both of
   // those are the same OMIT, so there is no error surface here to build.
+  // cch-w49-bl-repaint: SINGLE-FLIGHT. Two callers arriving while the read is
+  // open share one GET and one answer instead of issuing two. The ref is
+  // cleared only by the flight that owns it, so a reset that drops it mid-read
+  // (sign-out, below) cannot be un-done by the stale promise settling later.
+  var ceilingInflight = null;
   function loadBillingCeiling() {
-    return api("GET", "/v1/usage/summary").then(function (r) {
+    if (ceilingInflight) return ceilingInflight;
+    var flight = api("GET", "/v1/usage/summary").then(function (r) {
+      if (ceilingInflight === flight) ceilingInflight = null;
       if (!r.ok) return billingQuota;
       billingQuotaLoaded = true;
       billingQuota = usageInstanceCeiling(r.data && r.data.usage);
       return billingQuota;
     });
+    ceilingInflight = flight;
+    return flight;
   }
 
   // The declared checkout capability, or "" when the server has not told us.
@@ -21742,8 +21789,17 @@
     return capCache && typeof capCache.checkout === "string" ? capCache.checkout : "";
   }
 
+  // cch-w49-bl-repaint: SINGLE-FLIGHT, for the same reason as the ceiling and
+  // with wider reach — six call sites read this, and a #billing deep link had
+  // two of them open at once (applyRoute's cold render and loadMe's billing
+  // seam), so the console issued GET /v1/subscription twice per boot. Sharing
+  // one flight also makes "am I the caller that started this read?" answerable,
+  // which is what lets renderBilling subscribe exactly one re-render.
+  var subInflight = null;
   function loadSubscription() {
-    return api("GET", "/v1/subscription").then(function (r) {
+    if (subInflight) return subInflight;
+    var flight = api("GET", "/v1/subscription").then(function (r) {
+      if (subInflight === flight) subInflight = null;
       if (r.ok) {
         subLoaded = true;
         subError = false;
@@ -21761,6 +21817,8 @@
       renderBillingChip();  // GR20: the topbar trial/past-due chip follows too
       return subCache;
     });
+    subInflight = flight;
+    return flight;
   }
 
   // cch-w50-bl: reads the WHOLE vocabulary (catalog ∪ PLAN_NAMES), not just the
@@ -28041,6 +28099,13 @@
       // so the next account can never read the previous team's ceiling.
       billingQuota = null;
       billingQuotaLoaded = false;
+      // cch-w49-bl-repaint: the two single-flight refs are per-SESSION too. Left
+      // standing, the next account's first read would be handed the previous
+      // one's promise and paint that team's plan. Dropping the ref cannot be
+      // undone by the old flight settling later — each flight clears the ref
+      // only while it still owns it.
+      subInflight = null;
+      ceilingInflight = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared

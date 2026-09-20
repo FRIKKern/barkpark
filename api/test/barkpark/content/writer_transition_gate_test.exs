@@ -47,7 +47,11 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       # Unique description per call — keeps Tasks.Dedup AND the E4 publish
       # dedup wall quiet, so only the transitions under test drive outcomes.
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
@@ -67,7 +71,11 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
   # A whole-document createOrReplace payload — the fleet file-order.sh shape.
   defp task_doc(id, lifecycle) do
     content =
-      %{"kind" => "task", "lifecycle_status" => lifecycle}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => lifecycle
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
 
     %{"_id" => id, "_type" => "task", "title" => "Gate fixture #{id}", "content" => content}

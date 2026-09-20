@@ -695,6 +695,7 @@ defmodule BarkparkWeb.MutateControllerTest do
         Map.merge(
           %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 1,
             "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
@@ -755,6 +756,7 @@ defmodule BarkparkWeb.MutateControllerTest do
       content =
         %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "lifecycle_status" => "open",
           "priority" => 1,
           "acceptance_criteria" => [
@@ -1025,6 +1027,7 @@ defmodule BarkparkWeb.MutateControllerTest do
               "_type" => "task",
               "title" => "flat envelope",
               "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => "done"
             }
           }
@@ -1350,7 +1353,15 @@ defmodule BarkparkWeb.MutateControllerTest do
         "_id" => id,
         "_type" => "task",
         "title" => "Guard fixture #{id}",
-        "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+        "content" =>
+          Map.merge(
+            %{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => "open"
+            },
+            content_extra
+          )
       }
     end
 
@@ -1698,6 +1709,7 @@ defmodule BarkparkWeb.MutateControllerTest do
           "title" => "Merge-gate advisory fixture #{id}",
           "content" => %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 2,
             "acceptance_criteria" => criteria
@@ -1975,7 +1987,12 @@ defmodule BarkparkWeb.MutateControllerTest do
             "title" => "Filing-law fixture #{id}",
             "content" =>
               Map.merge(
-                %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1},
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open",
+                  "priority" => 1
+                },
                 content_extra
               )
           }
@@ -2000,6 +2017,7 @@ defmodule BarkparkWeb.MutateControllerTest do
               Map.merge(
                 %{
                   "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
                   "lifecycle_status" => "open",
                   "priority" => 1,
                   "parent_id" => @epic
@@ -2030,6 +2048,7 @@ defmodule BarkparkWeb.MutateControllerTest do
             "id" => id,
             "title" => "Filing-law fixture #{id}",
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 1,
             "parent_id" => @epic

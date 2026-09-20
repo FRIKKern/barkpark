@@ -137,6 +137,7 @@ defmodule BarkparkWeb.WallRefusalKeepsClaimedDraftTest do
   defp task_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "priority" => 1,
       "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
