@@ -6,7 +6,7 @@ name: Prod micro-block staleness
 # and it is NOT a deploy.yml target — that workflow's only SSH hosts are
 # CP_HOST and GUERRILLA_HOST. Its deploy is a human running `git pull` ON THE
 # BOX. So nothing in this repo compared its commit to origin/main, and on
-# 2026-09-20 it was measured 2891 commits and 24 migrations behind while
+# 2026-09-20 it was measured 2891 commits and 23 migrations behind while
 # serving HTTP 200 on every health surface the repo offers. Twenty days of
 # drift were invisible BY CONSTRUCTION: no instrument was pointed at it.
 #
