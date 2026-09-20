@@ -53,6 +53,7 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
       }
@@ -316,7 +317,11 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
       "type" => "task",
       "title" => "Gate fixture #{doc_id}",
       "content" =>
-        %{"kind" => "task", "lifecycle_status" => "open"}
+        %{
+          "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
+          "lifecycle_status" => "open"
+        }
         |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
         |> Map.put("acceptance_criteria", [
           %{"criterion" => "it works", "met" => false, "evidence" => ""}
@@ -549,6 +554,112 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
                "If the default source moved off :github, the publish door's full-gate " <>
                "arm (transition + claim + criteria) is no longer what a github write " <>
                "takes — see section (h) above and task-b36741707eabe359."
+    end
+  end
+
+  # ── (i) the stale-draft refusal's REMEDY lands (task-922e616cb9b99243) ────
+  #
+  # The refusal above used to prescribe "patch, then publish". While the twin
+  # exists, a bare-id patch is refused by the published-first fork fence
+  # (`Mutations.draft_twin_error/1`) and the publish then refuses identically —
+  # the two refusals pointed at each other. This arm runs the remedy the
+  # refusal NOW prints, in the order it prints it, against the same row the
+  # refusal was raised on, and shows it landing with the claim byte-identical.
+  # The wall itself is the quiet arm: the refusal fires BEFORE the remedy and
+  # the published row does not move until the remedy runs.
+  describe "the stale-claim refusal prescribes a remedy that lands" do
+    test "discard-draft, then a bare-id patch: lands, claim byte-identical", %{scope: scope} do
+      id = "pdg-remedy"
+      mk_task!(id, scope)
+      {:ok, _} = Content.publish_document(id, "task", @dataset, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(id, "pdg-remedy-worker", scope)
+      claim_before = claimed.content["claim"]
+      assert claim_before["worker"] == "pdg-remedy-worker"
+
+      # The trap shape: a draft twin that predates the claim (carries none).
+      mk_task!(id, scope)
+      {:ok, twin} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+      refute twin.content["claim"]
+
+      # THE WALL (quiet arm): still refused, published row untouched.
+      assert {:error, {:invalid_task_content, %{"claim" => [message]}}} =
+               Content.publish_document(id, "task", @dataset, scope)
+
+      assert published!(id, scope).content["claim"] == claim_before
+
+      # THE SENTENCE. The part that CLEARS the refusal is placeholder-free and
+      # printed with the real id, so criterion 1 ("runnable as printed") is
+      # measured against those two commands and this test runs exactly them
+      # below. The re-apply command keeps `<field>=<value>` because the value
+      # is the operator's own edit and `doc.patch` declares `flags: [set]`
+      # only — see the note over `stale_claim_error/2` for why filling it in
+      # from `draft.content` would be a worse bug, not a better message.
+      assert message =~ "stale draft: the published row carries claim state"
+      assert message =~ "`bp doc get task #{id} --perspective drafts`"
+      assert message =~ "`bp doc discard-draft task #{id} --yes`"
+      assert message =~ "only <field>=<value> is yours to fill"
+      assert message =~ "`bp doc patch task #{id} --set <field>=<value> --yes`"
+
+      # The OLD sentence is gone, in both of its halves.
+      refute message =~ "patch, then publish"
+      refute message =~ "Re-derive the draft from the published row"
+
+      # THE SELF-RETIREMENT KEY, asserted on the SHAPE the CLI guard actually
+      # reads (`internal/cli/stale_draft_publish_remedy.go`): it fires only when
+      # ONE string under `error.details.claim` carries BOTH clauses. The marker
+      # survives, the broken-remedy phrase does not, so the advisory retires.
+      # The phrase still exists in `criteria_regression_error/1`, but that error
+      # is emitted under "acceptance_criteria" and the guard reads only ".claim",
+      # so it is structurally invisible to it — this pair is the whole contract.
+      refute String.contains?(message, "stale draft: the published row carries claim state") and
+               String.contains?(message, "Re-derive the draft from the published row")
+
+      # THE PRINTED "patch, then publish" IS STILL A LOOP — pinned so the
+      # fork fence cannot be loosened by this row: with the twin in place the
+      # bare-id patch is refused…
+      assert {:error, {:invalid_task_content, %{"_id" => [fork]}}} =
+               Content.apply_mutations(
+                 [
+                   %{"patch" => %{"id" => id, "type" => "task", "set" => %{"description" => "x"}}}
+                 ],
+                 @dataset,
+                 [source: :api] ++ scope
+               )
+
+      assert fork =~ "Resolve the fork first"
+
+      # …and THE REMEDY, in the printed order, run as printed. Step 1: capture
+      # the twin's bytes (the `--perspective drafts` read the message names).
+      assert {:ok, captured} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+      assert captured.content["description"]
+
+      # Step 2: discard the twin. Placeholder-free, and after it the refusal
+      # is cleared — nothing about this row is refused any more.
+      assert {:ok, _} = Content.discard_draft(id, "task", @dataset, scope)
+      assert {:error, :not_found} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
+
+      # Step 3: the bare-id patch — published-first, so it LANDS.
+      assert {:ok, {_tx, [_]}} =
+               Content.apply_mutations(
+                 [
+                   %{
+                     "patch" => %{
+                       "id" => id,
+                       "type" => "task",
+                       "set" => %{"description" => "enriched through the printed remedy"}
+                     }
+                   }
+                 ],
+                 @dataset,
+                 [source: :api] ++ scope
+               )
+
+      pub = published!(id, scope)
+      assert pub.content["description"] == "enriched through the printed remedy"
+      assert pub.content["claim"] == claim_before
+      assert pub.content["lifecycle_status"] == "in_progress"
+      # No twin left behind: the remedy is a landing, not another fork.
+      assert {:error, :not_found} = Content.get_document("drafts.#{id}", "task", @dataset, scope)
     end
   end
 end

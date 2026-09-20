@@ -1401,7 +1401,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
         |> Params.put_opt(:landed, landed)
-        # The two LOUD overrides (PDS-D288/D289). Without these two lines the
+        # The two LOUD overrides (PDS-D288/PDS-D289). Without these two lines the
         # honesty gates are refuse-only over HTTP — a lead could not seal a
         # foreign task and nobody could close over an honest unmet criterion
         # through the API or the bp CLI at all. `bp task close … --set
@@ -1532,7 +1532,11 @@ defmodule BarkparkWeb.TasksController do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
-      case Tasks.release(task.id, worker_id, observed_epoch: observed_epoch) do
+      case Tasks.release(task.id, worker_id,
+             observed_epoch: observed_epoch,
+             caller_token_id: caller_token_id(conn),
+             session: session_id(conn, params)
+           ) do
         {:ok, %Document{} = doc} ->
           json(conn, %{
             ok: true,

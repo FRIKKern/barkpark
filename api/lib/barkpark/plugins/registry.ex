@@ -399,44 +399,26 @@ defmodule Barkpark.Plugins.Registry do
   # Tolerant on shape by design: only a command with an atom-keyed
   # `http.path_template` + `flags` list is rewritten; anything else falls to
   # the catch-all unchanged rather than raising inside a boot-time collector.
-  @task_doc_id_dataset_flag %{
-    name: "dataset",
-    type: "string",
-    summary:
-      "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 " <>
-        "`ambiguous_dataset` refusal names: one doc_id may live in two datasets of a " <>
-        "single workspace+project, and the task doors REFUSE such an id rather than " <>
-        "picking a dataset you did not name. Omit it and nothing is picked for you — " <>
-        "an unambiguous id reads normally and an ambiguous one is still refused."
-  }
-
   @doc """
   Declare the `?dataset=` disambiguator on a command whose ROUTE is a
   `/v1/tasks/:doc_id` route, whichever plugin declared the command.
 
-  Public so a test can assert the predicate directly, and so the tasks plugin
-  can apply the SAME rule to its own list without a second copy of it.
+  Public so a test can assert the predicate directly. THE RULE ITSELF — the
+  flag literal and the route predicate — lives in
+  `Barkpark.Tenancy.CliDatasetFlag`, the tenancy KERNEL module, because it has
+  a second application point: `Barkpark.Plugins.Tasks.cli_commands/0` applies
+  it to its own list so that list is self-consistent read directly. Two
+  FEATURE concepts needing one rule must both reach INWARD for it; the tasks
+  plugin delegating here instead was a sideways `tasks>registry` edge that
+  reddened the architecture boundary gate on every PR (task-9a90596e9194f370).
+  This clause is the registry's own door onto that one definition, not a
+  second copy of it.
   """
   @spec declare_dataset_on_task_doc_id_route(Barkpark.Plugin.cli_command()) ::
           Barkpark.Plugin.cli_command()
-  def declare_dataset_on_task_doc_id_route(%{http: %{path_template: path}, flags: flags} = cmd)
-      when is_binary(path) and is_list(flags) do
-    if task_doc_id_route?(path) and not Enum.any?(flags, &(flag_name(&1) == "dataset")) do
-      %{cmd | flags: flags ++ [@task_doc_id_dataset_flag]}
-    else
-      cmd
-    end
-  end
-
-  def declare_dataset_on_task_doc_id_route(cmd), do: cmd
-
-  defp task_doc_id_route?(path) do
-    String.starts_with?(path, "/v1/tasks/") and String.contains?(path, ":doc_id")
-  end
-
-  defp flag_name(%{name: name}), do: name
-  defp flag_name(%{"name" => name}), do: name
-  defp flag_name(_), do: nil
+  defdelegate declare_dataset_on_task_doc_id_route(cmd),
+    to: Barkpark.Tenancy.CliDatasetFlag,
+    as: :declare_on_task_doc_id_route
 
   # ─── Delegations ────────────────────────────────────────────────────────
   # Public surface preserved verbatim; canonical docs live on each delegated

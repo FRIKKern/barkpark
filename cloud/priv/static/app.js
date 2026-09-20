@@ -10351,6 +10351,15 @@
     if (updates && updates.isConnected !== false) {
       updates.innerHTML = updatePanelActionsHtml(bp, authority);
       wireUpdatePanel(bp);
+      // cch-w45-s5-fu: this strip now carries the unknown arm's exit too, and
+      // the innerHTML above just destroyed whichever button was wired. Same
+      // selfHealing:false the header strip takes, and for the same reason —
+      // loadMe re-enters this repaint, never this view's loader, so a
+      // SUCCESSFUL retry must still re-render or the strip keeps saying
+      // "Checking capabilities…" against an answer the console holds.
+      wireMeRetry(updates, function () {
+        loadInstance(bp.id, (instanceAuthorityMount || {}).tab);
+      }, false);
     }
   }
 
@@ -11980,15 +11989,24 @@
     // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
-    // authority-gated (no exit here: the page's one [data-me-retry] rides the
-    // header, where the still-checking arm first appears).
+    // authority-gated.
     buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "", "", UPDATE_ACTIONS_REASON_ID);
     // cch-w47-rv-bl: ONE reason for the strip. The pointer test (rather than
     // re-deriving which arms fired) keeps this correct if a future control is
     // added or a policy block goes missing — no grouped control, no span.
+    // cch-w45-s5-fu — THIS STRIP CARRIES ITS OWN EXIT. It used to pass "" and
+    // say so in words: "the page's one [data-me-retry] rides the header, where
+    // the still-checking arm first appears". That is false on every lifecycle
+    // arm whose header actions draw no adminWriteControlHtml control — a
+    // SUSPENDED box (and a removing one) still has a host, so this panel still
+    // renders and its Roll back still takes the unknown arm, while the header
+    // strip emits only the CLI disclosure and therefore no group reason and no
+    // exit. The result was a disabled "Checking capabilities…" with nothing on
+    // screen that could re-ask /v1/me. wireMeRetry now binds EVERY match in the
+    // subtree, so this second copy is a live button and not dead bytes.
     return buttons + (buttons.indexOf('aria-describedby="' + UPDATE_ACTIONS_REASON_ID + '"') === -1
       ? ""
-      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, ""));
+      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, meRetryHtml()));
   }
 
   function updatePanelHtml(bp, authority) {
@@ -13819,9 +13837,11 @@
         // (POST /v1/barkparks/:id/api/webhooks/:webhook_id/test-send → the
         // instance's one-shot synthetic probe, SINGLE attempt, delivery row
         // written with a NULL endpoint_id so a failed test never perturbs the
-        // auto-disable streak). No copy-as-CLI chip beside it on purpose: `bp
-        // cloud webhook` has no test-send verb today, and a chip for a command
-        // that does not exist is worse than no chip (backlog gr-bl-cli-test-send).
+        // auto-disable streak). The verb NOW EXISTS on the CLI side — `bp cloud
+        // webhook test-send` (internal/cli/cloud_webhook_cmd.go,
+        // runCloudWebhookTestSend; grep `case "test-send", "test":`) — so the
+        // chip this comment used to withhold is emitted below with the rest of
+        // the .wh-cli row. gr-bl-cli-test-send.
         '<button class="btn btn-sm" type="button" data-wh-test>Send test</button>' +
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
         '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
@@ -13835,6 +13855,12 @@
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
         cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
+        // The twin of the `Send test` button above. The verb spelling is the
+        // one C7's parser dispatches — internal/cli/cloud_webhook_cmd.go's
+        // `case "test-send", "test":` — and internal/cli/cloud_webhook_cmd_test.go
+        // pins this exact prefix as webhookTestSendChip, so a rename on either
+        // side reds a test rather than handing an operator a dead command.
+        cliChipHtml(webhookCliChip("test-send", instance, dataset)) +
         cliChipHtml(webhookCliChip("deliveries", instance, dataset)) +
         cliChipHtml(webhookCliChip("rm", instance, dataset)) +
       "</div>" +
@@ -20324,10 +20350,33 @@
     // Always read the real subscription before deciding what to show — the plan
     // state is the server's truth, never assumed.
     if (!subLoaded && !subError) {
-      box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
+      // cch-w49-bl-repaint — THE COLD ARM IS ENTERED MORE THAN ONCE PER BOOT,
+      // and every entry used to buy a whole extra render chain. A #billing deep
+      // link reaches renderBilling from applyRoute, and loadMe's billing seam
+      // re-enters it the moment /v1/me lands — both while the subscription is
+      // still in flight. Each entry re-wrote this placeholder AND attached its
+      // own `.then(renderBilling)`, so the FINAL card was painted once per cold
+      // entry, and each of those paints started its own ceiling read, doubling
+      // again. Measured on the shipped bytes: 6 / 8 / 6 writes to
+      // #billing-recommended for billing-past-due / -portal-return /
+      // -cancelling.
+      //
+      // Two guards, both about the SECOND caller doing nothing:
+      //   • the placeholder is written only when it is not already on screen.
+      //     Safe HERE and nowhere else on this screen: the loading div carries
+      //     no listener and no state, so skipping the write cannot strand a
+      //     handler (the plan card below DOES carry handlers, which is why its
+      //     paint is deduped by not RE-RENDERING, never by skipping a write).
+      //   • only the caller that STARTS the read subscribes the re-render. A
+      //     caller that merely joins an in-flight read is already covered by
+      //     the initiator's continuation.
+      var loadingHtml = '<div class="loading">Loading your plan&hellip;</div>';
+      if (box.innerHTML !== loadingHtml) box.innerHTML = loadingHtml;
       showBillingSection("#billing-manage-section", false);
       showBillingSection("#billing-cancel-section", false);
-      loadSubscription().then(renderBilling);
+      var startsSubRead = !subInflight;
+      var subRead = loadSubscription();
+      if (startsSubRead) subRead.then(renderBilling);
       return;
     }
 
@@ -20384,7 +20433,22 @@
     // is one line under it, and holding the card behind a second read would
     // trade a real absence for a spinner. The repaint is once — the loaded flag
     // makes the recursion terminal.
-    if (!billingQuotaLoaded) { loadBillingCeiling().then(function () { renderBilling(); }); }
+    // cch-w49-bl-repaint — the recursion is still terminal, and now it is also
+    // SINGLE. Two things changed: only the caller that STARTS the ceiling read
+    // subscribes a re-render (a second renderBilling arriving while the read is
+    // open used to attach a second one, so the card was repainted once per
+    // entry), and the re-render fires only when the answer actually MOVED the
+    // screen. `planCeilingHtml(billingQuota)` is the ceiling's only consumer,
+    // so a read that lands on the same value — overwhelmingly nil → nil, which
+    // is every team without an ACTIVE subscription, past_due included — would
+    // repaint byte-identical markup and destroy the card's live handlers to do
+    // it.
+    if (!billingQuotaLoaded && !ceilingInflight) {
+      var quotaBefore = billingQuota;
+      loadBillingCeiling().then(function () {
+        if (billingQuota !== quotaBefore) renderBilling();
+      });
+    }
 
     var band = billingOwnerAuthority();
     if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
@@ -21473,15 +21537,42 @@
   // and deliberately has none, and there the retry must repaint on BOTH
   // outcomes or a successful read leaves the stale unknown picker on screen,
   // which is the exact lie this slice exists to kill.
+  // cch-w45-s5-fu — EVERY [data-me-retry] IN THE SUBTREE, not the first one.
+  // This used to bind `root.querySelector("[data-me-retry]")`, and that single
+  // binding was load-bearing in the WRONG direction: because a second copy of
+  // the exit would be a DEAD button, five call sites reasoned their way OUT of
+  // emitting one ("the page's ONE shipped exit is already on screen beside
+  // it"), and the instance screen's Updates strip was left with none at all on
+  // every lifecycle arm whose header draws no grouped control — a disabled
+  // "Checking capabilities…" Roll back with no way to re-ask. Measured, not
+  // argued: the committed instance-suspended-me-unreadable scenario booted the
+  // instance screen on a failed /v1/me and #instance-body contained ZERO
+  // [data-me-retry].
+  //
+  // Binding all of them is the smaller of the two available fixes. The other
+  // was to hoist ONE exit to the instance screen, above the strips — rejected
+  // because the exit is an explanation attached to a specific disabled control
+  // (it sits inside the strip's own reason span, which is what
+  // `aria-describedby` points at), and a screen-level button would either
+  // duplicate the header's or float unanchored above two strips that can appear
+  // independently of each other. A per-strip exit keeps the D428 grammar; this
+  // makes the second one LIVE.
+  //
+  // Each button owns its own disable, so pressing one does not blank the other;
+  // whichever repaint wins replaces both nodes anyway.
   function wireMeRetry(root, repaint, selfHealing) {
-    var btn = root && root.querySelector ? root.querySelector("[data-me-retry]") : null;
-    if (!btn) return;
-    btn.addEventListener("click", function () {
-      btn.disabled = true;
-      loadMe().then(function () {
-        if (selfHealing === false || meState() !== "loaded") repaint();
-      });
-    });
+    var btns = root && root.querySelectorAll ? root.querySelectorAll("[data-me-retry]") : null;
+    if (!btns || !btns.length) return;
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          loadMe().then(function () {
+            if (selfHealing === false || meState() !== "loaded") repaint();
+          });
+        });
+      })(btns[i]);
+    }
   }
 
   function setAccountChip(team, email) {
@@ -21726,13 +21817,22 @@
   // leaves `billingQuotaLoaded` false — an unanswered ceiling must never render
   // as an absent one and must never render as a number either, and both of
   // those are the same OMIT, so there is no error surface here to build.
+  // cch-w49-bl-repaint: SINGLE-FLIGHT. Two callers arriving while the read is
+  // open share one GET and one answer instead of issuing two. The ref is
+  // cleared only by the flight that owns it, so a reset that drops it mid-read
+  // (sign-out, below) cannot be un-done by the stale promise settling later.
+  var ceilingInflight = null;
   function loadBillingCeiling() {
-    return api("GET", "/v1/usage/summary").then(function (r) {
+    if (ceilingInflight) return ceilingInflight;
+    var flight = api("GET", "/v1/usage/summary").then(function (r) {
+      if (ceilingInflight === flight) ceilingInflight = null;
       if (!r.ok) return billingQuota;
       billingQuotaLoaded = true;
       billingQuota = usageInstanceCeiling(r.data && r.data.usage);
       return billingQuota;
     });
+    ceilingInflight = flight;
+    return flight;
   }
 
   // The declared checkout capability, or "" when the server has not told us.
@@ -21742,8 +21842,17 @@
     return capCache && typeof capCache.checkout === "string" ? capCache.checkout : "";
   }
 
+  // cch-w49-bl-repaint: SINGLE-FLIGHT, for the same reason as the ceiling and
+  // with wider reach — six call sites read this, and a #billing deep link had
+  // two of them open at once (applyRoute's cold render and loadMe's billing
+  // seam), so the console issued GET /v1/subscription twice per boot. Sharing
+  // one flight also makes "am I the caller that started this read?" answerable,
+  // which is what lets renderBilling subscribe exactly one re-render.
+  var subInflight = null;
   function loadSubscription() {
-    return api("GET", "/v1/subscription").then(function (r) {
+    if (subInflight) return subInflight;
+    var flight = api("GET", "/v1/subscription").then(function (r) {
+      if (subInflight === flight) subInflight = null;
       if (r.ok) {
         subLoaded = true;
         subError = false;
@@ -21761,6 +21870,8 @@
       renderBillingChip();  // GR20: the topbar trial/past-due chip follows too
       return subCache;
     });
+    subInflight = flight;
+    return flight;
   }
 
   // cch-w50-bl: reads the WHOLE vocabulary (catalog ∪ PLAN_NAMES), not just the
@@ -28041,6 +28152,13 @@
       // so the next account can never read the previous team's ceiling.
       billingQuota = null;
       billingQuotaLoaded = false;
+      // cch-w49-bl-repaint: the two single-flight refs are per-SESSION too. Left
+      // standing, the next account's first read would be handed the previous
+      // one's promise and paint that team's plan. Dropping the ref cannot be
+      // undone by the old flight settling later — each flight clears the ref
+      // only while it still owns it.
+      subInflight = null;
+      ceilingInflight = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared

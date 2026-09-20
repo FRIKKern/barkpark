@@ -50,6 +50,33 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   defp occurrences(haystack, needle),
     do: haystack |> String.split(needle) |> length() |> Kernel.-(1)
 
+  # ── projection population floor ──────────────────────────────────────────────
+  #
+  # The realization loops below are FIXTURE-DRIVEN, so an emptied projection makes
+  # every per-row assertion vacuous — and the freshness leg cannot catch it, because
+  # the committed mirror is regenerated FROM the same emptied `build/1`. Both legs go
+  # green together. This is that missing control, the Elixir sibling of the Go leg's
+  # `projection floor:` fatals (internal/pdrender/component_golden_test.go).
+  #
+  # The floor VALUE is never hand-typed here: it is read from
+  # `GenGoldenParity.population_floor/2`, declared once beside the `*_projection/1`
+  # functions that produce the population. The population is ALSO pinned to the
+  # fixture's own authored input (a DERIVED equality), so dropping a single row reds
+  # even while the projection still clears the floor.
+  defp population!(fx, type, key, authored) do
+    projected = Map.get(fx["expected"], key) || []
+    floor = GenGoldenParity.population_floor(type, key)
+
+    assert length(projected) >= floor,
+           "projection floor: #{length(projected)} #{key}, want >= #{floor}"
+
+    assert length(projected) == length(authored),
+           "projection population diverged from the fixture's authored input: " <>
+             "#{length(projected)} projected #{key} vs #{length(authored)} authored"
+
+    projected
+  end
+
   # ── freshness ────────────────────────────────────────────────────────────────
 
   for type <- GenGoldenParity.types() do
@@ -164,7 +191,9 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     html = Components.notes_html(fx["input"])
     assert String.starts_with?(html, ~s|<div class="bp-notes">|)
 
-    for row <- fx["expected"]["rows"] do
+    rows = population!(fx, "notes", "rows", fx["input"]["items"])
+
+    for row <- rows do
       assert html =~ ~s|<span class="bp-note__k">#{row["label"]}</span>|, "label #{row["label"]}"
       assert html =~ ~s|<b>#{row["lead"]}</b>|, "lead #{row["lead"]}"
       assert html =~ row["text"], "text #{row["text"]}"
@@ -186,7 +215,9 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     html = Components.cards_html(fx["input"])
     assert String.starts_with?(html, ~s|<div class="bp-cards">|)
 
-    for card <- fx["expected"]["cards"] do
+    cards = population!(fx, "cards", "cards", fx["input"]["items"])
+
+    for card <- cards do
       assert html =~ ~s|<div class="bp-card__t">#{card["title"]}</div>|, "title #{card["title"]}"
       assert html =~ ~s|<div class="bp-card__d">#{card["text"]}</div>|, "text #{card["text"]}"
 
@@ -348,11 +379,12 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   test "roadmap: the emitter realizes the projection (scale axis · per-lane title/role/phase)" do
     fx = decode!(@api_dir, "roadmap")
     html = Components.roadmap_html(fx["input"])
-    ex = fx["expected"]
+    lanes = population!(fx, "roadmap", "lanes", fx["input"]["snapshot"])
+    scale = population!(fx, "roadmap", "scale", fx["input"]["scale"])
 
-    for cell <- ex["scale"], do: assert(html =~ ~s|<span>#{cell}</span>|, "scale #{cell}")
+    for cell <- scale, do: assert(html =~ ~s|<span>#{cell}</span>|, "scale #{cell}")
 
-    for lane <- ex["lanes"] do
+    for lane <- lanes do
       assert html =~ ~s|<span class="bp-rm__lbl">#{lane["title"]}</span>|, "lane #{lane["title"]}"
       assert html =~ ~s|bp-rm__bar--#{lane["role"]}|, "role #{lane["role"]}"
       if lane["phase"], do: assert(html =~ ~s|bp-rm__lane--phase|, "phase lane")

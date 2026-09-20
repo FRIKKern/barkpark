@@ -133,7 +133,60 @@ defmodule Barkpark.Plugins.Tasks do
   # Publish wall: a task that cannot render as PortableDoc in the terminal is
   # not a publishable task. Draft authoring remains permissive; publication
   # gives every agent an actionable repair message.
-  defp portable_brief_gate(%{doc: %{"type" => "task"} = doc}) do
+  #
+  # ── WHY THE HEAD READS BOTH SPELLINGS (task-c1f155da34d3338f) ─────────────
+  #
+  # This clause used to be `%{doc: %{"type" => "task"} = doc}` — a STRING key.
+  # `:before_save` fires with the raw string-keyed write attrs, so the sibling
+  # `quality_gate/1` matches there and every test that hands this function a
+  # plain map went green. But `:before_publish` is fired by
+  # `Content.Lifecycle.publish_after_gate/5` with `doc: draft`, and `draft` is a
+  # `%Barkpark.Content.Document{}` STRUCT whose keys are ATOMS. A struct never
+  # matches a string-key pattern, so every publish fell through to the catch-all
+  # `portable_brief_gate(_payload), do: :ok` below: the wall was registered,
+  # fired, and inert. Measured live on guerrilla 2026-09-18 — a briefless task
+  # and a bogus-block-brief task BOTH published 200 through
+  # `POST /v1/data/mutate/:dataset`.
+  #
+  # Both shapes are read now, exactly as `Grip.reject_level_skipping_fact/1` and
+  # `Bulldocs.reject_hollow_paper_publish/1` already did on this same seam.
+  # `fetch/2` below was ALWAYS struct-safe (it falls back to the atom key), so
+  # the head was the whole defect and the body needed no change.
+  # ── SCOPE: FIRST PUBLISH ONLY (task-c1f155da34d3338f, ruling) ─────────────
+  #
+  # The wall applies to a task ENTERING the published corpus, not to every
+  # publish forever after. A row that is ALREADY published without a brief —
+  # 3 of 20 sampled on the live instance, all of them born before the brief
+  # composer existed — keeps publishing: arming a dormant wall must not make
+  # the existing corpus un-republishable, which would strand the mutate publish
+  # op and the GitHub draft-twin collapse on every legacy row.
+  #
+  # `published_doc` is `nil` exactly on a birth (`Content.Lifecycle`'s
+  # `read_incumbent/4`). A payload that does not carry the key at all reads as
+  # `nil` too, and that is the SAFE default: a hook fired with a bare map (the
+  # shape the plugin's own unit tests use) still gates.
+  #
+  # THE BOUNDARY, STATED SO NOBODY HAS TO INFER IT: on a re-publish this gate
+  # does not fire AT ALL. A malformed brief on an already-published task is
+  # therefore NOT refused here. That is deliberate — the scope is the row's
+  # entry into the corpus, not a running brief validator — and it is the price
+  # of grandfathering. `Barkpark.Tasks.Validation` still owns brief SHAPE at
+  # the 422 layer on every write.
+  #
+  # `task_doc?/1` (defined beside the edge helpers below) already reads all
+  # three spellings — `:type`, `"type"`, `"_type"` — so the head reuses it
+  # rather than growing a second, drift-prone copy of the same predicate.
+  defp portable_brief_gate(%{doc: doc} = payload) when is_map(doc) do
+    cond do
+      not task_doc?(doc) -> :ok
+      not is_nil(Map.get(payload, :published_doc)) -> :ok
+      true -> gate_task_brief(doc)
+    end
+  end
+
+  defp portable_brief_gate(_payload), do: :ok
+
+  defp gate_task_brief(doc) do
     with content when is_map(content) <- fetch(doc, "content"),
          brief when is_map(brief) <- fetch(content, "brief"),
          1 <- fetch(brief, "version"),
@@ -150,8 +203,6 @@ defmodule Barkpark.Plugins.Tasks do
            "PortableDoc {version: 1, blocks: [...]} so bp task tui can render it"}
     end
   end
-
-  defp portable_brief_gate(_payload), do: :ok
 
   defp validate_brief_blocks(blocks) do
     Enum.reduce_while(blocks, :ok, fn
@@ -1462,7 +1513,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "rerun",
             type: "string",
             summary:
-              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/D336(a)): a SHARED rerun over distinct rows is the honest shape."
+              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/PDS-D336(a)): a SHARED rerun over distinct rows is the honest shape."
           },
           %{
             name: "clear-rerun",
@@ -1763,23 +1814,35 @@ defmodule Barkpark.Plugins.Tasks do
   # bare `bp task get <ambiguous-id>` still sends no `?dataset=` and still gets
   # the honest 409. The refusal is what this makes followable, not what it
   # replaces.
-  # THE RULE ITSELF NOW LIVES AT THE ASSEMBLY POINT (task-4968634c648cda54).
-  # `Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route/1` applies
-  # the same route predicate over the ASSEMBLED manifest — every plugin's
-  # `cli_commands/0`, not just this one's. That closes the escape hatch this
-  # per-list map left open: `session.link-task` targets
-  # `POST /v1/tasks/:doc_id/sessions` but is declared in
-  # `Barkpark.Plugins.Bulldocs`, so the map below never saw it, while its route
-  # (`TasksController.sessions/2` → `find_task_by_doc_id/2`) can answer the very
-  # 409 the flag exists to make followable.
+  # THE RULE ITSELF LIVES IN THE TENANCY KERNEL (task-9a90596e9194f370),
+  # `Barkpark.Tenancy.CliDatasetFlag` — ONE definition of the flag literal and
+  # of the route predicate, reached INWARD by both of its application points:
   #
-  # This call is KEPT, delegating to that one definition rather than repeating
-  # it, so `Barkpark.Plugins.Tasks.cli_commands/0` stays self-consistent when
-  # read on its own (tests and tooling do read it directly). The shared clause
-  # is idempotent, so applying it here and again at assembly appends nothing
-  # twice.
+  #   * `Barkpark.Plugins.Registry.collect_cli_commands/1` applies it at
+  #     ASSEMBLY, over the manifest every plugin contributes to. That closes
+  #     the escape hatch this per-list map leaves open on its own:
+  #     `session.link-task` targets `POST /v1/tasks/:doc_id/sessions` but is
+  #     declared in `Barkpark.Plugins.Bulldocs`, so the map below never sees
+  #     it, while its route (`TasksController.sessions/2` →
+  #     `find_task_by_doc_id/2`) can answer the very 409 the flag exists to
+  #     make followable (task-4968634c648cda54).
+  #   * this call, KEPT so `Barkpark.Plugins.Tasks.cli_commands/0` stays
+  #     self-consistent when read on its own — tests and tooling do read it
+  #     directly, without going through the registry.
+  #
+  # The shared clause is idempotent, so applying it here and again at assembly
+  # appends nothing twice.
+  #
+  # WHY NOT DELEGATE TO THE REGISTRY, which is where the assembly-point rule
+  # was first written: this plugin and the plugins registry are two FEATURE
+  # concepts, and `tasks → registry` is a sideways edge. It reddened the
+  # advisory architecture Boundary gate on EVERY pull request from 2026-09-18
+  # (`new feature→feature sideways edge "tasks>registry" not present in
+  # baseline`) for authors who had touched neither file. A rule two features
+  # share belongs in the kernel they both already depend on, and `?dataset=`
+  # is a tenancy selector by its own nature.
   defp declare_dataset_on_doc_id_route(cmd),
-    do: Barkpark.Plugins.Registry.declare_dataset_on_task_doc_id_route(cmd)
+    do: Barkpark.Tenancy.CliDatasetFlag.declare_on_task_doc_id_route(cmd)
 
   # ── THE `?dataset=` SCOPE SELECTOR, DECLARED FROM THE ROUTE ─────────────
   # (task-052c01b723ce1006)

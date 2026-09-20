@@ -4726,6 +4726,58 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── cch-w20-bl: THE LONG INSTANCE NAME, WHICH NO FIXTURE HAD EVER CARRIED ──
+  // `.attention-name` has carried `overflow: hidden; text-overflow: ellipsis;
+  // white-space: nowrap` since cch-w20-s9, and NOTHING in this corpus had ever
+  // made it use them. Every attention-queue fixture names its box in one word
+  // — Reporting, Marketing, Staging — which measure 52-69px at 14px/600, so the
+  // W20-attention-name-column leg's 44 green cells all proved the same thing:
+  // that the ellipsis was never NEEDED. A green that rests on a fixture string
+  // is conditional on that string, and the string was ours, not the server's.
+  //
+  // THIS NAME IS ORDINARY, NOT CRUEL, AND THAT IS THE POINT. `Barkpark.changeset`
+  // validates `name` at max 255 (cloud/lib/barkpark_cloud/registry/barkpark.ex,
+  // `validate_length(:name, min: 1, max: 255)`), and the cruel twins in this
+  // corpus — `fleet-cruel-content`, `members-cruel-content` — sit AT that cap.
+  // This one is 71 characters, well inside it: the shape an operator types when
+  // one word cannot tell two boxes apart. The blind spot was never the 255-char
+  // wall, which overflow-guard already drives elsewhere; it was the ORDINARY
+  // long name, which nothing drove at all.
+  //
+  // Everything else is `overview-attention` verbatim — the same degraded box,
+  // the same production-dominant "Health unknown · Agent offline" pair, the
+  // same `liveInstance` beside it — so the ONE axis between the two fixtures is
+  // the name, and the W20-attention-name-column leg reads them as a pair:
+  // engaged here, never needed there. Registered as breakpoint-sweep RESIDUE
+  // rather than a cell, the same home `overview-attention` and
+  // `overview-never-reported` have: what it exists to measure is one box's
+  // rendered text against its own column, which is overflow-guard's axis.
+  "overview-attention-long-name": {
+    label: "Overview attention — the degraded box wears a 71-character operator name, so .attention-name's ellipsis must engage",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-degraded-long",
+          name: "Reporting — EU customer analytics, billing reconciliation and retention",
+          slug: "reporting-eu",
+          url: "https://reporting-eu-5b2c1e.barkpark.cloud",
+          host: "reporting-eu-5b2c1e.barkpark.cloud",
+          health_status: "unknown",
+          agent_status: "offline",
+          version: "0.9.2",
+          last_seen_at: tMinus(1200),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
   // ── cch-w34-s6 (REVIEW ADDITION): the NEVER-REPORTED box, on screen ────────
   // The slice made `unreported` reachable and proved it through the pure hooks
   // and 26 harness assertions — but shipped no fixture, so the one state a
@@ -6114,6 +6166,66 @@ export const SCENARIOS = {
         provision_steps: failedSteps,
         provision_console: failedConsole,
       })],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // ── cch-w45-s5-fu · THE INSTANCE SCREEN WITH /v1/me UNANSWERED ─────────────
+  // The corpus had never booted the instance screen on a FAILED /v1/me at all
+  // (meFault appeared only on #billing and the operator console), so every
+  // claim about the instance screen's unknown arm — including "the still-
+  // checking control has an exit" — was argued from the render conditions and
+  // never measured.
+  //
+  // THE ACTOR IS AN OWNER. The role is irrelevant here on purpose: the read
+  // never lands, so instanceAdminAuthority() answers "unknown" for everybody
+  // and the arm under test is the one that claims NOTHING about the role.
+  //
+  // THE BOX IS SUSPENDED AND HOSTED, which is the whole point. The Updates
+  // panel renders for every box with a host, while the header's actions strip
+  // draws only the CLI disclosure in the suspended arm — no adminWriteControlHtml
+  // control at all, so the strip emits no group reason and therefore no exit.
+  // (The filing named a live box with a custom host as the reachable case. It is
+  // not: Connect agent is gated on lc.live ALONE, so a live box always draws a
+  // grouped control and always gets the header exit. The lifecycle arms that
+  // draw no grouped control while still rendering the Updates panel are the
+  // reachable ones, and `suspended` is the committed fixture that is both.)
+  //
+  // times: 1 — the fault is ONE-SHOT (the billing-me-recovers precedent), so the
+  // same fixture measures both halves: the first read fails and the panel paints
+  // the still-checking Rollback, and the exit's re-read can then LAND, which is
+  // the only way to prove the exit exits rather than merely renders.
+  "instance-suspended-me-unreadable": {
+    label: "Instance Updates panel with /v1/me unanswered on a SUSPENDED box — the still-checking Roll back needs an exit the header strip cannot provide (its suspended arm draws no grouped control)",
+    authed: true,
+    deepLink: "#instance/" + IDS.suspendedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [suspendedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // THE TWIN THAT MAKES THE BINDING LOAD-BEARING. Same one-shot /v1/me fault,
+  // but a LIVE box one release behind: its header strip DOES draw grouped
+  // controls (Update / Connect agent), so the header carries an exit AND the
+  // Updates strip now carries its own — two [data-me-retry] in one subtree,
+  // which is exactly the shape the old first-match binding made impossible to
+  // ship. Without this fixture "bind every match" is a change no committed
+  // scenario can tell apart from the code it replaced.
+  "instance-behind-me-unreadable": {
+    label: "Instance screen with /v1/me unanswered on a LIVE behind box — TWO still-checking strips, TWO exits, and the second one must not be dead bytes",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [behindInstance],
       subscription: activeSub,
       sites: [],
       audit: [],

@@ -527,7 +527,28 @@ defmodule Barkpark.Tasks.Dedup do
 
   # The refusal SAYS WHAT IT COULD NOT DO, in the response body, and names the
   # one action that gets the owner unstuck. Never `unknown error`.
-  defp degraded_message(reason) do
+  #
+  # TWO MESSAGES FROM ONE DOOR, because two different people need to act — the
+  # same split `Content.DedupWall` makes, for the same reason.
+  #
+  # OUTAGE (a binary reason): the database was slow, gone, or the scan could not
+  # be scoped. The filer can wait it out or, deliberately, file unchecked — so
+  # the remedy is named.
+  #
+  # DEFECT (`{:defect, phrase}`): OUR code raised. Offering `dedup_bypass` here
+  # would teach the filer to disable the gate permanently for a bug that is
+  # never reported — the exact misread this arm exists to prevent. No remedy is
+  # offered because the filer has none; the sentence tells them whose bug it is
+  # and to report it.
+  defp degraded_message({:defect, phrase}) do
+    "task dedup gate hit a DEFECT, not an outage: #{phrase}. The create was " <>
+      "REFUSED rather than filed unchecked — no duplicate check ran, so nothing " <>
+      "here claims this task is new. This is a bug in Barkpark, not a slow " <>
+      "database: retrying will not help and there is no filer escape for it. " <>
+      "Report it with this message so the defect gets fixed."
+  end
+
+  defp degraded_message(reason) when is_binary(reason) do
     "task dedup gate could not complete: #{reason}. The create was REFUSED rather " <>
       "than filed unchecked — no duplicate check ran, so nothing here claims this " <>
       "task is new. Retry, or resend with content.dedup_bypass: true to file it " <>
@@ -702,9 +723,19 @@ defmodule Barkpark.Tasks.Dedup do
       scan_candidates(dataset, opts, workspace_id)
     end
   rescue
+    # A code DEFECT and a database OUTAGE both land here, and they used to leave
+    # wearing the same clothes: `:warning`, "the backlog scan failed (Mod)", and
+    # a `content.dedup_bypass` remedy that is actively wrong for a bug. The
+    # classification below is the SAME one `Content.DedupWall` makes — see
+    # `@code_error_modules` and the agreement test in
+    # `dedup_defect_classification_test.exs`.
     e ->
-      Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+      if code_error?(e) do
+        {:degraded, defect_reason("candidate fetch failed", e)}
+      else
+        Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
+        {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+      end
   catch
     :exit, reason ->
       Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
@@ -1065,6 +1096,62 @@ defmodule Barkpark.Tasks.Dedup do
     do: "the backlog scan failed (#{inspect(mod)})"
 
   defp reason_phrase(_, _timeout), do: "the backlog scan failed"
+
+  # ── DEFECT vs OUTAGE: one list, two modules, and a test that locks them ──────
+  #
+  # This list is a VERBATIM MIRROR of `Barkpark.Content.DedupWall`'s
+  # `@code_error_modules`. It is duplicated rather than shared because the wall
+  # lives in the kernel (`Barkpark.Content`) and this module must not reach into
+  # a sibling's private classifier; the lock against drift is mechanical, not a
+  # comment: `api/test/barkpark/tasks/dedup_defect_classification_test.exs`
+  # reads BOTH modules' source, evaluates both lists, and reds the moment they
+  # differ by a single module.
+  @code_error_modules [
+    ArgumentError,
+    ArithmeticError,
+    BadArityError,
+    BadBooleanError,
+    BadFunctionError,
+    BadMapError,
+    BadStructError,
+    CaseClauseError,
+    CondClauseError,
+    FunctionClauseError,
+    KeyError,
+    MatchError,
+    Protocol.UndefinedError,
+    TryClauseError,
+    UndefinedFunctionError,
+    WithClauseError
+  ]
+
+  defp code_error?(%{__struct__: mod}), do: mod in @code_error_modules
+  defp code_error?(_), do: false
+
+  # Same fail-CLOSED verdict as an outage, DIFFERENT clothes:
+  #
+  #   * `Logger.error`, not `.warning` — an outage is watched, a defect is
+  #     paged. The `DEFECT` prefix is the string an alert can key on; the infra
+  #     arms keep `degraded:` and stay at warning.
+  #   * `[:barkpark, :tasks, :dedup, :defect]` telemetry carrying the exception
+  #     module, for anyone who alerts on events rather than log lines. The
+  #     namespace is this module's own (`[:barkpark, :tasks, :dedup, :scan]`
+  #     already ships from `report_scanned/5`), not the wall's `:dedup_wall`.
+  #   * a `{:defect, phrase}` reason, so `degraded_message/1` renders the
+  #     message that does NOT offer `content.dedup_bypass`.
+  defp defect_reason(where, %{__struct__: mod} = e) do
+    Logger.error(
+      "Tasks.Dedup DEFECT (not an outage): #{where} with a code error " <>
+        "in Barkpark, #{inspect(e)}"
+    )
+
+    :telemetry.execute([:barkpark, :tasks, :dedup, :defect], %{count: 1}, %{
+      exception: mod,
+      where: where
+    })
+
+    {:defect, "the backlog scan could not run because of a bug in Barkpark (#{inspect(mod)})"}
+  end
 
   defp maybe_filter_dataset(query, nil), do: query
 

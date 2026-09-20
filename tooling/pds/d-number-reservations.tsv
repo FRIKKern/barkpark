@@ -41,3 +41,4 @@ PDS-D757	2026-09-17T13:54:39Z	pds-bl-charter-anchors-stale-vs-frozen-blob (r21 d
 PDS-D758	2026-09-17T15:46:18Z	pds-bl-charter-api-anchor-rot-rate (r21 dw21) — 2 breaks / 30h priced by replaying arm A across main; cite the HOME not the construct; signal gap recorded
 PDS-D759	2026-09-17T16:45:49Z	pds-bl-charter-freeze-ledger (r21 dw22) — the harness thaw ledger: blob OID joins a thaw to its PDS-D
 PDS-D760	2026-09-17T20:59:50Z	task-73fc9e5d14308997 dw40 arm E trigger-coverage ratchet
+PDS-D761	2026-09-20T12:18:47Z	deploy s25: retroactive thaw record for 406978270 (stat -f portability)

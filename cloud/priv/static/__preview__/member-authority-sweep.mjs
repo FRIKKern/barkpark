@@ -723,9 +723,22 @@ const PIN_MEMBER_SCENARIOS = 15;
 // envelope, not the roster), so the member slice does not move and
 // PIN_MEMBER_SCENARIOS stays where it is — the same case `instance-sites-
 // unreadable` above set. RE-DERIVED by RUNNING this sweep and reading what it
-// PRINTED ("the committed corpus grew to 135 scenario(s), pinned at 134") and
-// the actor-set line, which still says 15, never by adding one.
-const PIN_TOTAL_SCENARIOS = 135;
+// PRINTED ("the committed corpus grew to 137 scenario(s), pinned at 135") and
+// the actor-set line, which still says 15, never by adding one. The two new
+// scenarios are `cch-w45`'s unknown-arm fixtures (`instance-suspended-me-
+// unreadable`, `instance-behind-me-unreadable`); neither declares role
+// "member", and the actor-set line the sweep PRINTED still reads 15, so the
+// member slice is unmoved and PIN_MEMBER_SCENARIOS stays at 15.
+// 137 -> 138 (cch-w20-bl): `overview-attention-long-name`, the corpus's first
+// fixture to hand `.attention-name` a string its own column cannot seat, so the
+// first able to prove that ellipsis ENGAGES instead of never being needed. The
+// member slice STAYS at 15 — the case the note above forbids bumping: its `me`
+// is the ordinary OWNER (`me("Acme Inc", …)`, copied verbatim from
+// `overview-attention`), so it cannot answer role="member" by construction.
+// 138 was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 138 scenario(s), pinned at 137") and the actor-set
+// line, which still says 15 — never by adding one.
+const PIN_TOTAL_SCENARIOS = 138;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

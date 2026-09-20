@@ -264,6 +264,15 @@ on:
       # locks the Go struct's tags against it in serializer order, so an edit to
       # the producer's key set must dispatch the Go job (task-801c6c33769ca01d).
       - "cloud/lib/barkpark_cloud/sites/build_log_bytes.ex"
+      # box_error_envelope.ex: the SAME producer_contract_test.go resolves
+      # build_log_bytes.ex's `BoxErrorEnvelope.fields(body)` call through to THIS
+      # module and reads the three keys fields/1 emits (box_error,
+      # box_error_message, box_error_request_id), so the Go decoders are locked
+      # against the reducer rather than against a hand-typed copy of it. A key
+      # added or renamed here carries no .go diff, so the edit must dispatch the
+      # Go job or the lock cannot fire on the very PR that breaks it
+      # (task-bb5b44bcc5e233af; same rule as build_log_bytes.ex above).
+      - "cloud/lib/barkpark_cloud/sites/box_error_envelope.ex"
       # registry/site.ex: internal/cli/cloud_site_prebuilt_nonstatic_predicate_test.go
       # reads the control plane's OWN `@kinds ~w(...)` from DISK and enrols every
       # non-static member as a site `bp cloud site deploy --prebuilt` must refuse.

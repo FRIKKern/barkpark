@@ -1247,7 +1247,7 @@ func deleteBucket(out *writer, name string) int {
 // pin that mutation testing could not remove, plus two invariants that are not
 // population counts at all.
 //
-// PDS-D444/D455 — WHY TOTAL SURVIVED AND ITS TWO NEIGHBOURS DID NOT. Eleven
+// PDS-D444/PDS-D455 — WHY TOTAL SURVIVED AND ITS TWO NEIGHBOURS DID NOT. Eleven
 // mutations against a clean tree, re-run on the merged tree, found exactly one
 // shape that no other arm of this file notices: mutation I2 — take a real,
 // paid, dispositioned verb, delete its hzResDone call so it returns exitOK with
@@ -1334,7 +1334,7 @@ func TestHetznerResourceCensusMeasuresTheKnownPopulation(t *testing.T) {
 // every legitimate refactor into a floor negotiation. The exact pins that used
 // to tax growth here (TOTAL=50 / KEYS=52 / NON_LITERAL=2) were the filed
 // question pds-bl-census-exact-pins-tax-growth, and it has since been SETTLED by
-// mutation (PDS-D444/D455): KEYS and NON_LITERAL are deleted as measured
+// mutation (PDS-D444/PDS-D455): KEYS and NON_LITERAL are deleted as measured
 // redundant, and TOTAL is kept — see the comment on
 // TestHetznerResourceCensusMeasuresTheKnownPopulation for why it is the only arm
 // that notices a receipt retired coherently with its disposition row.

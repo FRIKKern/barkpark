@@ -90,13 +90,22 @@ defmodule Barkpark.Content.Lifecycle do
 
     case Content.get_document(did, type, dataset, opts) do
       {:ok, draft} ->
+        # THE INCUMBENT, READ ONCE (task-c1f155da34d3338f). The published row
+        # this publish is about to replace — `nil` when there is none, which is
+        # the definition of a FIRST publish (a birth). It was already being read
+        # here, inside `ensure_task_publish_transition_legal/5`, purely to decide
+        # the same question ("First publish — a birth" — see its `_ ->` clause);
+        # hoisting the read makes that fact available to the `:before_publish`
+        # payload as well, and costs no extra query.
+        published = read_incumbent(pid, type, dataset, opts)
+
         # The publish-door lifecycle gate — immediately after the draft read,
         # BEFORE the wall and the :before_publish hook fire, so a refusal is
         # side-effect-free (the Writer-seam gate-position precedent).
         with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
              :ok <- ensure_bound_title_agrees(draft),
-             :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
-          publish_after_gate(draft, pid, type, dataset, opts)
+             :ok <- ensure_task_publish_transition_legal(type, draft, published, opts) do
+          publish_after_gate(draft, pid, type, dataset, opts, published)
         end
 
       {:error, :not_found} ->
@@ -255,14 +264,20 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
-  defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts) do
+  defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts, published) do
     ctx = WriteScope.build_ctx(opts)
 
+    # `published_doc` (task-c1f155da34d3338f): the row this publish REPLACES, or
+    # `nil` on a first publish. `prev_doc` cannot answer that question — it is
+    # the draft, the same value as `doc` — so a hook that needs to tell a birth
+    # from a re-publish had nothing to read and no way to know it was missing.
+    # Additive: a hook that does not name the key is unaffected.
     payload = %{
       event: :before_publish,
       doc: draft,
       dataset: dataset,
       prev_doc: draft,
+      published_doc: published,
       ctx: ctx
     }
 
@@ -854,7 +869,7 @@ defmodule Barkpark.Content.Lifecycle do
   #     the github bookkeeping collapse) carries the claim byte-identical and
   #     passes untouched.
   #   * a CLAIM-IDENTICAL draft can STILL erase evidence (PDS wave 26,
-  #     PDS-D360/D362, observed end-to-end): `bp task stamp` writes the
+  #     PDS-D360/PDS-D362, observed end-to-end): `bp task stamp` writes the
   #     PUBLISHED row directly (`Tasks.Stamp`, `Repo.update_all`) and never
   #     touches the draft twin, and a draft NEVER rebases. So a draft minted
   #     DURING an active claim carries that claim verbatim, sails past
@@ -917,27 +932,41 @@ defmodule Barkpark.Content.Lifecycle do
   #     criteria fence all apply to `:github`, and only `:sync` is exempt from
   #     the first two. `pds-bl-github-linkput-auto-publish-erasure` stays open
   #     for the audit-trail half it does not answer.
-  defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
-    case Content.get_document(pid, "task", dataset, opts) do
-      {:ok, %Document{content: pub_content}} ->
-        if Keyword.get(opts, :source, :api) == :sync do
-          # Mirror-verbatim: transition + claim exempt, criteria fence NOT —
-          # see the :sync coverage note above.
-          criteria_fence(pub_content || %{}, draft.content || %{})
-        else
-          gate_task_publish(pub_content || %{}, draft.content || %{})
-        end
+  # The incumbent is now READ BY THE CALLER and handed in (see `read_incumbent/4`
+  # at the top of `do_publish_document/4`) rather than re-read here. Same value,
+  # same verdicts — `nil` still means "first publish — a birth", and `legal?/2`
+  # is still never consulted for one (`legal?(nil, x)` is false by design and
+  # would refuse every birth).
+  defp ensure_task_publish_transition_legal(
+         "task",
+         %Document{} = draft,
+         %Document{} = published,
+         opts
+       ) do
+    pub_content = published.content
 
-      _ ->
-        # First publish — a birth. Never consult legal?/2 (legal?(nil, x)
-        # is false by design and would refuse every first publish).
-        :ok
+    if Keyword.get(opts, :source, :api) == :sync do
+      # Mirror-verbatim: transition + claim exempt, criteria fence NOT —
+      # see the :sync coverage note above.
+      criteria_fence(pub_content || %{}, draft.content || %{})
+    else
+      gate_task_publish(pub_content || %{}, draft.content || %{}, published.doc_id)
     end
   end
 
-  defp ensure_task_publish_transition_legal(_type, _draft, _pid, _dataset, _opts), do: :ok
+  defp ensure_task_publish_transition_legal(_type, _draft, _published, _opts), do: :ok
 
-  defp gate_task_publish(pub_content, draft_content) do
+  # `nil` when this doc_id has no published row yet. Deliberately total: every
+  # non-`{:ok, %Document{}}` answer (including a scoping miss) is read as "no
+  # incumbent", which is exactly how the clause it replaced behaved.
+  defp read_incumbent(pid, type, dataset, opts) do
+    case Content.get_document(pid, type, dataset, opts) do
+      {:ok, %Document{} = published} -> published
+      _ -> nil
+    end
+  end
+
+  defp gate_task_publish(pub_content, draft_content, pid) do
     was = pub_content["lifecycle_status"]
     now = draft_content["lifecycle_status"]
 
@@ -946,7 +975,7 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, publish_transition_error(was, now)}}
 
       stale_claim?(pub_content, draft_content) ->
-        {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
+        {:error, {:invalid_task_content, stale_claim_error(pub_content, pid)}}
 
       true ->
         # THE CLAIM-TIME CONTRACT (task-11390a3b900c8a09). `criteria_fence/2`
@@ -1191,7 +1220,61 @@ defmodule Barkpark.Content.Lifecycle do
     }
   end
 
-  defp stale_claim_error(pub_content) do
+  # THE REMEDY MUST BE ONE THAT LANDS (task-922e616cb9b99243). This refusal
+  # used to prescribe "re-derive the draft from the published row (patch, then
+  # publish)". Measured live on guerrilla 2026-09-16/18 (task-bff844cc812f0fe4)
+  # and again 2026-09-19 for this row: while `drafts.<id>` exists, the bare-id
+  # patch is refused by the published-first fork fence
+  # (`Mutations.draft_twin_error/1`, "Resolve the fork first"), and a publish
+  # after that refuses HERE again, byte-identically. The two refusals pointed
+  # at each other, so an operator following the printed sentence could not get
+  # out. The sequence that lands: DISCARD the unlandable twin, then a BARE-ID
+  # patch — published-first for a task (`@published_first_patch_types` /
+  # `land_patch/5`), so it edits the published row in place and the claim
+  # (worker, epoch, ts_iso, lease) rides through byte-identical. The wall
+  # itself is unchanged.
+  #
+  # WHAT THE MESSAGE CAN AND CANNOT FILL IN (the criterion-1 split, re-derived
+  # here rather than assumed). "A remedy that needs a human to adapt it is the
+  # defect" binds the part that CLEARS THE REFUSAL, and that part is now
+  # placeholder-free: `bp doc get … --perspective drafts` then
+  # `bp doc discard-draft task <real id> --yes`, both printed with the real id,
+  # both runnable as pasted, and after the second nothing is refused. What
+  # follows — re-applying the operator's own edit — cannot be pre-filled from
+  # here, and the reason is mechanical, not stylistic:
+  #
+  #   * the desired value IS `draft.content`, which this module does hold, but
+  #     `doc.patch` declares `flags: [set]` and nothing else
+  #     (`Barkpark.Plugins.Capabilities`, the `doc.patch` core_cmd — the
+  #     `--file` line is still owed and is pinned as owed by the CLI's own
+  #     `doc_patch_file_body_e2e_test.go`). So the only expression available is
+  #     inline `key=value` / `key:=json` ON A SHELL COMMAND LINE.
+  #   * rendering arbitrary draft content into a shell-pasteable command inside
+  #     a JSON error field means shell-quoting text that routinely carries
+  #     newlines, quotes and `$`. A mis-quoted command that RUNS and writes
+  #     something else is strictly worse than an honest placeholder.
+  #   * the size is unbounded: a real row's `acceptance_criteria` is multi-KB,
+  #     and this string is a 422 body.
+  #
+  # So `<field>=<value>` stays, and the message says whose it is and where to
+  # read it back from — the capture step above exists for exactly that.
+  #
+  # SELF-RETIREMENT, STATED PRECISELY. `internal/cli/stale_draft_publish_remedy.go`
+  # prints its corrective advisory only when ONE string under
+  # `error.details.claim` carries BOTH `staleDraftClaimMarker` ("stale draft:
+  # the published row carries claim state") AND `staleDraftBrokenRemedy`
+  # ("Re-derive the draft from the published row"). This message drops the
+  # second, so the advisory goes silent — that is the whole retirement.
+  #
+  # The phrase itself is NOT gone from this file: `criteria_regression_error/1`
+  # below still uses it. That is harmless and must not be "fixed" by deleting
+  # it there: that error is emitted under the `"acceptance_criteria"` key, and
+  # the guard reads ONLY `.claim`, so it is structurally invisible to it — not
+  # merely failing the two-clause AND. An earlier revision of this comment said
+  # the phrase was "deliberately absent", full stop; it was absent from THIS
+  # message only, and anyone who grepped the file would have caught the comment
+  # lying rather than the code being wrong.
+  defp stale_claim_error(pub_content, pid) do
     worker = get_in(pub_content, ["claim", "worker"])
     epoch = get_in(pub_content, ["claim", "epoch"])
 
@@ -1199,9 +1282,17 @@ defmodule Barkpark.Content.Lifecycle do
       "claim" => [
         "stale draft: the published row carries claim state (worker #{inspect(worker)}, " <>
           "epoch #{inspect(epoch)}) this draft does not — publishing would obliterate it. " <>
-          "Re-derive the draft from the published row (patch, then publish), or move the " <>
-          "claim through the sanctioned verbs (`bp task claim` / `bp task release` / " <>
-          "`bp task close`)."
+          "Do NOT patch-then-publish: while `drafts.#{pid}` exists the bare-id patch is " <>
+          "refused by the fork fence and this publish refuses again. To CLEAR this " <>
+          "refusal, run these two exactly as printed: `bp doc get task #{pid} " <>
+          "--perspective drafts` (keep the twin's bytes — `bp doc get` reads the " <>
+          "published lens by default), then `bp doc discard-draft task #{pid} --yes`. " <>
+          "To then LAND the edit you were publishing, re-apply it with a bare-id patch " <>
+          "— `bp doc patch task #{pid} --set <field>=<value> --yes` — which is " <>
+          "published-first for a task, so the claim rides through untouched; only " <>
+          "<field>=<value> is yours to fill, and the first command above is where you " <>
+          "read it back from. Or move the claim through the sanctioned verbs " <>
+          "(`bp task claim` / `bp task release` / `bp task close`)."
       ]
     }
   end
@@ -1217,7 +1308,8 @@ defmodule Barkpark.Content.Lifecycle do
           "holds that proof and this draft does not. A stamp is written DIRECTLY to the " <>
           "published row (`bp task stamp`) and never rebases an open draft, so a draft " <>
           "minted before the stamp still carries the pre-stamp criteria. Re-derive the " <>
-          "draft from the published row (discard it, patch again, then publish), or move " <>
+          "draft from the published row (`bp doc discard-draft` the twin, then a bare-id " <>
+          "`bp doc patch` — published-first, it lands without a publish), or move " <>
           "the criterion through the sanctioned verbs (`bp task stamp` / `bp task close`)."
       ]
     }

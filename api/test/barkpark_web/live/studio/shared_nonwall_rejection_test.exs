@@ -7,16 +7,19 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
   Wave-11's census (authoring-excellence charter D83a) proved these four are the whole set beyond the
   wall tuples. Every fixture below is taken from the EMITTER, not invented:
 
-    1. `{:error, :not_found}` — `lifecycle.ex:96-97`, the TOCTOU where the draft
+    1. `{:error, :not_found}` — `content/lifecycle.ex:do_publish_document/4`'s `{:error, :not_found}`
+       arm, the TOCTOU where the draft
        is gone (discarded, or published from another tab).
-    2. `{:error, {:rev_mismatch, %{expected:, actual:}}}` — `mutations.ex:apply_one/3` (the create arm),
-       `lifecycle.ex:149`. The autosave / second-tab race.
+    2. `{:error, {:rev_mismatch, %{expected:, actual:}}}` — `content/mutations.ex:apply_one/3` (the create arm),
+       `content/mutations.ex:ensure_rev/2` (the vanished-doc variant). The autosave / second-tab race.
     3. `{:error, {:invalid_task_content, %{field => [msg]}}}` —
-       `lifecycle.ex:349/352/365`, `mutations.ex:451/565/…`. Each `msg` is
+       `content/lifecycle.ex`'s `publish_transition_error/2` / `stale_claim_error/1` /
+       `criteria_regression_error/1`, `content/mutations.ex`'s
+       `close_bypass_error/1` / `claim_drop_error/1` / …. Each `msg` is
        pre-built human prose. NOTE the row's brief says the key is
        "lifecycle_status"; the emitters also use "claim" and
        "acceptance_criteria", so the render must not key on one field name.
-    4. A raw `%Ecto.Changeset{}` — `Repo.rollback(cs)` inside `publish_after_gate/5` (lifecycle.ex).
+    4. A raw `%Ecto.Changeset{}` — `Repo.rollback(cs)` inside `publish_after_gate/5` (content/lifecycle.ex).
 
   A REFUTED fifth: plugin exceptions cannot reach `do_action` — `Hooks.fire`
   coerces a raising `before_*` hook to `:ok`.
@@ -64,7 +67,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
   end
 
   describe "2. {:error, {:rev_mismatch, …}} — the autosave race" do
-    # VERBATIM emitter fixture — `Content.Mutations` (mutations.ex:151) emits
+    # VERBATIM emitter fixture — `Content.Mutations` (`content/mutations.ex:apply_one/3`, the create arm) emits
     # `%{expected: expected, actual: doc.rev}`.
     test "asks for a reload and spends no words on the opaque revs" do
       flash = flash_for({:error, {:rev_mismatch, %{expected: "rev-a", actual: "rev-b"}}})
@@ -75,7 +78,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
     end
 
     test "the `actual: nil` variant renders the same, not a crash" do
-      # `mutations.ex:1006` emits `%{expected: expected, actual: nil}` for a doc
+      # `content/mutations.ex:ensure_rev/2` emits `%{expected: expected, actual: nil}` for a doc
       # that vanished under an ifRevisionID fence.
       flash = flash_for({:error, {:rev_mismatch, %{expected: "rev-a", actual: nil}}})
 
@@ -85,7 +88,7 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
 
   describe "3. {:error, {:invalid_task_content, …}} — the task lifecycle gate" do
     # VERBATIM emitter fixture — `Content.Lifecycle.publish_transition_error/2`
-    # (lifecycle.ex:452-459).
+    # (content/lifecycle.ex).
     test "renders the emitter's own prose for an illegal lifecycle transition" do
       msg =
         "illegal lifecycle transition \"done\" → \"open\": publishing this draft would " <>

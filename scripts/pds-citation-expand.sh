@@ -91,6 +91,19 @@ readonly -a FENCE=(
   'scripts/pds-*'
   'tooling/pds/'
   '.claude/workflows/bp-pds-charter.md'
+  # Swept and now guarded permanently (task-757db888540ec92e).
+  'api/'
+  'internal/'
+  # tooling/grip/ is DELIBERATELY ABSENT, and the reason is a measurement, not
+  # a preference: tooling/pds/rerun-adjudicate.test.mjs check 1.1 asserts
+  # `git diff --stat origin/main -- tooling/grip/` is EMPTY, and that suite is
+  # wired PR-side in .github/workflows/research-coverage-suite.yml under a
+  # `tooling/grip/**` path filter. Expanding grip's 6 files was tried and took
+  # the suite from 276 checks/0 failed to 276/1 — so a fence entry here would
+  # make this guard demand a rewrite that reds another lane's suite. Its 41
+  # citations stay in the residue line --check prints on every green, where the
+  # debt is visible rather than quietly fenced away; the repair is a
+  # coordinated change with the owner of check 1.1.
 )
 
 usage() {
@@ -137,7 +150,16 @@ mode_count() {
   n_lines=$(awk -F: '{s+=$NF} END{print s+0}' "$tmp/lines.txt")
   n_matches=$(wc -l < "$tmp/matches.txt" | tr -d ' ')
   # Each `/D<n>` segment is one citation the prefix does not reach.
-  n_hidden=$(grep -oE "/D?${SEG}" "$tmp/matches.txt" 2>/dev/null | wc -l | tr -d ' ')
+  #
+  # A CLEAN SCOPE IS A RESULT, NOT A CRASH. `grep` exits 1 on no match, and
+  # under `pipefail` that rc is the whole substitution's, so `set -e` killed
+  # --count before its first `echo`: over a scope with ZERO compressed
+  # citations the census printed NOTHING and exited 1. That is precisely the
+  # state a successful sweep leaves behind, so the instrument went mute on
+  # exactly the measurement that proves the work — and a caller could not tell
+  # "clean" from "the script died". Every grep feeding a denominator below is
+  # `|| true`-terminated for that reason.
+  n_hidden=$( { grep -oE "/D?${SEG}" "$tmp/matches.txt" 2>/dev/null || true; } | wc -l | tr -d ' ')
   n_citations=$(( n_matches + n_hidden ))
 
   echo "PDS-D compressed-citation census"
@@ -150,10 +172,10 @@ mode_count() {
   # The unreachable set, by number. This is the damage in the form a reader can
   # act on: every one of these is a D a `git grep PDS-D<n>` cannot currently find.
   local unreachable
-  unreachable=$(grep -oE "/D?${SEG}" "$tmp/matches.txt" 2>/dev/null \
+  unreachable=$( { grep -oE "/D?${SEG}" "$tmp/matches.txt" 2>/dev/null || true; } \
                 | sed 's|^/||; s|^D||' | sort -u -V | tr '\n' ' ' || true)
   local n_distinct
-  n_distinct=$(grep -oE "/D?${SEG}" "$tmp/matches.txt" 2>/dev/null \
+  n_distinct=$( { grep -oE "/D?${SEG}" "$tmp/matches.txt" 2>/dev/null || true; } \
                | sed 's|^/||; s|^D||' | sort -u | wc -l | tr -d ' ')
   echo "  hidden     $n_distinct distinct D-numbers unreachable by \`git grep PDS-D<n>\`"
   [ "$n_distinct" -gt 0 ] && echo "             $unreachable"
@@ -216,8 +238,16 @@ mode_check() {
 
   # The captured-data skip, ALWAYS PRINTED with its count. An exclusion nobody
   # can see is how a principled rule turns into a silent exception list.
+  #
+  # A CLEAN SCOPE IS A PASS, NOT A CRASH. `git grep -l` exits 1 when a scope
+  # holds no compressed citation, and under `pipefail` that rc became the
+  # substitution's, so `set -e` killed --check before it could print `OK`: the
+  # guard exited 1, silently, on exactly the scope it was built to bless. A
+  # caller reading only the rc would have read a swept tree as a FAILING one,
+  # and a caller reading only the empty output would have read a crash as a
+  # pass. Terminated with `|| true` so the zero state is a measured zero.
   local cap_files
-  cap_files=$(git grep -lE "$COMPRESSED" -- "${spec[@]}" 2>/dev/null \
+  cap_files=$( { git grep -lE "$COMPRESSED" -- "${spec[@]}" 2>/dev/null || true; } \
               | { grep -c '/fixtures/' || true; })
   if [ "${cap_files:-0}" -gt 0 ]; then
     echo "captured-data files skipped (a dated snapshot records what a row SAID; re-prefixing it falsifies the record): $cap_files"
@@ -240,14 +270,34 @@ mode_check() {
   # THE CROSS-FENCE PIN, DERIVED. For each compressed token still in scope, ask
   # whether that exact token is asserted in a test tree outside this fence. One
   # that is cannot be expanded by this lane alone: the pinning suite would red.
-  local blocked_report="" live_hits="" line tok pinned_by
+  #
+  # THE HIT'S OWN FILE IS EXCLUDED FROM THE PIN LOOKUP, AND THIS IS LOAD-
+  # BEARING, NOT TIDYING. A pin is a citation one tree asserts about
+  # ANOTHER's bytes. Without the exclusion every hit inside a PIN_TREE finds
+  # ITSELF and is classified BLOCKED, so the guard can never fail on api/test,
+  # cloud/test, internal or js — precisely the trees this fence just grew to
+  # cover. The blindness is invisible in the output: "asserted verbatim by:
+  # <the file the hit is in>" reads like a finding.
+  local blocked_report="" live_hits="" line tok pinned_by hit_file
   if [ -n "$hits" ]; then
     while IFS= read -r line; do
       [ -n "$line" ] || continue
+      hit_file="${line%%:*}"
       tok=$(printf '%s' "$line" | grep -oE "$COMPRESSED" | sed -n '1p' || true)
       pinned_by=""
       if [ -n "$tok" ]; then
-        pinned_by=$(git grep -lF "$tok" -- "${PIN_TREES[@]}" 2>/dev/null | tr '\n' ' ' || true)
+        # A PIN HAS TWO ENDS, AND EITHER END CAN BE THE HIT. The first lookup
+        # is the asserting end: a test tree pins an instrument's printed bytes.
+        # The second is the ASSERTED end — the hit IS the assertion, and the
+        # bytes it pins live in some other tree. Only the first arm existed, so
+        # a two-file contract read as BLOCKED from one side and FAIL from the
+        # other, and the side that failed demanded a rewrite that would have
+        # desynchronised the pair. Either end found means the repair is
+        # coordinated and not this lane's to make alone.
+        pinned_by=$(git grep -lF "$tok" -- "${PIN_TREES[@]}" ":(exclude)$hit_file" 2>/dev/null | tr '\n' ' ' || true)
+        if [ -z "$pinned_by" ]; then
+          pinned_by=$(git grep -lF "$tok" -- . ":(exclude)$hit_file" "${CAPTURED[@]}" 2>/dev/null | tr '\n' ' ' || true)
+        fi
       fi
       if [ -n "$pinned_by" ]; then
         blocked_report="${blocked_report}  BLOCKED ${line%%:*} cites ${tok}, asserted verbatim by: ${pinned_by}

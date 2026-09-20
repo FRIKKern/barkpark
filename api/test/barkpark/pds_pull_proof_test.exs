@@ -91,7 +91,7 @@ defmodule Barkpark.PdsPullProofTest do
              "banner/sidecar/comment sentences themselves — the RSS peak labelled " <>
              "WHOLE-PROCESS rather than export-exclusive, the THE 34 block's real reason " <>
              "`tag` is out of the sentinel scope, and step 8 naming the gap between " <>
-             "invocations it does not vouch for. NINE MORE ARRIVED WITH THE PDS-D742/D743/D744 \
+             "invocations it does not vouch for. NINE MORE ARRIVED WITH THE PDS-D742/PDS-D743/PDS-D744 \
              thaw and are the demos PDS-D744 requires: they drive the shipped \
              `moved_column_counts` / `moved_columns_where` / `columns_intersect` / \
              `columns_where` against an ALL-PRIVATE fixture roster — the target shape \
