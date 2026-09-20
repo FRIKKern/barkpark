@@ -99,17 +99,23 @@ const POPULATION_FLOOR = 5
 // Each row needs a reason a reader can check and a task to argue with. Printed
 // on every run. A row that no longer applies REDS (see stale-waiver handling).
 const WAIVERS = [
-  {
-    file: 'vercel-preview-smoke.sh',
-    task: 'task-c0bde7ffbabafb07',
-    reason:
-      'Declared stub: it echoes "stub (Phase 5)" and exits 0 without asserting ' +
-      'anything. Its only reference is js/.github/workflows/vercel-preview.yml, ' +
-      'which is in the INERT nested workflow tree GitHub never reads. Wiring a ' +
-      'script that cannot fail into CI would manufacture a vacuous green, which ' +
-      'is worse than leaving it un-run and named here. Delete the waiver when ' +
-      'the three TODO assertions in its header are built.',
-  },
+  // EMPTY, and that is a RESULT, not a default. The one row here waived
+  // vercel-preview-smoke.sh — a stub that echoed "stub (Phase 5)" and exited 0
+  // for every input, whose ONLY reference was js/.github/workflows/vercel-preview.yml,
+  // a file in the INERT nested workflow tree GitHub never reads. Both are
+  // DELETED (task-7a49b8c2e3104aa2): a gate that cannot fail, wired to a
+  // workflow that cannot run, is not debt to be waived — it is a false entry in
+  // the repo's inventory of what is checked, and the honest close was to remove
+  // it rather than keep explaining it.
+  //
+  // The nested-workflow CLASS is now closed one level up by
+  // scripts/workflow-root-only-check.sh, run from .github/workflows/pr-meta.yml:
+  // a second js/.github/workflows/ cannot be added silently, so no future script
+  // can acquire a phantom caller of that shape and land back in this list.
+  //
+  // An empty waiver list is the goal state, not an invitation. A new row still
+  // needs a reason a reader can check and a task to argue with, and it still
+  // prints LOUDLY on every run.
 ]
 
 // ── reading the world ────────────────────────────────────────────────────────
