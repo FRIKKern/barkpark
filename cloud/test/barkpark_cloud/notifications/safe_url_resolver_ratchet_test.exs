@@ -110,7 +110,12 @@ defmodule BarkparkCloud.Notifications.SafeUrlResolverRatchetTest do
   end
 
   test "ARM C: non-vacuity floor — a root with no sources RAISES, it does not pass" do
-    absent = Path.join(System.tmp_dir!(), "safe-url-ratchet-no-such-root-#{System.unique_integer([:positive])}")
+    absent =
+      Path.join(
+        System.tmp_dir!(),
+        "safe-url-ratchet-no-such-root-#{System.unique_integer([:positive])}"
+      )
+
     refute File.exists?(absent)
 
     assert_raise RuntimeError, ~r/no \.ex sources under/, fn ->
