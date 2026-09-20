@@ -100,12 +100,12 @@ jobs:
       - name: Boot this checkout's Barkpark
         if: steps.token.outputs.present == 'true'
         run: bash barkdown/app/tests/ci/boot-barkpark.sh "$GITHUB_WORKSPACE/barkpark"
-      - name: Barkdown app
+      - name: Barkdown app (root holds playwright; app holds electron and the app's deps)
         if: steps.token.outputs.present == 'true'
-        working-directory: barkdown/app
+        working-directory: barkdown
         run: |
           npm ci
-          npm run build
+          cd app && npm ci && npm run build
       - name: Parity rows
         if: steps.token.outputs.present == 'true'
         working-directory: barkdown/app

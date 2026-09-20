@@ -536,6 +536,7 @@ class BpPaperCanvas extends HTMLElement {
     this._mount = null;
     this._bubble = null; // FormatBubble instance (selection format toolbar)
     this._linkPreview = null; // LinkPreview instance (hover card on links and wikilinks)
+    this._composeEndEmit = null; // one-shot compositionend listener: an ops emit held back by an open IME composition
     this._linkPreviewSource = null; // injected async ({ kind, href, target, docId }) => { title, excerpt, href }
     this._debounceTimer = null;
     // Baseline captured when a local debounce window opens. Server broadcasts may
@@ -1315,6 +1316,10 @@ class BpPaperCanvas extends HTMLElement {
       this._linkPreview.destroy();
       this._linkPreview = null;
     }
+    if (this._composeEndEmit && this._mount) {
+      this._mount.removeEventListener("compositionend", this._composeEndEmit, true);
+      this._composeEndEmit = null;
+    }
     if (this._handle) {
       this._handle.destroy();
       this._handle = null;
@@ -1461,6 +1466,15 @@ class BpPaperCanvas extends HTMLElement {
     }
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {
+      // An IME composition still open when the debounce fires (a dead key held, a CJK run being
+      // picked): ProseMirror has already read the candidate text into the doc, so emitting now would
+      // send the half-composed run as a patch, then the committed one as another (Barkdown row 15).
+      // Hold the timer instead; compositionend re-arms it and the run lands once.
+      if (this._editor && this._editor.view && this._editor.view.composing) {
+        this._debounceTimer = setTimeout(() => { this._debounceTimer = null; this._scheduleEmit(); }, DEBOUNCE_MS);
+        this._armComposeEndEmit();
+        return;
+      }
       this._debounceTimer = null;
       const emitted = this._emitOps();
       // An external echo can arrive after blur but before this debounce fires.
@@ -1471,6 +1485,19 @@ class BpPaperCanvas extends HTMLElement {
     }, DEBOUNCE_MS);
   }
 
+  // One-shot: when the IME releases, run the debounce path at once (still debounced by
+  // DEBOUNCE_MS from the release, so a commit followed by more typing stays one batch).
+  _armComposeEndEmit() {
+    if (this._composeEndEmit || !this._mount) return;
+    this._composeEndEmit = () => {
+      this._mount.removeEventListener("compositionend", this._composeEndEmit, true);
+      this._composeEndEmit = null;
+      if (this._debounceTimer) { clearTimeout(this._debounceTimer); this._debounceTimer = null; }
+      this._scheduleEmit();
+    };
+    this._mount.addEventListener("compositionend", this._composeEndEmit, true);
+  }
+
   // Diff the live doc against the current baseline run and, if anything changed,
   // emit the ordered op array S0 produces. The diff is runToOps VERBATIM — the
   // canvas is a thin shell over S0's PURE projector/op-mapper.
@@ -1479,6 +1506,8 @@ class BpPaperCanvas extends HTMLElement {
   // the next dispatch is incremental even if its server echo arrives later.
   _emitOps() {
     if (!this._editor) return false;
+    // Never mid-composition (see _scheduleEmit): the doc holds the IME's candidate text.
+    if (this._editor.view && this._editor.view.composing) { this._armComposeEndEmit(); return false; }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
     const nextBlocks = docToBlocks(nextDoc);
