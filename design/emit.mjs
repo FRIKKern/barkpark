@@ -630,19 +630,20 @@ function cloudStatusVars(theme, indent) {
   return lines.map((l) => indent + l).join("\n");
 }
 
-// ── cloud accent block (GR6: green IS the accent) ────────────────────────────
-// The per-identity 5-tuple: --primary + its -hsl/-soft machinery, the brand ring,
-// and the --ok family that now TRACKS accent.primary (no standalone green). NEW
-// --ok-strong = accent.hover is the text-on-tint voice (fixes the light evergreen
-// 4.06 / ember 4.23 pill-text fails). Emitted in the bare :root (evergreen
-// fallback) AND inside each [data-bp-theme] block — the ONLY per-identity vars.
-// Carries NO --cc-* and NO shell roles (D25 / GR2). primary/primary-fg/ring/
-// primary-hover are HSL channel strings in tokens; --ok-strong reads the hover
-// channel WITHOUT re-emitting the retired --primary-hover var.
+// ── cloud accent block (the BRAND, and only the brand) ───────────────────────
+// The per-identity tuple: --primary + its -hsl machinery, the brand ring and the
+// ring's soft tint. Emitted in the bare :root (evergreen fallback) AND inside
+// each [data-bp-theme] block — the ONLY per-identity vars.
+// GR6's "green IS the accent" line has been REVERSED here: the --ok family used
+// to live in this function and therefore repainted every success/health surface
+// with the brand hue. It now lives in cloudOkVars() below, called only from the
+// identity-INVARIANT :root/[data-theme="dark"] pair. See that function's header
+// for the measurement (24 screens, 2760 shots) that overturned the ruling.
+// Carries NO --cc-* and NO shell roles (D25 / GR2). primary/primary-fg/ring are
+// HSL channel strings in tokens.
 function cloudAccentVars(theme, indent, t = tokens) {
   const a = alpha(softAlpha[theme]);
   const p = t.color.primary[theme];
-  const hover = t.color["primary-hover"][theme];
   const lines = [
     `--primary: hsl(${p});`,
     `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
@@ -660,10 +661,45 @@ function cloudAccentVars(theme, indent, t = tokens) {
     // convention, exactly as the login surface derives it in authRows().
     `--ring-hsl: ${t.color.ring[theme]};`,
     `--ring-soft: hsl(var(--ring-hsl) / ${a});`,
-    `--ok-hsl: ${p};`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── the SUCCESS voice, identity-INVARIANT (cch DEFECT-A) ─────────────────────
+// OVERTURNS GR6's "green = the accent primary (no standalone green)" and GR90's
+// "--ok-hsl is NOT touched (it must keep tracking the brand)" FOR THE CLOUD SPA.
+// THE MEASUREMENT that overturns them: gr-backlog-accent-matrix-rereview
+// (console-w10, 2026-09-20, 2760 shots, 138 scenarios reviewed by eye at five
+// accents) found 24 screens where a HEALTHY state and a FAILED state read as one
+// warm hue at ember — because `--ok-hsl: ${p}` above made every success badge,
+// tick, meter, deploy rail and summary chip wear accent.primary, while --danger
+// stayed the designer red. "Good" and "bad" are the one pair a console may never
+// collapse, and a brand that repaints health is a brand that can erase the
+// distinction by changing its own hue.
+// THE VALUE IS NOT NEW: design/tokens.json has carried color.status.ok
+// ("142 72% 26%" / "142 52% 52%") since the token file existed — GR6 shadowed it
+// rather than deleting it. This restores the token file's own answer.
+// EMITTED HERE, NOT IN cloudStatusVars, so the four declarations keep their
+// source position in app.css (after the accent 5-tuple) and the diff is the four
+// values only. It is called ONLY from the bare :root / [data-theme="dark"] pair,
+// never from cloudThemeBlock — which is exactly what "does not vary with
+// [data-bp-theme]" means, and what E20 in __css_check.mjs now proves.
+// --ok-strong is the text-on-tint voice; it follows the primary-hover convention
+// (darker in light, lighter in dark) applied to the SEMANTIC hue, not the brand's.
+const OK_STRONG_L_SHIFT = { light: -6, dark: +8 };
+function okStrongTriplet(theme) {
+  const [h, sat, lit] = tokens.color.status.ok[theme].trim().split(/\s+/);
+  const l = Math.round((parseFloat(lit) + OK_STRONG_L_SHIFT[theme]) * 100) / 100;
+  return `${h} ${sat} ${l}%`;
+}
+function cloudOkVars(theme, indent) {
+  const a = alpha(softAlpha[theme]);
+  const ok = tokens.color.status.ok[theme];
+  const lines = [
+    `--ok-hsl: ${ok};`,
     `--ok: hsl(var(--ok-hsl));`,
     `--ok-soft: hsl(var(--ok-hsl) / ${a});`,
-    `--ok-strong: hsl(${hover});`,
+    `--ok-strong: hsl(${okStrongTriplet(theme)});`,
   ];
   return lines.map((l) => indent + l).join("\n");
 }
@@ -744,6 +780,7 @@ function cloudBlock(themes = loadThemes()) {
     aliasBridge("light", "  "),
     cloudStatusVars("light", "  "),
     cloudAccentVars("light", "  "),
+    cloudOkVars("light", "  "),
     providerVars("light", "  "),
     "  /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-",
     "     invariant, so :root only; the reduced-motion collapse is at the end of",
@@ -755,6 +792,7 @@ function cloudBlock(themes = loadThemes()) {
     aliasBridge("dark", "  "),
     cloudStatusVars("dark", "  "),
     cloudAccentVars("dark", "  "),
+    cloudOkVars("dark", "  "),
     providerVars("dark", "  "),
     "}",
     "/* instance-lifecycle glyph tones — colour READ THROUGH the state's status",
