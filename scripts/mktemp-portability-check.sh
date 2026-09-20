@@ -43,7 +43,7 @@
 #     legs-arm      every `arms[].run` body in .github/shell-harness-legs.json
 #                   — inline shell the harness feeds to `bash` on the runner
 #                                                                          (241)
-#     workflow-run  every `run:` body in .github/workflows/*.yml           (662)
+#     workflow-run  every `run:` body in .github/workflows/*.yml           (681)
 #
 #   The last two are not files, so they are MATERIALISED into a scratch dir,
 #   padded so that the scanner's line number IS the line number in the source
@@ -384,8 +384,22 @@ PYEOF2
 POP_FLOOR_sh_ext=400          # 482 today
 POP_FLOOR_sh_shebang=5        # 8 today
 POP_FLOOR_legs_arm=200        # 241 today
-POP_FLOOR_workflow_run=300    # 662 today
+POP_FLOOR_workflow_run=300    # 681 today (662 by PyYAML; the reader is
+                              # over-inclusive on purpose, see clause 4)
 POP_FLOOR_TOTAL=50            # the original whole-population refusal
+
+# Indirection through a `case` and not through `eval`, so that every floor is a
+# LITERAL use shellcheck can see: an unreferenced-looking constant is the shape
+# a dead floor takes, and a dead floor is a refusal that never fires.
+pop_floor() {
+  case "$1" in
+    sh-ext)       printf '%s\n' "$POP_FLOOR_sh_ext" ;;
+    sh-shebang)   printf '%s\n' "$POP_FLOOR_sh_shebang" ;;
+    legs-arm)     printf '%s\n' "$POP_FLOOR_legs_arm" ;;
+    workflow-run) printf '%s\n' "$POP_FLOOR_workflow_run" ;;
+    *)            die "no floor declared for population clause '$1'" ;;
+  esac
+}
 
 # THIS FILE IS HELD OUT OF THE TREE SCAN, and for a reason worth stating: its
 # selftest fixtures and its own refusal message are FULL of deliberately
@@ -426,7 +440,7 @@ run_tree_scan() {
   local kind floor n
   for kind in sh-ext sh-shebang legs-arm workflow-run; do
     n="$(printf '%s\n' "$records" | cut -f1 | grep -cxF "$kind" || true)"
-    eval "floor=\$POP_FLOOR_$(printf '%s' "$kind" | tr '-' '_')"
+    floor="$(pop_floor "$kind")"
     [ "${n:-0}" -ge "${floor:-1}" ] || die "population clause '$kind' yielded ${n:-0} source(s); expected >= ${floor}. A near-empty clause certifies nothing."
     printf 'mktemp-portability-check: %-13s %5d source(s)  (floor %d)\n' "$kind" "${n:-0}" "$floor"
   done
@@ -640,13 +654,16 @@ FIX
   printf '%s\n' "$recs" | population_display_map > "$popmap"
   out="$(printf '%s\n' "$recs" | cut -f2 | scan_files | render_hits "$popmap")"
   n="$(printf '%s' "$out" | grep -c . || true)"
-  local missed=""
-  printf '%s\n' "$out" | grep -qF 'shell-harness-legs.json[planted / violating arm]' \
-    || missed="$missed legs-arm"
-  printf '%s\n' "$out" | grep -qxF '.github/workflows/w.yml:8:c="$(mktemp -t planted-workflow-body)"' \
-    || missed="$missed workflow-run(line-8)"
-  printf '%s\n' "$out" | grep -qxF 'bin/planted-tool:2:d="$(mktemp -t planted-extensionless)"' \
-    || missed="$missed sh-shebang(line-2)"
+  # `grep -c`, never `grep -q`: -q exits on the first match, and under
+  # `set -o pipefail` that SIGPIPEs the producer into rc 141 — the repo's
+  # recurring way to make a control lie under load. -c drains its input.
+  local missed="" seen
+  seen="$(printf '%s\n' "$out" | grep -cF 'shell-harness-legs.json[planted / violating arm]' || true)"
+  [ "${seen:-0}" -ge 1 ] || missed="$missed legs-arm"
+  seen="$(printf '%s\n' "$out" | grep -cxF '.github/workflows/w.yml:8:c="$(mktemp -t planted-workflow-body)"' || true)"
+  [ "${seen:-0}" -ge 1 ] || missed="$missed workflow-run(line-8)"
+  seen="$(printf '%s\n' "$out" | grep -cxF 'bin/planted-tool:2:d="$(mktemp -t planted-extensionless)"' || true)"
+  [ "${seen:-0}" -ge 1 ] || missed="$missed sh-shebang(line-2)"
   cases=$((cases+1))
   if [ "${n:-0}" -eq 3 ] && [ -z "$missed" ]; then
     echo "  PASS  widened-population control — a planted mktemp REDS in all 3 previously-invisible surfaces (harness arm body, workflow run: block, extensionless shebang file), each cited at its REAL source line, and the clean arm beside it does not"
@@ -664,7 +681,7 @@ FIX
   mkdir -p "$root/pop-real"
   realrecs="$(derive_population "$REPO_ROOT" "$root/pop-real")" || die "selftest could not derive the real population"
   for kind in sh-ext sh-shebang legs-arm workflow-run; do
-    eval "floor=\$POP_FLOOR_$(printf '%s' "$kind" | tr '-' '_')"
+    floor="$(pop_floor "$kind")"
     rn="$(printf '%s\n' "$realrecs" | cut -f1 | grep -cxF "$kind" || true)"
     fn="$(printf '%s\n' "$recs"     | cut -f1 | grep -cxF "$kind" || true)"
     [ "${rn:-0}" -ge "${floor:-1}" ] || floorbad="$floorbad ${kind}:real=${rn}<${floor}"
