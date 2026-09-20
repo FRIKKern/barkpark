@@ -3354,10 +3354,15 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
 
-// E14 — wrap-recipe declaration parity (charter D220): the three hand-built
-// copies share a byte-identical five-declaration core wearing three different
-// jackets, and nothing asserted that the core still agrees. The copy inventory
-// is printed below so the count is the SCAN's claim, never a comment's.
+// E14 — wrap-recipe declaration parity (charter D220): the hand-built copies
+// share a byte-identical five-declaration core wearing different jackets, and
+// nothing asserted that the core still agrees. The copy inventory is printed
+// below so the count is the SCAN's claim, never a comment's — which is why
+// this sentence no longer states a number: it said "three" through two
+// additions (W20-S6's `.attention-row`, cch-w24-s2's `.detail-title-row`) and
+// was wrong for both. This gate body scans app.css ALONE (`cssRaw`); the
+// fixtures reach E14 only through the targeted `--wrap-parity-check <file>`
+// sub-mode.
 const wrapParity = wrapParityErrors(cssRaw);
 for (const e of wrapParity.errors) errors.push(e);
 
