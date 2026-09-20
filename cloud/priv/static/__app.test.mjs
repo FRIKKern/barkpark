@@ -10730,6 +10730,19 @@ test("coherence: serve.mjs routes every fixture URL the page fetches to a real g
       r.url + " routes to " + r.rel + ", which does not exist — the page would 404",
     );
   }
+  // AND serve.mjs's OWN ROOT RESOLVES TO THE REPO ROOT. Measured, not assumed:
+  // the first cut of this route wrote `path.resolve(HERE, "../../..")` —
+  // correct for __app.test.mjs, one level short for a file in __preview__ — and
+  // every assertion above passed while a live fetch of the route 404'd. A test
+  // that only compares STRINGS cannot see a resolution bug, so recompute it.
+  const rootLit = serveSrc.match(/const REPO_ROOT = path\.resolve\(HERE, "([^"]+)"\)/);
+  assert.ok(rootLit, "serve.mjs must derive REPO_ROOT from HERE");
+  assert.equal(
+    path.resolve(path.join(REPO_ROOT, "cloud/priv/static/__preview__"), rootLit[1]),
+    REPO_ROOT,
+    "serve.mjs's REPO_ROOT does not resolve to the repo root — /__fixtures__/ would 404",
+  );
+
   // Both are declared in the console dispatcher's path set, so the harness
   // re-runs when one is deleted or renamed (the only change that can red this).
   const decl = fs.readFileSync(path.join(REPO_ROOT, "scripts/console-path-escape-check.sh"), "utf8");

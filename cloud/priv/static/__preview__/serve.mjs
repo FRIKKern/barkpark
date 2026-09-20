@@ -31,7 +31,11 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
-const REPO_ROOT = path.resolve(HERE, "../../.."); // the repo root
+// The repo root. FOUR levels: this file lives one deeper than app.test.mjs
+// (cloud/priv/static/__preview__), which is exactly the off-by-one a live fetch
+// of /__fixtures__/… caught and every string-level test missed — see the
+// resolution arm in __app.test.mjs, which recomputes this literal.
+const REPO_ROOT = path.resolve(HERE, "../../../..");
 
 // ── /__fixtures__/ — the committed Go goldens, served from their ONE source ──
 // coherence.html USED to carry a byte-copy of each of these files inside a
