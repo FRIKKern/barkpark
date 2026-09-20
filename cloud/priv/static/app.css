@@ -138,10 +138,10 @@
   --primary-hsl: 151.96 71.81% 29.22%;
   --ring-hsl: 163 42% 30%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 151.96 71.81% 29.22%;
+  --ok-hsl: 142 72% 26%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(151.96 71.81% 23.22%);
+  --ok-strong: hsl(142 72% 20%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
   /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-
@@ -185,10 +185,10 @@
   --primary-hsl: 152.92 60% 52.94%;
   --ring-hsl: 152.92 60% 52.94%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 152.92 60% 52.94%;
+  --ok-hsl: 142 52% 52%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(152.92 60% 60.94%);
+  --ok-strong: hsl(142 52% 60%);
   --provider-hetzner: #f0728a;
   --provider-azure: #4aa3e0;
 }
@@ -211,10 +211,6 @@ html[data-bp-theme="evergreen"] {
   --primary-hsl: 151.96 71.81% 29.22%;
   --ring-hsl: 163 42% 30%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 151.96 71.81% 29.22%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(151.96 71.81% 23.22%);
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary: hsl(152.92 60% 52.94%);
@@ -223,10 +219,6 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary-hsl: 152.92 60% 52.94%;
   --ring-hsl: 152.92 60% 52.94%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 152.92 60% 52.94%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(152.92 60% 60.94%);
 }
 html[data-bp-theme="charple"] {
   --primary: hsl(282.39 44.23% 40.78%);
@@ -235,10 +227,6 @@ html[data-bp-theme="charple"] {
   --primary-hsl: 282.39 44.23% 40.78%;
   --ring-hsl: 282.39 44.23% 48.78%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 282.39 44.23% 40.78%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(282.39 44.23% 34.78%);
 }
 html[data-bp-theme="charple"][data-theme="dark"] {
   --primary: hsl(282.56 58.11% 70.98%);
@@ -247,10 +235,6 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-hsl: 282.56 58.11% 70.98%;
   --ring-hsl: 282.56 58.11% 70.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 282.56 58.11% 70.98%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(282.56 58.11% 78.98%);
 }
 html[data-bp-theme="ember"] {
   --primary: hsl(19.33 71.29% 40.98%);
@@ -259,10 +243,6 @@ html[data-bp-theme="ember"] {
   --primary-hsl: 19.33 71.29% 40.98%;
   --ring-hsl: 19.33 71.29% 48.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 19.33 71.29% 40.98%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(19.33 71.29% 34.98%);
 }
 html[data-bp-theme="ember"][data-theme="dark"] {
   --primary: hsl(19.01 75.53% 63.14%);
@@ -271,10 +251,6 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-hsl: 19.01 75.53% 63.14%;
   --ring-hsl: 19.01 75.53% 63.14%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 19.01 75.53% 63.14%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(19.01 75.53% 71.14%);
 }
 html[data-bp-theme="fjord"] {
   --primary: hsl(191.6 80.95% 28.82%);
@@ -283,10 +259,6 @@ html[data-bp-theme="fjord"] {
   --primary-hsl: 191.6 80.95% 28.82%;
   --ring-hsl: 191.6 80.95% 36.82%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 191.6 80.95% 28.82%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(191.6 80.95% 22.82%);
 }
 html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary: hsl(193.27 62.43% 64.51%);
@@ -295,10 +267,6 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-hsl: 193.27 62.43% 64.51%;
   --ring-hsl: 193.27 62.43% 64.51%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 193.27 62.43% 64.51%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(193.27 62.43% 72.51%);
 }
 html[data-bp-theme="iris"] {
   --primary: hsl(248.75 63.72% 55.69%);
@@ -307,10 +275,6 @@ html[data-bp-theme="iris"] {
   --primary-hsl: 248.75 63.72% 55.69%;
   --ring-hsl: 248.75 63.72% 62%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 248.75 63.72% 55.69%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(248.75 63.72% 49.69%);
 }
 html[data-bp-theme="iris"][data-theme="dark"] {
   --primary: hsl(248.87 100% 77.45%);
@@ -319,10 +283,6 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-hsl: 248.87 100% 77.45%;
   --ring-hsl: 248.87 100% 77.45%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 248.87 100% 77.45%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(248.87 100% 85.45%);
 }
 /* Motion collapses when the user asks for it (decision 29). Only the token
    durations go to 0 — spinner keyframes keep their literal duration because
