@@ -57,7 +57,11 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
   end
 
   defp create_task(doc_id, title, scope, content_extra) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(content_extra)
+      # The Tasks plugin's :before_publish brief wall (inert until #19303).
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     Content.create_document(
       "task",
