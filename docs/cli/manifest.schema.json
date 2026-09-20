@@ -53,7 +53,7 @@
         },
         "min_cli": {
           "type": "string",
-          "description": "OPTIONAL (additive). Minimum CLI semver required to drive this server. A CLI older than this MUST abort with a clear upgrade message rather than silently mis-driving a newer contract."
+          "description": "OPTIONAL (additive). Minimum CLI semver this server considers current. ADVISORY, never a refusal (docs/decisions/0007-capability-oracle.md): a CLI under the floor prints a named, actionable stderr notice on `bp capabilities` / `bp whoami` and keeps working; at or above the floor it is silent; a `dev` build, or a manifest omitting this key, reports UNKNOWN rather than a green. It stays advisory on the grounds 0007 leaves standing after its 2026-09-17 retraction: a `dev` build carries no release identity, and a floor never once exercised must not debut as a refusal."
         }
       }
     },
