@@ -6005,6 +6005,101 @@ const EXPECTATIONS = {
     },
   },
 
+  // ── cch-w45-s5-fu · THE UPDATES STRIP'S STILL-CHECKING ARM HAS AN EXIT ─────
+  // THE HOLE, MEASURED BEFORE IT WAS FIXED. Booted against origin/main's app.js
+  // this scenario rendered #instance-body with ZERO [data-me-retry] anywhere in
+  // its bytes, while the Updates panel carried a disabled "Roll back…" pointing
+  // at an "inst-update-actions-reason" span reading "Checking capabilities…".
+  // The exit lived only on the header's actions strip, and the suspended arm of
+  // that strip draws the CLI disclosure alone — no adminWriteControlHtml
+  // control, so no group reason and no exit. A three-valued offer whose unknown
+  // arm cannot be left is the D437 shape, one surface deeper.
+  //
+  // FOUR THINGS ARE ASSERTED AND NONE OF THEM IS REDUNDANT:
+  //   1. the PRECONDITION — the panel really is in the unknown arm (otherwise
+  //      an exit assertion would be about a screen that never needed one);
+  //   2. the header strip drew NO grouped control, which is what makes this the
+  //      reachable case rather than one the header already covers;
+  //   3. the exit is inside the Updates strip's own markup, not merely
+  //      somewhere on the page;
+  //   4. it WORKS — the click re-reads /v1/me and the arm RESOLVES to the live
+  //      [data-rollback] mount hook. Renders-but-dead is the failure wireMeRetry's
+  //      first-match binding used to guarantee for a second copy of the button,
+  //      so a presence-only assertion here would have passed on the broken shape.
+  "instance-suspended-me-unreadable": {
+    what: "the Updates panel's still-checking Roll back on a box whose header strip offers nothing — the exit renders IN THE STRIP and, when pressed, re-reads /v1/me and resolves the arm",
+    async check(reg, hooks, ctx) {
+      const bodyEl = reg.get("instance-body");
+      const before = (bodyEl || {}).innerHTML || "";
+      assert.ok(before.length > 0, "#instance-body rendered empty");
+      // 1. The precondition: the unknown arm really is on screen.
+      assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
+        "the Roll back offer is not in the unknown arm — there is no still-checking state here to need an exit");
+      assert.ok(before.includes('<span class="inst-life-note" id="inst-update-actions-reason">Checking capabilities&hellip;</span>'),
+        "the strip states the unknown honestly (no reason claimed) — the arm this exit belongs to");
+      assert.equal(before.indexOf("data-rollback"), -1,
+        "the live rollback mount hook must be withheld while /v1/me is unanswered");
+      // 2. The header strip cannot be the exit's home HERE: the suspended arm
+      //    draws no adminWriteControlHtml control at all, so it emits no group
+      //    reason — the pointer's absence is the measurement.
+      assert.equal(before.indexOf('aria-describedby="inst-header-actions-reason"'), -1,
+        "this fixture stopped being the reachable case: the header strip drew a grouped control, so it carries the exit and the Updates strip is covered by it");
+      // 3. The exit is IN the Updates strip, not merely somewhere on the page.
+      const stripOpen = '<div class="update-panel-actions" id="inst-update-actions">';
+      const at = before.indexOf(stripOpen);
+      assert.ok(at !== -1, "the Updates action strip did not render");
+      const strip = before.slice(at, before.indexOf("</div></div><section", at) + 6);
+      assert.ok(strip.includes('<button class="btn btn-primary btn-sm" data-me-retry type="button">Retry</button>'),
+        "the still-checking Updates strip carries NO exit — the only way out of 'Checking capabilities…' would have to be a page reload; got: " + strip);
+      // 4. It works. The fault is one-shot, so the re-read can land.
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      const btns = bodyEl.querySelectorAll("[data-me-retry]");
+      assert.equal(btns.length, 1, "exactly one exit in #instance-body — the Updates strip's own");
+      const fired = btns[0].click();
+      assert.ok(fired > 0, "[data-me-retry] dispatched " + fired + " handler(s) — the button RENDERS but is DEAD (wireMeRetry binds the first match only, so a second copy of the exit is bytes and not an exit)");
+      await ctx.settle();
+      assert.ok(ctx.countCalls("GET", "/v1/me") >= 2, "the retry never re-issued the /v1/me read");
+      const after = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(after.includes('data-rollback="1"'),
+        "the landed 200 owner did not resolve the arm — the exit re-read but the strip never repainted; got: " + after);
+      assert.equal(after.indexOf("inst-update-actions-reason"), -1,
+        "the still-checking note survived an answered /v1/me — the arm did not resolve, it was only appended to");
+      assert.equal(after.indexOf("data-me-retry"), -1,
+        "the exit is still offered after the answer landed — an exit that outlives the unknown it exits is the same lie in the other direction");
+    },
+  },
+
+  // The binding's own test. The Updates strip's exit is the SECOND
+  // [data-me-retry] in this subtree, and the first-match binding it replaced
+  // would have left it rendering and dead — the precise reason five call sites
+  // talked themselves out of emitting an exit at all. Asserted by INDEX and by
+  // handler count, never by presence.
+  "instance-behind-me-unreadable": {
+    what: "a live behind box with /v1/me unanswered — the header strip and the Updates strip each carry an exit, and the SECOND one is wired, not decoration",
+    async check(reg, hooks, ctx) {
+      const bodyEl = reg.get("instance-body");
+      const before = (bodyEl || {}).innerHTML || "";
+      assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-header-actions-reason">Update to v0.9.2</button></div>'),
+        "the header strip is not in the unknown arm — this fixture exists for the TWO-strip case");
+      assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
+        "the Updates strip is not in the unknown arm");
+      const btns = bodyEl.querySelectorAll("[data-me-retry]");
+      assert.equal(btns.length, 2,
+        "expected TWO exits (one per still-checking strip) and got " + btns.length + " — the case this binding exists for is not on screen");
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      // The SECOND one: the header's is bound by any implementation.
+      const fired = btns[1].click();
+      assert.ok(fired > 0,
+        "the Updates strip's exit dispatched " + fired + " handler(s) — it RENDERS and does NOTHING, which is the dead-bytes outcome a first-match binding guarantees for every copy after the first");
+      await ctx.settle();
+      assert.ok(ctx.countCalls("GET", "/v1/me") >= 2, "the second exit never re-issued the /v1/me read");
+      const after = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(after.includes('data-rollback="1"') && after.includes('id="inst-update"'),
+        "the landed answer did not resolve BOTH strips; got: " + after);
+      assert.equal(after.indexOf("data-me-retry"), -1, "the exits retire once the read lands");
+    },
+  },
+
   // ── cch-w12-followup-login-fixture-gap · THE IDENTITY CHANGE, DRIVEN ────────
   // THE SEAM. render()'s logged-out arm serves the sign-out click AND the 401
   // auto-bounce, and NEITHER reloads — so every per-account cache standing in
