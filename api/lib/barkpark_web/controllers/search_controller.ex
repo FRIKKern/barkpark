@@ -4,7 +4,7 @@ defmodule BarkparkWeb.SearchController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, SearchIntelligence}
   alias Barkpark.Search.{BodyBound, HitEnvelope, SurfaceConfigs, Synonyms}
-  alias BarkparkWeb.{AnonPerspective, ReadPerspective, SearchIntel}
+  alias BarkparkWeb.{AnonPerspective, ErrorResponse, ReadPerspective, SearchIntel}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
@@ -129,16 +129,24 @@ defmodule BarkparkWeb.SearchController do
     end
   end
 
+  # Refuse through the ONE emitter, exactly as `ReadPerspective.refuse/4` does
+  # for a bad `?perspective` — same status, same `malformed` code, same
+  # `details.parameter`/`details.received` pair — so a client that already
+  # parses one input refusal on this route parses this one. A hand-built body
+  # whose `error` key held a bare string would have been the only such shape on
+  # the route (BarkparkWeb.Contract.ErrorEnvelopeShapeTest refuses it), and it
+  # would have dropped `request_id`, which is the whole point of §9. That guard
+  # greps the SOURCE, so even naming the offending shape literally in a comment
+  # reds it — which is why this sentence spells it out in prose.
   defp invalid_body_chars(conn, value) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: "invalid bodyChars",
-      message:
-        "bodyChars must be a non-negative integer (characters of prose per hit); got " <>
-          inspect(value),
-      got: value
-    })
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "bodyChars must be a non-negative integer (characters of prose per hit); got " <>
+        inspect(value),
+      %{parameter: "bodyChars", received: value}
+    )
   end
 
   defp do_search(conn, dataset, params, body_chars) do

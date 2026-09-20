@@ -93,7 +93,7 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
   test "a bounded browse is orders of magnitude smaller than the same unbounded browse",
        %{conn: conn} do
     unbounded = browse(conn, [])
-    bounded = browse(build_conn(), bodyChars: "1000")
+    bounded = browse(scoped_conn(), bodyChars: "1000")
 
     assert unbounded.status == 200
     assert bounded.status == 200
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
   test "the bounded tree is a whole-block document prefix, and says it was cut",
        %{conn: conn} do
     unbounded = Jason.decode!(browse(conn, []).resp_body)["documents"]
-    bounded = Jason.decode!(browse(build_conn(), bodyChars: "1000").resp_body)["documents"]
+    bounded = Jason.decode!(browse(scoped_conn(), bodyChars: "1000").resp_body)["documents"]
 
     by_id = Map.new(unbounded, &{&1["_id"], &1})
 
@@ -139,7 +139,7 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
 
   test "no ?bodyChars= is byte-identical to before — the bound is opt-in", %{conn: conn} do
     a = browse(conn, [])
-    b = browse(build_conn(), bodyChars: "")
+    b = browse(scoped_conn(), bodyChars: "")
 
     assert a.resp_body |> Jason.decode!() |> Map.drop(["ms", "searchEventId"]) ==
              b.resp_body |> Jason.decode!() |> Map.drop(["ms", "searchEventId"])
@@ -162,13 +162,19 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
 
   test "a malformed ?bodyChars= is a 400, never an unbounded 200", %{conn: conn} do
     for bad <- ["abc", "-1", "1.5", "1_000"] do
-      resp = browse(build_conn(), bodyChars: bad)
+      resp = browse(scoped_conn(), bodyChars: bad)
 
       assert resp.status == 400, "expected 400 for bodyChars=#{bad}, got #{resp.status}"
       body = Jason.decode!(resp.resp_body)
-      assert body["error"] == "invalid bodyChars"
+      # The §9 envelope, not a bare string: same shape an unsupported
+      # ?perspective already answers with, so one parser reads both.
+      assert body["error"]["code"] == "malformed"
       # The refusal names the grammar, so the caller can fix the typo.
-      assert body["message"] =~ "non-negative integer"
+      assert body["error"]["message"] =~ "non-negative integer"
+      assert body["error"]["details"]["parameter"] == "bodyChars"
+      assert body["error"]["details"]["received"] == bad
+      # request_id is what a bare-string body used to drop on the floor.
+      assert is_binary(body["error"]["request_id"])
     end
 
     # CONTROL: the same request with a well-formed cap is served — the 400s
