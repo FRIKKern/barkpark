@@ -10,6 +10,9 @@
 # The cases that matter are the ones that prove the instruments can FAIL:
 #   * an uncovered repo-root read must red                  (case 3)
 #   * an uncovered read in an UNTRACKED file must red       (case 4)
+#   * an ARGV token that collides with a repo-root filename
+#     must NOT be a read, while the SAME word inside a
+#     join(...) call still is                                (case 4c)
 #   * a neutered scanner must red rather than report clean  (case 5)
 #   * the aggregator must red on every not-a-pass result    (case 9)
 #   * the dispatcher must red rather than emit all-false    (case 10)
@@ -498,6 +501,83 @@ else
   no ".git entered the census — this gate would red locally and pass in CI: $out"
 fi
 rm -f "$FXB/.git"
+echo
+
+# ── case 4c: AN ARGV ARRAY IS NOT A PATH READ ──────────────────────────────
+# The literal-join grep used to be a bare TOKEN PAIR — `(REPO_ROOT|REPO)` then a
+# comma then a quoted string — and that is also the shape of an ARGV ARRAY:
+# `execFileSync('git', ['-C', REPO, 'rev-parse', …])`. Measured on origin/main,
+# __preview__/seal-predicate.mjs and its test fed `rev-parse`, `show`,
+# `merge-base`, `--guard-cmd`, `--successor`, `--epic`, `--ladder-only`, `.git`
+# and `.github` into the literal-join idiom. All harmless — but harmless BY
+# COINCIDENCE: each was dropped by the `[ -f ]` existence filter or by the
+# explicit `.git` exclusion, never by the extractor refusing to see it.
+#
+# THE COINCIDENCE HAS A DEADLINE, and it is the bare-word rule. literal-join is
+# one of the three idioms allowed to admit a literal with no `/`, which is what
+# makes a read of `Makefile` / `README.md` / `mix.lock` representable at all. A
+# git subcommand is spelled exactly like a repo-root filename, so the first argv
+# token that collides with one reds this ratchet on a path NOTHING READS — and
+# the obvious remedy (an exemption) would enshrine a read that does not exist.
+#
+# So: the match must sit inside a `join(...)` CALL. Both arms below run on the
+# SAME fixture and differ in ONE thing — the shape the bare word is written in —
+# so neither arm can pass for a reason foreign to what this case measures.
+echo "case 4c: an argv array is not a path read, a join() of the same word is"
+FXV="$TMPROOT/argv"
+make_fixture "$FXV"
+: >"$FXV/Makefile"   # a REAL repo-root file, so the existence filter admits it
+# ARM 1 — the argv shape. `Makefile` here is the third element of a list, not a
+# path segment under REPO. It must not enter the census at all.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const out = execFileSync('git', ['-C', REPO, 'Makefile'], { encoding: 'utf8' });
+JS
+census_argv="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_argv" 'Makefile'; then
+  no "an ARGV token entered the census as a repo-root read — literal-join is matching token pairs, not join() calls"
+else
+  ok "an argv token colliding with a repo-root filename is not a read"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — the ratchet does not red on a path nothing reads"
+else
+  no "RED on an argv token (exit $rc) — this is the false red the join() shape exists to prevent: $out"
+fi
+# ARM 2 — THE CONTROL, and it is the half that keeps arm 1 from being vacuous.
+# Same fixture, same bare word, same file: written as a join() it IS a read, so
+# it must enter the census and red as UNCOVERED. If this arm ever goes quiet,
+# arm 1 is passing because bare words died, not because argv stopped matching.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const p = path.join(REPO_ROOT, "Makefile");
+JS
+census_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_join" 'Makefile'; then
+  ok "CONTROL: the SAME bare word inside join(REPO_ROOT, …) is still a read"
+else
+  no "CONTROL FAILED: join(REPO_ROOT, \"Makefile\") is invisible — the bare-word rule died, and arm 1 proves nothing"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "CONTROL: exit $rc (non-zero) — an undeclared bare-word read still reds"
+else
+  no "CONTROL FAILED: PASSED with an uncovered join(REPO_ROOT, \"Makefile\") read"
+fi
+if has "$out" "UNCOVERED repo-root read: Makefile"; then
+  ok "CONTROL: names the uncovered bare-word path"
+else
+  no "CONTROL FAILED: did not name the uncovered bare-word read: $out"
+fi
+# …and the idiom that admitted it is literal-join, not one of the others. The
+# bare-word rule is keyed on the TAG, so a row arriving under a different tag
+# would mean the control passed through a door this case is not measuring.
+tagged_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | awk -F'\t' '$1 == "Makefile" { print $3 }' | sort -u)"
+if has_line "$tagged_join" 'literal-join'; then
+  ok "CONTROL: the bare-word read is tagged literal-join"
+else
+  no "CONTROL FAILED: Makefile arrived tagged '$tagged_join', not literal-join"
+fi
+rm -f "$FXV/cloud/priv/static/__preview__/argv-probe.mjs"
 echo
 
 # ── case 5: a neutered scanner reds on the floor, never reports clean ───────
