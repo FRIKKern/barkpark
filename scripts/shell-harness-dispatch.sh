@@ -248,6 +248,8 @@ pds-harnesses scripts/pds-ledger-census.sh
 pds-harnesses scripts/pds-ledger-census_test.sh
 pds-harnesses scripts/pds-record-parity.sh
 pds-harnesses scripts/pds-record-parity.test.sh
+pds-harnesses scripts/pds-secret-scan.sh
+pds-harnesses scripts/pds-secret-scan_test.sh
 pds-harnesses .claude/workflows/bp-pds-charter.md
 pds-harnesses tooling/pds/d-number-reservations.tsv
 pds-harnesses .claude/workflows/bp-deploy-reliability-charter.md
