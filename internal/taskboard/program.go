@@ -310,7 +310,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		build:         BuildBoard,
 		doClaim:       DoClaim,
 		doClose:       DoCloseRev,
-		now:           time.Now,
+		now:           defaultClock,
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
 		liveStale:     defaultLiveStale,
