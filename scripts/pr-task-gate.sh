@@ -57,11 +57,14 @@
 #                               apply the claim predicate — see the landing-trailer
 #                               block for why a LANDED pointer is held to a
 #                               different bar than the PR's own backing row.
-#     --check-landing-trailers  every `Task:` trailer in LANDING_COMMIT_MESSAGES
-#                               (or the file LANDING_COMMIT_MESSAGES_FILE names)
-#                               must resolve. This is the text that SQUASHES onto
-#                               main under this repo's COMMIT_MESSAGES setting, so
-#                               it — not the PR body — is what `git log` will carry.
+#     --check-landing-trailers  every `Task:` trailer in the commit messages under
+#                               LANDING_COMMITS_DIR (one <nnn>-<sha>.msg file per
+#                               commit) must resolve. This is the text that
+#                               SQUASHES onto main under this repo's
+#                               COMMIT_MESSAGES setting, so it — not the PR body —
+#                               is what `git log` will carry. The refusal names the
+#                               SHA, which is why the sha rides the filename
+#                               rather than the messages being concatenated.
 #
 #     5  MALFORMED ANSWER — the ledger answered 2xx and the body could not be
 #                 read as a task document (not valid JSON, or no document in the
@@ -308,29 +311,63 @@ malformed()           { echo "pr-task-gate: MALFORMED LEDGER ANSWER: $*" >&2; ex
 # MORE THAN ONE LANDING TRAILER IS FINE, deliberately unlike the PR body. A
 # stacked or multi-commit branch can honestly land two rows, and there is
 # nothing to disambiguate: every one of them is checked, none is picked.
+# ── INPUT SHAPE: ONE FILE PER COMMIT, NAMED BY ITS SHA ──────────────────────
+# The first cut concatenated every branch commit message into one blob, which
+# resolved the ids correctly and then could not say WHICH COMMIT carried the
+# dead one. On a ten-commit branch that is a refusal the author cannot act on
+# without bisecting their own branch by hand — and this gate's whole thesis is
+# that a verdict which names the wrong thing sends the reader to fix the wrong
+# thing. So the collect step writes LANDING_COMMITS_DIR/<nnn>-<sha>.msg, one
+# message per file, and the sha travels with the text instead of being thrown
+# away before the scan. There is deliberately no blob fallback: a second input
+# shape would be a second answer to "which commit said this".
 if [ "${1:-}" = "--check-landing-trailers" ]; then
-  landing_text=""
-  if [ -n "${LANDING_COMMIT_MESSAGES_FILE:-}" ]; then
-    # A NAMED FILE THAT IS NOT THERE IS A REFUSAL, never an empty scan. An
-    # unreadable input that reads as "no trailers" is this gate going green
-    # having looked at nothing — the exact failure this whole mode exists to
-    # remove, reintroduced one level up.
-    [ -f "$LANDING_COMMIT_MESSAGES_FILE" ] || fail "the landing-trailer scan was pointed at '${LANDING_COMMIT_MESSAGES_FILE}' and that file does not exist, so the commit messages that will land were NOT read. This is a gate-plumbing fault, not a finding about the PR: see the 'Collect the trailers that will LAND' step in .github/workflows/pr-task-gate.yml."
-    landing_text="$(cat "$LANDING_COMMIT_MESSAGES_FILE")"
-  else
-    landing_text="${LANDING_COMMIT_MESSAGES:-}"
-  fi
+  landing_dir="${LANDING_COMMITS_DIR:-}"
+  [ -n "$landing_dir" ] || fail "the landing-trailer scan was given no LANDING_COMMITS_DIR, so the commit messages that will land were NOT read. This is a gate-plumbing fault, not a finding about the PR: see the 'Collect the trailers that will LAND' step in .github/workflows/pr-task-gate.yml."
+  # A NAMED DIRECTORY THAT IS NOT THERE IS A REFUSAL, never an empty scan. An
+  # unreadable input that reads as "no trailers" is this gate going green
+  # having looked at nothing — the exact failure this whole mode exists to
+  # remove, reintroduced one level up.
+  [ -d "$landing_dir" ] || fail "the landing-trailer scan was pointed at '${landing_dir}' and that directory does not exist, so the commit messages that will land were NOT read. This is a gate-plumbing fault, not a finding about the PR: see the 'Collect the trailers that will LAND' step in .github/workflows/pr-task-gate.yml."
 
-  landing_ids="$(task_trailer_ids "$landing_text")"
-  landing_n="$(task_trailer_count "$landing_text")"
+  # THE PAIR TABLE: one line per (sha, subject, trailer id). A file and not an
+  # associative array, because this runs on bash 3.2 too (macOS, where the
+  # harness is written) and `declare -A` is a bash 4 feature — a gate that
+  # silently degrades on the maintainer's own shell is a gate nobody runs
+  # before pushing. TAB-separated, and the subject has its tabs squashed on the
+  # way in so the separator can never be forged from commit-controlled text.
+  landing_pairs="$(mktemp)"
+  landing_commits=0
+  for landing_msg in "$landing_dir"/*.msg; do
+    [ -f "$landing_msg" ] || continue
+    landing_commits=$((landing_commits + 1))
+    # <nnn>-<sha>.msg — the sha is everything after the first dash.
+    landing_sha="$(basename "$landing_msg" .msg)"
+    landing_sha="${landing_sha#*-}"
+    landing_text="$(cat "$landing_msg")"
+    landing_subject="$(printf '%s' "$landing_text" | head -1 | tr '\t' ' ')"
+    while IFS= read -r landing_id; do
+      [ -n "$landing_id" ] || continue
+      printf '%s\t%s\t%s\n' "$landing_sha" "$landing_subject" "$landing_id" >> "$landing_pairs"
+    done <<LANDING_ONE
+$(task_trailer_ids "$landing_text")
+LANDING_ONE
+  done
+
+  # Distinct across the whole branch: the same row legitimately appears in
+  # every commit of a branch, and resolving it once per commit would be N
+  # ledger reads for one answer.
+  landing_ids="$(cut -f3 "$landing_pairs" 2>/dev/null | awk 'NF && !seen[$0]++' || true)"
+  landing_n="$(printf '%s' "$landing_ids" | grep -c . || true)"
   [ -n "$landing_n" ] || landing_n=0
   # THE SCAN SIZE IS PRINTED BEFORE THE VERDICT, and it is the line a positive
   # control must assert on. "every landing trailer resolves" is satisfied
   # VACUOUSLY by a scan that read zero of them, so a control that only checks
   # the exit code proves nothing about whether this mode can see.
-  echo "pr-task-gate: LANDING TRAILERS: scanned ${landing_n} distinct Task: trailer id(s) in the commit messages that will land: $(printf '%s' "$landing_ids" | tr '\n' ' ' | sed 's/ *$//')"
+  echo "pr-task-gate: LANDING TRAILERS: read ${landing_commits} commit message(s), scanned ${landing_n} distinct Task: trailer id(s) that will land: $(printf '%s' "$landing_ids" | tr '\n' ' ' | sed 's/ *$//')"
   if [ "$landing_n" = "0" ]; then
-    pass "the commit messages that will squash onto main carry no Task: trailer, so there is no landed pointer to resolve (the PR body's own trailer is checked separately, by the step above)"
+    rm -f "$landing_pairs"
+    pass "the ${landing_commits} commit message(s) that will squash onto main carry no Task: trailer, so there is no landed pointer to resolve (the PR body's own trailer is checked separately, by the step above)"
   fi
   # A SCAN BUDGET, spelled as a refusal rather than a truncation. Truncating at
   # N would mean the ids past N are never read while the gate still prints a
@@ -338,6 +375,7 @@ if [ "${1:-}" = "--check-landing-trailers" ]; then
   # 2026-09-20: 1.
   LANDING_TRAILER_MAX="${LANDING_TRAILER_MAX:-25}"
   if [ "$landing_n" -gt "$LANDING_TRAILER_MAX" ]; then
+    rm -f "$landing_pairs"
     fail "the commits on this branch name ${landing_n} distinct Task: trailer ids, over the ${LANDING_TRAILER_MAX} this gate will resolve in one run. This is almost always a branch that merged main into itself rather than rebasing, which drags every already-landed trailer into the range. Rebase onto current main and re-push."
   fi
   landing_bad=""
@@ -352,29 +390,39 @@ if [ "${1:-}" = "--check-landing-trailers" ]; then
     landing_out="$(TASK_ID="$landing_id" bash "$0" --resolve-only 2>&1)" || landing_rc=$?
     case "$landing_rc" in
       0) : ;;
-      # NOT ANCHORED AT COLUMN 0, deliberately: fail() wraps its sentence in a
-      # `::error title=...::` workflow command, so the verdict does NOT start
-      # the line. The first draft anchored on `^pr-task-gate: FAIL` and the
-      # capture came back EMPTY — a refusal that named the trailer and then
-      # said "the ledger answered: " with nothing after it. The harness arm
-      # that asserts the READ text is what caught it.
-      1) landing_bad="${landing_bad}${landing_bad:+; }${landing_id} (the ledger answered: $(printf '%s' "$landing_out" | grep -o 'pr-task-gate: FAIL: .*' | tail -1 | sed 's/^pr-task-gate: FAIL: //' || true))" ;;
-      2) unchecked "resolving the landing trailer '${landing_id}' could not be completed — ${landing_out}" ;;
-      3) credential_rejected "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
-      5) malformed "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
-      *) unchecked "resolving the landing trailer '${landing_id}' exited ${landing_rc}, which is not a code this gate's contract defines — ${landing_out}" ;;
+      1)
+        # NOT ANCHORED AT COLUMN 0, deliberately: fail() wraps its sentence in
+        # a `::error title=...::` workflow command, so the verdict does NOT
+        # start the line. The first draft anchored on `^pr-task-gate: FAIL` and
+        # the capture came back EMPTY — a refusal that named the trailer and
+        # then said "the ledger answered: " with nothing after it. The harness
+        # arm that asserts the READ text is what caught it.
+        landing_why="$(printf '%s' "$landing_out" | grep -o 'pr-task-gate: FAIL: .*' | tail -1 | sed 's/^pr-task-gate: FAIL: //' || true)"
+        # EVERY COMMIT THAT NAMES IT, not just the first. A rebase that fixed
+        # one of three commits and missed two must not read as fixed.
+        while IFS=$'\t' read -r bad_sha bad_subject bad_id; do
+          [ "$bad_id" = "$landing_id" ] || continue
+          landing_bad="${landing_bad}${landing_bad:+; }${bad_sha:0:10} \"${bad_subject}\" names ${landing_id} (the ledger answered: ${landing_why})"
+        done < "$landing_pairs"
+        ;;
+      2) rm -f "$landing_pairs"; unchecked "resolving the landing trailer '${landing_id}' could not be completed — ${landing_out}" ;;
+      3) rm -f "$landing_pairs"; credential_rejected "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
+      5) rm -f "$landing_pairs"; malformed "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
+      *) rm -f "$landing_pairs"; unchecked "resolving the landing trailer '${landing_id}' exited ${landing_rc}, which is not a code this gate's contract defines — ${landing_out}" ;;
     esac
   done <<LANDING_IDS
 $landing_ids
 LANDING_IDS
+  rm -f "$landing_pairs"
   if [ -n "$landing_bad" ]; then
-    # NAME WHICH TRAILER, AND WHAT WAS READ. There are two trailers in play and
-    # they are routinely different; a refusal that says only "a task does not
-    # exist" sends the author to edit the PR body, which is the one that is
-    # fine.
-    fail "the COMMIT MESSAGE that will squash onto main names a task that does not resolve on the ledger: ${landing_bad}. This is NOT the PR body's trailer — the body names '${BODY_TASK_ID:-<none>}', which was checked separately and is not what git log will carry. This repo squashes with COMMIT_MESSAGES, so the branch commits' messages ARE the landed text, and a dead pointer there is the only durable record the work leaves (specimen: 9f931a6f8 landed 'Task: task-PENDING-nightly'). Fix the COMMIT, not the body: git rebase -i ${BASE_REF_HINT:-<base>} (or git commit --amend on a single-commit branch), put a real row in the Task: trailer, force-push — this check re-fires on synchronize."
+    # NAME THE COMMIT, NAME WHICH TRAILER, AND QUOTE WHAT WAS READ. There are
+    # two trailers in play and they are routinely different; a refusal that
+    # says only "a task does not exist" sends the author to edit the PR body,
+    # which is the one that is fine. And without the SHA the author of a
+    # ten-commit branch has to bisect their own branch to find the line.
+    fail "a COMMIT MESSAGE that will squash onto main names a task that does not resolve on the ledger: ${landing_bad}. This is NOT the PR body's trailer — the body names '${BODY_TASK_ID:-<none>}', which was checked separately and is not what git log will carry. This repo squashes with COMMIT_MESSAGES, so the branch commits' messages ARE the landed text, and a dead pointer there is the only durable record the work leaves (specimen: 9f931a6f8 landed 'Task: task-PENDING-nightly'). Fix the COMMIT named above, not the body: git rebase -i ${BASE_REF_HINT:-<base>} (or git commit --amend on a single-commit branch), put a real row in its Task: trailer, force-push — this check re-fires on synchronize."
   fi
-  pass "every one of the ${landing_n} Task: trailer id(s) in the commit messages that will land resolves on the ledger"
+  pass "every one of the ${landing_n} Task: trailer id(s) across the ${landing_commits} commit message(s) that will land resolves on the ledger"
 fi
 
 [ -n "${TASK_ID:-}" ] || fail "no task reference found on the PR (add a 'Task: <doc_id>' line to the PR description)"

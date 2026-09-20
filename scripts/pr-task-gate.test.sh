@@ -1465,10 +1465,41 @@ fi
 # for task-PENDING-nightly.
 # ════════════════════════════════════════════════════════════════════════════
 SPECIMEN_BODY="$(printf 'fix(cli): brief fixtures (#19417)\n\nTask: active\n')"
-SPECIMEN_COMMITS="$(printf 'fix(cli): brief fixtures\n\nTask: ghost\n')"
-BOTH_RESOLVE_COMMITS="$(printf 'fix(a): one\n\nTask: active\n\nfix(b): two\n\nTask: doneclosed\n')"
-# shellcheck disable=SC2034  # read by name inside MODE_ENV, which mode_check evals
-NO_TRAILER_COMMITS="$(printf 'chore: no trailer anywhere\n\njust prose\n')"
+
+# ONE DIRECTORY PER SCENARIO, one <nnn>-<sha>.msg file per commit — the shape
+# the collect step writes. The sha rides the FILENAME, which is the whole point
+# of the input format: a refusal that cannot name the commit sends the author
+# of a ten-commit branch to bisect their own branch.
+landing_dir() { # landing_dir <name> [<sha> <message>]...
+  local name="$1"; shift
+  local d="$fixtures/landing-$name" n=0
+  rm -rf "$d"; mkdir -p "$d"
+  while [ "$#" -gt 0 ]; do
+    n=$((n + 1))
+    printf '%s' "$2" > "$d/$(printf '%04d' "$n")-$1.msg"
+    shift 2
+  done
+  printf '%s' "$d"
+}
+# The specimen: PR #19417's branch, reproduced in shape. `ghost` has no fixture
+# file, so the local server 404s it exactly as the live ledger 404s
+# task-PENDING-nightly.
+SPECIMEN_SHA="9f931a6f83ffb2183cd7bac583d06b5ddf2f7b90"
+DIR_SPECIMEN="$(landing_dir specimen "$SPECIMEN_SHA" "$(printf 'test(tasks): the last 7 briefless publish fixtures\n\nTask: ghost\n')")"
+# shellcheck disable=SC2034  # DIR_* are read by name inside MODE_ENV, which mode_check evals
+DIR_BOTH_OK="$(landing_dir bothok \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1 "$(printf 'fix(a): one\n\nTask: active\n')" \
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2 "$(printf 'fix(b): two\n\nTask: doneclosed\n')")"
+# shellcheck disable=SC2034  # read by name inside MODE_ENV
+DIR_NONE="$(landing_dir none \
+  ccccccccccccccccccccccccccccccccccccccc3 "$(printf 'chore: no trailer anywhere\n\njust prose\n')")"
+# THE SAME DEAD ID IN TWO COMMITS. A rebase that fixed one and missed the other
+# must not read as fixed, so every commit naming it is listed — not just the
+# first one the scan happened to reach.
+# shellcheck disable=SC2034  # read by name inside MODE_ENV
+DIR_TWICE="$(landing_dir twice \
+  ddddddddddddddddddddddddddddddddddddddd4 "$(printf 'fix(c): three\n\nTask: ghost\n')" \
+  eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee5 "$(printf 'fix(d): four\n\nTask: ghost\n')")"
 
 mode_check() { # mode_check <label> <expected_exit> <substring|-> <script> <args...> ; env via MODE_ENV
   local label="$1" want="$2" sub="$3" script="$4"; shift 4
@@ -1493,10 +1524,9 @@ mode_check() { # mode_check <label> <expected_exit> <substring|-> <script> <args
 #   (2) the text that will actually land names an id the ledger 404s.
 # Neither alone is a finding. Together they are a green required check over a
 # commit whose durable pointer is dead.
-MODE_ENV="LEDGER_TOKEN=harness-token PR_BODY=\"\$SPECIMEN_BODY\""
 : > "$fixtures/mode.out"
 body_id="$(PR_BODY="$SPECIMEN_BODY" bash "$GATE" --extract-task-id 2>/dev/null)"
-commit_id="$(PR_BODY="$SPECIMEN_COMMITS" bash "$GATE" --extract-task-id 2>/dev/null)"
+commit_id="$(PR_BODY="$(cat "$DIR_SPECIMEN"/*.msg)" bash "$GATE" --extract-task-id 2>/dev/null)"
 ( TASK_ID="$body_id" LEDGER_BASE="$BASE" LEDGER_TOKEN=harness-token bash "$GATE" ) >/dev/null 2>&1
 body_rc=$?
 ( TASK_ID="$commit_id" LEDGER_BASE="$BASE" LEDGER_TOKEN=harness-token bash "$GATE" ) >/dev/null 2>&1
@@ -1507,43 +1537,50 @@ else
   fail=$((fail+1)); printf 'FAIL %-46s body_id=%s(rc %s) commit_id=%s(rc %s) — want active/0 and ghost/1\n' "c0: the body-only gate passes the specimen" "$body_id" "$body_rc" "$commit_id" "$commit_rc"
 fi
 
-# ── c1 — the same shape is now REFUSED, and the refusal NAMES which of the two
-# trailers was unresolvable and what was read. Four separate assertions,
+# ── c1 — the same shape is now REFUSED, and the refusal names the COMMIT, the
+# unresolved id, and what the ledger answered. Five separate assertions,
 # because an exit code alone cannot tell this refusal from any other exit 1 and
 # the WORDS are the deliverable: an author told only "a task does not exist"
-# goes and edits the PR body, which is the trailer that is fine.
-MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$SPECIMEN_COMMITS\""
-mode_check "c1: dead landing trailer is REFUSED"   1 "ghost"                          "$GATE" --check-landing-trailers
-mode_check "c1: refusal names the COMMIT, not body" 1 "COMMIT MESSAGE that will squash" "$GATE" --check-landing-trailers
-mode_check "c1: refusal quotes what was READ"      1 "does not exist on the ledger"    "$GATE" --check-landing-trailers
-mode_check "c1: refusal names the body's own id"   1 "the body names 'active'"         "$GATE" --check-landing-trailers
+# goes and edits the PR body, which is the trailer that is fine, and an author
+# told only the id has to bisect their own branch to find the line.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_SPECIMEN\""
+mode_check "c1: dead landing trailer is REFUSED"    1 "ghost"                          "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the COMMIT SHA"       1 "9f931a6f83 \"test(tasks): the last 7 briefless publish fixtures\" names ghost" "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the commit, not body" 1 "COMMIT MESSAGE that will squash" "$GATE" --check-landing-trailers
+mode_check "c1: refusal quotes what was READ"       1 "does not exist on the ledger"    "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the body's own id"    1 "the body names 'active'"         "$GATE" --check-landing-trailers
+# Every commit naming the dead id, not just the first: a rebase that fixed one
+# of two and missed the other must not read as fixed.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_TWICE\""
+mode_check "c1: both offending commits are named"   1 "dddddddddd \"fix(c): three\" names ghost"  "$GATE" --check-landing-trailers
+mode_check "c1: ...including the second one"        1 "eeeeeeeeee \"fix(d): four\" names ghost"  "$GATE" --check-landing-trailers
 
 # ── c2 — THE POSITIVE CONTROL, and the vacuity guard on it. "every landing
 # trailer resolves" is satisfied by a scan that read ZERO of them, so the
 # control asserts the SCAN SIZE as well as the exit code. Without the second
 # assertion this row would stay green with the extractor deleted.
-MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\""
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_BOTH_OK\""
 mode_check "c2: both landing trailers resolve"     0 "scanned 2 distinct"              "$GATE" --check-landing-trailers
+mode_check "c2: and it counts the commits it read" 0 "read 2 commit message(s)"        "$GATE" --check-landing-trailers
 mode_check "c2: and it says every one resolved"    0 "every one of the 2 Task: trailer" "$GATE" --check-landing-trailers
 # A branch whose commits name no task is SILENT, not refused — that is the
 # measured choice (38 of 52 open PRs on 2026-09-20 are this shape, every
 # dependabot PR among them) and it is why the rule is "every landing trailer
 # resolves" and not "the landing trailers must include the body's id".
-MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$NO_TRAILER_COMMITS\""
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_NONE\""
 mode_check "c2: no landing trailer is silent"      0 "scanned 0 distinct"              "$GATE" --check-landing-trailers
 
-# A FILE that is not there is a REFUSAL, never an empty scan — an unreadable
+# An input that is not there is a REFUSAL, never an empty scan — an unreadable
 # input reading as "no trailers" is this gate going green having looked at
 # nothing, which is the whole defect reintroduced one level up.
-MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES_FILE=$fixtures/nope.txt"
-mode_check "landing: missing input file REFUSES"   1 "were NOT read"                   "$GATE" --check-landing-trailers
-printf '%s' "$BOTH_RESOLVE_COMMITS" > "$fixtures/landing.txt"
-MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES_FILE=$fixtures/landing.txt"
-mode_check "landing: file input is read"           0 "scanned 2 distinct"              "$GATE" --check-landing-trailers
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMITS_DIR=$fixtures/nope-dir"
+mode_check "landing: missing input dir REFUSES"    1 "were NOT read"                   "$GATE" --check-landing-trailers
+MODE_ENV="LEDGER_TOKEN=harness-token"
+mode_check "landing: no input at all REFUSES"      1 "given no LANDING_COMMITS_DIR"     "$GATE" --check-landing-trailers
 
 # The ledger's OWN failure modes must survive the recursion: an outage on a
 # landing trailer is exit 2 (UNCHECKED), never a false accusation against the PR.
-MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\" LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=1"
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMITS_DIR=\"\$DIR_BOTH_OK\" LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=1"
 mode_check "landing: ledger outage is UNCHECKED"   2 "-"                               "$GATE" --check-landing-trailers
 # EXISTENCE, NOT ACTIVE CLAIM. `openone` is open and never claimed: the main
 # gate reds it (proven above) and --resolve-only must NOT, because a landed
@@ -1563,7 +1600,7 @@ sed -e 's/^  if \[ -n "\$landing_bad" \]; then$/  if false; then/' "$GATE" > "$M
 if ! grep -q 'if false; then' "$MUTANT"; then
   fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the refusal guard was renamed\n' "mutation: refusal removed reds c1"
 else
-  MODE_ENV="PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMIT_MESSAGES=\"\$SPECIMEN_COMMITS\""
+  MODE_ENV="PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_SPECIMEN\""
   ( eval "LEDGER_BASE=\"$BASE\" $MODE_ENV bash \"$MUTANT\" --check-landing-trailers" ) >/dev/null 2>&1
   mut_rc=$?
   if [ "$mut_rc" = "0" ]; then
@@ -1580,7 +1617,7 @@ fi
 BLIND="$fixtures/blind-lib.sh"
 cp scripts/lib/task-trailers.sh "$BLIND"
 printf '\ntask_trailer_ids() { :; }\ntask_trailer_count() { printf 0; }\n' >> "$BLIND"
-blind_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=\"$BLIND\" LEDGER_TOKEN=harness-token LANDING_COMMIT_MESSAGES=\"\$BOTH_RESOLVE_COMMITS\" bash \"$GATE\" --check-landing-trailers" 2>&1 )"
+blind_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=\"$BLIND\" LEDGER_TOKEN=harness-token LANDING_COMMITS_DIR=\"\$DIR_BOTH_OK\" bash \"$GATE\" --check-landing-trailers" 2>&1 )"
 blind_rc=$?
 # NO PIPE INTO `grep -q` HERE. grep -q exits on its first match and the writer
 # takes SIGPIPE; under a caller's pipefail that pipeline returns 141, which is
@@ -1590,6 +1627,31 @@ if [ "$blind_rc" = "0" ] && [ "${blind_out#*scanned 2 distinct}" = "$blind_out" 
   pass=$((pass+1)); printf 'ok   %-46s (blind scan still exits 0 — only the scan-size assertion sees it)\n' "mutation: blind scan reds c2"
 else
   fail=$((fail+1)); printf 'FAIL %-46s blind rc=%s; the vacuity guard is not doing the work\n' "mutation: blind scan reds c2" "$blind_rc"
+fi
+
+# Mutant 3 — THE SHA DROPPED FROM THE REFUSAL. This is the one the exit code
+# cannot see: the mutant still REFUSES, still names the id, still quotes the
+# ledger, and is still exit 1. Only `c1: refusal names the COMMIT SHA` notices,
+# which is the whole reason that arm asserts the rendered sentence and not a
+# code. Without this mutant, "the refusal names the commit" is a claim nobody
+# has ever watched fail.
+SHALESS="$fixtures/shaless-gate.sh"
+sed -e 's/${bad_sha:0:10} \\"${bad_subject}\\" names //' "$GATE" > "$SHALESS"
+if ! grep -q 'landing_bad:+; }${landing_id} (the ledger answered' "$SHALESS"; then
+  fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the refusal sentence was reworded\n' "mutation: sha dropped reds c1"
+else
+  shaless_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_SPECIMEN\" bash \"$SHALESS\" --check-landing-trailers" 2>&1 )"
+  shaless_rc=$?
+  # Still refuses (exit 1) and still names the id — and has lost the sha. No
+  # pipe into `grep -q`: that pipeline returns 141 on SIGPIPE under pipefail,
+  # which is neither found nor not-found.
+  if [ "$shaless_rc" = "1" ] \
+     && [ "${shaless_out#*ghost}" != "$shaless_out" ] \
+     && [ "${shaless_out#*9f931a6f83}" = "$shaless_out" ]; then
+    pass=$((pass+1)); printf 'ok   %-46s (still exit 1, still names ghost, sha GONE — only the sha arm sees it)\n' "mutation: sha dropped reds c1"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s rc=%s; the sha assertion is not doing the work\n' "mutation: sha dropped reds c1" "$shaless_rc"
+  fi
 fi
 
 # ── THE SHARED RESOLVER'S OWN SELFTEST ──────────────────────────────────────
@@ -1627,9 +1689,12 @@ wf_want() { # wf_want <label> <substring>
   fi
 }
 wf_want "workflow runs --check-landing-trailers" "--check-landing-trailers"
-wf_want "workflow feeds it the commit messages"  "LANDING_COMMIT_MESSAGES_FILE:"
+wf_want "workflow feeds it the commit messages"  "LANDING_COMMITS_DIR:"
 wf_want "workflow passes the body id for naming" "BODY_TASK_ID:"
-wf_want "workflow reads BASE..HEAD, no merges"   'git log --no-merges --format=%B "${BASE_SHA}..${HEAD_SHA}"'
+wf_want "workflow reads BASE..HEAD, no merges"   'git rev-list --no-merges --reverse "${BASE_SHA}..${HEAD_SHA}"'
+# The sha must ride the FILENAME. Concatenated messages resolve the same ids
+# and then cannot name the commit; this is the line that keeps them apart.
+wf_want "workflow names each file by its sha"    'git log -1 --format=%B "$sha" > "$out/$(printf'
 # The `|| rc=$?` form, for the same reason the verify step needs it: GitHub
 # runs step bodies under `bash -e {0}`, which `set -uo pipefail` does not
 # clear, so a bare call would abort the step and make every handler dead code.

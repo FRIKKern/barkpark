@@ -570,8 +570,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -uo pipefail
-          out="${RUNNER_TEMP}/landing-commit-messages.txt"
-          : > "$out"
+          # ONE FILE PER COMMIT, NAMED BY ITS SHA. Concatenating the messages
+          # resolved the ids correctly and then could not say WHICH COMMIT
+          # carried the dead one — on a ten-commit branch that is a refusal the
+          # author can only act on by bisecting their own branch. The sha rides
+          # the filename so it survives into the verdict.
+          out="${RUNNER_TEMP}/landing-commits"
+          rm -rf "$out"; mkdir -p "$out"
           # UNRESOLVABLE IS UNKNOWN, NEVER EMPTY. An empty file reads as "no
           # trailers", which the checker below passes — so a fetch that quietly
           # missed would turn this into a green step that looked at nothing.
@@ -589,16 +594,22 @@ jobs:
           # --no-merges: a merge commit's own message is not part of the squash
           # body and carries no trailer of its own. The range is BASE..HEAD,
           # which is exactly the commit list GitHub squashes.
-          git log --no-merges --format=%B "${BASE_SHA}..${HEAD_SHA}" > "$out"
-          echo "file=${out}" >> "$GITHUB_OUTPUT"
-          echo "commits=$(git rev-list --no-merges --count "${BASE_SHA}..${HEAD_SHA}")" >> "$GITHUB_OUTPUT"
+          n=0
+          while read -r sha; do
+            [ -n "$sha" ] || continue
+            n=$((n + 1))
+            git log -1 --format=%B "$sha" > "$out/$(printf '%04d' "$n")-${sha}.msg"
+          done < <(git rev-list --no-merges --reverse "${BASE_SHA}..${HEAD_SHA}")
+          echo "dir=${out}" >> "$GITHUB_OUTPUT"
+          echo "commits=${n}" >> "$GITHUB_OUTPUT"
+          echo "Collected ${n} commit message(s) that will squash onto main." | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Verify every task trailer that will LAND resolves
         # `id:` is how scripts/pr-task-gate.test.sh addresses this step body.
         id: landing_verify
         if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
         env:
-          LANDING_COMMIT_MESSAGES_FILE: ${{ steps.landing.outputs.file }}
+          LANDING_COMMITS_DIR: ${{ steps.landing.outputs.dir }}
           # The OTHER trailer, carried only so the refusal can say which of the
           # two it is talking about. There are two `Task:` lines in play and
           # they are routinely different; an author told only "a task does not
