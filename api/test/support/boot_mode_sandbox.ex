@@ -115,6 +115,33 @@ defmodule Barkpark.BootModeSandbox do
   end
 
   @doc """
+  Run `fun` — which writes `:boot_mode` INDIRECTLY — with the key protected.
+
+  For the case `sandboxed/1` does not cover and which is what actually leaked
+  into `elixir-nightly`: a test that never types `Application.put_env` at all,
+  because the write happens in `api/lib` on its behalf.
+
+  `Mix.Tasks.Barkpark.Preview.Backfill.run/1` and
+  `Mix.Tasks.Barkpark.Workspace.ProvisionSchemas.run/1` both call
+  `Barkpark.OneShot.boot!/0`, whose FIRST line is a PERSISTENT
+  `put_env(:barkpark, :boot_mode, :one_shot)`. That is correct for an operator
+  one-shot and wrong for a test process, which shares the key with 1800 other
+  modules. A grep for raw writes under `api/test` finds nothing here — the call
+  site is two frames away — so the single-writer guard below, and
+  `scripts/test-env-leak-gate.sh`, both read these modules as CLEAN.
+
+      out = capture_io(fn -> BootModeSandbox.protecting(fn -> Task.run(argv) end) end)
+
+  Same `try … after`, same verified restore as `sandboxed/1`; it only withholds
+  the setter, because a caller of this arm has no business writing the key
+  itself.
+  """
+  @spec protecting((-> result)) :: result when result: term()
+  def protecting(fun) when is_function(fun, 0) do
+    sandboxed(fn _set -> fun.() end)
+  end
+
+  @doc """
   Run `fun` with `:boot_mode` ESTABLISHED as absent, restoring it afterwards.
 
   For the readers, which must assert what an ordinary boot does. An absent key

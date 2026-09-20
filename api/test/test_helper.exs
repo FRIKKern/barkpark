@@ -86,6 +86,22 @@ ExUnit.start(
   ]
 )
 
+# NODE-GLOBAL LEAK PROBE — the PER-MODULE arm (task-086261728f14c078).
+#
+# The after_suite arm below says a key leaked. It cannot say WHICH module leaked
+# it, and finding that out cost a full diagnosis on 2026-09-20: run 35509163543
+# printed `value left behind: :one_shot` and the writer turned out to be
+# `Barkpark.OneShot.boot!/0`, called by `Mix.Tasks.Barkpark.Preview.Backfill`
+# and `Mix.Tasks.Barkpark.Workspace.ProvisionSchemas` — two frames below any
+# test source, so no static reader of api/test could see it.
+#
+# A formatter gets `:module_finished` for every module, so it can. APPENDED to
+# whatever is already configured (`mix test --formatter …` must keep working);
+# it never replaces the CLI formatter.
+ExUnit.configure(
+  formatters: ExUnit.configuration()[:formatters] ++ [Barkpark.BootModeLeakFormatter]
+)
+
 # NODE-GLOBAL LEAK PROBE — the RUNTIME arm (task-086261728f14c078).
 #
 # `scripts/test-env-leak-gate.sh` is a STATIC reader. Its rule is "an on_exit

@@ -425,6 +425,149 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
     end
   end
 
+  describe "a test that BOOTS a one-shot mix task must route it through the sandbox" do
+    # THE DEFECT THIS CLOSES, and it is the one the row was filed for.
+    #
+    # The describe above asks "does any test source WRITE :boot_mode?" and the
+    # answer was, honestly, no — and the key still leaked. PR #19480's own
+    # end-of-suite probe caught it in run 35509163543: `value left behind:
+    # :one_shot`, on a tree where every raw write already went through the
+    # sandbox.
+    #
+    # The writer is `Barkpark.OneShot.boot!/0` (api/lib), whose first line is a
+    # PERSISTENT put_env of :one_shot and which nothing in api/lib puts back —
+    # an operator one-shot exits, so it never needs to. Seven `mix barkpark.*`
+    # tasks call it. A test that calls such a task's `run/1` is therefore a
+    # writer of the node-global key WITHOUT TYPING A WRITE, which is exactly why
+    # a grep of api/test read the tree as clean.
+    #
+    # DERIVED, NOT LISTED. The task set is read out of api/lib on every run, so
+    # a task that starts calling `OneShot.boot!/0` tomorrow is in scope the same
+    # day. A hardcoded list would have been correct on 2026-09-20 and stale by
+    # the next one.
+    @one_shot_boot_re ~r/Barkpark\.(OneShot\.boot!|Release\.seed_boot!)\(\)/
+    @sandbox_marker "BootModeSandbox"
+
+    defp strip_comments(source) do
+      source
+      |> String.split("\n")
+      |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+      |> Enum.join("\n")
+    end
+
+    # Every `Mix.Tasks.…` module under api/lib whose CODE boots a narrowed tree.
+    defp one_shot_task_modules do
+      Path.join(@test_root, "lib/mix/tasks/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&{&1, strip_comments(File.read!(&1))})
+      |> Enum.filter(fn {_path, src} -> src =~ @one_shot_boot_re end)
+      |> Enum.flat_map(fn {_path, src} ->
+        case Regex.run(~r/^defmodule\s+(Mix\.Tasks\.[A-Za-z0-9_.]+)\s+do/m, src) do
+          [_, mod] -> [mod]
+          nil -> []
+        end
+      end)
+      |> Enum.sort()
+    end
+
+    # PURE, so the controls below can feed it a specimen instead of hoping one
+    # exists in the tree. A source INVOKES a one-shot task when it both names
+    # the module (the alias) and calls `run/1` on its last segment — both, so a
+    # file that merely mentions the module in an assertion is not flagged, and a
+    # collision with some other module called `Backfill` is not either.
+    defp unsandboxed_one_shot_invocations(source, modules) do
+      stripped = strip_comments(source)
+
+      Enum.filter(modules, fn mod ->
+        last = mod |> String.split(".") |> List.last()
+
+        String.contains?(stripped, mod) and
+          stripped =~ ~r/(?<![A-Za-z0-9_.])#{Regex.escape(last)}\.run\(/ and
+          not String.contains?(stripped, @sandbox_marker)
+      end)
+    end
+
+    test "the derived task set is real and populated" do
+      # PRECONDITION. Every assertion below quantifies over this set, and an
+      # empty set satisfies all of them vacuously.
+      modules = one_shot_task_modules()
+
+      assert length(modules) >= 5,
+             "only #{length(modules)} one-shot mix task(s) derived from api/lib — the walk is blind"
+
+      assert "Mix.Tasks.Barkpark.Preview.Backfill" in modules
+      assert "Mix.Tasks.Barkpark.Workspace.ProvisionSchemas" in modules
+    end
+
+    test "control: the predicate FLAGS a call with no sandbox, and clears the same call with one" do
+      modules = ["Mix.Tasks.Barkpark.Preview.Backfill"]
+
+      leaky = """
+      defmodule SomeTest do
+        alias Mix.Tasks.Barkpark.Preview.Backfill
+        test "x" do
+          Backfill.run([])
+        end
+      end
+      """
+
+      assert unsandboxed_one_shot_invocations(leaky, modules) == modules,
+             "the predicate cannot see an unsandboxed call — the guard below measures nothing"
+
+      fixed =
+        String.replace(
+          leaky,
+          "Backfill.run([])",
+          "BootModeSandbox.protecting(fn -> Backfill.run([]) end)"
+        )
+
+      assert unsandboxed_one_shot_invocations(fixed, modules) == [],
+             "the predicate flags a SANDBOXED call too — it is reporting the call, not the leak"
+
+      # Prose is not code: a file that only DISCUSSES the call is clean.
+      prose = "# Backfill.run([]) would leak\nalias Mix.Tasks.Barkpark.Preview.Backfill\n"
+
+      assert unsandboxed_one_shot_invocations(prose, modules) == [],
+             "comment stripping is broken — prose is being read as a call"
+    end
+
+    test "no test invokes a one-shot mix task outside Barkpark.BootModeSandbox" do
+      modules = one_shot_task_modules()
+
+      offenders =
+        Path.join(@test_root, "test/**/*.{ex,exs}")
+        |> Path.wildcard()
+        |> Enum.sort()
+        |> Enum.flat_map(fn path ->
+          case unsandboxed_one_shot_invocations(File.read!(path), modules) do
+            [] -> []
+            mods -> [{Path.relative_to(path, @test_root), mods}]
+          end
+        end)
+
+      assert offenders == [],
+             """
+             these test sources invoke a one-shot mix task with no sandbox in the file:
+
+                 #{Enum.map_join(offenders, "\n    ", fn {f, m} -> "#{f} -> #{Enum.join(m, ", ")}" end)}
+
+             `run/1` calls `Barkpark.OneShot.boot!/0`, which writes the NODE-GLOBAL
+             `:barkpark, :boot_mode` PERSISTENTLY and never puts it back. The module
+             that does this makes `Barkpark.ApplicationBootModeTest` fail `left:
+             :one_shot` later in the same run — measured in elixir-nightly
+             35323296944 and again in run 35509163543.
+
+                 BootModeSandbox.protecting(fn -> SomeTask.run(argv) end)
+
+             HONEST LIMIT, stated rather than implied: this is a FILE-level rule.
+             It proves the sandbox is present in a file that invokes such a task,
+             not that every call site in it is wrapped. What proves THAT is the
+             runtime arm — `Barkpark.BootModeLeakFormatter` reds the run and names
+             the module whose `:module_finished` found the key still set.
+             """
+    end
+  end
+
   describe "the one-shot mix task guard is a PREDICATE over the shape" do
     # A source-level guard, because no `mix test` run can observe what
     # `Mix.Task.run("app.start")` does — the test node always has the full tree

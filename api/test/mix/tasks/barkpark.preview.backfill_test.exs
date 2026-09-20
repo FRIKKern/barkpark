@@ -19,6 +19,7 @@ defmodule Mix.Tasks.Barkpark.Preview.BackfillTest do
   alias Barkpark.Repo
   alias Barkpark.Tenancy
   alias Mix.Tasks.Barkpark.Preview.Backfill
+  alias Barkpark.BootModeSandbox
 
   setup do
     prev_shell = Mix.shell()
@@ -102,7 +103,7 @@ defmodule Mix.Tasks.Barkpark.Preview.BackfillTest do
     test "the Mix task with no args is a dry run" do
       seed_paper("bare-run", [])
 
-      output = capture_io(fn -> Backfill.run([]) end)
+      output = capture_io(fn -> run_backfill([]) end)
 
       assert output =~ "preview backfill (dry-run)"
       assert output =~ "Dry run — nothing was written"
@@ -356,5 +357,23 @@ defmodule Mix.Tasks.Barkpark.Preview.BackfillTest do
       assert output =~ "errors:"
       assert output =~ "poison2"
     end
+  end
+
+  # ── the ONLY way this module may invoke the task (task-086261728f14c078) ────
+  #
+  # `Backfill.run/1` calls `Barkpark.OneShot.boot!/0`, whose first line is a
+  # PERSISTENT `Application.put_env(:barkpark, :boot_mode, :one_shot)`. Nothing
+  # in api/lib puts it back — an operator one-shot exits, so it has no reason
+  # to. A test process does not exit, and the key is ONE value for the WHOLE
+  # NODE: this module ran and `Barkpark.ApplicationBootModeTest` then failed
+  # `assert App.boot_mode() == :full` with `left: :one_shot` in elixir-nightly
+  # 35323296944, and again in run 35509163543 where the end-of-suite probe read
+  # `value left behind: :one_shot`.
+  #
+  # `BootModeSandbox.protecting/1` restores in a `try … after` and re-reads the
+  # key, so a restore that does not land reds THIS module. Call the task through
+  # here and nowhere else.
+  defp run_backfill(argv) do
+    BootModeSandbox.protecting(fn -> Backfill.run(argv) end)
   end
 end
