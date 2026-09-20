@@ -1276,8 +1276,13 @@
         "env": {}
       },
       {
-        "name": "harness syntax check",
-        "run": "bash -n scripts/shell-harnesses-dispatch.test.sh",
+        "name": "harness + dispatcher syntax check",
+        "run": "bash -n scripts/shell-harnesses-dispatch.test.sh\nbash -n scripts/shell-harness-dispatch.sh\n",
+        "env": {}
+      },
+      {
+        "name": "the dispatcher's own hermetic selftest (8 arms over mktemp git repos)",
+        "run": "# THE DISPATCHER IS A FILE NOW (task-ca50ed283930706a), because an\n# interpolated `run:` scalar is compiled into ONE expression capped at\n# 21000 chars and the roster had 32 bytes of headroom. A file that no\n# arm executes is how that move would trade a byte wall for a silent\n# rot, so it carries its own selftest and this arm runs it.\nbash scripts/shell-harness-dispatch.sh --selftest\n",
         "env": {}
       },
       {
