@@ -1759,7 +1759,10 @@ class BpPaperCanvas extends HTMLElement {
     if (html || !text) return false;
     const lines = text.split(/\r?\n/);
     const blockish = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|---\s*$)/;
-    if (!lines.some((line) => blockish.test(line))) return false;
+    // A GFM pipe table announces itself by a delimiter row (dashes with a pipe) under a header line.
+    const tableDelimiter = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+    const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
+    if (!lines.some((line) => blockish.test(line)) && !pipeTable) return false;
     let nodes;
     try {
       const blocks = markdownToBlocks(text);

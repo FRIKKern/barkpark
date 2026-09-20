@@ -728,6 +728,15 @@ export function markdownToBlocks(md) {
       continue;
     }
 
+    // 7b) TABLE — a GFM pipe table: a header row, a delimiter row (| --- | :-: |) that
+    //     itself contains a pipe, then body rows until a blank line or another block.
+    if (isTableStart(lines, i)) {
+      const { block, next } = scanTable(lines, i);
+      blocks.push(block);
+      i = next;
+      continue;
+    }
+
     // 8) PARAGRAPH — consume consecutive non-blank lines that don't START a new
     //    block, join with a newline, tokenize as inline.
     const { para, next } = scanParagraph(lines, i);
@@ -931,7 +940,7 @@ function scanParagraph(lines, i) {
   while (j < lines.length) {
     const l = lines[j];
     if (l.trim() === "") break;
-    if (j !== i && startsNewBlock(l)) break;
+    if (j !== i && (startsNewBlock(l) || isTableStart(lines, j))) break;
     para.push(l);
     j += 1;
   }
@@ -940,6 +949,67 @@ function scanParagraph(lines, i) {
     para: { id: mintId(), type: "paragraph", content: tokenizeInline(joined) },
     next: j,
   };
+}
+
+// ── GFM pipe tables ──────────────────────────────────────────────────────────
+// `| a | b |` (or `a | b`) as the header, a delimiter row of dashes with optional
+// colons that MUST contain a pipe (a bare `---` under a line is a setext heading or
+// a thematic break, not a table), then body rows. Cells split on unescaped pipes
+// (`\|` is a literal pipe) and are tokenized as inline. The block is the server's
+// table shape (compose.ex): { type:"table", head:[cell…], rows:[[cell…]…] }, one
+// header row.
+const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+function splitTableRow(line) {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+  const cells = [];
+  let cur = "";
+  for (let k = 0; k < s.length; k += 1) {
+    const ch = s[k];
+    if (ch === "\\" && s[k + 1] === "|") {
+      cur += "|";
+      k += 1;
+      continue;
+    }
+    if (ch === "|") {
+      cells.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  cells.push(cur);
+  return cells.map((c) => c.trim());
+}
+
+function isTableRowLine(line) {
+  return typeof line === "string" && line.trim() !== "" && line.includes("|");
+}
+
+function isTableStart(lines, i) {
+  if (i + 1 >= lines.length) return false;
+  const head = lines[i];
+  const delim = lines[i + 1];
+  if (!isTableRowLine(head) || !delim.includes("|") || !TABLE_DELIMITER.test(delim)) return false;
+  return splitTableRow(head).length === splitTableRow(delim).length;
+}
+
+function scanTable(lines, i) {
+  const head = splitTableRow(lines[i]).map((c) => tokenizeInline(c));
+  const width = head.length;
+  const rows = [];
+  let j = i + 2;
+  while (j < lines.length && isTableRowLine(lines[j]) && !startsNewBlock(lines[j])) {
+    const cells = splitTableRow(lines[j]);
+    while (cells.length < width) cells.push("");
+    rows.push(cells.slice(0, width).map((c) => tokenizeInline(c)));
+    j += 1;
+  }
+  // The server refuses a table with no body rows; a header-only paste gets one empty row.
+  if (rows.length === 0) rows.push(Array.from({ length: width }, () => []));
+  return { block: { id: mintId(), type: "table", head, rows }, next: j };
 }
 
 // True when a line (NOT the first of a paragraph) would START a new block — so a
