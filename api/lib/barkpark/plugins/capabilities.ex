@@ -1301,6 +1301,7 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("id", true, "string", "Document id.")
         ],
         flags: [
+          flag("file", "file", "Fields to change as a JSON object from a file or - for stdin."),
           flag("set", "string", "Field key=value to change (repeatable; key:=json for typed).",
             repeatable: true
           ),
