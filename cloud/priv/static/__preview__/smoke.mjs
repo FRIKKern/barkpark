@@ -6895,12 +6895,112 @@ async function assertBillingPaintsOncePerFact() {
   }
 }
 
+// ── DEFECT-E · THE SHELL-INSTANCE TWIN GUARD (task-7bd507ea989ef248) ─────────
+// Nine scenarios shot BYTE-IDENTICAL to shell-instance in all 20 accent x theme
+// x width cells — four independent runs, one sha256 across all ten names. A
+// full-count green matrix certified them anyway, because a shot count says
+// "N files exist", never "N DISTINCT screens exist". This is that missing
+// predicate, and it is deliberately an ASSERTION OVER A CLASSIFICATION rather
+// than a flat "they must differ": the nine split into two causes, and a guard
+// that cannot tell them apart would have to accept the weaker one for all nine.
+//
+//   "dom"   — the scenario paints its own state and the DOM proves it. The
+//             identity was purely a SHOOTING artifact (fleetSupportCardHtml
+//             mounts at the tail of the Overview column; shoot.sh shoots a
+//             1000px viewport). #instance-body must differ from
+//             shell-instance's, and a `drive` must carry it into frame.
+//   "drive" — the DOM is legitimately shell-instance's, because the state the
+//             label names is behind a CLICK (pollOffloadWatch, runVerifyNow) or
+//             is shell-instance's own default render (fleet-support-empty's
+//             empty card). Only a drive can separate the shot, so the drive is
+//             what gets asserted: it must exist, and its FIRST selector must
+//             resolve in the painted DOM — a drive whose entry control is not
+//             on screen is a drive that cannot start.
+//
+// MUTATION-PROVED both ways: deleting `drive` from any one entry reds naming
+// that scenario; blanking a "dom" scenario's support rows reds naming it too.
+const SHELL_INSTANCE_TWINS = {
+  "fleet-support-provisioning": "dom",
+  "fleet-support-online": "dom",
+  "fleet-support-failed": "dom",
+  "fleet-support-empty": "drive",
+  "offload-filing": "drive",
+  "offload-working": "drive",
+  "offload-done": "drive",
+  "offload-blocked": "drive",
+  "verify-no-credentials": "drive",
+};
+
+// The selector a drive step names, whichever verb it uses.
+function driveStepSelector(step) {
+  return (step && (step.reveal || step.click || step.fill || step.await)) || "";
+}
+
+// Does `sel` resolve in the painted body? The shim is a string DOM, so this is
+// a SHAPE match over the two selector forms the nine drives use — an attribute
+// selector and a class — and it refuses anything else rather than answering
+// "true" for a form it cannot actually check.
+function selectorPaints(html, sel) {
+  const attr = sel.match(/^\[([a-z-]+)\]$/);
+  if (attr) return html.includes(attr[1] + "=") || html.includes(" " + attr[1] + ">") || html.includes(" " + attr[1] + " ");
+  const cls = sel.match(/^\.([a-z0-9-]+)$/i);
+  if (cls) return html.includes(cls[1]);
+  throw new Error("selectorPaints cannot check " + JSON.stringify(sel) + " — teach it that form");
+}
+
+async function assertDefectEScenariosAreNotShellInstance() {
+  const baseBoot = bootScenario("shell-instance");
+  await flush();
+  const baseline = (baseBoot.registry.get("instance-body") || {}).innerHTML || "";
+  assert.ok(baseline.length > 0, "shell-instance must paint #instance-body — the whole guard is relative to it");
+
+  const problems = [];
+  for (const name of Object.keys(SHELL_INSTANCE_TWINS)) {
+    const kind = SHELL_INSTANCE_TWINS[name];
+    const scen = SCENARIOS[name];
+    if (!scen) { problems.push(name + ": listed here but absent from SCENARIOS"); continue; }
+    const boot = bootScenario(name);
+    await flush();
+    const html = (boot.registry.get("instance-body") || {}).innerHTML || "";
+    // The DOM comparison is #instance-body — the container shell-instance and
+    // all nine share. The SELECTOR check needs more: this shim's innerHTML is a
+    // per-element STRING, so a slot filled later by its own id (#instance-verify
+    // is filled async by loadInstanceVerify) never appears inside the parent's
+    // bytes. Sweep every element the boot touched, or [data-vf-run] reads as
+    // "does not paint" when it painted perfectly one element down.
+    const painted = [...boot.registry.values()].map((el) => (el && el.innerHTML) || "").join("\n");
+    const drive = scen.drive;
+
+    if (!Array.isArray(drive) || drive.length === 0) {
+      problems.push(name + ": no `drive` — its shot collapses back onto shell-instance");
+      continue;
+    }
+    const entry = driveStepSelector(drive[0]);
+    if (!entry) { problems.push(name + ': drive step 0 names no selector'); continue; }
+    if (!selectorPaints(painted, entry)) {
+      problems.push(name + ": drive entry " + JSON.stringify(entry) + " does not paint — the drive cannot start");
+    }
+    if (kind === "dom" && html === baseline) {
+      problems.push(name + ": #instance-body is BYTE-IDENTICAL to shell-instance — its own state never painted");
+    }
+    if (!/\[(click-gated|below the fold)/.test(scen.label)) {
+      problems.push(name + ": its label must say the shot is driven (below the fold / click-gated)");
+    }
+  }
+  if (problems.length) {
+    process.stdout.write("\nshell-instance twin guard FAILED:\n" + problems.map((p) => "  - " + p).join("\n") + "\n");
+    assert.fail(problems.length + " DEFECT-E scenario(s) cannot be told apart from shell-instance");
+  }
+  process.stdout.write("  ok   shell-instance twins — 9 scenario(s): 3 differ in DOM, 6 carry a drive whose entry control paints\n");
+}
+
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
   await assertBillingPaintsOncePerFact();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
+  await assertDefectEScenariosAreNotShellInstance();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);
