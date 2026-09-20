@@ -922,11 +922,30 @@ with_retry() { # $1 fn, $2.. args -> sets RC_CODE
 # Overridable so a harness can run a SCRATCH COPY of this script from a temp
 # directory without the copy losing the extractor and reddening every arm at
 # once — a mutation that breaks everything locates nothing.
-EXTRACTOR="${LANDED_MARK_EXTRACTOR:-$ROOT/scripts/pr-task-gate.sh}"
-[ -f "$EXTRACTOR" ] || die2 "the Task: trailer grammar lives in ${EXTRACTOR} and it is not there. This script deliberately owns no second copy of that regex."
+# It is now a SOURCEABLE LIBRARY, not a subprocess (task-ee5b82efaee0fb0b).
+# pr-task-gate.sh sources the same file, so the two readers of the two texts —
+# this one reads the COMMIT message, the gate reads the PR BODY — share one
+# function rather than one executable. LANDED_MARK_EXTRACTOR is kept and still
+# takes precedence: it is the door this script's own harness drives, running a
+# SCRATCH COPY of this file from a temp directory where $ROOT does not resolve.
+# A mutation that breaks everything locates nothing, so that door stays open.
+TRAILER_LIB="${LANDED_MARK_TRAILER_LIB:-$ROOT/scripts/lib/task-trailers.sh}"
+EXTRACTOR="${LANDED_MARK_EXTRACTOR:-}"
+if [ -n "$EXTRACTOR" ]; then
+  [ -f "$EXTRACTOR" ] || die2 "the Task: trailer grammar lives in ${EXTRACTOR} and it is not there. This script deliberately owns no second copy of that regex."
+elif [ -f "$TRAILER_LIB" ]; then
+  # shellcheck source=scripts/lib/task-trailers.sh
+  . "$TRAILER_LIB"
+else
+  die2 "the Task: trailer grammar lives in ${TRAILER_LIB} and it is not there. This script deliberately owns no second copy of that regex."
+fi
 
 trailer_ids_for() { # $1 commit message -> id on stdout; rc 4 = ambiguous
-  PR_BODY="$1" bash "$EXTRACTOR" --extract-task-id 2>/dev/null
+  if [ -n "$EXTRACTOR" ]; then
+    PR_BODY="$1" bash "$EXTRACTOR" --extract-task-id 2>/dev/null
+  else
+    task_trailer_single "$1" 2>/dev/null
+  fi
 }
 
 pr_number_from_subject() { # squash convention: "subject (#1234)"
