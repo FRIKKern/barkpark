@@ -3152,6 +3152,28 @@ test("cchi-w20: --citation-inventory runs ABOVE the gate body, so a red gate can
   // census banner appears in this output and this test reds.
   const r = runCssCheck("--citation-inventory");
   assert.equal(r.status, 0, r.out);
+  // NON-VACUITY FLOOR, BEFORE THE TWO ABSENCE ASSERTIONS. Both of those are of
+  // the form !/x/.test(r.out), and the empty string satisfies both — so on its
+  // own this test could not tell "the inventory correctly exited above the gate
+  // body" from "the inventory printed nothing at all". That is not theoretical:
+  // gating the sub-mode to process.exit(0) before printing anything left this
+  // test green. Pin a COUNT the real run exceeds, derived here rather than
+  // hardcoded, so an EMPTY or TRUNCATED stdout reds instead of passing.
+  const invRows = r.out.split("\n").filter((l) => /^\s*ruled=\s*\d+\s+E11=\s*\d+\s+\S/.test(l));
+  assert.ok(invRows.length > 10, `the inventory must PRINT its per-file rows, got ${invRows.length} row(s):\n` + r.out);
+  const expectedRows = citationScanSetFrom(fileURLToPath(new URL(".", import.meta.url)));
+  assert.equal(
+    invRows.length,
+    expectedRows.length,
+    `the inventory must emit one row per scanned file (${expectedRows.length} expected):\n` + r.out,
+  );
+  // And the totals line must be PRESENT and whole — a stdout cut mid-stream
+  // keeps the rows above it and loses this, which the row count alone can miss.
+  assert.match(
+    r.out,
+    /\d+ file\(s\) scanned \(.*\), \d+ shipped-E11 hit\(s\), \d+ ruled-alternation hit\(s\), \d+ E17 refusal\(s\)/,
+    "the inventory's totals line must survive to the end of stdout:\n" + r.out,
+  );
   assert.ok(!/classes checked/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
   assert.ok(!/contrast pairs/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
 });
@@ -15667,9 +15689,21 @@ test("cch-w45-s5: rollbackInstance is no longer appended unconditionally — the
   assert.doesNotMatch(unknown, /data-rollback/);
   assert.equal(cchW45S5Reason(unknown), null);
   assert.match(unknown, /Checking capabilities/);
-  // The page's ONE exit lives in the header; a second [data-me-retry] here
-  // would be a DEAD control (wireMeRetry binds the first match only).
-  assert.doesNotMatch(unknown, /data-me-retry/);
+  // cch-w45-s5-fu — THE STRIP CARRIES ITS OWN EXIT. This used to assert the
+  // OPPOSITE ("the page's ONE exit lives in the header; a second here would be
+  // a DEAD control"), and that reasoning is what left the panel exit-less on
+  // every lifecycle arm whose header strip draws no grouped control: a
+  // suspended or removing box still has a host, so this panel still renders and
+  // its Roll back still takes the unknown arm, while the header offers only the
+  // CLI disclosure. wireMeRetry binds every match in the subtree now, so the
+  // second copy is live.
+  assert.equal(unknown.split("data-me-retry").length - 1, 1,
+    "the still-checking Updates strip must carry exactly one exit of its own; got " +
+    (unknown.split("data-me-retry").length - 1));
+  // …and only on the unknown arm: an ANSWERED authority has nothing to re-read.
+  for (const a of ["grant", "refuse"]) {
+    assert.doesNotMatch(hooks.updatePanelHtml(CCH_W45_S5_LIVE, a), /data-me-retry/);
+  }
 });
 
 test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (instanceDetailHtml)", () => {
@@ -15981,15 +16015,20 @@ test("cch-w47-rv-bl: the unknown arm dedupes the same way — one 'Checking capa
     assert.ok(strip.indexOf(S) === -1, name + ": the unknown arm borrowed the refusal's sentence");
   }
 
-  // ONE shared exit, unchanged: wireMeRetry binds the FIRST [data-me-retry], so
-  // the copies this slice removed were already dead bytes. It rides the header
-  // strip — the page's shipped home for it.
-  assert.equal(unknown.split("data-me-retry").length - 1, 1,
-    "exactly one /v1/me retry on the screen; got " + (unknown.split("data-me-retry").length - 1));
-  assert.match(hooks.instanceHeaderActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
-    "…and it is the header strip's, where it shipped");
-  assert.doesNotMatch(hooks.updatePanelActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
-    "a second exit in the updates strip would be a control nothing binds");
+  // ONE exit PER STRIP — the dedupe is per group, not per page. cch-w45-s5-fu
+  // changed the rule this block used to state ("exactly one on the screen,
+  // riding the header"): wireMeRetry binds EVERY [data-me-retry] in the
+  // subtree, so a strip that states an unknown states its own way out of it.
+  // The per-page count is therefore the number of still-checking STRIPS (here
+  // two: header + updates), never one, and never one per control.
+  assert.equal(unknown.split("data-me-retry").length - 1, 2,
+    "one exit per still-checking strip (header + updates); got " + (unknown.split("data-me-retry").length - 1));
+  for (const [name, render] of CCH_W47_RV_BL_STRIPS.map((x) => [x[0], x[1]])) {
+    const strip = render("unknown");
+    assert.equal(strip.split("data-me-retry").length - 1, 1,
+      name + ": a still-checking strip states exactly one exit — zero strands it, two is the per-control " +
+      "duplication this slice deleted");
+  }
 });
 
 test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
@@ -24805,7 +24844,11 @@ function railDom() {
     isConnected: true,
     addEventListener() {},
     querySelector(sel) { return this.controls[sel] || null; },
-    querySelectorAll() { return []; },
+    // cch-w45-s5-fu: wireMeRetry now binds EVERY [data-me-retry] in the
+    // subtree, so a stub whose querySelectorAll hard-returns [] binds NOTHING
+    // and every "the exit is wired" assertion below would pass by measuring an
+    // incapacity of this file. It answers the SAME node querySelector does.
+    querySelectorAll(sel) { const c = this.controls[sel]; return c ? [c] : []; },
     getAttribute() { return null; },
   };
   return {
@@ -25039,7 +25082,11 @@ function instanceScreenDom() {
     },
     addEventListener() {},
     querySelector(sel) { return this.controls[sel] || null; },
-    querySelectorAll() { return []; },
+    // cch-w45-s5-fu: wireMeRetry now binds EVERY [data-me-retry] in the
+    // subtree, so a stub whose querySelectorAll hard-returns [] binds NOTHING
+    // and every "the exit is wired" assertion below would pass by measuring an
+    // incapacity of this file. It answers the SAME node querySelector does.
+    querySelectorAll(sel) { const c = this.controls[sel]; return c ? [c] : []; },
     getAttribute() { return null; },
   });
   const strip = mk();
@@ -25167,9 +25214,16 @@ test("cch-w47-bl: the same repaint is SCOPED — a foreign instance and a foreig
 // NOTHING PINNED THAT. The count is a property of an arm no test counts, on a
 // fixture (custom_host set) that no authority test uses, and it is one
 // `!bp.custom_host` away from going back to zero. This is that pin, in both
-// directions: not zero (the row's defect) and not two (wireMeRetry binds the
-// FIRST match, so a second control is a dead button that looks like a way out).
-test("cch-w47-bl: a live CUSTOM-HOST box carries exactly ONE [data-me-retry] while /v1/me is out", () => {
+// directions: not zero (the row's defect) and not per-control (the duplication
+// cch-w47-rv-bl deleted).
+//
+// cch-w45-s5-fu RAISED THE PAGE COUNT FROM ONE TO TWO, deliberately. The
+// header-only exit was never reachable from the Updates strip on a lifecycle
+// arm whose header draws no grouped control, so that strip now states its own,
+// and wireMeRetry binds EVERY match rather than the first — which is what makes
+// a second control a live exit instead of the dead button this comment used to
+// warn about. The invariant is now ONE PER STILL-CHECKING STRIP.
+test("cch-w47-bl: a live CUSTOM-HOST box carries one [data-me-retry] per still-checking strip while /v1/me is out", () => {
   hooks.clearMe();
   assert.equal(hooks.instanceAdminAuthority(), "unknown", "sanity: the fixture's arm is the unknown one");
 
@@ -25184,15 +25238,18 @@ test("cch-w47-bl: a live CUSTOM-HOST box carries exactly ONE [data-me-retry] whi
 
   assert.equal(strip.split("data-me-retry").length - 1, 1,
     "the still-checking header strip of a CUSTOM-HOST box must carry exactly ONE exit. Zero is the filed defect " +
-    "(the page's only way out of a disabled Roll back would be a full reload); two is the founding class again — " +
-    "wireMeRetry binds the FIRST match, so the second is a dead button that reads as a way out. Got: " + strip);
+    "(the page's only way out of a disabled Roll back would be a full reload); two WITHIN ONE STRIP is the " +
+    "per-control duplication cch-w47-rv-bl deleted. Got: " + strip);
 
   // …and page-wide, because [data-rollback] lives in a different card and the
   // row's whole complaint is about what the PAGE offers, not what one strip does.
   const page = hooks.instanceDetailHtml(W47BL_CUSTOM_HOST_BP, "overview", { ready: false }, "unknown");
-  assert.equal(page.split("data-me-retry").length - 1, 1,
-    "the whole instance screen of a custom-host box carries exactly ONE exit while the answer is out. Got " +
-    (page.split("data-me-retry").length - 1));
+  assert.equal(page.split("data-me-retry").length - 1, 2,
+    "the whole instance screen of a custom-host box carries ONE exit PER still-checking strip (header + updates) " +
+    "while the answer is out — the Updates strip cannot borrow the header's on the lifecycle arms where the " +
+    "header draws no grouped control at all. Got " + (page.split("data-me-retry").length - 1));
+  assert.equal(hooks.updatePanelActionsHtml(W47BL_CUSTOM_HOST_BP, "unknown").split("data-me-retry").length - 1, 1,
+    "…and the second one is the Updates strip's own, beside the Roll back it exits");
   // The control this exit exists FOR is on that page, DISABLED. Asserted on the
   // label and the group pointer, not on `data-rollback`: adminWriteControlHtml
   // drops the mount hook entirely on the non-grant arms (that is the point — the
@@ -27296,6 +27353,9 @@ function launchContainer() {
     getAttribute() { return null; },
     querySelector(sel) { return this.controls[sel] || null; },
     querySelectorAll(sel) {
+      // cch-w45-s5-fu: wireMeRetry binds every match now, so the control map
+      // has to answer the plural lookup as well as the singular one.
+      if (this.controls[sel]) return [this.controls[sel]];
       if (sel !== ".runway-sub") return [];
       const out = [];
       const re = /<p class="runway-sub">([^<]*)<\/p>/g;

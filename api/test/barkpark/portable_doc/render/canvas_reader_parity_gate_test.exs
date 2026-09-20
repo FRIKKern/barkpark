@@ -36,9 +36,14 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       the saved-block re-render matches the reader by construction.
 
     * VERBATIM-CARRY (sheet, embed) — the canvas shows a read-only CHIP, not the
-      reader render, but carries the WHOLE block on `bpBlock` with ZERO
-      value/content ops (embed-node.js). So the SAVED block reader-renders
-      byte-identically to the original: parity of the persisted bytes. §4 proves
+      reader render, and carries the WHOLE block on `bpBlock`. The only
+      value/content op it can emit is a deliberate retarget: `mountAtomRetarget`
+      (embed-node.js) commits the new target through `setNodeMarkup` and
+      run-convert emits exactly one `patch-block` per retarget — `{ref,
+      snapshot: null}` for a sheet, `{target}` for an embed (proven by the audit
+      suite __sheet_embed_retarget_audit.test.mjs, §5 and §5c). Every OTHER key
+      rides verbatim, so the SAVED block reader-renders byte-identically to the
+      original apart from that one reference: parity of the persisted bytes. §4 proves
       the reader render is deterministic and the canvas JS shows only chip
       markup, never the reader's sheet/embed markup.
 
@@ -548,8 +553,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   # ── §4 VERBATIM-CARRY parity (sheet, embed) ─────────────────────────────────
   #
   # The chip-carry pair shows a read-only chip, not the reader render. Parity is
-  # carried by the block riding VERBATIM on bpBlock (embed-node.js, zero
-  # value/content ops): the saved block reader-renders identically. Assert the
+  # carried by the block riding VERBATIM on bpBlock: the canvas emits at most one
+  # `patch-block` per deliberate retarget (`mountAtomRetarget` in embed-node.js;
+  # audit suite §5 / §5c) and no other value/content ops, so the saved block
+  # reader-renders identically. Assert the
   # reader render is deterministic + non-empty, and (via §3) that the canvas JS
   # shows only chip markup, never the reader's sheet/embed markup.
 

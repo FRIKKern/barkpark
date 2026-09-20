@@ -135,7 +135,11 @@ defmodule BarkparkWeb.PublishKeepsTaskClaimHttpTest do
             "title" => id,
             "content" =>
               LabelFixtures.with_registered_labels(
-                %{"kind" => "task", "lifecycle_status" => "open"},
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open"
+                },
                 @dataset
               )
           }

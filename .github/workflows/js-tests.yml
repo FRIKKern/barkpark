@@ -150,13 +150,37 @@ jobs:
       - name: Setup Node (pnpm store cached on the lockfile)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # cache: pnpm needs pnpm on PATH first, hence the reorder above
           cache: pnpm
           cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: "The Node pin above satisfies engines.node and the root vitest config can load under it (task-a9c4b827881d71bd)"
+        run: node scripts/check-node-floor.mjs --selftest && node scripts/check-node-floor.mjs
+
+      # COVERAGE for the `size` and `test` steps below, in front of both
+      # (task-3cd40ebba5ab106a, task-d4c973367c0d1a76). `turbo run <task>`
+      # scores a package with NO SCRIPT for that task as a SUCCESS, so
+      # "N successful, N total" counts the packages that OPTED IN and says
+      # nothing about the workspace. MEASURED on 6744725c58d6657b0e: a 4000-key
+      # object appended to packages/nextjs-query/src/index.ts took
+      # dist/index.mjs from 291 B to 238114 B and `turbo run size` still
+      # printed "14 successful, 14 total", EXIT=0 — nextjs-query declared no
+      # `size` script. The same hole swallowed a package with a deliberately
+      # failing test file and no `test` script ("20 successful, 20 total").
+      # This step derives the package set from pnpm-workspace.yaml and demands
+      # a byte ceiling of every published library and a runnable suite of every
+      # package that ships test files. No step below can be trusted without it:
+      # a green Bundle budget means "the budgeted packages are within budget",
+      # and only this step says which packages those are. Runs on the manifests
+      # alone, so it is placed before Build and costs seconds.
+      - name: "Turbo task coverage selftest (proves the coverage gate can still lose)"
+        run: node scripts/check-turbo-task-coverage.mjs --selftest
+
+      - name: "Turbo task coverage (every published package has a byte ceiling; every test-shipping package runs its tests)"
+        run: node scripts/check-turbo-task-coverage.mjs
 
       - name: Cache turbo task outputs (js/.turbo)
         # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
@@ -394,7 +418,7 @@ jobs:
       - name: Setup Node (pnpm store cached on the lockfile)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # cache: pnpm needs pnpm on PATH first, hence the reorder above
           cache: pnpm
           cache-dependency-path: js/pnpm-lock.yaml

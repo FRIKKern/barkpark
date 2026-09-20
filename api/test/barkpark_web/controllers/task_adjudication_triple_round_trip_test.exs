@@ -95,6 +95,7 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
             "content" =>
               Map.merge(LabelFixtures.weighted_labels(), %{
                 "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "lifecycle_status" => "open",
                 disposition_key => "parked",
                 trigger_key => trigger,

@@ -148,7 +148,14 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
           # the projected body keeps its description.
           "content" =>
             LabelFixtures.with_registered_labels(
-              Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content),
+              Map.merge(
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open"
+                },
+                content
+              ),
               @dataset
             )
         },
