@@ -33,9 +33,31 @@
 # value-taking flags and their values, `file:LINE` addressing and a bare
 # argument-less run are all untouched.
 #
-# EXIT: 0/1 whatever `mix test` returned · 2 REFUSED before running.
-#   (2 is deliberately distinct from mix's own 1 so a gate can tell "tests
-#   failed" from "the recipe named a file that is not there".)
+# EXIT CODES — all of them, because a caller that cannot tell a refusal from a
+# red suite has no gate (task-620ea822de73bf5e):
+#
+#   0   `mix test` ran and every test passed.
+#   1   mix's own failure: a compile error, or `mix test` refusing because EVERY
+#       named path was unmatched. Tests may or may not have run.
+#   2   `mix test` RAN TO COMPLETION and tests FAILED. This is ExUnit's failure
+#       status (`--exit-status`, default 2) — the suite has a subject and a red.
+#   64  REFUSED BEFORE RUNNING — this script's own verdict. NOTHING was run.
+#       The argument list would have produced a green with no subject, or the
+#       CWD is not a mix project.
+#
+# WHY 64 and not 3: ExUnit's documented statuses are 0 on success and the
+# `--exit-status` value on failure, whose default is 2; mix itself uses 1. Any
+# small integer is reachable because `--exit-status N` is caller-settable, so
+# the refusal code must be one nobody would ever pass: 64 is sysexits(3)'s
+# EX_USAGE, and a refusal IS a usage error — the argv named a file that is not
+# there. A gate may therefore key on it directly:
+#
+#   ../scripts/mix-test-strict.sh test/a_test.exs; rc=$?
+#   case $rc in 0) echo PASS ;; 64) echo REFUSED, nothing ran ;; *) echo TESTS FAILED ;; esac
+#
+# BEFORE 2026-09-20 both refusal arms exited 2, i.e. the SAME code ExUnit uses
+# for "tests failed" — `… || echo REFUSED` called a red suite a refusal, and the
+# remedy for each is the opposite one (fix the argv vs fix the code).
 #
 # HONEST LIMIT, stated once: the test-file pattern here is ExUnit's default
 # `*_test.exs`. A project that sets a custom `test_pattern` in its Mix project
@@ -52,6 +74,11 @@
 set -uo pipefail
 
 ME="mix-test-strict"
+
+# The refusal status. Named once so a caller can grep it out of this file and so
+# the harness can mutate it back to 2 to prove the distinctness case is real.
+# See the EXIT CODES block above for why it is 64 and not 3.
+REFUSE_EXIT=64
 
 # Flags that SWALLOW the following token. That token is a value, never a path,
 # so it must not be existence-checked: `--only boot` would otherwise refuse
@@ -87,7 +114,8 @@ note_refusal() { refusals="${refusals}  $1"$'\n'; }
 # MUT: project-guard
 if [ ! -f "mix.exs" ]; then
   echo "$ME: CANNOT READ — no mix.exs in $(pwd). Run this from a mix project directory (api/ or cloud/)." >&2
-  exit 2
+  echo "$ME: REFUSED before running (exit $REFUSE_EXIT) — nothing was run." >&2
+  exit "$REFUSE_EXIT"
 fi
 
 # Validation runs in a FUNCTION so its `shift`s consume the function's own
@@ -146,8 +174,10 @@ if [ -n "$refusals" ]; then
     echo "  \`mix test\` drops an unmatched path SILENTLY whenever another path matches, and still"
     echo "  exits 0 with a full \"N tests, 0 failures\" trailer. Fix the path (or drop it) before"
     echo "  quoting this gate. Nothing was run."
+    echo ""
+    echo "  Exit $REFUSE_EXIT means REFUSED, nothing ran. A completed run whose tests failed exits 2."
   } >&2
-  exit 2
+  exit "$REFUSE_EXIT"
 fi
 
 if [ -n "${BP_MIX_TEST_STRICT_DRY_RUN:-}" ]; then

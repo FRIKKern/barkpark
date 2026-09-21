@@ -544,3 +544,103 @@ jobs:
             exit 1
           fi
           exit "$rc"
+
+      # ── THE TEXT THAT ACTUALLY LANDS (task-ee5b82efaee0fb0b) ───────────────
+      # Every step above reads the PR BODY. The commit message that squashes
+      # onto main is a SEPARATE piece of text, and until now nothing checked
+      # it. This repo's squash setting is COMMIT_MESSAGES (measured 2026-09-09,
+      # task-6275588f44322ab9), so the landed commit carries the BRANCH
+      # commits' messages — not the body. GitHub's default would compose the
+      # squash from the PR title and body, and then the two could not diverge;
+      # the setting is the mechanism.
+      #
+      # SPECIMEN, measured 2026-09-20: PR #19417 merged as 9f931a6f8. Its body
+      # named task-f902a5f2f6e3bcb3 (real, done). Its landed message ends
+      # `Task: task-PENDING-nightly`, which returns not_found. This gate
+      # reported success — correctly, by its own contract — and main now
+      # carries a commit whose only durable ledger pointer is dead. A second
+      # lane rebuilt the same fix as #19416 partly because the ledger showed no
+      # row owning the landed work. git log is what a future auditor reads.
+      - name: Collect the trailers that will LAND on main
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body.
+        id: landing
+        if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # ONE FILE PER COMMIT, NAMED BY ITS SHA. Concatenating the messages
+          # resolved the ids correctly and then could not say WHICH COMMIT
+          # carried the dead one — on a ten-commit branch that is a refusal the
+          # author can only act on by bisecting their own branch. The sha rides
+          # the filename so it survives into the verdict.
+          out="${RUNNER_TEMP}/landing-commits"
+          rm -rf "$out"; mkdir -p "$out"
+          # UNRESOLVABLE IS UNKNOWN, NEVER EMPTY. An empty file reads as "no
+          # trailers", which the checker below passes — so a fetch that quietly
+          # missed would turn this into a green step that looked at nothing.
+          # That is the exact failure mode the merge-base cutoff above spent a
+          # whole slice removing; it does not get to come back here.
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            if ! git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null; then
+              git fetch --no-tags --depth=200 origin "$sha" 2>/dev/null || true
+            fi
+            if ! git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null; then
+              echo "::error title=pr-task-gate could not read what this PR will land::The commit ${sha} does not resolve in this checkout even after fetching it, so the gate cannot read the commit messages that will squash onto main. Refusing to certify a PR whose landed text it could not read — rebase onto current main, or re-run this check." | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+          # --no-merges: a merge commit's own message is not part of the squash
+          # body and carries no trailer of its own. The range is BASE..HEAD,
+          # which is exactly the commit list GitHub squashes.
+          n=0
+          while read -r sha; do
+            [ -n "$sha" ] || continue
+            n=$((n + 1))
+            git log -1 --format=%B "$sha" > "$out/$(printf '%04d' "$n")-${sha}.msg"
+          done < <(git rev-list --no-merges --reverse "${BASE_SHA}..${HEAD_SHA}")
+          echo "dir=${out}" >> "$GITHUB_OUTPUT"
+          echo "commits=${n}" >> "$GITHUB_OUTPUT"
+          echo "Collected ${n} commit message(s) that will squash onto main." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify every task trailer that will LAND resolves
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body.
+        id: landing_verify
+        if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
+        env:
+          LANDING_COMMITS_DIR: ${{ steps.landing.outputs.dir }}
+          # The OTHER trailer, carried only so the refusal can say which of the
+          # two it is talking about. There are two `Task:` lines in play and
+          # they are routinely different; an author told only "a task does not
+          # exist" goes and edits the PR body, which is the one that is fine.
+          BODY_TASK_ID: ${{ steps.ref.outputs.task_id }}
+          BASE_REF_HINT: origin/${{ github.event.pull_request.base.ref }}
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+        run: |
+          # `|| rc=$?` for the same reason the verify step above uses it:
+          # `set -uo pipefail` does not clear the -e in GitHub's `bash -e {0}`,
+          # so a bare call would abort the step and make every handler below
+          # dead code — which is what the exit-2 handler was for the whole life
+          # of this gate (D24).
+          set -uo pipefail
+          err="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pr-task-gate-landing.err"
+          rc=0
+          bash scripts/pr-task-gate.sh --check-landing-trailers 2>"$err" || rc=$?
+          cat "$err" >&2
+          evidence="$(grep -E '^pr-task-gate: ' "$err" | tail -4 | tr '\n' ' ' || true)"
+          [ -n "$evidence" ] || evidence="(the gate printed no pr-task-gate: line — see the step log)"
+          if [ "$rc" = "3" ]; then
+            echo "::error title=BARKPARK_TASK_TOKEN was REFUSED — this is not an outage::The task ledger answered and REJECTED this gate's credential (HTTP 401/403) while resolving the trailers this PR will land. Re-running will NOT clear it; re-mint BARKPARK_TASK_TOKEN (least-privilege, read,write) and gh secret set it. Evidence: ${evidence}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$rc" = "5" ]; then
+            echo "::error title=Ledger answered with a payload this gate cannot read::The ledger answered 2xx while resolving a landing trailer but its body carried no readable task document, so whether the commit this PR lands points at a real row is UNKNOWN. Not an outage and not a credential fault. Evidence: ${evidence}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$rc" = "2" ]; then
+            echo "::error title=Ledger unreachable — landed trailer UNVERIFIED::The ledger did not answer after the gate's bounded retries, so whether the commit this PR lands points at a real task row is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up. Do NOT reach for the 'hotfix!' label: it files its record on the SAME host. Evidence: ${evidence}" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          exit "$rc"

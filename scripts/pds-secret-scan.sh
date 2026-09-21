@@ -200,7 +200,7 @@ deny_member_count() { [ -s "$DENY_MEMBERS_FILE" ] && wc -l < "$DENY_MEMBERS_FILE
 # ── the bundle scan: raw bytes, every member ────────────────────────────────
 # Returns the hit count via the global HITS; prints one line per hit.
 scan_bundle() { # tar-path
-  local bundle="$1" dir member label value n rel first table_members
+  local bundle="$1" dir member label value n rel first table_members mlist enumerated_members=0
   [ -r "$bundle" ] || die "cannot read bundle: $bundle"
   dir="$(mktemp -d "${TMPDIR:-/tmp}/pds-scan.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $dir"
@@ -211,8 +211,28 @@ scan_bundle() { # tar-path
   table_members=0
   MEMBER_LIST="$(mktemp "${TMPDIR:-/tmp}/pds-scan-members.XXXXXX")"
   TMP_FILES="$TMP_FILES $MEMBER_LIST"
+
+  # MATERIALISE THE ENUMERATION, THEN COUNT IT, BEFORE READING A SINGLE MEMBER.
+  # `members` below counts ITERATIONS; this counts the paths `find | sort`
+  # actually produced. The two must be equal, and the check after the loop is
+  # the only thing that can tell "scanned 40 of 40" from "scanned 1 of 40".
+  # A file rather than the old `< <(find …)` process substitution so the two
+  # numbers are read off ONE enumeration — re-running find would compare a scan
+  # against a second, possibly different, listing. `awk`, not `grep -c`: a grep
+  # that matches nothing exits 1, and an empty bundle is a case that already has
+  # its own refusal below.
+  mlist="$(mktemp "${TMPDIR:-/tmp}/pds-scan-find.XXXXXX")"
+  TMP_FILES="$TMP_FILES $mlist"
+  find "$dir" -type f | sort > "$mlist"
+  enumerated_members="$(awk 'NF { n++ } END { print n+0 }' "$mlist")"
+
   say "bundle: $bundle"
-  while IFS= read -r member; do
+  # `|| [ -n "$member" ]` is not decoration: a plain `while read` DROPS a final
+  # line with no trailing newline, and the identity below would then refuse a
+  # complete bundle. (The sibling table loop learned this from its own control
+  # arm — see task-4121ac48f4e4f71e.)
+  while IFS= read -r member || [ -n "$member" ]; do
+    [ -n "$member" ] || continue
     members=$((members + 1))
     rel="${member#"$dir"/}"
     printf '%s\n' "$rel" >> "$MEMBER_LIST"
@@ -226,7 +246,30 @@ scan_bundle() { # tar-path
         say "  HIT  member=$rel  ammo=$label  value=$(show "$value")  lines=$n  first_line=${first:-?}"
       fi
     done < "$AMMO_FILE"
-  done < <(find "$dir" -type f | sort)
+  done < "$mlist"
+
+  # ── THE COUNT IDENTITY ──────────────────────────────────────────
+  # FIRST, and ahead of BOTH anti-vacuity floors below, because a loop that died
+  # on its first iteration leaves members=0 over a NON-empty listing: the floor
+  # would then say "bundle contains ZERO members" about a tar holding 40. Two
+  # failures, two messages, and this one names BOTH numbers so a reader can see
+  # how much of the container was actually examined.
+  #
+  # WHY IT EXISTS (task-57fbebcb2d5339ff). The loop above reads the member list
+  # on fd 0. Any body child that reads stdin — a future `grep` with no file
+  # operand, a `read`, an `ssh`, a pager — swallows the remaining member paths
+  # and the loop ENDS EARLY with no error and no non-zero status. The scan then
+  # prints "RESULT: VALUE SCAN CLEAN" over one member of forty in the SAME WORDS
+  # it uses for forty of forty. The floors below cannot see that: `-eq 0`
+  # separates "nothing" from "something", never "some" from "all" — a scan that
+  # stopped after one member leaves members=1 and table_members=1 and clears
+  # both. No body child reads fd 0 today; the identity is for the one added
+  # next year, which is precisely the child no fd-discipline review can name.
+  # MUT-ANCHOR: bundle-count-identity
+  if [ "$members" -ne "$enumerated_members" ]; then
+    die "SHORT BUNDLE SCAN — examined $members of $enumerated_members member(s) enumerated from $bundle. The member loop ended before the listing did (a loop-body child that reads stdin consumes the remaining paths silently); a partial scan must never print CLEAN in the same words as a full one."
+  fi
+  # MUT-END: bundle-count-identity
 
   # PDS-D20 anti-vacuity, aimed at this scan's OWN blind spot: a value scan
   # over zero bytes is vacuously clean. An empty tar has no members; a
@@ -241,9 +284,9 @@ scan_bundle() { # tar-path
   fi
 
   if [ "$(ammo_count)" -gt 0 ]; then
-    say "  members scanned: $members ($table_members under tables/)   ammo values: $(ammo_count)"
+    say "  members scanned: $members of $enumerated_members enumerated ($table_members under tables/)   ammo values: $(ammo_count)"
   else
-    say "  members scanned: $members ($table_members under tables/)   ammo values: 0 — no value scan ran, member presence only"
+    say "  members scanned: $members of $enumerated_members enumerated ($table_members under tables/)   ammo values: 0 — no value scan ran, member presence only"
   fi
 
   check_deny_members
