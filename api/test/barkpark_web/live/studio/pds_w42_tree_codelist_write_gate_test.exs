@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import BarkparkWeb.LiveSettle, only: [settle!: 2]
 
   alias Barkpark.{Auth, Content}
   alias Barkpark.Content.Codelists
@@ -221,39 +222,19 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
   # ping, then ask whether the LiveView has anything left, and ping again until
   # it is twice-quiet. Each iteration strictly advances the chain, so it
   # terminates; the fuel only turns a hang into a named failure.
+  #
+  # The convergence itself is `BarkparkWeb.LiveSettle.settle!/2` — shared, not
+  # a third copy: `flush_form/3`-shaped chains in the studio tree need the same
+  # loop, and #19712's latency probe needs it with a DIFFERENT barrier, so the
+  # barrier is a parameter there. See that module for the scope limit (a
+  # `Process.send_after` generation is not in the mailbox and is not covered).
   defp tree_node_select(view, code) do
     view
     |> with_target("#tree-" <> @block_id)
     |> render_hook("tree_node_select", %{"code" => code})
 
-    settle!(view)
+    settle!(view, label: "tree_node_select/2")
     :ok
-  end
-
-  # Barrier until the LiveView process has nothing queued on two consecutive
-  # pings. One empty reading can be a window between a message arriving and the
-  # process dequeuing it; two, with a full barrier in between, cannot be the
-  # middle of this chain — every generation here is enqueued BEFORE the ping
-  # that precedes it is answered.
-  defp settle!(view, quiet \\ 0, fuel \\ 50)
-
-  defp settle!(_view, 2, _fuel), do: :ok
-
-  defp settle!(_view, _quiet, 0) do
-    flunk("""
-    the LiveView never went quiet after tree_node_select/2: 50 render/1 barriers \
-    and its mailbox was still non-empty. Either the select chain grew a repeating \
-    self-message, or the process is wedged.
-    """)
-  end
-
-  defp settle!(view, quiet, fuel) do
-    render(view)
-
-    case :erlang.process_info(view.pid, :message_queue_len) do
-      {:message_queue_len, 0} -> settle!(view, quiet + 1, fuel - 1)
-      _ -> settle!(view, 0, fuel - 1)
-    end
   end
 
   # What the component's OWN value is, as the editor renders it back: the
