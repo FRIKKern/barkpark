@@ -1247,13 +1247,32 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // to render the archives panel as a plain MEMBER — is the 139th scenario and
   // the 115th residue entry (family hash:#fleet), and the sweep refused the
   // same way until the entry was written.
-  assert.equal(r.total, 139);
+  // task-5ffdec2b609404bc moved it by two, and for a reason no earlier mover
+  // had: the modal seam stopped being a NAME CONVENTION in shoot.sh and became
+  // a scenarios.mjs `modal` field, so a scenario can finally ask for a dialog
+  // other than the account modal. `tokens-revoke-confirm` (the confirm-sheet
+  // shape, family hash:#settings) and `cmdk-palette` (the .modal-root:has(.cmdk)
+  // arm, family hash:#fleet) are the 140th and 141st scenarios and the 116th and
+  // 117th residue entries. Each is its HOST scenario's fixture deep-copied plus
+  // one field, so what they add to THIS sweep's axis is nothing — the tables
+  // beneath them are the ones the `tokens`/`fleet` cells already walk at all 18
+  // widths — and the sweep refused at exit 2 (`UNLISTED scenario
+  // "tokens-revoke-confirm"`) until both entries were written.
+  // task-499cab525e65018b moved it by two more, for the reason the seam above
+  // exists: `instance-pin-version` and `instance-update-conflict` (both family
+  // hash:#instance) are the first scenarios to reach `openPinModal` and
+  // `openUpdateConflictModal` — the two openModal call sites PR #19581's
+  // enumeration filed as having NO scenario at all. They are the 142nd and
+  // 143rd scenarios and the 118th and 119th residue entries; the sweep refused
+  // at exit 2 (`UNLISTED scenario "instance-pin-version" (family
+  // hash:#instance)`) until both entries were written.
+  assert.equal(r.total, 143);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 115, "115 is the RESIDUE, not the census");
+  assert.equal(r.residue, 119, "119 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 115, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 119, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
