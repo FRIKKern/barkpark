@@ -55,7 +55,15 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
   @token "barkpark-pds-groupc-admin"
 
   setup do
-    {:ok, _} = Auth.create_token(@token, "pds-groupc", "test", ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(
+        @token,
+        "pds-groupc",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     :ok
   end
 
