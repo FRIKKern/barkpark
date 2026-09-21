@@ -88,6 +88,14 @@ defmodule BarkparkWeb.QueryCountsDatasetIdFenceTest do
     own_ds_id = Tenancy.get_dataset(proj_one.id, dataset).id
     refute foreign_ds_id == own_ds_id
 
+    # The `own` control's premise, asserted rather than assumed: nothing else
+    # in this file can feel it. If the write path stopped stamping dataset_id
+    # and `own` went NULL, every count in all three tests below is unchanged —
+    # the row would ride the string disjunct instead of the id match and the
+    # suite would stay green while the moduledoc's "stamped with THIS project's
+    # dataset id" control had quietly stopped existing.
+    assert Repo.get_by(Document, doc_id: own).dataset_id == own_ds_id
+
     # The only way a test can manufacture the two off-normal row shapes: write
     # through the real path, then restamp. `legacy` becomes the unstamped
     # backfill leftover; `foreign` keeps its proj_one tenancy but carries
@@ -161,14 +169,16 @@ defmodule BarkparkWeb.QueryCountsDatasetIdFenceTest do
       assert counts(conn, raw, ws, proj_one, dataset)["counts"]["post"] == 1
     end
 
-    test "CONTROL: the sibling project sees its own stamped row, so the rows exist at all",
+    test "CONTROL: the PROJECT filter, not the dataset id, is what hides the foreign row here",
          %{conn: conn, raw: raw, ws: ws, proj_two: proj_two, dataset: dataset} do
       body = counts(conn, raw, ws, proj_two, dataset)
 
-      # proj_two holds only its seed row: the foreign-STAMPED doc is physically
-      # in proj_one, so the workspace/project filter (not the clause under test)
-      # keeps it out here. Proves the absence above is a fence, not an empty
-      # query against a dataset nobody wrote to.
+      # The `foreign` row carries proj_two's OWN dataset id, so the clause under
+      # test would happily admit it here — and it is still absent, because the
+      # row is physically in proj_one and `Scope.scope_to_workspace/3` ANDs the
+      # project. That separates the two fences: this census moves 1 -> 3 if the
+      # project filter is dropped, and is unmoved by the mutation the tests
+      # above measure. proj_two sees its seed row and nothing else.
       assert body["counts"] == %{"post" => 1}
     end
   end
