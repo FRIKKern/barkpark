@@ -73,6 +73,39 @@
     }
   } catch (e) {}
 
+  // 2c) The SCENARIO's own pre-paint seed — and it WINS over 2b (GR12).
+  //
+  //     Ordering is the whole fix (task-a0258bec59b256d7). A scenario declares
+  //     `seedLocal: { bp_theme: "iris" }` in scenarios.mjs precisely to assert
+  //     that a PERSISTED identity survives; the accent axis in 2b writes the
+  //     SHOT's identity into that same key. Applied before 2b, the scenario is
+  //     silently overwritten and identity-iris renders whatever ?accent= said —
+  //     byte-identical to shell-root at all five accents, which is how the
+  //     matrix built to prove GR12 came to disprove nothing. Applied AFTER, the
+  //     scenario beats the axis. Do not reorder these two blocks, and do not
+  //     move the accent write below this one "for symmetry": identity-seed.test.mjs
+  //     reds on exactly that, at every accent.
+  //
+  //     The map arrives as bytes in the HTML, ahead of this file — serve.mjs
+  //     injects it (see __preview__/seed-inject.mjs for why an import cannot
+  //     work here). Absent (a page served by something else, or a scenario that
+  //     seeds nothing) this block is a no-op and 2b stands.
+  try {
+    var seedLocal = window.__PREVIEW_SEED_LOCAL;
+    if (seedLocal && typeof seedLocal === "object") {
+      for (var sk in seedLocal) {
+        if (!Object.prototype.hasOwnProperty.call(seedLocal, sk)) continue;
+        window.localStorage.setItem(sk, String(seedLocal[sk]));
+        // bp_theme also paints: app.js mirrors the key onto the root element at
+        // boot, but the pre-paint attribute is what 2b set and what a shot of
+        // the first frame captures, so the seed has to move it too.
+        if (sk === BP_THEME_KEY && BP_THEMES.indexOf(String(seedLocal[sk])) !== -1) {
+          document.documentElement.setAttribute("data-bp-theme", String(seedLocal[sk]));
+        }
+      }
+    }
+  } catch (e) {}
+
   // 3) The scenarios module, imported once and cached. Any fetch awaits it.
   var scenariosReady = import(SCENARIOS_URL).then(function (mod) {
     // A typo'd ?scen= silently renders the default scenario — say so, loudly.
@@ -191,7 +224,7 @@
   // failed drive can never again be byte-identical to the twin it failed to
   // differ from — it fails LOUDLY instead of collapsing back into a collision.
   function driveGaveUp(sel) {
-    console.error('[preview] 2FA drive gave up waiting for "' + sel + '"');
+    console.error('[preview] drive gave up waiting for "' + sel + '"');
     var b = document.createElement("div");
     b.setAttribute("data-preview-drive-failed", sel);
     b.style.cssText =
@@ -235,10 +268,45 @@
           // (role=alert) only once the 422 lands. Without this the drive merely
           // ASSUMED its own subject; now a shot that never reached the 422 says
           // so by name instead of quietly photographing the enroll form.
-          whenPresent("#a2f-error", function () {});
+          whenPresent("#a2f-error", freezeShotSurface);
         });
       });
     });
+  }
+
+  // ── FREEZE THE SHOT (gr-p5r7-badcode-shot-nondeterministic) ────────────────
+  // The drive above ends with the app's own error handler re-focusing the OTP
+  // field (`grep -n 'a2f-otp' ../app.js` — the confirm-error branch re-seeds
+  // and re-focuses it). A FOCUSED text input is the one thing in this harness
+  // that is not a function of the DOM: it carries a BLINKING CARET on a wall
+  // clock Chrome's --virtual-time-budget does not freeze, and the focus ring
+  // arrives through a CSS transition whose phase depends on when the capture
+  // poll happens to fire.
+  //
+  // MEASURED, not hypothesised. Two clean shoots of this scenario at
+  // origin/main 2ff0d2c1a (Chrome for Testing 147.0.7727.15, headless shell):
+  //   account-modal-2fa-badcode-light-1440-iris  c1350453… 395866 B
+  //                                              7cfb2b44… 395120 B
+  // while all four plain `account-modal` shots were byte-identical across the
+  // same two runs. `magick compare` put EVERY differing pixel inside one
+  // 228x88 device-pixel box — the #a2f-otp input — and the crops show the
+  // caret present in one run and absent in the other. It is NOT the QR, which
+  // is a byte-matched SVG (`grep -n 'THE GATE IS A BYTE-MATCH' ../app.js`).
+  //
+  // So freeze both sources at shoot time, in the PREVIEW harness only — app.js
+  // is untouched, and a real user still gets a real caret. Focus is KEPT: the
+  // shot must still show the focused, rejected field; only its blink phase and
+  // its in-flight transitions are removed. Setting `transition:none` mid-
+  // transition snaps the property to its final computed value, so what lands
+  // is the settled frame rather than an arbitrary one.
+  function freezeShotSurface() {
+    if (document.querySelector("style[data-preview-shot-freeze]")) return;
+    var s = document.createElement("style");
+    s.setAttribute("data-preview-shot-freeze", "caret+transition+animation");
+    s.textContent =
+      "*,*::before,*::after{caret-color:transparent !important;" +
+      "transition:none !important;animation:none !important}";
+    (document.head || document.documentElement).appendChild(s);
   }
 
   if (params.get("modal") === "account") {
@@ -266,6 +334,51 @@
       })();
     });
   }
+
+  // 4d) DEFECT-E (task-7bd507ea989ef248) — the declarative per-scenario DRIVE.
+  //     Nine scenarios shot byte-identical to shell-instance in every one of
+  //     their 20 cells. Neither cause the filing guessed was the real one: their
+  //     data DOES reach route() and their screens DO exist. Two other causes —
+  //     the fleet card mounts at the TAIL of the instance Overview column and
+  //     shoot.sh shoots a 1000px VIEWPORT (below the fold), and the offload /
+  //     verify fixtures are read only by pollOffloadWatch / runVerifyNow, i.e.
+  //     behind a CLICK. The fold half is `shotHeight` (shoot.sh); THIS is the
+  //     click half: `SCENARIOS[scen].drive`, an ordered step list
+  //     (click/fill/await — documented above SCENARIOS in scenarios.mjs).
+  //
+  //     Two properties this inherits from the 2FA drive above, deliberately:
+  //     every step waits on a selector the REAL app painted (never a timer, so
+  //     no step can race the mocked fetch), and a step that never arrives paints
+  //     driveGaveUp's red banner IN THE FRAME — so a drive that did not land
+  //     announces itself in the PNG instead of collapsing back into the very
+  //     byte-identical twin it exists to break. The table is in scenarios.mjs
+  //     rather than here because smoke.mjs has to read it too (it imports the
+  //     module; it cannot import this classic script) — that is what makes
+  //     "this scenario is gated, and here is its gate" assertable in node.
+  function driveStep(step, done) {
+    var sel = step.click || step.fill || step.await;
+    if (!sel) { done(); return; }
+    whenPresent(sel, function (el) {
+      if (step.click) el.click();
+      else if (step.fill) el.value = step.value == null ? "" : String(step.value);
+      done();
+    });
+  }
+
+  function runDrive(steps, i) {
+    if (!steps || i >= steps.length) return;
+    driveStep(steps[i], function () { runDrive(steps, i + 1); });
+  }
+
+  // The account modal has its own seam above (?modal=account, a shoot.sh name
+  // convention); this one is keyed on the scenario's OWN field, so nothing has
+  // to be taught twice.
+  window.addEventListener("load", function () {
+    scenariosReady.then(function (mod) {
+      var def = mod && mod.SCENARIOS && mod.SCENARIOS[scen];
+      if (def && def.drive && def.drive.length) runDrive(def.drive, 0);
+    });
+  });
 
   // 5) Inert EventSource — the SPA opens one live stream at boot. It never fires
   //    on its own (a screenshot must be deterministic), but exposes a manual

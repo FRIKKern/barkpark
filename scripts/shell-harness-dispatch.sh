@@ -240,6 +240,9 @@ console-path-ratchet .github/workflows/console-harness.yml
 console-path-ratchet scripts/cloud-console-gate-shape.test.sh
 console-path-ratchet .github/workflows/cloud.yml
 console-path-ratchet .github/workflows/elixir.yml
+console-harness-pin scripts/console-harness.sh
+console-harness-pin scripts/console-harness-pin.test.sh
+console-harness-pin .github/workflows/console-harness.yml
 console-refusal-capture scripts/console-refusal-capture.mjs
 console-refusal-capture scripts/*.test.mjs
 weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
