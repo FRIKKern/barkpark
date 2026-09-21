@@ -43,13 +43,18 @@
 #     Sharing that exact key means a warm actions/cache entry produced by
 #     paper-rig.yml is restored here, so the chromium DOWNLOAD is usually not
 #     repeated — only `--with-deps`' apt step is.
-#   * MEASURED ON THIS PR: see the run quoted in the PR body. The budget is
-#     timeout-minutes: 12, and the accepted steady-state cost is roughly 2-4
-#     ubuntu-latest minutes per triggering PR (cold cache, mostly the apt
-#     dependency install), and zero on every PR that does not touch the five
-#     paths in the dispatcher. That is the price of the only instrument in the
-#     repo that can read this cascade without ssh and a deployed build, and it
-#     is accepted.
+#   * MEASURED, not estimated — run 35553223348 (head 12120679a, PR #19673,
+#     2026-09-21). `Cache hit for: Linux-playwright-1.59.1`, ~253 MB restored in
+#     2.0s, so the key really is shared and chromium really was not downloaded.
+#     Wall clock: `Dispatch (scrim paths)` 02:10:43 -> 02:11:10 (27s) and
+#     `Studio scrim threshold control` 02:14:33 -> 02:15:10 (37s) = ~2
+#     ubuntu-latest minutes billed for the pair, warm. A cold cache adds the
+#     chromium download and the `--with-deps` apt step on top of that; the
+#     budget is timeout-minutes: 12.
+#   * AND ZERO on every PR that does not touch the five paths in the dispatcher
+#     — the dispatch job is the only thing that runs. That is the price of the
+#     only instrument in the repo that can read this cascade without ssh and a
+#     deployed build, and it is accepted.
 name: Studio scrim threshold
 
 on:
