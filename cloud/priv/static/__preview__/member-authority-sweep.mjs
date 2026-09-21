@@ -774,7 +774,17 @@ const PIN_MEMBER_SCENARIOS = 16;
 // sweep and reading what it PRINTED ("the committed corpus grew to 141
 // scenario(s), pinned at 139") and the actor-set line, which still says 16 —
 // never by adding one.
-const PIN_TOTAL_SCENARIOS = 141;
+//
+// 141 -> 143 (task-499cab525e65018b): `instance-pin-version` and
+// `instance-update-conflict`, the first scenarios to render the pin form and the
+// pin-conflict sheet — the two openModal call sites PR #19581's enumeration
+// found with NO scenario at all. The member slice STAYS at 16 for the same
+// reason as the pair above: both are `instance-behind`'s fixture, whose actor is
+// an OWNER, so neither can answer role="member" by construction. 143 was
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
+// corpus grew to 143 scenario(s), pinned at 141") and the actor-set line, which
+// still says 16 — never by adding one.
+const PIN_TOTAL_SCENARIOS = 143;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

@@ -6629,6 +6629,67 @@ SCENARIOS["cmdk-palette"] = {
   modal: "cmdk",
 };
 
+// ── THE TWO CALL SITES WITH NO SCENARIO AT ALL (task-499cab525e65018b) ──────
+// PR #19581 derived every `openModal(` call site in app.js — re-derive it, the
+// number is not a memory:
+//
+//   grep -n 'openModal(' cloud/priv/static/app.js
+//
+// 31 hits, THREE of which are not calls (two prose lines and the
+// `function openModal(html)` definition) => 28 call sites. Twenty-six of them
+// have a host screen somewhere in this corpus, so widening the oracle to one is
+// a planFor() branch. TWO had no scenario at ALL:
+//
+//   openUpdateConflictModal   the pin-conflict sheet
+//   openPinModal              the pin-version form
+//
+// `pin-race.mjs` tests the pin LOGIC and renders nothing, so no PNG in this
+// harness has ever contained either dialog and the CSSOM oracle could not
+// certify them. These two scenarios are what closes that.
+//
+// BOTH RIDE `instance-behind`, and neither invents a fixture: that scenario is
+// already the corpus's only owner-actor box whose Updates panel paints both the
+// live `#inst-update` CTA and the live `[data-au="pin"]` policy control
+// (`behindInstance` carries `pinned_release: null`, so autoupdateActions'
+// `showPin` is true). Same deep-copy discipline as the two above: whatever the
+// two shots differ by is the dialog, because every other byte is the host's.
+SCENARIOS["instance-pin-version"] = {
+  ...SCENARIOS["instance-behind"],
+  label:
+    "Instance Updates panel — the PIN VERSION form itself, opened by a real click on the panel's own Pin version control: a release-tag input over the box it freezes",
+  data: copyData("instance-behind"),
+  modal: "pin-version",
+};
+
+// The conflict sheet needs a REFUSAL, and it is the ONE thing these two do not
+// share. `instanceSelfUpdate` is the only key added to the host's fixture, and
+// it changes NOTHING that renders before the click: it answers a POST that no
+// scenario issues until a person presses Update.
+//
+// The box is deliberately NOT pinned in its own fixture. That is not an
+// oversight, it is the state this dialog exists FOR: the console's copy of the
+// row was read before the pin landed, so the operator is looking at a box that
+// offers "Update to v0.9.2" and the plane refuses with a pin they cannot see.
+// Pinning the fixture would move the Autoupdate rail's badge and the panel's
+// buttons, and the host screen under the sheet would stop being the one
+// `instance-behind` already pins.
+SCENARIOS["instance-update-conflict"] = {
+  ...SCENARIOS["instance-behind"],
+  label:
+    "Instance Updates — the PIN-CONFLICT sheet: the plane answers the self-update 409 pinned, and the refusal names the freeze and offers the explicit override rather than dying into a toast",
+  data: {
+    ...copyData("instance-behind"),
+    // The typed envelope app.js's updateConflict() reads: `data.error.code`,
+    // with the tag on `pinned_release`. `kind: "pinned"` on a non-forced call
+    // is the ONLY branch that reaches openUpdateConflictModal.
+    instanceSelfUpdate: {
+      status: 409,
+      body: { error: { code: "pinned", pinned_release: "v0.8.4" } },
+    },
+  },
+  modal: "update-conflict",
+};
+
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
 export const DEFAULT_SCENARIO = "empty";
 
@@ -7016,6 +7077,21 @@ export function route(name, method, path, state) {
   if (bpRollback && method === "POST") {
     return d.instanceRollback ||
       { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
+  }
+  // task-499cab525e65018b — POST /v1/barkparks/:id/self-update, the seam the
+  // Update CTA presses. UNMODELLED until now: it fell through to the terminal
+  // `/v1/` 200 {} at the bottom of route(), and a 200 is not the 202 the plane
+  // answers, so every preview click on Update took updateInstance's REFUSAL
+  // branch, classified `{}` as the unnamed `other` kind and died into a toast.
+  // The consequence is the one this row was filed for: `openUpdateConflictModal`
+  // — reached ONLY from `c.kind === "pinned" && !opts.force` — was structurally
+  // unreachable from this harness, at any width, theme or accent.
+  // Same shape as the rollback arm directly above: default 202, and a scenario
+  // drives one named refusal through `d.instanceSelfUpdate`.
+  const bpSelfUpdate = p.match(/^\/v1\/barkparks\/([^/]+)\/self-update$/);
+  if (bpSelfUpdate && method === "POST") {
+    return d.instanceSelfUpdate ||
+      { status: 202, body: { status: "updating" } };
   }
   // cch-w49-s7 — the plane puts D554's `billing_capability` on this 200 as a
   // TOP-LEVEL SIBLING (router.ex: `%{subscription: …, billing_capability:

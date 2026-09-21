@@ -346,6 +346,11 @@
     "revoke-token": driveRevokeTokenSheet,
     // openCommandPalette — the `.modal-root:has(.cmdk)` arm.
     cmdk: driveCommandPalette,
+    // openPinModal / openUpdateConflictModal (task-499cab525e65018b) — the two
+    // call sites that had NO scenario at all until this table could be asked
+    // for them by name.
+    "pin-version": drivePinVersionForm,
+    "update-conflict": driveUpdateConflictSheet,
   };
 
   function openAccountModalThen(after) {
@@ -459,6 +464,44 @@
       if (tries++ < 60) { window.setTimeout(fire, 50); return; }
       driveGaveUp("#cmdk-input");
     })();
+  }
+
+  // THE PIN FORM (app.js openPinModal). A real click on the Updates panel's own
+  // `[data-au="pin"]` control, never a direct call: that control is bound by
+  // wireUpdatePanel()'s delegation and the live `data-au` mount hook exists on
+  // the AUTHORITY-GRANTED arm only (adminWriteControlHtml), so calling the
+  // opener would photograph a dialog a plain member is never handed the button
+  // for. `#pin-go` and not `.modal-card`: the panel's other three policy
+  // controls (pause/resume/unpin) are `data-au` too and open no dialog at all,
+  // so the submit button of the pin FORM is what proves this is the pin sheet.
+  function drivePinVersionForm() {
+    whenPresent('[data-au="pin"]', function (btn) {
+      btn.click();
+      // #pin-input takes focus on open, so the caret blinks on a wall clock
+      // --virtual-time-budget does not freeze — same reason the other drives
+      // freeze the surface.
+      whenPresent("#pin-go", freezeShotSurface);
+    });
+  }
+
+  // THE PIN-CONFLICT SHEET (app.js openUpdateConflictModal). TWO real clicks,
+  // because that is how many a person makes: #inst-update opens
+  // confirmUpdateInstance's generic confirm, and #update-go inside it is what
+  // POSTs the self-update. The 409 the scenario's `instanceSelfUpdate` answers
+  // is what REPLACES that confirm with this sheet — so the dialog is reached
+  // through the real transport branch (updateConflict -> kind "pinned" ->
+  // !opts.force), not by calling the opener with a hand-built copy object.
+  // #update-force is the override button; it exists ONLY on a conflict copy
+  // that carries a forceLabel, which is precisely what tells this sheet apart
+  // from the confirm it replaced.
+  function driveUpdateConflictSheet() {
+    whenPresent("#inst-update", function (cta) {
+      cta.click();
+      whenPresent("#update-go", function (go) {
+        go.click();
+        whenPresent("#update-force", freezeShotSurface);
+      });
+    });
   }
 
   // The resolution order, stated once: URL override, then the scenario's own

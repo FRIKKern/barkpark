@@ -1258,13 +1258,21 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // beneath them are the ones the `tokens`/`fleet` cells already walk at all 18
   // widths — and the sweep refused at exit 2 (`UNLISTED scenario
   // "tokens-revoke-confirm"`) until both entries were written.
-  assert.equal(r.total, 140);
+  // task-499cab525e65018b moved it by two more, for the reason the seam above
+  // exists: `instance-pin-version` and `instance-update-conflict` (both family
+  // hash:#instance) are the first scenarios to reach `openPinModal` and
+  // `openUpdateConflictModal` — the two openModal call sites PR #19581's
+  // enumeration filed as having NO scenario at all. They are the 141st and
+  // 142nd scenarios and the 117th and 118th residue entries; the sweep refused
+  // at exit 2 (`UNLISTED scenario "instance-pin-version" (family
+  // hash:#instance)`) until both entries were written.
+  assert.equal(r.total, 142);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 116, "116 is the RESIDUE, not the census");
+  assert.equal(r.residue, 118, "118 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 116, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 118, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
