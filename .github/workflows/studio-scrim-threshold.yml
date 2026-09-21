@@ -105,8 +105,18 @@ jobs:
             echo "scrim=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
+          # Unresolvable base, or a base with no common ancestor: TRUE, never a
+          # guess. `git diff A...B` FAILS outright without a merge base, and
+          # under `set -e` that would be a red dispatcher rather than a silent
+          # false — survivable, but a needless red on a force-pushed or
+          # re-parented head, so it is answered here instead.
           if [ -z "${BASE_SHA:-}" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             echo "base sha '${BASE_SHA:-}' is unresolvable — dispatching TRUE rather than guessing"
+            echo "scrim=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git merge-base "$BASE_SHA" HEAD >/dev/null 2>&1; then
+            echo "no common ancestor with $BASE_SHA — dispatching TRUE rather than guessing"
             echo "scrim=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
