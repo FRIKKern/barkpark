@@ -47,7 +47,14 @@ defmodule Mix.Tasks.Bokbasen.List do
 
   @impl Mix.Task
   def run(argv) do
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51), not `app.start`: a full boot binds
+    # the LIVE slot's port when `PHX_SERVER` is set and puts up a second Oban
+    # on the live queues. MEASURED, not assumed: this task is one scoped
+    # `Repo.all` over `documents` plus `BokbasenStatus.read/1`, a pure map
+    # read — no Content writer, no Oban insert, no endpoint read. The dev
+    # corpus prints the identical 4 rows under both boots (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     opts =
       try do

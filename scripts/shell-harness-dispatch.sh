@@ -479,6 +479,9 @@ mix-test-strict scripts/mix-test-strict.test.sh
 scratchpad-reaper scripts/scratchpad-reaper.sh
 scratchpad-reaper scripts/scratchpad-reaper.test.sh
 scratchpad-reaper scripts/disk-headroom-guard.sh
+echo-json-parse scripts/echo-json-parse-guard.test.sh
+echo-json-parse scripts/fixtures/echo-json-parse-row.json
+echo-json-parse .claude/skills/session/SKILL.md
 '
 self=".github/workflows/shell-harnesses.yml"
 self_script="scripts/shell-harness-dispatch.sh"

@@ -2208,10 +2208,50 @@ jobs:
           named "seal-predicate.test.mjs" || { echo "::error::selection self-test: the workflow scan no longer sees a suite this file demonstrably runs by name — the predicate has gone blind and would re-run everything or nothing"; exit 1; }
           named "no-such-suite-zzz.test.mjs" && { echo "::error::selection self-test: the workflow scan matches a basename that appears nowhere — the predicate cannot say NO, so it would select nothing forever"; exit 1; } || true
 
+          # SELF-TEST 3 — THE ITERATION, NOT THE PREDICATE. The two arms above
+          # exercise `named`, and `named` is NOT where this step diverges:
+          # measured 2026-09-21 on the same extracted body under /bin/sh,
+          # /bin/bash and /bin/zsh, it answers identically in all three (YES
+          # seal-predicate, NO bogus) and BOTH arms pass in all three. They were
+          # never broken. What they cannot see is the line below them: `for f in
+          # $all` word-splits an unquoted expansion under sh and bash and does
+          # NOT under zsh, which is the default shell on this repo's development
+          # Macs. Same script, same tree: sh -> 17 suites selected, bash -> 17,
+          # zsh -> ONE iteration with $f bound to the whole newline-joined list,
+          # one garbage basename, `named` says NO, and all 22 suites land in
+          # $todo — including seal-predicate.test.mjs, the one suite this step
+          # exists to exclude (see the ten-minute note above).
+          #
+          # CI IS NOT AT RISK: GitHub runs this body under `sh`. The casualty is
+          # a LOCAL re-derivation of the pin below, which is what a builder is
+          # told to do rather than trust arithmetic — observed on PR #19672,
+          # where a zsh replication selected 22 instead of 17. A smaller
+          # divergence would have produced a PLAUSIBLE wrong pin.
+          #
+          # WHY THIS ARM CANNOT ROT INTO A VACUOUS PASS, both halves deliberate:
+          #   * `want` is re-measured by a SECOND `find`, never counted off
+          #     `$all` and never off the loop, so it cannot compare a number to
+          #     itself: the two sides have no shared arithmetic.
+          #   * it REFUSES below two files. With one file every shell iterates
+          #     once, so the comparison could not tell the shells apart — an arm
+          #     that cannot distinguish them is not an arm, and 0 == 0 over an
+          #     empty directory must never read as agreement.
+          want=$(find "$dir" -name '*.test.mjs' | wc -l | tr -d '[:space:]')
+          if [ "${want:-0}" -lt 2 ]; then
+            echo "::error title=The iteration self-test cannot measure anything::$dir holds ${want:-0} *.test.mjs file(s). Below two, one iteration and N iterations are the same number, so this arm would pass under every shell while proving nothing. Either the directory was emptied or the find above stopped matching — decide which, deliberately."
+            exit 1
+          fi
+
           todo=""
+          iters=0
           for f in $all; do
+            iters=$((iters + 1))
             named "$(basename "$f")" || todo="$todo $f"
           done
+          if [ "$iters" -ne "$want" ]; then
+            echo "::error title=selection self-test: this shell did not split the file list::The selection loop ran ${iters} iteration(s) over ${want} file(s) that find returned. This shell does not word-split an unquoted \$all the way sh does — zsh does not. Every suite is about to be selected, including the ones other steps already run, and the tally below would be a number nobody can reproduce. Re-run this step under /bin/sh; do NOT re-derive the pin from this run."
+            exit 1
+          fi
           if [ -z "$todo" ]; then
             echo "::error title=This step selected nothing::Every preview suite is claimed by another step. That may be correct, but an empty selection is indistinguishable from a broken predicate, so say so deliberately and lower the floor below."
             exit 1
@@ -2964,6 +3004,65 @@ jobs:
             *)
               verdict UNINTERPRETABLE
               echo "::error title=Adjacency guard UNINTERPRETABLE::adjacency-guard.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── task-b96e83407f325986, accent-matrix DEFECT-B ───────────────────────
+      # A SECOND instrument riding this job, and riding THIS one on purpose: the
+      # step above asks whether a destroy-tier control sits close enough to a
+      # primary action to be misclicked; this one asks whether, once they ARE
+      # adjacent, the eye can tell them apart. Same subject, same pair of
+      # controls, opposite half of the question — geometry there, resolved
+      # colour here. Node 22 and an explicit CHROME are already provisioned in
+      # this job (node 20 has no global WebSocket and CDP bring-up exits 2
+      # there), and `Console gate` is fail-closed on `needs.adjacency-guard
+      # .result`, so a red here BLOCKS the merge with no edit to the aggregator,
+      # no new job in `needs:`, and no change to the "decide calls == length of
+      # needs:" count scripts/console-path-escape-check.test.sh walks.
+      #
+      # It publishes NO verdict output, exactly as the hashchange-wiring step
+      # does on the modal-oracle job, and for the same stated reason: the
+      # `verdict` output belongs to the step above and is already written by the
+      # time this runs. If that step passes and this one fails, `Console gate`
+      # sees result=failure with verdict=OK and takes its "verdict='OK' but the
+      # job FAILED — cannot tell, therefore red" arm. Fail-closed and honest; it
+      # simply names this step one line later, in this job's log.
+      #
+      # WHAT IT ASSERTS, and why no existing gate could. It loads the real SPA
+      # at 1440 over webhooks-panel / rollback / shell-site x five accents x two
+      # themes and reads the COMPUTED background and border of the first visible
+      # `.btn-danger` and `.btn-primary`, scoring each cell
+      # max(dE76(background), dE76(border)) against a floor of 55.
+      # `__css_check.mjs` reads TOKENS and can never see which rule a button
+      # finally wins; `cssom-parity.mjs` parses declarations, not resolved
+      # colours; the PNG accent matrix sees it but only by eye — and by eye is
+      # exactly how it was found, 2760 shots in. On the pre-fix bytes this exits
+      # 1 on SIX cells (the three screens x ember x light+dark, scoring 21.0 and
+      # 34.7) while the other 24 pass, so it is non-vacuous in both directions.
+      #
+      # ~40s wall for all 30 cells on a developer host.
+      - name: Accent role separation — can the eye tell destroy from primary at every accent?
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/accent-role-separation.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Accent role separation: every cell it declared cleared the dE76 floor (the cell roster, the floor and each cell's score are printed above)."
+              ;;
+            2)
+              echo "::error title=Accent role separation REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT, VOCABULARY or PRECONDITION fault, not a colour defect. NO claim is being made about any screen in either direction. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a server rooted at another tree squatting the preview port, an unknown scenario name — or a cell whose PRECONDITION never held, meaning one of the two controls never rendered. That last class lives in cloud/priv/static, not on the runner: a guard whose subject never arrived must never be counted as a pass."
+              exit 1
+              ;;
+            1)
+              echo "::error title=Accent role separation DEFECT::A measured colour collision in a real browser (exit 1) — this IS about the console's own bytes. The destructive control and the primary control are not visually separable in the cells listed above, which print both controls' computed background and border and the dE76 score of each channel. The remedy is NOT a hue move: --primary-hsl/--ok-hsl track the brand per identity (GR6) and GR90 ruled in writing that --ok-hsl is not to be touched, while --danger-hsl is pinned at hue 0 — both ends of the pair are fixed by doctrine. The separation has to come off the weight axis; the .btn-danger block in cloud/priv/static/app.css carries the ruling, the rejected lightness route and the numbers."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Accent role separation UNINTERPRETABLE::accent-role-separation.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
           esac
