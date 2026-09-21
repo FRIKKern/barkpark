@@ -3361,6 +3361,100 @@ function statusMetaPillBody(src) {
   }
 }
 
+// E21 — THE GR57 FIXED-BLUE INVARIANT, held in BOTH directions.
+//
+// WHY THIS EXISTS. `--info` (= `--cc-blue`) is the console's deliberately
+// accent-INDEPENDENT blue: GR57 rules that `.btn-link` colours itself
+// `var(--primary)`, which IS the user-selectable accent (redefined in ten
+// `[data-bp-theme]` blocks across five identities), so the design's fixed-blue
+// links would render terracotta under ember and orchid under charple. GR57's
+// words: "Ship a scoped variant, never repurpose `--primary`."
+//
+// That invariant has now been mis-read TWICE by a five-accent screenshot matrix
+// as a bug — "a fixed blue that ignores the accent on 11 screens" — because a
+// reviewer looking at pixels cannot see a ruling that lives in a charter. The
+// charter itself records the first retraction (gr-p5r7-reshoot-verify: "its
+// builder nearly reported a defect that GR57 documents as deliberate"). A
+// written finding does not fire by itself; this arm is the finding made
+// mechanical, so the THIRD reviewer meets a gate with the reason in it.
+//
+// THREE ARMS, and the first is a precondition because a guard that can go
+// vacuous is not a guard:
+//   (a) `--cc-blue` must be declared exactly twice — once in `:root`, once in
+//       `[data-theme="dark"]`. Zero declarations means the token was renamed
+//       and arms (b)/(c) would pass having measured nothing.
+//   (b) NO CONSUMER RULE reads the ramp token. Consumers read the ROLE token
+//       `--info`; the only permitted `var(--cc-blue)` references are the two
+//       `--info:` alias declarations themselves. A ramp token with consumers is
+//       a second front door: retune `--info` and those rules do not follow.
+//       (gr-r21m-defect-jk found two — `.trial-chip`, `.billing-chip--trial`.)
+//   (c) NO `[data-bp-theme]` BLOCK may declare `--info`, `--info-hsl` or
+//       `--cc-blue`. This is the direction GR57 actually cares about, and it is
+//       unguarded today: an identity block could quietly accent-ify the blue and
+//       every fixed-blue link in the product would fan per theme with no test
+//       anywhere noticing.
+//
+// MEASURED, so the next reader does not over-trust arm (c): its `--cc-blue`
+// comparand is SUBSUMED by arm (a). Inserting `--cc-blue: #c46a2a` into the
+// ember block reds as "found 3" from (a) — (a) counts declarations file-wide and
+// runs first — so (c) never sees it. (c) was mutation-proven on the two
+// comparands that ARE only its own: `--info:` and `--info-hsl:` in the ember
+// block each red on the `html[data-bp-theme="ember"]` selector with (a) silent. `--cc-blue` is kept in (c)'s
+// list anyway: it costs nothing and it survives the day (a) is re-pointed.
+{
+  const declRe = /--cc-blue\s*:/g;
+  const declCount = (css.match(declRe) || []).length;
+  if (declCount !== 2) {
+    errors.push(
+      `E21 app.css  expected exactly 2 \`--cc-blue:\` declarations (:root + [data-theme="dark"]) ` +
+        `but found ${declCount}. The token was renamed, deleted or duplicated, so arms (b) and (c) ` +
+        `below would pass having measured NOTHING. Re-point this arm at whatever replaced it, or ` +
+        `delete E21 and say in the same commit that GR57's fixed blue is gone.`,
+    );
+  } else {
+    // (b) every var(--cc-blue) must sit on a line whose own declaration is the
+    //     `--info:` alias. Line-scoped, so a consumer rule can never hide behind
+    //     an alias elsewhere in the file.
+    for (const [i, line] of css.split("\n").entries()) {
+      if (!/var\(--cc-blue\)/.test(line)) continue;
+      if (/--info\s*:\s*var\(--cc-blue\)/.test(line)) continue;
+      errors.push(
+        `E21 app.css:${i + 1}  a rule reads the RAMP token \`var(--cc-blue)\` directly: ` +
+          `${line.trim()}\n      Consumers read the ROLE token \`var(--info)\` — which is what this ` +
+          `rule's own background/border tints already use. Reaching past the role is a second front ` +
+          `door: retune --info for contrast and this rule silently does not follow.`,
+      );
+    }
+    // (c) GR57's own invariant: the identity blocks must not touch the blue.
+    const themeBlockRe = /(html)?\s*\[data-bp-theme=[^\]]*\][^{]*\{([^}]*)\}/g;
+    let m, themeBlocks = 0;
+    while ((m = themeBlockRe.exec(css)) !== null) {
+      themeBlocks += 1;
+      const body = m[2];
+      for (const tok of ["--cc-blue", "--info-hsl", "--info"]) {
+        const re = new RegExp("(^|[^-\\w])" + tok + "\\s*:");
+        if (!re.test(body)) continue;
+        errors.push(
+          `E21 app.css:${lineOf(css, m.index)}  the identity block \`${m[0].slice(0, m[0].indexOf("{")).trim()}\` ` +
+            `declares \`${tok}\`. GR57 makes --info/--cc-blue the ACCENT-INDEPENDENT blue precisely ` +
+            `because it is declared only in :root and [data-theme="dark"]: the design's fixed-blue links ` +
+            `("Change password", "Copy", "Show all N") must read the same under all five identities. ` +
+            `An override here fans every one of them per accent with nothing else in the tree noticing. ` +
+            `If the fixed blue is being retired, retire GR57 and this arm in the same commit.`,
+        );
+        break;
+      }
+    }
+    if (themeBlocks < 10) {
+      errors.push(
+        `E21 app.css  arm (c) found only ${themeBlocks} [data-bp-theme] block(s); the five identities ` +
+          `declare ten (light + dark each). A short scan means the block regex stopped matching, so ` +
+          `"no identity overrides the blue" would be a statement about blocks this run never read.`,
+      );
+    }
+  }
+}
+
 // E20 — a HOOK waiver must absolve something, same rule as E19 one list over.
 //
 // WHY THIS EXISTS. This file runs four suppression lists, and until this arm

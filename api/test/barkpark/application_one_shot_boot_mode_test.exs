@@ -650,19 +650,26 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
           "is no dry run, and running it to prove the move would mutate real credential " <>
           "state. Unproven by a safe run, therefore unmoved.",
 
-      # Plugin-owned operator/inspection tasks. NOT audited by
-      # task-12b07c13e3cc08b6, which scoped itself to the ten tasks its row
-      # names; they are listed here so the predicate is honest about what it is
-      # letting through rather than silently narrow to a convenient subset.
-      "bokbasen.list.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "bokbasen.replay.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "bokbasen.status.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "frt.export.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "frt.seed.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "onix.export_proof.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "onix.import.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "codelists.staleness.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten",
-      "search.eval.ex" => "NOT AUDITED — outside task-12b07c13e3cc08b6's named ten"
+      # Plugin-owned operator tasks, AUDITED 2026-09-19 (task-e2c484370ef8fb51).
+      # The nine that task-12b07c13e3cc08b6 left unaudited and exempted: seven
+      # were moved onto `Barkpark.OneShot.boot!/0` on a RUN each (identical
+      # report under both boots on the dev corpus; frt.seed re-seeded a fresh
+      # database to the same content_hash) — bokbasen.list, bokbasen.status,
+      # frt.export, frt.seed, onix.export_proof, codelists.staleness,
+      # search.eval. These two stay, for the same Oban reason as tags.seed:
+      "bokbasen.replay.ex" =>
+        "its non-dry-run arm IS an `Oban.insert/1` (`PublishWorker.new/1 |> Oban.insert()`, " <>
+          "the task's whole job is to enqueue the publish) — `:one_shot` drops Oban OUTRIGHT, " <>
+          "so a narrowed run would raise on the one thing the operator asked for. The " <>
+          "`--dry-run` arm alone is pure `Export.to_iodata/1`, but the file is one task. " <>
+          "Moving it needs an Oban-accepting one-shot mode (`:seed` keeps an inert Oban), " <>
+          "not a boot swap.",
+      "onix.import.ex" =>
+        "writes through `Content.create_document/4` / `Content.delete_document/4` — the " <>
+          "full writer, whose post-mutation fan-out reaches `Oban.insert/1` (webhooks.ex). " <>
+          "Same Oban decision as tags.seed. Its `--dry-run` arm already boots NOTHING " <>
+          "(the `app.start` is behind `unless dry_run`), so there is no narrowed run to " <>
+          "prove either."
     }
 
     @app_start ~S<Mix.Task.run("app.start")>
@@ -750,8 +757,9 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
           |> String.contains?("Barkpark.OneShot.boot!()")
         end)
 
-      assert length(moved) >= 8,
-             "only #{length(moved)} task(s) boot through Barkpark.OneShot — expected the #18596 four plus this row's moves"
+      assert length(moved) >= 15,
+             "only #{length(moved)} task(s) boot through Barkpark.OneShot — expected the #18596 four, " <>
+               "#19173's four and task-e2c484370ef8fb51's seven"
 
       for file <- moved do
         refute calls_app_start?(file),

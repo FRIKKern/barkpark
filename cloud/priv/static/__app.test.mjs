@@ -14639,8 +14639,32 @@ test("cch-w47-s3: an UNKNOWN /v1/me fails CLOSED — resurrect bills a real box,
   const unknown = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "unknown"));
   assert.ok(unknown.indexOf("archive-resurrect-btn") === -1, "an unanswered role authorises nothing");
   assert.equal((unknown.match(/class="archive-row"/g) || []).length, 2);
-  // Every non-grant answer renders the same way — one rule, not a per-value fork.
-  assert.equal(unknown, hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse")));
+  // cch-w47-rv-bl SPLIT THIS ASSERTION, and the split is the point of the slice.
+  //
+  // It used to read `assert.equal(unknown, refuse)` under the words "every
+  // non-grant answer renders the same way — one rule, not a per-value fork".
+  // That was true of the OFFER and was being asserted of the whole PANEL, so it
+  // quietly forbade the one sentence a refusal can carry and silence cannot.
+  // The shared rule survives intact below (neither arm draws the button); what
+  // is no longer shared is the EXPLANATION, because "unknown" means /v1/me was
+  // never answered — there is no `required` role to name and claiming one would
+  // state as fact a thing the console never read.
+  const refuseArm = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse"));
+  assert.ok(refuseArm.indexOf("archive-resurrect-btn") === -1, "a refusal authorises nothing either");
+  const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+  assert.ok(roleSentence.indexOf("admin role") !== -1,
+    "the shipped 403 reader must answer resurrect/1's payload with the admin-role sentence; got: " + roleSentence);
+  assert.ok(refuseArm.indexOf(roleSentence) !== -1, "the refuse arm names the role the CLI chip needs");
+  assert.ok(unknown.indexOf(roleSentence) === -1, "an unanswered /v1/me names no role");
+  // And the two arms differ by EXACTLY that line — nothing else moved.
+  // Through replaceUnique (the file's own import), never a bare `.replace`: a bare
+  // string needle takes the FIRST match and says nothing when it matches twice, so a
+  // panel that grew a second archives-note would subtract only one and still pass.
+  // replaceUnique REFUSES both drift and ambiguity instead.
+  assert.equal(
+    replaceUnique(refuseArm, '<div class="archives-note"><p>' + roleSentence + "</p></div>", "",
+      { what: "cch-w47-rv-bl: subtract the refuse arm's one role line" }),
+    unknown);
 });
 
 test("cch-w47-s3: the authority reaches EVERY row, not just the first — .map's index argument cannot leak in", () => {
@@ -35242,4 +35266,71 @@ test("cch-r21-w16: the webhooks tab keeps its member-tier reads and drops only t
     "the shell's default authority stopped being 'grant'");
   assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "unknown"), grant,
     "an unanswered /v1/me was treated as a determinate refusal in the shell");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// cch-r21m DEFECT-D — THE ADDRESS SLOT UNDER THE INSTANCE H1.
+//
+// Found by the 2760-shot accent matrix (gr-backlog-accent-matrix-rereview,
+// 2026-09-20) on instance-remove-failed, instance-remove-failed-member and
+// instance-failed-member, at all 5 accents, both themes, 1440: a bare red
+// italic "— removal failed" / "— provisioning failed" sat where the address
+// belongs. Accent-independent, so it was never a token bug.
+//
+// The em-dash lead is a FLEET-LIST idiom — in fleetRow it hangs off the box
+// name printed one line above. Under a detail H1 it has no antecedent, and the
+// lifecycle pill on that same line plus the banner one block down already say
+// the failure, so instance-remove-failed printed it THREE times in ~130px.
+// Worse, removeFailedInstance carries a host: the console suppressed a known
+// address to repeat a failure. A failed teardown is failed BECAUSE the server
+// is still there.
+//
+// These two pin the corrected bytes. Both RED on the pre-fix app.js: the first
+// because the slot rendered no `detail-url-text` at all, the second on the
+// leading em dash. Tail-append (OC9).
+// ════════════════════════════════════════════════════════════════════════════
+
+const CCH_R21M_REMOVE_FAILED = {
+  id: "b-rf", name: "Retired", slug: "retired",
+  url: "https://retired-5b2c1e.barkpark.cloud", host: "retired-5b2c1e.barkpark.cloud",
+  provision_status: "succeeded", deprovision_status: "failed",
+  deprovision_error: "hcloud: server delete returned 409 (a volume is still attached)",
+};
+
+test("cch-r21m DEFECT-D: a FAILED TEARDOWN still shows the address it never removed", () => {
+  const html = hooks.instanceHeaderHtml(CCH_R21M_REMOVE_FAILED);
+  // The slot renders the host, with the same copy affordance a live box gets.
+  assert.match(html, /detail-url-text">https:\/\/retired-5b2c1e\.barkpark\.cloud</,
+    "BEFORE: the address slot printed a bare '— removal failed' and hid a host the Identity card was printing two columns away");
+  assert.match(html, /data-copy="https:\/\/retired-5b2c1e\.barkpark\.cloud"/);
+  // …and the ORPHAN fragment is gone from the whole header: no em-dash-led
+  // failure sentence anywhere. The banner keeps the failure, once.
+  assert.doesNotMatch(html, /&mdash; removal failed/,
+    "BEFORE: the orphan em-dash fragment rendered in the address slot");
+  assert.match(html, /<b>Removal failed\.<\/b>/,
+    "the banner is the header's ONE home for the failure sentence");
+
+  // A teardown that failed AFTER the host column was cleared has no address to
+  // show — it keeps a red slot, but a LABELLED one that leads with the address.
+  const hostless = { ...CCH_R21M_REMOVE_FAILED, url: null, host: null };
+  const hl = hooks.instanceHeaderHtml(hostless);
+  assert.match(hl, /fleet-url failed">No address — removal failed</,
+    "BEFORE: the address-less teardown printed an orphan em dash instead of naming the slot");
+});
+
+test("cch-r21m DEFECT-D: a FAILED PROVISION labels its empty address slot, never an orphan em dash", () => {
+  const html = hooks.instanceHeaderHtml({ id: "b-fp", name: "Reporting", provision_status: "failed" });
+  assert.match(html, /fleet-url failed">No address — provisioning failed</,
+    "BEFORE: the slot read '— provisioning failed' — an em dash with nothing in front of it");
+  assert.doesNotMatch(html, /&mdash; provisioning failed/);
+
+  // THE SHAPE, not the two literals: no arm of this header may open the
+  // address slot with an em dash. `removing` is the remaining in-flight arm
+  // and is deliberately excluded here — it is out of DEFECT-D's scope and
+  // still ships its chip — so this predicate is scoped to the failed class.
+  for (const bp of [CCH_R21M_REMOVE_FAILED, { ...CCH_R21M_REMOVE_FAILED, url: null, host: null },
+                    { id: "b-fp", name: "Reporting", provision_status: "failed" }]) {
+    assert.doesNotMatch(hooks.instanceHeaderHtml(bp), /class="fleet-url failed">\s*(&mdash;|—)/,
+      "a failed-state address slot opened with an em dash again");
+  }
 });

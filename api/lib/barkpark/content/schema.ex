@@ -624,8 +624,21 @@ defmodule Barkpark.Content.Schema do
   """
   @spec allowed_origins_for_dataset(String.t(), keyword()) :: [String.t()]
   def allowed_origins_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
+    # BOTH confinements, matching `schema_hash_for_dataset/2` below: the
+    # dataset filter AND the workspace/project scope. The dataset filter alone
+    # is not a fence — `scope_to_dataset/3` falls back to a bare
+    # `dataset == <slug>` STRING whenever the slug resolves to no `dataset_id`
+    # in the caller's project, which is precisely the case when the caller's
+    # project owns no dataset of that name. A sibling project's same-named
+    # dataset then answered this read and its CORS allowlist crossed tenants
+    # (task-ab5da5c4faf1a04c).
+    scope_fun = workspace_scope_fun(opts)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     SchemaDefinition
     |> scope_to_dataset(dataset, opts)
+    |> scope_fun.(workspace_id, project_id)
     |> select([s], s.cors_origins)
     |> Repo.all()
     |> List.flatten()

@@ -372,6 +372,25 @@
     ]
   },
   {
+    "slug": "console-harness-pin",
+    "name": "console-harness.sh reads CI's pin (it must be able to LOSE)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "console-harness-pin.test.sh syntax check",
+        "run": "sh -n scripts/console-harness-pin.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the local gate's pin is READ from console-harness.yml, and arm 3 points it at a fixture carrying a DIFFERENT pin so a derivation that always answers one number LOSES",
+        "run": "sh scripts/console-harness-pin.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
     "slug": "console-refusal-capture",
     "name": "console-refusal-capture.mjs controls",
     "timeout": 10,
@@ -1692,6 +1711,25 @@
       {
         "name": "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)",
         "run": "bash scripts/orchestrate-launch-recipe.test.sh",
+        "env": {}
+      }
+    ]
+    },
+  {
+    "slug": "echo-json-parse",
+    "name": "echo-into-jq corruption + the session-skill recipe guard",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "echo-json-parse-guard.test.sh syntax check",
+        "run": "bash -n scripts/echo-json-parse-guard.test.sh",
+        "env": {}
+      },
+      {
+        "name": "echo vs printf over a frozen captured bp row, per shell (hermetic, no bp, no network)",
+        "run": "bash scripts/echo-json-parse-guard.test.sh",
         "env": {}
       }
     ]
