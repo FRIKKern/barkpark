@@ -677,7 +677,19 @@ defmodule Barkpark.PortableDoc.Render.Components do
   criteria/phase, so every roadmap geometry field is AUTHOR-LITERAL and reaches
   this function verbatim. Live resolver-backed date rails are owned by
   `tr-agg-resolver-wave` criterion 3, not by this renderer.
+
+  **UNPLACED (offline degrade)** — which is why a LIVE-QUERY roadmap has no
+  geometry at all. `roadmap_placeable?/2` names the only two trustworthy sources
+  (the block span + the row's own dates, or an author-typed `left`/`width`
+  number); a row with neither draws NO bar, because the clamp's {0, 100} default
+  would render it as a full-width bar indistinguishable from every other
+  geometry-less lane. With NO row placeable the block renders the sibling
+  `bp-tasks--empty` state; with SOME placeable the unplaced lanes render
+  `bp-rm__lane--unplaced` with an explicit marker beside the real bars.
   """
+  @roadmap_unplaced_copy "No schedule to place these items on."
+  @roadmap_lane_unplaced_copy "not scheduled"
+
   def roadmap_html(block) when is_map(block) do
     rows = block |> get("snapshot") |> as_list()
 
@@ -687,36 +699,113 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
       _ ->
         span = roadmap_span(block)
-        today = roadmap_today_html(block, span)
 
-        scale =
-          case block |> get("scale") |> as_list() do
-            [] ->
-              ""
-
-            cells ->
-              ~s|<div class="bp-rm__scale">#{cells |> Enum.map(fn c -> ~s|<span>#{escape_html(stringish(c))}</span>| end) |> Enum.join("")}</div>|
-          end
-
-        lanes =
-          rows
-          |> Enum.map(fn r ->
-            role = r |> get("status") |> stringish() |> role_of()
-            title = r |> get("title") |> stringish() |> escape_html()
-            phase = truthy(get(r, "phase_row"))
-            {left, width} = roadmap_left_width(r, span)
-            cls = if phase, do: "bp-rm__lane bp-rm__lane--phase", else: "bp-rm__lane"
-            marks = roadmap_marks_html(r, left, width)
-
-            ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{title}</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--#{role}" style="left:#{left}%;width:#{width}%"></span>#{marks}#{today}</div></div>|
-          end)
-          |> Enum.join("")
-
-        ~s|<div class="bp-roadmap">#{scale}<div class="bp-rm__lanes">#{lanes}</div></div>|
+        if Enum.any?(rows, &roadmap_placeable?(&1, span)) do
+          roadmap_lanes_html(block, rows, span)
+        else
+          # NOT ONE row has geometry: the whole timeline would be N identical
+          # full-width bars. Say so in the sibling empty family — and then render
+          # the ITEMS through the task-list emitter, because "cannot place them"
+          # is not a licence to drop them. The author asked for these rows; only
+          # the timeline is unavailable.
+          ~s|<div class="bp-tasks bp-tasks--empty">#{@roadmap_unplaced_copy}</div>| <>
+            tasks_html(%{"snapshot" => rows})
+        end
     end
   end
 
   def roadmap_html(_), do: ""
+
+  defp roadmap_lanes_html(block, rows, span) do
+    today = roadmap_today_html(block, span)
+
+    scale =
+      case block |> get("scale") |> as_list() do
+        [] ->
+          ""
+
+        cells ->
+          ~s|<div class="bp-rm__scale">#{cells |> Enum.map(fn c -> ~s|<span>#{escape_html(stringish(c))}</span>| end) |> Enum.join("")}</div>|
+      end
+
+    lanes =
+      rows
+      |> Enum.map(fn r ->
+        role = r |> get("status") |> stringish() |> role_of()
+        title = r |> get("title") |> stringish() |> escape_html()
+        phase = truthy(get(r, "phase_row"))
+        placed? = roadmap_placeable?(r, span)
+
+        # Every branch is a STRING LITERAL, deliberately: the lane class is the
+        # one attribute here whose value is not a number, and the attr-escape
+        # source scan proves a class safe by reading its branches. A `base <>
+        # modifier` concatenation is the same four strings and an UNPROVEN
+        # verdict.
+        cls =
+          case {phase, placed?} do
+            {true, true} -> "bp-rm__lane bp-rm__lane--phase"
+            {true, false} -> "bp-rm__lane bp-rm__lane--phase bp-rm__lane--unplaced"
+            {false, true} -> "bp-rm__lane"
+            {false, false} -> "bp-rm__lane bp-rm__lane--unplaced"
+          end
+
+        body =
+          if placed? do
+            {left, width} = roadmap_left_width(r, span)
+            marks = roadmap_marks_html(r, left, width)
+
+            ~s|<span class="bp-rm__bar bp-rm__bar--#{role}" style="left:#{left}%;width:#{width}%"></span>#{marks}|
+          else
+            # A lane in a roadmap that IS otherwise placeable, but which carries
+            # no geometry of its own. It draws NO bar: a bar here would be the
+            # clamp default (left:0;width:100) sitting under every other lane and
+            # reading as "runs the whole span", a claim the row never made.
+            ~s|<span class="bp-rm__unplaced">#{@roadmap_lane_unplaced_copy}</span>|
+          end
+
+        ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{title}</span><div class="bp-rm__track">#{body}#{today}</div></div>|
+      end)
+      |> Enum.join("")
+
+    ~s|<div class="bp-roadmap">#{scale}<div class="bp-rm__lanes">#{lanes}</div></div>|
+  end
+
+  @doc false
+  # The copy both roadmap unplaced states use, exposed so the email twin and the
+  # tests read ONE string instead of retyping it (a retyped placeholder is how
+  # two surfaces silently stop saying the same thing).
+  def roadmap_unplaced_copy, do: @roadmap_unplaced_copy
+  @doc false
+  def roadmap_lane_unplaced_copy, do: @roadmap_lane_unplaced_copy
+
+  # Is this row's position READ from a source field, or invented by the clamp?
+  #
+  # PLACEABLE means one of exactly two documented sources:
+  #
+  #   * DATE RAILS — the BLOCK carries a parseable `start`+`end` span AND this row
+  #     carries its own parseable `start`+`end` (the v2 path; Go twin
+  #     `internal/pdrender/taskblocks.go` `roadmapLeftWidth`). Trustworthy because
+  #     both endpoints are author-stated ISO dates measured against an
+  #     author-stated span — nothing is inferred.
+  #   * AUTHOR PCT — the row carries a NUMBER in `left` or `width` (the v1 path).
+  #     Trustworthy for the same reason: the author typed the position.
+  #
+  # Everything else has NO geometry, and `roadmap_pct_left_width/1` answers
+  # {0, 100} for it — `clampf(nil)` is 0, `clampf_width(nil, 0)` is 100. That is
+  # exactly what a LIVE-QUERY roadmap hits: `TaskResolver.row_from_task/1` emits
+  # title/status/priority/worker/criteria/phase/draft and NO schedule field, so
+  # every resolved lane used to paint one identical left:0;width:100 bar — a
+  # confident, uniform, fabricated timeline. There is no field on a task to
+  # derive a date from (lifecycle carries no schedule), so this renderer does not
+  # invent one; it renders the explicit unplaced state instead.
+  defp roadmap_placeable?(r, span) do
+    dated? =
+      match?({_, _}, span) and
+        match?({:ok, _}, roadmap_date(get(r, "start"))) and
+        match?({:ok, _}, roadmap_date(get(r, "end")))
+
+    dated? or is_number(get(r, "left")) or is_number(get(r, "width"))
+  end
 
   # ── roadmap v2: date rails + marker layer (Go twin: taskblocks.go) ───────────
 

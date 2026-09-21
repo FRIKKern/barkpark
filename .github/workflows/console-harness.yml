@@ -653,14 +653,21 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
-      # PIN 1499 — bumped 2026-09-21 from 1497 on console-r21m-defect-d:
-      # +2 tests. The instance detail header's address slot stops printing an
-      # orphan em-dash failure fragment on the two failed arms (accent-matrix
-      # DEFECT-D); two new tests in cloud/priv/static/__app.test.mjs pin the
-      # corrected slot — the real host on a failed teardown, and a LABELLED
-      # empty slot when there is genuinely no address.
-      # MEASURED, not arithmetic: `node --test cloud/priv/static/__app.test.mjs`
-      # on node 20 printed `# tests 1499 / # pass 1499 / # fail 0`.
+      # PIN 1502 — bumped 2026-09-21 from 1500 on console-r21m-defect-d (task-9f09b84ae8248a71):
+      # +2 tests. The instance detail header's address slot stops printing an orphan
+      # em-dash failure fragment on the two failed arms (accent-matrix DEFECT-D); two
+      # tests in cloud/priv/static/__app.test.mjs pin the corrected slot. RE-MEASURED
+      # after merging main at 793a03ad7 (pin 1500, #19523): `sh scripts/console-harness.sh`
+      # printed the figure below — the instrument's, not 1500 + 2.
+      # PIN 1500 — bumped 2026-09-21 from 1499 on console-r21k-coherence-durable (gr-backlog-coherence-fixture-durable):
+      # one __app.test.mjs test added (coherence.html reads the TUI goldens); the harness printed
+      # `ran 1500 test(s)` against the 1499 pin in CI run 35550741163.
+      # PIN 1499 — bumped 2026-09-20 from 1497 on console-r21k-w55-onboarding (cch-w55-bl):
+      # +2 tests. The onboarding published-doc step gets the ack control it never
+      # had, and the census's own comprehension no longer filters out the words it
+      # guards. RE-MEASURED after the rebase onto 2cc676f15 (pin 1497, #19498):
+      # `sh scripts/console-harness.sh` printed `# tests 1499 / # pass 1499 /
+      # # fail 0`. The figure is the instrument's, not 1497 + 2.
       #
       # PIN 1497 — bumped 2026-09-20 from 1496 on console-r21k-w48-chip (cch-w48-bl):
       # +1 test. The site badges row stops carrying a metadata pill (the repo
@@ -908,7 +915,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1499-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1502-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -924,14 +931,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1499 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1499 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1502 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1502 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1499 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1499 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1499 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1502 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1502 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1502 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1499 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1502 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -2152,11 +2159,16 @@ jobs:
       #
       # THE PIN, and the reason there is one: `node --test` on a file that
       # still LOADS but registers ZERO tests reports one passing test and exits
-      # 0 (task-2c39c3b9e1f925c2). 225 is this step's selection on 2026-09-14,
-      # re-derived on node 22.22.0 at origin/main c42fde07c across the 14 suites the
-      # predicate selects. It was 201 across 13 on 2026-09-11 (node 20.20.2, main run
-      # 34647939447, `preview suites: 201 tests`); anchored-replace.test.mjs joined the
-      # selection with its 24 arms and moved it, which is this pin working. The
+      # 0 (task-2c39c3b9e1f925c2). 230 is this step's selection on 2026-09-20,
+      # MEASURED on node 22.22.0 across the 15 suites the predicate selects
+      # (`# tests 230 / # pass 230 / # fail 0`, task-f8318f7734a52c52). It was 225
+      # across 14 on 2026-09-14 (node 22.22.0, origin/main c42fde07c);
+      # badcode-freeze.test.mjs — the regression guard for the caret/transition
+      # freeze #19583 lands in __preview__/mock.js — joined the selection with its
+      # 5 arms and moved it. It was 201 across 13 on 2026-09-11 (node 20.20.2, main
+      # run 34647939447, `preview suites: 201 tests`); anchored-replace.test.mjs
+      # joined the selection with its 24 arms and moved it, which is this pin
+      # working. The
       # literal said 68 — a FLOOR written when the selection was five suites; it
       # never reddened while the selection nearly tripled, which is the whole
       # reason this file no longer uses floors. THIS PIN IS ALSO SELECTION-SIZED:
@@ -2164,7 +2176,7 @@ jobs:
       # moves this number, so bump it in the PR that changes either the suites or
       # the steps that name them. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: "__preview__ suites no other step runs (derived selection, 225-test exact pin)"
+      - name: "__preview__ suites no other step runs (derived selection, 230-test exact pin)"
         run: |
           set -euo pipefail
           dir=cloud/priv/static/__preview__
@@ -2201,16 +2213,16 @@ jobs:
           echo "selected (run by no other step):$todo"
 
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 225 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 225 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 230 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 230 — this pin can no longer lose"; exit 1; }
 
           # shellcheck disable=SC2086 # word splitting is the selection
           node --test $todo 2>&1 | tee /tmp/preview-unrun-suites.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/preview-unrun-suites.txt)
-          if [ "${tally:-0}" -ne 225 ]; then
-            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 225 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 225 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 230 ]; then
+            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 230 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 230 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "preview suites: ${tally} tests, exact pin 225 — the pin re-earned"
+          echo "preview suites: ${tally} tests, exact pin 230 — the pin re-earned"
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes

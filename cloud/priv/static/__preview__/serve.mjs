@@ -31,6 +31,31 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
+// The repo root. FOUR levels: this file lives one deeper than app.test.mjs
+// (cloud/priv/static/__preview__), which is exactly the off-by-one a live fetch
+// of /__fixtures__/… caught and every string-level test missed — see the
+// resolution arm in __app.test.mjs, which recomputes this literal.
+const REPO_ROOT = path.resolve(HERE, "../../../..");
+
+// ── /__fixtures__/ — the committed Go goldens, served from their ONE source ──
+// coherence.html USED to carry a byte-copy of each of these files inside a
+// <script type="text/plain"> block, with a byte-identity assertion in
+// __app.test.mjs. Two sources of truth: any cycle that legitimately regenerated
+// a TUI golden reddened the console harness on the NEXT, unrelated cloud PR,
+// and the only repair was a hand re-embed of bytes nobody had reviewed. The
+// page now FETCHES the goldens through this table, which is the only place
+// their paths are written. A regenerated golden changes what the page renders
+// with no HTML edit and nothing to drift from.
+//
+// Both targets are declared in scripts/console-path-escape-check.sh's
+// CONSOLE_PATHS (they were already, for __app.test.mjs's reads), so this
+// repo-root read is dispatched on rather than being a silent escape.
+const FIXTURE_ROUTES = {
+  "/__fixtures__/styleguide_lifecycle.txt": path.join(
+    REPO_ROOT, "internal/taskboard/testdata/styleguide_lifecycle.txt"),
+  "/__fixtures__/styleguide_tokens.txt": path.join(
+    REPO_ROOT, "internal/pdrender/testdata/styleguide_tokens.txt"),
+};
 
 const argv = process.argv.slice(2);
 const portFlag = argv.indexOf("--port");
@@ -96,6 +121,25 @@ const server = http.createServer((req, res) => {
   if (urlPath === "/__tree") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     return res.end(JSON.stringify({ root: ROOT, pid: process.pid }));
+  }
+
+  // The committed Go goldens, read from their canonical path (see
+  // FIXTURE_ROUTES). A missing file answers 404 with the path it looked for —
+  // never a stale copy, because there is no copy.
+  if (Object.prototype.hasOwnProperty.call(FIXTURE_ROUTES, urlPath)) {
+    const src = FIXTURE_ROUTES[urlPath];
+    let body;
+    try {
+      body = fs.readFileSync(src);
+    } catch (e) {
+      res.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      return res.end("fixture not found on disk: " + src);
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    return res.end(body);
   }
 
   // Root and the SPA entry paths get the injected shell.
