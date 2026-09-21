@@ -1231,4 +1231,151 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       assert Repo.get(ApiToken, oauth_token.id).label == "connector:slack:oauth"
     end
   end
+
+  # ── The post-mount demotion window (authorize/1's LIVE job) ────────────────
+  #
+  # WHY THIS BLOCK EXISTS. Every other negative-authority case in this file is a
+  # MOUNT refusal: `live_session :scoped_admin_studio` turns the member-only
+  # principal away before `mount/3` runs, so the socket never exists and
+  # `authorize/1` is never called. That pre-filter makes the per-write re-gate
+  # INVISIBLE to the suite — delete `and TenancyAuth.workspace_admin?(principal,
+  # ws.id)` from `authorize/1` and every one of those tests still passes.
+  #
+  # The re-gate's live job is the window the mount gate cannot cover: a LiveView
+  # OUTLIVES its mount check. A principal that was a workspace admin at mount and
+  # is demoted (or un-membered) a second later is still holding an open socket
+  # with Connect and Disconnect on screen. `workspace_admin?/2` does a fresh
+  # `Repo.one` per call (no socket cache), so the very next click must fail
+  # closed. These tests are the only ones in the file that reach `authorize/1`
+  # with a principal it can actually refuse.
+  #
+  # ORACLE LAW. The load-bearing assertion in each test is STATE, never the
+  # flash: no chat token minted, no install token revoked, no call across the
+  # bridge seam. A flash-only oracle would also pass against a handler that did
+  # the write and then complained about it.
+  describe "authorize/1 re-gates on the LIVE workspace-admin seat, not the one proved at mount" do
+    # No public demote/revoke API exists, so the membership row is mutated
+    # directly — exactly as settings_live_test.exs's `downgrade_to_member!/2`
+    # does for the byte-equivalent `SettingsLive.guard_ws_admin/3`. Targeted by
+    # role: setup creates exactly one "admin" membership in this workspace (the
+    # outsider is a plain "member"), so the row is unambiguous.
+    defp admin_membership!(ws),
+      do: Repo.get_by!(Barkpark.Tenancy.Membership, workspace_id: ws.id, role: "admin")
+
+    defp demote_admin_to_member!(ws) do
+      ws
+      |> admin_membership!()
+      |> Ecto.Changeset.change(role: "member")
+      |> Repo.update!()
+    end
+
+    defp unmember_admin!(ws), do: ws |> admin_membership!() |> Repo.delete!()
+
+    defp install_rows(ws, provider, key) do
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT workspace_id FROM chat_bridge.connector_installs WHERE provider = $1 AND install_key = $2 AND workspace_id = $3",
+          [provider, key, ws.id]
+        )
+
+      rows
+    end
+
+    defp bridge_calls(tag), do: Enum.filter(Stub.calls(), &(elem(&1, 0) == tag))
+
+    test "confirm_connect after a mid-socket admin→member demotion mints NOTHING", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw,
+      ws: ws
+    } do
+      script(ws, %{})
+      {:ok, view, _html} = live(as(conn, raw), path)
+
+      # Walk the dialog to :confirm WHILE still an admin — the point is to isolate
+      # the mint step, so everything before it must legitimately succeed.
+      view |> element(~s([data-test-id="connector-connect-telegram"])) |> render_click()
+
+      view
+      |> form(~s(#connectors-connect-modal form), %{"credential" => "123:abc"})
+      |> render_submit()
+
+      # Baseline: validate writes nothing. Nothing is minted yet, so an empty
+      # read AFTER the click cannot be a vacuous pass.
+      assert live_tokens(ws, "telegram", @telegram_key) == []
+      assert bridge_calls(:connect) == []
+
+      demote_admin_to_member!(ws)
+
+      html = view |> element(~s([data-test-id="connectors-confirm-connect"])) |> render_click()
+
+      # STATE ORACLE (load-bearing): no workspace chat token was minted. This is
+      # `Repo.all` on the label with NO revoked_at filter, so a mint-then-revoke
+      # would still show up here — an empty list means it never happened.
+      assert live_tokens(ws, "telegram", @telegram_key) == []
+      # And nothing crossed the bridge seam: no credential was shipped.
+      assert bridge_calls(:connect) == []
+      assert install_rows(ws, "telegram", @telegram_key) == []
+      # Flash oracle, secondary: the refusal-unique prefix, and no success phrase.
+      assert html =~ "You need to be an owner or admin"
+      refute html =~ "data-test-id=\"connector-disconnect-telegram\""
+    end
+
+    test "confirm_disconnect after a mid-socket admin→member demotion REVOKES NOTHING", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw,
+      ws: ws
+    } do
+      script(ws, %{})
+      {:ok, view, _html} = live(as(conn, raw), path)
+
+      # A real, fully landed install — connected while the principal still held
+      # the seat. Its labelled token is LIVE.
+      connect!(view)
+      assert [%ApiToken{revoked_at: nil}] = live_tokens(ws, "telegram", @telegram_key)
+      assert install_rows(ws, "telegram", @telegram_key) != []
+
+      # Open the confirm dialog while still an admin, so the refusal under test is
+      # the one on the destructive step itself.
+      html = view |> element(~s([data-test-id="connector-disconnect-telegram"])) |> render_click()
+      assert html =~ ~s(data-test-id="connectors-disconnect-modal")
+
+      demote_admin_to_member!(ws)
+
+      html = view |> element(~s([data-test-id="connectors-confirm-disconnect"])) |> render_click()
+
+      # STATE ORACLE (load-bearing): the install's token is STILL LIVE, and the
+      # install row still exists. A demoted socket cannot tear down a connector.
+      assert [%ApiToken{revoked_at: nil}] = live_tokens(ws, "telegram", @telegram_key)
+      assert install_rows(ws, "telegram", @telegram_key) != []
+      # The bridge was never asked to unmount the adapter either.
+      assert bridge_calls(:disconnect) == []
+      # Flash oracle, secondary.
+      assert html =~ "You need to be an owner or admin"
+      refute html =~ "token revoked"
+    end
+
+    # The invariant stated independently of the demotion mechanism: it is the
+    # LIVE seat that authorizes, so REMOVING the membership row entirely must
+    # refuse exactly as a downgrade does — and it must refuse at the dialog
+    # OPENER, before the operator is ever offered the destructive step.
+    test "open_connect after the admin's membership row is DELETED opens no dialog and mints nothing",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script(ws, %{})
+      {:ok, view, _html} = live(as(conn, raw), path)
+
+      unmember_admin!(ws)
+
+      html = view |> element(~s([data-test-id="connector-connect-telegram"])) |> render_click()
+
+      # STATE ORACLE (load-bearing): the paste dialog never opened, so there is
+      # no surface on which to paste a credential, and nothing was minted or sent.
+      refute html =~ ~s(data-test-id="connectors-connect-modal")
+      assert live_tokens(ws, "telegram", @telegram_key) == []
+      assert Stub.calls() == []
+      # Flash oracle, secondary.
+      assert html =~ "You need to be an owner or admin"
+    end
+  end
 end

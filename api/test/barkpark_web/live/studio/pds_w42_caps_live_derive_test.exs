@@ -245,7 +245,15 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
       create_sheet!(ws, proj, sheet)
 
       raw = slug("w42-tok")
-      {:ok, token} = Auth.create_token(raw, "w42 writer", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "w42 writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, view, _html} =
         conn
@@ -287,7 +295,15 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
       create_sheet!(ws, proj, sheet)
 
       raw = slug("w42-tok")
-      {:ok, _token} = Auth.create_token(raw, "w42 writer", @dataset, ["read", "write"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "w42 writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, view, _html} =
         conn
@@ -427,7 +443,15 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
       create_sheet!(ws, proj, sheet)
 
       raw = slug("w42-tok")
-      {:ok, token} = Auth.create_token(raw, "w42 writer", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "w42 writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, view, _html} =
         conn
@@ -475,7 +499,15 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
       create_sheet!(ws, proj, sheet)
 
       raw = slug("w42-tok")
-      {:ok, _token} = Auth.create_token(raw, "w42 writer", @dataset, ["read", "write"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "w42 writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, view, _html} =
         conn

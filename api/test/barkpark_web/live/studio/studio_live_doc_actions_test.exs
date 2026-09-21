@@ -30,11 +30,17 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
   # about the ACTION, not the gate, so it mounts an admin principal.
   defp admin_conn(conn) do
     {:ok, _} =
-      Barkpark.Auth.create_token(@admin_token, "doc actions admin", @dataset, [
-        "read",
-        "write",
-        "admin"
-      ])
+      Barkpark.Auth.create_token(
+        @admin_token,
+        "doc actions admin",
+        @dataset,
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
   end

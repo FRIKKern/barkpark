@@ -23,6 +23,10 @@ defmodule Barkpark.Plugins.Github.Client do
     * `create_comment/3`— `POST   /repos/:repo/issues/:n/comments`
     * `add_sub_issue/4` — `POST   /repos/:repo/issues/:n/sub_issues` (native
       sub-issue link, keyed on the child's DATABASE id; charter D11)
+    * `remove_sub_issue/4` — `DELETE /repos/:repo/issues/:n/sub_issue` (NOTE the
+      SINGULAR path segment — GitHub's remove verb is not the plural add path;
+      same `sub_issue_id` body. Without it the mirror could only ever ADD a
+      parent, so a re-parented task stayed a sub-issue of BOTH parents)
     * `graphql/3`       — `POST   /graphql` (Projects v2; charter D10). A
       GraphQL `200 OK` carrying a top-level `"errors"` array surfaces as
       `%NetworkError{reason: {:graphql, errors}}`.
@@ -214,6 +218,32 @@ defmodule Barkpark.Plugins.Github.Client do
     request(
       :post,
       "/repos/#{repo}/issues/#{parent_number}/sub_issues",
+      %{"sub_issue_id" => child_issue_id},
+      opts
+    )
+  end
+
+  @doc """
+  Remove the NATIVE sub-issue link between `parent_number` and a child issue.
+
+  `DELETE /repos/:repo/issues/:parent_number/sub_issue` (SINGULAR `sub_issue` —
+  GitHub's remove verb does NOT share the plural `sub_issues` path `add_sub_issue/4`
+  posts to) with `%{"sub_issue_id" => child_issue_id}`. Like the add verb it keys
+  on the child's DATABASE id (the `"id"` field from `get_issue/3`), NOT its number.
+
+  The exact mirror of `add_sub_issue/4`: same auth, base resolution, opts and
+  error classification. A `404` (the link is already absent, or the parent is
+  gone) surfaces as `%NotFound{}` and a `422` as `%NetworkError{reason: {:http,
+  422}}` — neither is special-cased here; the `Relations` caller decides which
+  of those already means "nothing left to remove".
+  """
+  @spec remove_sub_issue(String.t(), integer() | String.t(), integer() | String.t(), keyword()) ::
+          {:ok, map()} | {:error, struct()}
+  def remove_sub_issue(repo, parent_number, child_issue_id, opts \\ [])
+      when is_binary(repo) do
+    request(
+      :delete,
+      "/repos/#{repo}/issues/#{parent_number}/sub_issue",
       %{"sub_issue_id" => child_issue_id},
       opts
     )
