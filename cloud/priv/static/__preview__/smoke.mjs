@@ -6895,12 +6895,121 @@ async function assertBillingPaintsOncePerFact() {
   }
 }
 
+// ── DEFECT-E · THE SHELL-INSTANCE TWIN GUARD (task-7bd507ea989ef248) ─────────
+// Nine scenarios shot BYTE-IDENTICAL to shell-instance in all 20 accent x theme
+// x width cells — four independent runs, one sha256 across all ten names. A
+// full-count green matrix certified them anyway, because a shot count says
+// "N files exist", never "N DISTINCT screens exist". This is that missing
+// predicate. It is an assertion over a CLASSIFICATION, not a flat "they must
+// differ", because the nine have TWO causes and a guard that cannot tell them
+// apart would have to accept the weaker one for all nine:
+//
+//   fold  — the scenario paints its own state; the identity was purely a
+//           SHOOTING artifact (fleetSupportCardHtml mounts at the tail of the
+//           Overview column, under shoot.sh's 1000px fold). It must declare a
+//           `shotHeight`, and #instance-body must differ from shell-instance's.
+//   click — the state the label names is behind a click (pollOffloadWatch,
+//           runVerifyNow), so the pre-click DOM legitimately IS
+//           shell-instance's. The DRIVE is what gets asserted: it must exist,
+//           and its FIRST selector must resolve in the painted DOM — a drive
+//           whose entry control is not on screen cannot start.
+//   both  — offload-*: click-gated AND the mounted ladder is below the fold.
+//
+// fleet-support-empty is the one honest "fold" entry whose DOM is shell-
+// instance's (an empty support card is shell-instance's own default render), so
+// it is classified "fold-only": shotHeight required, DOM equality allowed. Its
+// tall shot is the only image in the corpus showing the add-a-support CTA.
+//
+// MUTATION-PROVED in both directions — see the PR body.
+const SHELL_INSTANCE_TWINS = {
+  "fleet-support-provisioning": { fold: true, dom: true },
+  "fleet-support-online": { fold: true, dom: true },
+  "fleet-support-failed": { fold: true, dom: true },
+  "fleet-support-empty": { fold: true, dom: false },
+  "offload-filing": { fold: true, click: true },
+  "offload-working": { fold: true, click: true },
+  "offload-done": { fold: true, click: true },
+  "offload-blocked": { fold: true, click: true },
+  "verify-no-credentials": { click: true },
+};
+
+// The selector a drive step names, whichever verb it uses.
+function driveStepSelector(step) {
+  return (step && (step.click || step.fill || step.await)) || "";
+}
+
+// Does `sel` resolve in the painted body? The shim is a string DOM, so this is
+// a SHAPE match over the selector forms the drives use — an attribute selector
+// and an id — and it THROWS on anything else rather than answering "true" for a
+// form it cannot actually check.
+function selectorPaints(html, sel) {
+  const attr = sel.match(/^\[([a-z-]+)\]$/);
+  if (attr) return html.includes(attr[1] + "=") || html.includes(" " + attr[1] + ">") || html.includes(" " + attr[1] + " ");
+  const id = sel.match(/^#([a-z0-9-]+)$/i);
+  if (id) return html.includes('id="' + id[1] + '"');
+  throw new Error("selectorPaints cannot check " + JSON.stringify(sel) + " — teach it that form");
+}
+
+async function assertDefectEScenariosAreNotShellInstance() {
+  const baseBoot = bootScenario("shell-instance");
+  await flush();
+  const baseline = (baseBoot.registry.get("instance-body") || {}).innerHTML || "";
+  assert.ok(baseline.length > 0, "shell-instance must paint #instance-body — the whole guard is relative to it");
+  assert.ok(!SCENARIOS["shell-instance"].shotHeight,
+    "shell-instance is the REFERENCE shot and must keep the default fold — a shotHeight here moves the baseline under all nine");
+
+  const problems = [];
+  for (const name of Object.keys(SHELL_INSTANCE_TWINS)) {
+    const want = SHELL_INSTANCE_TWINS[name];
+    const scen = SCENARIOS[name];
+    if (!scen) { problems.push(name + ": listed here but absent from SCENARIOS"); continue; }
+    const boot = bootScenario(name);
+    await flush();
+    const html = (boot.registry.get("instance-body") || {}).innerHTML || "";
+    // The DOM comparison is #instance-body — the container shell-instance and
+    // all nine share. The SELECTOR check needs more: this shim's innerHTML is a
+    // per-element STRING, so a slot filled later by its own id (#instance-verify
+    // is filled async by loadInstanceVerify) never appears inside the parent's
+    // bytes. Sweep every element the boot touched, or [data-vf-run] reads as
+    // "does not paint" when it painted perfectly one element down.
+    const painted = [...boot.registry.values()].map((el) => (el && el.innerHTML) || "").join("\n");
+
+    if (want.fold && !(scen.shotHeight > 1000)) {
+      problems.push(name + ": its subject mounts below shoot.sh's 1000px fold and it declares no taller shotHeight");
+    }
+    if (want.click) {
+      const drive = scen.drive;
+      if (!Array.isArray(drive) || drive.length === 0) {
+        problems.push(name + ": click-gated with no `drive` — its shot collapses back onto shell-instance");
+      } else {
+        const entry = driveStepSelector(drive[0]);
+        if (!entry) problems.push(name + ": drive step 0 names no selector");
+        else if (!selectorPaints(painted, entry)) {
+          problems.push(name + ": drive entry " + JSON.stringify(entry) + " does not paint — the drive cannot start");
+        }
+      }
+    }
+    if (want.dom && html === baseline) {
+      problems.push(name + ": #instance-body is BYTE-IDENTICAL to shell-instance — its own state never painted");
+    }
+    if (!/\[(click-gated|below the fold)/.test(scen.label)) {
+      problems.push(name + ": its label must say how the shot is separated (below the fold / click-gated)");
+    }
+  }
+  if (problems.length) {
+    process.stdout.write("\nshell-instance twin guard FAILED:\n" + problems.map((p) => "  - " + p).join("\n") + "\n");
+    assert.fail(problems.length + " DEFECT-E scenario(s) cannot be told apart from shell-instance");
+  }
+  process.stdout.write("  ok   shell-instance twins — 9 scenario(s): 8 shot past the fold, 5 drive a real click, 3 also differ in DOM\n");
+}
+
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
   await assertBillingPaintsOncePerFact();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
+  await assertDefectEScenariosAreNotShellInstance();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);
