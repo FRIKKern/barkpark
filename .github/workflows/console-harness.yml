@@ -2208,10 +2208,50 @@ jobs:
           named "seal-predicate.test.mjs" || { echo "::error::selection self-test: the workflow scan no longer sees a suite this file demonstrably runs by name — the predicate has gone blind and would re-run everything or nothing"; exit 1; }
           named "no-such-suite-zzz.test.mjs" && { echo "::error::selection self-test: the workflow scan matches a basename that appears nowhere — the predicate cannot say NO, so it would select nothing forever"; exit 1; } || true
 
+          # SELF-TEST 3 — THE ITERATION, NOT THE PREDICATE. The two arms above
+          # exercise `named`, and `named` is NOT where this step diverges:
+          # measured 2026-09-21 on the same extracted body under /bin/sh,
+          # /bin/bash and /bin/zsh, it answers identically in all three (YES
+          # seal-predicate, NO bogus) and BOTH arms pass in all three. They were
+          # never broken. What they cannot see is the line below them: `for f in
+          # $all` word-splits an unquoted expansion under sh and bash and does
+          # NOT under zsh, which is the default shell on this repo's development
+          # Macs. Same script, same tree: sh -> 17 suites selected, bash -> 17,
+          # zsh -> ONE iteration with $f bound to the whole newline-joined list,
+          # one garbage basename, `named` says NO, and all 22 suites land in
+          # $todo — including seal-predicate.test.mjs, the one suite this step
+          # exists to exclude (see the ten-minute note above).
+          #
+          # CI IS NOT AT RISK: GitHub runs this body under `sh`. The casualty is
+          # a LOCAL re-derivation of the pin below, which is what a builder is
+          # told to do rather than trust arithmetic — observed on PR #19672,
+          # where a zsh replication selected 22 instead of 17. A smaller
+          # divergence would have produced a PLAUSIBLE wrong pin.
+          #
+          # WHY THIS ARM CANNOT ROT INTO A VACUOUS PASS, both halves deliberate:
+          #   * `want` is re-measured by a SECOND `find`, never counted off
+          #     `$all` and never off the loop, so it cannot compare a number to
+          #     itself: the two sides have no shared arithmetic.
+          #   * it REFUSES below two files. With one file every shell iterates
+          #     once, so the comparison could not tell the shells apart — an arm
+          #     that cannot distinguish them is not an arm, and 0 == 0 over an
+          #     empty directory must never read as agreement.
+          want=$(find "$dir" -name '*.test.mjs' | wc -l | tr -d '[:space:]')
+          if [ "${want:-0}" -lt 2 ]; then
+            echo "::error title=The iteration self-test cannot measure anything::$dir holds ${want:-0} *.test.mjs file(s). Below two, one iteration and N iterations are the same number, so this arm would pass under every shell while proving nothing. Either the directory was emptied or the find above stopped matching — decide which, deliberately."
+            exit 1
+          fi
+
           todo=""
+          iters=0
           for f in $all; do
+            iters=$((iters + 1))
             named "$(basename "$f")" || todo="$todo $f"
           done
+          if [ "$iters" -ne "$want" ]; then
+            echo "::error title=selection self-test: this shell did not split the file list::The selection loop ran ${iters} iteration(s) over ${want} file(s) that find returned. This shell does not word-split an unquoted \$all the way sh does — zsh does not. Every suite is about to be selected, including the ones other steps already run, and the tally below would be a number nobody can reproduce. Re-run this step under /bin/sh; do NOT re-derive the pin from this run."
+            exit 1
+          fi
           if [ -z "$todo" ]; then
             echo "::error title=This step selected nothing::Every preview suite is claimed by another step. That may be correct, but an empty selection is indistinguishable from a broken predicate, so say so deliberately and lower the floor below."
             exit 1
