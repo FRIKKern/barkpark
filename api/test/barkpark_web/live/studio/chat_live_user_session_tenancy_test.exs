@@ -227,7 +227,12 @@ defmodule BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest do
       raw = "usertenancy-unbound-#{System.unique_integer([:positive])}"
 
       {:ok, token} =
-        Auth.create_token(raw, "usertenancy unbound", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          raw,
+          "usertenancy unbound",
+          "production",
+          ["read", "write", "admin"]
+        )
 
       # `create_token/5` defaults an omitted workspace to Default, so the NULL
       # binding has to be written directly — which is exactly why this principal
@@ -320,7 +325,13 @@ defmodule BarkparkWeb.Studio.ChatLiveUserSessionTenancyTest do
       raw = "usertenancy-scopedtok-#{System.unique_integer([:positive])}"
 
       {:ok, token} =
-        Auth.create_token(raw, "usertenancy scoped tok", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          raw,
+          "usertenancy scoped tok",
+          "production",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       assert Repo.get(Barkpark.Auth.ApiToken, token.id).workspace_id == ctx.default_ws.id,
              "the fixture token is not Default-bound — this arm would not separate " <>

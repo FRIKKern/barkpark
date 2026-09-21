@@ -34,6 +34,10 @@
 # psql is STUBBED (a shell script first on PATH); no database, no network, no
 # credential. bash 3.2 compatible (macOS system bash).
 #
+# ARMS F-I do the same job for the BUNDLE member loop in `scan_bundle`
+# (task-57fbebcb2d5339ff) — the other half of the same CLEAN. Their own
+# commentary sits above arm F.
+#
 # EXIT CODES: 0 all assertions pass · 1 at least one failed · 2 cannot measure.
 
 set -uo pipefail
@@ -214,6 +218,144 @@ else
   bad "E unterminated last line: expected 3 of 3 and exit 0, got rc=$rc"
   cat "$TMP/e.err" >&2
 fi
+
+# ═══ THE BUNDLE MEMBER LOOP (task-57fbebcb2d5339ff) ═════════════════════════
+# The same defect one function up, in `scan_bundle`. It reads its member list
+# on fd 0 and produces the OTHER half of the very same "RESULT: VALUE SCAN
+# CLEAN" the arms above guard. Its two pre-existing floors (`members -eq 0`,
+# `table_members -eq 0`) are `-eq 0` floors, so they separate "nothing" from
+# "something" and never "some" from "all".
+#
+# THE PLANT IS CONDITIONAL, AND THAT IS THE POINT. A drain on the FIRST
+# iteration is caught by accident on a real bundle shape: `find | sort` puts
+# `manifest.json` ahead of `tables/…`, so a 1-member scan trips the
+# "no tables/ member" floor — with the WRONG message, and only by sort order.
+# `[ "$members" -ge 2 ] && cat >/dev/null` drains from the second iteration on,
+# which leaves members=2 and table_members=1: BOTH floors cleared, and on
+# origin/main that run prints CLEAN over 2 of 4 members in exactly the words a
+# full scan uses. That run is the RED this arm converts into a refusal.
+#
+#   F  CONTROL     an intact bundle scan reports "4 of 4 enumerated" and PRINTS
+#                  its verdict, exit 0
+#   G  SHORT READ  the drain is spliced into the member loop body; the identity
+#                  must REFUSE naming BOTH numbers ("examined 2 of 4 member(s)"),
+#                  exit 2, with NO `RESULT:` line on either stream and neither
+#                  floor's message borrowed
+#   H  MUTATION    the bundle identity block is CUT between its markers; arm G
+#                  must then go GREEN and print CLEAN over 2 of 4 — the defect,
+#                  reproduced — while F is unchanged
+#   I  ZERO        a tar holding no regular file still fires its OWN
+#                  "ZERO members" refusal and is not mis-reported as short
+#
+# No psql, no database, no network: a bundle scan is tar + find + grep.
+
+BFIX="$TMP/bundle"
+mkdir -p "$BFIX/tables"
+echo '{"format":"bp-export-v1","tables":["alpha","beta","gamma"]}' > "$BFIX/manifest.json"
+for t in alpha beta gamma; do printf '1\trow-for-%s\n' "$t" > "$BFIX/tables/$t.copy"; done
+BTAR="$TMP/bundle.tar"
+tar -cf "$BTAR" -C "$BFIX" . 2>/dev/null || unavailable "cannot build the fixture bundle tar"
+# 4 regular files: manifest.json + three tables/*.copy. Asserted, not assumed —
+# every "N of 4" below is a claim about THIS number.
+n_files=$(find "$BFIX" -type f | wc -l | tr -d ' ')
+[ "$n_files" = "4" ] || unavailable "fixture bundle holds $n_files regular files, expected 4"
+
+EMPTY_DIR="$TMP/emptybundle"
+mkdir -p "$EMPTY_DIR/tables"
+ETAR="$TMP/empty.tar"
+tar -cf "$ETAR" -C "$EMPTY_DIR" . 2>/dev/null || unavailable "cannot build the empty fixture tar"
+
+run_bundle_scan() { # script bundle outprefix
+  local script="$1" tar_path="$2" pre="$3" rc=0
+  bash "$script" scan --bundle "$tar_path" --value "s3cret-ammo-value-xyz" \
+    >"$pre.out" 2>"$pre.err" || rc=$?
+  echo "$rc"
+}
+
+# G's PLANT: a stdin-draining child in the MEMBER loop body, from the second
+# iteration on. Anchor asserted UNIQUE and the diff asserted non-empty — a
+# mutation that did not land is a green about nothing.
+BPLANT="$TMP/bundle-planted.sh"
+banchor='    members=$((members + 1))'
+bdrain='    [ "$members" -ge 2 ] && cat >/dev/null'
+n_banchor=$(grep -cF "$banchor" "$SCAN")
+if [ "$n_banchor" != "1" ]; then
+  unavailable "the bundle plant anchor matched $n_banchor times, expected exactly 1: $banchor"
+fi
+awk -v a="$banchor" -v d="$bdrain" '{ print; if ($0 == a) print d }' "$SCAN" > "$BPLANT"
+if cmp -s "$SCAN" "$BPLANT"; then unavailable "the bundle stdin-drain plant produced an identical file"; fi
+ok "bundle plant landed: a stdin-draining child spliced into the member loop body at the unique anchor"
+
+# H's CUT: the bundle identity decision removed between its markers.
+BCUT="$TMP/bundle-cut.sh"
+n_bmut=$(grep -c 'MUT-ANCHOR: bundle-count-identity' "$SCAN")
+if [ "$n_bmut" != "1" ]; then
+  unavailable "the bundle identity MUT-ANCHOR matched $n_bmut times, expected exactly 1"
+fi
+sed '/MUT-ANCHOR: bundle-count-identity/,/MUT-END: bundle-count-identity/d' "$SCAN" > "$BCUT"
+if cmp -s "$SCAN" "$BCUT"; then unavailable "the bundle identity cut produced an identical file"; fi
+BCUTPLANT="$TMP/bundle-cut-planted.sh"
+awk -v a="$banchor" -v d="$bdrain" '{ print; if ($0 == a) print d }' "$BCUT" > "$BCUTPLANT"
+cmp -s "$BCUT" "$BCUTPLANT" && unavailable "the bundle plant did not land on the cut copy"
+ok "bundle cut landed: the bundle-count-identity block removed from the scratch copy"
+
+# ── F: CONTROL — an intact bundle scan examines every enumerated member ─────
+rc=$(run_bundle_scan "$SCAN" "$BTAR" "$TMP/f")
+if [ "$rc" = "0" ]; then ok "F control: intact bundle scan over 4 members exits 0"
+else bad "F control: expected exit 0, got $rc"; sed -n '1,5p' "$TMP/f.err" >&2; fi
+if has "$TMP/f.out" 'members scanned: 4 of 4 enumerated'; then
+  ok "F control: reports 'members scanned: 4 of 4 enumerated'"
+else bad "F control: no '4 of 4 enumerated' line"; cat "$TMP/f.out" >&2; fi
+if has "$TMP/f.out" 'RESULT: VALUE SCAN CLEAN'; then
+  ok "F control: PRINTS its verdict (RESULT: VALUE SCAN CLEAN)"
+else bad "F control: the verdict line is missing"; fi
+
+# ── G: SHORT READ — the identity refuses, naming both numbers ───────────────
+rc=$(run_bundle_scan "$BPLANT" "$BTAR" "$TMP/g")
+if [ "$rc" = "2" ]; then ok "G short read: refuses with exit 2"
+else bad "G short read: expected exit 2, got $rc"; cat "$TMP/g.err" >&2; fi
+if has "$TMP/g.err" 'SHORT BUNDLE SCAN'; then
+  ok "G short read: fires the SHORT BUNDLE SCAN refusal"
+else bad "G short read: the short-scan refusal did not fire"; cat "$TMP/g.err" >&2; fi
+if has "$TMP/g.err" 'examined 2 of 4 member'; then
+  ok "G short read: the refusal names BOTH numbers ('examined 2 of 4 member(s)')"
+else bad "G short read: the refusal does not name both numbers"; cat "$TMP/g.err" >&2; fi
+if has "$TMP/g.out" 'RESULT:' || has "$TMP/g.err" 'RESULT:'; then
+  bad "G short read: a RESULT: verdict was printed over a partial bundle scan"
+else ok "G short read: NO verdict printed — no RESULT: line on either stream"; fi
+if has "$TMP/g.err" 'ZERO members' || has "$TMP/g.err" 'no tables/ member'; then
+  bad "G short read: borrowed a floor's message instead of its own"
+else ok "G short read: distinct from both -eq 0 floors (neither message present)"; fi
+
+# ── H: MUTATION — cut the identity and arm G must go GREEN over 2 of 4 ─────
+rc=$(run_bundle_scan "$BCUTPLANT" "$BTAR" "$TMP/h")
+if [ "$rc" = "0" ]; then
+  ok "H mutation: without the identity the SHORT bundle scan exits 0 — the defect, reproduced"
+else bad "H mutation: expected the cut copy to exit 0 on a short read, got $rc"; cat "$TMP/h.err" >&2; fi
+if has "$TMP/h.out" 'RESULT: VALUE SCAN CLEAN'; then
+  ok "H mutation: prints CLEAN over 2 of 4 members — exactly what arm G now refuses"
+else bad "H mutation: expected a CLEAN verdict from the un-guarded short bundle scan"; cat "$TMP/h.out" >&2; fi
+if has "$TMP/h.err" 'SHORT BUNDLE SCAN'; then
+  bad "H mutation: the refusal survived the cut — the cut did not remove the decision"
+else ok "H mutation: the refusal is GONE once its block is cut (RED-before is real)"; fi
+rc=$(run_bundle_scan "$BCUT" "$BTAR" "$TMP/h2")
+if [ "$rc" = "0" ] && has "$TMP/h2.out" 'RESULT: VALUE SCAN CLEAN'; then
+  ok "H mutation: arm F is unaffected by the cut (intact bundle scan still clean, exit 0)"
+else bad "H mutation: the cut changed arm F, so the cut is not surgical (rc=$rc)"; fi
+
+# ── I: ZERO MEMBERS — the pre-existing floor keeps its own message ──────────
+rc=$(run_bundle_scan "$SCAN" "$ETAR" "$TMP/i")
+if [ "$rc" = "2" ]; then ok "I zero members: refuses with exit 2"
+else bad "I zero members: expected exit 2, got $rc"; cat "$TMP/i.err" >&2; fi
+if has "$TMP/i.err" 'ZERO members'; then
+  ok "I zero members: fires its OWN message (bundle contains ZERO members)"
+else bad "I zero members: the zero-members refusal did not fire"; cat "$TMP/i.err" >&2; fi
+if has "$TMP/i.err" 'SHORT BUNDLE SCAN'; then
+  bad "I zero members: mis-reported as a short scan (0 of 0 is an identity, not a shortfall)"
+else ok "I zero members: NOT reported as a short scan — two refusals, two messages"; fi
+if has "$TMP/i.out" 'RESULT:'; then
+  bad "I zero members: a verdict was printed over an empty container"
+else ok "I zero members: no verdict printed"; fi
 
 echo "── pds-secret-scan count identity: $((PASS + FAIL)) checks, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1
