@@ -141,7 +141,7 @@ if [[ -z "$CHROME_BIN" ]]; then
 fi
 
 # Scenario names + their ROUTE straight from the single source of truth
-# (scenarios.mjs → SCENARIOS[name]). Three fields matter, not one:
+# (scenarios.mjs → SCENARIOS[name]). FOUR fields matter, not one:
 #   deepLink  the URL fragment — the provisioning/failed money shot is the
 #             #instance/<id> timeline, not #overview.
 #   pathname  app.js gates whole flows on the EXACT pathname (isNewFlow,
@@ -149,6 +149,12 @@ fi
 #             renders the logged-out card and files it under an activate name.
 #   search    app.js reads ?code=, ?template=, ?bp= and ?billing=portal out of
 #             location.search; dropping it silently voids the scenario's state.
+#   modal     the name of a mock.js MODAL_DRIVERS entry (task-5ffdec2b609404bc).
+#             THE FOURTH FIELD IS NEW, and it replaces a NAME CONVENTION: this
+#             script used to derive its one modal query from `account-modal*`,
+#             so the only dialog reachable by any PNG here was the account
+#             modal, at any accent, theme and width. A scenario now asks for a
+#             dialog by SAYING SO. Empty ⇒ no modal query, as before.
 #
 # ── \x1f, NEVER TAB ──────────────────────────────────────────────────────────
 # The fields are joined and split on \x1f (US, the ASCII unit separator).
@@ -164,7 +170,7 @@ SCEN_TABLE="$(HERE="$HERE" node --input-type=module -e '
   const m = await import(new URL("scenarios.mjs", "file://" + process.env.HERE + "/").href);
   const US = String.fromCharCode(31);
   for (const [name, s] of Object.entries(m.SCENARIOS)) {
-    console.log([name, s.deepLink || "", s.pathname || "", s.search || ""].join(US));
+    console.log([name, s.deepLink || "", s.pathname || "", s.search || "", s.modal || ""].join(US));
   }
 ')"
 THEMES=(light dark)
@@ -177,6 +183,26 @@ WIDTHS=(1440 768) # desktop + tablet — the second pass the slice mandates
 ALL_SCEN="$(printf '%s\n' "$SCEN_TABLE" | cut -d$'\x1f' -f1 | grep -v '^$' || true)"
 SCEN_TOTAL="$(printf '%s\n' "$ALL_SCEN" | grep -c . || true)"
 SCEN_DEEP="$(printf '%s\n' "$SCEN_TABLE" | cut -d$'\x1f' -f2 | grep -c . || true)"
+SCEN_MODAL="$(printf '%s\n' "$SCEN_TABLE" | cut -d$'\x1f' -f5 | grep -c . || true)"
+
+# ── THE CONVENTION'S REPLACEMENT, GUARDED (task-5ffdec2b609404bc) ────────────
+# Deleting `case "$scen" in account-modal*` has one failure mode and it is
+# SILENT: a scenario in that family that forgets the field is still shot, still
+# reported `ok`, and still filed under a name promising a dialog — it just
+# photographs the bare shell. The old convention covered that family by
+# accident; this covers it on purpose. It is deliberately NOT a general rule
+# (a scenario is free to have no dialog); it is a rule about the seven names
+# the deleted line used to reach.
+ORPHANED="$(printf '%s\n' "$SCEN_TABLE" | awk -F$'\x1f' '$1 ~ /^account-modal/ && $5 == "" { print $1 }')"
+if [[ -n "$ORPHANED" ]]; then
+  echo "!! shoot.sh: scenario(s) named account-modal* declare NO \`modal\` field in scenarios.mjs:" >&2
+  printf '   %s\n' $ORPHANED >&2
+  echo "   Before task-5ffdec2b609404bc this script opened the account modal for every" >&2
+  echo "   account-modal* name. It no longer does — the field is the contract. Without it" >&2
+  echo "   these scenarios shoot the BARE SHELL under a filename promising a dialog." >&2
+  echo "   Add \`modal: \"account\"\` (or the driver this scenario wants) to each." >&2
+  exit 1
+fi
 
 # ── optional SCEN filter (comma-list) ────────────────────────────────────────
 # Unset ⇒ shoot every scenario. Set ⇒ shoot only the named ones.
@@ -327,7 +353,7 @@ done
 
 echo ">> Chrome: $CHROME_BIN"
 echo ">> Shooting into: $OUT"
-echo ">> Census (derived from scenarios.mjs): $SCEN_DEEP of $SCEN_TOTAL scenarios carry a deepLink"
+echo ">> Census (derived from scenarios.mjs): $SCEN_DEEP of $SCEN_TOTAL scenarios carry a deepLink; $SCEN_MODAL declare a modal driver"
 
 # Portable file size (macOS `stat -f%z`, GNU `stat -c%s`), 0 if absent.
 # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
@@ -357,23 +383,24 @@ SHOTS_FAILED=0
 exec 3>&2
 
 shot() {
-  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}"
+  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}" smodal="${8:-}"
   local accent_q="" accent_sfx=""
   if [[ -n "$accent" ]]; then accent_q="&accent=$accent"; accent_sfx="-$accent"; fi
   # The scenario's own query string, folded in as extra params (its leading "?"
   # dropped — ours already opened the query with ?scen=).
   local search_q=""
   if [[ -n "$ssearch" ]]; then search_q="&${ssearch#\?}"; fi
-  # The account modal opens on a CLICK, so no deepLink can reach it; mock.js
-  # drives the REAL openAccountModal() on ?modal=account
-  # (`grep -n 'openAccountModal' mock.js`). The flag is derived
-  # from the "account-modal" NAME PREFIX here rather than from a scenarios.mjs
-  # field, deliberately: scenarios.mjs is a tail-zone collision anchor this wave.
-  # TRADEOFF, stated honestly: this is a naming CONVENTION, not a contract — a
-  # future account-modal scenario named otherwise is silently shot without the
-  # modal. Promote it to a scenarios.mjs field once the tail zone is quiet.
+  # A dialog opens on a CLICK or a KEYSTROKE, so no deepLink can reach one;
+  # mock.js drives the REAL opener (`grep -n 'MODAL_DRIVERS' mock.js`) on
+  # ?modal=<driver>. THAT NAME IS THE SCENARIO'S OWN DECLARED FIELD, passed
+  # through verbatim — the tradeoff the old code named ("this is a naming
+  # CONVENTION, not a contract — a future account-modal scenario named
+  # otherwise is silently shot without the modal") is paid off here, and with
+  # it the far larger one: `case "$scen" in account-modal*` could only ever
+  # produce `&modal=account`, so 27 of app.js's 28 openModal call sites were
+  # structurally unreachable by every PNG this script has ever taken.
   local modal_q=""
-  case "$scen" in account-modal*) modal_q="&modal=account" ;; esac
+  if [[ -n "$smodal" ]]; then modal_q="&modal=$smodal"; fi
   # ORDER MATTERS: everything above is a QUERY param and $deep is the URL
   # FRAGMENT, so the fragment MUST come LAST. mock.js reads accent from
   # location.search (`grep -n 'params.get("accent")' mock.js`), which
@@ -515,14 +542,14 @@ shot() {
 
 # IFS is \x1f (US) — see the SCEN_TABLE note above for why a tab here is a
 # silent-corruption bug, not a style choice.
-while IFS=$'\x1f' read -r scen deep spath ssearch; do
+while IFS=$'\x1f' read -r scen deep spath ssearch smodal; do
   [[ -z "$scen" ]] && continue
   # SCEN filter: when set, skip any scenario not on the list.
   if [[ -n "$WANT_SCEN" && "$WANT_SCEN" != *" $scen "* ]]; then continue; fi
   for theme in "${THEMES[@]}"; do
     for width in "${WIDTHS[@]}"; do
       for accent in "${ACCENTS[@]}"; do
-        shot "$scen" "$theme" "$width" "$deep" "$accent" "$spath" "$ssearch"
+        shot "$scen" "$theme" "$width" "$deep" "$accent" "$spath" "$ssearch" "$smodal"
       done
     done
   done
