@@ -653,6 +653,12 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1502 — bumped 2026-09-21 from 1500 on console-r21m-defect-d (task-9f09b84ae8248a71):
+      # +2 tests. The instance detail header's address slot stops printing an orphan
+      # em-dash failure fragment on the two failed arms (accent-matrix DEFECT-D); two
+      # tests in cloud/priv/static/__app.test.mjs pin the corrected slot. RE-MEASURED
+      # after merging main at 793a03ad7 (pin 1500, #19523): `sh scripts/console-harness.sh`
+      # printed the figure below — the instrument's, not 1500 + 2.
       # PIN 1500 — bumped 2026-09-21 from 1499 on console-r21k-coherence-durable (gr-backlog-coherence-fixture-durable):
       # one __app.test.mjs test added (coherence.html reads the TUI goldens); the harness printed
       # `ran 1500 test(s)` against the 1499 pin in CI run 35550741163.
@@ -909,7 +915,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1500-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1502-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -925,14 +931,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1500 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1500 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1502 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1502 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1500 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1500 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1500 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1502 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1502 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1502 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1500 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1502 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -2153,9 +2159,15 @@ jobs:
       #
       # THE PIN, and the reason there is one: `node --test` on a file that
       # still LOADS but registers ZERO tests reports one passing test and exits
-      # 0 (task-2c39c3b9e1f925c2). 230 is this step's selection on 2026-09-20,
-      # MEASURED on node 22.22.0 across the 15 suites the predicate selects
-      # (`# tests 230 / # pass 230 / # fail 0`, task-f8318f7734a52c52). It was 225
+      # 0 (task-2c39c3b9e1f925c2). 261 is this step's selection on 2026-09-21,
+      # MEASURED on node 22.22.0 across the 17 suites the predicate selects, by
+      # running this step's own selection and reading what it printed
+      # (`# tests 261 / # pass 261 / # fail 0`, task-a0258bec59b256d7);
+      # identity-seed.test.mjs and byte-comparability.test.mjs joined the
+      # selection with that task. The number was NOT computed from the previous
+      # pin: an arithmetic pin is a pin nobody re-earned, and the predicate's
+      # selection is what decides, not the diff. It was 230 across 15 on
+      # 2026-09-20 (node 22.22.0, task-f8318f7734a52c52). It was 225
       # across 14 on 2026-09-14 (node 22.22.0, origin/main c42fde07c);
       # badcode-freeze.test.mjs — the regression guard for the caret/transition
       # freeze #19583 lands in __preview__/mock.js — joined the selection with its
@@ -2170,7 +2182,7 @@ jobs:
       # moves this number, so bump it in the PR that changes either the suites or
       # the steps that name them. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: "__preview__ suites no other step runs (derived selection, 230-test exact pin)"
+      - name: "__preview__ suites no other step runs (derived selection, 261-test exact pin)"
         run: |
           set -euo pipefail
           dir=cloud/priv/static/__preview__
@@ -2196,10 +2208,50 @@ jobs:
           named "seal-predicate.test.mjs" || { echo "::error::selection self-test: the workflow scan no longer sees a suite this file demonstrably runs by name — the predicate has gone blind and would re-run everything or nothing"; exit 1; }
           named "no-such-suite-zzz.test.mjs" && { echo "::error::selection self-test: the workflow scan matches a basename that appears nowhere — the predicate cannot say NO, so it would select nothing forever"; exit 1; } || true
 
+          # SELF-TEST 3 — THE ITERATION, NOT THE PREDICATE. The two arms above
+          # exercise `named`, and `named` is NOT where this step diverges:
+          # measured 2026-09-21 on the same extracted body under /bin/sh,
+          # /bin/bash and /bin/zsh, it answers identically in all three (YES
+          # seal-predicate, NO bogus) and BOTH arms pass in all three. They were
+          # never broken. What they cannot see is the line below them: `for f in
+          # $all` word-splits an unquoted expansion under sh and bash and does
+          # NOT under zsh, which is the default shell on this repo's development
+          # Macs. Same script, same tree: sh -> 17 suites selected, bash -> 17,
+          # zsh -> ONE iteration with $f bound to the whole newline-joined list,
+          # one garbage basename, `named` says NO, and all 22 suites land in
+          # $todo — including seal-predicate.test.mjs, the one suite this step
+          # exists to exclude (see the ten-minute note above).
+          #
+          # CI IS NOT AT RISK: GitHub runs this body under `sh`. The casualty is
+          # a LOCAL re-derivation of the pin below, which is what a builder is
+          # told to do rather than trust arithmetic — observed on PR #19672,
+          # where a zsh replication selected 22 instead of 17. A smaller
+          # divergence would have produced a PLAUSIBLE wrong pin.
+          #
+          # WHY THIS ARM CANNOT ROT INTO A VACUOUS PASS, both halves deliberate:
+          #   * `want` is re-measured by a SECOND `find`, never counted off
+          #     `$all` and never off the loop, so it cannot compare a number to
+          #     itself: the two sides have no shared arithmetic.
+          #   * it REFUSES below two files. With one file every shell iterates
+          #     once, so the comparison could not tell the shells apart — an arm
+          #     that cannot distinguish them is not an arm, and 0 == 0 over an
+          #     empty directory must never read as agreement.
+          want=$(find "$dir" -name '*.test.mjs' | wc -l | tr -d '[:space:]')
+          if [ "${want:-0}" -lt 2 ]; then
+            echo "::error title=The iteration self-test cannot measure anything::$dir holds ${want:-0} *.test.mjs file(s). Below two, one iteration and N iterations are the same number, so this arm would pass under every shell while proving nothing. Either the directory was emptied or the find above stopped matching — decide which, deliberately."
+            exit 1
+          fi
+
           todo=""
+          iters=0
           for f in $all; do
+            iters=$((iters + 1))
             named "$(basename "$f")" || todo="$todo $f"
           done
+          if [ "$iters" -ne "$want" ]; then
+            echo "::error title=selection self-test: this shell did not split the file list::The selection loop ran ${iters} iteration(s) over ${want} file(s) that find returned. This shell does not word-split an unquoted \$all the way sh does — zsh does not. Every suite is about to be selected, including the ones other steps already run, and the tally below would be a number nobody can reproduce. Re-run this step under /bin/sh; do NOT re-derive the pin from this run."
+            exit 1
+          fi
           if [ -z "$todo" ]; then
             echo "::error title=This step selected nothing::Every preview suite is claimed by another step. That may be correct, but an empty selection is indistinguishable from a broken predicate, so say so deliberately and lower the floor below."
             exit 1
@@ -2207,16 +2259,16 @@ jobs:
           echo "selected (run by no other step):$todo"
 
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 230 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 230 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 261 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 261 — this pin can no longer lose"; exit 1; }
 
           # shellcheck disable=SC2086 # word splitting is the selection
           node --test $todo 2>&1 | tee /tmp/preview-unrun-suites.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/preview-unrun-suites.txt)
-          if [ "${tally:-0}" -ne 230 ]; then
-            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 230 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 230 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 261 ]; then
+            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 261 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 261 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "preview suites: ${tally} tests, exact pin 230 — the pin re-earned"
+          echo "preview suites: ${tally} tests, exact pin 261 — the pin re-earned"
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
