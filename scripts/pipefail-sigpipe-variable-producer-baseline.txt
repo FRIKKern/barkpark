@@ -85,4 +85,49 @@
 # tree). Counting them would bank sites the flag's own name excludes.
 #
 # Filed under task-7fccc7b8cf1c6f6c.
-105
+# ── RE-MEASURED 2026-09-21 (task-fb55d468c7dea75b) ───────────────────────────
+#
+# 105 -> 95. The ratchet ASKED for this, in its own words, and refusing it is a
+# failure in the second direction: at 95 against a banked 105 the arrears were
+# 10 against a documented slack bound of 2, so ten NEW sites of this exact shape
+# could have landed and the gate would still have said green. A ratchet that
+# cannot move on a fall is not measuring the property it claims any more than
+# one that cannot move on a rise.
+#
+# WHAT MOVED THE NUMBER. 38 occurrences of `printf '%s' "$var" | grep -q P`
+# rewritten to a here-string, or to `case`/`[[ =~ ]]` where no pipe was needed
+# at all (the scanner's own preference order), across six files:
+#   deploy/caddy-handle-errors-scope-check.sh   5   ($body is a whole source line)
+#   deploy/cp-deploy.sh                         3   (BOTH slot health probes + the provisioner sha)
+#   deploy/site-deploy.sh                       1   (the release-receipt digest)
+#   deploy/cp-deploy_test.sh                    -   (its health-class extraction followed the shape)
+#   scripts/pds-threshold-move-guard_test.sh   19   (9 of them introduced by the same PR's new arms)
+#   scripts/pds-charter-anchors-check.sh        2
+#
+# NOT FIXED, ON PURPOSE, AND IT IS COUNTED IN THE 95:
+# deploy/cp-deploy_test.sh:1158 is the RED-before arm of the wedged-endpoint
+# proof — it builds a >64KB transcript and asserts the PIPED form returns
+# non-zero, so the pipe-less predicate beside it is measured against the real
+# hazard instead of the weather. "Fixing" it deletes a control. This scanner has
+# no per-site waiver, so the site simply counts, and a future reader chasing the
+# last finding in deploy/** should stop here rather than repair it.
+#
+# COMMAND, DATE AND SHA — the three things a bare number cannot be checked
+# without (--check-provenance reads this block):
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --count-only
+#     -> pipefail-sigpipe-scan: 95 finding(s) — high 4 · medium 91 · low 0 — over 471 file(s)
+#
+#   date       2026-09-21T19:22:30Z
+#   tree       5db3ae5f49adc284bc85268f0a1ccb637d1ea367
+#              (this PR's head; its merge-base is origin/main bd804ca235057140b65f6c0818e0c1c79ef7f8f3, 0 commits
+#               behind at the time of measurement — the count was taken AFTER the
+#               final rebase, because the gate evaluates the merge and a number
+#               shot before the last rebase is stale on arrival)
+#
+# The before-numbers, for anyone checking the arithmetic: this branch measured
+# 124 before the rewrite; origin/main measures 115 (derived by scanning all 11
+# files this PR touches on both sides with --count-only <file> — every one
+# identical except pds-threshold-move-guard_test.sh, 10 -> 19; 124 - 9 = 115).
+#
+95

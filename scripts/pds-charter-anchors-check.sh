@@ -151,6 +151,10 @@ fi
 
 fails=0
 checked=0
+# THE WORK SIDE of arm A's count identity — one per anchor pair the resolution
+# loop below actually REACHED, tallied before any per-anchor verdict. `checked`
+# is NOT that number: it excludes the `<path>` placeholder on purpose.
+seen=0
 
 # Extract `path`@`literal` pairs. A line may carry more than one; perl walks
 # every match on every line rather than the first, and prints them NUL-free on
@@ -176,6 +180,10 @@ fi
 if [ -n "$anchors" ]; then
   while IFS=$'\t' read -r path literal; do
     [ -n "$path" ] || continue
+    # MUT-SPLICE: anchor-count-identity
+    # Tallied HERE — above the placeholder skip and above every `continue` — so
+    # it counts anchors REACHED, which is the only quantity a short read moves.
+    seen=$((seen + 1))
     [ "$path" = "<path>" ] && continue   # the documented placeholder, not an anchor
     checked=$((checked + 1))
     if [ ! -f "$path" ]; then
@@ -196,6 +204,34 @@ if [ -n "$anchors" ]; then
       fails=$((fails + 1))
     fi
   done <<< "$anchors"
+
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # The loop above reads `$anchors` on fd 0 (`done <<< "$anchors"`). Any body
+  # child that reads stdin — a future `grep` with no file operand, a `read`, an
+  # `ssh`, a pager — swallows the remaining pairs and the loop ENDS EARLY with
+  # no error and no non-zero status. Nothing downstream could see that: a
+  # resolution loop that stopped after pair 1 of 40 raises no ROTTED and no
+  # AMBIGUOUS, so `fails` stays 0 and the run prints
+  #     RESULT: PASS — every charter content anchor resolves uniquely.
+  # in the SAME WORDS it uses for 40 of 40. "Every" is the assertion, and an
+  # anchor never reached never rots.
+  #
+  # `$pairs` is the enumeration side, already computed above as the non-blank
+  # line count of `$anchors` (`grep -c .`); `perl` emits both fields non-empty
+  # on every line it prints, so a non-blank line and a non-empty `$path` are the
+  # same population. `$seen` is the work side. No body child reads fd 0 today;
+  # the identity is for the one added next year, which is precisely the child no
+  # fd-discipline review can name.
+  # MUT-ANCHOR: anchor-count-identity
+  if [ "$seen" -ne "$pairs" ]; then
+    printf '\nSHORT ANCHOR SWEEP — resolved %s of %s anchor pair(s) parsed from the charter.\n' "$seen" "$pairs"
+    printf '  The resolution loop ended before the parsed list did (a loop-body child that reads\n'
+    printf '  stdin consumes the remaining pairs silently). A partial sweep must never print\n'
+    printf '  RESULT: PASS in the same words as a complete one. This is a fault in THIS script,\n'
+    printf '  not a finding about the charter.\n'
+    exit 2
+  fi
+  # MUT-END: anchor-count-identity
 fi
 
 # Arm B — the legacy bare-citation ratchet.
@@ -370,9 +406,12 @@ else
       }
     ' "$TRIGGER_WORKFLOW" 2>&1)"
 
-  if printf '%s' "$trigger_out" | grep -q '^UNCHECKED'; then
+  # Here-strings, not `printf … | grep -q`: under this file's pipefail the
+  # reader's early exit SIGPIPEs the producer and 141 comes back, so a MATCH
+  # reads as a non-match. `$trigger_out` is arm E's whole transcript.
+  if grep -q '^UNCHECKED' <<<"$trigger_out"; then
     trigger_unchecked="$(printf '%s' "$trigger_out" | sed -n 's/^UNCHECKED\t//p' | head -1)"
-  elif ! printf '%s' "$trigger_out" | grep -q '^SETS'; then
+  elif ! grep -q '^SETS' <<<"$trigger_out"; then
     trigger_unchecked="the trigger parse produced no verdict line: $trigger_out"
   else
     trigger_gap_list="$(printf '%s' "$trigger_out" | grep '^GAP' | cut -f2- || true)"

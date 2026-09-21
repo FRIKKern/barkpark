@@ -315,7 +315,12 @@ do_rollback() {
   rb_ok=0
   for _ in $(seq 1 36); do
     code="$(bp_curl_code -s -o /dev/null --max-time 6 "http://localhost:${RB_PORT}/" || echo 000)"
-    if echo "$code" | grep -qE '^(200|301|302)$'; then rb_ok=1; log "rollback slot $RB_SLOT healthy ($code)"; break; fi
+    # `case`, not `echo | grep -q`: under this file's `pipefail` the reader
+    # exits at the first match, `echo` takes SIGPIPE and pipefail hands back 141,
+    # so a HEALTHY code reads as unhealthy. `$code` is short enough that it has
+    # never fired here, but the shape is the hazard and a pattern match needs no
+    # pipe at all (fix 1 in scripts/pipefail-sigpipe-scan.sh's preference order).
+    case "$code" in 200|301|302) rb_ok=1; log "rollback slot $RB_SLOT healthy ($code)"; break ;; esac
     sleep 5
   done
   if [ "$rb_ok" != 1 ]; then
@@ -515,7 +520,9 @@ BARKPARK_PROVISIONER_SHA=""
 if [ -n "$PROV_BIN" ] && [ -f "$PROV_BIN" ]; then
   [ -x "$PROV_BIN" ] || chmod 0755 "$PROV_BIN" 2>/dev/null || true
   _prov_sha="$("$PROV_BIN" --version 2>/dev/null | head -1 | tr -d '[:space:]')"
-  if printf '%s' "$_prov_sha" | grep -qE '^[0-9a-f]{40}$'; then
+  # Here-string, not `printf | grep -q` — a producer process that can be killed
+  # by the reader's early exit is what returns 141 under pipefail.
+  if grep -qE '^[0-9a-f]{40}$' <<<"$_prov_sha"; then
     BARKPARK_PROVISIONER_SHA="$_prov_sha"
   else
     log "provisioner binary carries NO usable build sha (--version gave '${_prov_sha}') — reporting absent"
@@ -634,8 +641,19 @@ SERVING_CONTAINER="${COMPOSE_PROJECT_NAME:-cloud}-control_plane_${ACTIVE_SLOT}-1
 # nothing. Never fatal: this runs on a path that is already failing.
 clear_wedged_endpoints() {
   cleared=0
+  seen=0
+  # MATERIALISED, not consumed straight out of the heredoc's command
+  # substitution: the count identity below needs an enumeration side that a
+  # short read cannot move.
+  endpoints="$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
+{{end}}' 2>/dev/null)"
+  enumerated="$(printf '%s' "$endpoints" | grep -c . || true)"
   while IFS=' ' read -r cid cname; do
     [ -n "$cid" ] && [ -n "$cname" ] || continue
+    # MUT-SPLICE: endpoint-count-identity
+    # THE WORK SIDE — tallied above every `continue`, so it counts endpoints
+    # REACHED. `$cleared` is the OUTCOME, not the coverage.
+    seen=$((seen + 1))
     # GUARD — NEVER unplug the slot that is serving traffic right now. A running
     # container's endpoint is not the fault anyway (the wedge is an endpoint
     # whose container is GONE), but this is the one mistake that would convert a
@@ -659,9 +677,29 @@ clear_wedged_endpoints() {
       log "WARNING: could not disconnect '$cname' from $CP_NETWORK"
     fi
   done <<EOF
-$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
-{{end}}' 2>/dev/null)
+$endpoints
 EOF
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # This loop reads the endpoint list on fd 0. Its body already starts THREE
+  # subprocesses (`docker inspect`, `docker network disconnect`, `log`), and the
+  # next one added that reads stdin — an `ssh`, a `read`, a `docker` subcommand
+  # that prompts — swallows the remaining endpoints and the loop ENDS EARLY with
+  # no error and no non-zero status. `$cleared` is read off this same loop, so a
+  # sweep that reached endpoint 1 of 6 leaves the other five WEDGED and reports a
+  # smaller number in the same words as a complete sweep — and the caller then
+  # retries a `compose up -d` against a network that is still blocked, which is
+  # the 2026-07-21 48h47m blackout's exact shape.
+  #
+  # NOT FATAL, deliberately: this runs on a path that is already failing, and a
+  # `die` here would convert a repairable deploy into an aborted one. The
+  # refusal is that the function reports FAILURE (return 1) and says both
+  # numbers, so it can never claim a clearance it did not complete.
+  # MUT-ANCHOR: endpoint-count-identity
+  if [ "$seen" -ne "$enumerated" ]; then
+    log "SHORT ENDPOINT SWEEP on $CP_NETWORK: examined $seen of $enumerated endpoint(s) the daemon listed. The sweep loop ended before the list did (a loop-body child that reads stdin consumes the rest silently), so $((enumerated - seen)) endpoint(s) were never even examined and a stale one may still be wedging the network. Reporting FAILURE rather than '$cleared cleared' — a partial sweep must not read as a completed one."
+    return 1
+  fi
+  # MUT-END: endpoint-count-identity
   [ "$cleared" -gt 0 ]
 }
 
@@ -783,7 +821,9 @@ for _ in $(seq 1 36); do
   # SPA missing) is exactly the broken-deploy shape this gate exists to
   # catch, and 404 waved it through as "healthy". Only redirect/success on
   # '/' counts now.
-  if echo "$code" | grep -qE '^(200|301|302)$'; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
+  # `case`, not `echo | grep -q` — see the rollback probe above: under pipefail
+  # a SIGPIPE'd producer turns a healthy code into an unhealthy verdict.
+  case "$code" in 200|301|302) ok=1; log "slot $TARGET healthy ($code)"; break ;; esac
   sleep 5
 done
 if [ "$ok" != "1" ]; then

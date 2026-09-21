@@ -314,6 +314,11 @@ main() {
     "$base" "${base_sha:0:9}" "$head" "${head_sha:0:9}" "$(roster_paths | grep -c . || true)"
 
   local moved=0 unstated=0 path kind key oldv newv id
+  # THE TWO WORK SIDES of the sweep count identities (task-fb55d468c7dea75b):
+  # watched paths REACHED, and — accumulated across every outer iteration —
+  # union keys REACHED against union keys ENUMERATED.
+  local watched_seen=0 watched_enumerated keys_seen=0 keys_enumerated=0 union
+  watched_enumerated="$(printf '%s' "$WATCHED" | grep -c . || true)"
   local before after
 
   # ── the roster-drop arm (the row-9 hole: nothing ratchets the ratchet's roster)
@@ -324,8 +329,16 @@ main() {
     local dropped
     dropped="$(comm -23 <(roster_paths_of_text "$self_base" | sort -u) <(roster_paths | sort -u))"
     if [ -n "$dropped" ]; then
+      # DERIVED, not named by the filing: the roster-drop loop is the same shape
+      # as the literal sweep below it and the same hazard — `$unstated` is read
+      # off it, so a short read means a dropped path is never REFUSED and the
+      # guard passes the very PR that silenced it for that path.
+      local dropped_enumerated dropped_seen=0
+      dropped_enumerated="$(printf '%s' "$dropped" | grep -c . || true)"
       while IFS= read -r path; do
         [ -n "$path" ] || continue
+        # MUT-SPLICE: dropped-count-identity
+        dropped_seen=$((dropped_seen + 1))
         if drop_statement_for "$path"; then
           printf '  STATED-DROP  %s is no longer watched, and the body says why.\n' "$path"
         else
@@ -335,6 +348,14 @@ main() {
           unstated=$((unstated + 1))
         fi
       done <<< "$dropped"
+      # MUT-ANCHOR: dropped-count-identity
+      if [ "$dropped_seen" -ne "$dropped_enumerated" ]; then
+        printf 'pds-threshold-move-guard: SHORT DROP SWEEP — examined %s of %s dropped path(s).\n' "$dropped_seen" "$dropped_enumerated"
+        printf '  The roster-drop loop ended before its list did; a dropped path never reached is a\n'
+        printf '  silencing never refused, in the PR that does the silencing.\n'
+        exit 2
+      fi
+      # MUT-END: dropped-count-identity
     else
       printf '  roster-drop arm: no watched path was dropped between %s and %s.\n' "${base_sha:0:9}" "${head_sha:0:9}"
     fi
@@ -346,13 +367,24 @@ main() {
   # ── the literal sweep
   while IFS=$'\t' read -r path kind; do
     [ -n "$path" ] || continue
+    # MUT-SPLICE: watched-count-identity
+    # THE WORK SIDE — tallied above every `continue`, so it counts watched paths
+    # REACHED, the only quantity a short read moves.
+    watched_seen=$((watched_seen + 1))
     before="$(literals_at "$base_sha" "$path" "$kind")"
     after="$(literals_at "$head_sha" "$path" "$kind")"
     [ "$before" = "$after" ] && continue
 
-    # every key present on EITHER side, so an added or removed cap is a move too
+    # every key present on EITHER side, so an added or removed cap is a move too.
+    # MATERIALISED into `$union` rather than consumed straight out of the process
+    # substitution: the key identity below needs an enumeration side that a short
+    # read cannot move.
+    union="$( { printf '%s\n' "$before"; printf '%s\n' "$after"; } | awk -F'\t' 'NF {print $1}' | awk '!seen[$0]++' )"
+    keys_enumerated=$((keys_enumerated + $(printf '%s' "$union" | grep -c . || true)))
     while IFS= read -r key; do
       [ -n "$key" ] || continue
+      # MUT-SPLICE: key-count-identity
+      keys_seen=$((keys_seen + 1))
       oldv="$(printf '%s\n' "$before" | awk -F'\t' -v k="$key" '$1 == k { print $2; exit }')"
       newv="$(printf '%s\n' "$after"  | awk -F'\t' -v k="$key" '$1 == k { print $2; exit }')"
       [ -n "$oldv" ] || oldv='(absent)'
@@ -370,8 +402,39 @@ main() {
           "$id" "$oldv" "$newv"
         unstated=$((unstated + 1))
       fi
-    done < <( { printf '%s\n' "$before"; printf '%s\n' "$after"; } | awk -F'\t' 'NF {print $1}' | awk '!seen[$0]++' )
+    done <<< "$union"
   done <<< "$WATCHED"
+
+  # ── THE COUNT IDENTITIES (task-fb55d468c7dea75b) ───────────────────────────
+  # BOTH loops above read on fd 0 — the outer from `<<< "$WATCHED"`, the inner
+  # from `<<< "$union"`. Any body child that reads stdin (a future `git` with a
+  # pager, a `read`, an `ssh`, a `gh` without `</dev/null`) swallows the
+  # remaining rows and the loop ENDS EARLY with no error and no non-zero status.
+  # Nothing below could see it: `$moved` and `$unstated` are BOTH read off those
+  # loops, so they agree with each other on a short read, and the verdict
+  #     PASS: nothing watched moved.
+  # is what a guard that examined 1 of 12 watched paths prints — the same words
+  # a complete sweep uses. A key never reached is a threshold move never
+  # REFUSED, which is precisely the silence this guard exists to break.
+  #
+  # Two identities, not one: the outer count alone would not notice an inner
+  # loop cut short inside a single watched path. The key identity accumulates
+  # across outer iterations, so it holds for the whole sweep.
+  # MUT-ANCHOR: watched-count-identity
+  if [ "$watched_seen" -ne "$watched_enumerated" ]; then
+    printf 'pds-threshold-move-guard: SHORT SWEEP — examined %s of %s watched path(s) in the roster.\n' "$watched_seen" "$watched_enumerated"
+    printf '  The sweep loop ended before $WATCHED did (a loop-body child that reads stdin consumes\n'
+    printf '  the remaining rows silently). A partial sweep must never print a PASS in the same words\n'
+    printf '  as a complete one. This is a fault in THIS guard, not a finding about the PR.\n'
+    exit 2
+  fi
+  if [ "$keys_seen" -ne "$keys_enumerated" ]; then
+    printf 'pds-threshold-move-guard: SHORT KEY SWEEP — examined %s of %s union key(s) across the watched paths.\n' "$keys_seen" "$keys_enumerated"
+    printf '  The per-path key loop ended before its union did; a threshold key never reached is a\n'
+    printf '  move never refused. This is a fault in THIS guard, not a finding about the PR.\n'
+    exit 2
+  fi
+  # MUT-END: watched-count-identity
 
   printf 'pds-threshold-move-guard: %s watched literal(s) moved, %s unstated.\n' "$moved" "$unstated"
   if [ "$unstated" -gt 0 ]; then

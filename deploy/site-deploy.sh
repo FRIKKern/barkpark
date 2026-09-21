@@ -762,7 +762,10 @@ write_release_receipt() { # <reldir>
   local reldir="$1" sha=""
   [ -n "$SHA_CMD" ] || { printf ''; return 0; }
   sha="$(release_tree_digest "$reldir")"
-  printf '%s' "$sha" | grep -qE '^[0-9a-f]{64}$' || { printf ''; return 0; }
+  # Here-string, not `printf | grep -q`: under pipefail the reader's early exit
+  # SIGPIPEs the producer and 141 comes back, so a VALID digest would be
+  # discarded and the receipt silently skipped.
+  grep -qE '^[0-9a-f]{64}$' <<<"$sha" || { printf ''; return 0; }
   printf '%s\n' "$sha" > "$reldir/$BUILD_MARK" 2>/dev/null || true
   printf '%s' "$sha"
 }
