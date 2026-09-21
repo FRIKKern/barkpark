@@ -159,7 +159,18 @@ defmodule Barkpark.PdsDoorCensusTest do
           "THE SUM IS ASSERTED",
           "WIRED-CLAIM FIRES",
           "WIRED-CLAIM CONTROL",
-          "WIRED-CLAIM FAIL-CLOSED"
+          "WIRED-CLAIM FAIL-CLOSED",
+          # WAVE 51. The pair that keeps the two halves of leg B apart. When the
+          # dispatcher path set learned to DERIVE `scripts/pds-*` from the glob
+          # pds-door-census.sh itself runs, `--match test` started answering
+          # `true` for every member of the family; DEAD-DECLARATION keyed on
+          # that answer, and 43 ledger-disposed instruments were reclassified in
+          # one commit with every disposition then reading as ORPHANED. The
+          # class means somebody TYPED the path; a derived family member did
+          # not. Delete either arm and the distinction can silently re-merge.
+          "LEG B LITERAL:",
+          "LEG B DERIVED:",
+          "LEG B LITERAL REFUSES:"
         ] do
       assert out =~ arm,
              "the `#{arm}` arm is gone from the selftest. It covers a silence that was live on " <>
