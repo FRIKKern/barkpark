@@ -1,0 +1,187 @@
+# Studio scrim threshold — the forced-container control and the tie that keeps
+# its fixture honest.
+#
+# WHY THIS FILE EXISTS (task scrim-control-uncied-and-fixture-drift):
+# scripts/studio-scrim-threshold-control.mjs was green, could fail, and NOTHING
+# RAN IT — no workflow, no make target, no gate. An instrument nobody invokes
+# rots exactly as quietly as the prose it replaced.
+#
+# And it had already rotted. scripts/fixtures/studio-scrim-threshold.html copies
+# the scrim cascade out of api/lib/barkpark_web/layouts/root.html.heex, and the
+# copy had no tie back: a FIFTH rule (charter D175/D187) landed in the source and
+# the fixture never grew it, so the control printed a confident matrix for a
+# cascade the product no longer runs. Two commands, in this order:
+#
+#   1. node scripts/studio-scrim-drift-check.mjs --self-test
+#      Extracts the scrim rules from root.html.heex BY SELECTOR and diffs them
+#      against the fixture. It is a PRECONDITION, not a sibling: a matrix taken
+#      against a drifted fixture measures nothing, so this runs FIRST and reds
+#      the job before a browser is ever downloaded.
+#   2. node scripts/studio-scrim-threshold-control.mjs --self-test
+#      Forces .editor-panel across the 860px container threshold and reads
+#      ::after content in all four width buckets x user-opened.
+#
+# ── THE VENUE IS THIS JOB, NOT THIS FILE ─────────────────────────────────────
+# There is deliberately NO `on: paths:` key. A paths-filtered workflow emits no
+# check run on a non-matching PR, which makes it permanently unrequireable
+# (docs/ops/merge-gates.md) and indistinguishable from a workflow that never
+# started. Instead the `changes` job runs on every event and the `scrim` job
+# carries a job-level `if:`, so a PR that touches nothing here still renders a
+# SKIPPED check run with this job's name on it. Same polarity as
+# shell-harnesses.yml's dispatcher: it never emits a silent false — an
+# unresolvable base dispatches TRUE.
+#
+# ── THE BROWSER COST, NAMED AND ACCEPTED ─────────────────────────────────────
+# The control needs Chromium; the drift check needs nothing at all. So the cost
+# is paid only on the PRs that touch the scrim, and only after the free check
+# has passed.
+#
+#   * REUSED, not new: the install recipe and the cache key are paper-rig.yml's
+#     verbatim (`npm install --global playwright@1.59.1` +
+#     `npx playwright install --with-deps chromium`, cache
+#     `~/.cache/ms-playwright` keyed `${{ runner.os }}-playwright-1.59.1`).
+#     Sharing that exact key means a warm actions/cache entry produced by
+#     paper-rig.yml is restored here, so the chromium DOWNLOAD is usually not
+#     repeated — only `--with-deps`' apt step is.
+#   * MEASURED, not estimated — run 35553223348 (head 12120679a, PR #19673,
+#     2026-09-21). `Cache hit for: Linux-playwright-1.59.1`, ~253 MB restored in
+#     2.0s, so the key really is shared and chromium really was not downloaded.
+#     Wall clock: `Dispatch (scrim paths)` 02:10:43 -> 02:11:10 (27s) and
+#     `Studio scrim threshold control` 02:14:33 -> 02:15:10 (37s) = ~2
+#     ubuntu-latest minutes billed for the pair, warm. A cold cache adds the
+#     chromium download and the `--with-deps` apt step on top of that; the
+#     budget is timeout-minutes: 12.
+#   * AND ZERO on every PR that does not touch the five paths in the dispatcher
+#     — the dispatch job is the only thing that runs. That is the price of the
+#     only instrument in the repo that can read this cascade without ssh and a
+#     deployed build, and it is accepted.
+name: Studio scrim threshold
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One group per PUSH SHA on main, per REF everywhere else — the shape every
+  # main-triggered workflow in this repo carries, and the one
+  # scripts/main-run-concurrency-check.sh keys on.
+  group: studio-scrim-threshold-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no path filter — it runs on every event this
+    # workflow fires for, so the job behind it always has a defined answer.
+    # It NEVER emits a silent false: a missing base sha, an unresolvable base,
+    # or any non-pull_request event all dispatch TRUE. A dispatcher that
+    # "couldn't tell" and said false would skip the control and publish a green
+    # check run over nothing — which is the exact species of failure this
+    # workflow was created to end.
+    name: Dispatch (scrim paths)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scrim: ${{ steps.set.outputs.scrim }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The PR HEAD, not the merge ref, and full history so the base sha is
+          # resolvable for the diff below.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - id: set
+        name: Does this head touch the scrim cascade or its instruments?
+        # No `${{ }}` in this body: GitHub compiles an interpolated `run:`
+        # scalar into ONE expression and measures it against a 21000-character
+        # cap, and going over is a STARTUP FAILURE with zero jobs. The two
+        # GitHub values arrive as env instead, leaving this a literal.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "event=$EVENT_NAME — dispatching TRUE (not a PR, nothing to diff against)"
+            echo "scrim=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Unresolvable base, or a base with no common ancestor: TRUE, never a
+          # guess. `git diff A...B` FAILS outright without a merge base, and
+          # under `set -e` that would be a red dispatcher rather than a silent
+          # false — survivable, but a needless red on a force-pushed or
+          # re-parented head, so it is answered here instead.
+          if [ -z "${BASE_SHA:-}" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "base sha '${BASE_SHA:-}' is unresolvable — dispatching TRUE rather than guessing"
+            echo "scrim=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git merge-base "$BASE_SHA" HEAD >/dev/null 2>&1; then
+            echo "no common ancestor with $BASE_SHA — dispatching TRUE rather than guessing"
+            echo "scrim=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD)"
+          echo "changed files:"
+          printf '%s\n' "$changed" | sed 's/^/  /'
+          verdict=false
+          while IFS= read -r f; do
+            case "$f" in
+              api/lib/barkpark_web/layouts/root.html.heex) verdict=true ;;
+              scripts/studio-scrim-threshold-control.mjs) verdict=true ;;
+              scripts/studio-scrim-drift-check.mjs) verdict=true ;;
+              scripts/fixtures/*) verdict=true ;;
+              .github/workflows/studio-scrim-threshold.yml) verdict=true ;;
+            esac
+          done <<EOF
+          $changed
+          EOF
+          echo "scrim=$verdict"
+          echo "scrim=$verdict" >>"$GITHUB_OUTPUT"
+
+  scrim:
+    needs: changes
+    if: needs.changes.outputs.scrim == 'true'
+    name: Studio scrim threshold control
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22: both scripts are ESM and the control uses node:fs/node:os only.
+          node-version: "22"
+
+      # THE FREE GATE, FIRST. It has no dependencies at all — no playwright, no
+      # browser, no network — so a drifted fixture reds this job in seconds
+      # rather than after a chromium download. Order is the point: the control's
+      # readings are worthless if this one fails.
+      - name: Fixture drift check (no browser)
+        run: node scripts/studio-scrim-drift-check.mjs --self-test
+
+      # paper-rig.yml's key, verbatim, so a warm entry it produced is restored
+      # here instead of re-downloading chromium. See THE BROWSER COST above.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-1.59.1
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright + chromium
+        run: |
+          set -eu
+          npm install --global playwright@1.59.1
+          npx playwright install --with-deps chromium
+          echo "BP_PLAYWRIGHT_FROM=$(npm root -g)/playwright/package.json" >>"$GITHUB_ENV"
+
+      # THE GATE. Not piped to anything: a gate piped to `tail` reports tail's
+      # exit code.
+      - name: Forced-container scrim control
+        run: node scripts/studio-scrim-threshold-control.mjs --self-test
