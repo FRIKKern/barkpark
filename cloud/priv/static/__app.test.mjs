@@ -1065,7 +1065,12 @@ for (const [scen, n] of [["account-modal", 2], ["account-modal-revoke", 4]]) {
 
 test("mock.js WIRING TRIPWIRE: the browser preview hands route() a per-boot state bag (red on a 3-arg revert)", () => {
   const args = callArgs(MOCK_JS_SRC, ".route(");
-  assert.equal(args.length, 4, `mock.js called route() with ${args.length} args — a 3-arg call gets no state bag, so every DELETE is a stateless no-op that still answers 200`);
+  // 5 since cch-w23-bl-real-hetzner-remediation-scenario: route() gained an
+  // optional `body` (the parsed POST payload) so a fixture can answer per
+  // provider KIND. The state bag is still the 4th, and that is what the arms
+  // below pin; this count stays EXACT in both directions so a revert to 3 (no
+  // bag) or a drop to 4 (no body) reds by name.
+  assert.equal(args.length, 5, `mock.js called route() with ${args.length} args — a 3-arg call gets no state bag, so every DELETE is a stateless no-op that still answers 200; a 4-arg call drops the parsed request body, so a per-kind fixture answers its _default for every kind`);
 
   // The 4th arg is a bare identifier (not an inline `{}`, which would be a FRESH
   // bag per request and therefore still stateless across the refetch).

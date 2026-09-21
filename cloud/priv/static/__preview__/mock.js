@@ -180,9 +180,31 @@
     try { path = new URL(url, window.location.origin).pathname + new URL(url, window.location.origin).search; }
     catch (e) { path = url; }
 
+    // 4d) cch-w23-bl-real-hetzner-remediation-scenario — THE POSTED BYTES.
+    //     route(name, method, path, state, body) takes an OPTIONAL 5th arg.
+    //     Until it existed, route() answered from the scenario alone, so a
+    //     fixture could model exactly ONE response per endpoint no matter what
+    //     the app sent — which is why the preview corpus carried the server's
+    //     azure remediation and, for hetzner, a string invented by the corpus.
+    //     PARSED HERE, NOT IN route(): `init.body` is a transport-shaped value
+    //     (app.js POSTs a JSON string) and scenarios.mjs must stay free of
+    //     browser types. A body that is not readable JSON is passed as
+    //     UNDEFINED rather than guessed at — the per-kind arm then answers its
+    //     `_default`, which is an honest "we could not read what you sent",
+    //     never a silent success.
+    var parsedBody;
+    var rawBody = (init && init.body) || null;
+    if (typeof rawBody === "string") {
+      try { parsedBody = JSON.parse(rawBody); } catch (e) { parsedBody = undefined; }
+    } else if (rawBody && typeof rawBody === "object" &&
+               !(typeof Blob !== "undefined" && rawBody instanceof Blob) &&
+               !(typeof FormData !== "undefined" && rawBody instanceof FormData)) {
+      parsedBody = rawBody;
+    }
+
     return scenariosReady.then(function (mod) {
       if (mod && typeof mod.route === "function") {
-        var res = mod.route(scen, method, path, fixtureState);
+        var res = mod.route(scen, method, path, fixtureState, parsedBody);
         // route() hands back the LIVE state array by reference (sessionsOf
         // returns state.sessions itself), so a body handed to the app earlier
         // would mutate under it on the next revoke — a rendered list that
