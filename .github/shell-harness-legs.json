@@ -372,6 +372,25 @@
     ]
   },
   {
+    "slug": "console-harness-pin",
+    "name": "console-harness.sh reads CI's pin (it must be able to LOSE)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "console-harness-pin.test.sh syntax check",
+        "run": "sh -n scripts/console-harness-pin.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the local gate's pin is READ from console-harness.yml, and arm 3 points it at a fixture carrying a DIFFERENT pin so a derivation that always answers one number LOSES",
+        "run": "sh scripts/console-harness-pin.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
     "slug": "console-refusal-capture",
     "name": "console-refusal-capture.mjs controls",
     "timeout": 10,

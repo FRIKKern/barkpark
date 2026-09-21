@@ -2479,6 +2479,43 @@
     return { state: state, label: LIFECYCLE_PILL_LABEL[state] || "Unknown", cls: instanceLifecycleClass(state) };
   }
 
+  // cch-r21l: THE LIFECYCLE STATE CHIP IS A statusMeta ROLE, NOT ITS OWN FAMILY.
+  // RULING (task-c74cf3120f6bca69): `.inst-life-pill` was a STATE chip — the same
+  // idea the fleet row already paints through statusMetaPill — wearing a second
+  // vocabulary. Its base rule was a clone of `.status-pill`'s box (same
+  // inline-flex/gap/height/padding/border/radius metrics, only font-weight
+  // differed), it was hand-emitted in lifecycleActionRowHtml and then RE-CLASSED
+  // imperatively in runDecommission, so the one-emitter predicate decision 24
+  // bought (E13 arm (f)) could never see it. It is absorbed here.
+  //
+  // The role per state is READ OFF the S4 token, never invented: app.css paints
+  // `.bp-inst--provisioning { color: var(--info) }`, `--live { var(--ok) }`,
+  // `--degraded { var(--warn) }`, `--stopped { var(--muted-text) }`,
+  // `--decommissioned { var(--danger) }`. Suspended additionally takes the
+  // `stopped` VARIANT (dim + dashed hairline), which is what the ladder already
+  // says for "a thing that was deliberately halted".
+  //
+  // The DOMAIN is held against LIFECYCLE_PILL_LABEL by the harness, so a sixth
+  // lifecycle state cannot arrive with a label and no role.
+  var LIFECYCLE_PILL_ROLE = {
+    provisioning:   { role: "info" },
+    live:           { role: "ok" },
+    degraded:       { role: "warn" },
+    stopped:        { role: "neutral", variant: "stopped" },
+    decommissioned: { role: "danger" }
+  };
+
+  // The ONE lifecycle-state chip emitter. Both the pure render and the optimistic
+  // decommission repaint go through it, so the chip has exactly one author.
+  // An unplaceable state degrades to a neutral chip labelled "Unknown" — never a
+  // fabricated hue.
+  function lifecycleStatePillHtml(state) {
+    var r = LIFECYCLE_PILL_ROLE[state] || { role: "neutral" };
+    return statusMetaPill(
+      { role: r.role, variant: r.variant || "", label: LIFECYCLE_PILL_LABEL[state] || "Unknown" },
+      instanceLifecycleClass(state));
+  }
+
   // Region · size meta for a fleet row (blank-tolerant — pre-S6 rows carry null
   // region/server_type). Renders nothing when both are absent so an old row never
   // shows an empty "·". Presentation only; the values are server-stamped slugs.
@@ -2818,12 +2855,10 @@
   // no test pins and nothing keeps in step.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
-    // The label sits in its own span so it stays neutral (--text) while the dot
-    // carries the S4 state hue (the model.pill.cls bp-inst--<state> tints color,
-    // the dot reads it through currentColor) — mirrors .status-pill.
-    var pill = '<span class="inst-life-pill ' + model.pill.cls + '">' +
-      '<span class="inst-life-dot" aria-hidden="true"></span>' +
-      '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
+    // cch-r21l: the state chip IS a statusMeta pill now (see lifecycleStatePillHtml
+    // for the ruling). It used to open its own span on the retired inst-life-pill
+    // family here; that hand-built chip is exactly the shape E13 arm (f) refuses.
+    var pill = lifecycleStatePillHtml(model.pill.state);
 
     // cch-w38-s1 — an UNKNOWN authority reuses the shipped checking grammar
     // verbatim (no new copy, no new CSS): while /v1/me is in flight or failed
@@ -9017,10 +9052,25 @@
   // hint is retracted to what is true: this step does not tick itself, and the
   // "Open Studio →" action stays, because publishing is still the real next move.
   // Pinned in __app.test.mjs (the old sentence was asserted by NOTHING).
+  //
+  // cch-w55-bl — THE ACK CONTROL NOW EXISTS, AND IT IS THE WHOLE FIX (charter
+  // D902, ending 1 of the three the row named). The server half was already
+  // built and already routed: `Accounts.ack_onboarding_step/2` ticks the step,
+  // `POST /v1/onboarding {action:"ack", step:"published_doc"}` reaches it, and
+  // `onboarding_status/1` ORs the ack with the never-written `content` event.
+  // Only the console was missing — {action:"skip"} was the one onboarding
+  // action this file POSTed, so the plane's own "reachable via the user-ack
+  // path" prose (accounts.ex, agent_event.ex) described a path no customer had.
+  // A pending published_doc step now renders "Mark as done" beside the Studio
+  // nudge, gated on canManage for the SAME reason the Dismiss button is: the
+  // route is owner/admin-only, so a member would get a silent 403. Still no
+  // producer, deliberately — ticking a checkbox you ticked yourself is an
+  // honest self-report; inventing an agent endpoint to observe it is the
+  // "build the actor before deciding the effect" trap this wave refuses.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
-    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →" },
+    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →", ack: "Mark as done" },
   ];
   // Pure: the render model for the runway steps. done marks render a mint check,
   // pending steps render their ordinal digit. The instance-step hint carries the
@@ -9046,6 +9096,14 @@
         // The Open Studio nudge shows only while the published_doc step is still
         // open (and only when there is a live box to open it on).
         action: (!isDone && spec.action && spec.key === "published_doc" && opts.studioId) ? spec.action : "",
+        // The ack control (cch-w55-bl): the ONLY path a customer has to this
+        // step, since no producer writes the `content` event it would otherwise
+        // derive from. Pending only (acking a done step is a no-op the server
+        // would accept and the card would not change), and canManage only —
+        // POST /v1/onboarding is owner/admin-gated, so a member's click would be
+        // a silent 403. Unlike the Studio nudge it does NOT need a live box: the
+        // user may well have published on an instance this console can't link.
+        ack: (!isDone && spec.ack && opts.canManage) ? spec.ack : "",
       };
     });
   }
@@ -9068,6 +9126,14 @@
         (st.action
           ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
               esc(opts.studioId) + '">' + esc(st.action) + "</button>"
+          : "") +
+        // Styled by the SAME .runway-step-action rule as the Studio nudge (no
+        // new class: E12 requires every emitted class to have an app.css rule,
+        // and this button wants that rule's exact look). The click hook is the
+        // data attribute, which E12 does not govern.
+        (st.ack
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-ack="' +
+              esc(st.key) + '">' + esc(st.ack) + "</button>"
           : "") +
       "</div>";
     }).join("");
@@ -9445,6 +9511,26 @@
     if (dismiss) dismiss.addEventListener("click", function () { dismissRunway(dismiss); });
     slot.querySelectorAll("[data-runway-studio]").forEach(function (b) {
       b.addEventListener("click", function () { openStudio(b.getAttribute("data-runway-studio"), null); });
+    });
+    slot.querySelectorAll("[data-runway-ack]").forEach(function (b) {
+      b.addEventListener("click", function () { ackRunwayStep(b, b.getAttribute("data-runway-ack")); });
+    });
+  }
+
+  // cch-w55-bl — tick a step the control plane cannot observe. POST
+  // /v1/onboarding {action:"ack", step} appends the step to onboarding_state.acked
+  // (Accounts.ack_onboarding_step/2); onboarding_status/1 then ORs that ack with
+  // the agent-derived signal, so the step stays done across reloads and tabs.
+  // Owner/admin only (the button is hidden otherwise — same rule as Dismiss), so
+  // a 403 is not expected; any non-2xx re-enables the button and toasts, and the
+  // card is NOT optimistically ticked — the next read is the truth.
+  function ackRunwayStep(btn, step) {
+    if (!step) return;
+    if (btn) btn.disabled = true;
+    api("POST", "/v1/onboarding", { action: "ack", step: step }).then(function (r) {
+      if (r.ok) { loadOverview(); return; }
+      if (btn) btn.disabled = false;
+      toast({ kind: "error", title: "Couldn't mark that step done", body: friendly(r.data, "Please try again.") });
     });
   }
 
@@ -9985,17 +10071,40 @@
     // affordance for an up box; the in-flight / failed states keep their
     // honest chips (the SSE fast path in loadInstance patches
     // .fleet-url.provisioning in place — that class stays load-bearing).
+    var addressHtml = '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+      '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+
+    // cch DEFECT-D — THE ADDRESS SLOT IS NOT A SECOND PLACE TO SAY "FAILED".
+    // The two failed arms used to print a bare "— removal failed" / "—
+    // provisioning failed" in the slot under the H1. That em-dash lead is a
+    // FLEET-LIST idiom: in fleetRow the fragment hangs off the box name one
+    // line above it, so it reads as a continuation. Under a detail H1 that
+    // already carries the lifecycle pill ("Removal failed · <server error>")
+    // and, one block lower, the failure banner, it is an ORPHAN — an em dash
+    // with no antecedent, red, in the slot a reader scans for the address.
+    // Measured on instance-remove-failed: the same sentence three times inside
+    // ~130px, and the box's host was KNOWN the whole time (the Identity card
+    // prints it two columns to the right).
+    //
+    // A FAILED TEARDOWN DOES NOT REMOVE AN ADDRESS — it is failed precisely
+    // because the server is still there. So removeFailed now renders the real
+    // address whenever bp.host is set, exactly like a live box. The genuinely
+    // address-less states (a failed provision never gets a host; a teardown
+    // that failed after the host column was cleared) keep a red slot, but a
+    // LABELLED one: it leads with what the ADDRESS is, not with a third copy
+    // of the failure.
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
-        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        ? (bp.host
+            ? addressHtml
+            : '<div class="fleet-url failed">No address — removal failed</div>')
         : lc.failed
-          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          ? '<div class="fleet-url failed">No address — provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
-              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
-              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+            : addressHtml;
 
     // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
     // already carries label + detail ("Degraded · Health down"); its rules are
@@ -10507,12 +10616,13 @@
   // The live decommission with an optimistic pill + rollback (mirrors the pure
   // lifecycleOptimistic reducer). Same DELETE the Remove button issued.
   function runDecommission(bp, ctl) {
-    var pill = $("#inst-lifecycle-actions .inst-life-pill");
+    // cch-r21l: the optimistic repaint goes through the SAME emitter as the pure
+    // render (lifecycleStatePillHtml). It used to rewrite `className` and
+    // `innerHTML` by hand — a second author for the chip that no static check
+    // could see, because it never spelled a class attribute at all.
+    var pill = $("#inst-lifecycle-actions .inst-life-head .status-pill");
     var prev = pill ? pill.outerHTML : null;
-    if (pill) {
-      pill.className = "inst-life-pill " + instanceLifecycleClass("decommissioned");
-      pill.innerHTML = '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(LIFECYCLE_PILL_LABEL.decommissioned);
-    }
+    if (pill) pill.outerHTML = lifecycleStatePillHtml("decommissioned");
     api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
       if (r.status === 200 || r.status === 202) {
         fleetCache = null;
@@ -10536,7 +10646,7 @@
       // SHAPE: DELETE /v1/barkparks/:id refuses FLAT ({error:"forbidden",required,
       // scope} / {error:"no_team"}), NOT the nested {error:{code}} rollbackInstance
       // reads; the dual-shape read below covers both so neither can be misclassified.
-      var back = $("#inst-lifecycle-actions .inst-life-pill");
+      var back = $("#inst-lifecycle-actions .inst-life-head .status-pill");
       if (back && prev) back.outerHTML = prev;
       var derr = (r.data && r.data.error) || {};
       var dcode = typeof derr === "string" ? derr : derr.code;
@@ -17456,6 +17566,22 @@
   // highlighted; the honest "Rolled back" completion pill + a link to the now-serving
   // URL read here instead. The "restored" branch shows nothing here (its cue is the
   // marked row). `url` is server data → escaped. Pure.
+  //
+  // cch-r21l RULING (task-c74cf3120f6bca69) — `.deploys-rollback-pill` STAYS ITS
+  // OWN COMPONENT; it is deliberately NOT absorbed into the .status-pill ladder,
+  // and this comment is the reason so the next sweep does not re-open it.
+  // The ladder is a STATE vocabulary: every `.status-pill` names what a thing IS
+  // right now (a deploy is building, a box is live) and carries a dot whose hue
+  // is that state's role. This marker names an EVENT that has already finished,
+  // it labels no entity, it has no state to be in, and it is one flex child of a
+  // composite banner (`.deploys-rollback-note`) — 20px tall, dotless, --text-xs,
+  // tinted to the BANNER's info wash rather than to a role. Giving it a role
+  // would assert a semantic it does not have ("this deploy's status is Rolled
+  // back" is false — `current_deployment_id` is UNCHANGED on this branch, which
+  // is exactly why no row is highlighted and this banner reads instead), and
+  // giving it a dot would make a settled completion look like a live state.
+  // A distinct affordance keeping its own component is not a second grammar; a
+  // second way to say the SAME thing is, and that is what .inst-life-pill was.
   function deployRollbackBannerHtml(flashView) {
     if (!flashView || flashView.kind !== "previous") return "";
     var link = flashView.url

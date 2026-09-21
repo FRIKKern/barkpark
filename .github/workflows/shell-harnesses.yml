@@ -204,6 +204,13 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE LOCAL GATE'S PIN (task-561ac06ea4ebb607). console-harness.sh
+      # READS the test-count pin out of console-harness.yml instead of
+      # carrying a second literal that can drift from CI's. The .yml is
+      # already an entry above as the ratchet's subject; these two are the
+      # SCRIPT and its harness, so an edit to either re-runs the pair.
+      - "scripts/console-harness.sh"
+      - "scripts/console-harness-pin.test.sh"
       # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
       # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
       # aggregator workflows — cloud.yml and console-harness.yml as subjects,
@@ -899,6 +906,13 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE LOCAL GATE'S PIN (task-561ac06ea4ebb607). console-harness.sh
+      # READS the test-count pin out of console-harness.yml instead of
+      # carrying a second literal that can drift from CI's. The .yml is
+      # already an entry above as the ratchet's subject; these two are the
+      # SCRIPT and its harness, so an edit to either re-runs the pair.
+      - "scripts/console-harness.sh"
+      - "scripts/console-harness-pin.test.sh"
       # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
       # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
       # aggregator workflows — cloud.yml and console-harness.yml as subjects,
@@ -1514,6 +1528,7 @@ jobs:
       deploy-convergence: ${{ steps.sets.outputs.deploy-convergence }}
       deploy-concurrency: ${{ steps.sets.outputs.deploy-concurrency }}
       console-path-ratchet: ${{ steps.sets.outputs.console-path-ratchet }}
+      console-harness-pin: ${{ steps.sets.outputs.console-harness-pin }}
       console-refusal-capture: ${{ steps.sets.outputs.console-refusal-capture }}
       weekly-changelog-backfill-guard: ${{ steps.sets.outputs.weekly-changelog-backfill-guard }}
       pds-harnesses: ${{ steps.sets.outputs.pds-harnesses }}
