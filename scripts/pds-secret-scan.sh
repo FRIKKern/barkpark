@@ -195,7 +195,16 @@ ammo_count() { [ -s "$AMMO_FILE" ] && wc -l < "$AMMO_FILE" | tr -d ' ' || echo 0
 # One member path per line. These are paths that must be ABSENT from the
 # bundle; presence is a HIT in its own right, independent of any value.
 DENY_MEMBERS_FILE=""
-deny_member_count() { [ -s "$DENY_MEMBERS_FILE" ] && wc -l < "$DENY_MEMBERS_FILE" | tr -d ' ' || echo 0; }
+# THE ENUMERATION SIDE of the deny identity: how many non-blank rows the deny
+# list hands `check_deny_members`. `awk NF` and not `wc -l`, for two reasons
+# that both make a wc-based count refuse a COMPLETE check: the loop skips blank
+# rows BEFORE it tallies (`[ -n "$want" ] || continue`), and `wc -l` counts
+# newlines, so a final row with no trailing newline is invisible to it while
+# the loop (which carries `|| [ -n "$want" ]`) still examines it.
+#
+# This is NOT the number the ABSENT verdict prints. That number is the
+# ITERATION count — see the count identity in `report`.
+deny_member_rows() { [ -s "$DENY_MEMBERS_FILE" ] && awk 'NF' "$DENY_MEMBERS_FILE" | wc -l | tr -d ' ' || echo 0; }
 
 # ── the bundle scan: raw bytes, every member ────────────────────────────────
 # Returns the hit count via the global HITS; prints one line per hit.
@@ -297,12 +306,21 @@ scan_bundle() { # tar-path
 # prints states that bound in its own words rather than leaving a reader to
 # infer that a token value was searched for.
 check_deny_members() {
-  local want
+  local want checked=0
   [ -s "$DENY_MEMBERS_FILE" ] || return 0
   say ""
   say "  denied-member check (structural — member names only, no value is read):"
-  while IFS= read -r want; do
+  # `|| [ -n "$want" ]` is not decoration: a plain `while read` DROPS a final
+  # line with no trailing newline, and the count identity in `report` would then
+  # refuse a COMPLETE deny list. (Both sibling loops in this file learned this
+  # from their own control arms — see task-4121ac48f4e4f71e.)
+  while IFS= read -r want || [ -n "$want" ]; do
     [ -n "$want" ] || continue
+    # THE WORK SIDE of the deny identity. Tallied here, one line below the
+    # blank-row skip so the two sides count the same population, and read by
+    # the ABSENT verdict in `report` — which prints THIS number.
+    checked=$((checked + 1))
+    DENY_CHECKED="$checked"
     if grep -qxF -- "$want" "$MEMBER_LIST" 2>/dev/null; then
       MEMBER_HITS=$((MEMBER_HITS + 1))
       say "    PRESENT  member=$want — a member ruled :deny travelled in this bundle."
@@ -473,7 +491,7 @@ mechanism_line() { # profile clean?
 
 # ── subcommand: scan ─────────────────────────────────────────────────────────
 cmd_scan() {
-  local bundle="" db="" profile="" from_db=""
+  local bundle="" db="" profile="" from_db="" deny_shown=""
   AMMO_FILE="$(mktemp "${TMPDIR:-/tmp}/pds-ammo.XXXXXX")"
   TMP_FILES="$TMP_FILES $AMMO_FILE"
   DENY_MEMBERS_FILE="$(mktemp "${TMPDIR:-/tmp}/pds-deny-members.XXXXXX")"
@@ -525,10 +543,39 @@ cmd_scan() {
     say "RESULT: NO VALUE SCAN RAN — this invocation carried no ammo; it checked member presence only."
   fi
   if [ -s "$DENY_MEMBERS_FILE" ]; then
+    deny_shown="$(deny_member_rows)"
+    # ── THE COUNT IDENTITY ────────────────────────────────────────────────────
+    # WHY IT EXISTS (task-068696cdce7db36b). `check_deny_members` reads the deny
+    # list on fd 0 (`done < "$DENY_MEMBERS_FILE"`). Any body child that reads
+    # stdin — a future `grep` with no file operand, a `read`, an `ssh`, a pager —
+    # swallows the remaining deny paths and the loop ENDS EARLY with no error
+    # and no non-zero status. Nothing downstream could see that, because the
+    # figure this verdict printed was `wc -l` of the INPUT FILE: a loop that
+    # stopped after 1 of 6 rows left MEMBER_HITS=0 and the verdict said
+    # "6 checked path(s), none present" in the SAME WORDS it uses for 6 of 6.
+    #
+    # "ABSENT" is the table-DENY assertion — the claim that an api_tokens dump
+    # did not travel in the bundle. A reassuring coverage number read off the
+    # enumeration rather than off the work is the exact false clear this whole
+    # script exists to prevent.
+    #
+    # Two statements, and the cut below removes BOTH on purpose: the refusal,
+    # and the substitution that makes the printed figure the ITERATION count.
+    # A guard that still printed the enumeration's number would be a guard over
+    # a line that remains a lie about coverage. Sited here rather than inside
+    # the loop so it also covers the case where the loop never ran at all.
+    # No body child reads fd 0 today; the identity is for the one added next
+    # year, which is precisely the child no fd-discipline review can name.
+    # MUT-ANCHOR: deny-count-identity
+    if [ "$DENY_CHECKED" -ne "$deny_shown" ]; then
+      die "SHORT DENIED-MEMBER CHECK — examined $DENY_CHECKED of $deny_shown denied path(s) enumerated from the deny list. The deny loop ended before the list did (a loop-body child that reads stdin consumes the remaining paths silently); a partial check must never print DENIED MEMBERS ABSENT in the same words as a full one."
+    fi
+    deny_shown="$DENY_CHECKED"
+    # MUT-END: deny-count-identity
     if [ "$MEMBER_HITS" -gt 0 ]; then
       say "RESULT: $MEMBER_HITS DENIED MEMBER(S) PRESENT — a table ruled :deny travelled in this bundle."
     else
-      say "RESULT: DENIED MEMBERS ABSENT — $(deny_member_count) checked path(s), none present in the container."
+      say "RESULT: DENIED MEMBERS ABSENT — $deny_shown checked path(s), none present in the container."
     fi
   fi
   [ "$UNSCANNED" -gt 0 ] && say "NOTE: $UNSCANNED table(s) were UNSCANNED (see skip lines above) — not proven clean."
@@ -857,6 +904,7 @@ CONTROL_KEEP=0
 HITS=0
 MEMBER_HITS=0
 MEMBER_LIST=""
+DENY_CHECKED=0
 UNSCANNED=0
 REVEAL=0
 
