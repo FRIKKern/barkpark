@@ -674,6 +674,21 @@ epic id `cloud-gui-remake-epic` (which does not resolve); both were followed to 
   `account-modal-dark-1440-iris` and `account-modal-2fa-badcode-dark-1440-iris` now hash `1cf3548c…` and
   `f7898562…` — distinct from each other and both distinct from the pre-fix shared
   `b3962224…`, with file sizes 309195 vs 337845. The reshoot rests on a sound primitive.
+  **ADDENDUM 2026-09-20 (`gr-p5r7-badcode-shot-nondeterministic`) — the `f7898562…` half of that pair was
+  NOT REPRODUCIBLE, and now is.** GR129's plain-modal hash reproduced bit-for-bit across hosts; its badcode
+  hash did not, which is why a later clean reshoot read `be65976b…`/336996 B against the 337845 B recorded
+  here. Re-measured at `origin/main` `2ff0d2c1a` (Chrome for Testing 147.0.7727.15, headless shell — so
+  these numbers are NOT comparable to the ones above, which came off a different binary): two clean shoots
+  gave `account-modal-2fa-badcode-light-1440-iris` = `c1350453…`/395866 B then `7cfb2b44…`/395120 B, while
+  all four plain `account-modal` shots were byte-identical across the same pair. Cause, measured not
+  hypothesised: `magick compare` put every differing pixel inside one 228×88 device-pixel box — the
+  `#a2f-otp` input the confirm-error branch re-focuses — and the crops show the blinking caret in one run
+  and not the other. It is NOT the QR (a byte-matched SVG fixture). Fix: `mock.js` injects a shoot-time
+  `caret-color:transparent; transition:none; animation:none` style once the 422 has painted — preview
+  harness only, `app.js` untouched, focus deliberately KEPT so the shot still shows the rejected field.
+  After it, three consecutive clean shoots produced 8/8 byte-identical PNGs with 8 distinct hashes;
+  badcode stays distinct from plain at every theme×width and none hashes `b3962224…`. A badcode hash may
+  now be pinned — but per host/Chrome build, as every other shot already was.
 
 **The round-8 wave (3 build slices, 2 rounds).**
 Round 1, file-disjoint, dispatching now: **`gr-p5r7-tablet-overflow`** (fable) owns `app.css`,

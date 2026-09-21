@@ -18436,14 +18436,21 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
 // and every __preview__/*.mjs returned zero before this test existed, so the
 // string could be changed, or re-added, with no exit code anywhere).
 //
-// `Accounts.published_doc?/1` (accounts.ex:2764) derives the step from an
-// `AgentEvent` of type "content" with `payload->>'published_count' > 0`. The
-// four `record_event/3` call sites in cloud/lib write "health" (router.ex:1378),
-// "space" (router.ex:1423), "verify" (router.ex:2627) and "status"
-// (health/staleness_worker.ex:91) — never "content" — and the agent's HTTP
+// `Accounts.published_doc?/1` derives the step from an `AgentEvent` of type
+// "content" with `payload->>'published_count' > 0`. The four `record_event/3`
+// call sites in cloud/lib write "health" and "space" (the agent-report and
+// agent-space handlers in web/router.ex), "verify" (the verify-run handler) and
+// "status" (`Health.StalenessWorker`) — never "content" — and the agent's HTTP
 // surface has no content endpoint, so no producer exists and none was built
-// here. The manual ack (`ack_onboarding_step/2`, router.ex:1701) is unreachable
-// too: {action:"skip"} is the only onboarding action app.js POSTs.
+// here. That is still true after cch-w55-bl (charter D902) and is pinned
+// server-side by `agent_event_producer_census_test.exs`.
+//
+// cch-w55-bl — the SECOND half of the sentence above has since been fixed: the
+// manual ack (`Accounts.ack_onboarding_step/2`, via POST /v1/onboarding
+// {action:"ack"}) used to be unreachable because {action:"skip"} was the only
+// onboarding action app.js POSTed. It is now reachable — see the ack-control
+// tests below. The hint stays retracted: an ack is the USER saying so, which
+// is not the plane noticing.
 test("cch-w55-s3: the published-document step never promises the plane will notice", () => {
   const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
   const step = [...hooks.runwayStepModel(ob, { instanceName: "Production", studioId: "b1" })][2];
@@ -18456,6 +18463,44 @@ test("cch-w55-s3: the published-document step never promises the plane will noti
   // …and the whole runway carries the retraction, not just the model row.
   const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
   assert.ok(!/notice automatically/i.test(card), "the rendered runway makes no detection promise either");
+});
+
+// cch-w55-bl — THE STEP HAD NO PRODUCER **AND NO CONTROL**, so it was a
+// checkbox no customer could tick except by dismissing the whole runway.
+// Charter D902 ships ending 1: the ack control the server half has backed since
+// C-02. These tests pin the control's EXISTENCE, its two gates, and the fact
+// that it is the published_doc step alone that carries it.
+test("cch-w55-bl: the pending published-document step carries an ack control for an owner/admin", () => {
+  const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  const model = [...hooks.runwayStepModel(ob, { canManage: true, instanceName: "Production", studioId: "b1" })];
+  assert.equal(model[2].ack, "Mark as done");
+  // ONLY the third step — subscription and instance are server-observable and
+  // must never offer a self-report that could contradict Billing or Registry.
+  assert.equal(model[0].ack, "");
+  assert.equal(model[1].ack, "");
+  // The ack does NOT need a live box (the user may have published on an
+  // instance this console cannot link), unlike the Studio nudge which does.
+  const noBox = [...hooks.runwayStepModel(ob, { canManage: true, studioId: "" })];
+  assert.equal(noBox[2].ack, "Mark as done");
+  assert.equal(noBox[2].action, "");
+  // Rendered, with the hook the click wiring reads.
+  const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
+  assert.match(card, /data-runway-ack="published_doc"/);
+  assert.match(card, /Mark as done/);
+});
+
+test("cch-w55-bl: the ack control is hidden for a member and for an already-done step", () => {
+  const pending = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  // POST /v1/onboarding is owner/admin-only (Auth.require_current_team_admin),
+  // so a member's button would be a silent 403 — the same rule as Dismiss.
+  const member = [...hooks.runwayStepModel(pending, { canManage: false, studioId: "b1" })];
+  assert.equal(member[2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(pending, { canManage: false }), /data-runway-ack/);
+  // Done — nothing left to self-report, whether it went done by ack or (one
+  // day) by an agent-reported content event.
+  const done = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: true }] };
+  assert.equal([...hooks.runwayStepModel(done, { canManage: true, studioId: "b1" })][2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(done, { canManage: true, studioId: "b1" }), /data-runway-ack/);
 });
 
 test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", () => {

@@ -1654,6 +1654,114 @@ else
   fi
 fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# THE COUNT-IDENTITY ARMS (task-f97a161b35aa2041)
+#
+# `landing_n` is the number of ids the SCAN handed the loop. The PASS sentence
+# is written over that number. The loop, however, is fed by a HERE-DOC (fd 0)
+# and its body runs a CHILD — `bash "$0" --resolve-only` — which inherits fd 0.
+# One stdin read anywhere in the resolve path eats the remaining ids, the loop
+# ends after ONE iteration at exit 0, and the gate announces a verdict over
+# five trailers having read one.
+#
+# The remedy under test is a COUNT IDENTITY: reached == handed in, asserted
+# before any verdict. These arms prove it by MUTATING THE CHILD, not the gate:
+# the only child in the resolve path is `curl`, so a stub curl first on PATH
+# that begins `cat > /dev/null` is a faithful stand-in for the future `gh`,
+# `jq -` or `python3 -` that this check exists to catch. The two stubs differ
+# by exactly that one line, and both forward to the real curl, so the ledger
+# answers identically in both arms.
+# ════════════════════════════════════════════════════════════════════════════
+REAL_CURL="$(command -v curl || true)"
+if [ -z "$REAL_CURL" ]; then
+  fail=$((fail+1)); printf 'FAIL %-46s no curl on PATH to forward to\n' "identity: stub harness is runnable"
+else
+  # FIVE distinct ids, five commits, every one of them resolvable — so the ONLY
+  # thing that can red these arms is the count, never a dead trailer.
+  # shellcheck disable=SC2034  # read by name inside MODE_ENV, which mode_check evals
+  DIR_FIVE="$(landing_dir five \
+    1111111111111111111111111111111111111111 "$(printf 'fix(a): one\n\nTask: active\n')" \
+    2222222222222222222222222222222222222222 "$(printf 'fix(b): two\n\nTask: doneclosed\n')" \
+    3333333333333333333333333333333333333333 "$(printf 'fix(c): three\n\nTask: openone\n')" \
+    4444444444444444444444444444444444444444 "$(printf 'fix(d): four\n\nTask: spacey\n')" \
+    5555555555555555555555555555555555555555 "$(printf 'fix(e): five\n\nTask: spaceclosed\n')")"
+
+  # Each stub TALLIES its own invocations, so "how many ledger reads were
+  # actually issued" is measured rather than inferred from the verdict — the
+  # inference is the very thing that was broken.
+  READS_A="$fixtures/reads-a.txt"; READS_B="$fixtures/reads-b.txt"
+  STUB_A="$fixtures/stub-a"; STUB_B="$fixtures/stub-b"
+  mkdir -p "$STUB_A" "$STUB_B"
+  # STUB A — reads stdin. One line different from STUB B.
+  cat > "$STUB_A/curl" <<STUBA
+#!/usr/bin/env bash
+cat > /dev/null
+echo read >> "$READS_A"
+exec "$REAL_CURL" "\$@"
+STUBA
+  # STUB B — the control: identical, minus the stdin read.
+  cat > "$STUB_B/curl" <<STUBB
+#!/usr/bin/env bash
+echo read >> "$READS_B"
+exec "$REAL_CURL" "\$@"
+STUBB
+  chmod +x "$STUB_A/curl" "$STUB_B/curl"
+  : > "$READS_A"; : > "$READS_B"
+
+  # ── i1 — THE MUTATION. A stdin-reading child truncates the loop to one
+  # iteration; the gate must REFUSE, and the refusal must state BOTH numbers.
+  MODE_ENV="PATH=\"$STUB_A:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_FIVE\""
+  mode_check "i1: stdin-reading child is REFUSED"     1 "resolved 1 of the 5"            "$GATE" --check-landing-trailers
+  mode_check "i1: refusal is not a PR accusation"     1 "not a finding about the PR"     "$GATE" --check-landing-trailers
+  mode_check "i1: refusal names the stdin mechanism"  1 "READS STDIN"                    "$GATE" --check-landing-trailers
+  mode_check "i1: refusal forbids deleting the count" 1 "Do NOT satisfy this by deleting the count check" "$GATE" --check-landing-trailers
+
+  # ── i2 — THE POSITIVE CONTROL. Same gate, same fixture, same stub minus the
+  # one stdin line: the loop reaches all five and the PASS says so. Without
+  # this arm "the identity refuses" would be indistinguishable from "the
+  # identity refuses everything".
+  MODE_ENV="PATH=\"$STUB_B:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_FIVE\""
+  mode_check "i2: control stub PASSES 5 of 5"        0 "resolved 5 of the 5 handed in"  "$GATE" --check-landing-trailers
+  mode_check "i2: control scanned all five"          0 "scanned 5 distinct"             "$GATE" --check-landing-trailers
+
+  # ── i3 — THE READS ACTUALLY ISSUED. The verdict is one instrument; the child
+  # invocation tally is a second, independent one. Arm A must show ONE ledger
+  # read against five ids and arm B five — that gap IS the defect, measured.
+  # The counters are RESET and each arm run exactly once here, so these are
+  # per-run absolutes (1 and 5) and not a ratio that a repeated arm could fake.
+  : > "$READS_A"; : > "$READS_B"
+  ( eval "LEDGER_BASE=\"$BASE\" PATH=\"$STUB_A:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_FIVE\" bash \"$GATE\" --check-landing-trailers" ) >/dev/null 2>&1
+  ( eval "LEDGER_BASE=\"$BASE\" PATH=\"$STUB_B:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_FIVE\" bash \"$GATE\" --check-landing-trailers" ) >/dev/null 2>&1
+  reads_a="$(grep -c . "$READS_A" || true)"; reads_b="$(grep -c . "$READS_B" || true)"
+  if [ "$reads_a" = "1" ] && [ "$reads_b" = "5" ]; then
+    pass=$((pass+1)); printf 'ok   %-46s (stdin-reading child issued %s read(s) for 5 ids; control issued %s)\n' "i3: the truncation is visible in read counts" "$reads_a" "$reads_b"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s stdin-stub reads=%s (want 1) control reads=%s (want 5)\n' "i3: the truncation is visible in read counts" "$reads_a" "$reads_b"
+  fi
+
+  # ── i4 — MUTANT: the identity check removed. Same stdin-reading stub, same
+  # five-trailer fixture. The mutant must go GREEN and print its PASS over all
+  # five, which is precisely the pre-fix behaviour — so i1 is the arm doing the
+  # work, and it is not riding on some other refusal.
+  NOCOUNT="$fixtures/nocount-gate.sh"
+  # shellcheck disable=SC2016  # the $-names are the GATE's text to match, not ours to expand
+  sed -e 's/^  if \[ "\$landing_reached" != "\$landing_n" \]; then$/  if false; then/' "$GATE" > "$NOCOUNT"
+  if ! grep -q 'if false; then' "$NOCOUNT"; then
+    fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the identity guard was reworded\n' "mutation: identity removed reds i1"
+  else
+    nocount_out="$( eval "LEDGER_BASE=\"$BASE\" PATH=\"$STUB_A:\$PATH\" PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_FIVE\" bash \"$NOCOUNT\" --check-landing-trailers" 2>&1 )"
+    nocount_rc=$?
+    # No pipe into `grep -q`: under pipefail a SIGPIPE'd writer returns 141,
+    # which is neither found nor not-found. Substring removal, same question.
+    if [ "$nocount_rc" = "0" ] && [ "${nocount_out#*every one of the 5 Task: trailer}" != "$nocount_out" ]; then
+      pass=$((pass+1)); printf 'ok   %-46s (mutant PASSES over 5 having resolved 1 — only the count sees it)\n' "mutation: identity removed reds i1"
+    else
+      fail=$((fail+1)); printf 'FAIL %-46s mutant rc=%s; i1 is NOT what refuses, so it proves nothing\n' "mutation: identity removed reds i1" "$nocount_rc"
+    fi
+  fi
+  MODE_ENV=""
+fi
+
 # ── THE SHARED RESOLVER'S OWN SELFTEST ──────────────────────────────────────
 # scripts/lib/task-trailers.sh is the ONE grammar both pr-task-gate.sh and
 # scripts/landed-mark.sh read through. It runs here, inside the `PR task gate
