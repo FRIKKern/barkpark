@@ -75,6 +75,19 @@
 #   elixir-path-escape-check.sh --print-set compile|test
 #   elixir-path-escape-check.sh --match compile|test   # changed paths on stdin
 #                                                      # -> prints true|false
+#   elixir-path-escape-check.sh --match test --literal # the LITERAL half only
+#   elixir-path-escape-check.sh --print-set test --literal
+#
+# `--literal` answers a DIFFERENT question from the bare form, and the two must
+# never be conflated. The bare form answers what the DISPATCHER must run: every
+# path in the declared lists PLUS every member of a derived family, because a
+# change to any of them can change what an api test reads. `--literal` answers
+# who TYPED a path into a list — the snapshot half, the half that can rot and
+# that a human is answerable for. A consumer asking "is this declaration dead?"
+# must ask the literal form: a family member nobody executes is not a dead
+# declaration, it is the derivation working. scripts/pds-door-census.sh is that
+# consumer (its leg B), and getting this wrong reclassified 43 ledger-disposed
+# instruments as DEAD-DECLARATION in one commit.
 #
 # `--print-set` / `--match` are consumed by the elixir.yml dispatcher, so the
 # workflow and this ratchet can never disagree about what the path sets are.
@@ -991,6 +1004,21 @@ family_probe_member() {
 # answer `true` for everything, silently running the full suite (or, on the
 # other polarity of a future caller, skipping it). The harness caught exactly
 # that; this check is the fix.
+# A third positional that is neither absent nor `--literal` is a REFUSAL, never
+# a silently-ignored token: the two halves answer different questions and a
+# caller that meant one and got the other is the whole hazard this flag exists
+# to remove.
+half_arg() {
+  case "${1:-}" in
+    '') printf 'whole' ;;
+    --literal) printf 'literal' ;;
+    *)
+      echo "elixir-path-escape-check: unknown flag '$1' (want --literal)" >&2
+      exit 2
+      ;;
+  esac
+}
+
 assert_set_name() {
   case "$1" in
     compile | test) ;;
@@ -1001,8 +1029,13 @@ assert_set_name() {
   esac
 }
 
+# $2, when it is the literal string `literal`, suppresses the derived half.
+# Any other value (including absent) keeps it. Spelled as an equality test and
+# not as a `case` default so a typo'd caller gets the FULL set — the answer that
+# over-runs the Elixir job — rather than the narrow one that would skip it.
 set_globs() {
   assert_set_name "$1"
+  local half="${2:-whole}"
   case "$1" in
     compile) printf '%s\n' "$ELIXIR_COMPILE_PATHS" ;;
     test)
@@ -1011,7 +1044,9 @@ set_globs() {
       # runtime through a program it shells, never an @external_resource the
       # compiler binds. Appended, never substituted — the exact-file entries
       # the census resolves are the BASE CASE this derivation closes over.
-      derived_family_globs
+      if [ "$half" != 'literal' ]; then
+        derived_family_globs
+      fi
       ;;
   esac
 }
@@ -1027,7 +1062,7 @@ set_ere() {
     if [ -n "$out" ]; then out="$out|"; fi
     out="$out$(glob_to_ere "$g")"
   done <<EOF
-$(set_globs "$1")
+$(set_globs "$1" "${2:-whole}")
 EOF
   # Belt and braces: an empty ERE matches EVERY line. Never return one.
   if [ -z "$out" ]; then
@@ -1884,7 +1919,13 @@ EOF
 
   --print-set)
     assert_set_name "${2:?--print-set needs compile|test}"
-    set_globs "$2"
+    # ON ITS OWN LINE, NEVER NESTED IN THE CALL. `half_arg`'s refusal is an
+    # `exit 2` from a command substitution, i.e. a SUBSHELL: written inline as
+    # an argument its status is discarded, and a bogus flag printed the error to
+    # stderr and then answered `false` with rc=0 — a refusal that answers is
+    # worse than no refusal at all.
+    half="$(half_arg "${3:-}")"
+    set_globs "$2" "$half"
     exit 0
     ;;
 
@@ -1894,7 +1935,8 @@ EOF
     # can never disagree about what a path set contains.
     want="${2:?--match needs compile|test}"
     assert_set_name "$want"
-    ere="$(set_ere "$want")"
+    half="$(half_arg "${3:-}")"
+    ere="$(set_ere "$want" "$half")"
     if grep -Eq -- "$ere"; then
       echo "true"
     else
@@ -1928,7 +1970,7 @@ EOF
 
   *)
     echo "elixir-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-families|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-families|--print-set SET [--literal]|--match SET [--literal]]" >&2
     exit 2
     ;;
 esac

@@ -1693,6 +1693,77 @@ else
 fi
 echo
 
+# ── case 6d: the two halves of the test set answer different questions ─────
+# WHY THIS EXISTS, AND IT IS AN INCIDENT AND NOT A STYLE. When case 6b's
+# derivation landed, `--match test` began answering `true` for every member of
+# `scripts/pds-*.{sh,exs}` and `tooling/pds/*.mjs`. scripts/pds-door-census.sh
+# reads that answer as its leg B and its DEAD-DECLARATION class means "somebody
+# TYPED this path into a list and no ExUnit case executes it" — so 43
+# ledger-disposed instruments were reclassified DEAD-DECLARATION in one commit
+# and every one of their dispositions then read as ORPHANED, five arms of
+# api/test/barkpark/pds_door_census_test.exs red. The set did not become wrong;
+# it started answering a QUESTION its consumer was not asking. `--literal` is
+# the narrow half, and these arms are what keeps the two from re-merging.
+echo "case 6d: --literal is the typed half, the bare form is the dispatched whole"
+ml() { "$SCRIPT" --match "$2" --literal <<<"$1"; }
+check_literal() {
+  # $1 path, $2 want-whole, $3 want-literal
+  local gw gl
+  gw="$(m "$1" test)"
+  gl="$(ml "$1" test)"
+  if [ "$gw" = "$2" ] && [ "$gl" = "$3" ]; then
+    ok "'$1' -> whole=$2 literal=$3"
+  else
+    no "'$1' -> whole=$gw literal=$gl, wanted whole=$2 literal=$3"
+  fi
+}
+# A FAMILY MEMBER NOBODY TYPED: gated, and NOT a typed declaration. This is the
+# row the census must not call DEAD-DECLARATION. It is an ABSENT path on
+# purpose — asking about a file the tree already holds is the assertion a hand
+# list passes too.
+check_literal "scripts/pds-zz-new.sh" true false
+check_literal "tooling/pds/zz-new.mjs" true false
+# A TYPED ENTRY: identical under both halves, which is what makes the arm above
+# a discriminator rather than a blanket `literal=false`.
+check_literal "api/lib/barkpark.ex" true true
+# A PATH IN NEITHER HALF stays false under both — the narrow half is a subset,
+# never an independent set that could answer true where the whole set says no.
+check_literal "scripts/deploy-rebuild.sh" false false
+# THE FLAG IS NOT A NO-OP, ASSERTED AS A SET DIFFERENCE AND NOT AS ONE PATH:
+# --print-set test --literal must be a STRICT subset of --print-set test, and
+# the difference must be exactly what --print-families derived. A --literal that
+# silently kept the derived half would pass every check_literal above only if
+# every probe were typed; this arm reds even then.
+# FILES, NOT PROCESS SUBSTITUTION: bash 3.2 — what macOS ships and therefore
+# what the local gate runs — segfaults on `<(...)` inside a command
+# substitution, and that is a RUN-time crash, not a parse error.
+"$SCRIPT" --print-set test | LC_ALL=C sort -u >"$TMPROOT/set-whole.txt"
+"$SCRIPT" --print-set test --literal | LC_ALL=C sort -u >"$TMPROOT/set-literal.txt"
+"$SCRIPT" --print-families | cut -f2 | LC_ALL=C sort -u >"$TMPROOT/set-families.txt"
+fam_set="$(cat "$TMPROOT/set-families.txt")"
+only_lit="$(comm -23 "$TMPROOT/set-literal.txt" "$TMPROOT/set-whole.txt")"
+diff_set="$(comm -13 "$TMPROOT/set-literal.txt" "$TMPROOT/set-whole.txt")"
+if [ -n "$only_lit" ]; then
+  no "--literal returned globs the whole set does not contain: $only_lit"
+elif [ -z "$diff_set" ]; then
+  no "--literal and the bare form returned the SAME set — the flag is a no-op and the census's leg B halves are still one thing"
+elif [ "$diff_set" = "$fam_set" ]; then
+  ok "whole - literal == the derived families exactly ($(printf '%s\n' "$fam_set" | wc -l | tr -d ' ') glob(s))"
+else
+  no "whole - literal is not the derived family set. difference: $(printf '%s' "$diff_set" | tr '\n' ' ') / families: $(printf '%s' "$fam_set" | tr '\n' ' ')"
+fi
+# AND AN UNKNOWN FLAG IN THAT SLOT REFUSES. It printed its complaint to stderr
+# and then answered `false` with rc=0 the first time this was written: the
+# refusal lived in a command substitution, i.e. a subshell, whose exit status
+# the caller discarded. A refusal that still answers is worse than none.
+out="$("$SCRIPT" --match test --bogus <<<'api/lib/barkpark.ex' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "an unknown flag after --match SET exits $rc"
+else
+  no "an unknown flag after --match SET answered '$out' with rc=0"
+fi
+echo
+
 # ── case 7: a bad set name is an error, not a silent false ──────────────────
 echo "case 7: an unknown set name errors"
 out="$("$SCRIPT" --match nonsense <<<'api/x' 2>&1)" && rc=0 || rc=$?

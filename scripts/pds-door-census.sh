@@ -472,7 +472,7 @@ pds-secret-scan_test.sh	PRICE	CPU=0.47+0.79=1.26s LOCAL meter=bash-times-builtin
 # any other instrument is a price nobody pays and nothing reads —
 # `orphaned_price_error` below is what makes that say so instead of passing in
 # total silence.
-PDS_DOOR_PRICES='pds-door-census.sh	CPU=2.81+5.78=8.59s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=76.94 arm=--selftest key=0ae13750c8e3 2026-09-18 (--selftest, rc=0; 3 trials gave 8.59/8.04/7.30s CPU at load1 74.91-77.90, observed band 7.30-8.59 s, a 17.7 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able. THE SPREAD IS THE HONEST NUMBER AND IT IS WIDE: this host carried load1 74.91-77.90 across the three trials, and a 17.7 percent within-stamp spread is what a machine at that load does to a CPU figure. It is quoted as measured rather than re-run until it looked tight.). TAKEN TWICE IN THIS PR, AND BOTH REASONS WERE THE SAME MECHANISM: PRICE-STALE fired when a slash-compressed charter citation in the prose of THIS FILE was expanded (key d44af97a4f79 -> 56296e9376c9), and fired AGAIN when that one expansion had to be REVERTED (key 56296e9376c9 -> 0ae13750c8e3) because api/test/barkpark/pds_door_census_test.exs:446 asserts the literal string METER BLIND SPOT (PDS-D633/D646) against this instrument printed output -- a compressed citation that is not prose at all but part of a pinned contract another lane owns. THE KEY WAS RIGHT BOTH TIMES: it elides the ledger literals precisely so a ledger paste cannot move it, so each firing was the program moving, and the honest discharge is a re-take rather than an argument that a comment-only edit must be harmless. THE INTERMEDIATE STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.87+5.15=8.02s at load1=72.70, 3 trials 7.84/8.02/7.70s at load1 69.61-72.70, key=56296e9376c9, 2026-09-18. THE IMMEDIATELY SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=3.09+5.87=8.96s at load1=61.55 over 74 arms, 3 trials 8.96/8.70/8.48s at load1 56.73-67.75, key=d44af97a4f79, 2026-09-17. THOSE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 56.73-67.75 against load1 69.61-72.70 is a busier host, so the edit and the contention are CONFOUNDED here and this row attributes the 0.94 s to neither. RE-TAKEN BECAUSE THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, WHICH IS THE ONLY REASON THIS COLUMN EVER RE-TAKES ONE: the PRICE-UNGRADED ruling landed with seven arms (67 -> 74), and the PRICE-STALE key moved f50c75efbf51 -> d44af97a4f79 in the same edit — and it moved BEFORE the row was pasted, which is how this row learned it needed re-taking at all. THE IMMEDIATELY SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN: CPU=2.50+4.39=6.89s at load1=47.82 over 67 arms, 3 trials 6.89/6.67/6.53s at load1 47.82-57.30, key=f50c75efbf51, 2026-09-17. THOSE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 47.82-57.30 against load1 56.73-67.75 is a host carrying meaningfully more load, so the seven new arms and the contention are CONFOUNDED here and this row attributes the 2.07 s to neither. AND THE STAMP BEFORE THAT ONE IS KEPT TOO, because a deleted measurement is a fact destroyed: workflow_claim_errors landed with five arms (62 -> 67), and the PRICE-STALE key moved fb27908d5edc -> f50c75efbf51 in that edit. The key ELIDES both ledger literals, so it did not move because a row was pasted -- it moved because the program did, which is exactly the signal it exists to give. THE SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.07+4.72=6.79s at load1=35.89 over 62 arms, 3 trials 6.79/6.54/6.33s at load1 29.91-35.89, key=fb27908d5edc, 2026-09-11. THE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 29.91-35.89 against load1 47.82-57.30 is a host carrying roughly half again the load, so the five new arms and the contention are CONFOUNDED here and this row attributes the 0.10 s to neither. The transferable facts are the arm count, the key, and the WITHIN-STAMP spread. THE HEADLINE MOVED TO THE GATED ARM IN WAVE 50, AND THAT IS NOW THE RULE OF THIS COLUMN, STATED ABOVE: the CPU= field is the arm a required gate actually runs, and every other figure about the same instrument is trailing prose in this same cell. Until this change this row headlined --check — the one arm NO gate runs — while naming its gated arm as prose, and every other row in this ledger headlined its gated arm; the column was therefore not comparable to itself, which is the defect pds-w46-bl-census-own-price-measures-the-wrong-arm was filed on. THE --check FIGURE IS NOT DELETED, because a deleted measurement is a fact destroyed: taken in the SAME session as the headline above, --check is CPU=4.08+10.11=14.20s at load1=26.99, 4.02+9.88=13.91s at load1=26.15, 4.09+9.92=14.01s at load1=24.67 (band 13.91-14.20 s, a 2.1 percent spread, cpus=10), i.e. the ungated arm costs 2.0-2.2x the gated one in one session. That ratio is the whole reason the headline had to move: it is the difference between a figure the repo pays on every PR and a figure nobody pays at all. That ratio is the whole reason the headline had to move: it is the difference between a figure the repo pays on every PR and a figure nobody pays at all. The earlier pair is kept too and is NOT poolable with either (PDS-D656): --check CPU=0.49+0.77=1.26s at load1=6.48 (3 trials 1.26/1.31/1.27s) and --selftest CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s, a 5.7 percent spread at one stamp), both 2026-08-05. THE ROW NOW CARRIES arm= AND key=: the key is the elided-ledger-block content key (price_key), recomputed by every --check inside the THROUGH branch, so this row REDS as PRICE-STALE the moment the census changes underneath it without being re-measured — and it survives its own paste, which is the self-pricing fixpoint the key was built for. RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once. RE-TAKEN ON THE BUILDER HOST 2026-09-03 (wave 49, the widened denominator), BY --measure, NEVER PASTED, AND ADDED BESIDE THE STAMP ABOVE RATHER THAN OVER IT: --check CPU=3.25+10.01=13.25s at load1=69.60, 3.25+9.75=13.00s at load1=65.29, 3.27+10.14=13.41s at load1=83.63 (band 13.00-13.41 s, a 3.1 percent spread, cpus=10); --selftest CPU=2.03+6.26=8.29s at load1=66.84, 2.11+6.70=8.81s at load1=75.97, 1.96+5.91=7.87s at load1=75.62 (band 7.87-8.81 s, an 11.9 percent spread, cpus=10). THE INSTRUMENT DID CHANGE UNDERNEATH THE ROW AGAIN and that is why it was re-taken: --selftest went 45 arms to 49 and --check went from a population of 25 to 34 as the denominator reached tooling/pds. THE TWO STAMPS ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): 1.26s at load1=6.48 against 13.25s at load1=69.60 is a TENFOLD gap on a host carrying ten times the load, and no part of it is attributable to the four new arms. A ratio taken across those stamps would measure this machine, not this change. The transferable facts here are the arm count, the population and the WITHIN-STAMP spreads; the quotable figure for a CI runner is still the load1=5-7 band above, which this run does not refute and cannot confirm. RE-TAKEN AGAIN 2026-09-11 (the wave-46 whitespace repair), BY `--measure`, NEVER PASTED, AND ADDED BESIDE THE TWO STAMPS ABOVE RATHER THAN OVER THEM: --selftest CPU=1.06+2.05=3.12s at load1=19.50, 1.05+2.01=3.06s at load1=19.50, 1.02+1.90=2.92s at load1=18.50 (band 2.92-3.12 s, a 6.8 percent spread, cpus=10; HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, AND THAT IS THE WHOLE REASON FOR THE RE-TAKE: --selftest went 49 arms to 50 when retired_evidence_errors learned that whitespace-only evidence IS empty evidence, and a price whose instrument changed underneath it is the exact rot this row exists to prevent. THIS STAMP IS NOT A DELTA AGAINST EITHER STAMP ABOVE AND MUST NOT BE READ AS ONE (PDS-D656): load1=18.50-19.50 sits between the load1=5-7 band and the load1=65-84 band, so the only facts transferable across the three are the arm count, the population and the within-stamp spreads.
+PDS_DOOR_PRICES='pds-door-census.sh	CPU=4.84+7.50=12.34s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=62.77 arm=--selftest key=3c5e931ce447 2026-09-21 (--selftest, rc=0; 3 trials gave 12.34/12.21/12.31s CPU at load1 62.77-66.30, observed band 12.21-12.34 s, a 1.1 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). RE-TAKEN BECAUSE THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, WHICH IS THE ONLY REASON THIS COLUMN EVER RE-TAKES ONE, AND THE KEY SAID SO BEFORE THE ROW WAS TOUCHED: leg B was split into its whole-set and LITERAL halves (leg_b_literal, plus three arms: LEG B LITERAL / LEG B DERIVED / LEG B LITERAL REFUSES), --selftest went 74 arms to 77, and the key moved 0ae13750c8e3 -> 3c5e931ce447. THIS IS A RE-MEASUREMENT, NEVER AN EDITED NUMBER: every figure here came back from `--measure pds-door-census.sh --selftest` on this tree, and nothing about the previous stamp was changed to make it fit. THE SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.81+5.78=8.59s at load1=76.94, 3 trials 8.59/8.04/7.30s at load1 74.91-77.90, a 17.7 percent spread, key=0ae13750c8e3, 2026-09-18. THE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 62.77-66.30 against load1 74.91-77.90 is a quieter host, and the three new arms and the contention are CONFOUNDED here — this row attributes the 3.75 s to neither. The transferable facts are the arm count, the key, and the WITHIN-STAMP spread, which tightened from 17.7 percent to 1.1 percent at the lower load. TAKEN TWICE IN THIS PR, AND BOTH REASONS WERE THE SAME MECHANISM: PRICE-STALE fired when a slash-compressed charter citation in the prose of THIS FILE was expanded (key d44af97a4f79 -> 56296e9376c9), and fired AGAIN when that one expansion had to be REVERTED (key 56296e9376c9 -> 0ae13750c8e3) because api/test/barkpark/pds_door_census_test.exs:446 asserts the literal string METER BLIND SPOT (PDS-D633/D646) against this instrument printed output -- a compressed citation that is not prose at all but part of a pinned contract another lane owns. THE KEY WAS RIGHT BOTH TIMES: it elides the ledger literals precisely so a ledger paste cannot move it, so each firing was the program moving, and the honest discharge is a re-take rather than an argument that a comment-only edit must be harmless. THE INTERMEDIATE STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.87+5.15=8.02s at load1=72.70, 3 trials 7.84/8.02/7.70s at load1 69.61-72.70, key=56296e9376c9, 2026-09-18. THE IMMEDIATELY SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=3.09+5.87=8.96s at load1=61.55 over 74 arms, 3 trials 8.96/8.70/8.48s at load1 56.73-67.75, key=d44af97a4f79, 2026-09-17. THOSE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 56.73-67.75 against load1 69.61-72.70 is a busier host, so the edit and the contention are CONFOUNDED here and this row attributes the 0.94 s to neither. RE-TAKEN BECAUSE THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, WHICH IS THE ONLY REASON THIS COLUMN EVER RE-TAKES ONE: the PRICE-UNGRADED ruling landed with seven arms (67 -> 74), and the PRICE-STALE key moved f50c75efbf51 -> d44af97a4f79 in the same edit — and it moved BEFORE the row was pasted, which is how this row learned it needed re-taking at all. THE IMMEDIATELY SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN: CPU=2.50+4.39=6.89s at load1=47.82 over 67 arms, 3 trials 6.89/6.67/6.53s at load1 47.82-57.30, key=f50c75efbf51, 2026-09-17. THOSE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 47.82-57.30 against load1 56.73-67.75 is a host carrying meaningfully more load, so the seven new arms and the contention are CONFOUNDED here and this row attributes the 2.07 s to neither. AND THE STAMP BEFORE THAT ONE IS KEPT TOO, because a deleted measurement is a fact destroyed: workflow_claim_errors landed with five arms (62 -> 67), and the PRICE-STALE key moved fb27908d5edc -> f50c75efbf51 in that edit. The key ELIDES both ledger literals, so it did not move because a row was pasted -- it moved because the program did, which is exactly the signal it exists to give. THE SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.07+4.72=6.79s at load1=35.89 over 62 arms, 3 trials 6.79/6.54/6.33s at load1 29.91-35.89, key=fb27908d5edc, 2026-09-11. THE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 29.91-35.89 against load1 47.82-57.30 is a host carrying roughly half again the load, so the five new arms and the contention are CONFOUNDED here and this row attributes the 0.10 s to neither. The transferable facts are the arm count, the key, and the WITHIN-STAMP spread. THE HEADLINE MOVED TO THE GATED ARM IN WAVE 50, AND THAT IS NOW THE RULE OF THIS COLUMN, STATED ABOVE: the CPU= field is the arm a required gate actually runs, and every other figure about the same instrument is trailing prose in this same cell. Until this change this row headlined --check — the one arm NO gate runs — while naming its gated arm as prose, and every other row in this ledger headlined its gated arm; the column was therefore not comparable to itself, which is the defect pds-w46-bl-census-own-price-measures-the-wrong-arm was filed on. THE --check FIGURE IS NOT DELETED, because a deleted measurement is a fact destroyed: taken in the SAME session as the headline above, --check is CPU=4.08+10.11=14.20s at load1=26.99, 4.02+9.88=13.91s at load1=26.15, 4.09+9.92=14.01s at load1=24.67 (band 13.91-14.20 s, a 2.1 percent spread, cpus=10), i.e. the ungated arm costs 2.0-2.2x the gated one in one session. That ratio is the whole reason the headline had to move: it is the difference between a figure the repo pays on every PR and a figure nobody pays at all. That ratio is the whole reason the headline had to move: it is the difference between a figure the repo pays on every PR and a figure nobody pays at all. The earlier pair is kept too and is NOT poolable with either (PDS-D656): --check CPU=0.49+0.77=1.26s at load1=6.48 (3 trials 1.26/1.31/1.27s) and --selftest CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s, a 5.7 percent spread at one stamp), both 2026-08-05. THE ROW NOW CARRIES arm= AND key=: the key is the elided-ledger-block content key (price_key), recomputed by every --check inside the THROUGH branch, so this row REDS as PRICE-STALE the moment the census changes underneath it without being re-measured — and it survives its own paste, which is the self-pricing fixpoint the key was built for. RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once. RE-TAKEN ON THE BUILDER HOST 2026-09-03 (wave 49, the widened denominator), BY --measure, NEVER PASTED, AND ADDED BESIDE THE STAMP ABOVE RATHER THAN OVER IT: --check CPU=3.25+10.01=13.25s at load1=69.60, 3.25+9.75=13.00s at load1=65.29, 3.27+10.14=13.41s at load1=83.63 (band 13.00-13.41 s, a 3.1 percent spread, cpus=10); --selftest CPU=2.03+6.26=8.29s at load1=66.84, 2.11+6.70=8.81s at load1=75.97, 1.96+5.91=7.87s at load1=75.62 (band 7.87-8.81 s, an 11.9 percent spread, cpus=10). THE INSTRUMENT DID CHANGE UNDERNEATH THE ROW AGAIN and that is why it was re-taken: --selftest went 45 arms to 49 and --check went from a population of 25 to 34 as the denominator reached tooling/pds. THE TWO STAMPS ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): 1.26s at load1=6.48 against 13.25s at load1=69.60 is a TENFOLD gap on a host carrying ten times the load, and no part of it is attributable to the four new arms. A ratio taken across those stamps would measure this machine, not this change. The transferable facts here are the arm count, the population and the WITHIN-STAMP spreads; the quotable figure for a CI runner is still the load1=5-7 band above, which this run does not refute and cannot confirm. RE-TAKEN AGAIN 2026-09-11 (the wave-46 whitespace repair), BY `--measure`, NEVER PASTED, AND ADDED BESIDE THE TWO STAMPS ABOVE RATHER THAN OVER THEM: --selftest CPU=1.06+2.05=3.12s at load1=19.50, 1.05+2.01=3.06s at load1=19.50, 1.02+1.90=2.92s at load1=18.50 (band 2.92-3.12 s, a 6.8 percent spread, cpus=10; HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, AND THAT IS THE WHOLE REASON FOR THE RE-TAKE: --selftest went 49 arms to 50 when retired_evidence_errors learned that whitespace-only evidence IS empty evidence, and a price whose instrument changed underneath it is the exact rot this row exists to prevent. THIS STAMP IS NOT A DELTA AGAINST EITHER STAMP ABOVE AND MUST NOT BE READ AS ONE (PDS-D656): load1=18.50-19.50 sits between the load1=5-7 band and the load1=65-84 band, so the only facts transferable across the three are the arm count, the population and the within-stamp spreads.
 pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 ungraded-until=2026-12-31 2026-08-03 (--selftest, 15/15 arms)
 pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 ungraded-until=2026-12-31 2026-08-03 (76 checks, 0 failures)
 pds-pull-proof_test.sh	CPU=0.32+0.28=0.59s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=3.17 ungraded-until=2026-12-31 2026-09-06 (no arguments, rc=0; 3 trials gave 0.56/0.59/0.57s CPU at one stamp, observed band 0.56-0.59 s, a 5.4 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS THROUGH AND THE PRICE IS WHY THAT IS HONEST: 0.59 s keeps no door shut, and the instrument is hermetic — it builds tar fixtures in a mktemp -d it removes, sources scripts/pds-pull-proof.sh through the PDS_PROOF_LIB=1 library mode that script itself documents (it loads every rung and runs none), issues no network call, opens no ssh, reads no credential and touches no scratch target. THE SUBJECT STAYS ENVIRONMENT-DISPOSED: this harness prices the offline predicate full_meta_ok and its reader manifest_field, never the --all climb, which still needs a live server and a pinned BARKPARK_HOME, and the disposition row for pds-pull-proof.sh is unchanged. NOT VACUOUS: --measure discards subject output, so the arm evidence comes from a SEPARATE un-metered run — rc=0, 23 `ok` lines and `pds-pull-proof_test: PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)`. The green descends from arms that can FAIL, shown by mutation rather than asserted: reverting full_meta_ok to the origin/main predicate reds 16 arms, collapsing the manifest_field exit code back to a constant 0 reds 5 (including the legacy-accept arm, which is what proves the tightening did not simply refuse everything), deleting file(1) from the refusal message reds 2, and forcing that identification empty reds 2 — an arm that could only ever pass is what this column exists to refuse.
@@ -978,6 +978,36 @@ leg_b() {
   # pipe, which is the exact defect this epic exists to remove. A here-doc feeds
   # stdin without one.
   out="$(bash "$ESCAPE_CHECK" --match test 2>&1 <<EOF
+$path
+EOF
+  )"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'ERROR'
+    return 0
+  fi
+  case "$out" in
+    true) printf 'true' ;;
+    false) printf 'false' ;;
+    *) printf 'ERROR' ;;
+  esac
+}
+
+# LEG B HAS TWO HALVES SINCE THE DERIVED-FAMILY RULING, AND THIS CLASS READS THE
+# NARROW ONE. `--match test` answers what the DISPATCHER runs: the declared
+# lists PLUS every member of a family a declared program enumerates by glob
+# (today `scripts/pds-*.{sh,exs}`, `tooling/pds/*.mjs`). That is the right
+# answer for "is this path gated?" and the WRONG answer for "is this
+# declaration dead?" — a family member nobody executes is the derivation
+# working as designed, not a name somebody typed and forgot. Reading the whole
+# set here reclassified 43 ledger-disposed instruments as DEAD-DECLARATION in
+# one commit, and every one of their dispositions then read as ORPHANED: the
+# census met a shape it did not model, which is an ERROR by its own rule, and
+# the fix is the shape, never the count.
+leg_b_literal() {
+  local path="$1" out rc
+  # NO PIPE — same SIGPIPE-under-pipefail reason as leg_b above.
+  out="$(bash "$ESCAPE_CHECK" --match test --literal 2>&1 <<EOF
 $path
 EOF
   )"
@@ -1707,6 +1737,13 @@ run_census() {
     legA='no'
     case "$kinds" in *LEGA-BOUND-EXEC*) legA='yes' ;; esac
     legB="$(leg_b "$bpath")"
+    # Only asked when the whole set already said yes — the narrow half can never
+    # be true where the whole set is false, and this keeps one bash per row
+    # rather than two for the rows that answer `false` outright.
+    legBlit='false'
+    if [ "$legB" = 'true' ]; then
+      legBlit="$(leg_b_literal "$bpath")"
+    fi
 
     class=''
     evidence=''
@@ -1778,9 +1815,15 @@ $ungraded_err"
       # price and never claims THROUGH-with-a-price.
       class='IN-BEAM-REQUIRED'
       evidence='Code.require_file — runs inside the ExUnit BEAM, so D633 forbids an OS-meter price for it. Gated, unpriceable, its own row.'
-    elif [ "$legA" = 'no' ] && [ "$legB" = 'true' ]; then
+    elif [ "$legA" = 'no' ] && [ "$legBlit" = 'ERROR' ]; then
+      # UNCLASSIFIABLE, NOT "probably family-declared". The narrow half refused
+      # or answered something that is neither true nor false, so no verdict
+      # about this row descends from a complete read.
+      class='ERROR'
+      evidence='the path set says this path is gated, but `--match test --literal` neither answered true nor false, so the census cannot tell a typed declaration from a derived family member. Fix the ratchet invocation; never let the narrow half fail open.'
+    elif [ "$legA" = 'no' ] && [ "$legBlit" = 'true' ]; then
       class='DEAD-DECLARATION'
-      evidence='declared in ELIXIR_TEST_ONLY_PATHS but executed by no ExUnit case — leg B without leg A. This is the one class no existing gate can see.'
+      evidence='declared in ELIXIR_TEST_ONLY_PATHS by NAME but executed by no ExUnit case — leg B (literal half) without leg A. This is the one class no existing gate can see. A member of a DERIVED family never lands here: nobody typed it, so there is no snapshot to rot.'
     elif is_library_module "$bpath"; then
       # DERIVED, NOT DECLARED — and ordered AFTER every gated band, so a library
       # that ever does become gated classifies THROUGH and never hides here.
@@ -2824,13 +2867,31 @@ EOF
     # `$( … )` ends the substitution early, which is a parse error, not a wrong
     # answer — but it is a parse error that only fires at RUN time.
     if CENSUS_OUT="$(
-      leg_b() { case "$1" in (*/pds-fx-through.sh) printf 'true' ;; (*) printf 'false' ;; esac; }
+      leg_b() { case "$1" in ($CENSUS_STUB_LEGB) printf 'true' ;; (*) printf 'false' ;; esac; }
+      # `ERROR` as the stub value is the third answer the real function can
+      # give (a non-zero ratchet, or output that is neither true nor false) and
+      # it is NOT expressible as a path pattern, so it gets its own arm here.
+      leg_b_literal() {
+        if [ "$CENSUS_STUB_LEGB_LIT" = 'ERROR' ]; then printf 'ERROR'; return 0; fi
+        case "$1" in ($CENSUS_STUB_LEGB_LIT) printf 'true' ;; (*) printf 'false' ;; esac
+      }
       run_census 2>&1
     )"; then CENSUS_RC=0; else CENSUS_RC=$?; fi
     SCAN_ROOT="$saved_scan"
     PDS_DOOR_DISPOSITIONS="$saved_d"
     PDS_DOOR_PRICES="$saved_p"
+    # RESET, ALWAYS. An arm that widens a stub must not widen every arm after
+    # it: a stub that leaks forward is a fixture nobody declared, and the arm it
+    # silently changes is the one that stops measuring anything.
+    CENSUS_STUB_LEGB='*/pds-fx-through.sh'
+    CENSUS_STUB_LEGB_LIT='*/pds-fx-through.sh'
   }
+
+  # THE TWO HALVES OF LEG B, STUBBED SEPARATELY. The default keeps both in
+  # lockstep, which is what every arm written before the derived-family ruling
+  # assumes; the family arms below are the only ones that pull them apart.
+  CENSUS_STUB_LEGB='*/pds-fx-through.sh'
+  CENSUS_STUB_LEGB_LIT='*/pds-fx-through.sh'
 
   census_arm() {
     # $1 = label, $2 = expected rc, $3.. = substrings the output MUST contain
@@ -2892,6 +2953,46 @@ EOF
   census_run "$(printf '%s\npds-fx-through.sh\tRETIRED-ENVIRONMENT\t ' "$d_ok")" "$p_ok"
   census_arm "A RETIRED ROW WHOSE EVIDENCE IS WHITESPACE-ONLY REDS TOO" 1 \
     'RETIRED row with EMPTY evidence'
+
+  # ---- LEG B HAS TWO HALVES: DERIVED-FAMILY MEMBER vs TYPED DECLARATION ----
+  # THE ARM THE 43-ERROR INCIDENT IS FILED ON, AND IT IS A PAIR. When the
+  # dispatcher path set learned to derive `scripts/pds-*.{sh,exs}` from the glob
+  # the consuming program runs, `--match test` began answering `true` for every
+  # member of the family. leg_b reads that whole-set answer, and DEAD-DECLARATION
+  # used to key on it directly — so 43 instruments carrying live ledger rows were
+  # reclassified as DEAD-DECLARATION in one commit, and every one of their
+  # dispositions then read as ORPHANED. The class means "somebody TYPED this path
+  # into a list and nothing executes it"; a family member nobody typed is the
+  # derivation working, not a snapshot rotting.
+  #
+  # FIRST THE MUTANT, so the control below cannot be read as vacuous: the literal
+  # half says the name WAS typed, and with leg A absent that is a dead
+  # declaration — which orphans the live ENVIRONMENT row the ledger carries.
+  CENSUS_STUB_LEGB='*/pds-fx-*.sh'
+  CENSUS_STUB_LEGB_LIT='*/pds-fx-*.sh'
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEG B LITERAL: a TYPED declaration with no ExUnit executor is DEAD-DECLARATION and orphans its row" 1 \
+    'DEAD-DECLARATION' 'pds-fx-shut.sh' 'ORPHANED DISPOSITION'
+
+  # THE CONTROL, AND THE ONE LINE THAT DIFFERS IS THE LITERAL HALF. Same tree,
+  # same ledgers, same whole-set answer: gated, so a change to it runs the Elixir
+  # job. Nobody typed it, so it is NOT a dead declaration and its ENVIRONMENT row
+  # is read exactly as before. Revert the DEAD-DECLARATION arm to key on $legB
+  # and this arm reds with the incident's own signature.
+  CENSUS_STUB_LEGB='*/pds-fx-*.sh'
+  CENSUS_STUB_LEGB_LIT='*/pds-fx-through.sh'
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEG B DERIVED: a FAMILY member with no ExUnit executor keeps its ledger class, not DEAD-DECLARATION" 0 \
+    'pds-fx-shut.sh' 'ENVIRONMENT' 'DEAD-DECLARATION        : 0 of'
+
+  # AND THE NARROW HALF CANNOT FAIL OPEN. `--match test --literal` answering
+  # neither true nor false leaves the census unable to tell a typed name from a
+  # derived one, which is unclassifiable — an ERROR, never a quiet ledger read.
+  CENSUS_STUB_LEGB='*/pds-fx-*.sh'
+  CENSUS_STUB_LEGB_LIT='ERROR'
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEG B LITERAL REFUSES: an unanswerable narrow half is an ERROR row, never a silent pass" 1 \
+    'pds-fx-shut.sh' 'never let the narrow half fail open'
 
   # ---- THE WIRED-CLAIM PREDICATE (the sentence that was false for hours) ---
   # ARM. A live row asserting the clause for an instrument fx-wired.yml NAMES.
