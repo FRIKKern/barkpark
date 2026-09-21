@@ -293,6 +293,170 @@ else
   printf '              The incident replay did NOT run. It is not counted as a pass.\n'
 fi
 
+# ── 13-17. THE TWO fd-0 COUNT IDENTITIES (task-fb55d468c7dea75b) ────────────
+# The literal sweep reads $WATCHED on fd 0 (`done <<< "$WATCHED"`), and inside
+# it the key loop reads the before/after union the same way. $moved and
+# $unstated are BOTH read off those loops, so a body child that steals stdin
+# truncates one and the guard prints
+#     PASS: nothing watched moved.
+# in the same words a complete sweep uses. A path never reached is a threshold
+# move never REFUSED, and this guard's whole job is to make that move visible.
+#
+# The roster count (18 rows) and the union count are read BEFORE the loops;
+# they are the only quantities a short read cannot move.
+#
+#   13  CONTROL   a silent move of a LATER watched row is REFUSED, identities silent
+#   14  OUTER SHORT  a drained fd 0 in the sweep body refuses "examined 1 of 18"
+#   15  OUTER CUT    the same short read then prints PASS over a real move (defect)
+#   16  INNER SHORT  a drained fd 0 in the KEY loop refuses "examined 1 of 2"
+#   17  INNER CUT    the same short read then misses the second moved key (defect)
+# ── THE MUTATION HELPERS (task-fb55d468c7dea75b) ─────────────────────────────
+# A count identity is a guard over a defect nobody can trigger by hand, so the
+# only way to show it MEANS anything is to build the defect: splice a
+# stdin-draining child into the loop body and watch the guard refuse, then CUT
+# the guard out of the same mutated copy and watch the old verdict come back.
+# Both operate on a COPY; the live script is never touched.
+#
+# `cat >/dev/null` is the minimal honest specimen of the hazard: it is what a
+# `gh` without `</dev/null`, an `ssh`, a `psql` or a `read` does to fd 0 — it
+# consumes the remainder, so the loop ends after ONE iteration with exit 0 and
+# nothing printed.
+mut_splice() { # <src> <dst> <marker-name>
+  awk -v m="# MUT-SPLICE: $3" '{ print } index($0, m) { print "cat >/dev/null" }' "$1" > "$2"
+  grep -q '^cat >/dev/null$' "$2" || { printf 'mut_splice: marker %s not found in %s\n' "$3" "$1" >&2; return 2; }
+}
+mut_cut() { # <src> <dst> <block-name>
+  awk -v a="# MUT-ANCHOR: $3" -v b="# MUT-END: $3" '
+    index($0, a) { skip = 1; cut = 1 }
+    !skip { print }
+    index($0, b) { skip = 0 }
+    END { if (!cut) exit 3 }' "$1" > "$2"
+}
+# Arm 12 left the shell in $REPO_ROOT to read real history. Everything below is
+# hermetic again, so go back to the fixture repo FIRST — the first draft of
+# these arms ran the guard against the real repo with the fixture's BASE sha and
+# got six identical UNCHECKED verdicts, which is a uniform result and therefore
+# a broken instrument, not six findings.
+# EVERY git WRITE BELOW TAKES `git -C "$FX"`, and that is not style. The first
+# draft of these arms wrote `git add -A && git commit` the way the arms above
+# do, relying on the shell's cwd — and arm 12 had left it in $REPO_ROOT, so the
+# fixture's cap files were written over the REAL ones and committed to the real
+# repository. A harness that can commit to the tree it is testing is a hazard
+# whatever its assertions say. `cd` too, so the guard resolves --base/--head in
+# the fixture, but nothing here depends on it having worked.
+cd "$FX" || exit 99
+MUT="$TMP/mut"; mkdir -p "$MUT"
+run_g() { # run_g <script> <PR_BODY>
+  OUT="$(PR_BODY="$2" bash "$1" --base "$BASE" --head HEAD 2>&1)"; RC=$?
+}
+
+# Back to the base tree, then move a LATER watched row only: .silencer-counts is
+# row 12 of 18, so a sweep that stops at row 1 cannot see it.
+cap_json "22.5 KB"  > "$FX/js/packages/react/.size-limit.json"
+silencer_counts 45  > "$FX/scripts/.silencer-counts"
+# `|| true` and quiet: an earlier arm may already have left the tree at 45, and
+# "nothing to commit" is not a failure — only the resulting sha matters here.
+git -C "$FX" add -A && git -C "$FX" commit -qm "chore: bump the tenant-scope baseline" >/dev/null 2>&1 || true
+
+run_g "$GUARD" "chore: bump the tenant-scope baseline"
+if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'REFUSED  scripts/.silencer-counts#tenant-scope-baseline moved 44 -> 45' \
+   && ! printf '%s' "$OUT" | grep -q 'SHORT SWEEP'; then
+  ok "13 CONTROL — a silent move of a LATER watched row is REFUSED, both identities silent"
+else
+  bad "13 control-later-row" "rc=$RC, want 1 naming .silencer-counts 44 -> 45 with no SHORT SWEEP. Output:
+$OUT"
+fi
+
+if mut_splice "$GUARD" "$MUT/outer-short.sh" watched-count-identity; then
+  run_g "$MUT/outer-short.sh" "chore: bump the tenant-scope baseline"
+  if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'SHORT SWEEP — examined 1 of 18 watched path(s)' \
+     && ! printf '%s' "$OUT" | grep -q '^PASS:'; then
+    ok "14 OUTER SHORT — a drained fd 0 refuses naming both numbers (1 of 18), exit 2, no PASS"
+  else
+    bad "14 outer-short" "rc=$RC, want 2 naming 'examined 1 of 18'. Output:
+$OUT"
+  fi
+else bad "14 outer-short" "no MUT-SPLICE marker for the watched sweep in $GUARD"; fi
+
+if mut_cut "$MUT/outer-short.sh" "$MUT/outer-short-nocount.sh" watched-count-identity; then
+  run_g "$MUT/outer-short-nocount.sh" "chore: bump the tenant-scope baseline"
+  if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'PASS: nothing watched moved' \
+     && ! printf '%s' "$OUT" | grep -q 'SHORT SWEEP'; then
+    ok "15 OUTER CUT — without the identity the same short read prints PASS over a real move (the defect, reproduced)"
+  else
+    bad "15 outer-cut" "rc=$RC, want 0 with 'PASS: nothing watched moved'. Output:
+$OUT"
+  fi
+else bad "15 outer-cut" "no MUT-ANCHOR block for the watched sweep in $GUARD"; fi
+
+# ── the inner loop: TWO keys move in ONE watched file, the body states ONE ──
+# A FRESH BASE. Earlier arms left several watched files changed relative to
+# $BASE, and the first draft of these arms measured a 3-key union across two
+# paths while asserting 2 across one — the assertion was about a population the
+# fixture no longer had. Pin the base to HEAD here so the ONLY diff below is the
+# react cap file, and the union is exactly its two keys.
+silencer_counts 44 > "$FX/scripts/.silencer-counts"
+cap_json "22.5 KB" > "$FX/js/packages/react/.size-limit.json"
+# `|| true`: an earlier arm may already have left the tree in this exact state,
+# and "nothing to commit" is not a failure here — only the resulting sha matters.
+git -C "$FX" add -A && git -C "$FX" commit -qm "chore: restore the fixture to a single-file baseline" >/dev/null 2>&1 || true
+BASE_TWO="$(git -C "$FX" rev-parse HEAD)"
+run_g2() { OUT="$(PR_BODY="$2" bash "$1" --base "$BASE_TWO" --head HEAD 2>&1)"; RC=$?; }
+
+cat <<'JSON' > "$FX/js/packages/react/.size-limit.json"
+[
+ {
+  "name": "PortableText root import",
+  "path": "dist/index.mjs",
+  "import": "{ PortableText }",
+  "limit": "1.4 KB",
+  "gzip": true
+ },
+ {
+  "name": "PortableDoc renderer — client entry (dist/index.mjs)",
+  "path": "dist/index.mjs",
+  "limit": "22.75 KB",
+  "gzip": true
+ }
+]
+JSON
+git -C "$FX" add -A && git -C "$FX" commit -qm "perf(react): two caps move at once"
+TWO_BODY='perf(react): two caps move at once
+
+Threshold-move: js/packages/react/.size-limit.json#limit#1 1.3 KB -> 1.4 KB — the root import gained a guard clause.'
+
+run_g2 "$GUARD" "$TWO_BODY"
+if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'REFUSED  js/packages/react/.size-limit.json#limit#2 moved 22.5 KB -> 22.75 KB' \
+   && printf '%s' "$OUT" | grep -q 'STATED   js/packages/react/.size-limit.json#limit#1'; then
+  ok "16a CONTROL — with two keys moved and one stated, the intact key loop STATES one and REFUSES the other"
+else
+  bad "16a control-two-keys" "rc=$RC, want 1 with limit#1 STATED and limit#2 REFUSED. Output:
+$OUT"
+fi
+
+if mut_splice "$GUARD" "$MUT/inner-short.sh" key-count-identity; then
+  run_g2 "$MUT/inner-short.sh" "$TWO_BODY"
+  if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'SHORT KEY SWEEP — examined 1 of 2 union key(s)' \
+     && ! printf '%s' "$OUT" | grep -q '^PASS:'; then
+    ok "16 INNER SHORT — a drained fd 0 in the KEY loop refuses naming both numbers (1 of 2), exit 2"
+  else
+    bad "16 inner-short" "rc=$RC, want 2 naming 'examined 1 of 2 union key(s)'. Output:
+$OUT"
+  fi
+else bad "16 inner-short" "no MUT-SPLICE marker for the key loop in $GUARD"; fi
+
+if mut_cut "$MUT/inner-short.sh" "$MUT/inner-short-nocount.sh" watched-count-identity; then
+  run_g2 "$MUT/inner-short-nocount.sh" "$TWO_BODY"
+  if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'STATED   js/packages/react/.size-limit.json#limit#1' \
+     && ! printf '%s' "$OUT" | grep -q 'limit#2' \
+     && ! printf '%s' "$OUT" | grep -q 'SHORT KEY SWEEP'; then
+    ok "17 INNER CUT — without the identities the same short key read never sees limit#2 and the guard passes (the defect, reproduced)"
+  else
+    bad "17 inner-cut" "rc=$RC, want 0 with limit#1 STATED, limit#2 never mentioned. Output:
+$OUT"
+  fi
+else bad "17 inner-cut" "no MUT-ANCHOR block covering the key identity in $GUARD"; fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "pds-threshold-move-guard_test: PASS"
