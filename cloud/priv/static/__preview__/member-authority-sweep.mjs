@@ -762,7 +762,19 @@ const PIN_MEMBER_SCENARIOS = 16;
 // accounted for a member actor and the sweep REFUSED on both as UNACCOUNTED.
 // Their rows are in HOOKS above, each named from the wiring rather than from
 // the shape (see wireFleetRows in app.js).
-const PIN_TOTAL_SCENARIOS = 139;
+//
+// 139 -> 141 (task-5ffdec2b609404bc): `tokens-revoke-confirm` and
+// `cmdk-palette`, the first two scenarios in this corpus to ask for a dialog
+// OTHER than the account modal — the modal seam stopped being shoot.sh's
+// `account-modal*` name convention and became a scenarios.mjs `modal` field.
+// The member slice STAYS at 16 — the case the note above forbids bumping: each
+// is its HOST scenario's fixture deep-copied (`tokens-revoke`, `mixed-fleet`)
+// with ONE field added, and both hosts' actors are OWNERS, so neither can
+// answer role="member" by construction. 140 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 141
+// scenario(s), pinned at 139") and the actor-set line, which still says 16 —
+// never by adding one.
+const PIN_TOTAL_SCENARIOS = 141;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

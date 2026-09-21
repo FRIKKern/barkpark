@@ -34,6 +34,11 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
+// THE BROWSER-SIDE HARNESS (task-5ffdec2b609404bc). This runner boots app.js
+// in a vm and never loads mock.js, so the two `modal`-declaring scenarios below
+// cannot be checked by RENDERING their dialog here — what they can be checked
+// for is that the seam they declare EXISTS on the other side.
+const MOCK_JS = fs.readFileSync(path.join(HERE, "mock.js"), "utf8");
 
 // ── index.html's shipped `hidden` (cch-w43-s6) ───────────────────────────────
 // The shim used to default EVERY element to hidden:false, and never read
@@ -4996,6 +5001,76 @@ const EXPECTATIONS = {
         !picker.includes('value="write"') && !picker.includes('value="deploy"') && !picker.includes('value="root"'),
         "write/deploy/root are not offered to a member",
       );
+    },
+  },
+  // ── THE MODAL SEAM'S TWO NEW SCREENS (task-5ffdec2b609404bc) ──────────────
+  // WHAT THESE CAN AND CANNOT ASSERT HERE, stated so a reader does not mistake
+  // the scope. This runner is a node:vm shim: it boots app.js and NEVER loads
+  // mock.js, so the dialog these two exist to photograph does not open in this
+  // process and no assertion here may pretend it does. The shot IS the evidence
+  // for the dialog (shoot.sh + the `modal` field), and modal-oracle.mjs is the
+  // evidence for its geometry.
+  //
+  // What this file OWNS is the half neither of those can see: that the scenario
+  // is its HOST's fixture plus one field (so any difference between the two
+  // shots is the dialog and nothing else), and that the driver it names is a
+  // real entry in mock.js's table rather than a string that silently shoots the
+  // bare shell. Both are exactly the failure the old `account-modal*` NAME
+  // CONVENTION made unrefusable.
+  "tokens-revoke-confirm": {
+    what: "the revoke CONFIRM SHEET's scenario: `tokens-revoke`'s fixture byte-for-byte, plus a declared `modal` driver that mock.js answers",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders. The dialog is shot over THIS.
+      const box = reg.get("token-list");
+      assert.equal(countMatches(box.innerHTML || "", 'class="token-row'), 4,
+        "the host screen must still render its four tokens — the dialog is shot OVER this list");
+
+      // 2 — the fixture is the host's, with nothing else moved. Deep equality,
+      //     not a spot check: if these ever diverge, a shot-hash difference
+      //     stops meaning "the dialog" and starts meaning "some other byte".
+      assert.deepEqual(
+        SCENARIOS["tokens-revoke-confirm"].data, SCENARIOS["tokens-revoke"].data,
+        "tokens-revoke-confirm must stay tokens-revoke's fixture exactly — that identity is " +
+        "what makes the two shots' difference attributable to the dialog alone");
+
+      // 3 — the declared driver EXISTS on the browser side. A typo'd name would
+      //     otherwise shoot the bare list under a filename promising a sheet.
+      assert.equal(SCENARIOS["tokens-revoke-confirm"].modal, "revoke-token");
+      assert.match(MOCK_JS, /"revoke-token": driveRevokeTokenSheet/,
+        "mock.js has no MODAL_DRIVERS entry named \"revoke-token\"");
+
+      // 4 — and the driver's own two selectors are the REAL ones app.js paints
+      //     (the `tokens-revoke` expectation above walks this same chain by
+      //     clicking it, which is what makes these two strings load-bearing).
+      assert.match(MOCK_JS, /whenPresent\("\.token-revoke\[data-id\]"/);
+      assert.match(MOCK_JS, /whenPresent\("#token-revoke-go", freezeShotSurface\)/);
+    },
+  },
+  "cmdk-palette": {
+    what: "the command palette's scenario: `mixed-fleet`'s fixture byte-for-byte, plus a declared `modal` driver that fires a REAL Cmd+K",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders one row per fixture instance.
+      const rows = countMatches(reg.get("fleet-body").innerHTML || "", "fleet-row");
+      assert.ok(rows >= SCENARIOS["cmdk-palette"].data.barkparks.length,
+        "the host fleet table must still render — the palette is shot OVER it");
+
+      // 2 — same identity argument as above.
+      assert.deepEqual(
+        SCENARIOS["cmdk-palette"].data, SCENARIOS["mixed-fleet"].data,
+        "cmdk-palette must stay mixed-fleet's fixture exactly");
+
+      // 3 — the driver exists, and it reaches the palette the way a PERSON does:
+      //     a dispatched keydown through app.js's own listener, which is what
+      //     puts the shot through that handler's four no-op guards instead of
+      //     around them. `openCommandPalette()` called directly would skip all
+      //     four and photograph a state no key press is proven to reach.
+      assert.equal(SCENARIOS["cmdk-palette"].modal, "cmdk");
+      assert.match(MOCK_JS, /cmdk: driveCommandPalette/,
+        "mock.js has no MODAL_DRIVERS entry named \"cmdk\"");
+      assert.match(MOCK_JS, /new KeyboardEvent\("keydown", \{\s*key: "k", metaKey: true/,
+        "the palette driver no longer dispatches a real Cmd+K keydown");
+      assert.match(APP_JS, /id="cmdk-input"/,
+        "the selector the driver waits for is gone from app.js");
     },
   },
   "tokens-reveal": {
