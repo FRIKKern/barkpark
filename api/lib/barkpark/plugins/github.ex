@@ -173,6 +173,11 @@ defmodule Barkpark.Plugins.Github do
   at the settings gate keeps the failure honest and in front of the operator.
   """
   @impl Barkpark.Plugin
+  # `String.to_atom/1` is applied to `"github." <> key` where `key` comes from
+  # the module's compile-time `@required_creds` list — a fixed, finite set, so
+  # the atom table cannot grow. Inline rather than a line-pinned
+  # `.sobelow-skips` row, which would shift on any edit above the call.
+  # sobelow_skip ["DOS.StringToAtom"]
   def validate_settings(settings) when is_map(settings) do
     # A present-but-non-map `github` row (e.g. `%{"github" => "junk"}`) must
     # fail CLOSED, not crash: `Map.get(non_map, key)` raises BadMapError, and
