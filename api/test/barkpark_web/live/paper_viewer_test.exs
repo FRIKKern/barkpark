@@ -104,7 +104,15 @@ defmodule BarkparkWeb.PaperViewerTest do
   describe "api token in the session" do
     test "a Default member holding write may edit", %{conn: conn, slug: slug} do
       raw = "pv-writer-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "pv writer", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "pv writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
 
@@ -123,7 +131,14 @@ defmodule BarkparkWeb.PaperViewerTest do
       slug: slug
     } do
       raw = "pv-reader-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "pv reader", @dataset, ["read"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "pv reader",
+          @dataset,
+          ["read"]
+        )
 
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
 
@@ -184,7 +199,15 @@ defmodule BarkparkWeb.PaperViewerTest do
       default_ws: default_ws
     } do
       raw = "pv-both-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Auth.create_token(raw, "pv both", @dataset, ["read"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "pv both",
+          @dataset,
+          ["read"]
+        )
+
       {user, conn} = user_session!(conn, [{default_ws, "member"}])
       conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 

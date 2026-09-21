@@ -127,11 +127,17 @@ defmodule BarkparkWeb.Studio.StudioLiveActionHandlerRaiseTest do
   # crash guard under test is never reached.
   defp admin_conn(conn) do
     {:ok, _} =
-      Barkpark.Auth.create_token(@admin_token, "action raise admin", @dataset, [
-        "read",
-        "write",
-        "admin"
-      ])
+      Barkpark.Auth.create_token(
+        @admin_token,
+        "action raise admin",
+        @dataset,
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
   end

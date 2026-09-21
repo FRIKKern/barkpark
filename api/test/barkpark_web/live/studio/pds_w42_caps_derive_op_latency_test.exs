@@ -140,7 +140,14 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
     # A WRITE-capable api token. The denial path short-circuits before the
     # write, so a denied principal would price the CHEAP arm; the cost this row
     # asks about is the one a real editor pays.
-    {:ok, _} = Auth.create_token(@writer, "pds w42 latency", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 latency",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end
