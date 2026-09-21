@@ -64,7 +64,16 @@ defmodule BarkparkWeb.Studio.StudioBetaTabsEditingTest do
     doc: doc
   } do
     raw = "beta-tabs-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta tabs editing", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta tabs editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     path = scoped_studio("/d/#{@dataset}/studio/#{@doc_type}/#{doc.doc_id}")
     {:ok, view, _html} = live(conn, path)

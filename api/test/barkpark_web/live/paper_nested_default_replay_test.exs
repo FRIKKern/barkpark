@@ -35,7 +35,16 @@ defmodule BarkparkWeb.PaperNestedDefaultReplayTest do
     end
 
     raw = "nested-default-replay-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "Nested default replay", @dataset, ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "Nested default replay",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw}), token: token}
   end
 

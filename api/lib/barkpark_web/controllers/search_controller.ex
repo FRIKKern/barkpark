@@ -3,8 +3,8 @@ defmodule BarkparkWeb.SearchController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, SearchIntelligence}
-  alias Barkpark.Search.{HitEnvelope, SurfaceConfigs, Synonyms}
-  alias BarkparkWeb.{AnonPerspective, ReadPerspective, SearchIntel}
+  alias Barkpark.Search.{BodyBound, HitEnvelope, SurfaceConfigs, Synonyms}
+  alias BarkparkWeb.{AnonPerspective, ErrorResponse, ReadPerspective, SearchIntel}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
@@ -33,14 +33,17 @@ defmodule BarkparkWeb.SearchController do
   Postgres.
   """
   def search_local(conn, %{"dataset" => dataset} = params) do
-    case bin(params["q"]) do
-      nil ->
+    case {bin(params["q"]), BodyBound.parse(params["bodyChars"])} do
+      {nil, _} ->
         missing_q(conn)
 
-      "" ->
+      {"", _} ->
         missing_q(conn)
 
-      query ->
+      {_query, :error} ->
+        invalid_body_chars(conn, params["bodyChars"])
+
+      {query, {:ok, body_chars}} ->
         t0 = System.monotonic_time(:microsecond)
 
         opts =
@@ -89,6 +92,7 @@ defmodule BarkparkWeb.SearchController do
             schema_resolver: schema_resolver(conn, dataset),
             fields: params["fields"],
             view: params["view"],
+            body_chars: body_chars,
             offset: opts[:offset]
           )
 
@@ -109,12 +113,43 @@ defmodule BarkparkWeb.SearchController do
     # of the missing-`q` 400 only because both are pure input refusals; neither
     # reveals anything the other does not.
     case ReadPerspective.unsupported(params, @search_perspectives) do
-      nil -> do_search(conn, dataset, params)
-      bad -> ReadPerspective.refuse(conn, bad, @search_perspectives)
+      nil ->
+        # A malformed `?bodyChars=` is REFUSED for the same reason an
+        # unsupported `?perspective` is: the silent alternative is to ignore
+        # the cap and answer with the unbounded payload the caller explicitly
+        # asked NOT to receive — a 14 MB "success" for a typo. Pure input
+        # refusal, reveals nothing about the dataset or the tenant.
+        case BodyBound.parse(params["bodyChars"]) do
+          {:ok, body_chars} -> do_search(conn, dataset, params, body_chars)
+          :error -> invalid_body_chars(conn, params["bodyChars"])
+        end
+
+      bad ->
+        ReadPerspective.refuse(conn, bad, @search_perspectives)
     end
   end
 
-  defp do_search(conn, dataset, params) do
+  # Refuse through the ONE emitter, exactly as `ReadPerspective.refuse/4` does
+  # for a bad `?perspective` — same status, same `malformed` code, same
+  # `details.parameter`/`details.received` pair — so a client that already
+  # parses one input refusal on this route parses this one. A hand-built body
+  # whose `error` key held a bare string would have been the only such shape on
+  # the route (BarkparkWeb.Contract.ErrorEnvelopeShapeTest refuses it), and it
+  # would have dropped `request_id`, which is the whole point of §9. That guard
+  # greps the SOURCE, so even naming the offending shape literally in a comment
+  # reds it — which is why this sentence spells it out in prose.
+  defp invalid_body_chars(conn, value) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "bodyChars must be a non-negative integer (characters of prose per hit); got " <>
+        inspect(value),
+      %{parameter: "bodyChars", received: value}
+    )
+  end
+
+  defp do_search(conn, dataset, params, body_chars) do
     case bin(params["q"]) do
       nil ->
         missing_q(conn)
@@ -192,6 +227,10 @@ defmodule BarkparkWeb.SearchController do
             schema_resolver: schema_resolver(conn, dataset),
             fields: params["fields"],
             view: params["view"],
+            # Server-side bound on each hit's projected prose (search-blocks-
+            # bound). nil = unbounded, so every caller that never passes
+            # `?bodyChars=` is byte-identical to before.
+            body_chars: body_chars,
             offset: opts[:offset]
           )
 
