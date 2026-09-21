@@ -634,8 +634,19 @@ SERVING_CONTAINER="${COMPOSE_PROJECT_NAME:-cloud}-control_plane_${ACTIVE_SLOT}-1
 # nothing. Never fatal: this runs on a path that is already failing.
 clear_wedged_endpoints() {
   cleared=0
+  seen=0
+  # MATERIALISED, not consumed straight out of the heredoc's command
+  # substitution: the count identity below needs an enumeration side that a
+  # short read cannot move.
+  endpoints="$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
+{{end}}' 2>/dev/null)"
+  enumerated="$(printf '%s' "$endpoints" | grep -c . || true)"
   while IFS=' ' read -r cid cname; do
     [ -n "$cid" ] && [ -n "$cname" ] || continue
+    # MUT-SPLICE: endpoint-count-identity
+    # THE WORK SIDE — tallied above every `continue`, so it counts endpoints
+    # REACHED. `$cleared` is the OUTCOME, not the coverage.
+    seen=$((seen + 1))
     # GUARD — NEVER unplug the slot that is serving traffic right now. A running
     # container's endpoint is not the fault anyway (the wedge is an endpoint
     # whose container is GONE), but this is the one mistake that would convert a
@@ -659,9 +670,29 @@ clear_wedged_endpoints() {
       log "WARNING: could not disconnect '$cname' from $CP_NETWORK"
     fi
   done <<EOF
-$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
-{{end}}' 2>/dev/null)
+$endpoints
 EOF
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # This loop reads the endpoint list on fd 0. Its body already starts THREE
+  # subprocesses (`docker inspect`, `docker network disconnect`, `log`), and the
+  # next one added that reads stdin — an `ssh`, a `read`, a `docker` subcommand
+  # that prompts — swallows the remaining endpoints and the loop ENDS EARLY with
+  # no error and no non-zero status. `$cleared` is read off this same loop, so a
+  # sweep that reached endpoint 1 of 6 leaves the other five WEDGED and reports a
+  # smaller number in the same words as a complete sweep — and the caller then
+  # retries a `compose up -d` against a network that is still blocked, which is
+  # the 2026-07-21 48h47m blackout's exact shape.
+  #
+  # NOT FATAL, deliberately: this runs on a path that is already failing, and a
+  # `die` here would convert a repairable deploy into an aborted one. The
+  # refusal is that the function reports FAILURE (return 1) and says both
+  # numbers, so it can never claim a clearance it did not complete.
+  # MUT-ANCHOR: endpoint-count-identity
+  if [ "$seen" -ne "$enumerated" ]; then
+    log "SHORT ENDPOINT SWEEP on $CP_NETWORK: examined $seen of $enumerated endpoint(s) the daemon listed. The sweep loop ended before the list did (a loop-body child that reads stdin consumes the rest silently), so $((enumerated - seen)) endpoint(s) were never even examined and a stale one may still be wedging the network. Reporting FAILURE rather than '$cleared cleared' — a partial sweep must not read as a completed one."
+    return 1
+  fi
+  # MUT-END: endpoint-count-identity
   [ "$cleared" -gt 0 ]
 }
 

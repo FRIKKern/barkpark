@@ -93,16 +93,38 @@ scoped_files=()
 deliberate_hits=()
 scanned=0
 skipped=0
+# THE WORK SIDES of this arm's two count identities (task-fb55d468c7dea75b):
+# tracked files REACHED, and — accumulated across every outer iteration — grep
+# hit lines REACHED against grep hit lines ENUMERATED.
+seen=0
+hit_lines_seen=0
+hit_lines_enumerated=0
+
+# MATERIALISED, not consumed straight out of `< <(git ls-files)`: an identity
+# needs an enumeration side that a short read cannot move, and a process
+# substitution gives it nothing to compare against. `git ls-files` quotes any
+# path containing a newline, so one tracked file is one line here.
+FILE_LIST="$(git ls-files)"
+file_enumerated="$(printf '%s' "$FILE_LIST" | grep -c . || true)"
 
 while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  # MUT-SPLICE: scan-count-identity
+  # Tallied above every `continue` in this body, so it counts tracked files
+  # REACHED. `$scanned` and `$skipped` are the CLASSIFICATION, not the coverage:
+  # a file the loop never reached lands in neither.
+  seen=$((seen + 1))
   [ -f "$f" ] || continue
   if ! is_scanned_file "$f"; then skipped=$((skipped + 1)); continue; fi
   scanned=$((scanned + 1))
   # `grep || true` — a no-match exit 1 must not trip `set -e`.
   hits="$(grep -nE "$BARE_RE|$SCOPED_RE" -- "$f" 2>/dev/null || true)"
   [ -n "$hits" ] || continue
+  hit_lines_enumerated=$((hit_lines_enumerated + $(printf '%s' "$hits" | grep -c . || true)))
   while IFS= read -r line; do
     [ -n "$line" ] || continue
+    # MUT-SPLICE: hitline-count-identity
+    hit_lines_seen=$((hit_lines_seen + 1))
     # `grep -n` over a SINGLE file emits `LINENO:text` — strip exactly ONE
     # field. Stripping two ate past a colon inside the text itself, which hid
     # the leading `#` of a comment line and mis-sorted a status-scoped hit into
@@ -139,7 +161,39 @@ while IFS= read -r f; do
       exit 1
     fi
   done <<< "$hits"
-done < <(git ls-files)
+done <<< "$FILE_LIST"
+
+# ── THE COUNT IDENTITIES (task-fb55d468c7dea75b) ─────────────────────────────
+# BOTH loops above read on fd 0 — the outer from `<<< "$FILE_LIST"`, the inner
+# from `<<< "$hits"`. Any body child that reads stdin (a future `git` with a
+# pager, an `ssh`, a `read`, a `gh` without `</dev/null`) swallows the remaining
+# rows and the loop ENDS EARLY with no error and no non-zero status. Nothing
+# below could see it: `bare_hits`, `scoped_files` and `scanned` are ALL read off
+# those loops, so they agree with each other on a short read, and the verdict
+#     [handle_errors-scope] OK — no status-less handle_errors block is emitted anywhere.
+# is exactly what a scan that reached 1 of 15884 tracked files prints. "Anywhere"
+# is the assertion, and a file never reached is a Caddyfile never scanned.
+#
+# The positive control below is NOT this guard: it asserts that SOME scoped
+# emission was seen, and deploy/instance-deploy.sh sorts early enough that a
+# truncated `git ls-files` walk can satisfy it while missing everything after it.
+# A control says nothing about the coverage of the population it was drawn from.
+# MUT-ANCHOR: scan-count-identity
+if [ "$seen" -ne "$file_enumerated" ]; then
+  echo "[handle_errors-scope] FAIL (short scan) — reached $seen of $file_enumerated tracked file(s)"
+  echo "  enumerated by \`git ls-files\`. The scan loop ended before the list did (a loop-body"
+  echo "  child that reads stdin consumes the remaining paths silently). A partial scan must"
+  echo "  never print a clean verdict in the same words as a complete one. This is a fault in"
+  echo "  THIS check, not a finding about the repo."
+  exit 1
+fi
+if [ "$hit_lines_seen" -ne "$hit_lines_enumerated" ]; then
+  echo "[handle_errors-scope] FAIL (short scan) — classified $hit_lines_seen of $hit_lines_enumerated"
+  echo "  grep hit line(s) across the scanned files. The per-line loop ended before its hit list"
+  echo "  did; a hit line never reached is a bare emission never reported."
+  exit 1
+fi
+# MUT-END: scan-count-identity
 
 echo "[handle_errors-scope] scanned $scanned tracked files ($skipped skipped as tests/fixtures)"
 
@@ -208,15 +262,22 @@ CT_LOOKBACK=12
 content_type_arm() {
   local f line n rest body ctx hits from
   local ct_bad=() ct_ok=() ct_deliberate=()
+  # THE TWO SIDES of this arm's count identity (task-fb55d468c7dea75b).
+  local ct_seen=0 ct_enumerated=0
 
   # ONE `git grep` over the whole index, not a grep per tracked file: the
   # status-list loop above already pays 12k process spawns and a second such
   # walk doubled this script's wall time. Same corpus (tracked files), same
   # per-line rules below. Output is `path:lineno:body`.
   hits="$(git grep -nE "$RESPOND_RE" -- . 2>/dev/null || true)"
+  ct_enumerated="$(printf '%s' "$hits" | grep -c . || true)"
   if [ -n "$hits" ]; then
     while IFS= read -r line; do
       [ -n "$line" ] || continue
+      # MUT-SPLICE: ct-count-identity
+      # Tallied above every `continue`, so it counts hit lines REACHED. The three
+      # arrays below are the CLASSIFICATION; a line never reached joins none.
+      ct_seen=$((ct_seen + 1))
       f="${line%%:*}"
       rest="${line#*:}"
       n="${rest%%:*}"
@@ -249,6 +310,27 @@ content_type_arm() {
       fi
     done <<< "$hits"
   fi
+
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # `done <<< "$hits"` is fd 0. The three `grep`s and the `sed` in that body all
+  # take a file or a here-string operand today; the next one added that does not
+  # eats the rest of the hit list and the loop ends early, silently. `ct_ok`,
+  # `ct_bad` and `ct_deliberate` are ALL read off that loop, so they agree with
+  # each other on a short read — and the positive control immediately below,
+  # which reds only at ZERO compliant emissions, is satisfied by the FIRST
+  # compliant hit. A truncated list shrinks the control's population without
+  # tripping it, and the arm then prints "every emitted respond-503 maintenance
+  # block sets Content-Type" over a list it stopped reading.
+  # MUT-ANCHOR: ct-count-identity
+  if [ "$ct_seen" -ne "$ct_enumerated" ]; then
+    echo "[handle_errors-scope] FAIL (short scan) — the Content-Type arm classified $ct_seen of"
+    echo "  $ct_enumerated \`respond 503\` hit line(s) enumerated by its own git grep. The loop ended"
+    echo "  before the hit list did (a loop-body child that reads stdin consumes the rest silently)."
+    echo "  The positive control below cannot see this: it reds at zero compliant emissions, and a"
+    echo "  truncated list still contains the first one. This is a fault in THIS check."
+    exit 1
+  fi
+  # MUT-END: ct-count-identity
 
   # POSITIVE CONTROL, same reasoning as the one above: a scan that found nothing
   # and a scan that is BROKEN print the same clean nothing.

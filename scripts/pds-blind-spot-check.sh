@@ -181,9 +181,17 @@ run_check() {
     return 1
   fi
 
+  # THE ENUMERATION SIDE of the scan-set count identity: how many non-blank rows
+  # `$files` hands the loop. Read BEFORE the loop so a short read cannot move it.
+  local enumerated
+  enumerated="$(printf '%s' "$files" | grep -c . || true)"
+
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    # MUT-SPLICE: scanset-count-identity
     rel="${f#"$root"/}"
+    # THE WORK SIDE. `scanned` is tallied above every `continue` in this body, so
+    # it counts files REACHED — the only quantity a short read moves.
     scanned=$((scanned + 1))
 
     # (3) DRIFT — asked of EVERY scanned file, obliged or not. A stale copy in a
@@ -272,6 +280,32 @@ EOF
   done <<EOF
 $files
 EOF
+
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # The loop above reads `$files` on fd 0 (`done <<EOF`). Any body child that
+  # reads stdin — a future `grep` with no file operand, a `read`, an `ssh`, a
+  # pager — swallows the remaining paths and the loop ENDS EARLY with no error
+  # and no non-zero status. Nothing below could see it: `$scanned`, `$obliged`
+  # and `$fails` are ALL read off the loop, so a run that stopped after file 1
+  # of 40 prints "scanned 1 file(s)" and then GREEN, in the same words as a
+  # complete run — and the DRIFT arm, which is asked of EVERY scanned file, is
+  # exactly the arm a file never reached can never fail.
+  #
+  # The `$scanned` figure is not the guard: it is read off the same short loop,
+  # so it agrees with itself. Only `$enumerated`, read before the loop, can
+  # disagree. No body child reads fd 0 today; the identity is for the one added
+  # next year, which is precisely the child no fd-discipline review can name.
+  # MUT-ANCHOR: scanset-count-identity
+  if [ "$scanned" -ne "$enumerated" ]; then
+    say ""
+    say "RED (broken scan) — reached $scanned of $enumerated file(s) enumerated into the scan set."
+    say "      The scan loop ended before the list did (a loop-body child that reads stdin"
+    say "      consumes the remaining paths silently). A partial scan must never print a"
+    say "      GREEN in the same words as a complete one. This is a fault in THIS script,"
+    say "      not a finding about the tree. Exit 1."
+    return 1
+  fi
+  # MUT-END: scanset-count-identity
 
   say ""
   say "scanned $scanned file(s); $obliged carry a live meter."
