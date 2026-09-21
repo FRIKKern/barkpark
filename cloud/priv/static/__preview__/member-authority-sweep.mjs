@@ -738,7 +738,18 @@ const PIN_MEMBER_SCENARIOS = 15;
 // 138 was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
 // committed corpus grew to 138 scenario(s), pinned at 137") and the actor-set
 // line, which still says 15 — never by adding one.
-const PIN_TOTAL_SCENARIOS = 138;
+// 138 -> 140 (task-5ffdec2b609404bc): `tokens-revoke-confirm` and
+// `cmdk-palette`, the first two scenarios in this corpus to ask for a dialog
+// OTHER than the account modal — the modal seam stopped being shoot.sh's
+// `account-modal*` name convention and became a scenarios.mjs `modal` field.
+// The member slice STAYS at 15 — the case the note above forbids bumping: each
+// is its HOST scenario's fixture deep-copied (`tokens-revoke`, `mixed-fleet`)
+// with ONE field added, and both hosts' actors are OWNERS, so neither can
+// answer role="member" by construction. 140 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 140
+// scenario(s), pinned at 138") and the actor-set line, which still says 15 —
+// never by adding one.
+const PIN_TOTAL_SCENARIOS = 140;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).
