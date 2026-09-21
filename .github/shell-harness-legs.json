@@ -1714,5 +1714,24 @@
         "env": {}
       }
     ]
+    },
+  {
+    "slug": "echo-json-parse",
+    "name": "echo-into-jq corruption + the session-skill recipe guard",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "echo-json-parse-guard.test.sh syntax check",
+        "run": "bash -n scripts/echo-json-parse-guard.test.sh",
+        "env": {}
+      },
+      {
+        "name": "echo vs printf over a frozen captured bp row, per shell (hermetic, no bp, no network)",
+        "run": "bash scripts/echo-json-parse-guard.test.sh",
+        "env": {}
+      }
+    ]
   }
 ]
