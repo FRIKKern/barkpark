@@ -70,8 +70,11 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    never borrow `_build` from another tree. NOT bare `mix test <files>`: mix refuses
    only when EVERY named path is unmatched, so one real path makes a renamed or
    mistyped sibling vanish and the run still prints `N tests, 0 failures` and exits 0
-   (task-1d5bf80f8f4de47a). The strict runner refuses first, exit 2, naming the
-   offending argument, and forwards every argument unchanged otherwise. Go: `go build ./... && go test ./internal/cli/...`.
+   (task-1d5bf80f8f4de47a). The strict runner refuses first, **exit 64**, naming the
+   offending argument, and forwards every argument unchanged otherwise. READ THE
+   CODE, not the output: 64 = REFUSED, nothing ran (fix the argv); 2 = the suite RAN
+   and tests FAILED (fix the code); 0 = green. Before 2026-09-20 a refusal also exited
+   2, so `… || echo REFUSED` called a red suite a refusal (task-620ea822de73bf5e). Go: `go build ./... && go test ./internal/cli/...`.
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).
