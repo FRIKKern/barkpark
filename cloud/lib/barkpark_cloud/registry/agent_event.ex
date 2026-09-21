@@ -42,6 +42,20 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   # permanently, silently false with no warning and no log. A word with a reader
   # is forward-compat; a word with neither reader nor writer is a lie.
   #
+  # cch-w55-bl — THAT "reached today through the user-ack path" SENTENCE WAS
+  # ITSELF UNBACKED UNTIL NOW, and it is the half this row actually found. The
+  # ack function and its route (`POST /v1/onboarding {action:"ack"}`) both
+  # existed, but the console POSTed only `{action:"skip"}`, so no customer could
+  # reach either path: not the producer (none exists) and not the ack (no
+  # control). The console now renders a "Mark as done" button on the pending
+  # step (`runwayStepModel`/`runwayCardHtml` in `priv/static/app.js`,
+  # owner/admin-gated like Dismiss), which is what makes the sentence above
+  # true. Charter D902 rules that ending 1 of the three ships and that NO
+  # producer is built: `content` remains declared-and-consumer-only ON PURPOSE,
+  # and `agent_event_producer_census_test.exs` pins that per-type expectation in
+  # BOTH directions — a `content` producer landing without this decision being
+  # revisited reds, exactly as a `status` producer disappearing does.
+  #
   # `verify` (C8/D53) is the on-demand readiness proof: `BarkparkCloud.Verify`
   # re-runs the golden-path probe suite over HTTPS and appends the full result
   # envelope (payload carries `ok`, `reachable`, `probes`) so "ready" becomes a
@@ -61,7 +75,11 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   # Pinned in BOTH directions by `test/barkpark_cloud/registry/agent_event_test.exs`:
   # every word here must have a producer or a consumer in `cloud/lib`, and every
   # producer's type must be declared here (an undeclared one is rejected by the
-  # `validate_inclusion` below and its row is silently never written).
+  # `validate_inclusion` below and its row is silently never written). That test
+  # is an OR — it cannot tell a producer-backed word from a consumer-only one,
+  # so `content` gaining or losing a writer is invisible to it.
+  # `agent_event_producer_census_test.exs` is the per-type half: it carries the
+  # expected producer-backedness of EVERY word here and reds on either change.
   @types ~w(health status content verify space)
 
   # Append-only stream: stamp inserted_at, never updated_at.
