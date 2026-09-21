@@ -13825,14 +13825,24 @@ async function main() {
         { scen: "timeline-events-only", hash: `#instance/${INST}/timeline` },
         { scen: "instance-behind-member", hash: `#instance/${INST_BEHIND}` },
       ];
-      const MEM_WIDTHS = [1440, 1280, 1024, 900, 768];
+      // 1280 IS DELIBERATELY ABSENT, and it is not an oversight. Driven, it
+      // reads BYTE-IDENTICAL to 1440 in both directions (pre-fix 2L/h78/
+      // dead131 and 7L/h273/dead434; post-fix 1L/h39/dead12 and 1L/h39/
+      // dead48), so it adds no question this axis does not already ask — and
+      // width-drivers.test.mjs's FLICK_VIEWPORTS mutation arm depends on 1280
+      // having exactly ONE driver in this file, so that removing it can
+      // produce the honest negative ("driven by NO other axis"). A second
+      // driver here would silently retire that arm's negative branch to buy a
+      // cell that measures nothing new. Re-derive with
+      // `node --test cloud/priv/static/__preview__/width-drivers.test.mjs`.
+      const MEM_WIDTHS = [1440, 1024, 900, 768];
       // A title is allowed TWO lines; a third is the wrap this leg exists for.
       const TITLE_LINE_CAP = 2;
       // "no dead band taller than one row", and the number is DERIVED FROM
       // THE MEASUREMENT IN BOTH DIRECTIONS rather than chosen a priori. Driven
       // on origin/main bytes the SMALLEST pre-fix band in the row band is
-      // 131px (panel-overview-member / timeline-events-only at 1440 and 1280)
-      // and the largest is 533px; driven on the remedy the LARGEST band left
+      // 131px (panel-overview-member / timeline-events-only at 1440) and the
+      // largest is 533px; driven on the remedy the LARGEST band left
       // is 66px, on `instance-behind-member` at 900 — where the left column is
       // legitimately the taller one because the behind box's `.status-pill`
       // wraps under its own title inside `.detail-title-row`, which is CONTENT
