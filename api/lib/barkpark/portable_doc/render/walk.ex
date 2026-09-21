@@ -464,7 +464,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     # Author alignment is DATA (like `color`): an inline text-align on every surface —
     # the :article allowlist already carries the property.
-    out = if Map.get(n, "align") in ["center", "right"], do: ["text-align:#{Map.get(n, "align")}" | out], else: out
+    out =
+      if Map.get(n, "align") in ["center", "right"],
+        do: ["text-align:#{Map.get(n, "align")}" | out],
+        else: out
 
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
@@ -1209,6 +1212,9 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # text|num|delta|spark. ABSENT ⇒ [] ⇒ table_col_class/3 returns "" for every
     # column, so the emitted bytes are identical to the untyped render.
     cols = Map.get(n, "cols", []) |> List.wrap()
+    # Per-cell alignment and the header column (plan #26) are read once for both row groups.
+    aligns = Map.get(n, "aligns")
+    head_col? = Map.get(n, "headCol") == true
 
     thead =
       if head == [] do
@@ -1220,7 +1226,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
 
-            ~s(<th class="bp-table__th#{table_col_class(cols, index, "bp-table__th")}">#{inner}</th>)
+            ~s(<th class="bp-table__th#{table_col_class(cols, index, "bp-table__th")}"#{table_align_attr(aligns, :head, 0, index)}>#{inner}</th>)
           end)
           |> Enum.join("")
 
@@ -1242,7 +1248,14 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           |> Enum.reject(fn {_cell, index} -> MapSet.member?(covered, {r, index}) end)
           |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-            ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}"#{table_span_attrs(spans, r, index)}>#{inner}</td>)
+            attrs = table_span_attrs(spans, r, index) <> table_align_attr(aligns, :rows, r, index)
+
+            # The header column (plan #26): the first body cell is a row header.
+            if head_col? and index == 0 do
+              ~s(<th scope="row" class="bp-table__th bp-table__th--col#{table_col_class(cols, index, "bp-table__th")}"#{attrs}>#{inner}</th>)
+            else
+              ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}"#{attrs}>#{inner}</td>)
+            end
           end)
           |> Enum.join("")
 
@@ -1251,7 +1264,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<table role="presentation" class="bp-table">) <>
-      table_colgroup(Map.get(n, "widths"), max(length(head), body |> List.first() |> List.wrap() |> length())) <>
+      table_colgroup(
+        Map.get(n, "widths"),
+        max(length(head), body |> List.first() |> List.wrap() |> length())
+      ) <>
       thead <> "<tbody>#{tbody}</tbody></table>"
   end
 
@@ -1318,6 +1334,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # the Go renderer applies through lipgloss's StyleFunc. spark gets its own
   # modifier so the inline SVG can be sized by the stylesheet. Alignment is the
   # ONLY thing num changes: a num cell's body is the legacy text body.
+  # ` style="text-align:right"` on an aligned cell (plan #26); the vocabulary is closed
+  # (compose.ex table_cell_align/1), escaped all the same.
+  defp table_align_attr(%{} = aligns, area, r, c) do
+    list =
+      if area == :head,
+        do: Map.get(aligns, "head", []),
+        else: Enum.at(Map.get(aligns, "rows", []), r, [])
+
+    case Enum.at(List.wrap(list), c) do
+      a when a in ["center", "right"] -> ~s( style="#{escape_attr("text-align:" <> a)}")
+      _ -> ""
+    end
+  end
+
+  defp table_align_attr(_aligns, _area, _r, _c), do: ""
+
   # The body positions a span covers without being its origin.
   defp table_covered(spans) do
     Enum.reduce(spans, MapSet.new(), fn s, acc ->
@@ -1344,7 +1376,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         cs = Map.get(s, "colspan", 1)
         rs = Map.get(s, "rowspan", 1)
 
-        (if is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
           if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
     end
   end

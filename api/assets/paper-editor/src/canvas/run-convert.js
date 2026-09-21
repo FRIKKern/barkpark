@@ -2171,10 +2171,14 @@ function cellToInline(cell) {
 
 // One cell block → a bpTableHeaderCell|bpTableCell node. Omit the `content` key when
 // the inline array is empty (empty-body fidelity, callout precedent).
-function cellToNode(nodeName, cell, colspan = 1, rowspan = 1) {
+function cellAlign(cell) {
+  const a = cell && typeof cell === "object" && !Array.isArray(cell) ? cell.align : null;
+  return a === "center" || a === "right" ? a : null;
+}
+function cellToNode(nodeName, cell, colspan = 1, rowspan = 1, head = false) {
   const node = {
     type: nodeName,
-    attrs: { bpTableCellSource: { cell: deepClone(cell) }, colspan: colspan > 1 ? colspan : 1, rowspan: rowspan > 1 ? rowspan : 1 },
+    attrs: { bpTableCellSource: { cell: deepClone(cell) }, colspan: colspan > 1 ? colspan : 1, rowspan: rowspan > 1 ? rowspan : 1, align: cellAlign(cell), head: !!head },
   };
   const inline = inlineArrayToTiptap(cellToInline(cell));
   if (inline.length) node.content = inline;
@@ -2193,12 +2197,16 @@ function tableBlockToNode(block, bpId, bpType) {
   // Merged cells (plan #24): `spans` on the block; covered positions hold placeholders and get no
   // node, the origin carries colspan / rowspan (table-grid.js).
   const grid = { head: Array.isArray(headSrc) && headSrc.length ? headSrc : null, rows: rowsSrc, spans: Array.isArray(block && block.spans) ? block.spans : [] };
-  const mkRow = (nodeName, cells) => {
-    const cellNodes = cells.map((vc) => cellToNode(nodeName, vc.cell, vc.colspan, vc.rowspan));
+  const headCol = !!(block && block.headCol === true);
+  const coveredFirst = new Set();
+  for (const sp of grid.spans) if (sp && sp.col === 0) for (let r = sp.row + 1; r < sp.row + (sp.rowspan || 1); r++) coveredFirst.add(r);
+  const mkRow = (nodeName, cells, bodyIndex) => {
+    const cellNodes = cells.map((vc, i) => cellToNode(nodeName, vc.cell, vc.colspan, vc.rowspan, headCol && bodyIndex != null && i === 0 && !coveredFirst.has(bodyIndex)));
     if (!cellNodes.length) cellNodes.push({ type: nodeName });
     return { type: "bpTableRow", content: cellNodes };
   };
-  for (const vrow of gridToVisible(grid)) content.push(mkRow(vrow.header ? "bpTableHeaderCell" : "bpTableCell", vrow.cells));
+  let bodyIndex = 0;
+  for (const vrow of gridToVisible(grid)) content.push(mkRow(vrow.header ? "bpTableHeaderCell" : "bpTableCell", vrow.cells, vrow.header ? null : bodyIndex++));
 
   if (!content.length) {
     content.push({ type: "bpTableRow", content: [{ type: "bpTableCell" }] });
@@ -2216,6 +2224,7 @@ function tableBlockToNode(block, bpId, bpType) {
       bpType: bpType || "table",
       bpTableSource: { block: deepClone(block) },
       colWidths,
+      headCol,
     },
     content,
   };
@@ -2265,6 +2274,9 @@ function cellNodeMatchesSource(cell, source) {
 // Once edited, retain a supported content-map's opaque sibling metadata and replace
 // only its content. Other edited carriers become the canonical inline-array shape.
 function cellNodeToSource(cell) {
+  return withCellAlign(cellNodeToSourcePlain(cell), cell);
+}
+function cellNodeToSourcePlain(cell) {
   const source = sourceCellFromNode(cell);
   const inline = cellNodeInline(cell);
   if (source !== undefined && cellNodeMatchesSource(cell, source)) {
@@ -2277,6 +2289,27 @@ function cellNodeToSource(cell) {
     return next;
   }
   return inline;
+}
+// Per-cell alignment (plan #26) on the way back: "center" | "right" make the stored cell a
+// content-map `{ content, align }` (other map keys kept); left drops `align`, and a map left with
+// nothing but `content` becomes the plain inline array again.
+function withCellAlign(stored, cell) {
+  const align = cell?.attrs?.align === "center" || cell?.attrs?.align === "right" ? cell.attrs.align : null;
+  // Unchanged alignment must preserve the source carrier and unknown metadata.
+  if (align === cellAlign(sourceCellFromNode(cell))) return stored;
+  const isMap = stored && typeof stored === "object" && !Array.isArray(stored);
+  if (align) {
+    if (isMap) return { ...stored, content: Array.isArray(stored.content) ? stored.content : cellToInline(stored), align };
+    return { content: cellToInline(stored), align };
+  }
+  if (isMap && Object.hasOwn(stored, "align")) {
+    const next = { ...stored };
+    delete next.align;
+    const keys = Object.keys(next);
+    if (keys.length === 1 && keys[0] === "content") return next.content;
+    return next;
+  }
+  return stored;
 }
 
 // tableNodeToBlock(node, id) → { id, type:"table", rows:[…], head?:[…] }. Walk the row
@@ -2304,6 +2337,8 @@ function tableNodeToBlock(node, id) {
   block.rows = rows;
   if (grid.spans.length) block.spans = grid.spans;
   else delete block.spans;
+  if (node?.attrs?.headCol) block.headCol = true;
+  else if (block.headCol === true) block.headCol = false;
   // Column widths back onto `cols` (kept beside the reader's column types); a column list with
   // nothing left in it is dropped.
   const widths = Array.isArray(node?.attrs?.colWidths) ? node.attrs.colWidths : null;
@@ -2352,6 +2387,10 @@ function tableNodeToPatch(node, prevBlock) {
     (Array.isArray(node?.attrs?.bpTableSource?.block?.cols) && node.attrs.bpTableSource.block.cols.length > 0);
   if (Array.isArray(block.cols) && block.cols.length) patch.cols = block.cols;
   else if (hadCols) patch.cols = [];
+  // The header column rides as a boolean; false is sent only when the table had one.
+  const hadHeadCol = prevBlock?.headCol === true || node?.attrs?.bpTableSource?.block?.headCol === true;
+  if (block.headCol === true) patch.headCol = true;
+  else if (hadHeadCol) patch.headCol = false;
   return patch;
 }
 
@@ -2364,7 +2403,7 @@ function tableNodeChanged(prevNode, nextNode) {
 
 function stableTableKey(node) {
   const b = tableNodeToBlock(node, null);
-  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows, spans: b.spans || null, cols: b.cols || null });
+  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows, spans: b.spans || null, cols: b.cols || null, headCol: b.headCol === true });
 }
 
 // ── eyebrow / byline / ingress / pullquote ⇄ canvas role prose node ──────────

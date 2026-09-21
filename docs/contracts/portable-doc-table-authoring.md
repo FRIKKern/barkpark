@@ -61,6 +61,15 @@ offers a grip on every column's right edge; a drag sets that one column's width 
 lands as one `patch-block` carrying `cols` (`cols: []` when the last entry goes).
 BPML spells the column list as `<col type="num" width="220"/>` lines ahead of the rows.
 
+## Row headers and cell alignment
+
+`headCol: true` renders the first body column as `<th scope="row">`, including
+spanning origins. Toggle off patches `headCol: false`. Cell maps carry
+`{content, align: "center" | "right"}`; left removes alignment, preserving other
+metadata. Article and canvas use the same cell style. BPML carries `headcol` on
+`<table>` and `align` on `<th>`/`<td>`; email keeps the plain grid. Studio's
+per-block editor refuses these attributes. Untouched source remains exact.
+
 ## Verification
 
 Server: `api/lib/barkpark/portable_doc/table_editing.ex` and its matching test.

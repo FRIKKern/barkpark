@@ -659,8 +659,10 @@ const TABLE_MARKS = new Set([
 
 function tableCellAttrsPlain(attrs) {
   if (attrs == null) return true;
-  if (!tableAttrsHaveOnly(attrs, ["bpTableCellSource", "colspan", "rowspan"])) return false;
+  if (!tableAttrsHaveOnly(attrs, ["bpTableCellSource", "colspan", "rowspan", "align", "head"])) return false;
   if (attrs.bpTableCellSource != null) return false;
+  // A per-cell alignment or a row-header cell (plan #26) is canvas-only here: fail closed.
+  if (attrs.align != null || attrs.head === true) return false;
   return (attrs.colspan == null || attrs.colspan === 1) && (attrs.rowspan == null || attrs.rowspan === 1);
 }
 
@@ -772,7 +774,8 @@ function tableCellRows(editorJSON, projection) {
   const nodes = editorJSON?.content;
   if (!source.editable || !Array.isArray(nodes) || nodes.length !== 1 ||
       nodes[0]?.type !== "bpTable" || nodes[0]?.attrs?.bpId !== projection.id ||
-      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource", "colWidths"]) ||
+      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource", "colWidths", "headCol"]) ||
+      nodes[0]?.attrs?.headCol === true ||
       nodes[0]?.attrs?.bpTableSource != null ||
       // Column widths (plan #25) are a canvas attribute; the per-block Studio editor edits plain
       // grids, so a table carrying one fails closed here (read-only) and no widths reads as plain.

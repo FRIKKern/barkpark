@@ -97,6 +97,13 @@ function tableAttributes() {
       keepOnSplit: false,
       parseHTML: () => null,
     },
+    // Header column (plan #26): the first cell of every body row is a row header (<th scope="row">).
+    // Stored on the block as `headCol: true`; the cells' `head` attr is derived from it on build.
+    headCol: {
+      default: false,
+      parseHTML: (el) => el.getAttribute("data-head-col") === "true",
+      renderHTML: (attrs) => (attrs.headCol ? { "data-head-col": "true" } : {}),
+    },
   };
 }
 
@@ -123,6 +130,19 @@ function tableCellAttributes() {
       parseHTML: (el) => Math.max(1, parseInt(el.getAttribute("rowspan") || "1", 10) || 1),
       renderHTML: (attrs) => (attrs.rowspan > 1 ? { rowspan: attrs.rowspan } : {}),
     },
+    // Per-cell alignment (plan #26): "center" | "right" (left is the absence). Stored on the cell as
+    // a content-map `{ content, align }`; painted as an inline text-align like the reader does.
+    align: {
+      default: null,
+      parseHTML: (el) => { const a = el.getAttribute("data-align"); return a === "center" || a === "right" ? a : null; },
+      renderHTML: (attrs) => (attrs.align === "center" || attrs.align === "right" ? { "data-align": attrs.align, style: `text-align:${attrs.align}` } : {}),
+    },
+    // A body cell that is a ROW HEADER (the table's headCol): rendered as <th scope="row">.
+    head: {
+      default: false,
+      rendered: false,
+      parseHTML: (el) => el.getAttribute("scope") === "row",
+    },
   };
 }
 
@@ -148,6 +168,7 @@ function extractRows(tableNode) {
         source: cellNode.attrs?.bpTableCellSource || null,
         colspan: Math.max(1, cellNode.attrs?.colspan || 1),
         rowspan: Math.max(1, cellNode.attrs?.rowspan || 1),
+        align: cellNode.attrs?.align || null,
       });
       if (cellNode.type.name !== "bpTableHeaderCell") header = false;
     });
@@ -159,19 +180,28 @@ function extractRows(tableNode) {
 function buildCell(schema, header, cell) {
   const type = schema.nodes[header ? "bpTableHeaderCell" : "bpTableCell"];
   // A merged origin carries its colspan / rowspan (never on a header cell: a head does not span).
-  const attrs = { bpTableCellSource: cell.source || null, colspan: header ? 1 : Math.max(1, cell.colspan || 1), rowspan: header ? 1 : Math.max(1, cell.rowspan || 1) };
+  const attrs = { bpTableCellSource: cell.source || null, colspan: header ? 1 : Math.max(1, cell.colspan || 1), rowspan: header ? 1 : Math.max(1, cell.rowspan || 1), align: cell.align || null, head: !!cell.head };
   // Omit content for an empty cell (a contentless inline* cell, rendering an empty
   // <td>/<th> exactly like an empty callout body).
   return cell.content ? type.create(attrs, cell.content) : type.create(attrs);
 }
 
-function buildRowNodes(schema, rows) {
+// `headCol` marks the first visible cell of each body row as a row header (a covered first column
+// has no cell to mark; the spanning origin above it is the header).
+function buildRowNodes(schema, rows, headCol = false) {
   return rows.map((r) =>
     schema.nodes.bpTableRow.create(
       null,
-      r.cells.map((c) => buildCell(schema, r.header, c))
+      r.cells.map((c, i) => buildCell(schema, r.header, headCol && !r.header && i === 0 && firstColumnVisible(rows, r) ? { ...c, head: true } : { ...c, head: false }))
     )
   );
+}
+function firstColumnVisible(rows, row) {
+  const g = toGrid(rows);
+  const bodyIndex = rows.filter((x) => !x.header).indexOf(row);
+  if (bodyIndex < 0) return false;
+  const covered = coverMap(normalizeSpans(g.spans, g.rows.length, gridWidth(g)));
+  return !covered.has(bodyIndex + ",0");
 }
 
 function colCount(rows) {
@@ -190,12 +220,12 @@ function bodyRowCount(rows) {
 // the canvas descriptor { content, source }; a covered position holds an empty one.
 const emptyCell = () => ({ content: null, source: null });
 function toGrid(rows) {
-  return visibleToGrid(rows.map((r) => ({ header: r.header, cells: r.cells.map((c) => ({ cell: { content: c.content, source: c.source }, colspan: c.colspan || 1, rowspan: c.rowspan || 1 })) })), emptyCell);
+  return visibleToGrid(rows.map((r) => ({ header: r.header, cells: r.cells.map((c) => ({ cell: { content: c.content, source: c.source, align: c.align || null }, colspan: c.colspan || 1, rowspan: c.rowspan || 1 })) })), emptyCell);
 }
 function fromGrid(rows, grid) {
   const visible = gridToVisible(grid);
   rows.length = 0;
-  for (const r of visible) rows.push({ header: r.header, cells: r.cells.map((vc) => ({ content: vc.cell?.content || null, source: vc.cell?.source || null, colspan: vc.colspan, rowspan: vc.rowspan })) });
+  for (const r of visible) rows.push({ header: r.header, cells: r.cells.map((vc) => ({ content: vc.cell?.content || null, source: vc.cell?.source || null, align: vc.cell?.align || null, colspan: vc.colspan, rowspan: vc.rowspan })) });
 }
 // Body-grid coordinates of the k-th visible cell of visible row `rowIndex` (rows include the head).
 function gridCoords(grid, rowIndex, cellIndex) {
@@ -230,6 +260,7 @@ const TRANSFORMS = {
   addCol(rows) { const g = toGrid(rows); gridTransforms.addCol(g, emptyCell); fromGrid(rows, g); },
   removeCol(rows) { const g = toGrid(rows); if (gridWidth(g) <= 1) return; gridTransforms.removeCol(g); fromGrid(rows, g); },
   toggleHeader(rows) { const g = toGrid(rows); gridTransforms.toggleHeader(g, emptyCell); fromGrid(rows, g); },
+  toggleHeadCol() { return { headCol: "toggle" }; },
   // Merge: the rectangle between the selection's anchor and head cells; with the caret in one cell,
   // the cell to the right (mergeRight) or below (mergeDown). Swallowed cells' text joins the origin.
   merge(rows, ctx, dir) {
@@ -348,7 +379,7 @@ function moveCell(editor, dir) {
         TRANSFORMS.addRow(rows);
         const newTable = editor.schema.nodes.bpTable.create(
           tableNode.attrs,
-          buildRowNodes(editor.schema, rows)
+          buildRowNodes(editor.schema, rows, !!tableNode.attrs.headCol)
         );
         if (dispatch) {
           tr.replaceWith(tablePos, tablePos + tableNode.nodeSize, newTable);
@@ -565,9 +596,10 @@ export const BpTable = Node.create({
             const outcome = TRANSFORMS[name](rows, ctx, dir);
             if (!rows.length) return false;
             if ((name === "merge" || name === "split") && !outcome) return false;
+            const headCol = name === "toggleHeadCol" ? !cur.attrs.headCol : !!cur.attrs.headCol;
             const newTable = editor.schema.nodes.bpTable.create(
-              cur.attrs,
-              buildRowNodes(editor.schema, rows)
+              { ...cur.attrs, headCol },
+              buildRowNodes(editor.schema, rows, headCol)
             );
             if (dispatch) {
               tr.replaceWith(pos, pos + cur.nodeSize, newTable);
@@ -625,6 +657,7 @@ export const BpTable = Node.create({
             delRowBtn = mkBtn("− row", "Remove row", "removeRow");
             rowRail.appendChild(delRowBtn);
             rowRail.appendChild(mkBtn("header", "Toggle header row", "toggleHeader"));
+            colRail.appendChild(mkBtn("header col", "Toggle header column", "toggleHeadCol"));
             // Merged cells (plan #24): merge the selected cells (or the cell to the right / below
             // of the caret) and split a merged cell back into its grid positions.
             const mergeRow = document.createElement("div");
@@ -740,10 +773,14 @@ export const BpTableCell = Node.create({
     return tableCellAttributes();
   },
   parseHTML() {
-    return [{ tag: "td" }];
+    return [{ tag: "td" }, { tag: "th[scope='row']" }];
   },
-  renderHTML() {
-    return ["td", { class: "bp-table__td" }, 0];
+  renderHTML({ node, HTMLAttributes }) {
+    // A row header (the table's header column, plan #26) is a <th scope="row"> with the reader's
+    // th class; every other body cell stays a <td>. Span and align attributes ride either way.
+    const attrs = { ...HTMLAttributes };
+    if (node.attrs.head) return ["th", mergeAttributes(attrs, { scope: "row", class: "bp-table__th bp-table__th--col" }), 0];
+    return ["td", mergeAttributes(attrs, { class: "bp-table__td" }), 0];
   },
 });
 
@@ -755,9 +792,9 @@ export const BpTableHeaderCell = Node.create({
     return tableCellAttributes();
   },
   parseHTML() {
-    return [{ tag: "th" }];
+    return [{ tag: "th:not([scope='row'])" }];
   },
-  renderHTML() {
-    return ["th", { class: "bp-table__th" }, 0];
+  renderHTML({ HTMLAttributes }) {
+    return ["th", mergeAttributes(HTMLAttributes, { class: "bp-table__th" }), 0];
   },
 });

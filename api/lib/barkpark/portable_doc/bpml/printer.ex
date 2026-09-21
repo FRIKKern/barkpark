@@ -204,7 +204,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           []
 
         cells ->
-          ths = Enum.map_join(cells, "", &"<th>#{head_cell(&1)}</th>")
+          ths = Enum.map_join(cells, "", &"<th#{cell_align_attr(&1)}>#{head_cell(&1)}</th>")
           ["#{pad(d + 1)}<tr>#{ths}</tr>"]
       end
 
@@ -220,7 +220,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
         tds =
           cells
           |> Enum.with_index()
-          |> Enum.map_join("", fn {cell, c} -> "<td#{td_span_attrs(spans, r, c)}>#{inline(cell)}</td>" end)
+          |> Enum.map_join("", fn {cell, c} ->
+            "<td#{td_span_attrs(spans, r, c)}#{cell_align_attr(cell)}>#{cell_inline(cell)}</td>"
+          end)
 
         "#{pad(d + 1)}<tr>#{tds}</tr>"
       end)
@@ -239,11 +241,23 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           []
       end
 
-    wrap("table", attr_str(b, ["id"]), cols ++ head ++ rows, d)
+    table_attrs =
+      attr_str(b, ["id"]) <> if(Map.get(b, "headCol") == true, do: ~s( headcol="true"), else: "")
+
+    wrap("table", table_attrs, cols ++ head ++ rows, d)
   end
 
+  # A body cell is an inline list or a content-map (plan #26 alignment rides the map).
+  defp cell_inline(%{"content" => content}) when is_list(content), do: inline(content)
+  defp cell_inline(cell), do: inline(cell)
+
+  defp cell_align_attr(%{"align" => a}) when a in ["center", "right"], do: ~s( align="#{a}")
+  defp cell_align_attr(_cell), do: ""
+
   defp td_span_attrs(spans, r, c) do
-    case Enum.find(spans, fn s -> is_map(s) and Map.get(s, "row") == r and Map.get(s, "col") == c end) do
+    case Enum.find(spans, fn s ->
+           is_map(s) and Map.get(s, "row") == r and Map.get(s, "col") == c
+         end) do
       nil ->
         ""
 
@@ -251,7 +265,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
         cs = Map.get(s, "colspan", 1)
         rs = Map.get(s, "rowspan", 1)
 
-        (if is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
           if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
     end
   end

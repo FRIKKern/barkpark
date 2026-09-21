@@ -29,7 +29,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "ul" => ~w(id ordered),
     "stats" => ~w(id),
     "steps" => ~w(id),
-    "table" => ~w(id),
+    "table" => ~w(id headcol),
     "h1" => ~w(id align),
     "h2" => ~w(id align),
     "h3" => ~w(id align),
@@ -69,8 +69,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "item" => [],
     "li" => ~w(checked),
     "tr" => [],
-    "th" => [],
-    "td" => ~w(colspan rowspan),
+    "th" => ~w(align),
+    "td" => ~w(colspan rowspan align),
     "col" => ~w(type width),
     "meta" => [],
     "description" => [],
@@ -815,6 +815,11 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> Map.put("rows", rows)
         |> then(&if spans == [], do: &1, else: Map.put(&1, "spans", spans))
         |> then(&if cols == [], do: &1, else: Map.put(&1, "cols", cols))
+        |> then(
+          &if List.keyfind(attrs, "headcol", 0) == {"headcol", "true"},
+            do: Map.put(&1, "headCol", true),
+            else: &1
+        )
 
       {:ok, block, cur}
     end
@@ -1280,14 +1285,20 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       # printer-input shape only).
       {"th", k} when k in [nil, :head] ->
         case tag_inline("th", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :head, [nodes | cells])
-          {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
+          {:ok, nodes, cur3} ->
+            row_cells_loop(cur3, at, :head, [aligned_cell(nodes, attrs) | cells])
+
+          {:skip, es, cur3} ->
+            {:skip, es, consume_until_close("tr", cur3)}
         end
 
       {"td", k} when k in [nil, :body] ->
         case tag_inline("td", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :body, [td_cell(nodes, attrs) | cells])
-          {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
+          {:ok, nodes, cur3} ->
+            row_cells_loop(cur3, at, :body, [td_cell(aligned_cell(nodes, attrs), attrs) | cells])
+
+          {:skip, es, cur3} ->
+            {:skip, es, consume_until_close("tr", cur3)}
         end
 
       {t, _} when t in ["th", "td"] ->
@@ -1425,6 +1436,14 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     cs = td_span_attr(attrs, "colspan")
     rs = td_span_attr(attrs, "rowspan")
     if cs > 1 or rs > 1, do: {:span, nodes, cs, rs}, else: nodes
+  end
+
+  # `align="center|right"` makes the cell a content-map (plan #26); anything else leaves the list.
+  defp aligned_cell(nodes, attrs) do
+    case List.keyfind(attrs, "align", 0) do
+      {"align", a} when a in ["center", "right"] -> %{"content" => nodes, "align" => a}
+      _ -> nodes
+    end
   end
 
   defp td_span_attr(attrs, key) do
