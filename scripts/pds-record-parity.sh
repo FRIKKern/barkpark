@@ -1570,8 +1570,17 @@ axis_b() {
     printf '%s\t%s\t%s\n' "$id" "$num" "$merged" >> "$ids"
   done < <(jq -r '.[] | [(.number|tostring), .mergedAt, (.body // "" | @base64)] | @tsv' "$prs")
 
-  local n_ids
-  n_ids="$(cut -f1 "$ids" | sort -u | wc -l | tr -d ' ')"
+  # MATERIALISED, NOT PIPED, AND FOR ONE REASON: the count printed here is the
+  # SAME list the sweep below reads on fd 0. A `cut | sort -u` in the header and
+  # a second one in the loop's redirect are two enumerations that a reader is
+  # invited to assume are one; writing it once makes `n_ids` the denominator of
+  # the count identity after the loop instead of a coincidentally equal number.
+  # `awk 'NF'`, not `wc -l`: it counts NON-BLANK lines, which is exactly what the
+  # loop counts (its first statement skips a blank id), so the two sides of the
+  # identity are the same population by construction.
+  local n_ids uids="$WORKDIR/axis-b-uids"
+  cut -f1 "$ids" | sort -u > "$uids"
+  n_ids="$(awk 'NF { n++ } END { print n+0 }' "$uids")"
   echo "  extractor:  ${EXTRACTOR} --extract-task-id  (absence = EMPTY STDOUT, never \$?)"
   echo "  task ids:   ${n_ids} distinct across ${i} PRs"
   echo "  no trailer: ${no_trailer} PRs carry no Task: trailer (advisory — predates the gate)"
@@ -1592,8 +1601,23 @@ axis_b() {
   local n_terminal=0 n_open=0 n_notfound=0 n_unchecked=0 n_grace=0 n_root=0
   local n_leaf_open=0 n_leaf_ghost=0
   local tid latest prlist lifecycle parent has_result age
-  while read -r tid; do
+  # `n_swept` COUNTS ITERATIONS. It is not a tally of any disposition — every
+  # `continue` arm below has already been counted by the time it fires, because
+  # an id that was HANDED to the loop was swept whichever branch disposed of it.
+  # The identity after the loop is therefore exactly "iterations == lines handed".
+  local n_swept=0
+  # `|| [ -n "$tid" ]` — `sort -u` always terminates its last line, so this can
+  # not fire today; it is here so the identity below can never refuse a COMPLETE
+  # list as short if this redirect is ever pointed at a file that lacks one.
+  while read -r tid || [ -n "$tid" ]; do
     [ -n "$tid" ] || continue
+    n_swept=$((n_swept + 1))
+    # The marker below is a NO-OP on every real run. It exists so the control
+    # arm in scripts/pds-record-parity.test.sh can splice a stdin-draining child
+    # into this loop body at a unique, greppable point and prove the identity
+    # above actually fires — a guard nothing has ever been seen to trip is a
+    # guard nobody can tell from a comment.
+    : # MUT-BODY: axis-b-loop-body
     # The row's own recency is the MAX mergedAt across every PR naming it —
     # a task whose latest PR merged an hour ago is inside grace even if its
     # first one merged days back.
@@ -1676,7 +1700,32 @@ axis_b() {
     echo "    DIVERGENT  ${tid}  lifecycle=${lifecycle}  parent=${parent}  merged over an OPEN row  ${prlist}"
     printf '%s\t%s\t%s\n' "$parent" "$tid" "$prlist" >> "$leaves"
     n_leaf_open=$((n_leaf_open + 1)); raise 1
-  done < <(cut -f1 "$ids" | sort -u)
+  done < "$uids"
+
+  # ── THE COUNT IDENTITY ─────────────────────────────────────────────────────
+  # WHY IT EXISTS (task-d5485c04e0e63488). The sweep above reads the unique task
+  # id list on fd 0 and runs children in its body. Any body child that reads
+  # stdin — a future `gh` without `</dev/null`, a `psql`, an `ssh` into the box —
+  # swallows the remaining ids and the loop ENDS EARLY with no error and no
+  # non-zero status. Every tally below is then SMALLER and the divergent set is
+  # EMPTY, so a sweep of 1 id in 200 prints a GREEN AXIS B in the same words as a
+  # real one. The failure direction is silence, which is the direction a parity
+  # check cannot afford: the rows that would have redded it were never fetched.
+  #
+  # No `-eq 0` floor can see that — zero separates "nothing" from "something",
+  # never "some" from "all". Only the identity can, and it names BOTH numbers so
+  # a reader can see how much of the window was actually examined.
+  # MUT-ANCHOR: axis-b-count-identity
+  if [ "$n_swept" -ne "$n_ids" ]; then
+    echo "  UNCHECKED: axis B swept ${n_swept} of ${n_ids} task id(s) the enumeration handed it." >&2
+    echo "             The sweep loop ended before its id list did (a loop-body child that reads" >&2
+    echo "             stdin consumes the remaining ids silently). A partial sweep must never" >&2
+    echo "             print this axis's tally in the same words as a complete one, so the tally" >&2
+    echo "             is WITHHELD: the numbers it would print are true of a corpus nobody chose." >&2
+    raise 2
+    return 0
+  fi
+  # MUT-END: axis-b-count-identity
 
   local n_divergent=$(( n_open + n_notfound ))
   local n_leaf=$(( n_leaf_open + n_leaf_ghost ))
@@ -1718,14 +1767,36 @@ axis_b() {
     echo "  PER-OWNER REPORT — ${n_leaf} leaf red(s), grouped by the rows' own parent_id"
     echo "    (a REPORT, never a gate: most of these belong to epics that never"
     echo "     consented to this instrument. Hand each owner their own block.)"
+    # THE SAME FD-0 EXPOSURE, ONE LOOP LATER. The reconciliation below compares
+    # `wc -l "$leaves"` to the tally — two numbers computed OUTSIDE this loop, so
+    # neither moves when the loop itself ends early. A body child that drained fd 0
+    # would print one OWNER block, report `owners: 1`, and still pass the coverage
+    # check word for word. So this loop gets its own identity against its own
+    # materialised list.
+    local owners_list="$WORKDIR/axis-b-owners"
+    cut -f1 "$leaves" | sort | uniq -c | sort -rn | awk '{ $1=""; sub(/^ /,""); print }' > "$owners_list"
+    local n_owners_enum
+    n_owners_enum="$(awk 'NF { n++ } END { print n+0 }' "$owners_list")"
     local owner n_owners=0 owner_rows
-    while read -r owner; do
+    while read -r owner || [ -n "$owner" ]; do
       [ -n "$owner" ] || continue
       n_owners=$((n_owners + 1))
+      # A NO-OP on every real run; the control arm splices a stdin-draining
+      # child here. See the note on the sweep loop's marker above.
+      : # MUT-BODY: axis-b-owner-body
       owner_rows="$(awk -F'\t' -v o="$owner" '$1==o' "$leaves" | wc -l | tr -d ' ')"
       echo "    OWNER ${owner}  —  ${owner_rows} leaf red(s)"
       awk -F'\t' -v o="$owner" '$1==o { printf "      %s  %s\n", $2, $3 }' "$leaves"
-    done < <(cut -f1 "$leaves" | sort | uniq -c | sort -rn | awk '{ $1=""; sub(/^ /,""); print }')
+    done < "$owners_list"
+    # MUT-ANCHOR: axis-b-owner-identity
+    if [ "$n_owners" -ne "$n_owners_enum" ]; then
+      echo "  UNCHECKED: the per-owner report printed ${n_owners} of ${n_owners_enum} owner block(s)." >&2
+      echo "             The grouping loop ended before its owner list did; the blocks above are a" >&2
+      echo "             PREFIX of the report, not the report." >&2
+      raise 2
+      return 0
+    fi
+    # MUT-END: axis-b-owner-identity
     # THE HEADLINE MUST EQUAL WHAT IS UNDER IT. A per-owner block that prints
     # fewer rows than the tally counted is the shape where a reader trusts a
     # number nothing under it descends from, so the two are reconciled out loud

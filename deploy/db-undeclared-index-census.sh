@@ -37,6 +37,10 @@
 #     derive — they are counted on the BLIND SPOT line, never silently dropped;
 #   * `%_pkey` is treated as implicitly declared (Postgres mints it from the
 #     table's primary key, no migration names it).
+#   NOT a blind spot, because it is now a REFUSAL: a derive loop that reads
+#   FEWER migration files than the enumeration handed it exits 2 SHORT DERIVE
+#   naming both numbers, rather than emitting a short manifest whose every
+#   missing name becomes a FALSE UNDECLARED.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -71,8 +75,21 @@ derive_manifest() {
   #     UNDECLARED on production (arm k);
   #   * it keeps unparseable declarations on a BLIND SPOT tally instead of
   #     dropping them silently.
-  while IFS= read -r f; do
+  # COUNT THE LIST BEFORE READING IT. `iterated` below counts ITERATIONS of the
+  # derive loop; this counts the PATHS `find` actually put on the list. The two
+  # must be equal, and the identity after the loop is the only thing that can
+  # tell "derived from 40 of 40 migrations" from "derived from 1 of 40". `awk`,
+  # not `wc -l`, so a final line with no trailing newline still counts.
+  local enumerated; enumerated="$(awk 'NF { n++ } END { print n+0 }' "$files")"
+  local iterated=0
+
+  # `|| [ -n "$f" ]` is not decoration: a plain `while read` DROPS a final line
+  # with no trailing newline, and the identity below would then refuse a
+  # complete derive as "N-1 of N".
+  while IFS= read -r f || [ -n "$f" ]; do
     [ -n "$f" ] || continue
+    iterated=$((iterated + 1))
+    # MUT-ANCHOR: derive-loop-body-head
     awk -v blind="$blind_file" '
       function emit(line,   nm, tbl, cols, n, parts, i, c, out) {
         if (match(line, /name:[[:space:]]*:[A-Za-z0-9_]+/)) {
@@ -141,6 +158,31 @@ derive_manifest() {
     ' "$f"
   done < "$files"
   rm -f "$files"
+
+  # ── THE COUNT IDENTITY ─────────────────────────────────────────────
+  # WHY IT EXISTS (task-3853d5a64604d7af). The loop above reads `$files` on
+  # fd 0. Any body child that reads stdin — a future `psql`, an `ssh`, a bare
+  # `read`, an awk invoked with no file operand — swallows the remaining paths
+  # and the loop ENDS EARLY with no error and no non-zero status. Today's body
+  # child is `awk PROGRAM "$f"`, a file operand, so it leaves fd 0 alone: this
+  # is LATENT, not live. The exposure is that nothing would notice if that
+  # stopped being true.
+  #
+  # THE FAILURE DIRECTION IS WHAT MAKES IT WORSE HERE THAN ELSEWHERE. This loop
+  # builds the ALLOW side of the comparison. Unread migrations SHRINK the
+  # declared set, so every live index those files declared reads UNDECLARED and
+  # `--check` reds a merge over production schema that is entirely correct.
+  #
+  # AND THE BLIND SPOT TALLY CANNOT SEE IT. That tally counts declarations this
+  # parser opened and could not NAME; a file it never OPENED contributes to
+  # neither tally, so a short derive leaves the BLIND SPOT number UNCHANGED
+  # while the manifest quietly shrinks. Different quantity, different arm.
+  # MUT-ANCHOR: derive-count-identity
+  if [ "$iterated" -ne "$enumerated" ]; then
+    echo "SHORT DERIVE: the derive loop read ${iterated} of ${enumerated} migration file(s) the enumeration handed it. It ended before its file list did (a loop-body child that reads stdin consumes the remaining paths silently). Refusing to emit the declared-index manifest, and therefore any UNDECLARED verdict: a short declared set turns every index the unread migrations declare into a FALSE UNDECLARED, and the BLIND SPOT tally counts declarations it could not PARSE, never files it never READ." >&2
+    return 8
+  fi
+  # MUT-END: derive-count-identity
   return 0
 }
 
@@ -148,7 +190,16 @@ print_manifest() {
   local roots=("$@")
   local blind; blind="$(mktemp)"
   local out; out="$(mktemp)"
-  if ! ( cd "$REPO_ROOT" && derive_manifest "$blind" "${roots[@]}" ) > "$out"; then
+  local drc=0
+  ( cd "$REPO_ROOT" && derive_manifest "$blind" "${roots[@]}" ) > "$out" || drc=$?
+  if [ "$drc" = 8 ]; then
+    # derive_manifest already named BOTH numbers on stderr. Nothing captured in
+    # "$out" is printed: a partial manifest must never leave this function, or
+    # the short read becomes a burst of UNDECLARED rows downstream.
+    echo "CANNOT READ: the declared-index manifest is INCOMPLETE (see the SHORT DERIVE line above); refusing to print a partial declared set." >&2
+    rm -f "$blind" "$out"; return 2
+  fi
+  if [ "$drc" != 0 ]; then
     echo "CANNOT READ: no migration directory found under $(pwd) — refusing to print an empty manifest." >&2
     rm -f "$blind" "$out"; return 2
   fi
@@ -421,15 +472,128 @@ ROWS
     ok "(l) ARM for (h): the site is in the capture shape, and that shape answers correctly on a hit, a true negative and a comment-only line"
   else bad "(l) ARM for (h): the site is in the capture shape, and that shape answers correctly on a hit, a true negative and a comment-only line"; fi
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # (m)(n)(o) THE DERIVE-LOOP COUNT IDENTITY, on its own fixture repo.
+  #
+  # `derive_manifest` reads its `find` output on fd 0. A body child that reads
+  # stdin eats the remaining paths and the loop ends early with NO error and NO
+  # non-zero status — the manifest just gets shorter, and a shorter ALLOW set is
+  # a burst of FALSE UNDECLAREDs against production schema.
+  #
+  # The fixture is ordered so the SHORT read is invisible to every pre-existing
+  # defence: the expression index (the only BLIND SPOT contributor) lives in the
+  # FIRST file read, so a loop that reads 1 of 3 files reports the SAME
+  # `BLIND SPOT: 1` as a loop that reads 3 of 3. The tally counts declarations
+  # it could not PARSE; a file it never OPENED is in neither tally. That is
+  # arm (n), and it is why the identity is a separate quantity.
+  local drepo="$tmp/drainrepo"
+  mkdir -p "$drepo/deploy" "$drepo/api/priv/repo/migrations" "$drepo/cloud/priv/repo/migrations"
+  # api is enumerated FIRST, so this file is the one a short loop does read.
+  cat > "$drepo/api/priv/repo/migrations/20260201000000_first.exs" <<'D1'
+defmodule D1 do
+  use Ecto.Migration
+  def change do
+    create index(:alpha, [:x])
+    create index(:barkparks, ["lower(name)"])
+  end
+end
+D1
+  cat > "$drepo/cloud/priv/repo/migrations/20260202000000_second.exs" <<'D2'
+defmodule D2 do
+  use Ecto.Migration
+  def change do
+    create index(:beta, [:y])
+  end
+end
+D2
+  cat > "$drepo/cloud/priv/repo/migrations/20260203000000_third.exs" <<'D3'
+defmodule D3 do
+  use Ecto.Migration
+  def change do
+    create index(:gamma, [:z])
+  end
+end
+D3
+
+  local intact="$drepo/deploy/intact.sh"
+  local drain="$drepo/deploy/drain.sh"
+  local prefix="$drepo/deploy/prefix.sh"
+  cp "$CEN" "$intact"
+  # THE PLANTED CHILD: `cat >/dev/null` in the loop body, at the anchor, draining
+  # fd 0 on the first iteration. The anchor must be unique and the splice must
+  # change the file, or this control would pass while planting nothing.
+  # The three anchor literals are ASSEMBLED AT RUNTIME, exactly as arm (g)'s DDL
+  # needle is, so this block cannot match ITSELF: a literal spelled here would
+  # make `grep -c` read 3-for-1 and would let `sed` rewrite these very lines in
+  # the copy it is building.
+  local a_head a_id_start a_id_end
+  a_head="$(printf 'MUT-ANCHOR:%sderive-loop-body-head' ' ')"
+  a_id_start="$(printf 'MUT-ANCHOR:%sderive-count-identity' ' ')"
+  a_id_end="$(printf 'MUT-END:%sderive-count-identity' ' ')"
+  local n_anchor; n_anchor="$(grep -c "$a_head" "$intact")"
+  sed "s|# ${a_head}|cat >/dev/null|" "$intact" > "$drain"
+  # And the SAME plant with the identity block cut out — the shipped behaviour
+  # BEFORE this fix, kept runnable so arm (n) can read what it used to print.
+  sed "/${a_id_start}/,/${a_id_end}/d" "$drain" > "$prefix"
+  chmod +x "$intact" "$drain" "$prefix"
+  local spliced=1
+  [ "$n_anchor" = 1 ]        || spliced=0
+  cmp -s "$intact" "$drain"  && spliced=0
+  cmp -s "$drain" "$prefix"  && spliced=0
+
+  # (o) POSITIVE CONTROL first: the UNMUTATED script over this fixture derives
+  #     all three names, counts 3 of 3, and refuses nothing.
+  local o_out o_rc
+  o_out="$("$intact" --manifest 2>&1)"; o_rc=$?
+  if [ "$o_rc" = 0 ] \
+     && grep -qxF alpha_x_index <<<"$o_out" \
+     && grep -qxF beta_y_index <<<"$o_out" \
+     && grep -qxF gamma_z_index <<<"$o_out" \
+     && ! grep -q 'SHORT DERIVE' <<<"$o_out"; then
+    ok "(o) QUIET: an unmutated derive over the same fixture emits the FULL manifest and refuses nothing"
+  else bad "(o) QUIET: an unmutated derive over the same fixture emits the FULL manifest and refuses nothing (rc=$o_rc)"; fi
+
+  # (m) RED: with the drain planted, the derive loop reads 1 of 3 files. The
+  #     identity must refuse, NAME BOTH NUMBERS, and print no manifest at all —
+  #     not one name, because every name it would print is an ALLOW entry and
+  #     every name it would OMIT becomes an UNDECLARED row downstream.
+  local m_out m_rc
+  m_out="$("$drain" --manifest 2>&1)"; m_rc=$?
+  if [ "$spliced" = 1 ] && [ "$m_rc" = 2 ] \
+     && grep -q 'SHORT DERIVE' <<<"$m_out" \
+     && grep -q 'read 1 of 3 migration file' <<<"$m_out" \
+     && ! grep -qxF alpha_x_index <<<"$m_out" \
+     && ! grep -q '^DECLARED:' <<<"$m_out"; then
+    ok "(m) RED: a stdin-draining child in the derive loop body makes the count identity refuse, naming 1 of 3, and no manifest is printed"
+  else bad "(m) RED: a stdin-draining child in the derive loop body makes the count identity refuse, naming 1 of 3, and no manifest is printed (rc=$m_rc spliced=$spliced)"; echo "$m_out" | sed -n '1,6p'; fi
+
+  # (n) THE DISTINCTION. Same plant, identity CUT — i.e. what this script did
+  #     before the fix. It exits 0, prints a manifest SHORT by two names, and
+  #     its BLIND SPOT line is BYTE-IDENTICAL to the full run's. The tally that
+  #     already existed is blind to this by construction, so the identity is not
+  #     a duplicate of it.
+  local n_out n_rc n_blind o_blind
+  n_out="$("$prefix" --manifest 2>&1)"; n_rc=$?
+  n_blind="$(grep '^BLIND SPOT:' <<<"$n_out" || true)"
+  o_blind="$(grep '^BLIND SPOT:' <<<"$o_out" || true)"
+  if [ "$spliced" = 1 ] && [ "$n_rc" = 0 ] \
+     && grep -qxF alpha_x_index <<<"$n_out" \
+     && ! grep -qxF beta_y_index <<<"$n_out" \
+     && ! grep -qxF gamma_z_index <<<"$n_out" \
+     && ! grep -q 'SHORT DERIVE' <<<"$n_out" \
+     && [ -n "$o_blind" ] && [ "$n_blind" = "$o_blind" ]; then
+    ok "(n) the BLIND SPOT tally does NOT move under that same short read — identical line over 1 of 3 files as over 3 of 3, while the manifest loses two names"
+  else bad "(n) the BLIND SPOT tally does NOT move under that same short read (rc=$n_rc spliced=$spliced blind_short=[$n_blind] blind_full=[$o_blind])"; fi
+
   echo "=== $pass passed, $fail failed ==="
   rm -rf "$tmp"
   [ "$fail" = 0 ] || return 1
-  [ "$pass" -ge 12 ] || { echo "REFUSING: fewer arms ran than this selftest declares." >&2; return 1; }
+  [ "$pass" -ge 15 ] || { echo "REFUSING: fewer arms ran than this selftest declares." >&2; return 1; }
   return 0
 }
 
 usage() {
-  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   return 3
 }
 
