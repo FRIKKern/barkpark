@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  138 scenarios, 24 rendered, 114 in a COMMITTED residue literal.
+//   SCENARIO  139 scenarios, 24 rendered, 115 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -508,7 +508,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 9 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) and cch-w50-bl's `billing-forever` (the admin-granted comp tier: a NON-catalog plan rendering as the current plan, whose Manage panel carries prose and no button) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 18 widths, one .plan-rec badge and one full-width button wider than nothing.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 18 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
-  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
+  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 3 vary CONTENT or ACTOR over those same two tables: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg. `fleet-archives-member` (cch-w47-rv-bl) is `fleet-archives-stored`'s fixture with ONE field changed — the actor is a plain member — so the archives panel it paints is the `fleet-archives` cell's own geometry minus one button and plus one `.archives-note` line, strictly less horizontal demand at every width that cell already walks. What it carries that no width can score is an AUTHORITY answer, and smoke.mjs drives it there.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
   "hash:#activity": "The Activity feed is swept by the `activity` cell at all 18 widths. cch-w36-bl's `activity-denied` is the plain-MEMBER twin of that same screen, and it renders STRICTLY LESS: /v1/audit answers 403, so loadActivity replaces the whole coalesced feed with ONE .empty-state block — the identical geometry the refusal fixtures in `hash:#operator` and `hash:#billing` already occupy, and narrower at every width than the grid the cell walks. What it exists to measure is an AUTHORITY answer, not a width: it was the first fixture in this corpus able to reach that refusal arm at all, because the only other #activity scenario is an owner and the only other auditDenied fixture sits on the instance timeline, where the same 403 degrades to events-only instead of taking over the view.",
 };
@@ -525,8 +525,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 138 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 114 · 14 families.
+// THE CENSUS THIS RECONCILES AGAINST: 139 scenarios · 25 cells over 24 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 115 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -698,6 +698,22 @@ export const RESIDUE_FAMILY_REASONS = {
 // "overview-attention-long-name" (family hash:#overview)` until the entry below
 // was written.
 //
+// cch-w47-rv-bl moved it by ONE: `fleet-archives-member` — the first fixture in
+// this corpus to render the archives panel as a plain MEMBER, and so the first
+// able to show that the authority answer travels from the archives render site
+// into the pure helpers at all — is the 139th scenario and the 115th residue
+// entry (family `hash:#fleet`). RESIDUE, not a cell: it is
+// `fleet-archives-stored`'s fixture field for field with ONE difference, the
+// actor, so it paints the same archive rows at the same widths, minus one
+// button and plus one `.archives-note` line — strictly less horizontal demand
+// than the `fleet-archives` cell already walks at all 18 widths. What it
+// carries that no width walk can score is an AUTHORITY answer, driven by
+// smoke.mjs's own `fleet-archives-member` expectation. The family count does
+// not move; `hash:#fleet` already had two entries. Both numerals were RE-READ
+// from a RUN of `node breakpoint-sweep.mjs` on this branch, never by adding
+// one: the sweep exited 2 with `UNLISTED scenario "fleet-archives-member"
+// (family hash:#fleet)` until the entry below was written.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
 // cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
 // read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
@@ -714,7 +730,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 138 / 25 / 24 / 114 / 14 — "the census five in breakpoint-sweep.mjs's
+//   * 139 / 25 / 24 / 115 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -962,9 +978,10 @@ export const SCENARIO_RESIDUE = {
   // hash:#notifications — 2
   "notif-empty": "hash:#notifications",
   "notif-member": "hash:#notifications",
-  // hash:#fleet — 2
+  // hash:#fleet — 3
   "fleet-v4": "hash:#fleet",
   "fleet-cruel-content": "hash:#fleet",
+  "fleet-archives-member": "hash:#fleet",
   // hash:#signup — 1
   "loggedout-signup": "hash:#signup",
   // hash:#activity — 1

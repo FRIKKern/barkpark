@@ -3485,6 +3485,71 @@ const EXPECTATIONS = {
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
     },
   },
+  // ── cch-w47-rv-bl: the REFUSE arm of the same panel, end to end ────────────
+  //
+  // The twin above boots the default OWNER. This one boots the SAME two bundles
+  // for an actor whose own GET /v1/me answers role "member" — the first member x
+  // archives scenario in the corpus. Until it existed, the refuse arm was proven
+  // only where __app.test.mjs hands the pure helper the string "refuse" by hand:
+  // a helper that is right and never reached is the vacuous green this epic keeps
+  // finding, and nothing anywhere proved that instanceAdminAuthority's answer
+  // travels from the loadArchives render site into these helpers at all.
+  //
+  // EVERY EXPECTED STRING IS DERIVED, NOT TYPED. The role sentence comes out of
+  // the shipped reader (hooks.friendly on the exact payload router.ex's
+  // resurrect/1 sends), and the refuse-arm bytes come out of the shipped pure
+  // pair called on this scenario's OWN fixture. So a copy edit in app.js moves
+  // both sides together and this expectation cannot go stale into a false green;
+  // what it pins is the RELATION — mount bytes == refuse render, and refuse !=
+  // grant — which is exactly the thing a regression breaks.
+  "fleet-archives-member": {
+    what: "the Archives panel refused: no live Resurrect, the CLI chip kept, and ONE server-owned line saying which role the command needs",
+    check(reg, hooks) {
+      const arch = (reg.get("archives-body") || {}).innerHTML || "";
+      // THE PRECONDITION, ASSERTED — not assumed. Both assertions below are
+      // about what a REFUSED member sees; measured against an owner they would
+      // pass or fail for reasons that have nothing to do with authority.
+      assert.equal(hooks.meState(), "loaded",
+        "fleet-archives-member must boot with /v1/me ANSWERED — got " + hooks.meState() +
+        ", and an unanswered read takes the 'unknown' arm, so nothing below measures the refuse arm");
+      assert.equal(hooks.meFlags().role, "member",
+        "fleet-archives-member must boot a plain member — got " + JSON.stringify(hooks.meFlags().role));
+      // The panel really rendered the list (an empty/error arm would pass the
+      // absence assertions below for free).
+      assert.ok(arch.includes("archive-list"), "the populated archive list renders for a member too");
+      assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle, unchanged by authority");
+      // THE REFUSAL LINE, in the server's own words. `friendly` is the shipped
+      // 403 reader; this is the payload router.ex's resurrect/1 really sends
+      // (`Auth.forbidden(required: "admin", scope: "team")`).
+      const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+      assert.ok(roleSentence && roleSentence.includes("admin role"),
+        "the shipped 403 reader must answer this payload with the admin-role sentence; got: " + roleSentence);
+      assert.ok(arch.includes(roleSentence),
+        "the refuse arm prints the server's own role sentence above the list; got: " + arch.slice(0, 600));
+      // The live write stays OMITTED (cch-w47-s3's ruling, unweakened) …
+      assert.ok(!arch.includes("archive-resurrect-btn"),
+        "a member the route refuses is offered no live Resurrect");
+      // … and the CLI chip stays on EVERY row (cch-w47-rv-bl ruled (a), not (c):
+      // a member must still be able to learn the command and hand it on).
+      assert.ok(countMatches(arch, "bp cloud instance resurrect") >= 2,
+        "the copy-paste CLI chip is kept on every row — the ruling labels it, it does not delete it");
+      // THE MOUNT IS WIRED TO THE HELPER, and the two arms really differ. Both
+      // sides are computed from this scenario's own fixture through the shipped
+      // pure pair, so this is a diff of rendered BYTES, not of two hand-written
+      // strings.
+      const payload = SCENARIOS["fleet-archives-member"].data.archives.body;
+      const refused = hooks.archivesPanelHtml(hooks.archivesModel(payload, "refuse"));
+      const granted = hooks.archivesPanelHtml(hooks.archivesModel(payload, "grant"));
+      assert.equal(arch, refused,
+        "the DOM mount must render exactly the pure refuse arm — if these differ, instanceAdminAuthority's answer is not reaching the helpers");
+      assert.notEqual(refused, granted,
+        "the refused member's rendered bytes must differ from the granted ones");
+      assert.ok(!granted.includes(roleSentence),
+        "the grant arm never carries the role sentence — it is offered the button and has nothing to apologise for");
+      assert.ok(granted.includes("archive-resurrect-btn"),
+        "the grant arm still offers the live Resurrect (this is the control: the refuse assertions above could otherwise pass on a panel that offers it to nobody)");
+    },
+  },
 
   // ── gr-p3 instance workspace (GR24/GR30): D-02 header + D-03 Overview ──────
   // The scenario predates this wave with a fixture but ZERO assertions (the
@@ -6895,12 +6960,121 @@ async function assertBillingPaintsOncePerFact() {
   }
 }
 
+// ── DEFECT-E · THE SHELL-INSTANCE TWIN GUARD (task-7bd507ea989ef248) ─────────
+// Nine scenarios shot BYTE-IDENTICAL to shell-instance in all 20 accent x theme
+// x width cells — four independent runs, one sha256 across all ten names. A
+// full-count green matrix certified them anyway, because a shot count says
+// "N files exist", never "N DISTINCT screens exist". This is that missing
+// predicate. It is an assertion over a CLASSIFICATION, not a flat "they must
+// differ", because the nine have TWO causes and a guard that cannot tell them
+// apart would have to accept the weaker one for all nine:
+//
+//   fold  — the scenario paints its own state; the identity was purely a
+//           SHOOTING artifact (fleetSupportCardHtml mounts at the tail of the
+//           Overview column, under shoot.sh's 1000px fold). It must declare a
+//           `shotHeight`, and #instance-body must differ from shell-instance's.
+//   click — the state the label names is behind a click (pollOffloadWatch,
+//           runVerifyNow), so the pre-click DOM legitimately IS
+//           shell-instance's. The DRIVE is what gets asserted: it must exist,
+//           and its FIRST selector must resolve in the painted DOM — a drive
+//           whose entry control is not on screen cannot start.
+//   both  — offload-*: click-gated AND the mounted ladder is below the fold.
+//
+// fleet-support-empty is the one honest "fold" entry whose DOM is shell-
+// instance's (an empty support card is shell-instance's own default render), so
+// it is classified "fold-only": shotHeight required, DOM equality allowed. Its
+// tall shot is the only image in the corpus showing the add-a-support CTA.
+//
+// MUTATION-PROVED in both directions — see the PR body.
+const SHELL_INSTANCE_TWINS = {
+  "fleet-support-provisioning": { fold: true, dom: true },
+  "fleet-support-online": { fold: true, dom: true },
+  "fleet-support-failed": { fold: true, dom: true },
+  "fleet-support-empty": { fold: true, dom: false },
+  "offload-filing": { fold: true, click: true },
+  "offload-working": { fold: true, click: true },
+  "offload-done": { fold: true, click: true },
+  "offload-blocked": { fold: true, click: true },
+  "verify-no-credentials": { click: true },
+};
+
+// The selector a drive step names, whichever verb it uses.
+function driveStepSelector(step) {
+  return (step && (step.click || step.fill || step.await)) || "";
+}
+
+// Does `sel` resolve in the painted body? The shim is a string DOM, so this is
+// a SHAPE match over the selector forms the drives use — an attribute selector
+// and an id — and it THROWS on anything else rather than answering "true" for a
+// form it cannot actually check.
+function selectorPaints(html, sel) {
+  const attr = sel.match(/^\[([a-z-]+)\]$/);
+  if (attr) return html.includes(attr[1] + "=") || html.includes(" " + attr[1] + ">") || html.includes(" " + attr[1] + " ");
+  const id = sel.match(/^#([a-z0-9-]+)$/i);
+  if (id) return html.includes('id="' + id[1] + '"');
+  throw new Error("selectorPaints cannot check " + JSON.stringify(sel) + " — teach it that form");
+}
+
+async function assertDefectEScenariosAreNotShellInstance() {
+  const baseBoot = bootScenario("shell-instance");
+  await flush();
+  const baseline = (baseBoot.registry.get("instance-body") || {}).innerHTML || "";
+  assert.ok(baseline.length > 0, "shell-instance must paint #instance-body — the whole guard is relative to it");
+  assert.ok(!SCENARIOS["shell-instance"].shotHeight,
+    "shell-instance is the REFERENCE shot and must keep the default fold — a shotHeight here moves the baseline under all nine");
+
+  const problems = [];
+  for (const name of Object.keys(SHELL_INSTANCE_TWINS)) {
+    const want = SHELL_INSTANCE_TWINS[name];
+    const scen = SCENARIOS[name];
+    if (!scen) { problems.push(name + ": listed here but absent from SCENARIOS"); continue; }
+    const boot = bootScenario(name);
+    await flush();
+    const html = (boot.registry.get("instance-body") || {}).innerHTML || "";
+    // The DOM comparison is #instance-body — the container shell-instance and
+    // all nine share. The SELECTOR check needs more: this shim's innerHTML is a
+    // per-element STRING, so a slot filled later by its own id (#instance-verify
+    // is filled async by loadInstanceVerify) never appears inside the parent's
+    // bytes. Sweep every element the boot touched, or [data-vf-run] reads as
+    // "does not paint" when it painted perfectly one element down.
+    const painted = [...boot.registry.values()].map((el) => (el && el.innerHTML) || "").join("\n");
+
+    if (want.fold && !(scen.shotHeight > 1000)) {
+      problems.push(name + ": its subject mounts below shoot.sh's 1000px fold and it declares no taller shotHeight");
+    }
+    if (want.click) {
+      const drive = scen.drive;
+      if (!Array.isArray(drive) || drive.length === 0) {
+        problems.push(name + ": click-gated with no `drive` — its shot collapses back onto shell-instance");
+      } else {
+        const entry = driveStepSelector(drive[0]);
+        if (!entry) problems.push(name + ": drive step 0 names no selector");
+        else if (!selectorPaints(painted, entry)) {
+          problems.push(name + ": drive entry " + JSON.stringify(entry) + " does not paint — the drive cannot start");
+        }
+      }
+    }
+    if (want.dom && html === baseline) {
+      problems.push(name + ": #instance-body is BYTE-IDENTICAL to shell-instance — its own state never painted");
+    }
+    if (!/\[(click-gated|below the fold)/.test(scen.label)) {
+      problems.push(name + ": its label must say how the shot is separated (below the fold / click-gated)");
+    }
+  }
+  if (problems.length) {
+    process.stdout.write("\nshell-instance twin guard FAILED:\n" + problems.map((p) => "  - " + p).join("\n") + "\n");
+    assert.fail(problems.length + " DEFECT-E scenario(s) cannot be told apart from shell-instance");
+  }
+  process.stdout.write("  ok   shell-instance twins — 9 scenario(s): 8 shot past the fold, 5 drive a real click, 3 also differ in DOM\n");
+}
+
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
   await assertBillingPaintsOncePerFact();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
+  await assertDefectEScenariosAreNotShellInstance();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);

@@ -1243,13 +1243,17 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // seat, and so the first able to make that ellipsis ENGAGE — is the 138th
   // scenario and the 114th residue entry (family hash:#overview), and the sweep
   // refused the same way until the entry was written.
-  assert.equal(r.total, 138);
+  // cch-w47-rv-bl moved it by one: `fleet-archives-member` — the first fixture
+  // to render the archives panel as a plain MEMBER — is the 139th scenario and
+  // the 115th residue entry (family hash:#fleet), and the sweep refused the
+  // same way until the entry was written.
+  assert.equal(r.total, 139);
   assert.equal(r.cells, 25);
   assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 114, "114 is the RESIDUE, not the census");
+  assert.equal(r.residue, 115, "115 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 114, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 115, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

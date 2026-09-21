@@ -382,4 +382,86 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
       assert PaperAccess.ttl_days() == 90
     end
   end
+
+  describe "workspace scope — two workspaces, ONE shared paper slug" do
+    # WHY THIS FIXTURE EXISTS (task-60fc69276124b779).
+    #
+    # Every other fixture in this file mints a UNIQUE slug, so the sibling
+    # `where([r], r.slug == ^slug)` inside `PaperAccess.list/2` already
+    # separates the rows and the workspace clause never has to discriminate.
+    # Replacing the body of `scope_workspace(q, ws) when is_binary(ws)`
+    # (content/paper_access.ex) with the unscoped `query` therefore left all
+    # 17 tests green: the tenant fence was untested, not absent.
+    #
+    # A paper's slug is its `documents.doc_id`, unique only per
+    # `dataset_id` (priv/repo/migrations/20260527134000_flip_uniqueness_to_dataset_id.exs),
+    # and datasets are per-project, projects per-workspace — so two workspaces
+    # sharing a paper slug is ORDINARY, not exotic. This test builds exactly
+    # that collision so the workspace clause is the only thing standing
+    # between workspace A and workspace B's readers.
+    test "only the caller's own rows come back, from list/2 and from the endpoint", %{
+      conn: conn
+    } do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      shared = "eol-shared-#{System.unique_integer([:positive])}"
+
+      :ok = log_access!(shared, ws_a.id, "actor-a", "Reader A")
+      :ok = log_access!(shared, ws_b.id, "actor-b", "Reader B")
+
+      # PRECONDITION, not decoration: without BOTH rows under the one slug the
+      # assertions below pass vacuously, whatever scope_workspace/2 does.
+      assert 2 ==
+               Repo.aggregate(from(r in PaperAccessLog, where: r.slug == ^shared), :count)
+
+      assert [row_a] = PaperAccess.list(shared, workspace_id: ws_a.id)
+      assert row_a.actor_id == "actor-a"
+      assert row_a.workspace_id == ws_a.id
+
+      # The mirror arm: B is not merely "not leaked to A", B still reads B.
+      assert [row_b] = PaperAccess.list(shared, workspace_id: ws_b.id)
+      assert row_b.actor_id == "actor-b"
+
+      # And over HTTP, with an admin token BOUND to workspace A so
+      # DeriveWorkspaceFromToken resolves A rather than the seeded Default.
+      raw = admin_token_in!(ws_a)
+
+      body =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> get_access(shared)
+        |> json_response(200)
+
+      assert body["count"] == 1
+      assert [%{"actor_id" => "actor-a", "actor_label" => "Reader A"}] = body["access"]
+      refute Enum.any?(body["access"], &(&1["actor_id"] == "actor-b"))
+    end
+  end
+
+  defp log_access!(slug, workspace_id, actor_id, actor_label) do
+    PaperAccess.record_now(%{
+      slug: slug,
+      dataset: @dataset,
+      workspace_id: workspace_id,
+      action: "view",
+      actor_kind: "user",
+      actor_id: actor_id,
+      actor_label: actor_label
+    })
+  end
+
+  defp admin_token_in!(workspace) do
+    raw = "eol-access-ws-#{System.unique_integer([:positive])}"
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "admin-#{workspace.slug}",
+        @dataset,
+        ["read", "write", "admin"],
+        workspace.id
+      )
+
+    raw
+  end
 end

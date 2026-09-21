@@ -34,13 +34,13 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     62 of this file's 69 `min-width` declarations are this escape, and none of
+     63 of this file's 70 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
-   break-all), 69 `min-width` (72 occurrences less the THREE that are `@media
+   break-all), 70 `min-width` (74 occurrences less the FOUR that are `@media
    (min-width: …)` preludes, which are not declarations at all), and 30
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
@@ -735,15 +735,71 @@ select.form-input {
 }
 .notice .btn { margin-left: auto; }
 
-/* destructive action button (e.g. Remove instance) — rides the solid button
-   fill tokens (white label both themes; dark uses a deeper red than the
-   status text colour); the pairing is contrast-gated in __css_check.mjs. */
+/* destructive action button (e.g. Remove instance, Delete site, Delete
+   webhook).
+
+   DEFECT-B (accent matrix re-review, 2026-09-20; task-b96e83407f325986) — this
+   rule USED to paint a solid `--btn-danger-bg` fill with a white label, and at
+   the EMBER identity that put a solid warm red next to the solid warm orange
+   `.btn-primary` wears. Measured on origin/main 537bca5a0 in a real Chrome at
+   1440, ember/light: `.btn-primary` background rgb(179,78,30), `.btn-danger`
+   background rgb(178,54,54) — CIE76 dE 21.0, against 82.9 (fjord) / 91.7
+   (evergreen) / 100.1 (iris) for the same pair at the other identities. A 4-5x
+   outlier, and the reason Delete and the primary action were told apart only by
+   position.
+
+   WHY THE FIX IS NOT A HUE MOVE. `--ok-hsl`/`--primary-hsl` track the brand for
+   every identity by GR6, and GR90 ruled in writing that `--ok-hsl` is NOT to be
+   touched; `--danger-hsl` is pinned at hue 0. Both ends of the pair are
+   therefore fixed by doctrine, so the separation has to come off a NON-HUE
+   axis — exactly the move GR77/GR90 made for the `.vf-chip` wash collision
+   (see that rule above: separated on ALPHA, not hue, so it works identically in
+   all five identities).
+
+   THE LIGHTNESS ROUTE WAS MEASURED AND REJECTED, not assumed away: deepening
+   the danger fill to hsl(0 62% 32%) moves ember/light from dE 21.0 to only
+   26.1, and even an unusable near-maroon hsl(0 62% 24%) reaches 35.8 — still
+   less than half the 82.9-100.1 band the other four identities already sit in.
+   Darkening the fill cannot buy the separation.
+
+   THE FIX — a WEIGHT discriminator. The destructive tier stops being a SOLID
+   accent-weight fill and becomes an OUTLINED danger object: the soft danger
+   tint as ground, full-strength `--danger` as border AND label. The primary
+   stays a solid accent fill. So the two controls now differ in the thing a
+   glance reads first — filled vs outlined — and that difference is identical at
+   all five identities.
+
+   It cannot get worse anywhere, and that is arithmetic rather than hope: the
+   BORDER still resolves to `--danger`, i.e. exactly the colour the background
+   used to be, so the border-channel distance at every identity is byte-for-byte
+   what the background-channel distance was before. The background channel is
+   pure gain: white-ish tint vs ember's solid orange measures dE 80.9, inside
+   the band the other identities already had.
+
+   CONTRAST is not a new risk and is not newly waived: `--danger` on
+   `--danger-soft` over `--surface` at min 4.5 is ALREADY a row in
+   __css_check.mjs's CONTRAST_PAIRS (it gates .wh-del-status--danger and
+   .tlv-badge--verify-fail), and it is checked in both themes. The white-label
+   pairing `--btn-danger-fg` / `--btn-danger-bg` stays live and stays gated
+   because :hover still commits to the solid fill — hovering a destructive
+   control is the moment it should shout, and that is where the full-weight red
+   now lives.
+
+   Pinned by __preview__/accent-role-separation.mjs, which reads the COMPUTED
+   background and border of the destructive and primary controls on
+   webhooks-panel / rollback / shell-site in a real browser at all five accents.
+   It reds on the pre-fix bytes. */
 .btn-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.btn-danger:hover {
   background: var(--btn-danger-bg);
   color: var(--btn-danger-fg);
   border-color: var(--btn-danger-bg);
+  filter: brightness(1.08);
 }
-.btn-danger:hover { background: var(--btn-danger-bg); filter: brightness(1.08); }
 
 /* instance/site detail-head inline actions (retry / remove) */
 .detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
@@ -1863,25 +1919,31 @@ select.form-input {
 
 /* ── S11b lifecycle action row — the persistent "operate this box" cluster ─────
    Previously UNSTYLED (raw inline spans); rendered here as one compact cluster:
-   a state pill + the verb controls, with a single "via the bp CLI" caption. The
-   pill mirrors .status-pill; the .bp-inst--<state> class tints its colour and the
-   dot reads that hue through currentColor while the label stays neutral. */
+   a state pill + the verb controls, with a single "via the bp CLI" caption.
+
+   cch-r21l: THE `.inst-life-pill` FAMILY IS RETIRED — absorbed into the one
+   `.status-pill` family (parent decision 24 / GR11), same sweep that retired
+   `.dep-*`. What stood here: `.inst-life-pill` (inline-flex, gap 7px, height
+   24px, padding 0 11px, 1px border, var(--pill) radius, var(--muted-surface),
+   12px — i.e. `.status-pill`'s box re-typed, differing only in font-weight
+   600 vs 500), plus `.inst-life-dot` and `.inst-life-label`. The chip said the
+   SAME thing the fleet row's `.status-pill` already said (this box's lifecycle
+   state), in a second dialect, and it was additionally RE-CLASSED by hand in
+   the decommission handler — a second author no static check could see.
+   Where each look went: the box is `.status-pill`'s, the dot is
+   `.status-pill-dot`, the label is `.status-pill-label`, and the state hue is
+   the ROLE the state maps to — provisioning → `--info`, live → `--ok`,
+   degraded → `--warn`, stopped/Suspended → `--neutral --stopped`,
+   decommissioned → `--danger`. That mapping is not this comment's to keep: it
+   is LIFECYCLE_PILL_ROLE in app.js (grep -n 'LIFECYCLE_PILL_ROLE' app.js),
+   which __css_check E13 reads and holds total over LIFECYCLE_PILL_LABEL — and
+   E13 also reds if an `.inst-life-pill` / `.inst-life-dot` / `.inst-life-label`
+   rule or class literal returns, so re-forking the grammar fails the gate.
+   The `.bp-inst--<state>` token still rides on the chip as an extra class; it
+   is the S4 identity, not the paint. Every other `.inst-life-*` rule survives:
+   they are the row's LAYOUT and copy, never pills. */
 .inst-lifecycle-actions { margin: 18px 0 4px; }
 .inst-life-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
-.inst-life-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 24px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--pill);
-  background: var(--muted-surface);
-  font-size: 12px;
-  font-weight: 600;
-}
-.inst-life-dot { width: 7px; height: 7px; border-radius: var(--pill); background: currentColor; flex: 0 0 auto; }
-.inst-life-label { color: var(--text); }
 .inst-life-status { display: inline-flex; align-items: center; gap: 8px; }
 .inst-life-note { font-size: 12px; color: var(--muted-text); }
 .inst-life-note--warn { color: var(--warn-strong); }
@@ -6506,6 +6568,43 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      0/24 cells (12 widths x 2 themes) have `deSw > deCw`. */
   .detail-head--inst { flex-direction: column; align-items: stretch; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
+}
+
+/* THE MEMBER HEADER'S OWN ROW (task-4f071458f1c59358). Above the stack the head
+   is a flex ROW, and `.detail-head--inst .detail-actions` above is authored
+   `flex: 0 0 auto` while its own box carries `flex-wrap: wrap`. A wrapping flex
+   container's flex BASE size is its max-content width — every chip PLUS the
+   whole sentence on one line — and `flex-shrink: 0` forbids it to give any of
+   that back. For an OWNER that base is a few chips wide and nothing is wrong.
+   For a MEMBER the strip also carries `.inst-life-reason`, the server's own
+   team-admin sentence (D428 disable-and-explain), and the sibling
+   `.detail-head-main` carries `min-width: 0` — so it absorbs the ENTIRE
+   deficit and the instance name wraps toward its min-content width.
+
+   MEASURED on origin/main bytes, headless Chrome, both themes, via
+   overflow-guard.mjs --defect W21m-member-head-title-floor: at 1440
+   `instance-behind-member` painted the name "Staging" over SEVEN line boxes
+   (H1 273px, `.detail-head-main` 2px beside a 966px strip) with 434px of empty
+   header under the strip; `panel-overview-member` and `timeline-events-only`
+   read 2 lines / 131px dead at 1440 and collapsed to TEN line boxes / 533px
+   dead / `.detail-head-main` 0px at 1024 and 900, where the page also dragged
+   96-346px sideways. Post-fix every one of those 24 row-band cells reads a
+   1-2 line title, a dead band under one row, and `scrollWidth == clientWidth`.
+
+   THE TWO DECLARATIONS ARE BOTH LOAD-BEARING, and neither alone is the fix:
+   `flex: 0 1 auto` on the strip lets the sentence wrap instead of holding the
+   row open; `flex: 1 1 360px` gives the title column a FLOOR it is grown from
+   rather than a zero it is shrunk from, so the name keeps a readable measure
+   at every width in the band.
+
+   SCOPED ABOVE THE STACK ON PURPOSE. Below 900 the block above turns the head
+   into a COLUMN, where a `flex-basis` is a HEIGHT basis — an unscoped
+   `flex: 1 1 360px` would buy the wide band by forcing a 360px-tall title
+   column on every tablet and phone. The 768 cell is this leg's committed
+   no-regression control for exactly that. */
+@media (min-width: 900px) {
+  .detail-head--inst .detail-head-main { flex: 1 1 360px; }
+  .detail-head--inst .detail-actions { flex: 0 1 auto; min-width: 0; }
 }
 
 /* ==========================================================================
