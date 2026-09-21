@@ -51,6 +51,30 @@
 // cell is `standard` + `data-user-opened` — which is why this script pins the
 // bucket explicitly instead of inferring it from a window size.
 //
+// ── THE ANSWER, AS OF 2026-09-21: QUIETLY KILLED EVERYWHERE ──────────────────
+// The scrim renders in NO shipped state. Five rules reach the pseudo-element,
+// not four, and the fifth — SUPPRESSOR D, charter D175/D187,
+// `html[data-width-bucket="standard"]` — suppresses the last cell that crossed
+// the threshold. With A, B, C and D in place every bucket x user_opened cell
+// reads `none` at 861px AND at 860px. The 860px generator is unreachable code.
+//
+// THIS FILE ASSERTED THE OPPOSITE UNTIL 2026-09-21, and was green while doing
+// it: its fixture was a snapshot taken before D landed, with no tie back to
+// root.html.heex, so the control certified the FIXTURE and not the product —
+// the precise failure mode it was built to end. scripts/studio-scrim-drift-check.mjs
+// is the tie back, and it runs in the same CI job as this file. That check is a
+// PRECONDITION of every reading below: a matrix taken against a drifted fixture
+// measures nothing, however confident its table looks.
+//
+// SO THE ASSERTION INVERTED, AND THE ABILITY TO FAIL MOVED. `assertAbolished()`
+// now reds if ANY cell paints — a suppressor narrowed or removed is a scrim
+// coming back, and that is the regression worth catching. The proof that the
+// probe can still SEE a scrim is arm 1 of --self-test: delete the fenced
+// SUPPRESSOR D from a copy of the fixture and the standard/user_opened cell
+// lights up at 860px and stays dark at 861px. Arm 2 then deletes the generator
+// from that same D-less copy and it goes dark again. Two mutations, opposite
+// directions; a control that only ever reads `none` would pass arm 2 for free.
+//
 // ── THE SHIPPED --positive-control IS A DIFFERENT MECHANISM ──────────────────
 // `POSITIVE_CONTROL_RULE` in scripts/studio-desk-measure.mjs (:2028-2032)
 // injects `.editor-with-preview::after { content:"" !important; ... }`: no
@@ -99,6 +123,11 @@ const FIXTURE = path.join(HERE, 'fixtures', 'studio-scrim-threshold.html');
 const GEN_BEGIN = 'SCRIM-GENERATOR-BEGIN';
 const GEN_END = 'SCRIM-GENERATOR-END';
 
+// The fence around SUPPRESSOR D. Deleting it is how the probe is shown a scrim
+// it can actually read; see THE ANSWER, above.
+const SUPP_D_BEGIN = 'SUPPRESSOR-D-BEGIN';
+const SUPP_D_END = 'SUPPRESSOR-D-END';
+
 // The buckets the server actually stamps. Anything outside this set is a state
 // production cannot be in, so a reading taken there certifies nothing.
 const SHIPPED_BUCKETS = ['wide', 'standard', 'narrow', 'phone'];
@@ -108,7 +137,8 @@ const SHIPPED_BUCKETS = ['wide', 'standard', 'narrow', 'phone'];
 const ABOVE = 861;
 const BELOW = 860;
 
-// The one cell that can distinguish a live generator from a deleted one.
+// The last cell that ever crossed the threshold, and the one SUPPRESSOR D
+// abolished. It is where both self-test mutations are read.
 const TRUTHFUL_CELL = { bucket: 'standard', userOpened: true };
 
 class ControlError extends Error {}
@@ -153,7 +183,7 @@ function resolvePlaywright() {
 // shorter, and the generator's own selector gone. A self-test whose "deleted"
 // copy is byte-identical to the original would pass for the emptiest reason
 // there is.
-function writeGeneratorDeletedCopy(srcPath, destPath) {
+function writeFenceDeletedCopy(srcPath, destPath, { begin, end, mustContain, what }) {
   const src = fs.readFileSync(srcPath, 'utf8');
 
   // A marker counts ONLY on a line that is itself a CSS comment. The fixture's
@@ -169,9 +199,9 @@ function writeGeneratorDeletedCopy(srcPath, destPath) {
     });
     return hits;
   };
-  const beginHits = markerLines(GEN_BEGIN);
-  const endHits = markerLines(GEN_END);
-  for (const [marker, hits] of [[GEN_BEGIN, beginHits], [GEN_END, endHits]]) {
+  const beginHits = markerLines(begin);
+  const endHits = markerLines(end);
+  for (const [marker, hits] of [[begin, beginHits], [end, endHits]]) {
     if (hits.length !== 1) {
       die(`fixture ${srcPath} carries ${hits.length} CSS-comment ${marker} markers, ` +
           `expected exactly 1 — the self-test cannot delete a generator it cannot ` +
@@ -180,24 +210,24 @@ function writeGeneratorDeletedCopy(srcPath, destPath) {
   }
   const [beginLine] = beginHits;
   const [endLine] = endHits;
-  if (endLine <= beginLine) die(`fixture ${srcPath}: ${GEN_END} precedes ${GEN_BEGIN}.`);
+  if (endLine <= beginLine) die(`fixture ${srcPath}: ${end} precedes ${begin}.`);
 
   // Cut whole lines, from the one carrying BEGIN through the one carrying END,
   // so the fenced comment and its @container rule go together.
   const removed = lines.slice(beginLine, endLine + 1).join('\n') + '\n';
   const out = [...lines.slice(0, beginLine), ...lines.slice(endLine + 1)].join('\n');
 
-  if (!removed.includes('@container panel (max-width: 860px)')) {
-    die(`the fenced region does not contain the @container generator — ` +
+  if (!removed.includes(mustContain)) {
+    die(`the fenced ${what} region does not contain ${JSON.stringify(mustContain)} — ` +
         `deleting it would prove nothing. Removed ${removed.length} bytes.`);
   }
-  if (out.length >= src.length) die('generator deletion removed nothing.');
+  if (out.length >= src.length) die(`${what} deletion removed nothing.`);
   // HTML comments (including this fixture's own header, which quotes the
   // at-rule) are not cascade, so they must not count as a surviving generator.
   const outCss = out.replace(/<!--[\s\S]*?-->/g, '');
-  if (outCss.includes('@container panel (max-width: 860px)')) {
-    die('a SECOND @container panel (max-width: 860px) block survives the ' +
-        'deletion — the fixture has drifted and the self-test would be vacuous.');
+  if (outCss.includes(mustContain)) {
+    die(`a SECOND ${JSON.stringify(mustContain)} survives the deletion of ${what} — ` +
+        `the fixture has drifted and this arm of the self-test would be vacuous.`);
   }
 
   fs.writeFileSync(destPath, out);
@@ -332,6 +362,24 @@ const findCell = (rows, { bucket, userOpened }) =>
 
 // ── the assertions ───────────────────────────────────────────────────────────
 
+// THE SHIPPED VERDICT. Five rules reach the pseudo-element and every one of the
+// last four suppresses, so no bucket x user_opened cell paints at either width.
+// This reds the day a suppressor is narrowed or removed — a scrim coming back.
+function assertAbolished(rows) {
+  const painting = rows.filter((r) => scrimPainted(r.above) || scrimPainted(r.below));
+  if (painting.length) {
+    die(`A SCRIM CAME BACK. The shipped cascade suppresses the 860px generator in every ` +
+        `bucket x user_opened state, but ${painting.length} cell(s) painted: ` +
+        `${painting.map((r) => `${r.bucket}/${r.user_opened} ${ABOVE}px=${r.above} ${BELOW}px=${r.below}`).join('; ')}. ` +
+        `Either a suppressor was narrowed or removed, or the fixture has drifted from ` +
+        `root.html.heex — run scripts/studio-scrim-drift-check.mjs before believing this table.`);
+  }
+}
+
+// Applied ONLY to the copy with SUPPRESSOR D deleted. It is the old
+// "the generator is live" assertion, moved to the one document where it is
+// still true — which is what makes it a proof that the probe can see a scrim
+// rather than a claim about what ships.
 function assertLiveGenerator(rows) {
   const t = findCell(rows, TRUTHFUL_CELL);
   if (!t) die(`the ${TRUTHFUL_CELL.bucket}/user_opened cell is missing from the matrix.`);
@@ -342,9 +390,10 @@ function assertLiveGenerator(rows) {
         `container-scoped at all.`);
   }
   if (!scrimPainted(t.below)) {
-    die(`THE GENERATOR IS DEAD: ${TRUTHFUL_CELL.bucket}/user_opened at ${BELOW}px read ` +
-        `${JSON.stringify(t.below)}, expected "". Either the 860px generator was deleted ` +
-        `or a suppressor has grown to cover the one state that still wants a scrim.`);
+    die(`THIS CONTROL IS BLIND: with SUPPRESSOR D deleted, ${TRUTHFUL_CELL.bucket}/user_opened ` +
+        `at ${BELOW}px still read ${JSON.stringify(t.below)}, expected "". The probe cannot ` +
+        `SEE a scrim even where one must render, so its none-readings on the shipped ` +
+        `fixture mean nothing at all.`);
   }
   const others = rows.filter((r) => r !== t && r.discriminates);
   if (others.length) {
@@ -364,8 +413,9 @@ function assertGeneratorDeletedGoesDark(rows) {
         `scrim, and every green this script has ever printed is suspect.`);
   }
   if (rows.some((r) => r.discriminates)) {
-    die(`with the generator deleted, ${rows.filter((r) => r.discriminates).length} cell(s) ` +
-        `still cross the 860px threshold. The fixture has a second generator.`);
+    die(`with SUPPRESSOR D and the generator both deleted, ` +
+        `${rows.filter((r) => r.discriminates).length} cell(s) still cross the 860px threshold. ` +
+        `The fixture has a second generator.`);
   }
 }
 
@@ -373,14 +423,18 @@ function assertGeneratorDeletedGoesDark(rows) {
 
 const HELP = `studio-scrim-threshold-control.mjs — forced-container positive control (charter D176)
 
-  --self-test   also run the matrix against a copy of the fixture with the
-                860px generator DELETED, and require the truthful cell to go
-                dark. Exits non-zero if the control cannot fail.
+  --self-test   also run the matrix twice more, against copies of the fixture
+                with SUPPRESSOR D deleted (the standard cell must LIGHT UP) and
+                then with the 860px generator deleted too (it must go dark
+                again). Exits non-zero if the probe cannot see a scrim.
   --json        emit the run as JSON as well as the table
   --help
 
 Runs offline against ${path.relative(REPO, FIXTURE)}. No deployed build, no ssh,
-no network. Viewport is irrelevant — see the header of this file.`;
+no network. Viewport is irrelevant — see the header of this file.
+
+The fixture is a COPY of root.html.heex's cascade. scripts/studio-scrim-drift-check.mjs
+is what keeps it honest; run it first, or this matrix certifies the fixture.`;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -396,10 +450,11 @@ async function main() {
   console.log(`threshold   @container panel (max-width: 860px) — probing ${ABOVE}px and ${BELOW}px`);
 
   const live = await runMatrix(pw, FIXTURE);
-  printMatrix('WITH GENERATOR (the fixture as committed):', live);
-  assertLiveGenerator(live);
-  console.log(`\n  OK  the 860px generator is LIVE: ${TRUTHFUL_CELL.bucket}/user_opened is ` +
-    `none at ${ABOVE}px and "" at ${BELOW}px, and it is the ONLY cell that crosses.`);
+  printMatrix('THE SHIPPED CASCADE (the fixture as committed, all five rules):', live);
+  assertAbolished(live);
+  console.log(`\n  OK  THE SCRIM IS ABOLISHED: no bucket x user_opened cell paints at ${ABOVE}px ` +
+    `or ${BELOW}px. The 860px generator is unreachable code — SUPPRESSOR D (D175/D187) ` +
+    `took the last cell that crossed.`);
 
   const out = { fixture: FIXTURE, playwright: version, live };
 
@@ -411,20 +466,47 @@ async function main() {
     out.trap = trap;
 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'scrim-control-'));
-    const deletedPath = path.join(tmp, 'studio-scrim-threshold.no-generator.html');
     try {
-      const cut = writeGeneratorDeletedCopy(FIXTURE, deletedPath);
-      console.log(`\nSELF-TEST: deleted the fenced generator ` +
-        `(${cut.removedBytes} bytes, ${cut.srcBytes} -> ${cut.outBytes}) and re-ran the matrix.`);
-      const dead = await runMatrix(pw, deletedPath);
-      printMatrix('GENERATOR DELETED:', dead);
+      // ARM 1 — CAN THE PROBE SEE A SCRIM AT ALL? Delete SUPPRESSOR D and the
+      // one cell it abolished must light up. Without this arm, every dark cell
+      // in the shipped matrix above is indistinguishable from a broken probe.
+      const noDPath = path.join(tmp, 'studio-scrim-threshold.no-suppressor-d.html');
+      const cutD = writeFenceDeletedCopy(FIXTURE, noDPath, {
+        begin: SUPP_D_BEGIN, end: SUPP_D_END, what: 'SUPPRESSOR D',
+        mustContain: 'html[data-width-bucket="standard"]',
+      });
+      console.log(`\nSELF-TEST ARM 1: deleted the fenced SUPPRESSOR D ` +
+        `(${cutD.removedBytes} bytes, ${cutD.srcBytes} -> ${cutD.outBytes}) and re-ran the matrix.`);
+      const noD = await runMatrix(pw, noDPath);
+      printMatrix('SUPPRESSOR D DELETED:', noD);
+      assertLiveGenerator(noD);
+      const d1 = findCell(noD, TRUTHFUL_CELL);
+      const s1 = findCell(live, TRUTHFUL_CELL);
+      console.log(`\n  OK  THE PROBE CAN SEE A SCRIM. ${TRUTHFUL_CELL.bucket}/user_opened at ${BELOW}px: ` +
+        `${cell(s1.below)} as shipped, ${cell(d1.below)} with SUPPRESSOR D removed — so the ` +
+        `abolition above is a reading, not a blind spot.`);
+      out.no_suppressor_d = noD;
+      out.suppressor_d_deletion = cutD;
+
+      // ARM 2 — AND IT IS THE GENERATOR DOING IT. From that same D-less copy,
+      // delete the 860px generator too: the cell must go dark again. Run on the
+      // SHIPPED fixture this arm would pass for free, because every cell is
+      // already dark.
+      const noGenPath = path.join(tmp, 'studio-scrim-threshold.no-d-no-generator.html');
+      const cutG = writeFenceDeletedCopy(noDPath, noGenPath, {
+        begin: GEN_BEGIN, end: GEN_END, what: 'the 860px generator',
+        mustContain: '@container panel (max-width: 860px)',
+      });
+      console.log(`\nSELF-TEST ARM 2: from that same copy, deleted the fenced generator ` +
+        `(${cutG.removedBytes} bytes, ${cutG.srcBytes} -> ${cutG.outBytes}) and re-ran the matrix.`);
+      const dead = await runMatrix(pw, noGenPath);
+      printMatrix('SUPPRESSOR D AND GENERATOR BOTH DELETED:', dead);
       assertGeneratorDeletedGoesDark(dead);
-      const t = findCell(live, TRUTHFUL_CELL);
-      const d = findCell(dead, TRUTHFUL_CELL);
-      console.log(`\n  OK  THE CONTROL CAN FAIL. ${TRUTHFUL_CELL.bucket}/user_opened at ${BELOW}px: ` +
-        `${cell(t.below)} with the generator, ${cell(d.below)} without it.`);
+      const d2 = findCell(dead, TRUTHFUL_CELL);
+      console.log(`\n  OK  AND THE 860px GENERATOR IS WHAT PAINTS IT. ${TRUTHFUL_CELL.bucket}/user_opened ` +
+        `at ${BELOW}px: ${cell(d1.below)} with the generator, ${cell(d2.below)} without it.`);
       out.deleted = dead;
-      out.deletion = cut;
+      out.deletion = cutG;
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

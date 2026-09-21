@@ -8,13 +8,29 @@
   can force `.editor-panel` across the 860px container threshold and read the
   computed `::after` content without a deployed build, an ssh key, or a network.
 
-  THE FOUR RULES BELOW ARE COPIED VERBATIM from
+  THE FIVE RULES BELOW ARE COPIED VERBATIM from
   `api/lib/barkpark_web/layouts/root.html.heex` on origin/main:
 
-    - the GENERATOR   at :1389, inside `@container panel (max-width: 860px)`
-    - suppressor A    at :2029  (below-wide AND never-asked-for)
-    - suppressor B    at :2067  (wide, unconditional — charter D170)
-    - suppressor C    at :2141-2142 (the summoned destination at narrow/phone)
+    - the GENERATOR   inside `@container panel (max-width: 860px)`
+    - suppressor A    below-wide AND never-asked-for
+    - suppressor B    wide, unconditional — charter D170
+    - suppressor C    the summoned destination at narrow/phone
+    - suppressor D    standard + user-opened — charter D175/D187
+
+  THE COPY IS LOCKED by `scripts/studio-scrim-drift-check.mjs`, which extracts
+  these rules from root.html.heex BY SELECTOR and diffs them against this file.
+  Run it after any edit here, and never edit here without it.
+
+  LINE NUMBERS ARE DELIBERATELY ABSENT. This header used to cite :1389 / :2029 /
+  :2067 / :2141 and every one of them was wrong by 2026-09-21 — the generator had
+  moved to :1599 and suppressor A to :2336 — while suppressor D had landed at
+  :2484 and this fixture did not carry it AT ALL. A citation is documentation
+  that goes stale silently; the drift check is the thing that cannot.
+
+  WHAT SUPPRESSOR D DOES TO THIS CONTROL: it kills the standard/user-opened
+  cell, which was the ONLY cell that crossed the 860px threshold. With all five
+  rules present the scrim renders in NO shipped state — see the control's
+  header, which now asserts that abolition rather than a live generator.
 
   SOURCE ORDER IS PART OF THE CONTRACT. In root.html.heex the generator is at
   :1389 and every suppressor is at :2029 or later, so the suppressors win ties
@@ -50,7 +66,7 @@
 
       html, body { margin: 0; height: 100%; }
 
-      /* VERBATIM from root.html.heex:1829-1833 — this is what makes the
+      /* VERBATIM from root.html.heex — this is what makes the
          861/860 threshold a CONTAINER question rather than a viewport one.
          `position: relative` is what the scrim's `inset: 0` anchors to. */
       .editor-panel {
@@ -67,8 +83,8 @@
       .bp-doc-sidebar.is-collapsed { width: 44px; }
 
       /* ───────── SCRIM-GENERATOR-BEGIN ─────────
-         VERBATIM from root.html.heex:1388-1396 (the rule at :1389), inside the
-         `@container panel (max-width: 860px)` block opened at :1367. Deleting
+         VERBATIM from root.html.heex, inside its
+         `@container panel (max-width: 860px)` block. Deleting
          everything between these markers is how the control proves it can fail. */
       @container panel (max-width: 860px) {
         .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
@@ -82,14 +98,14 @@
       }
       /* ───────── SCRIM-GENERATOR-END ───────── */
 
-      /* SUPPRESSOR A — VERBATIM from root.html.heex:2029-2032.
+      /* SUPPRESSOR A — VERBATIM from root.html.heex.
          "below wide AND never asked for". */
       html:not([data-width-bucket="wide"])
         .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
         content: none;
       }
 
-      /* SUPPRESSOR B — VERBATIM from root.html.heex:2067-2070 (charter D170).
+      /* SUPPRESSOR B — VERBATIM from root.html.heex (charter D170).
          UNCONDITIONAL at wide: no `[data-user-opened]` qualifier. This is the
          rule that makes D170's own "verified at both 1280 and 1440" claim
          unrunnable — see the control script's VIEWPORT IS IRRELEVANT note. */
@@ -98,12 +114,28 @@
         content: none;
       }
 
-      /* SUPPRESSOR C — VERBATIM from root.html.heex:2141-2144.
+      /* SUPPRESSOR C — VERBATIM from root.html.heex.
          The summoned destination: an opaque inset:0 panel needs no scrim. */
       html[data-width-bucket="narrow"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after,
       html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
         content: none;
       }
+
+      /* ───────── SUPPRESSOR-D-BEGIN ─────────
+         SUPPRESSOR D — VERBATIM from root.html.heex (charter D175/D187, D127
+         harden). The standard bucket is RULED, not left to arithmetic: a 360px
+         .bp-secondary-pane can bring a standard pane under 860, and an
+         invariant can break where a suppressor cannot. It sits OUTSIDE the
+         860px @container on purpose.
+
+         THIS IS THE RULE THAT ABOLISHES THE LAST SCRIM. It suppresses exactly
+         the cell the control used to call TRUTHFUL_CELL, so the fenced region
+         below is what `--self-test` deletes to give the probe something to
+         SEE — proving it can read a scrim, not merely that it prints none. */
+      html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
+        content: none;
+      }
+      /* ───────── SUPPRESSOR-D-END ───────── */
     </style>
   </head>
   <body>
