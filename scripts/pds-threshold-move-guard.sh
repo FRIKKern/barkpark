@@ -329,8 +329,16 @@ main() {
     local dropped
     dropped="$(comm -23 <(roster_paths_of_text "$self_base" | sort -u) <(roster_paths | sort -u))"
     if [ -n "$dropped" ]; then
+      # DERIVED, not named by the filing: the roster-drop loop is the same shape
+      # as the literal sweep below it and the same hazard — `$unstated` is read
+      # off it, so a short read means a dropped path is never REFUSED and the
+      # guard passes the very PR that silenced it for that path.
+      local dropped_enumerated dropped_seen=0
+      dropped_enumerated="$(printf '%s' "$dropped" | grep -c . || true)"
       while IFS= read -r path; do
         [ -n "$path" ] || continue
+        # MUT-SPLICE: dropped-count-identity
+        dropped_seen=$((dropped_seen + 1))
         if drop_statement_for "$path"; then
           printf '  STATED-DROP  %s is no longer watched, and the body says why.\n' "$path"
         else
@@ -340,6 +348,14 @@ main() {
           unstated=$((unstated + 1))
         fi
       done <<< "$dropped"
+      # MUT-ANCHOR: dropped-count-identity
+      if [ "$dropped_seen" -ne "$dropped_enumerated" ]; then
+        printf 'pds-threshold-move-guard: SHORT DROP SWEEP — examined %s of %s dropped path(s).\n' "$dropped_seen" "$dropped_enumerated"
+        printf '  The roster-drop loop ended before its list did; a dropped path never reached is a\n'
+        printf '  silencing never refused, in the PR that does the silencing.\n'
+        exit 2
+      fi
+      # MUT-END: dropped-count-identity
     else
       printf '  roster-drop arm: no watched path was dropped between %s and %s.\n' "${base_sha:0:9}" "${head_sha:0:9}"
     fi

@@ -457,6 +457,71 @@ $OUT"
   fi
 else bad "17 inner-cut" "no MUT-ANCHOR block covering the key identity in $GUARD"; fi
 
+# ── 18-20. THE ROSTER-DROP LOOP'S COUNT IDENTITY (DERIVED, not filed) ────────
+# The filing named the literal sweep and its key loop. The roster-drop loop two
+# blocks above them is the SAME shape and the same hazard: `$unstated` is read
+# off it, so a short read means a dropped path is never REFUSED and the guard
+# passes the very PR that silenced it for that path. It is in the fence and it
+# is latent, so it is fixed here and said out loud rather than left for a
+# sibling row.
+#
+#   18 CONTROL  two paths dropped, ONE stated: STATED-DROP a, REFUSED-DROP b
+#   19 SHORT    a drained fd 0 refuses "examined 1 of 2 dropped path(s)", exit 2
+#   20 CUT      the same short read sees only the STATED drop and passes at
+#               exit 0 — the silencing of fixture/b, invisible
+DROPFX="$FX/scripts/pds-threshold-move-guard.sh"
+awk -F'\t' '
+  { print }
+  !ins && $1 ~ /^WATCHED=/ {
+    printf "fixture/a.baseline\tnumber\n"; printf "fixture/b.baseline\tnumber\n"; ins = 1
+  }
+' "$GUARD" > "$DROPFX"
+if ! grep -q '^fixture/b.baseline	number$' "$DROPFX"; then
+  bad "18-setup" "the two-row fixture guard copy was not built — arms 18-20 would measure nothing"
+fi
+chmod +x "$DROPFX"
+git -C "$FX" add -A && git -C "$FX" commit -qm "land the guard with TWO extra watched paths" >/dev/null 2>&1 || true
+BASE_DROP="$(git -C "$FX" rev-parse HEAD)"
+cp "$GUARD" "$DROPFX"; chmod +x "$DROPFX"
+git -C "$FX" add -A && git -C "$FX" commit -qm "drop TWO watched paths" >/dev/null 2>&1 || true
+
+DROP_BODY='drop two watched paths
+
+Threshold-watch-drop: fixture/a.baseline — the file was deleted from the tree and no check reads it as a reference value any more.'
+run_drop() { OUT="$(PR_BODY="$DROP_BODY" bash "$1" --base "$BASE_DROP" --head HEAD 2>&1)"; RC=$?; }
+
+run_drop "$DROPFX"
+if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'STATED-DROP  fixture/a.baseline' \
+   && printf '%s' "$OUT" | grep -q 'REFUSED-DROP fixture/b.baseline'; then
+  ok "18 CONTROL — two drops, one stated: a is STATED, b is REFUSED"
+else
+  bad "18 drop-control" "rc=$RC, want 1 with STATED-DROP a and REFUSED-DROP b. Output:
+$OUT"
+fi
+
+if mut_splice "$DROPFX" "$MUT/drop-short.sh" dropped-count-identity; then
+  run_drop "$MUT/drop-short.sh"
+  if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'SHORT DROP SWEEP — examined 1 of 2 dropped path(s)' \
+     && ! printf '%s' "$OUT" | grep -q 'REFUSED-DROP fixture/b.baseline'; then
+    ok "19 DROP SHORT — a drained fd 0 refuses naming both numbers (1 of 2), exit 2"
+  else
+    bad "19 drop-short" "rc=$RC, want 2 naming 'examined 1 of 2 dropped path(s)'. Output:
+$OUT"
+  fi
+else bad "19 drop-short" "no MUT-SPLICE marker for the roster-drop loop in $GUARD"; fi
+
+if mut_cut "$MUT/drop-short.sh" "$MUT/drop-short-nocount.sh" dropped-count-identity; then
+  run_drop "$MUT/drop-short-nocount.sh"
+  if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'STATED-DROP  fixture/a.baseline' \
+     && ! printf '%s' "$OUT" | grep -q 'fixture/b.baseline' \
+     && ! printf '%s' "$OUT" | grep -q 'SHORT DROP SWEEP'; then
+    ok "20 DROP CUT — without the identity the same short read never sees fixture/b's silencing and PASSES (the defect, reproduced)"
+  else
+    bad "20 drop-cut" "rc=$RC, want 0 with fixture/b never mentioned. Output:
+$OUT"
+  fi
+else bad "20 drop-cut" "no MUT-ANCHOR block for the roster-drop identity in $GUARD"; fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "pds-threshold-move-guard_test: PASS"
