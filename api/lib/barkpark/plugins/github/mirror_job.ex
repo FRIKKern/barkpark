@@ -17,14 +17,17 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   ## reconcile/2 — the convergence step
 
-    1. Load the task's CURRENT state DRAFT-FIRST (contract #2): `content.github`
-       bookkeeping is written to the DRAFT row by `Link.put`, so reading the
-       published perspective would miss `github.issue` and CREATE a duplicate
-       issue. Absent task → `{:cancel, :task_gone}`. Absent PUBLISHED row →
+    1. Load the task's CURRENT state DRAFT-FIRST (contract #2) — an in-flight
+       edit lives on the draft. That row is NOT the bookkeeping authority:
+       `Link.put` is PUBLISHED-FIRST (D12), so the link is resolved separately
+       by `resolve_link/4` (published row first, loaded doc as the fallback).
+       Reading `Link.get(load_task(…))` instead is the DUPLICATE-MINT bug — a
+       linkless draft twin makes every drain CREATE another issue.
+       Absent task → `{:cancel, :task_gone}`. Absent PUBLISHED row →
        the publish gate below: `{:cancel, :unpublished_closed}` when the task
        was previously mirrored (its issue is CLOSED first — the retraction),
        `{:cancel, :unpublished}` when it never was.
-    2. `Link.get/1`. A `state: "detached"` link → `{:cancel, :detached}`: the
+    2. `resolve_link/4` (see the fence note on it). A `state: "detached"` link → `{:cancel, :detached}`: the
        issue was deleted/transferred out-of-band and we NEVER recreate it (D7).
        A `state: "intake"` link → `{:cancel, :intake}` (D13, the PRE-ADOPTION
        MIRROR GATE): a born-dark inbound `gh-<num>` holds the outsider's issue
@@ -232,7 +235,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         {:cancel, :task_gone}
 
       %Document{} = task_doc ->
-        link = Link.get(task_doc)
+        link = resolve_link(doc_id, dataset, task_doc, opts)
 
         cond do
           detached?(link) ->
@@ -688,9 +691,13 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # Task load (draft-first — contract #2)
   # ---------------------------------------------------------------------------
 
-  # Read the task's CURRENT full state, DRAFT row first: `Link.put` writes the
-  # `content.github` bookkeeping to the draft, so the published perspective
-  # would miss `github.issue` and re-CREATE the issue. `doc_id` is normalised to
+  # Read the task's CURRENT full state, DRAFT row first: an in-flight edit lives
+  # on the draft, and the projection must mirror what the ledger now says.
+  #
+  # This row is NOT the bookkeeping authority. `Link.put/4` is PUBLISHED-FIRST
+  # (D12), so `content.github` may live on a row this load never returns — read
+  # the link through `resolve_link/4`, never `Link.get(load_task(...))`, or the
+  # linkless-twin duplicate mint comes straight back. `doc_id` is normalised to
   # its published form so the projection's `Task: <doc_id>` trailer and title
   # fallback never carry the `drafts.` prefix (a draft row stores the prefixed id).
   defp load_task(doc_id, dataset, opts) do
@@ -729,6 +736,33 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # draft-first for bookkeeping, so its result cannot answer this. A draft-only
   # task returns false and the reconcile cancels `:unpublished` before any
   # GitHub write.
+  # THE DUPLICATE-MINT FENCE. Read the link from the row `Link.put/4` WRITES it
+  # to, never from whichever row `load_task/3` happened to return.
+  #
+  # The two disagreed. `load_task/3` is DRAFT-FIRST (contract #2). `Link.put/4`
+  # has been PUBLISHED-FIRST since D12, and `report_draft_twin/3` deliberately
+  # leaves a draft twin UNTOUCHED (it only names it). So on a task carrying BOTH
+  # a published row and a twin forked before its first mirror, the stamp landed
+  # on the published row while every later reconcile loaded the LINKLESS twin,
+  # saw `issue_number(link) == nil`, and took `converge/5`'s CREATE branch —
+  # minting a fresh issue on EVERY drain, for as long as the twin lives. That is
+  # the runaway shape behind the live census: 151 doc_ids / 1292 open issues,
+  # worst row 159 issues (task-19d507b3b6f99ae7; the 59-seconds-apart specimen
+  # in task-134cd7207a338429 is two drains of this same path, not a race).
+  #
+  # INVARIANT: the reconcile never CREATEs while ANY row of the task already
+  # carries `content.github.issue`. Published row wins (it is the stamp target);
+  # the loaded doc answers only when the published row knows nothing — a
+  # never-published task, whose stamp goes to the draft. A link found on either
+  # row routes to `update/9`, which is idempotent, so the fallback can only ever
+  # turn a CREATE into a PATCH — never the reverse.
+  defp resolve_link(doc_id, dataset, task_doc, opts) do
+    case Content.get_document(Content.published_id(doc_id), @task_type, dataset, opts) do
+      {:ok, %Document{} = published} -> Link.get(published) || Link.get(task_doc)
+      _ -> Link.get(task_doc)
+    end
+  end
+
   defp published?(doc_id, dataset, opts) do
     case Content.get_document(Content.published_id(doc_id), @task_type, dataset, opts) do
       {:ok, %Document{}} -> true

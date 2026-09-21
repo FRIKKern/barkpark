@@ -466,7 +466,11 @@ const ALLOW_PREFIXES = [
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
   // gr-w1 (cloud GUI remake): dynamic sites whose composed classes all have
   // rules in app.css today — verified via `.<family>` grep before allowing.
-  "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
+  // cch-r21l: `"inst-life-pill "` stood here and is REMOVED with the family. The
+  // instance lifecycle chip now composes `status-pill status-pill--` like every
+  // other state affordance (LIFECYCLE_PILL_ROLE -> statusMetaPill), so it is
+  // covered by that entry above — and E19 would red on this one anyway the
+  // moment the last emitting site went, which is the durable half of the removal.
   "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
   "notice",                     // fleetRolloutBannerHtml(): + NOTICE_TONE_CLASS[tone] (.notice / .notice-ok|warn|error)
   "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
@@ -564,7 +568,17 @@ const STATUS_PILL_ROLES = ["ok", "info", "warn", "danger", "neutral"];
 // lives. Returns null when the table cannot be located or brace-matched — an
 // empty scan is not a clean scan, so arm (a) makes that a hard error.
 function deployStatusMetaTable(js) {
-  const start = js.indexOf("var DEPLOY_STATUS_META = {");
+  return roleTableOf(js, "DEPLOY_STATUS_META");
+}
+
+// The same brace-matched read, for any `var <NAME> = { key: {role,variant}, … }`
+// role table in app.js. cch-r21l added LIFECYCLE_PILL_ROLE as a second such
+// table (the instance lifecycle chip's absorption into the .status-pill family),
+// and a SECOND hand-rolled parser is a second thing to keep in step — so the
+// deploy reader above is expressed through this one rather than beside it.
+function roleTableOf(js, name) {
+  if (js == null) return null;
+  const start = js.indexOf(`var ${name} = {`);
   if (start === -1) return null;
   let i = js.indexOf("{", start);
   if (i === -1) return null;
@@ -577,14 +591,34 @@ function deployStatusMetaTable(js) {
   if (depth !== 0) return null;
   const body = js.slice(open + 1, i);
   const table = new Map();
-  for (const m of body.matchAll(
-    /([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g,
-  )) {
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:\s*\{([^{}]*)\}/g)) {
     const role = /\brole\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
     const variant = /\bvariant\s*:\s*"([a-z][a-z0-9-]*)"/.exec(m[2]);
     table.set(m[1], { role: role ? role[1] : null, variant: variant ? variant[1] : null });
   }
   return table.size === 0 ? null : table;
+}
+
+// The KEY SET of a flat `var <NAME> = { key: "…", … }` object in app.js. Used by
+// E13 arm (g) to hold LIFECYCLE_PILL_ROLE's domain against LIFECYCLE_PILL_LABEL's,
+// so a sixth lifecycle state cannot arrive with a label and no role (which would
+// fall the chip through to a bare neutral pill — the impersonation shape).
+function flatObjectKeys(js, name) {
+  if (js == null) return null;
+  const start = js.indexOf(`var ${name} = {`);
+  if (start === -1) return null;
+  let i = js.indexOf("{", start);
+  const open = i;
+  let depth = 0;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open + 1, i);
+  const keys = new Set();
+  for (const m of body.matchAll(/([a-z][a-z0-9_]*)\s*:/g)) keys.add(m[1]);
+  return keys.size === 0 ? null : keys;
 }
 
 // The `wh-del-status--` VALUE SPACE, mirroring DEPLOY_STATUSES above and checked
@@ -2979,6 +3013,102 @@ function statusMetaPillBody(src) {
         );
       }
     }
+
+    // cch-r21l — THE SAME PREDICATE, WIDENED TO THE SECOND ABSORBED FAMILY.
+    // Arm (f) above measures the SURVIVING family's literals; `.inst-life-pill`
+    // was a THIRD grammar for a state the ladder already paints (the fleet row
+    // renders the same lifecycle state through statusMetaPill), so absorbing it
+    // without a checked predicate would just re-run the decision-24 mistake —
+    // the sentence "there is one state grammar" with nothing measuring it.
+    //
+    // TWO WAYS IT CAN COME BACK, both refused BY NAME:
+    //   · a class LITERAL in app.js (the hand-built span in the pure render), or
+    //   · a RULE in app.css (comment-stripped, so the tombstone that names the
+    //     dead classes is not itself a revival).
+    // The third way — the imperative `className = "inst-life-pill " + …` repaint
+    // in the decommission handler — is caught by the literal scan too, because
+    // the class name is spelled in a quoted string either way. That site is
+    // exactly the one no class-attribute scan could ever see, which is why the
+    // regex below is keyed on the NAME and not on the attribute.
+    const ABSORBED = ["inst-life-pill", "inst-life-dot", "inst-life-label"];
+    const revivedCss = ABSORBED.filter((c) => cssClasses.has(c)).sort();
+    if (revivedCss.length) {
+      errors.push(
+        `E13 app.css  the RETIRED .inst-life-pill chip family is back: ${revivedCss
+          .map((c) => "." + c)
+          .join(", ")}. The instance lifecycle chip is .status-pill + a ` +
+          `LIFECYCLE_PILL_ROLE role since cch-r21l; a second family painting the ` +
+          `same state is the regression this arm exists to catch, not a styling ` +
+          `choice.`,
+      );
+    }
+    for (const [file, src] of [["app.js", jsRaw], ["styleguide.html", styleguideRaw]]) {
+      if (src == null) continue;
+      const back = ABSORBED.filter((c) => new RegExp(`["'][^"'\n]*\\b${c}\\b`).test(src)).sort();
+      if (!back.length) continue;
+      errors.push(
+        `E13 ${file}  emits a \`${back.join("\`, \`")}\` class literal — the ` +
+          `.inst-life-pill chip family is retired. Render the chip through ` +
+          `lifecycleStatePillHtml(state), which delegates to statusMetaPill, so ` +
+          `there stays exactly one state grammar and exactly one author for it.`,
+      );
+    }
+  }
+
+  // (g) THE ABSORBED FAMILY'S ROLE TABLE IS TOTAL AND PAINTED. Same shape as
+  //     arms (b)/(c)/(d) above, one surface over: LIFECYCLE_PILL_ROLE must cover
+  //     every state LIFECYCLE_PILL_LABEL declares, name only closed roles, and
+  //     every role/variant it names must have a .status-pill--* rule. A state
+  //     with a label and no role falls through to a bare neutral chip — the
+  //     impersonation shape that made `.dep-cancelled` read as `queued`.
+  {
+    const roleTable = roleTableOf(jsRaw, "LIFECYCLE_PILL_ROLE");
+    const labelKeys = flatObjectKeys(jsRaw, "LIFECYCLE_PILL_LABEL");
+    if (roleTable === null || labelKeys === null) {
+      errors.push(
+        "E13 app.js  LIFECYCLE_PILL_ROLE and/or LIFECYCLE_PILL_LABEL could not be " +
+          "located or parsed — this arm reads both, so a rename or a rewrite must " +
+          "come with an update to roleTableOf()/flatObjectKeys() here, never a " +
+          "silently skipped check.",
+      );
+    } else {
+      const roles = new Set(STATUS_PILL_ROLES);
+      for (const st of [...labelKeys].sort()) {
+        if (roleTable.has(st)) continue;
+        errors.push(
+          `E13 app.js  lifecycle state "${st}" has a LIFECYCLE_PILL_LABEL entry but ` +
+            `no LIFECYCLE_PILL_ROLE entry — lifecycleStatePillHtml() falls it through ` +
+            `to the neutral role with no variant, so a ${st} box would wear the same ` +
+            `chip as one nobody has classified. Add the role beside the others.`,
+        );
+      }
+      for (const [st, m] of roleTable) {
+        if (!labelKeys.has(st)) {
+          errors.push(
+            `E13 app.js  LIFECYCLE_PILL_ROLE["${st}"] names a state LIFECYCLE_PILL_LABEL ` +
+              `does not declare — the chip would render the literal word "Unknown" in a ` +
+              `${m.role || "?"}-coloured pill. Give it a label or drop the role.`,
+          );
+          continue;
+        }
+        if (m.role === null || !roles.has(m.role)) {
+          errors.push(
+            `E13 app.js  LIFECYCLE_PILL_ROLE["${st}"] names role "${m.role}", which is ` +
+              `not one of the closed five (${STATUS_PILL_ROLES.join(" | ")}).`,
+          );
+        }
+        for (const [kind, name] of [["role", m.role], ["variant", m.variant]]) {
+          if (!name) continue;
+          if (kind === "role" && !roles.has(name)) continue;
+          if (cssClasses.has(`status-pill--${name}`)) continue;
+          errors.push(
+            `E13 app.css  LIFECYCLE_PILL_ROLE["${st}"] names ${kind} "${name}" but there ` +
+              `is no .status-pill--${name} rule — the class rides into the DOM and ` +
+              `paints as the bare base pill.`,
+          );
+        }
+      }
+    }
   }
 }
 
@@ -3228,6 +3358,100 @@ function statusMetaPillBody(src) {
         `unemitted head can never fail, so it reads as live consent forever and pre-exempts ` +
         `the family if the name returns. Delete the entry; re-add it with the emission.`,
     );
+  }
+}
+
+// E21 — THE GR57 FIXED-BLUE INVARIANT, held in BOTH directions.
+//
+// WHY THIS EXISTS. `--info` (= `--cc-blue`) is the console's deliberately
+// accent-INDEPENDENT blue: GR57 rules that `.btn-link` colours itself
+// `var(--primary)`, which IS the user-selectable accent (redefined in ten
+// `[data-bp-theme]` blocks across five identities), so the design's fixed-blue
+// links would render terracotta under ember and orchid under charple. GR57's
+// words: "Ship a scoped variant, never repurpose `--primary`."
+//
+// That invariant has now been mis-read TWICE by a five-accent screenshot matrix
+// as a bug — "a fixed blue that ignores the accent on 11 screens" — because a
+// reviewer looking at pixels cannot see a ruling that lives in a charter. The
+// charter itself records the first retraction (gr-p5r7-reshoot-verify: "its
+// builder nearly reported a defect that GR57 documents as deliberate"). A
+// written finding does not fire by itself; this arm is the finding made
+// mechanical, so the THIRD reviewer meets a gate with the reason in it.
+//
+// THREE ARMS, and the first is a precondition because a guard that can go
+// vacuous is not a guard:
+//   (a) `--cc-blue` must be declared exactly twice — once in `:root`, once in
+//       `[data-theme="dark"]`. Zero declarations means the token was renamed
+//       and arms (b)/(c) would pass having measured nothing.
+//   (b) NO CONSUMER RULE reads the ramp token. Consumers read the ROLE token
+//       `--info`; the only permitted `var(--cc-blue)` references are the two
+//       `--info:` alias declarations themselves. A ramp token with consumers is
+//       a second front door: retune `--info` and those rules do not follow.
+//       (gr-r21m-defect-jk found two — `.trial-chip`, `.billing-chip--trial`.)
+//   (c) NO `[data-bp-theme]` BLOCK may declare `--info`, `--info-hsl` or
+//       `--cc-blue`. This is the direction GR57 actually cares about, and it is
+//       unguarded today: an identity block could quietly accent-ify the blue and
+//       every fixed-blue link in the product would fan per theme with no test
+//       anywhere noticing.
+//
+// MEASURED, so the next reader does not over-trust arm (c): its `--cc-blue`
+// comparand is SUBSUMED by arm (a). Inserting `--cc-blue: #c46a2a` into the
+// ember block reds as "found 3" from (a) — (a) counts declarations file-wide and
+// runs first — so (c) never sees it. (c) was mutation-proven on the two
+// comparands that ARE only its own: `--info:` and `--info-hsl:` in the ember
+// block each red on the `html[data-bp-theme="ember"]` selector with (a) silent. `--cc-blue` is kept in (c)'s
+// list anyway: it costs nothing and it survives the day (a) is re-pointed.
+{
+  const declRe = /--cc-blue\s*:/g;
+  const declCount = (css.match(declRe) || []).length;
+  if (declCount !== 2) {
+    errors.push(
+      `E21 app.css  expected exactly 2 \`--cc-blue:\` declarations (:root + [data-theme="dark"]) ` +
+        `but found ${declCount}. The token was renamed, deleted or duplicated, so arms (b) and (c) ` +
+        `below would pass having measured NOTHING. Re-point this arm at whatever replaced it, or ` +
+        `delete E21 and say in the same commit that GR57's fixed blue is gone.`,
+    );
+  } else {
+    // (b) every var(--cc-blue) must sit on a line whose own declaration is the
+    //     `--info:` alias. Line-scoped, so a consumer rule can never hide behind
+    //     an alias elsewhere in the file.
+    for (const [i, line] of css.split("\n").entries()) {
+      if (!/var\(--cc-blue\)/.test(line)) continue;
+      if (/--info\s*:\s*var\(--cc-blue\)/.test(line)) continue;
+      errors.push(
+        `E21 app.css:${i + 1}  a rule reads the RAMP token \`var(--cc-blue)\` directly: ` +
+          `${line.trim()}\n      Consumers read the ROLE token \`var(--info)\` — which is what this ` +
+          `rule's own background/border tints already use. Reaching past the role is a second front ` +
+          `door: retune --info for contrast and this rule silently does not follow.`,
+      );
+    }
+    // (c) GR57's own invariant: the identity blocks must not touch the blue.
+    const themeBlockRe = /(html)?\s*\[data-bp-theme=[^\]]*\][^{]*\{([^}]*)\}/g;
+    let m, themeBlocks = 0;
+    while ((m = themeBlockRe.exec(css)) !== null) {
+      themeBlocks += 1;
+      const body = m[2];
+      for (const tok of ["--cc-blue", "--info-hsl", "--info"]) {
+        const re = new RegExp("(^|[^-\\w])" + tok + "\\s*:");
+        if (!re.test(body)) continue;
+        errors.push(
+          `E21 app.css:${lineOf(css, m.index)}  the identity block \`${m[0].slice(0, m[0].indexOf("{")).trim()}\` ` +
+            `declares \`${tok}\`. GR57 makes --info/--cc-blue the ACCENT-INDEPENDENT blue precisely ` +
+            `because it is declared only in :root and [data-theme="dark"]: the design's fixed-blue links ` +
+            `("Change password", "Copy", "Show all N") must read the same under all five identities. ` +
+            `An override here fans every one of them per accent with nothing else in the tree noticing. ` +
+            `If the fixed blue is being retired, retire GR57 and this arm in the same commit.`,
+        );
+        break;
+      }
+    }
+    if (themeBlocks < 10) {
+      errors.push(
+        `E21 app.css  arm (c) found only ${themeBlocks} [data-bp-theme] block(s); the five identities ` +
+          `declare ten (light + dark each). A short scan means the block regex stopped matching, so ` +
+          `"no identity overrides the blue" would be a statement about blocks this run never read.`,
+      );
+    }
   }
 }
 

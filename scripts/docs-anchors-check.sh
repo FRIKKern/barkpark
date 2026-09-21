@@ -71,6 +71,11 @@
 #   proving each blocking check still reds on its own planted violation.
 #   Unknown argument => exit 2 (distinct from a gate failure, exit 1).
 #
+# Exit codes: 0 pass · 1 the tree is dirty (a real finding) · 2 usage · 3 CANNOT
+#   MEASURE — an fd-0 loop walked fewer items than its enumeration handed it, so
+#   this run's verdicts are a truncated sample and are withheld rather than
+#   printed. 3 is deliberately NOT 1: the instrument broke, not the corpus.
+#
 # bash 3.2 compatible: no associative arrays, no mapfile.
 
 set -euo pipefail
@@ -145,6 +150,9 @@ st_case() {
   # shell, so an arm that supplies its own pin (`export CANON_PIN=...`) would
   # otherwise judge every later arm against it too.
   unset CANON_PIN
+  # Same reasoning for the fd-0 drain probe: an arm that arms it must not leave
+  # it armed for every arm after it.
+  unset DOCS_ANCHORS_FD0_DRAIN
   # shellcheck disable=SC2034  # $FIX is consumed by the eval'd mutation snippet
   FIX="$fix"; eval "$mutate"
   set +e
@@ -425,6 +433,96 @@ CASEE'
     st_auth_fixture "$FIX"
     rm -f "$FIX/api/lib/barkpark_web/router.ex"'
 
+
+  # --- fd-0 COUNT IDENTITY (task-7c3784a147944add) ---------------------------
+  # Each pair below is a CONTROL and a MUTATION over the SAME fixture. The
+  # control is the whole point: the mutation arms all exit 3, and an exit 3 is
+  # only attributable to the planted drain if the identical tree WITHOUT it
+  # exits 0 and prints no refusal. Without the control, an identity that refused
+  # unconditionally would score exactly the same green.
+  #
+  # The mutation is a real stdin-draining child (`cat >/dev/null`, armed by
+  # DOCS_ANCHORS_FD0_DRAIN) placed at the top of the loop body — the exact
+  # hazard, not a simulation of it: fd 0 is shared, the child eats the rest of
+  # the list, the loop ends after ONE pass with no error. Every arm therefore
+  # needs a fixture holding at least TWO items for that loop, or a drain on
+  # iteration 1 leaves nothing to lose and the identity is correctly silent.
+
+  # §3 — the sharpest of the seven: its "checked N anchor line(s)" line was
+  # computed from the ENUMERATION, so a loop that walked 1 of 2 still printed 2.
+  st_case "§3 CONTROL: two anchor lines, no drain, identity silent" 0 "§3 checked 2 anchor line(s) across 1 card(s)" '
+    printf -- "- api/lib/x.ex — def real_symbol\n" >> "$FIX/docs/cards/a.md"'
+  st_case "§3 MUTATION: a stdin-draining child in the loop body refuses, naming both numbers" 3 "§3 card Code anchors (docs/cards/a.md) — the enumeration handed 2 item(s) but the loop walked 1." '
+    printf -- "- api/lib/x.ex — def real_symbol\n" >> "$FIX/docs/cards/a.md"
+    export DOCS_ANCHORS_FD0_DRAIN=3'
+
+  # §3b — non-card docs carrying a '"'"'## Code anchors'"'"' section.
+  st_nc_anchor_fixture() {
+    printf -- "%s\n" \
+      "<!-- doc-tier: agent | canonical-for: fixture-nc | budget: 100tok -->" \
+      "# NC" "" "## Code anchors" "" \
+      "- api/lib/x.ex — one" "- CLAUDE.md — two" > "$1/docs/nc.md"
+  }
+  st_case "§3b CONTROL: two non-card anchor lines, no drain" 0 "docs/nc.md -> CLAUDE.md" '
+    st_nc_anchor_fixture "$FIX"'
+  st_case "§3b MUTATION: drained loop refuses" 3 "§3b non-card Code anchors (docs/nc.md) — the enumeration handed 2 item(s) but the loop walked 1." '
+    st_nc_anchor_fixture "$FIX"
+    export DOCS_ANCHORS_FD0_DRAIN=3b'
+
+  # §3c — cross-doc .md links. docs/INDEX.md carries no links in the base
+  # fixture, so both arms plant the same two.
+  st_links_fixture() {
+    printf -- "%s\n" \
+      "<!-- doc-tier: agent | canonical-for: fixture-links | budget: 100tok -->" \
+      "# Links" "" "[a](cards/a.md) and [i](INDEX.md)" > "$1/docs/links.md"
+  }
+  st_case "§3c CONTROL: two resolvable links, no drain" 0 "docs-anchors-check: PASS" '
+    st_links_fixture "$FIX"'
+  st_case "§3c MUTATION: drained loop refuses" 3 "§3c cross-doc .md links (docs/links.md) — the enumeration handed 2 item(s) but the loop walked 1." '
+    st_links_fixture "$FIX"
+    export DOCS_ANCHORS_FD0_DRAIN=3c'
+
+  # §5 — the loop lives inside a command substitution; the control proves the
+  # iteration marker file actually crosses that subshell boundary (a broken
+  # carry would read as 0 iterations and refuse on the CONTROL too).
+  st_case "§5 CONTROL: whole-repo header walk, no drain" 0 "all canonical-for values unique" ':'
+  st_case "§5 MUTATION: drained loop refuses across the subshell" 3 "§5 canonical-for uniqueness — the enumeration handed 3 item(s) but the loop walked 1." '
+    export DOCS_ANCHORS_FD0_DRAIN=5'
+
+  # §6 — skipped entirely unless _attic/docs-2026-06 exists, so both arms build it.
+  st_attic_fixture() {
+    mkdir -p "$1/_attic/docs-2026-06"
+    printf "ARCHIVED — do not load\n" > "$1/_attic/docs-2026-06/one.md"
+    printf "ARCHIVED — do not load\n" > "$1/_attic/docs-2026-06/two.md"
+  }
+  st_case "§6 CONTROL: two archived docs, no drain" 0 "banner _attic/docs-2026-06/two.md" '
+    st_attic_fixture "$FIX"'
+  st_case "§6 MUTATION: drained loop refuses" 3 "§6 ARCHIVED banners (_attic/docs-2026-06) — the enumeration handed 2 item(s) but the loop walked 1." '
+    st_attic_fixture "$FIX"
+    export DOCS_ANCHORS_FD0_DRAIN=6'
+
+  # §8 — same subshell shape as §5, and the count rides out on the COUNTS line.
+  st_canon_fixture() {
+    printf -- "%s\n" \
+      "defmodule Fixture.Y do" \
+      "  # @canonical capability:fixture-cap-one" \
+      "  def cap_one, do: :ok" \
+      "  # @canonical capability:fixture-cap-two" \
+      "  def cap_two, do: :ok" \
+      "end" > "$1/api/lib/y.ex"
+  }
+  st_case "§8 CONTROL: two markers, no drain, both scanned" 0 "§8 scanned 2 @canonical marker(s)" '
+    st_canon_fixture "$FIX"'
+  st_case "§8 MUTATION: drained loop refuses before the scanned-count line" 3 "§8 @canonical capability markers — the enumeration handed 2 item(s) but the loop walked 1." '
+    st_canon_fixture "$FIX"
+    export DOCS_ANCHORS_FD0_DRAIN=8'
+
+  # §12 — COLD_N shrinks WITH the truncation, so the section could never have
+  # noticed this on its own; the identity is the only witness.
+  st_case "§12 CONTROL: whole-repo cold-doc walk, no drain" 0 "§12 scanned 0 cold doc(s)" ':'
+  st_case "§12 MUTATION: drained loop refuses" 3 "§12 cold docs carrying runnable commands — the enumeration handed 3 item(s) but the loop walked 1." '
+    export DOCS_ANCHORS_FD0_DRAIN=12'
+
   echo ""
   if [ "$ST_FAIL" -ne 0 ]; then
     echo "docs-anchors-check --selftest: FAILED"
@@ -454,6 +552,50 @@ WARN=0
 
 fail() { echo "FAIL: $*"; FAIL=1; }
 warn() { echo "WARN: $*"; WARN=$((WARN + 1)); }
+
+# --- fd-0 COUNT IDENTITY (task-7c3784a147944add) -----------------------------
+# Seven loops in this file read their work list from fd 0 and spawn children in
+# the body. fd 0 is SHARED with every one of those children: a child that reads
+# stdin eats the rest of the list, the loop then ends early with no error, and
+# every section here reports per-item verdicts — so a truncated walk does not
+# print FEWER violations, it prints ZERO, and the gate exits 0. There is no
+# floor on any of the seven; §3 is worse still, because its non-vacuity line
+# ("§3 checked N anchor line(s)") is computed from the ENUMERATION, so a loop
+# that walked 1 of 47 still advertises 47 and the sample-size assertion added to
+# make the section trustworthy is the exact line that lies.
+#
+# The remedy is one identity per loop: count what the enumeration handed over,
+# count what the loop actually walked, and REFUSE naming BOTH numbers before any
+# ok:/FAIL: line of that section prints. A truncated tally is not a smaller true
+# answer, it is a wrong one — printing it first would put the false number in the
+# log above the refusal. Same shape as scripts/task-lease-sweep.sh and
+# scripts/pds-secret-scan.sh:338.
+#
+# EXIT 3, distinct from both 1 (a real gate failure: the tree is dirty) and 2 (a
+# usage error). "I could not measure this tree" is a third thing, and collapsing
+# it into 1 would let a reader debug the corpus when the instrument is what
+# broke.
+#
+# Counted with `awk 'END{print NR+0}'`, never `wc -l`: wc counts NEWLINES, so a
+# final line with no trailing newline is invisible to it while the loop still
+# walks it — the identity would then refuse a complete walk.
+fd0_identity() {
+  # $1 = site label, $2 = what the enumeration handed over, $3 = iterations
+  [ "$2" = "$3" ] && return 0
+  echo "CANNOT MEASURE: $1 — the enumeration handed $2 item(s) but the loop walked $3. Something drained the loop's stdin (fd 0 is shared with every child in the body) or the list changed under it. The verdicts for this section would be a wrong number, not a smaller one, so they are not printed." >&2
+  exit 3
+}
+
+# TEST-ONLY. `DOCS_ANCHORS_FD0_DRAIN=<site>` plants a real stdin-draining child
+# in that loop's body, which is the only way --selftest can show an identity
+# FIRING rather than merely present. Nothing arms it in CI or in a normal run:
+# unset, every call returns before spawning anything. A control arm that can
+# still fire is worth more than a `</dev/null` belt that makes the identity
+# untestable (scripts/task-lease-sweep.sh reasons the same way).
+fd0_drain_probe() {
+  [ "${DOCS_ANCHORS_FD0_DRAIN:-}" = "$1" ] || return 0
+  cat >/dev/null
+}
 
 # --- generated / scratch trees: PRUNE at the walk, not after it (D18) --------
 # §5, §7 and §8 walk the whole repo. On a clean CI checkout that is cheap; on a
@@ -557,20 +699,30 @@ for card in docs/cards/*.md; do
     continue
   fi
   CARDS_WITH_ANCHORS=$((CARDS_WITH_ANCHORS + 1))
-  # How many anchor lines the parser will actually SEE. Counted here, in the
-  # parent shell, because the `while` below reads from a pipe and runs in a
-  # subshell whose counters cannot escape. `grep -c .` prints 0 and exits 1 on
-  # no match, so `|| true` keeps the substitution alive under `set -e` while
-  # stdout stays a single integer.
-  card_anchor_lines=$(awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$card" | grep -c . || true)
+  # How many anchor lines the parser will actually SEE — enumerated ONCE, into a
+  # file, and that same file is what the loop below reads. Before this, the count
+  # came from one awk run and the loop from a second, independent one; the two
+  # numbers could disagree and nothing noticed, which is precisely how "§3
+  # checked 47" could sit above a loop that walked 1. One enumeration, two
+  # readers, one identity.
+  #
+  # The loop no longer hangs off a pipe either (`done < "$card_enum"`), so its
+  # iteration counter lives in THIS shell and can be compared — the comment that
+  # used to sit here explained why a subshell made that impossible, and the fix
+  # was to stop using the subshell.
+  card_enum=/tmp/anchors-enum.$$
+  awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$card" > "$card_enum"
+  card_anchor_lines=$(awk 'END{print NR+0}' "$card_enum")
   if [ "$card_anchor_lines" -eq 0 ]; then
     fail "$card has a '## Code anchors' section but ZERO parseable anchor lines under it (expected \`- <path> — <description>\` bullets). An empty section is not a card with nothing to anchor: it is a card this gate cannot check, and it passes silently."
     continue
   fi
   ANCHOR_LINES_TOTAL=$((ANCHOR_LINES_TOTAL + card_anchor_lines))
   # anchor lines: "- <path> — <description with optional func/def/defmodule symbols>"
-  awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$card" |
+  card_iters=0
   while IFS= read -r line; do
+    card_iters=$((card_iters + 1))
+    fd0_drain_probe 3
     apath=$(printf '%s\n' "$line" | sed -E 's/^- ([^ ]+) —.*/\1/')
     if [ -z "$apath" ] || [ "$apath" = "$line" ]; then
       echo "FAIL: $card anchor line not parseable: $line"
@@ -608,14 +760,19 @@ for card in docs/cards/*.md; do
         echo "FAIL: $card anchor symbol '$sym' not found in $apath (pattern: $symbol_pat_desc)"
       fi
     done
-  done > /tmp/anchors-out.$$ || true
+  done < "$card_enum" > /tmp/anchors-out.$$ || true
+  # BEFORE the cat: a short walk means the verdicts below are a truncated sample.
+  fd0_identity "§3 card Code anchors ($card)" "$card_anchor_lines" "$card_iters"
+  rm -f "$card_enum"
   cat /tmp/anchors-out.$$
   if grep -q '^FAIL:' /tmp/anchors-out.$$; then FAIL=1; fi
   rm -f /tmp/anchors-out.$$
 done
 
-# The sample size, out loud AND asserted. A green §3 that cannot say how many
-# anchors it read is indistinguishable from a §3 that read none.
+# The sample size, out loud AND asserted — and now EARNED: the per-card identity
+# above proves the loop walked every line summed into this total, so the number
+# printed here is the number checked. Previously it was only the number
+# enumerated.
 echo "ok:   §3 checked $ANCHOR_LINES_TOTAL anchor line(s) across $CARDS_WITH_ANCHORS card(s)"
 if [ "$CARDS_WITH_ANCHORS" -gt 0 ] && [ "$ANCHOR_LINES_TOTAL" -eq 0 ]; then
   fail "§3 found $CARDS_WITH_ANCHORS card(s) with a '## Code anchors' section and NOT ONE anchor line among them — the anchor parser is blind, not the corpus clean."
@@ -638,8 +795,17 @@ if [ -z "$NONCARD_ANCHOR_DOCS" ]; then
   echo "ok:   no non-card docs carry a '## Code anchors' section"
 fi
 for doc in $NONCARD_ANCHOR_DOCS; do
-  awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$doc" |
+  nc_enum=/tmp/nc-anchors-enum.$$
+  awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$doc" > "$nc_enum"
+  nc_enum_n=$(awk 'END{print NR+0}' "$nc_enum")
+  nc_iters=0
   while IFS= read -r line; do
+    # Counted at the TOP of the body, above the prose-bullet `continue`: the
+    # identity asks whether the loop RECEIVED every line, not whether it acted
+    # on it. Counting after the skip would make a drained list and a list of
+    # prose bullets read identically.
+    nc_iters=$((nc_iters + 1))
+    fd0_drain_probe 3b
     apath=$(printf '%s\n' "$line" | sed -E 's/^- *`?([A-Za-z0-9_./-]+)`? *—.*/\1/' | sed 's#/$##')
     case "$apath" in ""|"-"|*" "*) continue ;; esac   # no " —" anchor → prose bullet, skip
     if [ -e "$apath" ]; then
@@ -647,7 +813,9 @@ for doc in $NONCARD_ANCHOR_DOCS; do
     else
       echo "FAIL: $doc Code-anchor path does not exist: $apath (stale reference — repoint or remove)"
     fi
-  done > /tmp/nc-anchors.$$ || true
+  done < "$nc_enum" > /tmp/nc-anchors.$$ || true
+  fd0_identity "§3b non-card Code anchors ($doc)" "$nc_enum_n" "$nc_iters"
+  rm -f "$nc_enum"
   cat /tmp/nc-anchors.$$
   if grep -q '^FAIL:' /tmp/nc-anchors.$$; then FAIL=1; fi
   rm -f /tmp/nc-anchors.$$
@@ -671,16 +839,28 @@ LINK_DOCS=$(
 )
 for doc in $LINK_DOCS; do
   dir=$(dirname "$doc")
+  # The two greps used to be the head of a pipe, so the loop ran in a subshell.
+  # Landing them in a file keeps the loop in THIS shell and gives the identity a
+  # countable enumeration; `|| true` because a doc with no links at all is a
+  # legitimate state and the group would otherwise exit 1 under `set -e`.
+  dl_enum=/tmp/doclinks-enum.$$
   {
     grep -oE '\]\([^) ]+\)' "$doc" 2>/dev/null | sed -E 's/^\]\(//; s/\)$//'
     grep -oE '^\[[^]]+\]:[[:space:]]+[^[:space:]]+' "$doc" 2>/dev/null | sed -E 's/^\[[^]]+\]:[[:space:]]+//'
-  } | while IFS= read -r raw; do
+  } > "$dl_enum" || true
+  dl_enum_n=$(awk 'END{print NR+0}' "$dl_enum")
+  dl_iters=0
+  while IFS= read -r raw; do
+    dl_iters=$((dl_iters + 1))
+    fd0_drain_probe 3c
     lnk=${raw%%#*}
     case "$lnk" in *.md) ;; *) continue ;; esac
     case "$lnk" in http*|/*|"") continue ;; esac
     resolved=$(python3 -c "import posixpath,sys; print(posixpath.normpath(posixpath.join(sys.argv[1],sys.argv[2])))" "$dir" "$lnk" 2>/dev/null)
     [ -e "$resolved" ] || echo "FAIL: $doc links to a missing doc: $lnk (resolved: $resolved)"
-  done > /tmp/doclinks.$$ || true
+  done < "$dl_enum" > /tmp/doclinks.$$ || true
+  fd0_identity "§3c cross-doc .md links ($doc)" "$dl_enum_n" "$dl_iters"
+  rm -f "$dl_enum"
   cat /tmp/doclinks.$$
   if grep -q '^FAIL:' /tmp/doclinks.$$; then FAIL=1; fi
   rm -f /tmp/doclinks.$$
@@ -735,9 +915,21 @@ done
 
 # --- 5. canonical-for uniqueness (repo-wide, non-attic) ----------------------
 echo "== canonical-for uniqueness =="
+# The walk is enumerated to a file FIRST, so the count survives: this loop sits
+# inside a command substitution, i.e. a subshell, and an iteration counter set in
+# there can never reach the parent. The iterations ride out the same way — one
+# marker line per pass into a second file, tallied back here. (Process
+# substitution would keep the loop in the subshell just the same; a file is what
+# crosses the boundary.)
+CANON_UNIQ_ENUM=/tmp/canon-uniq-enum.$$
+CANON_UNIQ_ITER=/tmp/canon-uniq-iter.$$
+prune_find -name '*.md' -print > "$CANON_UNIQ_ENUM" || true
+CANON_UNIQ_ENUM_N=$(awk 'END{print NR+0}' "$CANON_UNIQ_ENUM")
+: > "$CANON_UNIQ_ITER"
 DUPES=$(
-  prune_find -name '*.md' -print |
   while IFS= read -r f; do
+    echo iter >> "$CANON_UNIQ_ITER"
+    fd0_drain_probe 5
     h=$(header_line "$f")
     # `grep` returns 1 for a header-less file (README etc.); `|| true` keeps that
     # benign miss from aborting the substitution when the gate runs under
@@ -750,8 +942,11 @@ DUPES=$(
     # be unique. Without this, three wave ledger files each declaring `none`
     # collide on main (each green alone — the stale-green accumulator), redding
     # doc-gates for a non-violation. Real duplicate slugs are still caught below.
-  done | grep -vxE 'none' | sort | uniq -d || true
+  done < "$CANON_UNIQ_ENUM" | grep -vxE 'none' | sort | uniq -d || true
 )
+CANON_UNIQ_ITER_N=$(awk 'END{print NR+0}' "$CANON_UNIQ_ITER")
+fd0_identity "§5 canonical-for uniqueness" "$CANON_UNIQ_ENUM_N" "$CANON_UNIQ_ITER_N"
+rm -f "$CANON_UNIQ_ENUM" "$CANON_UNIQ_ITER"
 if [ -n "$DUPES" ]; then
   for d in $DUPES; do
     fail "canonical-for '$d' has more than one owner: $(grep -rl "canonical-for: $d " --include='*.md' "${GREP_PRUNE[@]}" . | grep -v _attic | grep -v node_modules | tr '\n' ' ')"
@@ -763,13 +958,21 @@ fi
 # --- 6. ARCHIVED banner (scoped to _attic/docs-2026-06/, .md only — A6) ------
 echo "== ARCHIVED banners (_attic/docs-2026-06/) =="
 if [ -d "_attic/docs-2026-06" ]; then
-  find _attic/docs-2026-06 -name '*.md' | while IFS= read -r f; do
+  ban_enum=/tmp/banners-enum.$$
+  find _attic/docs-2026-06 -name '*.md' > "$ban_enum"
+  ban_enum_n=$(awk 'END{print NR+0}' "$ban_enum")
+  ban_iters=0
+  while IFS= read -r f; do
+    ban_iters=$((ban_iters + 1))
+    fd0_drain_probe 6
     if head -n 1 "$f" | grep -c '^ARCHIVED' >/dev/null; then
       echo "ok:   banner $f"
     else
       echo "FAIL: $f first line must start with 'ARCHIVED — do not load' (G3)"
     fi
-  done > /tmp/banners-out.$$
+  done < "$ban_enum" > /tmp/banners-out.$$
+  fd0_identity "§6 ARCHIVED banners (_attic/docs-2026-06)" "$ban_enum_n" "$ban_iters"
+  rm -f "$ban_enum"
   cat /tmp/banners-out.$$
   if grep -q '^FAIL:' /tmp/banners-out.$$; then FAIL=1; fi
   rm -f /tmp/banners-out.$$
@@ -963,13 +1166,24 @@ canon_hits() {
 # in here touches $FAIL, which is what lets the same code run over a tree that
 # is SUPPOSED to be dirty.
 canon_scan() {
-  local root="$1" hits cf rest cl slug dpath pubentry_pat
+  local root="$1" hits cf rest cl slug dpath pubentry_pat hit_file enum_n iter_n
   hits="$(canon_hits "$root")"
 
   printf '%s\n' "$hits" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' \
     | grep . | sort | uniq -d | sed 's/^/DUP /' || true
 
-  { printf '%s\n' "$hits" | grep . || true; } | while IFS= read -r hit; do
+  # The marker list goes to a FILE, not into a pipe: this loop's body spawns
+  # sed and grep children that share its fd 0, and the loop has to be countable
+  # against what the enumeration handed it. `COUNTS` rides out on the same
+  # stream the caller already parses line-prefix by line-prefix, because this
+  # whole function runs inside `$(...)` and a variable set here cannot escape.
+  hit_file="$(mktemp)"
+  printf '%s\n' "$hits" | grep . > "$hit_file" || true
+  enum_n=$(awk 'END{print NR+0}' "$hit_file")
+  iter_n=0
+  while IFS= read -r hit; do
+    iter_n=$((iter_n + 1))
+    fd0_drain_probe 8
     cf=${hit%%:*}; rest=${hit#*:}; cl=${rest%%:*}
     slug=$(printf '%s' "$hit" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/')
     # `export` is the public-entry keyword for a real ES MODULE (.mjs, .ts,
@@ -1012,12 +1226,21 @@ canon_scan() {
     fi
     dpath=$(printf '%s' "$hit" | sed -nE 's/.*doc:([A-Za-z0-9._/-]+\.md).*/\1/p')
     if [ -n "$dpath" ] && [ ! -e "$dpath" ]; then echo "DOCMISS $slug $dpath"; fi
-  done
+  done < "$hit_file"
+  rm -f "$hit_file"
+  echo "COUNTS $enum_n $iter_n"
 }
 
 echo "== @canonical capability markers =="
 
 CANON_OUT="$(canon_scan .)"
+# BEFORE any §8 verdict. CANON_N below is a grep over the loop's OWN output, so
+# it shrinks silently with a truncated walk and can never notice one; only the
+# enumeration/iteration pair can, and canon_scan carries both out on its COUNTS
+# line because it ran in a subshell.
+CANON_ENUM_N=$(printf '%s\n' "$CANON_OUT" | awk '$1=="COUNTS"{print $2}')
+CANON_ITER_N=$(printf '%s\n' "$CANON_OUT" | awk '$1=="COUNTS"{print $3}')
+fd0_identity "§8 @canonical capability markers" "${CANON_ENUM_N:-?}" "${CANON_ITER_N:-?}"
 CANON_N=$(printf '%s\n' "$CANON_OUT" | grep -cE '^(OK|PRIVATE) ' || true)
 
 { printf '%s\n' "$CANON_OUT" | grep '^DUP ' || true; } | while IFS=' ' read -r _ d; do
@@ -1188,7 +1411,17 @@ fi
 CMD_VERBS='git|gh|bp|curl|mix|cd|ssh|make|npm|npx|node|python3?|psql|bash|sh|jq|for|while|grep|awk|sed|find|rm|mkdir|export|sudo|systemctl|docker|go|cargo|pnpm|yarn'
 COLD_N=0
 COLD_BAD=""
+# COLD_N is incremented INSIDE the loop, so it shrinks WITH a truncated walk and
+# still reads as a clean absence proof — the mirror image of §3's bug and just as
+# invisible. COLD_ENUM_N is what the walk handed over; COLD_ITER_N is what the
+# loop received. The here-document is replaced by a file so both numbers exist.
+COLD_ENUM=/tmp/cold-enum.$$
+prune_find -name '*.md' -type f -print | sed 's|^\./||' | grep -v '^_attic/' | LC_ALL=C sort > "$COLD_ENUM" || true
+COLD_ENUM_N=$(awk 'END{print NR+0}' "$COLD_ENUM")
+COLD_ITER_N=0
 while IFS= read -r f; do
+  COLD_ITER_N=$((COLD_ITER_N + 1))
+  fd0_drain_probe 12
   [ -n "$f" ] || continue
   # Tier lives on line 1 by contract ("First line of every active doc").
   head -1 "$f" 2>/dev/null | grep -c 'doc-tier: *cold' >/dev/null || continue
@@ -1214,9 +1447,9 @@ while IFS= read -r f; do
   if ! head -10 "$f" | grep -c '^> HISTORICAL RECORD (' >/dev/null; then
     COLD_BAD="$COLD_BAD $f"
   fi
-done <<COLDEOF
-$(prune_find -name '*.md' -type f -print | sed 's|^\./||' | grep -v '^_attic/' | LC_ALL=C sort)
-COLDEOF
+done < "$COLD_ENUM"
+fd0_identity "§12 cold docs carrying runnable commands" "$COLD_ENUM_N" "$COLD_ITER_N"
+rm -f "$COLD_ENUM"
 
 for f in $COLD_BAD; do
   echo "FAIL: $f is doc-tier: cold and carries runnable commands, but has no '> HISTORICAL RECORD (<date>)' banner in its first 10 lines."

@@ -45,6 +45,20 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
       "children" => [%{"_type" => "span", "value" => String.duplicate("z", @chars_per_block)}]
     }
 
+  # The RENDERED TWIN. A real paper `body` is
+  # `%{"blocks" => …, "html" => Render.render_blocks(…)}`
+  # (`PortableDoc.Projection.project_body/2`), and the first cut of this bound
+  # shipped that twin WHOLE beside a 3-block prefix: live on guerrilla the
+  # `bodyChars=1000` seed was 6,129,873 B of which `body.html` was 5,565,150 B.
+  # The corpus below carries it so the ratio test cannot go green on a body the
+  # production corpus does not have.
+  defp body_html do
+    Enum.map_join(1..@blocks_per_doc, "", fn _ ->
+      "<p style=\"margin:0 0 16px;font-family:'Iowan Old Style';font-size:17px\">" <>
+        String.duplicate("z", @chars_per_block) <> "</p>"
+    end)
+  end
+
   setup do
     {:ok, _} =
       Content.upsert_schema(
@@ -62,7 +76,11 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
             "doc_id" => id,
             "title" => "Bodycharsuniq Doc #{i}",
             "excerpt" => "short excerpt",
-            "blocks" => Enum.map(1..@blocks_per_doc, &block/1)
+            "blocks" => Enum.map(1..@blocks_per_doc, &block/1),
+            "body" => %{
+              "blocks" => Enum.map(1..@blocks_per_doc, &block/1),
+              "html" => body_html()
+            }
           },
           @ds,
           []
@@ -82,7 +100,7 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
           types: "post",
           perspective: "published",
           limit: "100",
-          fields: "title,excerpt,blocks"
+          fields: "title,excerpt,blocks,body"
         ],
         extra
       )
@@ -101,10 +119,30 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
     big = byte_size(unbounded.resp_body)
     small = byte_size(bounded.resp_body)
 
+    # PRECONDITION: the unbounded corpus really carries BOTH prose-bearing body
+    # keys. A ratio measured over a corpus with no `html` twin is exactly the
+    # measurement that reported 54x in-process while the live bound delivered
+    # 2.4x — the test was green because the corpus lacked the key.
+    for hit <- Jason.decode!(unbounded.resp_body)["documents"] do
+      assert String.length(hit["body"]["html"]) > 10_000,
+             "corpus precondition: an unbounded hit must carry a heavy body.html"
+
+      assert length(hit["body"]["blocks"]) == @blocks_per_doc
+    end
+
     # DISCRIMINATION CONTROL: the unbounded browse really is the heavy one —
     # without this the ratio below could be two small responses agreeing.
     assert big > 500_000, "expected an unbounded browse to be heavy, got #{big} bytes"
     assert small < big / 10, "bodyChars=1000 must cut the payload by >10x: #{small} vs #{big}"
+
+    # THE HTML ARM. Removing `bound_body_html/2` from `BodyBound` reds exactly
+    # here: the twin rides back whole and the >10x ratio above collapses with
+    # it. Asserted per hit as well as in aggregate, so the failure NAMES the key
+    # rather than only reporting a byte count that drifted.
+    for hit <- Jason.decode!(bounded.resp_body)["documents"] do
+      refute Map.has_key?(hit["body"], "html"),
+             "bodyChars=1000 shipped a whole rendered body.html beside a cut block prefix"
+    end
 
     # Both answered the SAME corpus — the bound cut payload, not hits.
     assert length(Jason.decode!(unbounded.resp_body)["documents"]) ==
@@ -131,6 +169,13 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
       # 400 prose chars/block ⇒ 3 blocks is the smallest prefix reaching 1000.
       assert length(kept) == 3
       assert hit["_bodyTruncated"] == true
+
+      # The map body's OWN block list is cut to the same whole-block prefix,
+      # and its rendered twin — which no search consumer reads, and which a
+      # prefix cannot be taken of without re-rendering — is gone.
+      assert hit["body"]["blocks"] == Enum.take(whole["body"]["blocks"], 3)
+      refute Map.has_key?(hit["body"], "html")
+
       # The bound touches prose only; the projected scalars are untouched.
       assert hit["title"] == whole["title"]
       assert hit["excerpt"] == whole["excerpt"]
@@ -147,6 +192,8 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
     for hit <- Jason.decode!(a.resp_body)["documents"] do
       refute Map.has_key?(hit, "_bodyTruncated")
       assert length(hit["blocks"]) == @blocks_per_doc
+      # Opt-in means opt-in for the twin too: an unbounded caller still gets it.
+      assert String.length(hit["body"]["html"]) > 10_000
     end
   end
 
@@ -156,6 +203,8 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
 
     for hit <- Jason.decode!(resp.resp_body)["documents"] do
       assert length(hit["blocks"]) == @blocks_per_doc
+      # A cap the whole document fits inside keeps the twin whole as well.
+      assert String.length(hit["body"]["html"]) > 10_000
       refute Map.has_key?(hit, "_bodyTruncated")
     end
   end
@@ -187,6 +236,8 @@ defmodule BarkparkWeb.SearchBodyCharsBoundTest do
 
     for hit <- Jason.decode!(resp.resp_body)["documents"] do
       assert hit["blocks"] == []
+      assert hit["body"]["blocks"] == []
+      refute Map.has_key?(hit["body"], "html")
       assert hit["_bodyTruncated"] == true
       assert hit["title"] =~ "Bodycharsuniq"
     end

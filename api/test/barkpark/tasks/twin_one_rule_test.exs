@@ -302,20 +302,29 @@ defmodule Barkpark.Tasks.TwinOneRuleTest do
       end
     end
 
+    # THE UPDATE MUST REACH THE NAMED CLAUSE. The edit used to carry
+    # `dataset_twin_intended: true` as well, so `intended?/1` — a clause INSIDE
+    # the cond — waved it through: widen the head to accept a non-nil
+    # `prev_doc` and this arm still passed, leaving the birth restriction
+    # unmeasured. Only the TWIN'S BIRTH needs the stated intent (it is the
+    # write that would otherwise be refused); the edit must state nothing, so
+    # the `nil = _prev_doc` head is the only thing that can exempt it.
     test "an UPDATE of an existing row is untouched — the guard is a birth guard",
          %{scope: scope} do
       doc_id = uniq("producer-update")
       _first = mk_draft!(doc_id, @primary, scope)
       _twin = mk_draft!(doc_id, @secondary, scope, %{"dataset_twin_intended" => true})
 
+      edit = content()
+
+      refute Map.has_key?(edit, "dataset_twin_intended"),
+             "the edit states the twin intent, so `intended?/1` would exempt it and the " <>
+               "birth-guard head would go unmeasured"
+
       assert {:ok, %Document{}} =
                Content.upsert_document(
                  "task",
-                 %{
-                   "doc_id" => doc_id,
-                   "title" => "#{doc_id} (edited)",
-                   "content" => content(%{"dataset_twin_intended" => true})
-                 },
+                 %{"doc_id" => doc_id, "title" => "#{doc_id} (edited)", "content" => edit},
                  @secondary,
                  scope
                )

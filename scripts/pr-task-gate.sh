@@ -379,6 +379,27 @@ LANDING_ONE
     fail "the commits on this branch name ${landing_n} distinct Task: trailer ids, over the ${LANDING_TRAILER_MAX} this gate will resolve in one run. This is almost always a branch that merged main into itself rather than rebasing, which drags every already-landed trailer into the range. Rebase onto current main and re-push."
   fi
   landing_bad=""
+  # THE COUNT IDENTITY (task-f97a161b35aa2041). `landing_n` above is the number
+  # of ids the scan HANDED IN; `landing_reached` is the number this loop
+  # actually took a ledger answer for. They are two different quantities and
+  # the PASS sentence below is written over the first one, so until they are
+  # compared the gate can announce a verdict over work it never did.
+  #
+  # The concrete way they come apart: this loop is fed by a HERE-DOC, so its
+  # input sits on fd 0, and its body runs a CHILD (`bash "$0" --resolve-only`)
+  # that INHERITS fd 0. Any command anywhere in the resolve path that reads
+  # stdin — a future `gh`, a `jq -`, a `python3 -`, a bare `read` — swallows
+  # the rest of the here-doc, the loop ends after ONE iteration with exit 0,
+  # and the gate prints "every one of the 5 ... resolves" having resolved one.
+  #
+  # The guard is a COUNT COMPARISON, not fd discipline, and deliberately so: fd
+  # discipline is a property of every child in the resolve path forever, which
+  # nothing can hold, while the identity is one assertion in one place that
+  # notices no matter WHY the loop came up short. No `</dev/null` is attached
+  # to the child here for exactly that reason — it would silence the symptom
+  # this check exists to catch and leave the check itself unfalsifiable. See
+  # the identity arms in scripts/pr-task-gate.test.sh.
+  landing_reached=0
   while IFS= read -r landing_id; do
     [ -n "$landing_id" ] || continue
     landing_rc=0
@@ -410,10 +431,22 @@ LANDING_ONE
       5) rm -f "$landing_pairs"; malformed "resolving the landing trailer '${landing_id}' — ${landing_out}" ;;
       *) rm -f "$landing_pairs"; unchecked "resolving the landing trailer '${landing_id}' exited ${landing_rc}, which is not a code this gate's contract defines — ${landing_out}" ;;
     esac
+    # COUNTED AFTER THE CASE, not before it: an id is "reached" once a ledger
+    # answer for it has been read and classified. rc 2/3/5 leave the script
+    # from inside the case, so they can never inflate this.
+    landing_reached=$((landing_reached + 1))
   done <<LANDING_IDS
 $landing_ids
 LANDING_IDS
   rm -f "$landing_pairs"
+  # THE IDENTITY, CHECKED BEFORE ANY VERDICT — including before the dead-trailer
+  # refusal. A loop that stopped early did not only miss ids, it also produced
+  # an INCOMPLETE offender list, so even its refusal would be a claim over work
+  # it never did. Both numbers are in the sentence because "the loop is broken"
+  # is unactionable and "resolved 1 of the 5 handed in" is not.
+  if [ "$landing_reached" != "$landing_n" ]; then
+    fail "the landing-trailer loop resolved ${landing_reached} of the ${landing_n} Task: trailer id(s) the scan handed it, so this gate CANNOT say anything about the other $((landing_n - landing_reached)). It is not a finding about the PR — it is this gate failing to do its own work, and the near-certain cause is that something in the '--resolve-only' path now READS STDIN: the loop's ids are on fd 0 (a here-doc) and the child 'bash \$0 --resolve-only' inherits fd 0, so one stdin read swallows the remaining ids and the loop ends after ${landing_reached} iteration(s). Find the new stdin reader in the resolve path and give it its own input (for example '</dev/null'), then re-run. Do NOT satisfy this by deleting the count check: the count is the only thing that can see this at all."
+  fi
   if [ -n "$landing_bad" ]; then
     # NAME THE COMMIT, NAME WHICH TRAILER, AND QUOTE WHAT WAS READ. There are
     # two trailers in play and they are routinely different; a refusal that
@@ -422,7 +455,11 @@ LANDING_IDS
     # ten-commit branch has to bisect their own branch to find the line.
     fail "a COMMIT MESSAGE that will squash onto main names a task that does not resolve on the ledger: ${landing_bad}. This is NOT the PR body's trailer — the body names '${BODY_TASK_ID:-<none>}', which was checked separately and is not what git log will carry. This repo squashes with COMMIT_MESSAGES, so the branch commits' messages ARE the landed text, and a dead pointer there is the only durable record the work leaves (specimen: 9f931a6f8 landed 'Task: task-PENDING-nightly'). Fix the COMMIT named above, not the body: git rebase -i ${BASE_REF_HINT:-<base>} (or git commit --amend on a single-commit branch), put a real row in its Task: trailer, force-push — this check re-fires on synchronize."
   fi
-  pass "every one of the ${landing_n} Task: trailer id(s) across the ${landing_commits} commit message(s) that will land resolves on the ledger"
+  # THE COUNT IS IN THE PASS SENTENCE TOO. A verdict that does not say how much
+  # work it did cannot be read as anything but a boolean, and the defect this
+  # clause closes was invisible precisely because the green sentence quoted the
+  # number handed in and never the number reached.
+  pass "every one of the ${landing_n} Task: trailer id(s) across the ${landing_commits} commit message(s) that will land resolves on the ledger (resolved ${landing_reached} of the ${landing_n} handed in)"
 fi
 
 [ -n "${TASK_ID:-}" ] || fail "no task reference found on the PR (add a 'Task: <doc_id>' line to the PR description)"

@@ -211,6 +211,15 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     end
   end
 
+  # The DRAFT row explicitly (never the published fallback) — used to assert that
+  # a stamp did NOT reach the twin.
+  defp reload_draft(doc_id, scope) do
+    case Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope) do
+      {:ok, doc} -> doc
+      _ -> nil
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # CREATE path
   # ---------------------------------------------------------------------------
@@ -1029,6 +1038,82 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert :ok = MirrorJob.reconcile(id, @dataset, fast())
       assert Agent.get(calls, & &1) == 1
       assert Link.get(reload(id, scope))["issue"] == 9001
+    end
+
+    # -------------------------------------------------------------------------
+    # DUPLICATE MINT (task-19d507b3b6f99ae7 / task-134cd7207a338429).
+    #
+    # `load_task/3` is DRAFT-FIRST; `Link.put/4` is PUBLISHED-FIRST (D12) and
+    # leaves a draft twin untouched. A twin forked BEFORE the first mirror
+    # therefore never receives `content.github`, so every later reconcile loaded
+    # a LINKLESS doc and took the CREATE branch again — one new open issue per
+    # drain, for as long as the twin lives (live census: 151 doc_ids / 1292 open
+    # issues, worst row 159). The twin below carries NO `github` key: that is
+    # the only difference from the REGRESSION CONTROL above, which forks its
+    # twin from an ALREADY-STAMPED published row and so never reproduced this.
+    # -------------------------------------------------------------------------
+    test "a LINKLESS draft twin does not make the SECOND reconcile mint a SECOND issue", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Twin forked before the first mirror"}, scope)
+
+      # Fork the twin BEFORE any mirror pass: an ordinary in-flight edit of a
+      # published-but-never-yet-mirrored task. It cannot carry `content.github`
+      # because no issue exists yet.
+      published = reload(id, scope)
+      refute Link.get(published), "precondition: the task must not be mirrored yet"
+
+      {:ok, twin} =
+        Content.upsert_document(
+          "task",
+          %{
+            "doc_id" => id,
+            "title" => "Twin forked before the first mirror",
+            "content" => Map.put(published.content, "description", "Edited in the twin.")
+          },
+          @dataset,
+          scope
+        )
+
+      assert twin.doc_id == Content.draft_id(id)
+      refute Link.get(twin), "precondition: the twin carries NO content.github"
+
+      # Every POST /issues mints a DISTINCT number, so a second create is
+      # observable as a second number as well as a second call.
+      {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        n = Agent.get_and_update(calls, fn c -> {c + 1, c + 1} end)
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 7000 + n, "state" => "open"}))
+      end)
+
+      # The update path the second pass MUST take instead.
+      stub_get(bypass, 7001)
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/7001", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 7001, "state" => "open"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+      assert Agent.get(calls, & &1) == 1, "precondition: the FIRST pass mints exactly one issue"
+
+      # The twin is still alive and still linkless — the stamp went to the
+      # published row. THIS is the drain that used to mint issue #2.
+      refute Link.get(reload_draft(id, scope)),
+             "precondition: the stamp landed on the published row, not the twin"
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+
+      minted = Agent.get(calls, & &1)
+
+      assert minted == 1,
+             "the mirror made #{minted} create_issue call(s) for ONE doc_id: " <>
+               "a linkless draft twin re-minted the issue"
+
+      assert Link.get(reload(id, scope))["issue"] == 7001
     end
 
     test "REGRESSION CONTROL: a PUBLISHED task with a live draft twin still mirrors", %{

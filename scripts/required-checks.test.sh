@@ -2717,7 +2717,39 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # touches .github/** or scripts/**. This is the SIXTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
         # this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "the breaker measurement's preconditions can still be UNMET")
+        --expect-unrendered "the breaker measurement's preconditions can still be UNMET"
+        # studio-scrim-threshold.yml jobs `changes` and `scrim` are CREATED by the
+        # same commit as their .exclusions rows (task scrim-control-uncied-and-
+        # fixture-drift): they postdate the frozen fixture pair, so the pair cannot
+        # render them and the generator reports them LOST. UNLIKE most names here
+        # the cause is NOT a paths filter — that workflow deliberately has none, so
+        # the `scrim` job renders a SKIPPED conclusion on every PR and both names
+        # WILL be renderable on any head sampled after this merge. They are
+        # acknowledged only because the fixture pair is frozen behind them.
+        # DERIVED, not remembered: the job printed exactly these two as
+        # MISSING ACK_EX on run 35553647416 (head 99b11ec52), in this order, with
+        # these two lines to paste.
+        --expect-unrendered "Dispatch (scrim paths)"
+        --expect-unrendered "Studio scrim threshold control"
+        # deploy-prod-microblock-staleness.yml jobs `prod-microblock-selftest` (:66),
+        # `prod-microblock-read` (:124) and `prod-microblock-report-scheduled-failure`
+        # (:150). The workflow landed AFTER both `generated_from_shas`, so the frozen
+        # D130 fixture pair (e34031104 / f69cfb1f6) cannot render these names and the
+        # generator reports all three LOST; their .exclusions rows are added by hand in
+        # the same change (task-c102f24f29f9bbc7). LIKE the scrim pair and UNLIKE most
+        # names here the cause is NOT a paths filter — that workflow deliberately
+        # carries no `on: paths:` key, so all three ARE renderable on any head sampled
+        # after the merge (MEASURED on c1947259048d: success / skipped / skipped). They
+        # are acknowledged only because the fixture pair is frozen behind them, and
+        # re-shooting that pair would silently change what sections 14 / 14b / 15 / 16
+        # measure. The names are their JOB IDS: none of the three jobs declares a
+        # `name:` key, so GitHub publishes the id verbatim.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh (exit 1) named
+        # exactly these three as MISSING ACK_EX on this tree, in this order, and printed
+        # these three lines to paste.
+        --expect-unrendered "prod-microblock-read"
+        --expect-unrendered "prod-microblock-report-scheduled-failure"
+        --expect-unrendered "prod-microblock-selftest")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
