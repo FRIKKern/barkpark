@@ -28,7 +28,7 @@ import {
   SHELL_CHROME_SELECTORS, SHELL_CHROME_CEILING, CHROME_PIN_ROW, foldVerdict,
   HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
   RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
-  selectNames,
+  selectNames, ascendingViolation, nonAscendingRefusal,
   SCENARIO_RESIDUE, RESIDUE_FAMILY_REASONS,
 } from "./breakpoint-sweep.mjs";
 import { SCENARIOS, SCENARIO_NAMES } from "./scenarios.mjs";
@@ -1785,4 +1785,56 @@ test("a cell pointed at a scenario that no longer exists refuses", () => {
   });
   assert.equal(r.ok, false);
   assert.deepEqual(r.phantomCells, ["not-a-scenario"]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE ORDER PIN (cch-w15-bl-target-reuse-ascending-order-pin)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Target reuse across the WIDTH axis makes the width ORDER part of the
+//  measurement: a reused document carries the previous width's settled
+//  geometry into the next probe. These pin the predicate and the sentence; the
+//  browser half is proven by running the leg both ways and diffing the raw
+//  Q1/Q2/Q3 records byte-for-byte.
+
+test("the shipped width axis is strictly ascending, and boundaryWalk asserts it rather than leaving it to be inferred", () => {
+  assert.equal(ascendingViolation(WIDTHS), null);
+  assert.equal(ascendingViolation(boundaryWalk(BREAKPOINTS)), null);
+});
+
+test("a DESCENDING width list is a violation, named by position and pair", () => {
+  // The exact mutation the row names: `--widths 900,619` under reuse.
+  assert.deepEqual(ascendingViolation([900, 619]), { index: 1, prev: 900, next: 619 });
+  // And the positive control it is a mutation OF — the same two widths, sorted.
+  assert.equal(ascendingViolation([619, 900]), null);
+});
+
+test("EQUAL neighbours violate too — the same width twice measures the second against the first's settled state", () => {
+  assert.deepEqual(ascendingViolation([619, 720, 720, 830]), { index: 2, prev: 720, next: 720 });
+  assert.equal(ascendingViolation([619, 720, 721, 830]), null);
+});
+
+test("a single width, and an empty list, are vacuously ascending — reuse has nothing to inherit from", () => {
+  assert.equal(ascendingViolation([901]), null);
+  assert.equal(ascendingViolation([]), null);
+  // The two lists console-harness.yml actually drives, pinned as ACCEPTED:
+  // a pin that refused a committed CI invocation would red the harness.
+  assert.equal(ascendingViolation([320, 390, 620]), null);
+});
+
+test("the dip in the MIDDLE is caught, not just a reversed pair at the end", () => {
+  assert.deepEqual(ascendingViolation([619, 720, 700, 830, 900]), { index: 2, prev: 720, next: 700 });
+});
+
+test("the refusal PRINTS the list it read and names the escape hatch", () => {
+  const widths = [900, 619];
+  const msg = nonAscendingRefusal(widths, ascendingViolation(widths));
+  assert.match(msg, /--widths 900,619/);            // the offending list, verbatim
+  assert.match(msg, /position 1 goes 900 -> 619/);  // where it broke
+  assert.match(msg, /--fresh-targets/);             // how to drive any order anyway
+  // MUTATION: the sentence is built from the list, not typed. A different list
+  // must produce a different sentence, or the assertions above are satisfied by
+  // a constant string.
+  const other = [830, 720];
+  assert.match(nonAscendingRefusal(other, ascendingViolation(other)), /--widths 830,720/);
+  assert.doesNotMatch(nonAscendingRefusal(other, ascendingViolation(other)), /900/);
 });

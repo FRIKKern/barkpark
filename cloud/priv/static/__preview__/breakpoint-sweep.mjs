@@ -333,7 +333,42 @@ const BASE = `http://127.0.0.1:${PORT}`;
 export function boundaryWalk(breakpoints) {
   const out = new Set();
   for (const b of breakpoints) { out.add(b - 1); out.add(b); out.add(b + 1); }
-  return [...out].sort((a, b) => a - b);
+  const walk = [...out].sort((a, b) => a - b);
+  // ASSERTED, NOT ASSUMED (cch-w15-bl-target-reuse-ascending-order-pin). The
+  // sort above is what MAKES this ascending, and a caller cannot tell the
+  // difference between "sorted" and "happens to arrive sorted" by reading the
+  // export. Under target reuse the ascending order is a PRECONDITION of the
+  // measurement — a reused document inherits the previous width's
+  // geometry-derived classes — so the property this file's own axis relies on
+  // is checked here, at the only place that constructs it.
+  const bad = ascendingViolation(walk);
+  if (bad) throw new Error(`boundaryWalk produced a non-ascending axis at index ${bad.index} (${bad.prev} then ${bad.next}): [${walk.join(",")}]`);
+  return walk;
+}
+
+// THE ORDER PIN'S PURE HALF. Returns null when `widths` is STRICTLY ascending
+// (equal neighbours are a violation too: driving the same width twice in a
+// reused document measures the second one against the first one's settled
+// state, which is the same inheritance the descending case exposes), otherwise
+// the first offending pair with its index.
+export function ascendingViolation(widths) {
+  for (let i = 1; i < widths.length; i++) {
+    if (!(widths[i] > widths[i - 1])) return { index: i, prev: widths[i - 1], next: widths[i] };
+  }
+  return null;
+}
+
+// The refusal SENTENCE, kept beside the predicate so the test file can pin the
+// wording without driving a browser. It names the offending list verbatim —
+// a refusal that says "not ascending" without printing what it read makes the
+// operator guess which of their two `--widths` runs was rejected.
+export function nonAscendingRefusal(widths, bad) {
+  return `--widths ${widths.join(",")} is NOT strictly ascending: position ${bad.index} goes ${bad.prev} -> ${bad.next}.\n` +
+    `   Target reuse drives every width of a (cell, theme, height) group into ONE document, so a width is measured against the\n` +
+    `   geometry the PREVIOUS width left behind. Ascending is the order this equivalence was established at; any other order\n` +
+    `   silently measures a different console (wave 15: driven descending, the fleet cell lost every one of its is-nav-clipped\n` +
+    `   CUE_STUCK observations while overview-fleet, same class and same widths, kept them — non-uniform, i.e. racy).\n` +
+    `   Sort the list, or pass --fresh-targets to open a fresh target per (cell, width) and drive any order you like.`;
 }
 
 // W17-S6 ADDED 830. `@media (max-width: 830px)` is where GR116's topbar tighten
@@ -2449,9 +2484,53 @@ async function legRender(rep) {
   if (!heightNames.length) refuse(`--height "${heightFilter}" selected no height. Known: ${HEIGHTS.join(", ")}`);
   const heights = heightFilter ? heightNames.map(Number) : [...RENDER_HEIGHTS_DEFAULT];
 
+  // ── TARGET REUSE ACROSS THE WIDTH AXIS ONLY ─────────────────────────────────
+  //  (cch-w15-bl-target-reuse-ascending-order-pin)
+  //
+  //  A group is (cell, theme, height). Under reuse ONE target is opened per
+  //  group, navigated ONCE, and then walked across the widths with
+  //  Emulation.setDeviceMetricsOverride — which is where the speedup lives: the
+  //  per-width cost stops being a cross-document load and becomes a resize.
+  //
+  //  THE WIDTH AXIS IS THE ONLY ONE REUSED, AND THAT IS DELIBERATE. Theme is a
+  //  FRESH `?theme=` LOAD (the flip is a measured lie — see the block by the
+  //  url below) and height is a FRESH group for the same reason a theme is:
+  //  reuse across HEIGHTS IS UNTESTED AND ASSUMED UNSAFE. Nothing here has
+  //  diffed a height-reused record against a fresh one, so the loop does not
+  //  do it, and this comment is the reason rather than an oversight.
+  //
+  //  THE ORDER PIN. A reused document carries the previous width's settled
+  //  geometry into the next measurement, so the width order is part of the
+  //  measurement. Ascending is the order equivalence was established at, and a
+  //  non-ascending --widths under reuse is REFUSED rather than silently
+  //  measured. --fresh-targets restores the old fresh-target-per-(cell,width)
+  //  path so the equivalence can be re-run by anyone, and it accepts any order.
+  const freshTargets = has("--fresh-targets");
+  if (!freshTargets) {
+    const bad = ascendingViolation(widths);
+    if (bad) refuse(nonAscendingRefusal(widths, bad));
+  }
+
+  // The raw per-cell record sink. `--records <path>` writes ONE JSON line per
+  // driven cell carrying the Q1/Q2/Q3 measurement verbatim, so the reuse path
+  // and the fresh path can be diffed BYTE-FOR-BYTE rather than compared by
+  // eye through the report's prose. It is an instrument for the equivalence
+  // argument, not a report: nothing in CI reads it.
+  const recordsPath = valOf("--records");
+  if (has("--records") && (recordsPath == null || recordsPath.startsWith("--"))) {
+    refuse(`--records was given no path. A record sink with no file writes nowhere and would report a byte-identical diff over ZERO records.`);
+  }
+  if (recordsPath) fs.writeFileSync(recordsPath, "");
+  const record = (obj) => { if (recordsPath) fs.appendFileSync(recordsPath, JSON.stringify(obj) + "\n"); };
+
   return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
     const total = cells.length * themes.length * heights.length * widths.length;
     out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${heights.length} height${heights.length > 1 ? "s" : ""} [${heights.join(",")}] x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
+    // WHICH PATH RAN, SAID OUT LOUD. The two paths cost an order of magnitude
+    // apart and a wall-clock number with no path label is unreadable.
+    out(freshTargets
+      ? `              targets    FRESH per (cell, width) — ${total} cross-document loads. Any --widths order is accepted. This is the equivalence path.\n`
+      : `              targets    REUSED across the WIDTH axis — ${cells.length * themes.length * heights.length} group(s) of (cell, theme, height), each ONE load then ${widths.length} metrics override(s), widths ASCENDING [${widths.join(",")}]. Theme and height stay FRESH loads; reuse across heights is untested and assumed unsafe. --fresh-targets restores the per-width path.\n`);
     if (!heightFilter) {
       out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x21 = 1050 renders (12.8 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3150 (38.3 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
@@ -2471,15 +2550,30 @@ async function legRender(rep) {
      for (const theme of themes) {
       for (const height of heights) {
       const row = [];
+      // ONE target per (cell, theme, height) under reuse; one per width under
+      // --fresh-targets. `navigated` is what makes the first width of a reused
+      // group pay for the cross-document load and the rest pay for a resize.
+      let group = null, navigated = false;
+      if (!freshTargets) {
+        group = await openCell();
+        // cch-bl-tier-card — installed on the GROUP's target, before the single
+        // navigation, for the same reason the fresh path installs it before its
+        // own: Page.addScriptToEvaluateOnNewDocument only reaches a document
+        // that has not been created yet.
+        if (cell.name === "billing-trial") {
+          await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, group.sessionId);
+        }
+      }
+      try {
       for (const width of widths) {
-        const { targetId, sessionId } = await openCell();
+        const { targetId, sessionId } = freshTargets ? await openCell() : group;
         try {
           // cch-bl-tier-card — the hook receiver for the tier-CTA tense probe
           // below, installed BEFORE app.js parses and ONLY for the cell that
           // uses it (an accessor, not an assignment: see TIERS5_HOOK_TAP for the
           // measured reason mock.js would otherwise overwrite it). Every other
           // cell renders exactly as it did before.
-          if (cell.name === "billing-trial") {
+          if (freshTargets && cell.name === "billing-trial") {
             await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
           }
           await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
@@ -2495,10 +2589,26 @@ async function legRender(rep) {
           const url = `${BASE}/?scen=${cell.scen}&theme=${theme}${cell.hash}`;
           let m = null;
           try {
-            await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
+            if (freshTargets || !navigated) {
+              await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
+              navigated = true;
+            } else {
+              // A REUSED DOCUMENT AT A NEW WIDTH. The override lands
+              // asynchronously and the console recomputes its geometry-derived
+              // classes from a resize listener, so the probe must not read the
+              // same frame the override arrives in. The eval between the two
+              // sleeps is a forced layout flush, NOT a delay: it makes the
+              // reflow happen inside this await rather than inside the probe.
+              // A double-requestAnimationFrame settle HANGS under headless=new
+              // (see navSettle's 16ms note), which is why this is sleeps.
+              await sleep(16);
+              await evalJs(sessionId, "document.documentElement.offsetWidth");
+              await sleep(16);
+            }
             m = await evalJs(sessionId, cellProbeJs(cell));
           } catch (err) {
             dead.push({ cell: cell.name, theme, width, why: err.message.slice(0, 160), present: [] });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
@@ -2511,6 +2621,7 @@ async function legRender(rep) {
               cell: cell.name, theme, width, present: [],
               why: `asked for ?theme=${theme} and the document loaded data-theme=${m.themeState.attr} — the fresh load did not take, so this cell measured the wrong mode.`,
             });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
@@ -2528,6 +2639,7 @@ async function legRender(rep) {
               cell: cell.name, theme, width, present: [],
               why: `asked for a ${height}px viewport and the document reported window.innerHeight ${m.q3.vh} — the height override did not take, so this cell measured a viewport nobody chose.`,
             });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
@@ -2547,9 +2659,15 @@ async function legRender(rep) {
                 (weakWouldPass ? `\n     CLAUSE 3 IS WHY THIS IS DEAD: clauses 1+2 alone (right view, hidden:${L.hidden}, h:${L.h}, textLen:${L.textLen}) would have PASSED this cell and measured an empty state.` : ""),
               present: L.present,
             });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
+          // THE RAW RECORD, before any accumulation shapes it. This is the
+          // artefact the reuse/fresh equivalence is argued from — it carries
+          // the probe's Q1/Q2/Q3 verbatim, so a divergence shows up as a diff
+          // line rather than as a changed summary number.
+          record({ cell: cell.name, theme, height, width, q1: m.q1, q2: m.q2, q3: m.q3 });
           if (m.q1.over) q1f.push({ cell: cell.name, theme, width, sw: m.q1.sw, cw: m.q1.cw });
           for (const f of m.q2) {
             if (f.kind === "CUE_STUCK") notes.push({ cell: cell.name, theme, width, ...f });
@@ -2592,9 +2710,12 @@ async function legRender(rep) {
           }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
         } finally {
-          await closeCell(targetId);
+          if (freshTargets) await closeCell(targetId);
           done++;
         }
+      }
+      } finally {
+        if (group) await closeCell(group.targetId);
       }
       out(`   ${`${cell.name}/${theme}@${height}`.padEnd(30)} ${row.join(" ")}\n`);
       }
