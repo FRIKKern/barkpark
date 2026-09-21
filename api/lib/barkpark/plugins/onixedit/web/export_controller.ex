@@ -45,8 +45,9 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
 
   # The `send_resp(200, iodata)` below is a REVIEWED false positive: `iodata` is
   # the ONIX document `Export.to_iodata/1` rendered from a stored document, and
-  # the response is sent as `application/xml` with a `content-disposition`
-  # attachment header — it is never interpreted as HTML in a browsing context.
+  # the response is sent as `@content_type` — `application/onix+xml`, not any
+  # HTML type — with a `content-disposition: attachment` header, so it is never
+  # interpreted as markup in a browsing context.
   # MIGRATED FROM `.sobelow-skips` (hg-bl-sobelow-fingerprint-to-inline-
   # migration): the old row was `…/export_controller.ex:52,64EB26D`, pinned to a
   # LINE, which is why this file used to forbid adding an `alias`. That
