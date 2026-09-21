@@ -229,7 +229,7 @@ explain_line_address() {
   else
     printf '      above every test declaration in this file, so it selects nothing\n'
   fi
-  printf '      and `mix test` would still exit 0 with a "0 tests, 0 failures (N excluded)" trailer.\n'
+  printf '      and mix test would still exit 0 with a "0 tests, 0 failures (N excluded)" trailer.\n'
 
   dir="$(dirname "$path")"
   base="$(basename "$path")"
