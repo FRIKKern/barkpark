@@ -1744,6 +1744,7 @@ STUBB
   # five, which is precisely the pre-fix behaviour — so i1 is the arm doing the
   # work, and it is not riding on some other refusal.
   NOCOUNT="$fixtures/nocount-gate.sh"
+  # shellcheck disable=SC2016  # the $-names are the GATE's text to match, not ours to expand
   sed -e 's/^  if \[ "\$landing_reached" != "\$landing_n" \]; then$/  if false; then/' "$GATE" > "$NOCOUNT"
   if ! grep -q 'if false; then' "$NOCOUNT"; then
     fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the identity guard was reworded\n' "mutation: identity removed reds i1"
