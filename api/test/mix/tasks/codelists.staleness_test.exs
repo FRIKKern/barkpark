@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
   import ExUnit.CaptureIO
 
+  alias Barkpark.BootModeSandbox
   alias Barkpark.Content.Document
   alias Mix.Tasks.Codelists.Staleness
 
@@ -50,7 +51,7 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
       output =
         capture_io(fn ->
-          Staleness.run(["--report"])
+          BootModeSandbox.protecting(fn -> Staleness.run(["--report"]) end)
         end)
 
       assert output =~ "codelist staleness report"
@@ -72,7 +73,8 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
         }
       })
 
-      output = capture_io(fn -> Staleness.run(["--report"]) end)
+      output =
+        capture_io(fn -> BootModeSandbox.protecting(fn -> Staleness.run(["--report"]) end) end)
 
       assert output =~ "book: rep-section"
       assert output =~ "outer.inner"
@@ -87,7 +89,9 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
       output =
         capture_io(fn ->
-          Staleness.run(["--report", "--current-issue", "75"])
+          BootModeSandbox.protecting(fn ->
+            Staleness.run(["--report", "--current-issue", "75"])
+          end)
         end)
 
       assert output =~ "current registry issue: 75"
@@ -121,7 +125,9 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
       output =
         capture_io(fn ->
-          Staleness.run(["--revalidate", "--book-id", "rev-known"])
+          BootModeSandbox.protecting(fn ->
+            Staleness.run(["--revalidate", "--book-id", "rev-known"])
+          end)
         end)
 
       assert output =~ "revalidate report for book: rev-known"
@@ -142,19 +148,29 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
       assert Repo.aggregate("codelists", :count) == 0
 
       assert_raise Mix.Error, ~r/codelists table is EMPTY/, fn ->
-        capture_io(fn -> Staleness.run(["--revalidate", "--book-id", "rev-blind"]) end)
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn ->
+            Staleness.run(["--revalidate", "--book-id", "rev-blind"])
+          end)
+        end)
       end
     end
 
     test "errors when --revalidate is given without --book-id" do
       assert_raise Mix.Error, ~r/--book-id/, fn ->
-        capture_io(fn -> Staleness.run(["--revalidate"]) end)
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn -> Staleness.run(["--revalidate"]) end)
+        end)
       end
     end
 
     test "raises Mix.Error when --book-id refers to a missing doc" do
       assert_raise Mix.Error, ~r/book not found/i, fn ->
-        capture_io(fn -> Staleness.run(["--revalidate", "--book-id", "no-such-book"]) end)
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn ->
+            Staleness.run(["--revalidate", "--book-id", "no-such-book"])
+          end)
+        end)
       end
     end
   end
@@ -162,13 +178,13 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
   describe "errors" do
     test "raises Mix.Error when neither --report nor --revalidate is given" do
       assert_raise Mix.Error, ~r/missing mode/i, fn ->
-        capture_io(fn -> Staleness.run([]) end)
+        capture_io(fn -> BootModeSandbox.protecting(fn -> Staleness.run([]) end) end)
       end
     end
 
     test "raises on unknown switches" do
       assert_raise Mix.Error, fn ->
-        capture_io(fn -> Staleness.run(["--bogus"]) end)
+        capture_io(fn -> BootModeSandbox.protecting(fn -> Staleness.run(["--bogus"]) end) end)
       end
     end
   end

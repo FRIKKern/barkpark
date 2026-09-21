@@ -15,6 +15,27 @@
 #   scripts/check-doc-budgets.sh --span-only           # the onramp arm alone
 #                                                      # (harness use; skips the
 #                                                      # fixed caps + card count)
+#   scripts/check-doc-budgets.sh --discovery-only      # the HEADER-DISCOVERY arm
+#                                                      # alone: the freeze table,
+#                                                      # the append-only table,
+#                                                      # every discovered doc's
+#                                                      # own `budget: Ntok`, and
+#                                                      # the union floor. Skips
+#                                                      # the fixed-caps SIZE
+#                                                      # verdicts (locked by
+#                                                      # api/test/barkpark/
+#                                                      # doc_budget_cap_test.exs
+#                                                      # under the required
+#                                                      # Elixir gate), the onramp
+#                                                      # arm, the card count and
+#                                                      # the headroom floors.
+#                                                      # THIS is the mode
+#                                                      # elixir.yml's UNFILTERED
+#                                                      # `path-escape` job runs,
+#                                                      # so the discovery arm
+#                                                      # publishes a verdict
+#                                                      # inside a REQUIRED
+#                                                      # context on EVERY PR.
 # Exit codes: 0 pass · 1 a budget (or the onramp span pin) failed · 2 bad usage.
 #
 # NOTHING IN THE ENVIRONMENT CAN LOOSEN THIS GATE. --span-only is an argument,
@@ -71,21 +92,37 @@ fi
 # where a reviewer reads it next to the command.
 SPAN_ONLY=0
 
+# 1 = run ONLY the header-discovery arm. Same reasoning as --span-only, and the
+# same refusal to be an environment variable: it is read next to the command in
+# the workflow step, where a reviewer sees which arms a run does NOT carry.
+#
+# WHY A NARROW MODE AND NOT THE WHOLE SCRIPT. elixir.yml's `path-escape` job is
+# unfiltered, so whatever it runs blocks EVERY pull request. The fixed-caps
+# arm already has a blocking reader (api/test/barkpark/doc_budget_cap_test.exs,
+# #18216) and the card/headroom/onramp arms are live policy that this task was
+# not asked to re-scope — turning all of them blocking in one edit would be a
+# fleet-wide merge change smuggled under a discovery fix. The narrow mode keeps
+# the blast radius equal to the hole being closed. It is NOT a loosening: every
+# refusal the discovery arm can print is reachable in this mode, and the
+# --selftest arms (m0)-(m3) pin that.
+DISCOVERY_ONLY=0
+
 MODE=check
 case "${1:-}" in
   "") ;;
   --selftest) MODE=selftest ;;
   --regen-onramp-golden) MODE=regen ;;
   --span-only) SPAN_ONLY=1 ;;
+  --discovery-only) DISCOVERY_ONLY=1 ;;
   *)
     echo "check-doc-budgets: unknown argument '$1'" >&2
-    echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden|--span-only]" >&2
+    echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden|--span-only|--discovery-only]" >&2
     exit 2
     ;;
 esac
 if [ "$#" -gt 1 ]; then
   echo "check-doc-budgets: too many arguments" >&2
-  echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden|--span-only]" >&2
+  echo "usage: check-doc-budgets.sh [--selftest|--regen-onramp-golden|--span-only|--discovery-only]" >&2
   exit 2
 fi
 
@@ -822,14 +859,138 @@ if [ "$MODE" = selftest ]; then
     *) fail_selftest "an UNPINNED extra exemption did not print its row-count FAIL line — the exemption list can grow quietly" ;;
   esac
 
+  # --- the --discovery-only MODE, which is what the required lane runs -------
+  #
+  # These arms exist because a narrow mode is the classic way a gate goes quiet:
+  # the workflow step keeps its name, the run keeps exiting 0, and nobody
+  # notices the flag stopped reaching any verdict. Every arm below runs the mode
+  # the UNFILTERED `path-escape` job runs, not the full script.
+
+  # m0: THE CONTROL, and the SCOPE assertion in one run. The unmutated copy in
+  #     --discovery-only must exit 0 on the planted green root (or no m-arm's
+  #     exit is attributable), must reach the union floor (so the arm under test
+  #     actually ran), and must NOT reach the card count (so the mode really is
+  #     narrow and a later reader is not misled about what this lane covers).
+  cp "$SELF" "$caps_probe"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 0 ] \
+    || fail_selftest "the --discovery-only CONTROL exited $caps_rc on the planted green root — no m-arm below is attributable. Its last lines: $(printf '%s' "$caps_out" | tail -3 | tr '\n' ' ')"
+  case "$caps_out" in
+    *"budget gate reached"*"floor is"*|*"budget gate reached"*"floor $selftest_docs_floor"*) ;;
+    *) fail_selftest "--discovery-only did not print the union-floor line — the mode exits before the discovery arm reaches a verdict, so the required lane would carry a green that asserts NOTHING" ;;
+  esac
+  case "$caps_out" in
+    *"check-doc-budgets: PASS (discovery-only)"*) ;;
+    *) fail_selftest "--discovery-only did not print its own PASS line — it fell through to some other exit and the mode is not what the workflow step thinks it is" ;;
+  esac
+  case "$caps_out" in
+    *"card count is exactly 7"*) fail_selftest "--discovery-only reached the CARD arm — the mode is wider than its name and than the workflow step's comment; either fix the exit or rename the flag" ;;
+    *) ;;
+  esac
+  case "$caps_out" in
+    *"fixed-caps table walked all"*) ;;
+    *) fail_selftest "--discovery-only did not walk the CAPS table — that walk is discovery's PRECEDENCE source and feeds the union floor, so without it discovery re-verdicts capped docs and the floor means something else" ;;
+  esac
+
+  # m1: DARK DISCOVERY, IN THE NARROW MODE. k1 proves the floor refuses in the
+  #     full run; that says nothing about the mode the required lane actually
+  #     invokes. Same mutation, same assertion, different entry point — which is
+  #     the whole reason this arm is not a duplicate of k1.
+  sed -e "s|^      find docs -name '\*\.md' -not -path 'docs/cli/fixtures/\*'$|      true|" \
+      -e "s|^      find scripts -maxdepth 1 -name '\*\.md'$|      true|" \
+      -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=0|" \
+      "$SELF" \
+    | awk 'BEGIN { drop = 0 }
+           /^done <<.FREEZE.$/ { print; drop = 1; next }
+           /^FREEZE$/          { print; drop = 0; next }
+           drop == 0           { print }' > "$caps_probe"
+  grep -q "^      find docs -name " "$caps_probe" \
+    && fail_selftest "the m1 discovery-blinding step did not remove the docs find — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "DARK discovery under --discovery-only exited $caps_rc, expected 1 — the mode the REQUIRED lane runs reports zero violations over zero docs and exits 0"
+  case "$caps_out" in
+    *"($expected_literal capped + 0 discovered), floor is $selftest_docs_floor"*) ;;
+    *) fail_selftest "DARK discovery under --discovery-only did not print its floor FAIL line — the red came from something other than the floor" ;;
+  esac
+
+  # m2: THE MUTATION THE BLOCKING LANE EXISTS FOR. One discovery-enforced doc
+  #     pushed over its own header must RED in --discovery-only, NAMING the doc
+  #     and its header. Without this arm the required lane is a green with no
+  #     subject: the assertion is fine and the code path never arrives.
+  cp "$SELF" "$caps_probe"
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: mode-overbudget-fixture | budget: 1tok -->" \
+    > "$caps_root/docs/discovery-mode-overbudget-fixture.md"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  rm -f "$caps_root/docs/discovery-mode-overbudget-fixture.md"
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "an over-header doc under --discovery-only exited $caps_rc, expected 1 — the arm this whole lane was widened to carry does not refuse in the mode the lane runs"
+  case "$caps_out" in
+    *"docs/discovery-mode-overbudget-fixture.md is"*"its own header declares 1tok = 4B"*) ;;
+    *) fail_selftest "an over-header doc under --discovery-only did not print its \`header declares 1tok = 4B\` FAIL line naming the doc — a refusal that does not name the file is not actionable in CI" ;;
+  esac
+
+  # m3: THE FLAG IS AN ARGUMENT. --span-only carries this warning already and it
+  #     applies twice as hard here: as an env var, one `env:` line far from the
+  #     step could narrow the required lane to nothing. An unknown argument must
+  #     still be usage (2), and the env-var spelling must be INERT.
+  cp "$SELF" "$caps_probe"
+  set +e
+  caps_out="$(DOC_BUDGETS_DISCOVERY_ONLY=1 bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 0 ] \
+    || fail_selftest "the env-var spelling DOC_BUDGETS_DISCOVERY_ONLY=1 changed the run (exit $caps_rc) — the narrowing must live in the step a reviewer reads"
+  case "$caps_out" in
+    *"card count is exactly 7"*) ;;
+    *) fail_selftest "DOC_BUDGETS_DISCOVERY_ONLY=1 narrowed the run — an environment variable can now blank arms of this gate from a distance" ;;
+  esac
+
+  # m4: THE CEILING. The lazy remedy for a freeze table is to re-baseline it and
+  #     keep appending, and before FREEZE_ROWS_CEILING landed that worked: the
+  #     k6 arm only checks the literal AGREES with the table, so a row plus a
+  #     matching digit passed. Bump the literal past the ceiling (leaving the
+  #     ceiling alone, which is exactly the shape of that edit) and the gate must
+  #     refuse by name.
+  awk -v add="$selftest_dup_freeze" '
+       { print }
+       /^done <<.FREEZE.$/ && !done_add { print add; done_add = 1 }' "$SELF" \
+    | sed -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=$((freeze_expected_literal + 1))|" \
+    > "$caps_probe"
+  grep -qE "^FREEZE_ROWS_EXPECTED=$((freeze_expected_literal + 1))$" "$caps_probe" \
+    || fail_selftest "the ceiling-probe step did not bump FREEZE_ROWS_EXPECTED — this arm would have proven nothing"
+  grep -qE "^FREEZE_ROWS_CEILING=$freeze_expected_literal$" "$caps_probe" \
+    || fail_selftest "the ceiling-probe step disturbed FREEZE_ROWS_CEILING — the arm must test a literal bump against an UNCHANGED ceiling"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a freeze literal bumped PAST the ceiling exited $caps_rc, expected 1 — new over-budget docs can be enrolled instead of trimmed, and 'the list may only shrink' is prose with no reader"
+  case "$caps_out" in
+    *"exceeds FREEZE_ROWS_CEILING=$freeze_expected_literal"*) ;;
+    *) fail_selftest "a freeze literal past the ceiling did not print its ceiling FAIL line — the red came from something else" ;;
+  esac
+
   SELFTEST_COMPLETED=1
-  echo "check-doc-budgets --selftest: PASS (25 arms: pristine, in-span plant," \
+  echo "check-doc-budgets --selftest: PASS (30 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
        "span-cap clamp both directions, retired env var inert, caps green control," \
        "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
        "file, freeze literal pin, DISCOVERY DARK, over-header doc, grown frozen" \
        "doc, paid frozen doc, stale freeze row, unpinned freeze row, harness" \
-       "aborts non-zero, unpinned exemption row — every" \
+       "aborts non-zero, unpinned exemption row, discovery-only control+scope," \
+       "discovery-only DARK, discovery-only over-header doc, discovery-only env" \
+       "var inert, freeze ceiling — every" \
        "probe arm asserts the EXIT CODE and its own message)"
   exit 0
 fi
@@ -861,7 +1022,13 @@ while read -r path cap; do
   CAPS_ROWS_WALKED=$((CAPS_ROWS_WALKED + 1))
   CAPS_PATHS="$CAPS_PATHS$path
 "
-  check_cap "$path" "$cap"
+  # --discovery-only still WALKS this table: it is the precedence source (a
+  # capped doc is skipped by discovery) and its row count feeds the union
+  # floor. Only the SIZE verdict is withheld, because that arm already has a
+  # blocking reader of its own.
+  if [ "$DISCOVERY_ONLY" != "1" ]; then
+    check_cap "$path" "$cap"
+  fi
 done <<'CAPS'
 CLAUDE.md 10000
 api/CLAUDE.md 6500
@@ -994,6 +1161,153 @@ DISCOVERY_HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-
 # reds, and a frozen doc that has come back UNDER its header budget also reds,
 # telling you to delete its row. So paying a debt is not optional bookkeeping —
 # the gate refuses until the row is gone.
+# --- THE FREEZE PIN, ADJUDICATED IN WRITING (2026-09-21, gates-r21m) ------
+#
+# A freeze row is a RATCHET, and a ratchet has two failure directions: it
+# reds when the world gets worse, and it ALSO stops saying anything once the
+# pinned number is simply where the file already is. A pin can therefore
+# encode a BLIND state as easily as a tolerated one, so every row below is
+# adjudicated by DIRECTION rather than adjusted as a number. Measured on
+# origin/main f11ac14d1 with `bash scripts/check-doc-budgets.sh`; sizes are
+# wc -c, caps are the file's OWN `budget: Ntok` header x 4.
+#
+# NO ROW BELOW WAS MOVED BY THIS EDIT, and that is the finding, not an
+# omission. Trimming is a content judgement owned by each doc's canonical
+# owner; 38 trims in one PR is the bulk adjustment this adjudication exists
+# to refuse. The directions are recorded here so the next editor of each
+# file inherits the verdict instead of re-deriving it.
+#
+# DIRECTION (b) -- "the cap was set too low, raise it with a reason" -- is
+# used ZERO times, deliberately. The header IS the cap in this arm, so
+# raising a header is raising a cap, which repo-root CLAUDE.md forbids
+# outright and which this script's own FAIL line refuses by name. (b) is
+# therefore not available here at all; saying so once is more honest than
+# leaving a reader to wonder why no row carries it.
+#
+# (a) TRIM -- agent-tier, over its own header by >=15% -- 12 doc(s)
+#   These bytes are loaded into an agent context on every read, so the
+#   overage is paid on every session. The remedy is the doc contract's:
+#   split to the owning contract/runbook or retire content. Trim toward the
+#   header, then DELETE the freeze row and lower FREEZE_ROWS_EXPECTED -- the
+#   gate refuses a paid debt left in the table.
+#
+#   docs/cli/error-exit-table.md
+#       20864B vs 2500tok=10000B header, over by 10864B (+109%)
+#   docs/cli/HANDBOOK.md
+#       13979B vs 1800tok=7200B header, over by 6779B (+94%)
+#   docs/contracts/cycle-fleet.md
+#       7497B vs 1200tok=4800B header, over by 2697B (+56%)
+#   docs/ops/npm-rollback-playbook.md
+#       11391B vs 2200tok=8800B header, over by 2591B (+29%)
+#   docs/decisions/deferred.md
+#       3892B vs 400tok=1600B header, over by 2292B (+143%)
+#   docs/decisions/0002-npm-dist-tag.md
+#       5221B vs 800tok=3200B header, over by 2021B (+63%)
+#   docs/studio/web-components.md
+#       3676B vs 600tok=2400B header, over by 1276B (+53%)
+#   docs/decisions/0001-sdk-envelope.md
+#       2178B vs 300tok=1200B header, over by 978B (+82%)
+#   docs/media/DISCOVERY.md
+#       2445B vs 400tok=1600B header, over by 845B (+53%)
+#   docs/search/ROADMAP.md
+#       2809B vs 500tok=2000B header, over by 809B (+40%)
+#   docs/snippets/README.md
+#       1975B vs 300tok=1200B header, over by 775B (+65%)
+#   docs/api/error-envelope-migration.md
+#       2645B vs 500tok=2000B header, over by 645B (+32%)
+#
+# (c) FROZEN, near-miss -- agent-tier, over by <15% -- 11 doc(s)
+#   Within one ordinary edit of its own header. Frozen rather than trimmed
+#   because a sub-15% trim made for CI is the kind of edit that removes a
+#   sentence someone needed; the next substantive edit to the file should
+#   carry it under and delete the row.
+#
+#   docs/ops/vercel-dns-connect.md
+#       12390B vs 2900tok=11600B header, over by 790B (+7%)
+#   docs/spec/bokbasen-api-contract.md
+#       39908B vs 9800tok=39200B header, over by 708B (+2%)
+#   docs/ops/bokbasen-go-live.md
+#       5153B vs 1200tok=4800B header, over by 353B (+7%)
+#   docs/contracts/tui-render-doctrine.md
+#       3920B vs 900tok=3600B header, over by 320B (+9%)
+#   docs/decisions/0005-pr-body-criteria.md
+#       3113B vs 700tok=2800B header, over by 313B (+11%)
+#   docs/contracts/roster-reading.md
+#       7384B vs 1800tok=7200B header, over by 184B (+3%)
+#   docs/contracts/dispatch-areas.md
+#       5782B vs 1400tok=5600B header, over by 182B (+3%)
+#   docs/ops/backup-dr.md
+#       5735B vs 1400tok=5600B header, over by 135B (+2%)
+#   docs/cli/m0-decisions.md
+#       5334B vs 1300tok=5200B header, over by 134B (+3%)
+#   docs/plugins/codelists-byo.md
+#       2081B vs 500tok=2000B header, over by 81B (+4%)
+#   docs/decisions/0003-sync-tags.md
+#       3674B vs 900tok=3600B header, over by 74B (+2%)
+#
+# (c) FROZEN, tier question -- `doc-tier: human` -- 15 doc(s)
+#   A byte budget buys AGENT CONTEXT. That is exactly why `doc-tier: cold`
+#   is exempt above. `human` docs are read by people, not loaded by agents,
+#   so their header number governs a cost nobody pays -- the same argument,
+#   one tier over. This is NOT an exemption and these rows stay frozen and
+#   ratcheted: the open question is whether the doc contract budgets human
+#   tier at all, and that is the contract owner's call, filed rather than
+#   smuggled in here.
+#
+#   docs/setup/CLAUDE-CODE.md
+#       12444B vs 1600tok=6400B header, over by 6044B (+94%)
+#   docs/setup/SETUP.md
+#       12184B vs 1700tok=6800B header, over by 5384B (+79%)
+#   docs/ops/mcp-serve-validation.md
+#       13209B vs 2000tok=8000B header, over by 5209B (+65%)
+#   docs/ops/barkpark-cloud-go-live.md
+#       10564B vs 1900tok=7600B header, over by 2964B (+39%)
+#   docs/swarm/subscription-billing.md
+#       7317B vs 1200tok=4800B header, over by 2517B (+52%)
+#   docs/swarm/personal-access-tokens.md
+#       6925B vs 1200tok=4800B header, over by 2125B (+44%)
+#   docs/setup/personal-local.md
+#       5161B vs 800tok=3200B header, over by 1961B (+61%)
+#   docs/setup/CURSOR.md
+#       7572B vs 1600tok=6400B header, over by 1172B (+18%)
+#   docs/swarm/oban-substrate.md
+#       5931B vs 1200tok=4800B header, over by 1131B (+24%)
+#   docs/setup/REMOTE.md
+#       7443B vs 1600tok=6400B header, over by 1043B (+16%)
+#   docs/ops/github-sync.md
+#       8693B vs 2000tok=8000B header, over by 693B (+9%)
+#   docs/setup/cloud-login.md
+#       6290B vs 1400tok=5600B header, over by 690B (+12%)
+#   docs/ops/connectors-deploy.md
+#       10625B vs 2600tok=10400B header, over by 225B (+2%)
+#   docs/swarm/teams-invitations.md
+#       4937B vs 1200tok=4800B header, over by 137B (+3%)
+#   docs/studio/user-guide.md
+#       4872B vs 1200tok=4800B header, over by 72B (+2%)
+#
+# TOTAL: 38 rows -- 12 (a), 26 (c), 0 (b). The freeze table below is
+# byte-identical to what it was before this adjudication.
+
+# THE CEILING IS THE OTHER HALF OF "MAY ONLY SHRINK", and it exists because the
+# lazy remedy was SIMULATED and found to work. On the tree before this line
+# landed: re-baseline every freeze number to today's size, add a 39th
+# over-budget doc with its own freeze row, bump FREEZE_ROWS_EXPECTED to 39 ->
+# `check-doc-budgets: PASS`. Nothing refused it. The k6 arm only checks that
+# the literal AGREES with the table, so the table could absorb new debt
+# indefinitely as long as both moved together, and "may only shrink" was prose
+# with no reader.
+#
+# FREEZE_ROWS_CEILING is a HIGH-WATER MARK. It may be LOWERED (freely, as debts
+# are paid) and never raised: a raise is the author declaring in the diff that
+# they are enrolling a NEW over-budget doc instead of trimming it, which is the
+# one edit this gate exists to make visible. Arm (m4) pins the refusal.
+#
+# THE RESIDUAL, stated rather than left to be discovered: both numbers live in
+# this file, so an author determined to raise the ceiling can. That is the
+# point -- the ceiling buys a REVIEWED LINE IN THE DIFF, not an impossibility.
+# What it removes is the silent path, where a freeze row is appended and the
+# only visible change is one digit that looks like bookkeeping.
+FREEZE_ROWS_CEILING=38
 FREEZE_ROWS_EXPECTED=38
 
 # APPEND-ONLY RECORDS. A byte ceiling on a file that grows by design is a gate
@@ -1078,6 +1392,15 @@ APPEND_ONLY
     FAIL=1
   else
     echo "ok:   append-only exemption table walked all $APPEND_ONLY_ROWS_WALKED row(s)"
+  fi
+  if [ "$FREEZE_ROWS_EXPECTED" -gt "$FREEZE_ROWS_CEILING" ]; then
+    echo "FAIL: FREEZE_ROWS_EXPECTED=$FREEZE_ROWS_EXPECTED exceeds FREEZE_ROWS_CEILING=$FREEZE_ROWS_CEILING." \
+         "The freeze list may only SHRINK. A new over-budget doc is trimmed to its own header," \
+         "not enrolled: $REMEDY. If a row genuinely must be added, raise the ceiling in the" \
+         "same diff with the reason, where a reviewer reads it."
+    FAIL=1
+  else
+    echo "ok:   freeze literal $FREEZE_ROWS_EXPECTED <= ceiling $FREEZE_ROWS_CEILING (the list may only shrink)"
   fi
   if [ "$FREEZE_ROWS_WALKED" -ne "$FREEZE_ROWS_EXPECTED" ]; then
     echo "FAIL: the freeze table walked $FREEZE_ROWS_WALKED row(s), expected $FREEZE_ROWS_EXPECTED." \
@@ -1189,6 +1512,31 @@ FREEZE_CHECK
   if [ "$FREEZE_STALE" -eq 0 ]; then
     echo "ok:   every freeze row still names a discovered doc"
   fi
+fi
+
+# --- --discovery-only stops HERE -------------------------------------------
+#
+# Everything the header-discovery arm can say has been said by this point: the
+# CAPS precedence walk and its row ratchet, the append-only exemption pin, the
+# freeze ceiling, the freeze row pin, one verdict per discovered doc, the union
+# floor, and the stale-freeze sweep. The arms below (onramp span, card count,
+# headroom floors) are OTHER budgets. They are not weakened by this exit -- the
+# advisory `Doc budgets + anchors` job still runs the whole script -- they are
+# simply not what the unfiltered required lane was widened to carry.
+#
+# NOTE WHICH SIDE THIS EXIT FAILS TOWARD. It re-reads $FAIL, so every refusal
+# accumulated above still exits 1. A vacuous run cannot reach a PASS here: the
+# CAPS row pin, the freeze row pin, the append-only pin and the union floor all
+# RED on a zero parse, and arm (m1) proves the floor refuses a DARK discovery
+# in this mode specifically rather than reporting zero violations.
+if [ "$DISCOVERY_ONLY" = "1" ]; then
+  if [ "$FAIL" -ne 0 ]; then
+    echo ""
+    echo "check-doc-budgets: FAILED (discovery-only) — $REMEDY"
+    exit 1
+  fi
+  echo "check-doc-budgets: PASS (discovery-only)"
+  exit 0
 fi
 
 # --- CODEX.md: cap applies OUTSIDE the pinned onramp span (D42) -------------

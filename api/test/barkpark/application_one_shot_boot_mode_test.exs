@@ -470,21 +470,118 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
       |> Enum.sort()
     end
 
+    # THE BLIND SPOT THIS REPLACED (task-198d289bafabd06a). The first predicate
+    # asked one question: does the source name the module AND call `run(` on the
+    # module's LAST SEGMENT? That is a name-keyed question about a shape-keyed
+    # defect. `alias Mix.Tasks.Bokbasen.List, as: ListTask` binds the module to
+    # `ListTask`, so every call site reads `ListTask.run(` and the last-segment
+    # arm never fires: the `String.contains?(mod)` half passed (the alias line
+    # names it), the regex half did not, and the guard reported
+    # test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs — six
+    # unsandboxed `run/1` calls into a task that boots `Barkpark.OneShot.boot!/0`
+    # — as CLEAN. Measured on origin/main ab36b3bcd: 37 tests, 0 failures, exit 0.
+    #
+    # THE RULE NOW, derived from the call SHAPE. A module is reachable in a
+    # source under whatever NAME the source's own `alias` directives bound it
+    # to. So: parse EVERY alias directive in the file into {bound_name,
+    # full_module} pairs (see `alias_bindings/1` — it handles the plain form,
+    # the `, as:` form and the `A.B.{C, D}` group form by PARSING, not by
+    # listing), keep the pairs whose full_module is one of the derived one-shot
+    # tasks, and ask whether `run(` is called on any name the module is
+    # reachable under. A fifth alias spelling added tomorrow is caught by
+    # extending `parse_alias/1`, which is a rule over the directive's grammar —
+    # there is no list of module names or of bound names anywhere in this path.
+    #
+    # STRICT SUPERSET, DELIBERATELY. The last-segment arm is KEPT as a second
+    # disjunct rather than replaced. A guard that trades one blind spot for
+    # another is the obvious failure of this fix, and a union cannot lose a site
+    # the old predicate saw — including shapes no alias directive explains at
+    # all (a module attribute holding the module, an `import`, an alias written
+    # across a line break). The guard must see MORE, not refuse less.
+    #
     # PURE, so the controls below can feed it a specimen instead of hoping one
-    # exists in the tree. A source INVOKES a one-shot task when it both names
-    # the module (the alias) and calls `run/1` on its last segment — both, so a
-    # file that merely mentions the module in an assertion is not flagged, and a
-    # collision with some other module called `Backfill` is not either.
+    # exists in the tree.
     defp unsandboxed_one_shot_invocations(source, modules) do
       stripped = strip_comments(source)
 
-      Enum.filter(modules, fn mod ->
-        last = mod |> String.split(".") |> List.last()
+      if String.contains?(stripped, @sandbox_marker) do
+        []
+      else
+        bindings = alias_bindings(stripped)
 
-        String.contains?(stripped, mod) and
-          stripped =~ ~r/(?<![A-Za-z0-9_.])#{Regex.escape(last)}\.run\(/ and
-          not String.contains?(stripped, @sandbox_marker)
+        Enum.filter(modules, fn mod ->
+          calls_run?(stripped, mod, bindings)
+        end)
+      end
+    end
+
+    # Every NAME under which `mod` can be called in this source: its full name,
+    # whatever its own alias directives bound it to, and — as the superset arm
+    # above — its last segment when the source names the module at all.
+    defp reachable_names(stripped, mod, bindings) do
+      last = mod |> String.split(".") |> List.last()
+
+      aliased = for {bound, full} <- bindings, full == mod, do: bound
+
+      legacy = if String.contains?(stripped, mod), do: [last], else: []
+
+      Enum.uniq([mod | aliased] ++ legacy)
+    end
+
+    defp calls_run?(stripped, mod, bindings) do
+      stripped
+      |> reachable_names(mod, bindings)
+      |> Enum.any?(fn name ->
+        stripped =~ ~r/(?<![A-Za-z0-9_.])#{Regex.escape(name)}\.run\(/
       end)
+    end
+
+    # Parse the file's `alias` directives into {bound_name, full_module} pairs.
+    # A GRAMMAR, not an enumeration: each branch below is one production of
+    # Elixir's `alias` syntax, so any module written in that syntax is bound
+    # correctly whether or not anyone has heard of it.
+    defp alias_bindings(stripped) do
+      stripped
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^\s*alias\s+(\S.*)$/, line) do
+          [_, rest] -> parse_alias(String.trim(rest))
+          nil -> []
+        end
+      end)
+    end
+
+    defp parse_alias(rest) do
+      group = Regex.run(~r/^([A-Z][A-Za-z0-9_.]*)\.\{([^}]*)\}/, rest)
+      as_form = Regex.run(~r/^([A-Z][A-Za-z0-9_.]*)\s*,\s*as:\s*([A-Z][A-Za-z0-9_.]*)/, rest)
+      plain = Regex.run(~r/^([A-Z][A-Za-z0-9_.]*)/, rest)
+
+      cond do
+        # `alias A.B.{C, D}` — each member binds under its own last segment.
+        group ->
+          [_, prefix, inner] = group
+
+          inner
+          |> String.split(",")
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(fn seg ->
+            {seg |> String.split(".") |> List.last(), prefix <> "." <> seg}
+          end)
+
+        # `alias A.B.C, as: D` — THE SHAPE THAT WAS INVISIBLE.
+        as_form ->
+          [_, full, bound] = as_form
+          [{bound, full}]
+
+        # `alias A.B.C` — binds under `C`.
+        plain ->
+          [_, full] = plain
+          [{full |> String.split(".") |> List.last(), full}]
+
+        true ->
+          []
+      end
     end
 
     test "the derived task set is real and populated" do
@@ -529,6 +626,148 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
 
       assert unsandboxed_one_shot_invocations(prose, modules) == [],
              "comment stripping is broken — prose is being read as a call"
+    end
+
+    test "control: the predicate sees a call through an `as:` ALIAS — the shape that was invisible" do
+      # THE RED-BEFORE, TURNED INTO A STANDING ARM (task-198d289bafabd06a).
+      # This specimen is the shape of
+      # test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs, which the
+      # previous predicate reported CLEAN: the module is named only on the alias
+      # line, and every call site reads `ListTask.run(`, never `List.run(`.
+      modules = ["Mix.Tasks.Bokbasen.List"]
+
+      aliased = """
+      defmodule SomeTest do
+        alias Mix.Tasks.Bokbasen.List, as: ListTask
+        test "x" do
+          capture_io(fn -> ListTask.run(["--limit", "3"]) end)
+        end
+      end
+      """
+
+      assert unsandboxed_one_shot_invocations(aliased, modules) == modules,
+             "an `as:` alias still hides the call — the blind spot this arm exists for is back"
+
+      # The remedy clears it, so the arm reports the LEAK and not the call.
+      fixed =
+        String.replace(
+          aliased,
+          "ListTask.run([\"--limit\", \"3\"])",
+          "BootModeSandbox.protecting(fn -> ListTask.run([\"--limit\", \"3\"]) end)"
+        )
+
+      assert unsandboxed_one_shot_invocations(fixed, modules) == [],
+             "the sandboxed aliased call is still flagged — the arm reports the call, not the leak"
+    end
+
+    test "control: alias binding is parsed from the GRAMMAR, so every alias form is reachable" do
+      # A PREDICATE, NOT A LIST. Each specimen below is a different production of
+      # Elixir's `alias` syntax over the SAME module. None of them is special-cased
+      # anywhere in the predicate: `parse_alias/1` reads the directive's shape.
+      modules = ["Mix.Tasks.Bokbasen.List"]
+
+      forms = [
+        {"full name, no alias", "Mix.Tasks.Bokbasen.List.run([])"},
+        {"plain alias", "alias Mix.Tasks.Bokbasen.List\nList.run([])"},
+        {"as: alias", "alias Mix.Tasks.Bokbasen.List, as: ListTask\nListTask.run([])"},
+        {"as: alias, unusual bound name", "alias Mix.Tasks.Bokbasen.List, as: Zzz\nZzz.run([])"},
+        {"group alias", "alias Mix.Tasks.Bokbasen.{List, Status}\nList.run([])"},
+        {"group alias with an as:-shaped sibling",
+         "alias Mix.Tasks.Bokbasen.{Status, List}\nList.run([])"}
+      ]
+
+      for {label, source} <- forms do
+        assert unsandboxed_one_shot_invocations(source, modules) == modules,
+               "the predicate cannot see a call through the #{label} form"
+      end
+
+      # And the negative direction: a bound name that is NOT this module must not
+      # be flagged, or the guard is flagging on `.run(` alone.
+      other = "alias Some.Other.Thing, as: ListTask\nListTask.run([])"
+
+      assert unsandboxed_one_shot_invocations(other, modules) == [],
+             "a `run/1` call on an unrelated alias was flagged — the predicate is matching `.run(` alone"
+    end
+
+    test "control: the predicate is a SUPERSET of the last-segment rule it replaced" do
+      # THE OBVIOUS FAILURE OF THIS FIX is trading one blind spot for another.
+      # Reconstructed here rather than referenced, so this arm keeps measuring if
+      # the real one is deleted: everything the OLD rule flagged must still be
+      # flagged by the new one.
+      modules = ["Mix.Tasks.Bokbasen.List", "Mix.Tasks.Barkpark.Preview.Backfill"]
+
+      old_rule = fn source, mods ->
+        stripped = strip_comments(source)
+
+        Enum.filter(mods, fn mod ->
+          last = mod |> String.split(".") |> List.last()
+
+          String.contains?(stripped, mod) and
+            stripped =~ ~r/(?<![A-Za-z0-9_.])#{Regex.escape(last)}\.run\(/ and
+            not String.contains?(stripped, @sandbox_marker)
+        end)
+      end
+
+      specimens = [
+        "alias Mix.Tasks.Bokbasen.List\nList.run([])",
+        "alias Mix.Tasks.Bokbasen.List, as: ListTask\nListTask.run([])",
+        "Mix.Tasks.Barkpark.Preview.Backfill.run([])",
+        "alias Mix.Tasks.Barkpark.Preview.Backfill\nBackfill.run([])",
+        "@task Mix.Tasks.Bokbasen.List\nList.run([])",
+        "alias Mix.Tasks.Bokbasen.List\nBootModeSandbox.protecting(fn -> List.run([]) end)",
+        "nothing to see here"
+      ]
+
+      # The real tree is the subject c1 names; these specimens are the arm that
+      # keeps the property from silently regressing between runs of it.
+      for source <- specimens do
+        old = old_rule.(source, modules)
+        new = unsandboxed_one_shot_invocations(source, modules)
+
+        assert Enum.all?(old, &(&1 in new)),
+               """
+               the new predicate LOST a site the last-segment rule saw:
+                   source:  #{inspect(source)}
+                   old:     #{inspect(old)}
+                   new:     #{inspect(new)}
+               """
+      end
+    end
+
+    test "positive control: the offender scan reads a real, non-empty population" do
+      # ANTI-VACUITY FOR THE SCAN ITSELF (task-198d289bafabd06a c2). The guard
+      # below asserts `offenders == []`. That is satisfied vacuously by a walk
+      # that reads ZERO files — a renamed directory, a changed wildcard, a
+      # Path.relative_to/2 that stops matching. A guard against a silent gap must
+      # prove it can see, or it is theatre.
+      scanned = Path.wildcard(Path.join(@test_root, "test/**/*.{ex,exs}"))
+
+      refute scanned == [],
+             "the offender walk under #{@test_root}/test read ZERO files — every `offenders == []` below is vacuous"
+
+      assert length(scanned) > 200,
+             "the offender walk read only #{length(scanned)} test source(s) — the wildcard is not reaching the tree"
+
+      # NAMED, not just counted: the file whose shape this whole block exists for
+      # must actually be inside the population being scanned.
+      relative = Enum.map(scanned, &Path.relative_to(&1, @test_root))
+
+      assert "test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs" in relative,
+             "the aliased-call file is not in the scanned population — the guard cannot see it however good the predicate is"
+
+      # And the predicate must actually FIRE on something in that population when
+      # a known one-shot invocation is present. Read the real file, strip its
+      # sandbox if it has one, and require a flag: this proves the end-to-end
+      # path (walk -> read -> predicate) rather than the predicate alone.
+      source =
+        Path.join(@test_root, "test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs")
+        |> File.read!()
+        |> String.replace(@sandbox_marker, "SandboxRemovedForThisControl")
+
+      modules = one_shot_task_modules()
+
+      refute unsandboxed_one_shot_invocations(source, modules) == [],
+             "with its sandbox removed, the real aliased file is STILL read as clean — the scan-to-predicate path measures nothing"
     end
 
     test "no test invokes a one-shot mix task outside Barkpark.BootModeSandbox" do
