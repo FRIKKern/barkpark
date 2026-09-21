@@ -216,6 +216,61 @@ STUB
        "$(printf '%s\n' "$out" | grep -c '^#17709 ')"
   if [ "$fails" -gt 0 ]; then printf '%s\n' "$out" | _ind; fi
 
+  # ════════════════════════════════════════════════════════════════════════
+  # arm 8 — THE COUNT IDENTITY (task-c767be8a820a9300)
+  #
+  # The held-row loop is fed by a FILE on fd 0; its body runs `bp task get`,
+  # which inherits fd 0. One stdin read in that child eats the rest of the
+  # list and the run reports "dispatch block: EMPTY" over one row of three.
+  # These arms MUTATE THE CHILD, not the helper: two stub `bp`s that differ by
+  # EXACTLY ONE LINE — `cat > /dev/null` — and answer identically otherwise,
+  # so the only variable between red and green is whether a child reads fd 0.
+  # ════════════════════════════════════════════════════════════════════════
+  echo "== arm 8: a stdin-reading bp child truncates the held loop — the count must see it"
+  mkdir -p "$d/bin8a" "$d/bin8b"
+  cp "$d/bin/gh" "$d/bin8a/gh"; cp "$d/bin/gh" "$d/bin8b/gh"
+  cat > "$d/bin8a/bp" <<'STUB8A'
+#!/usr/bin/env bash
+cat > /dev/null
+[ "$1" = task ] && [ "$2" = get ] || { echo "stub bp: unexpected '$*'" >&2; exit 9; }
+echo '{"doc":{"content":{"lifecycle_status":"in_progress"},"claim":{"worker":"lead-api-r9"}}}'
+STUB8A
+  # THE CONTROL: byte-identical minus the stdin read.
+  sed -e '/^cat > \/dev\/null$/d' "$d/bin8a/bp" > "$d/bin8b/bp"
+  chmod +x "$d/bin8a/bp" "$d/bin8b/bp" "$d/bin8a/gh" "$d/bin8b/gh"
+  _chk "arm8 stubs differ by exactly the read" 1 \
+       "$(diff "$d/bin8a/bp" "$d/bin8b/bp" | grep -c '^< cat > /dev/null$')"
+  # THREE rows, so a 1-of-N refusal cannot be confused with an off-by-one.
+  printf 'held-row-one lead-api-r9\nheld-row-two lead-api-r9\nheld-row-three lead-api-r9\n' > "$d/held3.txt"
+
+  out=$(cd "$d" && PATH="$d/bin8a:$PATH" STUB_DIR="$d" bash "$SELF" "api/" "$d/held3.txt" 2>&1); rc=$?
+  _chk "arm8 stdin-reading child exits 3" 3 "$rc"
+  _chk "arm8 refusal names 1 of the 3"  1 "$(printf '%s\n' "$out" | grep -c 'handled 1 of the 3')"
+  _chk "arm8 refusal names the mechanism" 1 "$(printf '%s\n' "$out" | grep -c 'READS STDIN')"
+  _chk "arm8 refusal forbids deleting it" 1 "$(printf '%s\n' "$out" | grep -c 'deleting the count check')"
+  _chk "arm8 never says dispatch block EMPTY" 0 "$(printf '%s\n' "$out" | grep -c 'dispatch block: EMPTY')"
+  _chk "arm8 never says lane-open-prs: OK"    0 "$(printf '%s\n' "$out" | grep -c 'lane-open-prs: OK')"
+  if [ "$fails" -gt 0 ]; then printf '%s\n' "$out" | _ind; fi
+
+  echo "== arm 8b: THE CONTROL — same stub minus the stdin read reaches all three"
+  out=$(cd "$d" && PATH="$d/bin8b:$PATH" STUB_DIR="$d" bash "$SELF" "api/" "$d/held3.txt" 2>&1); rc=$?
+  _chk "arm8b control exits 0" 0 "$rc"
+  _chk "arm8b read all three rows" 3 "$(printf '%s\n' "$out" | grep -c '^held-row-')"
+  _chk "arm8b says 3 of the 3" 1 "$(printf '%s\n' "$out" | grep -c 'all 3 of the 3 line(s)')"
+  if [ "$fails" -gt 0 ]; then printf '%s\n' "$out" | _ind; fi
+
+  echo "== arm 8c: MUTANT — the identity removed goes GREEN over the truncated list"
+  # shellcheck disable=SC2016  # the $-names are THIS file's text to match, not ours to expand
+  sed -e 's/^  if \[ "\$ROWS_REACHED" != "\$HELD_FED" \]; then$/  if false; then/' "$SELF" > "$d/nocount.sh"
+  if ! grep -q '^  if false; then$' "$d/nocount.sh"; then
+    echo "FAIL arm8c: the mutation did not apply — the identity guard was reworded"; fails=$((fails+1))
+  else
+    out=$(cd "$d" && PATH="$d/bin8a:$PATH" STUB_DIR="$d" bash "$d/nocount.sh" "api/" "$d/held3.txt" 2>&1); rc=$?
+    _chk "arm8c mutant exits 0 over 1 of 3" 0 "$rc"
+    _chk "arm8c mutant clears dispatch silently" 1 "$(printf '%s\n' "$out" | grep -c 'dispatch block: EMPTY')"
+    _chk "arm8c mutant read only ONE row"        1 "$(printf '%s\n' "$out" | grep -c '^held-row-')"
+  fi
+
   rm -rf "$d"
   if [ "$fails" -gt 0 ]; then echo "lane-open-prs.sh selftest: $fails FAILED"; return 1; fi
   echo "lane-open-prs.sh selftest: all arms passed"; return 0
@@ -283,8 +338,30 @@ fi
 # ------------------------------------------------------------------ 2. HELD ROWS --------------
 if [ -n "$HELDFILE" ]; then
   say "--- held rows from $HELDFILE (ledger: lifecycle_status + claim.lease_extension.pr)"
-  ROWS=0; INFLIGHT=""
+  # ── THE COUNT IDENTITY (task-c767be8a820a9300) ─────────────────────────────
+  # This loop is fed by a FILE on fd 0 and its body runs a CHILD — `bp task get`
+  # — that INHERITS fd 0. One stdin read in that child (a future `bp` that
+  # prompts, a `jq -`, a bare `read`) swallows the rest of the held list, the
+  # loop ends early AT EXIT 0, and every line below — the per-row verdicts, the
+  # DISPATCH BLOCK, "dispatch block: EMPTY" — is computed over the rows the loop
+  # happened to reach rather than the rows the file holds. "EMPTY" then means
+  # "no row I looked at had a PR", which reads as clearance to dispatch.
+  #
+  # HELD_FED is the number of lines the file HANDED IN, counted outside the loop
+  # from the same file; ROWS_REACHED is the number this loop actually read. The
+  # guard is a COUNT COMPARISON, not fd discipline: fd discipline is a property
+  # of every child in this body forever, which nothing can hold, while the
+  # identity notices no matter WHY the loop came up short. No `</dev/null` is
+  # attached to the `bp` child for exactly that reason — it would silence the
+  # symptom this check exists to catch. See arm 8 of the selftest.
+  # awk counts a final unterminated line as a record, matching this loop's
+  # `|| [ -n "$line" ]` clause; the two readers must agree on what a line is.
+  HELD_FED=$(awk 'END{print NR}' "$HELDFILE"); [ -n "$HELD_FED" ] || HELD_FED=0
+  ROWS=0; ROWS_REACHED=0; INFLIGHT=""
   while IFS= read -r line || [ -n "$line" ]; do
+    # COUNTED FIRST, before any `continue`: a line is "reached" once this loop
+    # has read it, blank and comment lines included — HELD_FED counts those too.
+    ROWS_REACHED=$((ROWS_REACHED+1))
     line="${line%%#*}"
     line=$(printf '%s' "$line" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     [ -n "$line" ] || continue
@@ -312,6 +389,15 @@ EOF
     fi
     say "$id lifecycle=$life lease-pr=$leasepr ledger-worker=$ledgerw file-worker=${filew:-?} — $cross"
   done < "$HELDFILE"
+  # THE IDENTITY, CHECKED BEFORE ANY SUMMARY — including before the empty-list
+  # line and the DISPATCH BLOCK. A loop that stopped early did not only miss
+  # rows, it also built an INCOMPLETE $INFLIGHT, so even its refusals would be
+  # claims over work it never did. Both numbers are in the sentence: "the loop
+  # is broken" is unactionable, "handled 1 of the 9 handed in" is not.
+  if [ "$ROWS_REACHED" != "$HELD_FED" ]; then
+    say "lane-open-prs: REFUSING — the held-row loop handled $ROWS_REACHED of the $HELD_FED line(s) $HELDFILE handed it, so this run CANNOT say anything about the other $((HELD_FED - ROWS_REACHED)) and the DISPATCH BLOCK below would be a clearance over rows it never read. It is NOT a finding about the ledger — it is this helper failing to do its own work, and the near-certain cause is that something in the loop body now READS STDIN: the held list is on fd 0 and the 'bp task get' child inherits fd 0, so one stdin read swallows the remaining lines and the loop ends after $ROWS_REACHED iteration(s) at exit 0. Find the new stdin reader and give it its own input (for example '</dev/null'), then re-run. Do NOT satisfy this by deleting the count check: the count is the only thing that can see this at all."
+    exit 3
+  fi
   [ "$ROWS" = 0 ] && say "held rows: the file $HELDFILE lists NO rows. An empty list is not 'nothing is in flight'."
 
   # Rows a successor must NOT dispatch a worker onto: they already have a PR.
@@ -331,7 +417,7 @@ EOF
 $PRLINES
 EOF
   fi
-  [ "$BLOCKED" = 0 ] && say "dispatch block: EMPTY — no held row has an open PR. (Read the CANNOT READ lines above, if any, before trusting that.)"
+  [ "$BLOCKED" = 0 ] && say "dispatch block: EMPTY — no held row has an open PR, across all $ROWS_REACHED of the $HELD_FED line(s) $HELDFILE handed in. (Read the CANNOT READ lines above, if any, before trusting that.)"
 fi
 
 if [ "$REFUSALS" -gt 0 ]; then

@@ -24,7 +24,7 @@ name: Prod micro-block staleness
 #               how a workflow ends up with no owner — a job that renders on
 #               every PR has one by construction, the author whose PR reds it.
 #               This job is deliberately NOT in .github/required-checks.json's
-#               required set; it is a reader, not a merge gate.
+#               required set; it is a reader, never a required context.
 #
 #   prod-microblock-read      — schedule + dispatch ONLY (`if:` below). It runs the reader
 #               against the live box. On a pull_request head that answer is

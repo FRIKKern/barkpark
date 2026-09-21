@@ -492,3 +492,90 @@ before it is made. Then, for each non-success name, follow `details_url`'s run
 id to `actions/runs/<id>/jobs`, take the job whose `conclusion` is `failure`,
 and read `actions/jobs/<job>/logs` — the check-run's own `output` is frequently
 empty, and a run's `conclusion` still lies under `continue-on-error`.
+## 9 — The SAME file's `:53`, added 2026-09-20: same family as §8, opposite polarity
+
+`task-232ca4f298258788` asked whether `claude_chat_cloud_session_test.exs:53` is
+the §8 family or a distinct defect. It is the SAME family, and the polarity of the
+assertion is what makes that easy to miss: §8's `:170` reds because the binding is
+STILL THERE when it should be gone, `:53` reds because the binding is NOT YET there
+when it should have arrived. Both are the one mechanism §8 names — the stub
+subprocess's frames not landing on the schedule the test assumed.
+
+**Signature.** `BarkparkWeb.Studio.ClaudeChatCloudSessionTest`, the test
+
+    two-turn invocation-counting Cloud session
+    (connectors D137/D139 — the W14 capstone)
+    turn 1 CREATES + binds a sandbox, turn 2 REUSES it
+    — one create across both turns
+
+fails at `api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs:53` with
+
+    match (=) failed
+    code:  assert %{cloud_sandbox_id: @sandbox_id} = StudioChat.get_session(sid)
+    left:  %{cloud_sandbox_id: "sbx-stub-1"}
+    right: %Barkpark.StudioChat.Session{ … cloud_sandbox_id: nil, … }
+
+Read the `right` side before anything else: the Session ROW EXISTS and is fully
+populated, and the single field that is `nil` is the one the swallowed `bp_sandbox`
+frame writes. Nothing about the argv, the pipeline or the persistence path is
+broken — the frame simply had not been processed when `assert_recorder_gone/1`
+returned and the row was read. That is §8's "host contention on subprocess
+scheduling", not an order dependence and not the diff under it.
+
+**Reproduction.** Identical to §8: it reds in a DIRECTORY run and passes ALONE.
+Under a private `MIX_TEST_PARTITION`:
+
+    cd api && MIX_TEST_PARTITION=<yours> ../scripts/mix-test-strict.sh test/barkpark_web/studio/
+    cd api && MIX_TEST_PARTITION=<yours> ../scripts/mix-test-strict.sh test/barkpark_web/studio/claude_chat_cloud_session_test.exs
+
+**Run ids — ONE, and this entry says so rather than padding.** A sweep of the 250
+most recent FAILED `elixir.yml` runs (2026-09-16T13:43Z → 2026-09-20T17:58Z),
+grepped for the literal failing line, found `:53` in exactly one:
+
+| run | branch | line |
+|---|---|---|
+| 35514385842 | `cli-r21k-history-lock` — a CLI diff, nothing near chat or sandbox code | `claude_chat_cloud_session_test.exs:53` |
+
+Its §8 sibling `:170` appears once in the same window (35505321451, branch
+`studio-r21j-switchers`, already cited by §8). The pair is rare, and the pair is
+the population: the two tests in this file that wait on a stub subprocess are the
+only two that red. A second run id for `:53` is NOT quoted because the sweep did
+not find one — treat the family, evidenced across both tests, as the claim.
+
+**What to do when you hit it.** Exactly §8's line: confirm the failing test is
+this one and only this one, then re-fire the gate with `gh pr update-branch <pr>`
+(a new head, a fresh run) rather than `gh run rerun`. If a run fails with this
+signature PLUS anything else, the something else is yours.
+
+## 10 — `chat_live_test.exs:6661` / `{:managed_runtime_capacity, 3}`: FIXED, not baselined
+
+Recorded here because leads who met it before 2026-09-20 were told to read it as a
+fresh red, and because the entry a reader expects to find is the one that says why
+there is no entry.
+
+`BarkparkWeb.Studio.ChatLiveTest`, `living sidebar cards (wave 5) a background
+session's card shows working + its current tool line`, failed at
+`api/test/barkpark_web/live/studio/chat_live_test.exs:6661` with
+
+    ** (MatchError) no match of right hand side value: {:error, {:managed_runtime_capacity, 3}}
+    code: {:ok, _rec} =
+    stacktrace:
+      test/barkpark_web/live/studio/chat_live_test.exs:6668: (test)
+
+on `Elixir gate` runs **35515018409** (branch `cli-r21k-dedupwall`, a CLI diff) and
+**35249228901** (branch `main`) — neither carrying a chat or studio_chat change.
+
+This one was NOT host contention and is not baselined. `Barkpark.StudioChat.
+RuntimeAdmission` caps managed runtimes at a node-global 3 — one lease count over
+the single shared `RecorderRegistry` — and 44 `Recorder.ensure/1` call sites across
+nine ASYNC test files compete for those three slots. A fourth concurrent holder
+gets deterministic backpressure and reds. The cap is a sound production default and
+a concurrency ceiling below the suite's own fan-out; `config/test.exs` now raises
+`max_managed_runtimes` out of the suite's reach, and
+`runtime_admission_test.exs` pins that the effective no-opts limit clears
+`max(System.schedulers_online() * 2, 8)`. Tests that ASSERT backpressure are
+untouched — they pass an explicit `managed_runtime_limit`, or `Application.put_env`
+their own cap per-test.
+
+If `{:managed_runtime_capacity, N}` reds a test again, N tells you which door: `3`
+means the config raise was lost, any other N means a test set that cap on purpose.

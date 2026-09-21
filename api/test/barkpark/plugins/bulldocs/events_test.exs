@@ -302,6 +302,93 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
                Events.record_decision(decision_attrs(request, %{"workspace_id" => workspace.id}))
     end
 
+    # The PROJECT rung of check_same_scope/2. The sibling test above holds
+    # project_id nil on BOTH sides, so the workspace conjunct decides it in
+    # both arms — these hold the WORKSPACE equal so only the project
+    # conjunct can produce the refusal.
+    test "a CROSS-PROJECT decision is refused with the workspace held EQUAL" do
+      workspace = create_workspace!()
+      proj_a = create_project!(workspace)
+      proj_b = create_project!(workspace)
+
+      request =
+        seed_request(%{"workspace_id" => workspace.id, "project_id" => proj_a.id})
+
+      # Same workspace on both sides — the workspace conjunct CANNOT refuse
+      # this; only the project conjunct can.
+      assert request.workspace_id == workspace.id
+      assert request.project_id == proj_a.id
+      assert proj_a.id != proj_b.id
+
+      assert {:error, :cross_scope} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_b.id
+                 })
+               )
+
+      # Control: the SAME call with the request's own project lands.
+      assert {:ok, decision} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_a.id
+                 })
+               )
+
+      assert decision.authorization == "authorized"
+    end
+
+    test "a decision that OMITS project_id cannot decide a project-scoped request" do
+      workspace = create_workspace!()
+      proj_a = create_project!(workspace)
+
+      request =
+        seed_request(%{"workspace_id" => workspace.id, "project_id" => proj_a.id})
+
+      # The unscoped-reader shape: stamp_scope/2 omits the key entirely when
+      # the resolved paper carries no project, so fetch/2 reads nil.
+      attrs = decision_attrs(request, %{"workspace_id" => workspace.id})
+      refute Map.has_key?(attrs, "project_id")
+
+      assert {:error, :cross_scope} = Events.record_decision(attrs)
+
+      # Control: the same actor, same workspace, WITH the project lands.
+      assert {:ok, decision} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_a.id
+                 })
+               )
+
+      assert decision.authorization == "authorized"
+    end
+
+    test "a project-scoped decision cannot decide an UNSCOPED request" do
+      workspace = create_workspace!()
+      proj_a = create_project!(workspace)
+
+      # The mirror of the arm above: the request carries no project, the
+      # decision does. nil != proj_a.id is still a scope mismatch.
+      request = seed_request(%{"workspace_id" => workspace.id})
+      assert is_nil(request.project_id)
+
+      assert {:error, :cross_scope} =
+               Events.record_decision(
+                 decision_attrs(request, %{
+                   "workspace_id" => workspace.id,
+                   "project_id" => proj_a.id
+                 })
+               )
+
+      assert {:ok, decision} =
+               Events.record_decision(decision_attrs(request, %{"workspace_id" => workspace.id}))
+
+      assert decision.authorization == "authorized"
+    end
+
     test "REPLAY: a second authorized decision on the same request is refused" do
       request = seed_request()
 
