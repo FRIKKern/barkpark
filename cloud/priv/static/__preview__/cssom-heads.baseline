@@ -698,7 +698,23 @@
 # MISSES is not re-measured here (it needs a browser) and nothing in this diff adds a
 # construct the CSSOM parses differently from the authored text: every head removed is
 # a plain class selector in the top-level cascade, and none is added.
-1329
+# Re-measured 2026-09-21 (task-4f071458f1c59358, the member instance header's title
+# floor): 1329 -> 1331, +2 authored rule heads, ZERO removed. Both are inside ONE new
+# `@media (min-width: 900px)` block above the existing 899 stack:
+# `.detail-head--inst .detail-head-main` and `.detail-head--inst .detail-actions`.
+# MISSES 0 in the same run, which is what makes this an unrecorded ADD rather than a
+# parity defect — the distinction the ratchet's own failure text tells you to confirm
+# before bumping.
+# NOT arithmetic — and this entry is the second measurement, not the first: the branch
+# was cut when the baseline read 1332 and recorded 1334, then the pill-families retirement
+# above landed 1332 -> 1329 underneath it. The rebase conflict was resolved by RE-RUNNING
+# the instrument on the rebased tree, never by re-adding 2 to the new floor. 1331 is the
+# return of cssom-parity.mjs's own exported `authoredHeads(app.css).length` on this branch;
+# the SAME call on origin/main's app.css returned 1329, matching the baseline it replaces,
+# and that control is what says the +2 is this diff and not a resolver difference. The
+# multiset diff of the two head lists is exactly [.detail-head--inst .detail-head-main,
+# .detail-head--inst .detail-actions] ADDED and NOTHING removed.
+1331
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout

@@ -34,13 +34,13 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     62 of this file's 69 `min-width` declarations are this escape, and none of
+     63 of this file's 70 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
-   break-all), 69 `min-width` (72 occurrences less the THREE that are `@media
+   break-all), 70 `min-width` (74 occurrences less the FOUR that are `@media
    (min-width: …)` preludes, which are not declarations at all), and 30
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
@@ -6471,6 +6471,43 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      0/24 cells (12 widths x 2 themes) have `deSw > deCw`. */
   .detail-head--inst { flex-direction: column; align-items: stretch; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
+}
+
+/* THE MEMBER HEADER'S OWN ROW (task-4f071458f1c59358). Above the stack the head
+   is a flex ROW, and `.detail-head--inst .detail-actions` above is authored
+   `flex: 0 0 auto` while its own box carries `flex-wrap: wrap`. A wrapping flex
+   container's flex BASE size is its max-content width — every chip PLUS the
+   whole sentence on one line — and `flex-shrink: 0` forbids it to give any of
+   that back. For an OWNER that base is a few chips wide and nothing is wrong.
+   For a MEMBER the strip also carries `.inst-life-reason`, the server's own
+   team-admin sentence (D428 disable-and-explain), and the sibling
+   `.detail-head-main` carries `min-width: 0` — so it absorbs the ENTIRE
+   deficit and the instance name wraps toward its min-content width.
+
+   MEASURED on origin/main bytes, headless Chrome, both themes, via
+   overflow-guard.mjs --defect W21m-member-head-title-floor: at 1440
+   `instance-behind-member` painted the name "Staging" over SEVEN line boxes
+   (H1 273px, `.detail-head-main` 2px beside a 966px strip) with 434px of empty
+   header under the strip; `panel-overview-member` and `timeline-events-only`
+   read 2 lines / 131px dead at 1440 and collapsed to TEN line boxes / 533px
+   dead / `.detail-head-main` 0px at 1024 and 900, where the page also dragged
+   96-346px sideways. Post-fix every one of those 24 row-band cells reads a
+   1-2 line title, a dead band under one row, and `scrollWidth == clientWidth`.
+
+   THE TWO DECLARATIONS ARE BOTH LOAD-BEARING, and neither alone is the fix:
+   `flex: 0 1 auto` on the strip lets the sentence wrap instead of holding the
+   row open; `flex: 1 1 360px` gives the title column a FLOOR it is grown from
+   rather than a zero it is shrunk from, so the name keeps a readable measure
+   at every width in the band.
+
+   SCOPED ABOVE THE STACK ON PURPOSE. Below 900 the block above turns the head
+   into a COLUMN, where a `flex-basis` is a HEIGHT basis — an unscoped
+   `flex: 1 1 360px` would buy the wide band by forcing a 360px-tall title
+   column on every tablet and phone. The 768 cell is this leg's committed
+   no-regression control for exactly that. */
+@media (min-width: 900px) {
+  .detail-head--inst .detail-head-main { flex: 1 1 360px; }
+  .detail-head--inst .detail-actions { flex: 0 1 auto; min-width: 0; }
 }
 
 /* ==========================================================================
