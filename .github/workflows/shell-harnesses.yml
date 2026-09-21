@@ -835,6 +835,14 @@ on:
       - "internal/cli/tasks_next_cmd.go"
       - "docs/contracts/canonical-impl-markers.md"
       - "scripts/pds-*.py"
+      # ECHO-INTO-JQ CORRUPTION (task-8a5fb4bf0915b5b2). The fixture is a
+      # SUBJECT, not an input: it is a frozen captured bp row, and its escape
+      # sequences ARE what an escape-interpreting echo destroys — strip them and
+      # the check stops measuring anything. The SKILL.md is the other subject:
+      # its fenced recipes are what an agent pastes into zsh.
+      - "scripts/echo-json-parse-guard.test.sh"
+      - "scripts/fixtures/echo-json-parse-row.json"
+      - ".claude/skills/session/SKILL.md"
   push:
     branches: [main]
     paths:
@@ -1436,6 +1444,14 @@ on:
       - "internal/cli/tasks_next_cmd.go"
       - "docs/contracts/canonical-impl-markers.md"
       - "scripts/pds-*.py"
+      # ECHO-INTO-JQ CORRUPTION (task-8a5fb4bf0915b5b2). The fixture is a
+      # SUBJECT, not an input: it is a frozen captured bp row, and its escape
+      # sequences ARE what an escape-interpreting echo destroys — strip them and
+      # the check stops measuring anything. The SKILL.md is the other subject:
+      # its fenced recipes are what an agent pastes into zsh.
+      - "scripts/echo-json-parse-guard.test.sh"
+      - "scripts/fixtures/echo-json-parse-row.json"
+      - ".claude/skills/session/SKILL.md"
 
 permissions:
   contents: read
@@ -1569,6 +1585,7 @@ jobs:
       scheduled-arm-health: ${{ steps.sets.outputs.scheduled-arm-health }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
       scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
+      echo-json-parse: ${{ steps.sets.outputs.echo-json-parse }}
     steps:
       - uses: actions/checkout@v4
         with:
