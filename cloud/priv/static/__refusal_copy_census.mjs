@@ -861,6 +861,7 @@ const PIN = [
   { key: "FN|loadOverview|d1b27ebe", verdict: "UNREVIEWED", copy: "You don't have access to this fleet." },
   { key: "FN|loadOverview|6ad5126d", verdict: "UNREVIEWED", copy: "Your fleet couldn't be loaded, and the answer didn't say why." },
   { key: "ARG|dismissRunway|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|ackRunwayStep|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|runDecommission|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|retryInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|removeInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
