@@ -859,14 +859,138 @@ if [ "$MODE" = selftest ]; then
     *) fail_selftest "an UNPINNED extra exemption did not print its row-count FAIL line — the exemption list can grow quietly" ;;
   esac
 
+  # --- the --discovery-only MODE, which is what the required lane runs -------
+  #
+  # These arms exist because a narrow mode is the classic way a gate goes quiet:
+  # the workflow step keeps its name, the run keeps exiting 0, and nobody
+  # notices the flag stopped reaching any verdict. Every arm below runs the mode
+  # the UNFILTERED `path-escape` job runs, not the full script.
+
+  # m0: THE CONTROL, and the SCOPE assertion in one run. The unmutated copy in
+  #     --discovery-only must exit 0 on the planted green root (or no m-arm's
+  #     exit is attributable), must reach the union floor (so the arm under test
+  #     actually ran), and must NOT reach the card count (so the mode really is
+  #     narrow and a later reader is not misled about what this lane covers).
+  cp "$SELF" "$caps_probe"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 0 ] \
+    || fail_selftest "the --discovery-only CONTROL exited $caps_rc on the planted green root — no m-arm below is attributable. Its last lines: $(printf '%s' "$caps_out" | tail -3 | tr '\n' ' ')"
+  case "$caps_out" in
+    *"budget gate reached"*"floor is"*|*"budget gate reached"*"floor $selftest_docs_floor"*) ;;
+    *) fail_selftest "--discovery-only did not print the union-floor line — the mode exits before the discovery arm reaches a verdict, so the required lane would carry a green that asserts NOTHING" ;;
+  esac
+  case "$caps_out" in
+    *"check-doc-budgets: PASS (discovery-only)"*) ;;
+    *) fail_selftest "--discovery-only did not print its own PASS line — it fell through to some other exit and the mode is not what the workflow step thinks it is" ;;
+  esac
+  case "$caps_out" in
+    *"card count is exactly 7"*) fail_selftest "--discovery-only reached the CARD arm — the mode is wider than its name and than the workflow step's comment; either fix the exit or rename the flag" ;;
+    *) ;;
+  esac
+  case "$caps_out" in
+    *"fixed-caps table walked all"*) ;;
+    *) fail_selftest "--discovery-only did not walk the CAPS table — that walk is discovery's PRECEDENCE source and feeds the union floor, so without it discovery re-verdicts capped docs and the floor means something else" ;;
+  esac
+
+  # m1: DARK DISCOVERY, IN THE NARROW MODE. k1 proves the floor refuses in the
+  #     full run; that says nothing about the mode the required lane actually
+  #     invokes. Same mutation, same assertion, different entry point — which is
+  #     the whole reason this arm is not a duplicate of k1.
+  sed -e "s|^      find docs -name '\*\.md' -not -path 'docs/cli/fixtures/\*'$|      true|" \
+      -e "s|^      find scripts -maxdepth 1 -name '\*\.md'$|      true|" \
+      -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=0|" \
+      "$SELF" \
+    | awk 'BEGIN { drop = 0 }
+           /^done <<.FREEZE.$/ { print; drop = 1; next }
+           /^FREEZE$/          { print; drop = 0; next }
+           drop == 0           { print }' > "$caps_probe"
+  grep -q "^      find docs -name " "$caps_probe" \
+    && fail_selftest "the m1 discovery-blinding step did not remove the docs find — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "DARK discovery under --discovery-only exited $caps_rc, expected 1 — the mode the REQUIRED lane runs reports zero violations over zero docs and exits 0"
+  case "$caps_out" in
+    *"($expected_literal capped + 0 discovered), floor is $selftest_docs_floor"*) ;;
+    *) fail_selftest "DARK discovery under --discovery-only did not print its floor FAIL line — the red came from something other than the floor" ;;
+  esac
+
+  # m2: THE MUTATION THE BLOCKING LANE EXISTS FOR. One discovery-enforced doc
+  #     pushed over its own header must RED in --discovery-only, NAMING the doc
+  #     and its header. Without this arm the required lane is a green with no
+  #     subject: the assertion is fine and the code path never arrives.
+  cp "$SELF" "$caps_probe"
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: mode-overbudget-fixture | budget: 1tok -->" \
+    > "$caps_root/docs/discovery-mode-overbudget-fixture.md"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  rm -f "$caps_root/docs/discovery-mode-overbudget-fixture.md"
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "an over-header doc under --discovery-only exited $caps_rc, expected 1 — the arm this whole lane was widened to carry does not refuse in the mode the lane runs"
+  case "$caps_out" in
+    *"docs/discovery-mode-overbudget-fixture.md is"*"its own header declares 1tok = 4B"*) ;;
+    *) fail_selftest "an over-header doc under --discovery-only did not print its \`header declares 1tok = 4B\` FAIL line naming the doc — a refusal that does not name the file is not actionable in CI" ;;
+  esac
+
+  # m3: THE FLAG IS AN ARGUMENT. --span-only carries this warning already and it
+  #     applies twice as hard here: as an env var, one `env:` line far from the
+  #     step could narrow the required lane to nothing. An unknown argument must
+  #     still be usage (2), and the env-var spelling must be INERT.
+  cp "$SELF" "$caps_probe"
+  set +e
+  caps_out="$(DOC_BUDGETS_DISCOVERY_ONLY=1 bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 0 ] \
+    || fail_selftest "the env-var spelling DOC_BUDGETS_DISCOVERY_ONLY=1 changed the run (exit $caps_rc) — the narrowing must live in the step a reviewer reads"
+  case "$caps_out" in
+    *"card count is exactly 7"*) ;;
+    *) fail_selftest "DOC_BUDGETS_DISCOVERY_ONLY=1 narrowed the run — an environment variable can now blank arms of this gate from a distance" ;;
+  esac
+
+  # m4: THE CEILING. The lazy remedy for a freeze table is to re-baseline it and
+  #     keep appending, and before FREEZE_ROWS_CEILING landed that worked: the
+  #     k6 arm only checks the literal AGREES with the table, so a row plus a
+  #     matching digit passed. Bump the literal past the ceiling (leaving the
+  #     ceiling alone, which is exactly the shape of that edit) and the gate must
+  #     refuse by name.
+  awk -v add="$selftest_dup_freeze" '
+       { print }
+       /^done <<.FREEZE.$/ && !done_add { print add; done_add = 1 }' "$SELF" \
+    | sed -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=$((freeze_expected_literal + 1))|" \
+    > "$caps_probe"
+  grep -qE "^FREEZE_ROWS_EXPECTED=$((freeze_expected_literal + 1))$" "$caps_probe" \
+    || fail_selftest "the ceiling-probe step did not bump FREEZE_ROWS_EXPECTED — this arm would have proven nothing"
+  grep -qE "^FREEZE_ROWS_CEILING=$freeze_expected_literal$" "$caps_probe" \
+    || fail_selftest "the ceiling-probe step disturbed FREEZE_ROWS_CEILING — the arm must test a literal bump against an UNCHANGED ceiling"
+  set +e
+  caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a freeze literal bumped PAST the ceiling exited $caps_rc, expected 1 — new over-budget docs can be enrolled instead of trimmed, and 'the list may only shrink' is prose with no reader"
+  case "$caps_out" in
+    *"exceeds FREEZE_ROWS_CEILING=$freeze_expected_literal"*) ;;
+    *) fail_selftest "a freeze literal past the ceiling did not print its ceiling FAIL line — the red came from something else" ;;
+  esac
+
   SELFTEST_COMPLETED=1
-  echo "check-doc-budgets --selftest: PASS (25 arms: pristine, in-span plant," \
+  echo "check-doc-budgets --selftest: PASS (30 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
        "span-cap clamp both directions, retired env var inert, caps green control," \
        "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
        "file, freeze literal pin, DISCOVERY DARK, over-header doc, grown frozen" \
        "doc, paid frozen doc, stale freeze row, unpinned freeze row, harness" \
-       "aborts non-zero, unpinned exemption row — every" \
+       "aborts non-zero, unpinned exemption row, discovery-only control+scope," \
+       "discovery-only DARK, discovery-only over-header doc, discovery-only env" \
+       "var inert, freeze ceiling — every" \
        "probe arm asserts the EXIT CODE and its own message)"
   exit 0
 fi

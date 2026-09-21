@@ -821,6 +821,63 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh selftest-wiring-census -- bash scripts/selftest-wiring-census.sh
 
+      # ── the doc-budget HEADER-DISCOVERY arm, blockingly ──────────────────
+      #
+      # THE HOLE. `scripts/check-doc-budgets.sh` enforces byte budgets two ways.
+      # The 39-row CAPS heredoc got a blocking reader in #18216
+      # (api/test/barkpark/doc_budget_cap_test.exs, under the required Elixir
+      # gate). Its sibling arm — HEADER DISCOVERY, which walks docs/**.md and
+      # enforces each file's own `budget: Ntok` header — got none, and the
+      # closed row's scope note called those docs "advisory-only", which reads
+      # as a tolerable gap. MEASURED on origin/main f11ac14d1 by running the
+      # script: 109 docs are enforced ONLY by discovery, 38 of them are OVER
+      # their own declared header TODAY (green solely because a FREEZE row pins
+      # them at their measured size), and 0 of the 38 sat in any dispatched path
+      # set. The gap and the breach are different claims and only the second was
+      # ever true.
+      #
+      # WHY THIS JOB AND NOT `mix-test`. The CAPS route rides mix-test, which
+      # carries `if: needs.changes.outputs.test == 'true'` — it works only
+      # because every capped path is ALSO declared in the dispatcher's path
+      # sets, and a fourth test arm exists purely to keep that superset true.
+      # Header discovery has no path list to declare: its population is
+      # `docs/**.md` plus `scripts/*.md` plus five surface files, computed at
+      # run time and changing on any doc PR. Declaring all of docs/** would
+      # dispatch the whole Elixir suite on every documentation edit. So it rides
+      # `path-escape` instead, which carries NO `if:`, NO `needs`, and is in the
+      # aggregator's needs with the gate value NEVER — the one shape that
+      # publishes a verdict inside a REQUIRED context on EVERY pull request.
+      #
+      # A STEP, not a job: a step adds no rendered check name, so the required
+      # roster (`.github/required-checks.json`, four contexts) is unchanged and
+      # this needs no ruling from main.
+      #
+      # --discovery-only, NOT the whole script. The other arms (fixed-cap SIZE
+      # verdicts, the onramp span pin, the 7-card count, the two headroom
+      # floors) are live policy this task was not asked to re-scope, and root
+      # CLAUDE.md is at 203B of headroom against a 200B floor — turning that
+      # blocking in the same edit would be a fleet-wide merge change smuggled
+      # under a discovery fix. The advisory `Doc budgets + anchors` job still
+      # runs the whole script.
+      #
+      # HARNESS FIRST, subject second — the house idiom, and here it is what
+      # answers "does this green assert anything?". Arms (m0)-(m4) of the
+      # selftest run the NARROW mode specifically: a DARK discovery loop must
+      # exit 1 on the union floor rather than report zero violations, an
+      # over-header doc must red NAMING the doc and its header, the mode must
+      # still walk the CAPS table (its precedence source), it must NOT reach the
+      # card arm, the env-var spelling must be inert, and a freeze literal
+      # bumped past FREEZE_ROWS_CEILING must refuse. PRICED: the selftest is
+      # ~60s and the checked run ~2s on a loaded laptop, against this job's
+      # 2m35s average.
+      - name: The doc-budget discovery arm must be able to fail (30-arm harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh doc-budgets-selftest -- bash scripts/check-doc-budgets.sh --selftest
+
+      - name: Every header-discovered doc is within its own declared budget
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh doc-budgets-discovery -- bash scripts/check-doc-budgets.sh --discovery-only
+
       # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
       # `if: always()` and LAST, so it runs even when an instrument above it
       # reddened the job — the refusal case is precisely the one whose verdict
