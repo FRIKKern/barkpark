@@ -9017,10 +9017,25 @@
   // hint is retracted to what is true: this step does not tick itself, and the
   // "Open Studio →" action stays, because publishing is still the real next move.
   // Pinned in __app.test.mjs (the old sentence was asserted by NOTHING).
+  //
+  // cch-w55-bl — THE ACK CONTROL NOW EXISTS, AND IT IS THE WHOLE FIX (charter
+  // D902, ending 1 of the three the row named). The server half was already
+  // built and already routed: `Accounts.ack_onboarding_step/2` ticks the step,
+  // `POST /v1/onboarding {action:"ack", step:"published_doc"}` reaches it, and
+  // `onboarding_status/1` ORs the ack with the never-written `content` event.
+  // Only the console was missing — {action:"skip"} was the one onboarding
+  // action this file POSTed, so the plane's own "reachable via the user-ack
+  // path" prose (accounts.ex, agent_event.ex) described a path no customer had.
+  // A pending published_doc step now renders "Mark as done" beside the Studio
+  // nudge, gated on canManage for the SAME reason the Dismiss button is: the
+  // route is owner/admin-only, so a member would get a silent 403. Still no
+  // producer, deliberately — ticking a checkbox you ticked yourself is an
+  // honest self-report; inventing an agent endpoint to observe it is the
+  // "build the actor before deciding the effect" trap this wave refuses.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
-    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →" },
+    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →", ack: "Mark as done" },
   ];
   // Pure: the render model for the runway steps. done marks render a mint check,
   // pending steps render their ordinal digit. The instance-step hint carries the
@@ -9046,6 +9061,14 @@
         // The Open Studio nudge shows only while the published_doc step is still
         // open (and only when there is a live box to open it on).
         action: (!isDone && spec.action && spec.key === "published_doc" && opts.studioId) ? spec.action : "",
+        // The ack control (cch-w55-bl): the ONLY path a customer has to this
+        // step, since no producer writes the `content` event it would otherwise
+        // derive from. Pending only (acking a done step is a no-op the server
+        // would accept and the card would not change), and canManage only —
+        // POST /v1/onboarding is owner/admin-gated, so a member's click would be
+        // a silent 403. Unlike the Studio nudge it does NOT need a live box: the
+        // user may well have published on an instance this console can't link.
+        ack: (!isDone && spec.ack && opts.canManage) ? spec.ack : "",
       };
     });
   }
@@ -9068,6 +9091,14 @@
         (st.action
           ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
               esc(opts.studioId) + '">' + esc(st.action) + "</button>"
+          : "") +
+        // Styled by the SAME .runway-step-action rule as the Studio nudge (no
+        // new class: E12 requires every emitted class to have an app.css rule,
+        // and this button wants that rule's exact look). The click hook is the
+        // data attribute, which E12 does not govern.
+        (st.ack
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-ack="' +
+              esc(st.key) + '">' + esc(st.ack) + "</button>"
           : "") +
       "</div>";
     }).join("");
@@ -9445,6 +9476,26 @@
     if (dismiss) dismiss.addEventListener("click", function () { dismissRunway(dismiss); });
     slot.querySelectorAll("[data-runway-studio]").forEach(function (b) {
       b.addEventListener("click", function () { openStudio(b.getAttribute("data-runway-studio"), null); });
+    });
+    slot.querySelectorAll("[data-runway-ack]").forEach(function (b) {
+      b.addEventListener("click", function () { ackRunwayStep(b, b.getAttribute("data-runway-ack")); });
+    });
+  }
+
+  // cch-w55-bl — tick a step the control plane cannot observe. POST
+  // /v1/onboarding {action:"ack", step} appends the step to onboarding_state.acked
+  // (Accounts.ack_onboarding_step/2); onboarding_status/1 then ORs that ack with
+  // the agent-derived signal, so the step stays done across reloads and tabs.
+  // Owner/admin only (the button is hidden otherwise — same rule as Dismiss), so
+  // a 403 is not expected; any non-2xx re-enables the button and toasts, and the
+  // card is NOT optimistically ticked — the next read is the truth.
+  function ackRunwayStep(btn, step) {
+    if (!step) return;
+    if (btn) btn.disabled = true;
+    api("POST", "/v1/onboarding", { action: "ack", step: step }).then(function (r) {
+      if (r.ok) { loadOverview(); return; }
+      if (btn) btn.disabled = false;
+      toast({ kind: "error", title: "Couldn't mark that step done", body: friendly(r.data, "Please try again.") });
     });
   }
 
@@ -13837,9 +13888,11 @@
         // (POST /v1/barkparks/:id/api/webhooks/:webhook_id/test-send → the
         // instance's one-shot synthetic probe, SINGLE attempt, delivery row
         // written with a NULL endpoint_id so a failed test never perturbs the
-        // auto-disable streak). No copy-as-CLI chip beside it on purpose: `bp
-        // cloud webhook` has no test-send verb today, and a chip for a command
-        // that does not exist is worse than no chip (backlog gr-bl-cli-test-send).
+        // auto-disable streak). The verb NOW EXISTS on the CLI side — `bp cloud
+        // webhook test-send` (internal/cli/cloud_webhook_cmd.go,
+        // runCloudWebhookTestSend; grep `case "test-send", "test":`) — so the
+        // chip this comment used to withhold is emitted below with the rest of
+        // the .wh-cli row. gr-bl-cli-test-send.
         '<button class="btn btn-sm" type="button" data-wh-test>Send test</button>' +
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
         '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
@@ -13853,6 +13906,12 @@
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
         cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
+        // The twin of the `Send test` button above. The verb spelling is the
+        // one C7's parser dispatches — internal/cli/cloud_webhook_cmd.go's
+        // `case "test-send", "test":` — and internal/cli/cloud_webhook_cmd_test.go
+        // pins this exact prefix as webhookTestSendChip, so a rename on either
+        // side reds a test rather than handing an operator a dead command.
+        cliChipHtml(webhookCliChip("test-send", instance, dataset)) +
         cliChipHtml(webhookCliChip("deliveries", instance, dataset)) +
         cliChipHtml(webhookCliChip("rm", instance, dataset)) +
       "</div>" +
@@ -16486,6 +16545,36 @@
     // The chip is exactly the arm a non-admin already gets — one grammar, one
     // .set-chip, no new CSS.
     //
+    // cch-w48-bl-site-repo-chip-visual-weight — AND THE CHIP IS NOW GONE FROM
+    // THE BADGES ROW, because the fact it was carrying is ALREADY on this
+    // screen and always was. The Details rail's "Repository" row (see
+    // `railRowHtml("Repository", repo)` below) renders `owner/repo@branch` in
+    // mono for EVERY actor, unpredicated on authority or readiness — a strict
+    // SUPERSET of the chip's text, since the chip omitted the branch. So the
+    // withheld arms delete no information: they delete a DUPLICATE, and the
+    // rail row is the honest home for a read-only fact.
+    //
+    // WHY NOT A BADGES-SCOPED RULE. The alternative was a
+    // `.fleet-badges .set-chip` rule sized to btn-sm. Measured in headless
+    // Chrome on this screen, the chip computes font-size 12px — the SAME as
+    // #site-deploy — and differs on height (22 vs 28) and colour (muted-text,
+    // transparent ground). So a restyle would have to grow it to button height
+    // and button colour, i.e. make a non-interactive span look like the
+    // buttons on either side of it, which is the worse outcome: .fleet-badges
+    // is a row of CONTROLS, and the honest fix is that it stops carrying a
+    // non-control at all. It also costs a CSS rule and a cssom-heads baseline
+    // regeneration for a duplicate of a row two inches away.
+    //
+    // AND IT WAS NOT ONLY A WEIGHT PROBLEM. `.set-chip` carries
+    // `white-space: nowrap`, and github_repo's only server-side ceiling is the
+    // varchar(255) column (registry/site.ex `validate_github_repo/1` is a
+    // FORMAT check with no length clause). Driven at a 320px viewport on the
+    // preview's 255-char cruel repo fixture, the chip measured 1658px wide and
+    // put documentElement.scrollWidth at 2688 against a 320 clientWidth — a
+    // 2368px sideways scroll on the whole page. The rail row held the FULL
+    // 511-char `repo@branch` span in 250px at the same width, because `.v`
+    // wraps. Removing the chip removes the overhang with it.
+    //
     // NO SENTENCE, at either withholding. This function's own s2 note settles
     // it: sentences belong to the POST-hoc refusal (the server's own words
     // through friendly()); a sentence at a PRE-hoc omit invents a refusal for
@@ -16495,7 +16584,7 @@
     var githubOffered = authority === "grant" && githubReady === "ready";
     var githubControl = githubOffered
       ? '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>"
-      : (site.github_repo ? '<span class="set-chip">' + githubLabel + "</span>" : "");
+      : "";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).

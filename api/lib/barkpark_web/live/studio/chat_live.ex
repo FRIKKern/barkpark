@@ -5295,28 +5295,40 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # workspace's chat sessions by id.
   #
   # The predicate refuses ONE thing: a row owned by a workspace that is not the
-  # principal's. It deliberately does NOT narrow to the principal's workspace
+  # acting principal's. It deliberately does NOT narrow to that workspace
   # wholesale — a NULL `owner_workspace_id` is a legacy / pre-tenancy row and
-  # stays reachable, which is the admin superuser path charter D17/D18 asks for
-  # and what the sidebar has always shown. Note that `Auth.create_token/5`
-  # defaults an omitted workspace to the Default workspace, so almost every
-  # token IS bound; narrowing on the binding alone would have made every legacy
-  # row unmanageable.
+  # stays reachable, which is what the admin sidebar has always shown. Note that
+  # `Auth.create_token/5` defaults an omitted workspace to the Default
+  # workspace, so almost every token IS bound; narrowing on the binding alone
+  # would have made every legacy row unmanageable.
+  #
+  # ONE BINDING PER MOUNT, SHARED WITH THE LOAD SEAM (task-787766c0cf6604f1).
+  # This used to ask `principal_permits_owner?/2` on BOTH mounts, i.e. the acting
+  # TOKEN's binding, while `load_permits?/2` beside it asked `read_workspace_id/1`
+  # — the URL workspace — on the scoped mount. That asymmetry was the defect: on
+  # `/w/:ws/p/:proj/studio/chat` the READS were confined to the URL workspace and
+  # the four id-addressed WRITES were not. Proven by run before it was closed: a
+  # user-session admin of workspace B *only*, mounting the scoped route for B,
+  # DELETED a workspace-A row —
+  # `test/barkpark_web/live/studio/chat_live_user_session_tenancy_test.exs`.
+  # Delegating to `load_permits?/2` makes the write guard state exactly the read
+  # guard, so a row this socket may not SEE is a row it may not WRITE.
   defp tenancy_permits?(socket, id) do
     case StudioChat.get_session(id, :global) do
-      %{owner_workspace_id: owner} -> principal_permits_owner?(socket, owner)
+      %{} = session -> load_permits?(socket, session)
       # Missing row: not a cross-tenant reach.
       _ -> true
     end
   end
 
-  # The rule `tenancy_permits?/2` enforces, stated over an OWNER rather than an
-  # id, so the LOAD seam can ask it without a second `get_session/2`. A token
-  # with no binding at all is the genuine `:global` superuser (charter D17/D18);
-  # a NULL-owned row is legacy / pre-tenancy and stays reachable, which is why
-  # this is not a wholesale narrowing to the principal's workspace.
+  # The rule the FLAT mount enforces, stated over an OWNER rather than an id, so
+  # the LOAD seam can ask it without a second `get_session/2`. `nil` from
+  # `acting_workspace_id/1` is the genuinely unbound superuser — and, since
+  # task-787766c0cf6604f1, ONLY a token can produce it. A NULL-owned row is
+  # legacy / pre-tenancy and stays reachable, which is why this is not a
+  # wholesale narrowing to the principal's workspace.
   defp principal_permits_owner?(socket, owner) do
-    case principal_workspace_id(socket) do
+    case acting_workspace_id(socket) do
       nil -> true
       ws_id -> is_nil(owner) or owner == ws_id
     end
@@ -5350,7 +5362,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     if socket.assigns[:scoped_mount?] do
       case socket.assigns[:current_workspace] do
         %{id: ws_id} when is_binary(ws_id) -> ws_id
-        _ -> principal_workspace_id(socket)
+        _ -> acting_workspace_id(socket)
       end
     end
   end
@@ -5476,10 +5488,66 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> Map.new()
   end
 
+  # The acting principal's TOKEN binding, and nothing else. Its one remaining
+  # caller is `viewer_workspace_slug/1`, which is describing the token on screen.
+  # The PERMISSION axis asks `acting_workspace_id/1` instead — see there for why
+  # the two are no longer the same question.
   defp principal_workspace_id(socket) do
     case socket.assigns[:api_token] do
       %{workspace_id: ws_id} when is_binary(ws_id) -> ws_id
       _ -> nil
+    end
+  end
+
+  # ── The acting principal's tenancy, for the PERMISSION axis ───────────────
+  #
+  # TWO POPULATIONS SHARED ONE `nil` BEFORE task-787766c0cf6604f1, and that is
+  # what made the branch read as safe. Separated here, because they are not the
+  # same principal and do not hold the same grant:
+  #
+  #   * an `:api_token` WITH a `workspace_id` — bound; acts inside it.
+  #   * an `:api_token` with a NULL `workspace_id` — the genuinely UNBOUND
+  #     superuser, the deliberate instance-wide path. `Auth.create_token/5`
+  #     defaults an omitted workspace to Default, so producing one takes a
+  #     direct `Repo.insert!`; it is the dev-root / explicitly-unbound
+  #     credential, never something a customer admin holds by accident. `nil`
+  #     here, and it keeps its reach.
+  #   * NO `:api_token` at all — a USER-SESSION admin. `LiveAuth.authorize_user/3`
+  #     grants the flat admin surfaces on an owner/admin-grade role in the
+  #     DEFAULT workspace and says so in its own comment ("the flat admin
+  #     surfaces … operate in the DEFAULT-workspace context … so the bar is an
+  #     owner/admin-grade role THERE"). That is the SAME grant a Default-BOUND
+  #     token holds, so it gets the SAME confinement: the Default workspace plus
+  #     NULL-owned legacy rows. It was never the unbound superuser; it merely
+  #     looked like one because the assign it was read through is absent.
+  #
+  # The scoped mount does not reach this clause for a lifecycle write any more —
+  # `tenancy_permits?/2` delegates to `load_permits?/2`, whose scoped branch is
+  # the URL workspace — so the Default fallback below cannot widen a ws-B admin.
+  # It is `read_workspace_id/1`'s narrowing fallback and the flat mount's answer.
+  defp acting_workspace_id(socket) do
+    case socket.assigns[:api_token] do
+      %{workspace_id: ws_id} when is_binary(ws_id) -> ws_id
+      %{} -> nil
+      _ -> user_session_workspace_id(socket)
+    end
+  end
+
+  # A user-session admin's tenancy is the Default workspace — the one
+  # `LiveAuth.authorize_user/3` checked the role in. `nil` is unreachable from
+  # the flat mount (that gate requires `Tenancy.get_default_workspace/0` to
+  # resolve before it will assign `:current_user` at all), and on the scoped
+  # mount this is only the fallback behind a `LiveScope`-pinned workspace.
+  defp user_session_workspace_id(socket) do
+    case socket.assigns[:current_user] do
+      %Barkpark.Accounts.User{} ->
+        case Tenancy.get_default_workspace() do
+          %{id: ws_id} when is_binary(ws_id) -> ws_id
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 

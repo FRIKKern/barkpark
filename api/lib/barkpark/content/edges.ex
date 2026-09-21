@@ -941,12 +941,17 @@ defmodule Barkpark.Content.Edges do
   Outbound edges of a document id (indexed `(from_id, kind)` scan). Ordered by
   `inserted_at` ASC — the forward-BFS input for Phase 4. `:kind` opt narrows to
   one kind.
+
+  `:workspace_id` is an OPTIONAL tenant bind (see `maybe_scope_edges_to_workspace/2`):
+  supplied, the scan returns only edges BOTH of whose endpoint documents sit in
+  that workspace; omitted, the scan is unchanged (explicit global read).
   """
   @spec list_outbound_edges(binary(), keyword()) :: [Barkpark.Content.Edge.t()]
   def list_outbound_edges(from_id, opts \\ []) do
     Barkpark.Content.Edge
     |> where([e], e.from_id == ^from_id)
     |> maybe_filter_edge_kind(opts)
+    |> maybe_scope_edges_to_workspace(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
@@ -955,12 +960,17 @@ defmodule Barkpark.Content.Edges do
   Inbound edges of a document id (indexed `(to_id, kind)` scan). Ordered by
   `inserted_at` ASC — the reverse-walk input for the Studio unpublish guard
   (Phase 4/5). `:kind` opt narrows to one kind.
+
+  `:workspace_id` is an OPTIONAL tenant bind (see `maybe_scope_edges_to_workspace/2`):
+  supplied, the scan returns only edges BOTH of whose endpoint documents sit in
+  that workspace; omitted, the scan is unchanged (explicit global read).
   """
   @spec list_inbound_edges(binary(), keyword()) :: [Barkpark.Content.Edge.t()]
   def list_inbound_edges(to_id, opts \\ []) do
     Barkpark.Content.Edge
     |> where([e], e.to_id == ^to_id)
     |> maybe_filter_edge_kind(opts)
+    |> maybe_scope_edges_to_workspace(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
@@ -970,6 +980,64 @@ defmodule Barkpark.Content.Edges do
       nil -> query
       kind -> where(query, [e], e.kind == ^to_string(kind))
     end
+  end
+
+  # THE EDGE-SCAN TENANT BIND (task-4b942de098205a47), defence-in-depth.
+  #
+  # `content_edges` carries NO tenancy column of its own — an edge's tenancy is
+  # its two endpoint DOCUMENTS' (`documents.workspace_id`). So the bind is a
+  # join on both endpoints, not a column filter.
+  #
+  # OMITTED BIND IS PERMITTED, NOT REFUSED. With no `:workspace_id` in `opts`
+  # the query is returned UNTOUCHED — the same explicit-global read the
+  # pre-bind code always did. This mirrors the nil arm of
+  # `Content.Scope.scope_to_workspace_or_global/3` and is deliberate: the
+  # existing callers (`Content.Graph.neighbor_edges/4`,
+  # `Content.Graph.backlinks`, `EdgeProjector.Projector`) seed `from_id`/`to_id`
+  # from a scoped `documents.id` PK resolution, so they are structurally safe
+  # today; refusing an omitted bind would be a NEW contract across all of them
+  # with no defect to justify it. The bind adds a second fence for callers that
+  # resolve a pk by any other route.
+  #
+  # BOTH endpoints are bound, not just the far one: the near endpoint fences a
+  # caller that arrived with an unscoped pk, the far endpoint fences the walk
+  # from expanding into another tenant. The joins are INNER on `documents.id`
+  # (an FK-enforced, non-null PK on both sides — `Content.Edge`'s "dangling
+  # targets are NEVER stored"), so they can drop no row a bound scan should
+  # return.
+  #
+  # `:shared_only` (what `BarkparkWeb.ScopeHelpers.scope_opts/1` emits for a
+  # request that resolved no workspace) means the shared layer —
+  # `workspace_id IS NULL` — and never "every tenant", matching
+  # `Content.Scope.scope_to_workspace/3`'s sentinel arm.
+  defp maybe_scope_edges_to_workspace(query, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      nil -> query
+      workspace_id -> scope_edges_to_workspace(query, workspace_id)
+    end
+  end
+
+  defp scope_edges_to_workspace(query, workspace_id) do
+    query
+    |> join(:inner, [e], f in Document, on: f.id == e.from_id, as: :edge_from_doc)
+    |> join(:inner, [e], t in Document, on: t.id == e.to_id, as: :edge_to_doc)
+    |> edge_workspace_clause(workspace_id)
+  end
+
+  defp edge_workspace_clause(query, :shared_only) do
+    where(
+      query,
+      [edge_from_doc: f, edge_to_doc: t],
+      is_nil(f.workspace_id) and is_nil(t.workspace_id)
+    )
+  end
+
+  defp edge_workspace_clause(query, workspace_id) do
+    where(
+      query,
+      [edge_from_doc: f, edge_to_doc: t],
+      f.workspace_id == ^workspace_id and t.workspace_id == ^workspace_id
+    )
   end
 
   defp fetch_content_edge!(from_id, to_id, kind) do

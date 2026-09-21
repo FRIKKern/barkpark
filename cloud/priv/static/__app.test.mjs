@@ -8043,9 +8043,39 @@ test("webhookCardHtml reflects active state (Active pill + Disable) and carries 
   assert.match(html, /data-wh-rotate/);
   assert.match(html, /data-wh-deliveries/);
   assert.match(html, /data-wh-delete/);
-  for (const verb of ["show", "toggle", "rotate", "deliveries", "rm"]) {
+  for (const verb of ["show", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
     assert.match(html, new RegExp("bp cloud webhook " + verb + " abc"));
   }
+});
+
+// The `Send test` button's copy-as-CLI twin. This is the pair the card used to
+// break: the button shipped while `bp cloud webhook` had no test-send verb, so
+// the chip was deliberately withheld. The verb landed (internal/cli/
+// cloud_webhook_cmd.go, `case "test-send", "test":`), and the CLI side pins the
+// same prefix as webhookTestSendChip in internal/cli/cloud_webhook_cmd_test.go.
+// What is asserted here is the EXACT clipboard payload, inside the .wh-cli row —
+// not merely "the string appears somewhere in the card" — so removing the
+// cliChipHtml(webhookCliChip("test-send", …)) call from webhookCardHtml reds it.
+test("webhookCardHtml: the Send test button has a CLI twin whose copied command is exactly `bp cloud webhook test-send <instance>`", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", url: "https://x/h", active: true }, "abc", "production");
+  // Precondition: the action this chip is the twin OF is actually rendered.
+  assert.match(html, /data-wh-test>Send test</,
+    "precondition: the Send test action button is missing, so this test would pass vacuously");
+
+  const cli = html.split('<div class="wh-cli">')[1].split("</div>")[0];
+  assert.ok(cli.includes('data-copy="bp cloud webhook test-send abc"'),
+    "the .wh-cli row carries no test-send chip: " + cli);
+  assert.ok(cli.includes(">bp cloud webhook test-send abc<"),
+    "the test-send chip's visible command text is not the copied command: " + cli);
+
+  // Off-default dataset rides the ratified `--dataset <ds>` suffix, same as the
+  // sibling chips — a staging card must not copy a production command.
+  const staging = hooks.webhookCardHtml(
+    { id: "wh1", url: "https://x/h", active: true }, "abc", "staging");
+  const stagingCli = staging.split('<div class="wh-cli">')[1].split("</div>")[0];
+  assert.ok(stagingCli.includes('data-copy="bp cloud webhook test-send abc --dataset staging"'),
+    "the test-send chip does not forward an off-default dataset: " + stagingCli);
 });
 
 test("webhookCardHtml reflects disabled state (neutral pill + Enable)", () => {
@@ -18516,14 +18546,21 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
 // and every __preview__/*.mjs returned zero before this test existed, so the
 // string could be changed, or re-added, with no exit code anywhere).
 //
-// `Accounts.published_doc?/1` (accounts.ex:2764) derives the step from an
-// `AgentEvent` of type "content" with `payload->>'published_count' > 0`. The
-// four `record_event/3` call sites in cloud/lib write "health" (router.ex:1378),
-// "space" (router.ex:1423), "verify" (router.ex:2627) and "status"
-// (health/staleness_worker.ex:91) — never "content" — and the agent's HTTP
+// `Accounts.published_doc?/1` derives the step from an `AgentEvent` of type
+// "content" with `payload->>'published_count' > 0`. The four `record_event/3`
+// call sites in cloud/lib write "health" and "space" (the agent-report and
+// agent-space handlers in web/router.ex), "verify" (the verify-run handler) and
+// "status" (`Health.StalenessWorker`) — never "content" — and the agent's HTTP
 // surface has no content endpoint, so no producer exists and none was built
-// here. The manual ack (`ack_onboarding_step/2`, router.ex:1701) is unreachable
-// too: {action:"skip"} is the only onboarding action app.js POSTs.
+// here. That is still true after cch-w55-bl (charter D902) and is pinned
+// server-side by `agent_event_producer_census_test.exs`.
+//
+// cch-w55-bl — the SECOND half of the sentence above has since been fixed: the
+// manual ack (`Accounts.ack_onboarding_step/2`, via POST /v1/onboarding
+// {action:"ack"}) used to be unreachable because {action:"skip"} was the only
+// onboarding action app.js POSTed. It is now reachable — see the ack-control
+// tests below. The hint stays retracted: an ack is the USER saying so, which
+// is not the plane noticing.
 test("cch-w55-s3: the published-document step never promises the plane will notice", () => {
   const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
   const step = [...hooks.runwayStepModel(ob, { instanceName: "Production", studioId: "b1" })][2];
@@ -18536,6 +18573,44 @@ test("cch-w55-s3: the published-document step never promises the plane will noti
   // …and the whole runway carries the retraction, not just the model row.
   const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
   assert.ok(!/notice automatically/i.test(card), "the rendered runway makes no detection promise either");
+});
+
+// cch-w55-bl — THE STEP HAD NO PRODUCER **AND NO CONTROL**, so it was a
+// checkbox no customer could tick except by dismissing the whole runway.
+// Charter D902 ships ending 1: the ack control the server half has backed since
+// C-02. These tests pin the control's EXISTENCE, its two gates, and the fact
+// that it is the published_doc step alone that carries it.
+test("cch-w55-bl: the pending published-document step carries an ack control for an owner/admin", () => {
+  const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  const model = [...hooks.runwayStepModel(ob, { canManage: true, instanceName: "Production", studioId: "b1" })];
+  assert.equal(model[2].ack, "Mark as done");
+  // ONLY the third step — subscription and instance are server-observable and
+  // must never offer a self-report that could contradict Billing or Registry.
+  assert.equal(model[0].ack, "");
+  assert.equal(model[1].ack, "");
+  // The ack does NOT need a live box (the user may have published on an
+  // instance this console cannot link), unlike the Studio nudge which does.
+  const noBox = [...hooks.runwayStepModel(ob, { canManage: true, studioId: "" })];
+  assert.equal(noBox[2].ack, "Mark as done");
+  assert.equal(noBox[2].action, "");
+  // Rendered, with the hook the click wiring reads.
+  const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
+  assert.match(card, /data-runway-ack="published_doc"/);
+  assert.match(card, /Mark as done/);
+});
+
+test("cch-w55-bl: the ack control is hidden for a member and for an already-done step", () => {
+  const pending = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  // POST /v1/onboarding is owner/admin-only (Auth.require_current_team_admin),
+  // so a member's button would be a silent 403 — the same rule as Dismiss.
+  const member = [...hooks.runwayStepModel(pending, { canManage: false, studioId: "b1" })];
+  assert.equal(member[2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(pending, { canManage: false }), /data-runway-ack/);
+  // Done — nothing left to self-report, whether it went done by ack or (one
+  // day) by an agent-reported content event.
+  const done = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: true }] };
+  assert.equal([...hooks.runwayStepModel(done, { canManage: true, studioId: "b1" })][2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(done, { canManage: true, studioId: "b1" }), /data-runway-ack/);
 });
 
 test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", () => {
@@ -19451,8 +19526,17 @@ const S2_GH_SITE = {
 const S2_DEPLOY_BTN = '<button class="btn btn-primary btn-sm" id="site-deploy"';
 const s2Badges = (html) =>
   html.slice(html.indexOf('<div class="fleet-badges">'), html.indexOf(S2_DEPLOY_BTN));
+// cch-w48-bl-site-repo-chip-visual-weight: the DETAILS RAIL's Repository row,
+// which is where the read-only repo fact lives for every actor and always did.
+// The withheld arms used to duplicate it in .fleet-badges as a `.set-chip`;
+// the rail row is a strict SUPERSET of that text (it carries `@branch` too),
+// so pinning the rail is what keeps "the badges chip is gone" from being a
+// deletion of information rather than a deletion of a duplicate.
+const s2RailRepo = (span) =>
+  new RegExp('<span class="k">Repository</span><span class="v"><span class="mono">' +
+    span + '</span></span>');
 
-test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admin; the connected member keeps the repo name as a non-interactive chip", () => {
+test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admin; the connected member keeps the repo name in the Details rail", () => {
   const connected = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
 
   // THE PAIRED POSITIVE CONTROL: the admin arm still emits exactly one control,
@@ -19481,7 +19565,12 @@ test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admi
   // member's hands; omitting it would delete information the payload gave them.
   const memberConn = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "refuse");
   assert.doesNotMatch(memberConn, /site-github/);
-  assert.match(memberConn, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  // cch-w48-bl-site-repo-chip-visual-weight: the fact survives in the DETAILS
+  // RAIL — `owner/repo@branch`, a superset of what the badges chip carried —
+  // and the badges cluster holds no chip at all, so it is a row of CONTROLS
+  // again rather than a row of controls with one metadata pill in it.
+  assert.match(memberConn, s2RailRepo("acme/site@main"));
+  assert.doesNotMatch(s2Badges(memberConn), /set-chip/);
   assert.doesNotMatch(s2Badges(memberConn), /<button|disabled|title=/);
   assert.doesNotMatch(memberConn, /admin on this team|You need the/);
 });
@@ -19493,13 +19582,14 @@ test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown a
   // fail-open this epic exists to kill.
   const unknown = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "unknown");
   assert.doesNotMatch(unknown, /site-github/);
-  assert.match(unknown, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  assert.match(unknown, s2RailRepo("acme/site"));
+  assert.doesNotMatch(s2Badges(unknown), /set-chip/);
   // An OMITTED argument is the same class of ignorance — a call site that never
   // heard about the authority term must not silently re-open the door.
   const absent = hooks.siteDetailHtml(connected, null, [], "acme.com", []);
   assert.doesNotMatch(absent, /site-github/);
-  // …and the read-legal fact still survives on both closed arms.
-  assert.match(absent, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  // …and the read-legal fact still survives on both closed arms — in the rail.
+  assert.match(absent, s2RailRepo("acme/site"));
   // A garbage authority is not a grant either (only the literal "grant" is).
   assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
 });
@@ -19545,7 +19635,8 @@ test("cch-w48-bl: siteDetailHtml withholds #site-github on an UNCONFIGURED deplo
   // GET; whether the App is wired up today says nothing about whether this site
   // is linked, so deleting the repo name would destroy information the payload
   // handed the person.
-  assert.match(adminUnconfigured, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  assert.match(adminUnconfigured, s2RailRepo("acme/site@main"));
+  assert.doesNotMatch(s2Badges(adminUnconfigured), /set-chip/);
 
   // An UNCONNECTED site on an unconfigured deployment loses the whole control —
   // there is no fact left to keep.
@@ -19584,9 +19675,73 @@ test("cch-w48-bl: the readiness argument FAILS CLOSED — unknown, garbage and a
   assert.doesNotMatch(
     hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
     /id="site-github"/);
-  // …and the chip survives every closed arm.
+  // …and the read-legal fact survives every closed arm, in the Details rail.
   assert.match(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
-    /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+    s2RailRepo("acme/site"));
+});
+
+// ── cch-w48-bl-site-repo-chip-visual-weight: .fleet-badges IS A ROW OF CONTROLS
+//
+// cch-w48-s2 gave every withheld arm of #site-github the repo name as a
+// `.set-chip` inside `.fleet-badges`. The chip was a settings-row metadata pill
+// standing in a row of btn-sm controls — measured in headless Chrome on this
+// screen it computes the SAME font-size as #site-deploy (12px) but 22px tall
+// against the buttons' 28px, in --muted-text on a transparent ground — and it
+// was a DUPLICATE: the Details rail's "Repository" row already renders
+// `owner/repo@branch` in mono for every actor, unpredicated, which is a strict
+// superset of the chip's text.
+//
+// THE SHAPE CHOSEN IS RELOCATION, NOT A BADGES-SCOPED RULE. Restyling would
+// mean growing a NON-INTERACTIVE span to button height and button colour in a
+// row whose every other child is clickable — the worse outcome — and it would
+// cost a CSS rule plus a cssom-heads baseline regeneration to duplicate a fact
+// the same render already carries two rows down. Nothing is relocated in the
+// code: the rail row predates this change and is untouched. What is deleted is
+// the duplicate.
+//
+// AND THE CHIP WAS AN OVERFLOW, NOT ONLY A WEIGHT. `.set-chip` is
+// `white-space: nowrap` and github_repo's only server-side ceiling is the
+// varchar(255) column (`validate_github_repo/1` in
+// cloud/lib/barkpark_cloud/registry/site.ex is a FORMAT check with no length
+// clause). At a 320px viewport on the preview corpus's 255-char cruel repo the
+// chip measured 1658px wide and documentElement.scrollWidth read 2688 against
+// clientWidth 320 — the whole page scrolled 2368px sideways. The rail row held
+// the full 511-char `repo@branch` span in 250px at the same width.
+test("cch-w48-bl: siteDetailHtml — the badges cluster carries NO metadata pill on any withheld arm, and the repo fact lives in the Details rail", () => {
+  const branched = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
+  const bare = { ...S2_GH_SITE, github_repo: "acme/site" };
+  // Every arm on which #site-github is withheld, by BOTH axes and by both
+  // flavours of ignorance. Each is named so a failure says which arm broke.
+  const withheld = [
+    ["member + connected", hooks.siteDetailHtml(branched, null, [], "acme.com", [], "refuse", null, null, null, "ready"), "acme/site@main"],
+    ["member + connected, readiness unknown", hooks.siteDetailHtml(branched, null, [], "acme.com", [], "refuse"), "acme/site@main"],
+    ["authority unknown", hooks.siteDetailHtml(bare, null, [], "acme.com", [], "unknown", null, null, null, "ready"), "acme/site"],
+    ["authority omitted", hooks.siteDetailHtml(bare, null, [], "acme.com", []), "acme/site"],
+    ["admin + unconfigured deployment", hooks.siteDetailHtml(branched, null, [], "acme.com", [], "grant", null, null, null, "unconfigured"), "acme/site@main"],
+  ];
+  for (const [arm, html, span] of withheld) {
+    assert.doesNotMatch(html, /id="site-github"/, arm + ": the door is withheld on this arm");
+    // THE WHOLE RENDER, not just the badges slice: a "fix" that moved the pill
+    // into the rail instead of deleting it would satisfy a badges-scoped
+    // negative while still shipping a settings-row pill on this screen.
+    assert.doesNotMatch(html, /set-chip/,
+      arm + ": .fleet-badges is a row of controls — a metadata pill does not belong on this screen at all");
+    // …and the read-legal fact is NOT deleted with it. GET /v1/sites/:id is
+    // require_user, so github_repo is already legally this person's.
+    assert.match(html, s2RailRepo(span),
+      arm + ": the Details rail must still name the repository, or this is a deletion of information");
+  }
+  // THE PAIRED POSITIVE CONTROL. Without it every assertion above is satisfied
+  // by a siteDetailHtml that rendered nothing: the admin arm still emits
+  // EXACTLY ONE #site-github, byte-identically to before this change, and the
+  // rail row is unchanged underneath it.
+  const open = hooks.siteDetailHtml(branched, null, [], "acme.com", [], "grant", null, null, null, "ready");
+  assert.equal((open.match(/id="site-github"/g) || []).length, 1);
+  assert.match(open, /<button class="btn btn-ghost btn-sm" id="site-github" type="button"><span class="mono">acme\/site<\/span><\/button>/);
+  assert.match(open, s2RailRepo("acme/site@main"));
+  // The badges cluster the button sits in carries no pill either — the admin
+  // arm is a control, not a control PLUS the duplicate it replaced.
+  assert.doesNotMatch(s2Badges(open), /set-chip/);
 });
 
 test("cch-w48-s2 (review): a /v1/me that lands LATE re-decides the site screen — the fence must not strand a real admin", () => {
@@ -21953,12 +22108,17 @@ test("REVIEW FIX (GR80 leg 3): the verdict is three-way and the toast never cont
   assert.match(pending.body, /hasn't answered yet/);
 });
 
-test("GR80 leg 3: the webhook action bar offers Send test, and no CLI chip for a verb bp lacks", () => {
+// AMENDED (gr-bl-cli-test-send): this test used to assert the INVERSE of its
+// second half — `!/webhook test-send acme/` — because `bp cloud webhook` had no
+// test-send verb and a chip for a non-existent command is worse than no chip.
+// The verb landed (internal/cli/cloud_webhook_cmd.go, `case "test-send", "test":`),
+// so the absence assertion was the stale half and is now the presence assertion.
+test("GR80 leg 3: the webhook action bar offers Send test, and the CLI chip for the verb bp now has", () => {
   const card = hooks.webhookCardHtml(
     { id: "wh_1", url: "https://example.com/hook", active: true }, "acme", "production");
   assert.match(card, /data-wh-test/, "the action bar carries the test-send affordance");
   assert.match(card, />Send test</);
-  assert.ok(!/webhook test-send acme/.test(card), "no copy-as-CLI chip: bp cloud webhook has no test-send verb");
+  assert.ok(/webhook test-send acme/.test(card), "the copy-as-CLI chip for test-send is missing from the card");
   // The existing bar is intact — this is an addition, not a re-composition.
   for (const hook of ["data-wh-edit", "data-wh-toggle", "data-wh-rotate", "data-wh-deliveries", "data-wh-delete"]) {
     assert.ok(card.includes(hook), "the bar keeps " + hook);

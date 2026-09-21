@@ -1,0 +1,322 @@
+window	workflow	run_id	job_id	job_name	job_conclusion	verdict_first_pass
+W1	compose-smoke.yml	33828798378	100887196055	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W1	doc-gates.yml	33830027752	100890847364	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	security.yml	33830868355	100893676261	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33830868355	100893676287	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33832261860	100897646934	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33834868002	100905242709	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W1	security.yml	33843516341	100930661603	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33843516341	100930661628	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33843516341	100930661945	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33843516341	100930661982	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33844907778	100934569999	Doc budgets + anchors	success	NO-BREAKER-OUTPUT
+W1	security.yml	33846858835	100940748349	Sobelow baseline does not swallow its own inline waivers (blocking)	success	NO-BREAKER-OUTPUT
+W1	security.yml	33846858835	100940748606	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33860970065	100985191791	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33860970065	100985191803	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	doc-gates.yml	33865783959	101000223109	Doc budgets + anchors	success	GREEN-NO-VERDICT
+W1	go-format.yml	33867690272	101006180108	gofmt -l (advisory)	success	GREEN-NO-VERDICT
+W1	go-format.yml	33867690272	101006180549	gofmt drift ceiling (blocking)	success	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33868367532	101008390235	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33872192325	101020628930	Smoke arms (census, green boot, refusal boot — one image build)	failure	THIS-PRS-OWN
+W1	compose-smoke.yml	33873846355	101026796445	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33874842394	101029659758	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031233859	Dependency CVE audit (mix_audit over mix.lock, blocking)	cancelled	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031233958	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031234039	Sobelow baseline does not swallow its own inline waivers (blocking)	cancelled	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031234134	Sobelow static analysis (regression gate, baseline .sobelow-skips)	cancelled	NO-BREAKER-OUTPUT
+W1	security.yml	33878261717	101040572692	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33878261717	101040572704	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33879855812	101045654080	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33881300570	101050431871	Smoke arms (census, green boot, refusal boot — one image build)	success	NO-BREAKER-OUTPUT
+W1	security.yml	33923419120	101186679012	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33923419120	101186679268	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33923419120	101186679329	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33923419120	101186679478	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33924320505	101189512581	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33924320505	101189512615	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33929305009	101204541695	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33929305009	101204541962	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33929305009	101204542005	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33929305009	101204542119	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33935582179	101222797179	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33936001250	101223994869	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33936376027	101225066782	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33936376027	101225066800	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33945324602	101250298438	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945324602	101250298461	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945324602	101250298467	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945324602	101250298511	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945928978	101251961532	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945928978	101251961541	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945928978	101251961585	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33945928978	101251961663	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33947744844	101256825954	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33949740521	101262186307	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33949740521	101262186528	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33949740521	101262186569	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33949740521	101262186699	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33953895829	101273591401	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	compose-smoke.yml	33954593868	101275523532	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	doc-gates.yml	33955248350	101277302202	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	security.yml	33956124893	101279733299	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33956124893	101279733481	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33956124893	101279733576	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33956124893	101279733593	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33956605538	101280960856	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	compose-smoke.yml	33957586809	101283644918	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33958132866	101285173599	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	security.yml	33958784006	101286886048	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33958784006	101286886140	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33958784006	101286886146	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33958784006	101286886151	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33959587109	101289000533	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	doc-gates.yml	33960330378	101290997227	Doc budgets + anchors	cancelled	INHERITED-FROM-MAIN
+W1	compose-smoke.yml	33960829943	101293758357	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33961629855	101295081099	Smoke arms (census, green boot, refusal boot — one image build)	success	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33962853183	101297657245	Doc budgets + anchors	failure	THIS-PRS-OWN
+W1	security.yml	33963484159	101299492092	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33963484159	101299492247	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33963484159	101299492248	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33963484159	101299492306	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964037735	101300875111	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964037735	101300875182	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964037735	101300875325	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964037735	101300875332	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964584325	101302411925	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964584325	101302411982	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964584325	101302412074	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33964584325	101302412127	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33965547969	101304957370	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W1	security.yml	33966767582	101308262779	Sobelow baseline does not swallow its own inline waivers (blocking)	success	INHERITED-FROM-MAIN
+W1	security.yml	33966767582	101308262808	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33968575582	101312981248	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	INHERITED-FROM-MAIN
+W1	compose-smoke.yml	33969418244	101315203619	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W1	doc-gates.yml	33969769405	101316091664	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	doc-gates.yml	33970236053	101317324815	Doc budgets + anchors	success	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33971022261	101319433798	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	security.yml	33971387826	101321542145	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W1	security.yml	33971387826	101321542248	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W1	doc-gates.yml	33973601230	101326322395	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	doc-gates.yml	33974089638	101327620477	Doc budgets + anchors	failure	THIS-PRS-OWN
+W1	doc-gates.yml	33975413771	101331128998	Doc budgets + anchors	failure	NO-BREAKER-OUTPUT
+W1	doc-gates.yml	33978165949	101338441236	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W1	security.yml	33981335448	101347102075	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33981335448	101347102249	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33981335448	101347102303	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W1	security.yml	33981335448	101347102358	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33983235869	101352133697	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W1	compose-smoke.yml	33985555086	101358328025	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W2	compose-smoke.yml	34001092441	101400013122	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	doc-gates.yml	34001465263	101400971471	Doc budgets + anchors	cancelled	GREEN-NO-VERDICT
+W2	security.yml	34001706340	101401692577	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W2	security.yml	34001706340	101401692672	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W2	security.yml	34002077509	101402667582	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34002077509	101402667708	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34002077509	101402667733	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34002077509	101402667768	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34002805977	101404619948	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34007519000	101417390854	Smoke arms (census, green boot, refusal boot — one image build)	success	INHERITED-FROM-MAIN
+W2	required-checks-drift.yml	34012535146	101430695014	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34012535146	101430730334	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34014288681	101435336921	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34014288681	101435336924	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34014288681	101435336953	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34014288681	101435337242	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34015087150	101437451919	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	required-checks-drift.yml	34015305326	101437919737	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34015305326	101438125468	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34015732695	101439378939	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34017289430	101443265271	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34017289430	101443265327	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34017289430	101443265355	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34017289430	101443265367	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34017944163	101445062181	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	doc-gates.yml	34018218134	101445781309	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	required-checks-drift.yml	34018443176	101446463670	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34018443176	101447135353	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34018618576	101448337087	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	doc-gates.yml	34019235471	101448616312	Doc budgets + anchors	failure	NO-BREAKER-OUTPUT
+W2	doc-gates.yml	34019619630	101449651926	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	compose-smoke.yml	34020117428	101451169431	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34020489367	101452309671	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34020489367	101452309685	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34020489367	101452309748	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34020489367	101452310229	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34022158921	101456914489	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT
+W2	security.yml	34022521888	101457677180	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34022521888	101457677259	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34022521888	101457677346	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34022521888	101457677491	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34023134381	101459413144	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	security.yml	34023494972	101460358876	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34023494972	101460358922	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34023494972	101460358951	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34023494972	101460359267	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	doc-gates.yml	34024038259	101461723731	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	security.yml	34024689379	101463566655	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W2	security.yml	34024689379	101463566660	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W2	doc-gates.yml	34025129204	101464628103	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT
+W2	required-checks-drift.yml	34025662287	101466054849	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34025662287	101466427764	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34026156205	101467704584	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	doc-gates.yml	34026759303	101468993324	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	doc-gates.yml	34027954312	101472188942	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	compose-smoke.yml	34028214723	101472976504	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34028973947	101475176039	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34029055157	101475137122	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34029055157	101476117984	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34029492090	101477418561	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34029492090	101477418582	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34029492090	101477418686	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34029492090	101477418725	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34030387117	101479411007	Smoke arms (census, green boot, refusal boot — one image build)	skipped	LOG-UNREADABLE
+W2	security.yml	34031315805	101481347263	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W2	security.yml	34031315805	101481347427	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34032021761	101483182227	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34032021761	101483578301	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34032477144	101484913489	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34032477144	101484913515	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34032477144	101484913548	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34032477144	101484913567	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	doc-gates.yml	34036718204	101496016257	Doc budgets + anchors	failure	OWNERSHIP-UNDETERMINED
+W2	required-checks-drift.yml	34037767344	101498871159	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34037767344	101498929791	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34039783822	101504364602	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	compose-smoke.yml	34040372741	101505954058	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	compose-smoke.yml	34040896129	101507471657	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34041904182	101510075136	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34041904182	101510168010	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34042327900	101511585115	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W2	security.yml	34042327900	101511585137	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W2	doc-gates.yml	34042854918	101512610107	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	compose-smoke.yml	34043511170	101514912138	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34046110904	101521330396	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34046110904	101521430637	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	required-checks-drift.yml	34046430236	101522189703	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34046430236	101522379996	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34047234989	101524555913	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	security.yml	34047679921	101525720843	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34047679921	101525720922	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34047679921	101525721008	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34047679921	101525721063	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34048476817	101527986764	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W2	doc-gates.yml	34048702712	101528299650	Doc budgets + anchors	failure	OWNERSHIP-UNDETERMINED
+W2	doc-gates.yml	34049661768	101530855034	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W2	required-checks-drift.yml	34049858049	101531378880	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34049858049	101531657161	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	required-checks-drift.yml	34050324670	101532661522	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W2	required-checks-drift.yml	34050324670	101532997736	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34050782078	101534486683	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34050782078	101534486700	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34050782078	101534486724	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34050782078	101534486856	Dependency CVE audit (mix_audit over mix.lock, blocking)	skipped	NO-BREAKER-OUTPUT
+W2	compose-smoke.yml	34054832660	101544814444	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W2	security.yml	34055378083	101546287747	Sobelow baseline rows still hash to their own fingerprint (blocking)	success	GREEN-NO-VERDICT
+W2	security.yml	34055378083	101546287755	Sobelow baseline does not swallow its own inline waivers (blocking)	success	GREEN-NO-VERDICT
+W3	compose-smoke.yml	34293366130	102284626404	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	doc-gates.yml	34313427520	102344603932	Doc budgets + anchors	success	GREEN-NO-VERDICT
+W3	compose-smoke.yml	34378335160	102556798654	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34387830620	102588642536	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34387830620	102588642869	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34387830620	102588642933	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34387830620	102588643205	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34391938035	102602106218	Head does not silently revert main (stale tree)	success	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34391938035	102602427477	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34409487859	102660515579	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34411546243	102666859451	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	security.yml	34414659608	102677438182	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34414659608	102677438332	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34414659608	102677438564	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34414659608	102677438596	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34417606893	102685850140	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	required-checks-drift.yml	34420766288	102695448837	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34420766288	102695520904	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34421703688	102698340799	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34421703688	102698932563	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34422857035	102701842259	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	doc-gates.yml	34425805021	102710654180	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	compose-smoke.yml	34427920762	102718062515	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34431567705	102727990865	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34431567705	102728657547	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34433117720	102733621706	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34433117720	102733621707	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34433117720	102733621764	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34433117720	102733622409	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34455341803	102800447169	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34455341803	102800447264	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34455341803	102800447507	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34455341803	102800447898	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34458255428	102809661803	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34460095236	102816355953	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34463109065	102825313973	Doc budgets + anchors	failure	THIS-PRS-OWN
+W3	compose-smoke.yml	34465392053	102833433058	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34467196645	102838431815	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34469379165	102848454943	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34469379165	102848455221	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34469379165	102848455381	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34469379165	102848455933	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34471455015	102852061978	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34473230854	102857799286	Head does not silently revert main (stale tree)	cancelled	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34473230854	102859098300	Required-check spec gate	cancelled	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34492113050	102921345160	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	compose-smoke.yml	34504405755	102963884939	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34506530390	102969978839	Head does not silently revert main (stale tree)	success	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34506530390	102972222370	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34522475758	103024091168	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34533498185	103060124844	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34533498185	103060124955	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34533498185	103060125038	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34533498185	103060125050	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34535598852	103068645024	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	security.yml	34538150924	103075686148	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686314	Sobelow baseline does not swallow its own inline waivers (blocking)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686817	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686848	Sobelow static analysis (regression gate, baseline .sobelow-skips)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34548730646	103107555466	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34548730646	103107555531	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34548730646	103107555759	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34548730646	103107556046	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34550875583	103113332098	Head does not silently revert main (stale tree)	cancelled	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34550875583	103113795865	Required-check spec gate	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34553734151	103121993151	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34553734151	103121993441	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34553734151	103121993564	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34553734151	103121993663	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34558079380	103134934394	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	required-checks-drift.yml	34560062868	103140766718	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34560062868	103140826690	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34562779297	103148742523	Doc budgets + anchors	failure	OWNERSHIP-UNDETERMINED
+W3	required-checks-drift.yml	34563981907	103152209619	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34563981907	103153027972	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34567663642	103162980882	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	compose-smoke.yml	34569697130	103169269310	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	doc-gates.yml	34579806443	103200480736	Doc budgets + anchors	success	GREEN-NO-VERDICT
+W3	security.yml	34580949031	103205558853	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34580949031	103205559059	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34580949031	103205559263	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34580949031	103205559421	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34582230838	103208237163	Doc budgets + anchors	success	GREEN-NO-VERDICT
+W3	doc-gates.yml	34584360462	103215016559	Doc budgets + anchors	success	GREEN-NO-VERDICT
+W3	security.yml	34586174713	103223969578	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34586174713	103223969846	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34586174713	103223969894	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34586174713	103223969908	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	go-format.yml	34588952666	103229558085	gofmt -l (advisory)	cancelled	NO-BREAKER-OUTPUT
+W3	go-format.yml	34588952666	103229558404	gofmt drift ceiling (blocking)	cancelled	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34604550541	103279810583	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	compose-smoke.yml	34607907685	103290972370	Smoke arms (census, green boot, refusal boot — one image build)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34610146331	103298285224	Head does not silently revert main (stale tree)	success	GREEN-NO-VERDICT
+W3	required-checks-drift.yml	34610146331	103299371970	Required-check spec gate	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34613813452	103312759482	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34613813452	103312759512	Sobelow baseline does not swallow its own inline waivers (blocking)	cancelled	NO-BREAKER-OUTPUT
+W3	security.yml	34616837705	103323356374	Sobelow baseline does not swallow its own inline waivers (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34616837705	103323356492	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34616837705	103323356526	Sobelow static analysis (regression gate, baseline .sobelow-skips)	skipped	NO-BREAKER-OUTPUT
+W3	security.yml	34616837705	103323356618	Sobelow baseline rows still hash to their own fingerprint (blocking)	skipped	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34632276750	103371920136	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34633342721	103377855056	Smoke arms (census, green boot, refusal boot — one image build)	skipped	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34636627169	103385978759	Doc budgets + anchors	success	INHERITED-FROM-MAIN
+W3	required-checks-drift.yml	34639782234	103396368363	Head does not silently revert main (stale tree)	cancelled	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34642504319	103405376596	Head does not silently revert main (stale tree)	success	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34642504319	103407487255	Required-check spec gate	skipped	NO-BREAKER-OUTPUT

@@ -23,7 +23,8 @@
 # the unmodified tree: 3 of 5 runs red, the failing arm set varying run to run
 # (4/5/11, then 5/11). A here-string has no producer process to kill. Arming a
 # flaky harness is arming a broken one, so this had to be fixed in the same PR.
-# Baseline: 20 passed, 0 failed (14 before arm D added arms 15-20).
+# Baseline: 32 passed, 0 failed (20 before arm E added arms 21-29; 29 before
+# arms 30-32 pinned where the roster LIVES, task-67a7d8d5b2fd4482).
 
 # shellcheck disable=SC2016  # backticks inside single quotes are literal citation syntax, not expansions
 set -uo pipefail
@@ -375,6 +376,65 @@ run_e "$REPO_ROOT/.github/workflows/shell-harnesses.yml" 0
 if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
   ok "ARM 29 CONTROL — the REAL shell-harnesses.yml covers every cited path at ceiling 0 (arm E lock)"
 else bad "ARM 29 CONTROL — the REAL shell-harnesses.yml covers every cited path at ceiling 0 (arm E lock)" "rc=$rc $out"; fi
+
+# ── ARMS 30-32 (arm E): the roster is found where the roster LIVES, not in one
+# hardcoded filename (task-67a7d8d5b2fd4482).
+#
+# #19505 moved the `pds-harnesses <path>` rows OUT of the workflow and into
+# scripts/shell-harness-dispatch.sh. Arm E read only the workflow, so @roster
+# parsed EMPTY, the precondition fired, and 12 of the arms above reddened on
+# main for four days with NO coverage verdict at all. Re-pointing the read at
+# the new filename would have re-armed the identical trap for the next move.
+#
+# Arm E now FOLLOWS the sources: every `.sh` the workflow names, then anything
+# those scripts `source`. These three arms pin that read in both directions
+# through a fixture PAIR — same workflow, same script, the roster rows present
+# in one and absent in the other — so neither is satisfiable by an arm E stuck
+# at one verdict, and neither can pass by reading the real repo's dispatcher.
+#
+# mk_wf_dispatch <paths-glob> <script-basename>: a workflow that carries NO
+# roster row of its own and names a script in its own directory.
+mk_wf_dispatch() {
+  printf 'on:\n  pull_request:\n    paths:\n      - "%s"\njobs:\n  changes:\n    steps:\n      - run: bash %s\n' "$1" "$2"
+}
+
+# ── ARM 30 (QUIET/CONTROL, arm E): a roster living in a SCRIPT is found ─────
+# The repair itself. The workflow half is `**` (covers everything) and the
+# roster half is `**` too, but ONLY inside the script — so a gap of 0 here is
+# reachable only by an arm E that opened the script. An arm E reading the
+# workflow alone scores UNCHECKED and fails this arm.
+mk_wf_dispatch '**' 'disp30.sh' > "$TMP/wf_disp.yml"
+printf '#!/usr/bin/env bash\nroster=\x27\npds-harnesses **\n\x27\n' > "$TMP/disp30.sh"
+run_e "$TMP/wf_disp.yml" 0
+if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
+  ok "ARM 30 CONTROL — roster rows carried by a script the workflow names are found (arm E source-following)"
+else bad "ARM 30 CONTROL — roster rows carried by a script the workflow names are found (arm E source-following)" "rc=$rc $out"; fi
+
+# ── ARM 31 (RED, arm E): the roster moving AGAIN reds, and NAMES what it read ─
+# The regression guard. Same workflow, same script name, rows deleted from the
+# script — i.e. the next #19505. The arm asserts more than the red: it asserts
+# the message carries the file it looked in, so the next person gets a worklist
+# instead of a silent zero. Without this arm, an arm E that resolved the roster
+# from a hardcoded path would still pass arm 30.
+mk_wf_dispatch '**' 'disp31.sh' > "$TMP/wf_disp_empty.yml"
+printf '#!/usr/bin/env bash\necho no roster here\n' > "$TMP/disp31.sh"
+run_e "$TMP/wf_disp_empty.yml" 0
+if [ "$rc" -ne 0 ] && grep -q 'roster rows parsed EMPTY — read' <<<"$out" && grep -q 'disp31.sh' <<<"$out"; then
+  ok "ARM 31 RED — a roster that moved out of every reachable source reds UNCHECKED naming the files read (arm E guard)"
+else bad "ARM 31 RED — a roster that moved out of every reachable source reds UNCHECKED naming the files read (arm E guard)" "rc=$rc $out"; fi
+
+# ── ARM 32 (RED, arm E): a script-carried roster can still LOSE ─────────────
+# Arm 30 proves the script-carried roster can score 0. On its own that is
+# satisfiable by an arm E that treats "found a script" as coverage. Here the
+# script's roster covers nothing, so every cited path must come back a gap with
+# `in workflow paths: yes  in pds-harnesses roster: no` — the verdict is still
+# an AND of the two halves when the halves live in two different files.
+mk_wf_dispatch '**' 'disp32.sh' > "$TMP/wf_disp_nocov.yml"
+printf '#!/usr/bin/env bash\nroster=\x27\npds-harnesses no/such/path/at/all\n\x27\n' > "$TMP/disp32.sh"
+run_e "$TMP/wf_disp_nocov.yml" 0
+if [ "$rc" -ne 0 ] && grep -q 'in workflow paths: yes  in pds-harnesses roster: no' <<<"$out"; then
+  ok "ARM 32 RED — a script-carried roster that covers nothing still reds as a gap (arm E AND, across files)"
+else bad "ARM 32 RED — a script-carried roster that covers nothing still reds as a gap (arm E AND, across files)" "rc=$rc $out"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

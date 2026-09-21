@@ -284,7 +284,13 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       raw = "studio-resume-writer-#{System.unique_integer([:positive])}"
 
       {:ok, _token} =
-        Auth.create_token(raw, "Studio reconnect writer", @dataset, ["read", "write"])
+        Auth.create_token(
+          raw,
+          "Studio reconnect writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       conn =
         conn

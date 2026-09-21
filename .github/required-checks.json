@@ -225,6 +225,10 @@
       "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. console-harness.yml job `overflow-guard`, listed in `Console gate`'s `needs:`. Substantive and load-bearing — this row says it is ALREADY enforced through the aggregator, never that it does not matter."
     },
     {
+      "context": "Destroy-vs-primary adjacency (rendered)",
+      "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator \u2014 the aggregator already fails when it fails. console-harness.yml job `adjacency-guard`, listed in `Console gate`'s `needs:`. Substantive and load-bearing \u2014 this row says it is ALREADY enforced through the aggregator, never that it does not matter."
+    },
+    {
       "context": "Modal CSSOM oracle (rendered)",
       "reason": "S3 SUBSUMED: an upstream `needs` of a required aggregator — the aggregator already fails when it fails. console-harness.yml job `modal-oracle`, listed in `Console gate`'s `needs:`. Substantive and load-bearing — this row says it is ALREADY enforced through the aggregator, never that it does not matter."
     },

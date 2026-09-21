@@ -367,6 +367,57 @@ read_changed_files() {
   return 0
 }
 
+# ── the full-oid gate ────────────────────────────────────────────────────────
+# THE TWO ENDPOINTS DISAGREE ABOUT ABBREVIATED SHAS, AND ONLY ONE SAYS SO.
+# `repos/<r>/commits/<sha>/check-runs` ACCEPTS a prefix and answers the same
+# rows for `a5260f609` as for the full oid. `repos/<r>/actions/runs?head_sha=`
+# matches the FULL 40-character oid ONLY: handed a prefix it returns
+# `{"total_count":0,"workflow_runs":[]}` — HTTP 200, well-formed, empty. Every
+# guard in read_workflow_runs() fires on a transport or shape failure and NONE
+# of them fires on this, so the in-flight set comes back empty for the wrong
+# reason and the absence branch below concludes "every workflow run on it is
+# terminal" and screams MISSING at a tip that is simply still running.
+#
+# MEASURED, not reasoned (2026-09-20T13:36Z, tip 769c39bd6…):
+#   --sha 769c39bd6959f1adb7428b72d9dde4237421640d -> WAITING, exit 2
+#   --sha 769c39bd6                                -> MISSING, exit 1
+# Same commit, same minute, opposite verdicts. That is the failed-read-equals-
+# zero class, in the one script whose whole subject is an unjudged tip.
+#
+# So the sha is widened BEFORE the run feed is ever queried, and a prefix that
+# cannot be widened is REFUSED at exit 3 rather than answered. Resolution is
+# local first (a checkout already knows the oid, and costs no network), then
+# `repos/<r>/commits/<sha>`, which — unlike the run feed — accepts a prefix.
+# Prints the 40-character oid, or the single token UNRESOLVED.
+full_oid() {
+  local sha="$1" repo full
+  case "$sha" in
+    ""|*[!0-9a-fA-F]*) echo "UNRESOLVED"; return 0 ;;
+  esac
+  if [ "${#sha}" -eq 40 ]; then
+    printf '%s\n' "$sha" | tr 'A-F' 'a-f'
+    return 0
+  fi
+  [ "${#sha}" -ge 4 ] || { echo "UNRESOLVED"; return 0; }
+  full="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null)"
+  case "$full" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
+      printf '%s\n' "$full"; return 0 ;;
+  esac
+  repo="${REPO_OVERRIDE:-$(spec_repo)}"
+  if [ -n "$repo" ]; then
+    # The RAW payload, with this script applying its own jq: a reader that let
+    # `gh -q` do the projection could not tell an empty answer from a missing
+    # field, which is the very confusion this gate exists to end.
+    full="$(gh api "repos/$repo/commits/$sha" 2>/dev/null | jq -r '.sha // ""' 2>/dev/null)"
+    case "$full" in
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
+        printf '%s\n' "$full"; return 0 ;;
+    esac
+  fi
+  echo "UNRESOLVED"
+}
+
 resolve_tip_sha() {
   local repo branch
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
@@ -449,6 +500,29 @@ EOF
   if [ -z "$sha" ]; then
     red "CONFIGURATION FAULT — could not resolve the tip sha of ${BRANCH_OVERRIDE:-$(spec_branch)}."
     return 3
+  fi
+
+  # WIDEN BEFORE ANY head_sha= QUERY (see full_oid above). Only the live path
+  # issues one: with --runs-file the feed is a recorded payload, and with
+  # --check-runs-file and no --runs-file read_workflow_runs() returns without
+  # touching the network at all. The hermetic harness names its fixtures by the
+  # abbreviated sha it recorded them under, so the gate bites in exactly the
+  # place the endpoint does and nowhere else.
+  if [ -z "$RUNS_FILE" ] && [ -z "$CHECK_RUNS_FILE" ]; then
+    local full
+    full="$(full_oid "$sha")"
+    if [ "$full" = "UNRESOLVED" ]; then
+      red "CONFIGURATION FAULT — the sha argument '$sha' is not a full 40-character commit oid and could not be widened to one."
+      red "repos/<repo>/actions/runs?head_sha= matches the FULL oid only: handed an abbreviation it returns an EMPTY"
+      red "run list with HTTP 200, and this watch would then read 'nothing is in flight' and report MISSING on a tip"
+      red "that is simply still running. Pass the full 40-character oid (git rev-parse <ref>)."
+      red "This run FAILS rather than answering off a query it could not satisfy."
+      return 3
+    fi
+    if [ "$full" != "$sha" ]; then
+      say "  resolved the sha argument '$sha' to the full oid $full (the run feed matches the full oid only)"
+      sha="$full"
+    fi
   fi
 
   local changed_files

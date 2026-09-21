@@ -91,12 +91,15 @@ function isNoteType(t) {
 //   ingress  → an inline `content` array (the shared inline serializer)
 //   pullquote→ an inline `content` array (the shared inline serializer)
 // KEEP LOCKSTEP with paper_canvas.ex @canvas_role_types.
-const CANVAS_ROLE_TYPES = new Set(["eyebrow", "byline", "ingress", "pullquote"]);
+// `blockquote` is the plain quote (inline content + an optional `cite` the canvas
+// carries but never patches) — a role in shape, not in chrome; see role-nodes.js.
+const CANVAS_ROLE_TYPES = new Set(["eyebrow", "byline", "ingress", "pullquote", "blockquote"]);
 const ROLE_BODY_MODEL = {
   eyebrow: "text",
   byline: "items",
   ingress: "inline",
   pullquote: "inline",
+  blockquote: "inline",
 };
 
 // True when a portable-doc BLOCK type (and, since node.type === bpType, a NODE type)
@@ -109,7 +112,7 @@ function isCanvasRoleType(t) {
 // lifts, `> ` shorthand). A same-id block whose kind changed is REPLACED, since patch-block
 // keeps `type` immutable.
 const CONVERTIBLE_NODE_KIND = { paragraph: "paragraph", heading: "heading", bulletList: "list", orderedList: "list", taskList: "list" };
-const CONVERTIBLE_KINDS = new Set(["paragraph", "heading", "list", "pullquote", "eyebrow", "byline", "ingress"]);
+const CONVERTIBLE_KINDS = new Set(["paragraph", "heading", "list", "pullquote", "blockquote", "eyebrow", "byline", "ingress"]);
 const LIST_KIND_ALIASES = new Set(["list", "bulletList", "bullet_list", "bullet-list", "bulletedList", "bulleted_list", "bulleted-list", "orderedList", "ordered-list", "ordered_list", "numbered_list", "numberedList"]);
 function blockKind(block) {
   const t = block && block.type;
@@ -2143,6 +2146,11 @@ function bylineDisplay(block) {
 //   inline→ inlineArrayToTiptap(block.content) (the shared serializer; may be empty).
 function roleBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType };
+  // A quote's attribution rides on the node so a same-id replace keeps it; ops never patch it.
+  if (bpType === "blockquote") {
+    const cite = block && (block.cite ?? block.attribution);
+    if (typeof cite === "string" && cite.trim() !== "") attrs.cite = cite;
+  }
   const model = ROLE_BODY_MODEL[bpType];
   const node = { type: bpType, attrs };
 
@@ -2168,11 +2176,14 @@ function roleNodeToBlock(node, id) {
   const bpType = (node && node.type) || "eyebrow";
   const model = ROLE_BODY_MODEL[bpType];
   if (model === "inline") {
-    return {
+    const block = {
       id,
       type: bpType,
       content: tiptapInlineToPd((node && node.content) || []),
     };
+    const cite = node && node.attrs && node.attrs.cite;
+    if (bpType === "blockquote" && typeof cite === "string" && cite !== "") block.cite = cite;
+    return block;
   }
   if (model === "items") {
     return { id, type: bpType, items: splitBylineItems(roleNodeText(node)) };
