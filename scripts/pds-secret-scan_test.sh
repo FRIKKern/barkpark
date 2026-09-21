@@ -38,6 +38,10 @@
 # (task-57fbebcb2d5339ff) — the other half of the same CLEAN. Their own
 # commentary sits above arm F.
 #
+# ARMS J-M do it for the DENIED-MEMBER loop in `check_deny_members`
+# (task-068696cdce7db36b) — the third loop of the shape, and the one whose
+# verdict PRINTS its coverage number. Their own commentary sits above arm J.
+#
 # EXIT CODES: 0 all assertions pass · 1 at least one failed · 2 cannot measure.
 
 set -uo pipefail
@@ -356,6 +360,142 @@ else ok "I zero members: NOT reported as a short scan — two refusals, two mess
 if has "$TMP/i.out" 'RESULT:'; then
   bad "I zero members: a verdict was printed over an empty container"
 else ok "I zero members: no verdict printed"; fi
+
+# ═══ THE DENIED-MEMBER LOOP (task-068696cdce7db36b) ═════════════════════════
+# The third loop in this file with the same shape, and the one whose verdict
+# carries the coverage number in its own text. `check_deny_members` reads the
+# deny list on fd 0 (`done < "$DENY_MEMBERS_FILE"`) and the final verdict used
+# to read its figure off `wc -l` of that INPUT FILE:
+#
+#     RESULT: DENIED MEMBERS ABSENT — 6 checked path(s), none present …
+#
+# A loop that ended after row 1 leaves MEMBER_HITS=0, so that line printed "6
+# checked path(s)" over one path examined — a coverage claim sourced from the
+# enumeration, which by construction cannot notice that the work stopped.
+# There is no -eq 0 floor here at all, so nothing else was watching.
+#
+#   J  CONTROL     an intact deny check over 3 rows prints
+#                  "DENIED MEMBERS ABSENT — 3 checked path(s)", exit 0; and a
+#                  deny path that IS in the bundle still reports PRESENT, exit 1
+#   K  SHORT READ  a stdin-draining child is spliced into the deny loop body;
+#                  the identity must REFUSE naming BOTH numbers ("examined 1 of
+#                  3 denied path(s)"), exit 2, and NO ABSENT verdict may print
+#   L  CUT         the identity block is CUT between its markers; arm K's short
+#                  read must then print the OLD line — "DENIED MEMBERS ABSENT —
+#                  3 checked path(s)" over a loop that examined 1 — at exit 0.
+#                  That is the defect reproduced verbatim, and it is what makes
+#                  arms J and K mean anything
+#   M  BLANK ROW   a blank deny row must not manufacture a refusal: the loop
+#                  skips it before tallying, so the enumeration side counts with
+#                  `awk NF`. A guard that reds on correct input gets deleted.
+#
+# No psql, no database, no network: a deny check is tar + find + grep.
+
+DENY_ABSENT_ARGS='--deny-member tables/webhooks.copy --deny-member tables/api_tokens.copy --deny-member tables/access_grants.copy'
+
+run_deny_scan() { # script bundle outprefix extra-args...
+  local script="$1" tar_path="$2" pre="$3" rc=0
+  shift 3
+  bash "$script" scan --bundle "$tar_path" "$@" >"$pre.out" 2>"$pre.err" || rc=$?
+  echo "$rc"
+}
+
+# K's PLANT: a stdin-draining child in the DENY loop body, spliced right after
+# the iteration tally. Anchor asserted UNIQUE and the diff asserted non-empty —
+# a mutation that did not land is a green about nothing.
+DPLANT="$TMP/deny-planted.sh"
+danchor='    checked=$((checked + 1))'
+n_danchor=$(grep -cF "$danchor" "$SCAN")
+if [ "$n_danchor" != "1" ]; then
+  unavailable "the deny plant anchor matched $n_danchor times, expected exactly 1: $danchor"
+fi
+awk -v a="$danchor" '{ print; if ($0 == a) print "    cat >/dev/null" }' "$SCAN" > "$DPLANT"
+if cmp -s "$SCAN" "$DPLANT"; then unavailable "the deny stdin-drain plant produced an identical file"; fi
+ok "deny plant landed: 'cat >/dev/null' spliced into the deny loop body at the unique anchor"
+
+# L's CUT: the deny identity decision removed between its markers.
+DCUT="$TMP/deny-cut.sh"
+n_dmut=$(grep -c 'MUT-ANCHOR: deny-count-identity' "$SCAN")
+if [ "$n_dmut" != "1" ]; then
+  unavailable "the deny identity MUT-ANCHOR matched $n_dmut times, expected exactly 1"
+fi
+sed '/MUT-ANCHOR: deny-count-identity/,/MUT-END: deny-count-identity/d' "$SCAN" > "$DCUT"
+if cmp -s "$SCAN" "$DCUT"; then unavailable "the deny identity cut produced an identical file"; fi
+DCUTPLANT="$TMP/deny-cut-planted.sh"
+awk -v a="$danchor" '{ print; if ($0 == a) print "    cat >/dev/null" }' "$DCUT" > "$DCUTPLANT"
+cmp -s "$DCUT" "$DCUTPLANT" && unavailable "the deny plant did not land on the cut copy"
+ok "deny cut landed: the deny-count-identity block removed from the scratch copy"
+
+# ── J: CONTROL — an intact deny check examines every enumerated deny row ─────
+rc=$(run_deny_scan "$SCAN" "$BTAR" "$TMP/j" $DENY_ABSENT_ARGS)
+if [ "$rc" = "0" ]; then ok "J control: intact deny check over 3 absent paths exits 0"
+else bad "J control: expected exit 0, got $rc"; sed -n '1,5p' "$TMP/j.err" >&2; fi
+if has "$TMP/j.out" 'RESULT: DENIED MEMBERS ABSENT — 3 checked path(s)'; then
+  ok "J control: prints 'DENIED MEMBERS ABSENT — 3 checked path(s)' — the ITERATION count"
+else bad "J control: the ABSENT verdict is missing or carries the wrong count"; cat "$TMP/j.out" >&2; fi
+if has "$TMP/j.err" 'SHORT DENIED-MEMBER CHECK'; then
+  bad "J control: the identity refused a COMPLETE deny list"
+else ok "J control: no false refusal on a complete list"; fi
+# and the check still FIRES: a deny path that IS in the bundle is reported
+rc=$(run_deny_scan "$SCAN" "$BTAR" "$TMP/j2" --deny-member tables/alpha.copy --deny-member tables/api_tokens.copy)
+if [ "$rc" = "1" ]; then ok "J control: a PRESENT denied member still exits 1 — the check FIRES"
+else bad "J control: expected exit 1 for a present denied member, got $rc"; cat "$TMP/j2.err" >&2; fi
+if has "$TMP/j2.out" 'RESULT: 1 DENIED MEMBER(S) PRESENT'; then
+  ok "J control: reports 'RESULT: 1 DENIED MEMBER(S) PRESENT'"
+else bad "J control: the PRESENT verdict is missing"; cat "$TMP/j2.out" >&2; fi
+
+# ── K: SHORT READ — the identity refuses, naming both numbers ───────────────
+rc=$(run_deny_scan "$DPLANT" "$BTAR" "$TMP/k" $DENY_ABSENT_ARGS)
+if [ "$rc" = "2" ]; then ok "K short read: refuses with exit 2"
+else bad "K short read: expected exit 2, got $rc"; cat "$TMP/k.err" >&2; fi
+if has "$TMP/k.err" 'SHORT DENIED-MEMBER CHECK'; then
+  ok "K short read: fires the SHORT DENIED-MEMBER CHECK refusal"
+else bad "K short read: the short-check refusal did not fire"; cat "$TMP/k.err" >&2; fi
+if has "$TMP/k.err" 'examined 1 of 3 denied path'; then
+  ok "K short read: the refusal names BOTH numbers ('examined 1 of 3 denied path(s)')"
+else bad "K short read: the refusal does not name both numbers"; cat "$TMP/k.err" >&2; fi
+# The VERDICT LINE, not the bare phrase: the refusal's own text quotes the
+# words it is refusing to print ("must never print DENIED MEMBERS ABSENT in the
+# same words as a full one"), so a bare-phrase assertion matches the refusal
+# itself and fails on a run that behaved perfectly. Found by this arm on its
+# first run.
+if has "$TMP/k.out" 'RESULT: DENIED MEMBERS ABSENT' || has "$TMP/k.err" 'RESULT: DENIED MEMBERS ABSENT'; then
+  bad "K short read: an ABSENT verdict was printed over a partial deny check"
+else ok "K short read: NO ABSENT verdict line printed on either stream"; fi
+if has "$TMP/k.err" 'SHORT BUNDLE SCAN'; then
+  bad "K short read: borrowed the bundle loop's message instead of its own"
+else ok "K short read: distinct from the bundle-loop refusal (that message absent)"; fi
+
+# ── L: CUT-IDENTITY — the OLD line, printed over a short read ───────────────
+# This is the RED-WITHOUT. Without the identity block the very same drained run
+# prints the enumeration's number — 3 — over one path examined, in exactly the
+# words a complete check uses, and exits 0.
+rc=$(run_deny_scan "$DCUTPLANT" "$BTAR" "$TMP/l" $DENY_ABSENT_ARGS)
+if [ "$rc" = "0" ]; then
+  ok "L cut: without the identity the SHORT deny check exits 0 — the defect, reproduced"
+else bad "L cut: expected the cut copy to exit 0 on a short read, got $rc"; cat "$TMP/l.err" >&2; fi
+if has "$TMP/l.out" 'RESULT: DENIED MEMBERS ABSENT — 3 checked path(s)'; then
+  ok "L cut: prints the OLD line — '3 checked path(s)' over 1 examined — exactly what arm K now refuses"
+else bad "L cut: expected the old wc-of-the-input ABSENT line from the un-guarded short check"; cat "$TMP/l.out" >&2; fi
+if has "$TMP/l.err" 'SHORT DENIED-MEMBER CHECK'; then
+  bad "L cut: the refusal survived the cut — the cut did not remove the decision"
+else ok "L cut: the refusal is GONE once its block is cut (RED-before is real)"; fi
+rc=$(run_deny_scan "$DCUT" "$BTAR" "$TMP/l2" $DENY_ABSENT_ARGS)
+if [ "$rc" = "0" ] && has "$TMP/l2.out" 'RESULT: DENIED MEMBERS ABSENT'; then
+  ok "L cut: arm J is unaffected by the cut (intact deny check still ABSENT, exit 0)"
+else bad "L cut: the cut changed arm J, so the cut is not surgical (rc=$rc)"; fi
+
+# ── M: BLANK DENY ROW — the identity must not refuse a GOOD check ───────────
+# The loop skips blank rows BEFORE it tallies, so the enumeration side counts
+# with `awk NF`. A `wc -l` there would read 4 against 3 iterations and refuse a
+# complete deny list — the false refusal that gets a guard deleted.
+rc=$(run_deny_scan "$SCAN" "$BTAR" "$TMP/m" --deny-member tables/webhooks.copy --deny-member '' --deny-member tables/api_tokens.copy --deny-member tables/access_grants.copy)
+if [ "$rc" = "0" ] && has "$TMP/m.out" 'RESULT: DENIED MEMBERS ABSENT — 3 checked path(s)'; then
+  ok "M blank row: a blank deny row is skipped by BOTH sides — still 3 checked, no false refusal"
+else
+  bad "M blank row: expected '3 checked path(s)' and exit 0, got rc=$rc"
+  cat "$TMP/m.err" >&2; grep 'DENIED MEMBERS' "$TMP/m.out" >&2
+fi
 
 echo "── pds-secret-scan count identity: $((PASS + FAIL)) checks, $FAIL failed ──"
 [ "$FAIL" -eq 0 ] || exit 1
