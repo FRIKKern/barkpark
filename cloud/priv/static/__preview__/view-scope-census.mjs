@@ -449,6 +449,24 @@ export const SINGULAR_REGISTER = [
   { leg: "W20-type-floor-instances", selector: "#billing-plan-section .set-h", reason: "readiness for the billing screen: one section heading, under an id host" },
   { leg: "W20-type-floor-instances", selector: "#billing-recommended .loading", reason: "readiness, NEGATED: waits for the recommended panel to stop showing a spinner — the question is whether ANY loading node remains, so one match is enough to keep waiting" },
   { leg: "W20-type-floor-instances", selector: "#activity-body .tlv-row", reason: "readiness for the activity feed: the first row proves the feed painted" },
+
+  // ── W24: the word-break alias population ──
+  // All five are READINESS, in the first sense the header names: each is the
+  // `ready` expression `nav()` is handed (or, for the settle, the poll that
+  // follows a click), and its only question is whether the screen this cell
+  // measures has painted AT ALL. None of them is the measurement — that is
+  // `wbProbe`, which walks the SAME live-view scope with `querySelectorAll` and
+  // PRINTS its population in the leg's own ok-line ("N painted element(s)
+  // walked"), so the counts these waits stand in front of are re-measured on
+  // every run rather than asserted here. Each is already scoped to
+  // `section.view:not([hidden])` — the SCOPE half's remedy, applied at the
+  // source, because app.js never clears a hidden view and a document-wide
+  // `.tlv-row` here matched five nodes inside a hidden #view-activity.
+  { leg: "W24-word-break-alias-population", selector: "section.view:not([hidden]) .new-step-probe", reason: "readiness: the first probe row proves the instance rail painted its failed steps; the probes are then measured plurally by wbProbe, which prints how many it found" },
+  { leg: "W24-word-break-alias-population", selector: "section.view:not([hidden]) .deploy-row", reason: "readiness for the two deploy cells (detail and site rail): the first row proves the deploy surface painted — one row is enough to wait on and the leg measures the console lines, not the rows" },
+  { leg: "W24-word-break-alias-population", selector: "section.view:not([hidden]) .wh-card", reason: "readiness for the webhooks screen: the first card proves it painted, before the Deliveries control inside it is clicked" },
+  { leg: "W24-word-break-alias-population", selector: "section.view:not([hidden]) .tlv-row", reason: "readiness for the two timeline-vocabulary cells (activity and instance timeline): the first row proves the feed painted, and the detail bodies the leg measures are opened by a separate plural click" },
+  { leg: "W24-word-break-alias-population", arg: "${JSON.stringify(c.settle)})`));", reason: "the SETTLE poll, and being population-blind is the point: it asks whether the delivery log has arrived from its fetch YET, and the first `.wh-del-err` to paint answers that — the count is then taken by wbProbe, after the wait, and printed" },
 ];
 
 /** A singular walk's stable identity: the owning leg plus what it walks. */
@@ -637,6 +655,23 @@ export const UNRESOLVED_REGISTER = [
   {
     leg: "W35-hash-nav-hidden-view-residue", arg: "s).length;}catch(err){e.err=String(err&&err.mess", scope: "document-wide",
     reason: "DOCUMENT-WIDE ON PURPOSE AND IT IS THE SUBJECT: this is the residue census walking every censused selector against the whole document, then against each hidden `section.view` in turn. Scoping it would delete the measurement",
+  },
+
+  // ── W24: the word-break alias population ──
+  {
+    leg: "W24-word-break-alias-population", arg: "'section.view:not([hidden]) '+SEL))` +", scope: "live-view",
+    values: [".rail-row .v", ".new-step-probe", ".deploy-console-line", ".deploy-detail", ".bp-console-line", ".wh-del-err", ".tlv-detail"],
+    reason: "THE MEASUREMENT ITSELF. The `section.view:not([hidden]) ` prefix is a LITERAL in the expression and only the trailing class interpolates, so no value this walk can take reaches a hidden view — the interpolated tail cannot move it out of that host. The seven values are the leg's OWNED list, which the leg asserts is fully covered by its own cases before it measures anything, so a table that grows a row is a change to this row too",
+  },
+  {
+    leg: "W24-word-break-alias-population", arg: "${JSON.stringify(c.click)}));` +", scope: "live-view",
+    values: ["section.view:not([hidden]) [data-wh-deliveries]", "section.view:not([hidden]) .tlv-toggle"],
+    reason: "the CONTROL click, over the case table's own `click` strings: two values, both written in that table with the live-view prefix spelled out, and the leg reds by name when the walk finds none — a run that clicked nothing would otherwise report a perfect table about collapsed rows",
+  },
+  {
+    leg: "W24-word-break-alias-population", arg: "${JSON.stringify(c.settle)})`));", scope: "live-view",
+    values: ["section.view:not([hidden]) .wh-del-err"],
+    reason: "the SETTLE poll, over the case table's one `settle` string, likewise live-view-scoped in the table; SINGULAR_REGISTER above answers the cardinality half of this same site separately",
   },
 ];
 
