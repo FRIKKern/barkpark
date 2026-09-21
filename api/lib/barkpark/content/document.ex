@@ -136,11 +136,26 @@ defmodule Barkpark.Content.Document do
       name: :documents_doc_id_type_dataset_id_index
     )
     # FK-abort containment (Felix W17). `workspace_id`, `project_id`, and
-    # `dataset_id` are real Postgres foreign keys —
-    # `references(:workspaces/:projects/:datasets, on_delete: :nilify_all)` from
-    # migrations 20260527110100_add_tenancy_columns and
-    # 20260527131000_add_dataset_id_columns, with Ecto-default constraint names
-    # `documents_<col>_fkey`. `owner_id` is NOT this class — it is a plain
+    # `dataset_id` are real Postgres foreign keys to
+    # `:workspaces` / `:projects` / `:datasets`, with Ecto-default constraint
+    # names `documents_<col>_fkey`. The COLUMNS arrived in migrations
+    # 20260527110100_add_tenancy_columns and 20260527131000_add_dataset_id_columns;
+    # their CURRENT delete action was set later, by
+    # 20260527160000_cascade_content_on_scope_delete, to `on_delete: :delete_all`
+    # (SQL `ON DELETE CASCADE`) — and nothing after it re-flips these twelve
+    # content-table scope FKs, so CASCADE is what ships.
+    #
+    # WHAT THAT MEANS FOR A READER: deleting a workspace / project / dataset
+    # DELETES this row. It does not survive with a NULLed scope column, so a
+    # scope delete can never manufacture a `documents` row carrying
+    # `workspace_id IS NULL` beside a non-NULL `project_id` — the writer cannot
+    # produce that pair either (`Content.WriteScope.resolve_write_scope/1`;
+    # task-3e3367eba8695cec). The sibling content tables (revisions,
+    # media_files, schema_definitions) were flipped by the same migration; see
+    # `Content.Revisions`' retention note for the same fact stated from the
+    # history side.
+    #
+    # `owner_id` is NOT this class — it is a plain
     # `:binary_id` column with no `references()` (migration
     # 20260629150300_add_owner_id_to_documents) — so it earns no constraint.
     #
