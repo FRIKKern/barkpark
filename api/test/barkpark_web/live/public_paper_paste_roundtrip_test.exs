@@ -40,7 +40,15 @@ defmodule BarkparkWeb.PublicPaperPasteRoundtripTest do
       )
 
     raw = "paste-roundtrip-writer-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "paste roundtrip writer", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "paste roundtrip writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw}), slug: slug}
   end

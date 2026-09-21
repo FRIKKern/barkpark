@@ -240,6 +240,9 @@ console-path-ratchet .github/workflows/console-harness.yml
 console-path-ratchet scripts/cloud-console-gate-shape.test.sh
 console-path-ratchet .github/workflows/cloud.yml
 console-path-ratchet .github/workflows/elixir.yml
+console-harness-pin scripts/console-harness.sh
+console-harness-pin scripts/console-harness-pin.test.sh
+console-harness-pin .github/workflows/console-harness.yml
 console-refusal-capture scripts/console-refusal-capture.mjs
 console-refusal-capture scripts/*.test.mjs
 weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
@@ -248,6 +251,8 @@ pds-harnesses scripts/pds-ledger-census.sh
 pds-harnesses scripts/pds-ledger-census_test.sh
 pds-harnesses scripts/pds-record-parity.sh
 pds-harnesses scripts/pds-record-parity.test.sh
+pds-harnesses scripts/pds-secret-scan.sh
+pds-harnesses scripts/pds-secret-scan_test.sh
 pds-harnesses .claude/workflows/bp-pds-charter.md
 pds-harnesses tooling/pds/d-number-reservations.tsv
 pds-harnesses .claude/workflows/bp-deploy-reliability-charter.md
@@ -474,6 +479,9 @@ mix-test-strict scripts/mix-test-strict.test.sh
 scratchpad-reaper scripts/scratchpad-reaper.sh
 scratchpad-reaper scripts/scratchpad-reaper.test.sh
 scratchpad-reaper scripts/disk-headroom-guard.sh
+echo-json-parse scripts/echo-json-parse-guard.test.sh
+echo-json-parse scripts/fixtures/echo-json-parse-row.json
+echo-json-parse .claude/skills/session/SKILL.md
 '
 self=".github/workflows/shell-harnesses.yml"
 self_script="scripts/shell-harness-dispatch.sh"

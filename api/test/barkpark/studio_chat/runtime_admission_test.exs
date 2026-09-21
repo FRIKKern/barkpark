@@ -78,6 +78,29 @@ defmodule Barkpark.StudioChat.RuntimeAdmissionTest do
              RuntimeAdmission.acquire("session-4", opts)
   end
 
+  # THE CEILING THE SUITE ITSELF MUST NOT REACH (task-232ca4f298258788).
+  # Every other test here passes an explicit `managed_runtime_limit`, so none of
+  # them measures the limit a REAL `Recorder.ensure/1` gets — and that limit is
+  # the module's production default of 3 unless config/test.exs raises it. Three
+  # is below ExUnit's own fan-out, so a fourth async test holding a Recorder reds
+  # with `{:error, {:managed_runtime_capacity, 3}}` on an unrelated diff (seen on
+  # `Elixir gate` runs 35515018409 and 35249228901 at chat_live_test.exs:6661).
+  # Read the effective limit off a lease taken with NO limit opt, against a
+  # PRIVATE registry so this assertion holds zero node-global slots of its own.
+  test "the test-env admission ceiling clears the suite's concurrency", %{registry: registry} do
+    assert {:ok, lease} =
+             RuntimeAdmission.acquire("ceiling-probe", %{
+               execution_target: "managed",
+               admission_registry: registry
+             })
+
+    floor = max(System.schedulers_online() * 2, 8)
+
+    assert lease.limit >= floor,
+           "config/test.exs must raise max_managed_runtimes above the async suite's " <>
+             "fan-out; got #{lease.limit}, need >= #{floor}"
+  end
+
   defp opts(registry, limit) do
     %{
       execution_target: "managed",

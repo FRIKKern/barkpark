@@ -176,8 +176,21 @@ defmodule Barkpark.Content.ScopeTest do
       assert wheres(q) == []
     end
 
-    test "nil workspace_id with a non-nil project_id still falls back to global" do
+    # task-ab5da5c4faf1a04c INVERTED this test. It read
+    # `assert wheres(q) == []` — the leak written down AS the contract: a
+    # caller that had resolved a PROJECT but no workspace got no tenancy
+    # clause whatsoever and read every tenant's rows, with the dataset STRING
+    # left as the only discriminator. A project belongs to exactly one
+    # workspace, so `project_id` alone is a COMPLETE tenancy key; the
+    # nil-workspace arm now applies it instead of discarding it.
+    test "nil workspace_id with a non-nil project_id applies the PROJECT clause" do
       q = Scope.scope_to_workspace_or_global(base_query(), nil, "proj-xyz")
+
+      assert [%Ecto.Query.BooleanExpr{params: [{"proj-xyz", {0, :project_id}}]}] = wheres(q)
+    end
+
+    test "nil workspace AND nil project is still the deliberate global read" do
+      q = Scope.scope_to_workspace_or_global(base_query(), nil, nil)
       assert wheres(q) == []
     end
   end

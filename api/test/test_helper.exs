@@ -86,6 +86,74 @@ ExUnit.start(
   ]
 )
 
+# NODE-GLOBAL LEAK PROBE — the PER-MODULE arm (task-086261728f14c078).
+#
+# The after_suite arm below says a key leaked. It cannot say WHICH module leaked
+# it, and finding that out cost a full diagnosis on 2026-09-20: run 35509163543
+# printed `value left behind: :one_shot` and the writer turned out to be
+# `Barkpark.OneShot.boot!/0`, called by `Mix.Tasks.Barkpark.Preview.Backfill`
+# and `Mix.Tasks.Barkpark.Workspace.ProvisionSchemas` — two frames below any
+# test source, so no static reader of api/test could see it.
+#
+# A formatter gets `:module_finished` for every module, so it can. APPENDED to
+# whatever is already configured (`mix test --formatter …` must keep working);
+# it never replaces the CLI formatter.
+ExUnit.configure(
+  formatters: ExUnit.configuration()[:formatters] ++ [Barkpark.BootModeLeakFormatter]
+)
+
+# NODE-GLOBAL LEAK PROBE — the RUNTIME arm (task-086261728f14c078).
+#
+# `scripts/test-env-leak-gate.sh` is a STATIC reader. Its rule is "an on_exit
+# restoring this key exists in the module", and its own moduledoc says so: a
+# green from it means "a restore is WRITTEN", never "a restore RAN". That is
+# not a tightening away — elixir-nightly 35323296944 (2026-09-18) reddened two
+# assertions in application_boot_mode_test.exs with `left: :one_shot` while the
+# writer module had a correct, present, matching `on_exit`. The gate was green
+# and RIGHT to be green; the leak was still live. A static reader cannot close
+# that, so something must run.
+#
+# This is the cheap half of that something: at the END of the suite, a
+# node-global key that no test claims to own must be in its pristine state. It
+# costs one function call per run and it cannot be vacuous — the pristine value
+# is asserted below, not read from the tree.
+#
+# WHAT IT DOES NOT CATCH, stated rather than left to be discovered: a write that
+# is restored before the suite ends but AFTER some other module read it. That is
+# the transient the 09-18 nightly actually drew, and it is caught at the SOURCE
+# instead — `Barkpark.BootModeSandbox` restores synchronously in a `try … after`
+# and then re-reads the key, so a restore that does not land reds the writer's
+# own test. The two arms are complementary: the sandbox catches it in the
+# module that caused it, this catches anything that escaped the whole run.
+ExUnit.after_suite(fn _results ->
+  case Barkpark.BootModeSandbox.current() do
+    :error ->
+      :ok
+
+    {:ok, mode} ->
+      IO.puts(:stderr, """
+
+      ================================================================
+      NODE-GLOBAL LEAK: :barkpark, :boot_mode outlived the whole suite
+      ================================================================
+
+        value left behind: #{inspect(mode)}
+
+      This key is ONE value for the WHOLE NODE. Whatever set it did not put it
+      back, and in a run where the ExUnit shuffle puts a reader after the writer
+      that reader fails an assertion about code it does not touch.
+
+      Every write must go through `Barkpark.BootModeSandbox` (api/test/support),
+      which restores in a `try … after` and asserts the restore landed.
+      ================================================================
+      """)
+
+      # Non-zero exit, not just a shout: a detector that only prints is read as
+      # decoration and scrolls past in 60k lines of CI log.
+      System.at_exit(fn _ -> exit({:shutdown, 1}) end)
+  end
+end)
+
 # ── chat_bridge fixture (Connectors D54) ───────────────────────────────────
 #
 # WHY THIS IS HERE AND NOT IN A MIGRATION.
