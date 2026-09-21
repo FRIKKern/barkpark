@@ -43,7 +43,13 @@ defmodule BarkparkWeb.ScopedPluginSessionTest do
     raw = "scoped-cookie-member-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "scoped cookie member", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        raw,
+        "scoped cookie member",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # A second workspace this token is NOT a member of (membership-gate target).
     {:ok, other_ws} =
