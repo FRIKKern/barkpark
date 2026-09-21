@@ -657,6 +657,13 @@ const TABLE_MARKS = new Set([
   "blockref", "tag", "valueref",
 ]);
 
+function tableCellAttrsPlain(attrs) {
+  if (attrs == null) return true;
+  if (!tableAttrsHaveOnly(attrs, ["bpTableCellSource", "colspan", "rowspan"])) return false;
+  if (attrs.bpTableCellSource != null) return false;
+  return (attrs.colspan == null || attrs.colspan === 1) && (attrs.rowspan == null || attrs.rowspan === 1);
+}
+
 function tableAttrsHaveOnly(attrs, allowed) {
   return attrs && typeof attrs === "object" && !Array.isArray(attrs) &&
     Object.keys(attrs).every((key) => allowed.includes(key));
@@ -776,9 +783,10 @@ function tableCellRows(editorJSON, projection) {
         row.content.length !== source.rows[0].length) return null;
     const expectedType = header ? "bpTableHeaderCell" : "bpTableCell";
     const cells = row.content.map((cell, column) => {
-      if (cell?.type !== expectedType ||
-          (cell.attrs != null && (!exactObjectKeys(cell.attrs, ["bpTableCellSource"]) ||
-            cell.attrs.bpTableCellSource != null))) return null;
+      // The canvas cell carries colspan / rowspan (merged cells, plan #24); the per-block Studio
+      // editor edits plain grids only, so a spanning cell fails closed here (read-only), and 1/1
+      // reads as the plain cell it is.
+      if (cell?.type !== expectedType || !tableCellAttrsPlain(cell.attrs)) return null;
       const inline = cell.content || [];
       if (!Array.isArray(inline)) return null;
       try {

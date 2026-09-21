@@ -133,6 +133,34 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert Walk.render_body(right, @width, @email) =~ "text-align:right"
     end
 
+    test "a merged table cell renders colspan/rowspan on the origin and no <td> for the covered positions (plan #24)" do
+      table = %{
+        "kind" => "PdTable",
+        "head" => [[%{"kind" => "PdText", "children" => ["A"]}], [%{"kind" => "PdText", "children" => ["B"]}], [%{"kind" => "PdText", "children" => ["C"]}]],
+        "rows" => [
+          [[%{"kind" => "PdText", "children" => ["ab"]}], [], [%{"kind" => "PdText", "children" => ["c1"]}]],
+          [[%{"kind" => "PdText", "children" => ["tall"]}], [%{"kind" => "PdText", "children" => ["b2"]}], [%{"kind" => "PdText", "children" => ["c2"]}]],
+          [[], [%{"kind" => "PdText", "children" => ["b3"]}], [%{"kind" => "PdText", "children" => ["c3"]}]]
+        ],
+        "spans" => [
+          %{"row" => 0, "col" => 0, "colspan" => 2, "rowspan" => 1},
+          %{"row" => 1, "col" => 0, "colspan" => 1, "rowspan" => 2}
+        ]
+      }
+
+      html = Walk.render_body(table, @width, @article)
+      assert html =~ ~r/<td class="bp-table__td" colspan="2">.*?ab.*?<\/td>/
+      assert html =~ ~r/<td class="bp-table__td" rowspan="2">.*?tall.*?<\/td>/
+      # first body row: two cells (the covered one is gone); third row: two cells (covered by the rowspan)
+      rows = Regex.scan(~r/<tr>(.*?)<\/tr>/s, html) |> Enum.map(fn [_, inner] -> inner end)
+      body = Enum.drop(rows, 1)
+      assert Enum.map(body, fn r -> length(Regex.scan(~r/<td/, r)) end) == [2, 3, 2]
+      # the email arm renders every grid cell and no span attributes
+      email = Walk.render_body(table, @width, @email)
+      refute email =~ "colspan"
+      assert length(Regex.scan(~r/<td/, email)) == 9
+    end
+
     test "escapes HTML in string children" do
       node = %{"kind" => "PdText", "children" => ["<script>"]}
       html = Walk.render_body(node, @width, @email)

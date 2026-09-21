@@ -42,6 +42,8 @@ import {
   tiptapInlineToPd,
   tiptapToBlock,
 } from "../convert.js";
+// Merged cells (plan #24): the grid <-> visible-rows model (spans on the block, covered placeholders).
+import { gridToVisible, visibleToGrid, PLACEHOLDER_CELL } from "./table-grid.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
 // switch). These project to a native ProseMirror textblock and diff via
@@ -2169,10 +2171,10 @@ function cellToInline(cell) {
 
 // One cell block → a bpTableHeaderCell|bpTableCell node. Omit the `content` key when
 // the inline array is empty (empty-body fidelity, callout precedent).
-function cellToNode(nodeName, cell) {
+function cellToNode(nodeName, cell, colspan = 1, rowspan = 1) {
   const node = {
     type: nodeName,
-    attrs: { bpTableCellSource: { cell: deepClone(cell) } },
+    attrs: { bpTableCellSource: { cell: deepClone(cell) }, colspan: colspan > 1 ? colspan : 1, rowspan: rowspan > 1 ? rowspan : 1 },
   };
   const inline = inlineArrayToTiptap(cellToInline(cell));
   if (inline.length) node.content = inline;
@@ -2185,21 +2187,18 @@ function cellToNode(nodeName, cell) {
 // Guards keep the node schema-valid (bpTableRow+ ; each row (cell)+) for a degenerate
 // empty table — real tables always carry rows, so the guards never fire on live data.
 function tableBlockToNode(block, bpId, bpType) {
-  const rowsSrc = Array.isArray(block && block.rows) ? block.rows : [];
+  const rowsSrc = Array.isArray(block && block.rows) ? block.rows.map((r) => (Array.isArray(r) ? r : Array.isArray(r && r.cells) ? r.cells : [])) : [];
   const headSrc = block && block.head;
   const content = [];
-
+  // Merged cells (plan #24): `spans` on the block; covered positions hold placeholders and get no
+  // node, the origin carries colspan / rowspan (table-grid.js).
+  const grid = { head: Array.isArray(headSrc) && headSrc.length ? headSrc : null, rows: rowsSrc, spans: Array.isArray(block && block.spans) ? block.spans : [] };
   const mkRow = (nodeName, cells) => {
-    const list = Array.isArray(cells) ? cells : [];
-    const cellNodes = list.map((cell) => cellToNode(nodeName, cell));
+    const cellNodes = cells.map((vc) => cellToNode(nodeName, vc.cell, vc.colspan, vc.rowspan));
     if (!cellNodes.length) cellNodes.push({ type: nodeName });
     return { type: "bpTableRow", content: cellNodes };
   };
-
-  if (Array.isArray(headSrc) && headSrc.length) {
-    content.push(mkRow("bpTableHeaderCell", headSrc));
-  }
-  for (const row of rowsSrc) content.push(mkRow("bpTableCell", row));
+  for (const vrow of gridToVisible(grid)) content.push(mkRow(vrow.header ? "bpTableHeaderCell" : "bpTableCell", vrow.cells));
 
   if (!content.length) {
     content.push({ type: "bpTableRow", content: [{ type: "bpTableCell" }] });
@@ -2281,16 +2280,15 @@ function cellNodeToSource(cell) {
 // path drops absent fields, like calloutNodeToBlock).
 function tableNodeToBlock(node, id) {
   const rowNodes = (node && node.content) || [];
-  let head = null;
-  const rows = [];
-  rowNodes.forEach((rowNode, i) => {
+  const visible = rowNodes.map((rowNode, i) => {
     const cells = (rowNode && rowNode.content) || [];
-    const isHeaderRow =
-      cells.length > 0 && cells.every((c) => c.type === "bpTableHeaderCell");
-    const mapped = cells.map(cellNodeToSource);
-    if (i === 0 && isHeaderRow) head = mapped;
-    else rows.push(mapped);
+    const isHeaderRow = i === 0 && cells.length > 0 && cells.every((c) => c.type === "bpTableHeaderCell");
+    return { header: isHeaderRow, cells: cells.map((c) => ({ cell: cellNodeToSource(c), colspan: isHeaderRow ? 1 : Math.max(1, c.attrs?.colspan || 1), rowspan: isHeaderRow ? 1 : Math.max(1, c.attrs?.rowspan || 1) })) };
   });
+  // Back to the rectangular grid: covered positions get the placeholder cell, spans ride `spans`.
+  const grid = visibleToGrid(visible, () => deepClone(PLACEHOLDER_CELL));
+  const head = grid.head;
+  const rows = grid.rows;
   const source = node?.attrs?.bpTableSource?.block;
   const block = source && typeof source === "object" && !Array.isArray(source)
     ? deepClone(source)
@@ -2298,6 +2296,8 @@ function tableNodeToBlock(node, id) {
   block.id = id;
   block.type = "table";
   block.rows = rows;
+  if (grid.spans.length) block.spans = grid.spans;
+  else delete block.spans;
   if (head) block.head = head;
   else if (Array.isArray(source?.head) && source.head.length) block.head = [];
   else if (!source || !Object.hasOwn(source, "head")) delete block.head;
@@ -2311,12 +2311,20 @@ function tableNodeToBlock(node, id) {
 // silently reappears on reload. compose.ex maps head:[] → no thead, so `head:[]`
 // round-trips clean. `rows` is always the full body (a whole-table replace — one cell
 // edit re-emits the entire rows/head, the v1 greenlit coarse round-trip).
-function tableNodeToPatch(node) {
+function tableNodeToPatch(node, prevBlock) {
   const block = tableNodeToBlock(node, null);
   const patch = { rows: block.rows };
   if (Object.hasOwn(block, "head")) patch.head = block.head;
   // Source-free/pasted table nodes retain the historical removal-safe fallback.
   if (!node?.attrs?.bpTableSource && !Object.hasOwn(patch, "head")) patch.head = [];
+  // Spans ride the patch; a table that lost its last span says so (a shallow merge would keep the old list).
+  // "Had spans" is read from the BASELINE the patch merges onto (the acknowledged block), not the
+  // mount-time source the node still carries: a table merged and split within one session has
+  // spans on the server and none on its source.
+  const hadSpans = (Array.isArray(prevBlock?.spans) && prevBlock.spans.length > 0) ||
+    (Array.isArray(node?.attrs?.bpTableSource?.block?.spans) && node.attrs.bpTableSource.block.spans.length > 0);
+  if (Array.isArray(block.spans) && block.spans.length) patch.spans = block.spans;
+  else if (hadSpans) patch.spans = [];
   return patch;
 }
 
@@ -2329,7 +2337,7 @@ function tableNodeChanged(prevNode, nextNode) {
 
 function stableTableKey(node) {
   const b = tableNodeToBlock(node, null);
-  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows });
+  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows, spans: b.spans || null });
 }
 
 // ── eyebrow / byline / ingress / pullquote ⇄ canvas role prose node ──────────
@@ -4211,7 +4219,7 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
         ops.push({
           op: "patch-block",
           id: entry.id,
-          patch: tableNodeToPatch(entry.node),
+          patch: tableNodeToPatch(entry.node, prevBlock),
         });
       }
       continue;

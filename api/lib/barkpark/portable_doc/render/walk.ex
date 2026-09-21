@@ -1227,16 +1227,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         "<thead><tr>#{cells}</tr></thead>"
       end
 
+    # Merged cells (Barkdown plan #24): a covered position renders nothing, the origin carries the
+    # span attributes. `spans` is already validated and in-grid (compose.ex table_put_spans/4).
+    spans = Map.get(n, "spans", []) |> List.wrap()
+    covered = table_covered(spans)
+
     tbody =
       body
-      |> Enum.map(fn row ->
+      |> Enum.with_index()
+      |> Enum.map(fn {row, r} ->
         cells =
           row
           |> Enum.with_index()
+          |> Enum.reject(fn {_cell, index} -> MapSet.member?(covered, {r, index}) end)
           |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-
-            ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}">#{inner}</td>)
+            ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}"#{table_span_attrs(spans, r, index)}>#{inner}</td>)
           end)
           |> Enum.join("")
 
@@ -1294,6 +1300,37 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # the Go renderer applies through lipgloss's StyleFunc. spark gets its own
   # modifier so the inline SVG can be sized by the stylesheet. Alignment is the
   # ONLY thing num changes: a num cell's body is the legacy text body.
+  # The body positions a span covers without being its origin.
+  defp table_covered(spans) do
+    Enum.reduce(spans, MapSet.new(), fn s, acc ->
+      r0 = Map.get(s, "row", 0)
+      c0 = Map.get(s, "col", 0)
+
+      for r <- r0..(r0 + Map.get(s, "rowspan", 1) - 1),
+          c <- c0..(c0 + Map.get(s, "colspan", 1) - 1),
+          {r, c} != {r0, c0},
+          reduce: acc do
+        set -> MapSet.put(set, {r, c})
+      end
+    end)
+  end
+
+  # ` colspan="2" rowspan="3"` on the origin (each only when above 1); integers only, so nothing
+  # here can carry author text.
+  defp table_span_attrs(spans, r, c) do
+    case Enum.find(spans, fn s -> Map.get(s, "row") == r and Map.get(s, "col") == c end) do
+      nil ->
+        ""
+
+      s ->
+        cs = Map.get(s, "colspan", 1)
+        rs = Map.get(s, "rowspan", 1)
+
+        (if is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
+    end
+  end
+
   defp table_col_class(cols, index, base) do
     case Enum.at(cols, index) do
       "num" -> " #{base}--num"

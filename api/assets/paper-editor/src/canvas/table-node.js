@@ -61,6 +61,8 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
+// Merged cells (plan #24): the grid <-> visible-rows model and its structural transforms.
+import { visibleToGrid, gridToVisible, gridTransforms, coverMap, normalizeSpans, width as gridWidth } from "./table-grid.js";
 
 // Shared bpId/bpType attr skeleton (the role-nodes.js roleAttributes shape). Only the
 // bpTable carries identity — rows/cells are INTERNAL PM structure with NO bpId (one id
@@ -101,6 +103,18 @@ function tableCellAttributes() {
       keepOnSplit: false,
       parseHTML: () => null,
     },
+    // A merged cell (plan #24): how many columns / rows it spans. Rendered as the HTML attributes
+    // so the browser lays the table out; the block stores them in `spans` (table-grid.js).
+    colspan: {
+      default: 1,
+      parseHTML: (el) => Math.max(1, parseInt(el.getAttribute("colspan") || "1", 10) || 1),
+      renderHTML: (attrs) => (attrs.colspan > 1 ? { colspan: attrs.colspan } : {}),
+    },
+    rowspan: {
+      default: 1,
+      parseHTML: (el) => Math.max(1, parseInt(el.getAttribute("rowspan") || "1", 10) || 1),
+      renderHTML: (attrs) => (attrs.rowspan > 1 ? { rowspan: attrs.rowspan } : {}),
+    },
   };
 }
 
@@ -124,6 +138,8 @@ function extractRows(tableNode) {
       cells.push({
         content: cellNode.content && cellNode.content.size ? cellNode.content : null,
         source: cellNode.attrs?.bpTableCellSource || null,
+        colspan: Math.max(1, cellNode.attrs?.colspan || 1),
+        rowspan: Math.max(1, cellNode.attrs?.rowspan || 1),
       });
       if (cellNode.type.name !== "bpTableHeaderCell") header = false;
     });
@@ -134,7 +150,8 @@ function extractRows(tableNode) {
 
 function buildCell(schema, header, cell) {
   const type = schema.nodes[header ? "bpTableHeaderCell" : "bpTableCell"];
-  const attrs = cell.source ? { bpTableCellSource: cell.source } : null;
+  // A merged origin carries its colspan / rowspan (never on a header cell: a head does not span).
+  const attrs = { bpTableCellSource: cell.source || null, colspan: header ? 1 : Math.max(1, cell.colspan || 1), rowspan: header ? 1 : Math.max(1, cell.rowspan || 1) };
   // Omit content for an empty cell (a contentless inline* cell, rendering an empty
   // <td>/<th> exactly like an empty callout body).
   return cell.content ? type.create(attrs, cell.content) : type.create(attrs);
@@ -160,32 +177,93 @@ function bodyRowCount(rows) {
 // Each transform mutates the descriptor list in place. add-col/remove-col touch
 // EVERY row (incl. the header) so the grid stays rectangular; remove-row never drops
 // the header; toggle-header flips the FIRST row's cells between header↔body.
+// The visible rows (extractRows) <-> the grid (rectangular rows + spans), so every transform is a
+// grid operation and merged cells survive add/remove row/col (table-grid.js). A grid cell here is
+// the canvas descriptor { content, source }; a covered position holds an empty one.
+const emptyCell = () => ({ content: null, source: null });
+function toGrid(rows) {
+  return visibleToGrid(rows.map((r) => ({ header: r.header, cells: r.cells.map((c) => ({ cell: { content: c.content, source: c.source }, colspan: c.colspan || 1, rowspan: c.rowspan || 1 })) })), emptyCell);
+}
+function fromGrid(rows, grid) {
+  const visible = gridToVisible(grid);
+  rows.length = 0;
+  for (const r of visible) rows.push({ header: r.header, cells: r.cells.map((vc) => ({ content: vc.cell?.content || null, source: vc.cell?.source || null, colspan: vc.colspan, rowspan: vc.rowspan })) });
+}
+// Body-grid coordinates of the k-th visible cell of visible row `rowIndex` (rows include the head).
+function gridCoords(grid, rowIndex, cellIndex) {
+  const r = rowIndex - (grid.head ? 1 : 0);
+  if (r < 0) return null; // the head row never merges
+  const covered = coverMap(normalizeSpans(grid.spans, grid.rows.length, gridWidth(grid)));
+  let k = -1;
+  for (let c = 0; c < gridWidth(grid); c++) {
+    if (covered.has(r + "," + c)) continue;
+    k++;
+    if (k === cellIndex) return { r, c };
+  }
+  return null;
+}
+// The visible cell index (over the whole table, in document order) of body position (r, c).
+function visibleIndexOf(grid, r, c) {
+  const visible = gridToVisible(grid);
+  const covered = coverMap(normalizeSpans(grid.spans, grid.rows.length, gridWidth(grid)));
+  let idx = 0;
+  const headRows = grid.head ? 1 : 0;
+  for (let i = 0; i < visible.length; i++) {
+    const br = i - headRows;
+    if (br < r) { idx += visible[i].cells.length; continue; }
+    for (let cc = 0; cc <= c; cc++) if (!covered.has(br + "," + cc)) { if (cc === c) return idx; idx++; }
+    return idx;
+  }
+  return idx;
+}
 const TRANSFORMS = {
-  addRow(rows) {
-    const n = colCount(rows) || 1;
-    rows.push({
-      header: false,
-      cells: Array.from({ length: n }, () => ({ content: null, source: null })),
-    });
-  },
-  removeRow(rows) {
-    if (bodyRowCount(rows) <= 1) return;
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (!rows[i].header) {
-        rows.splice(i, 1);
-        return;
+  addRow(rows) { const g = toGrid(rows); gridTransforms.addRow(g, emptyCell); fromGrid(rows, g); },
+  removeRow(rows) { const g = toGrid(rows); if (g.rows.length <= 1) return; gridTransforms.removeRow(g); fromGrid(rows, g); },
+  addCol(rows) { const g = toGrid(rows); gridTransforms.addCol(g, emptyCell); fromGrid(rows, g); },
+  removeCol(rows) { const g = toGrid(rows); if (gridWidth(g) <= 1) return; gridTransforms.removeCol(g); fromGrid(rows, g); },
+  toggleHeader(rows) { const g = toGrid(rows); gridTransforms.toggleHeader(g, emptyCell); fromGrid(rows, g); },
+  // Merge: the rectangle between the selection's anchor and head cells; with the caret in one cell,
+  // the cell to the right (mergeRight) or below (mergeDown). Swallowed cells' text joins the origin.
+  merge(rows, ctx, dir) {
+    const g = toGrid(rows);
+    const a = ctx && ctx.anchor ? gridCoords(g, ctx.anchor.rowIndex, ctx.anchor.cellIndex) : null;
+    let b = ctx && ctx.head ? gridCoords(g, ctx.head.rowIndex, ctx.head.cellIndex) : null;
+    if (!a) return null;
+    if (!b || (b.r === a.r && b.c === a.c)) {
+      const spanA = normalizeSpans(g.spans, g.rows.length, gridWidth(g)).find((s) => s.row === a.r && s.col === a.c) || { colspan: 1, rowspan: 1 };
+      b = dir === "down" ? { r: a.r + spanA.rowspan, c: a.c } : { r: a.r, c: a.c + spanA.colspan };
+      if (b.r >= g.rows.length || b.c >= gridWidth(g)) return null;
+    }
+    const before = coverMap(normalizeSpans(g.spans, g.rows.length, gridWidth(g)));
+    const merged = gridTransforms.merge(g, a.r, a.c, b.r, b.c);
+    if (!merged) return null;
+    // Gather the swallowed cells' content into the origin, in reading order.
+    const origin = g.rows[merged.row][merged.col];
+    const pieces = [];
+    for (let r = merged.row; r < merged.row + merged.rowspan; r++) {
+      for (let c = merged.col; c < merged.col + merged.colspan; c++) {
+        if (r === merged.row && c === merged.col) continue;
+        if (before.has(r + "," + c)) continue; // was already covered: nothing of its own
+        const cell = g.rows[r][c];
+        if (cell && cell.content && cell.content.size) pieces.push(cell.content);
+        g.rows[r][c] = emptyCell();
       }
     }
+    if (pieces.length) {
+      let content = origin && origin.content && origin.content.size ? origin.content : null;
+      for (const piece of pieces) content = content ? content.append(piece) : piece;
+      g.rows[merged.row][merged.col] = { content, source: null };
+    }
+    fromGrid(rows, g);
+    return { merged, visibleIndex: visibleIndexOf(g, merged.row, merged.col) };
   },
-  addCol(rows) {
-    rows.forEach((r) => r.cells.push({ content: null, source: null }));
-  },
-  removeCol(rows) {
-    if (colCount(rows) <= 1) return;
-    rows.forEach((r) => r.cells.pop());
-  },
-  toggleHeader(rows) {
-    if (rows.length) rows[0].header = !rows[0].header;
+  split(rows, ctx) {
+    const g = toGrid(rows);
+    const a = ctx && ctx.anchor ? gridCoords(g, ctx.anchor.rowIndex, ctx.anchor.cellIndex) : null;
+    if (!a) return null;
+    if (!gridTransforms.split(g, a.r, a.c)) return null;
+    fromGrid(rows, g);
+    return { visibleIndex: visibleIndexOf(g, a.r, a.c) };
   },
 };
 
@@ -372,24 +450,43 @@ export const BpTable = Node.create({
 
       // A chrome button dispatches a PM transaction that REBUILDS the whole bpTable
       // content (keeping the grid rectangular), preserving bpId/bpType via cur.attrs.
-      const runTransform = (name) => {
+      // Where the selection's ends sit in THIS table: visible row index + visible cell index, the
+      // coordinates the merge / split transforms take (table-grid.js maps them onto the grid).
+      const cellCoordsOf = ($p, tablePos) => {
+        const td = tableDepthInfo($p);
+        if (td === -1 || $p.before(td) !== tablePos) return null;
+        const ci = cellDepthInfo($p);
+        if (!ci) return null;
+        return { rowIndex: $p.index(td), cellIndex: $p.index(ci.depth - 1) };
+      };
+      const runTransform = (name, dir) => {
         if (typeof getPos !== "function") return;
         const pos = getPos();
         if (pos == null) return;
         const cur = editor.state.doc.nodeAt(pos);
         if (!cur || cur.type.name !== "bpTable") return;
+        const sel = editor.state.selection;
+        const ctx = { anchor: cellCoordsOf(sel.$anchor, pos), head: cellCoordsOf(sel.$head, pos) };
         editor
           .chain()
           .focus()
           .command(({ tr, dispatch }) => {
             const rows = extractRows(cur);
-            TRANSFORMS[name](rows);
+            const outcome = TRANSFORMS[name](rows, ctx, dir);
             if (!rows.length) return false;
+            if ((name === "merge" || name === "split") && !outcome) return false;
             const newTable = editor.schema.nodes.bpTable.create(
               cur.attrs,
               buildRowNodes(editor.schema, rows)
             );
-            if (dispatch) tr.replaceWith(pos, pos + cur.nodeSize, newTable);
+            if (dispatch) {
+              tr.replaceWith(pos, pos + cur.nodeSize, newTable);
+              // A merge or split lands the caret in the cell it acted on.
+              if (outcome && typeof outcome.visibleIndex === "number") {
+                const cell = collectCells(newTable, pos)[outcome.visibleIndex];
+                if (cell) tr.setSelection(TextSelection.create(tr.doc, cell.end, cell.end));
+              }
+            }
             return true;
           })
           .run();
@@ -435,6 +532,20 @@ export const BpTable = Node.create({
             delRowBtn = mkBtn("− row", "Remove row", "removeRow");
             rowRail.appendChild(delRowBtn);
             rowRail.appendChild(mkBtn("header", "Toggle header row", "toggleHeader"));
+            // Merged cells (plan #24): merge the selected cells (or the cell to the right / below
+            // of the caret) and split a merged cell back into its grid positions.
+            const mergeRow = document.createElement("div");
+            mergeRow.className = "bp-canvas-table__rail bp-canvas-table__rail--merge";
+            mergeRow.contentEditable = "false";
+            const mkMergeBtn = (label, title, name, dir) => {
+              const b = mkBtn(label, title, name);
+              if (dir) b.addEventListener("click", (e) => { e.stopImmediatePropagation(); e.preventDefault(); runTransform(name, dir); }, true);
+              return b;
+            };
+            mergeRow.appendChild(mkMergeBtn("merge", "Merge the selected cells (or with the cell to the right)", "merge", "right"));
+            mergeRow.appendChild(mkMergeBtn("merge ↓", "Merge with the cell below", "merge", "down"));
+            mergeRow.appendChild(mkBtn("split", "Split the merged cell", "split"));
+            controls.appendChild(mergeRow);
           }
           delRowBtn.disabled = bodyRowCount(rows) <= 1;
           delColBtn.disabled = colCount(rows) <= 1;

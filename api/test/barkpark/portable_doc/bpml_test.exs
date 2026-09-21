@@ -120,6 +120,31 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       assert bpml =~ ~s(<p id="p2">Plain.</p>)
     end
 
+    test "a table with merged cells round-trips exactly and spells the span on the origin <td> (plan #24)" do
+      blocks = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => [[%{"type" => "text", "value" => "A"}], [%{"type" => "text", "value" => "B"}]],
+          "rows" => [
+            [[%{"type" => "text", "value" => "ab"}], []],
+            [[%{"type" => "text", "value" => "a2"}], [%{"type" => "text", "value" => "b2"}]]
+          ],
+          "spans" => [%{"row" => 0, "col" => 0, "colspan" => 2, "rowspan" => 1}]
+        }
+      ]
+
+      {bpml, parsed} = roundtrip!(blocks)
+      assert parsed == blocks
+      assert bpml =~ ~s(<td colspan="2">ab</td><td></td>)
+
+      assert {:ok, [table]} =
+               Bpml.parse_blocks("<table><tr><td rowspan=\"2\">tall</td><td>b1</td></tr><tr><td></td><td>b2</td></tr></table>")
+
+      assert table["spans"] == [%{"row" => 0, "col" => 0, "colspan" => 1, "rowspan" => 2}]
+      assert length(table["rows"]) == 2 and Enum.all?(table["rows"], &(length(&1) == 2))
+    end
+
     test "hand-written BPML parses to the same blocks (minus ids it omits)" do
       bpml = """
       <eyebrow>OPS · LIVE</eyebrow>

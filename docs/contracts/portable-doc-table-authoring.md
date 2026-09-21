@@ -37,6 +37,21 @@ normalization canonicalizes strings/simple wrappers; native comparisons use stor
 source, not pre-publication input. Table metadata and absent/null/empty `head` stay
 distinct. Explicit header removal emits `head: []`; omission is not removal.
 
+## Merged cells
+
+A table may carry `spans`, a list of `{row, col, colspan, rowspan}` over body rows
+(the head never spans). The grid stays rectangular: every position a span covers
+keeps a placeholder cell (`[]`) in `rows`, so the positional grammar and every
+row/column action keep holding. The article walker skips covered positions and
+emits `colspan`/`rowspan` on the origin; email renders the plain grid. BPML prints
+every cell and spells the span as attributes on the origin's `<td>`. The canvas
+mounts only visible cells (each with `colspan`/`rowspan`), merges the rectangle
+between the selection's cells (or with the neighbour to the right or below) and
+splits a span back into its placeholders; a merge or split is one `patch-block`
+carrying `rows` and `spans` (`spans: []` when the last one goes). Markdown cannot
+spell a span, so such a table rides the sentinel. Studio's per-block editor edits
+plain grids only: a spanning cell fails closed there.
+
 ## Verification
 
 Server: `api/lib/barkpark/portable_doc/table_editing.ex` and its matching test.

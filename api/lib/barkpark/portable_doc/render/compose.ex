@@ -886,7 +886,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       body_rows
       |> Enum.map(compose_row)
 
-    pd = %{"kind" => "PdTable", "rows" => rows} |> table_put_col_types(col_types)
+    pd =
+      %{"kind" => "PdTable", "rows" => rows}
+      |> table_put_col_types(col_types)
+      |> table_put_spans(Map.get(b, "spans"), length(rows), rows |> List.first() |> List.wrap() |> length())
 
     head =
       if is_list(declared_head) and declared_head != [],
@@ -2454,6 +2457,44 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp table_col_types(_b, _style), do: []
+
+  # Merged cells (Barkdown plan #24): `spans` is a list of %{"row", "col", "colspan", "rowspan"}
+  # over BODY rows; the grid stays rectangular (covered positions hold a placeholder cell) and
+  # the walker skips what a span covers. Anything malformed or outside the grid is dropped here,
+  # so the walker never sees an entry it cannot honour. Only the :article walker reads it.
+  defp table_put_spans(pd, spans, n_rows, n_cols) when is_list(spans) do
+    valid =
+      spans
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(fn s ->
+        %{
+          "row" => table_span_int(Map.get(s, "row"), 0),
+          "col" => table_span_int(Map.get(s, "col"), 0),
+          "colspan" => table_span_int(Map.get(s, "colspan"), 1) || 1,
+          "rowspan" => table_span_int(Map.get(s, "rowspan"), 1) || 1
+        }
+      end)
+      |> Enum.filter(fn %{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} ->
+        is_integer(r) and is_integer(c) and r < n_rows and c < n_cols and (cs > 1 or rs > 1)
+      end)
+      |> Enum.map(fn %{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} = s ->
+        %{s | "colspan" => min(cs, n_cols - c), "rowspan" => min(rs, n_rows - r)}
+      end)
+      |> Enum.filter(fn %{"colspan" => cs, "rowspan" => rs} -> cs > 1 or rs > 1 end)
+
+    if valid == [], do: pd, else: Map.put(pd, "spans", valid)
+  end
+
+  defp table_put_spans(pd, _spans, _n_rows, _n_cols), do: pd
+
+  defp table_span_int(v, min) when is_integer(v) and v >= min, do: v
+  defp table_span_int(v, min) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} when n >= min -> n
+      _ -> nil
+    end
+  end
+  defp table_span_int(_v, _min), do: nil
 
   defp table_put_col_types(pd, []), do: pd
   defp table_put_col_types(pd, types), do: Map.put(pd, "cols", types)

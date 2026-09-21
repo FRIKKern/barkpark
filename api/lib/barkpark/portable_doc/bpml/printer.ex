@@ -208,13 +208,38 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           ["#{pad(d + 1)}<tr>#{ths}</tr>"]
       end
 
+    # Merged cells (Barkdown plan #24): `spans` rides as colspan/rowspan attributes on the
+    # origin's <td>; every grid cell still prints (a covered position is an empty <td>), so the
+    # round trip is byte-exact.
+    spans = Map.get(b, "spans", []) |> List.wrap()
+
     rows =
-      Enum.map(Map.get(b, "rows", []), fn cells ->
-        tds = Enum.map_join(cells, "", &"<td>#{inline(&1)}</td>")
+      Map.get(b, "rows", [])
+      |> Enum.with_index()
+      |> Enum.map(fn {cells, r} ->
+        tds =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_join("", fn {cell, c} -> "<td#{td_span_attrs(spans, r, c)}>#{inline(cell)}</td>" end)
+
         "#{pad(d + 1)}<tr>#{tds}</tr>"
       end)
 
     wrap("table", attr_str(b, ["id"]), head ++ rows, d)
+  end
+
+  defp td_span_attrs(spans, r, c) do
+    case Enum.find(spans, fn s -> is_map(s) and Map.get(s, "row") == r and Map.get(s, "col") == c end) do
+      nil ->
+        ""
+
+      s ->
+        cs = Map.get(s, "colspan", 1)
+        rs = Map.get(s, "rowspan", 1)
+
+        (if is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
+    end
   end
 
   defp block(%{"type" => "section"} = b, d) do

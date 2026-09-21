@@ -70,7 +70,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "li" => ~w(checked),
     "tr" => [],
     "th" => [],
-    "td" => [],
+    "td" => ~w(colspan rowspan),
     "meta" => [],
     "description" => [],
     "a" => ~w(href),
@@ -803,14 +803,42 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp build_block("table", attrs, sc, cur) do
     with {:ok, {head, rows}, cur} <- table_rows(sc, cur) do
+      # Merged cells (Barkdown plan #24): a <td colspan/rowspan> is the origin of a span; the
+      # cells it covers are printed as empty <td>s, so the grid stays rectangular.
+      {rows, spans} = table_split_spans(rows)
+
       block =
         %{"type" => "table"}
         |> put_attr("id", attrs)
         |> then(&if head == [], do: &1, else: Map.put(&1, "head", head))
         |> Map.put("rows", rows)
+        |> then(&if spans == [], do: &1, else: Map.put(&1, "spans", spans))
 
       {:ok, block, cur}
     end
+  end
+
+  # Body rows arrive as lists of cells, a spanning cell as {:span, nodes, colspan, rowspan}.
+  defp table_split_spans(rows) do
+    {rows, spans} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {cells, r}, acc ->
+        {plain, acc} =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_reduce(acc, fn
+            {{:span, nodes, cs, rs}, c}, acc ->
+              {nodes, [%{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} | acc]}
+
+            {nodes, _c}, acc ->
+              {nodes, acc}
+          end)
+
+        {plain, acc}
+      end)
+
+    {rows, Enum.reverse(spans)}
   end
 
   defp build_block("section", attrs, sc, cur) do
@@ -1211,7 +1239,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       :tag ->
         case open_tag(cur) do
           {:error, e} -> {:skip, [e], consume_until_close("tr", skip_to_next_tag(cur))}
-          {:ok, tag, _attrs, sc, cur2} -> row_cell(cur, cur2, tag, sc, at, kind, cells)
+          {:ok, tag, attrs, sc, cur2} -> row_cell(cur, cur2, tag, attrs, sc, at, kind, cells)
         end
 
       _ ->
@@ -1219,7 +1247,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp row_cell(cur, cur2, tag, sc, at, kind, cells) do
+  defp row_cell(cur, cur2, tag, attrs, sc, at, kind, cells) do
     case {tag, kind} do
       # Head cells parse as INLINE content and emit inline-node lists — the
       # write chokepoint's canonical head-cell shape, so blocks fetched from
@@ -1233,7 +1261,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
       {"td", k} when k in [nil, :body] ->
         case tag_inline("td", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :body, [nodes | cells])
+          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :body, [td_cell(nodes, attrs) | cells])
           {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
         end
 
@@ -1365,6 +1393,27 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp attrs_hint([]), do: "(no attributes)"
   defp attrs_hint(allowed), do: Enum.join(allowed, ", ")
+
+  # A <td colspan="2" rowspan="3"> is the origin of a merged cell (plan #24); a plain <td> is its
+  # inline nodes. An attribute that is not an integer above 1 is read as absent.
+  defp td_cell(nodes, attrs) do
+    cs = td_span_attr(attrs, "colspan")
+    rs = td_span_attr(attrs, "rowspan")
+    if cs > 1 or rs > 1, do: {:span, nodes, cs, rs}, else: nodes
+  end
+
+  defp td_span_attr(attrs, key) do
+    case List.keyfind(attrs, key, 0) do
+      {^key, v} ->
+        case Integer.parse(v) do
+          {n, ""} when n > 1 -> n
+          _ -> 1
+        end
+
+      nil ->
+        1
+    end
+  end
 
   defp put_attr(map, key, attrs) do
     case List.keyfind(attrs, key, 0) do
