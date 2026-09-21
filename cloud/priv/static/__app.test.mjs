@@ -14639,8 +14639,32 @@ test("cch-w47-s3: an UNKNOWN /v1/me fails CLOSED — resurrect bills a real box,
   const unknown = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "unknown"));
   assert.ok(unknown.indexOf("archive-resurrect-btn") === -1, "an unanswered role authorises nothing");
   assert.equal((unknown.match(/class="archive-row"/g) || []).length, 2);
-  // Every non-grant answer renders the same way — one rule, not a per-value fork.
-  assert.equal(unknown, hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse")));
+  // cch-w47-rv-bl SPLIT THIS ASSERTION, and the split is the point of the slice.
+  //
+  // It used to read `assert.equal(unknown, refuse)` under the words "every
+  // non-grant answer renders the same way — one rule, not a per-value fork".
+  // That was true of the OFFER and was being asserted of the whole PANEL, so it
+  // quietly forbade the one sentence a refusal can carry and silence cannot.
+  // The shared rule survives intact below (neither arm draws the button); what
+  // is no longer shared is the EXPLANATION, because "unknown" means /v1/me was
+  // never answered — there is no `required` role to name and claiming one would
+  // state as fact a thing the console never read.
+  const refuseArm = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse"));
+  assert.ok(refuseArm.indexOf("archive-resurrect-btn") === -1, "a refusal authorises nothing either");
+  const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+  assert.ok(roleSentence.indexOf("admin role") !== -1,
+    "the shipped 403 reader must answer resurrect/1's payload with the admin-role sentence; got: " + roleSentence);
+  assert.ok(refuseArm.indexOf(roleSentence) !== -1, "the refuse arm names the role the CLI chip needs");
+  assert.ok(unknown.indexOf(roleSentence) === -1, "an unanswered /v1/me names no role");
+  // And the two arms differ by EXACTLY that line — nothing else moved.
+  // Through replaceUnique (the file's own import), never a bare `.replace`: a bare
+  // string needle takes the FIRST match and says nothing when it matches twice, so a
+  // panel that grew a second archives-note would subtract only one and still pass.
+  // replaceUnique REFUSES both drift and ambiguity instead.
+  assert.equal(
+    replaceUnique(refuseArm, '<div class="archives-note"><p>' + roleSentence + "</p></div>", "",
+      { what: "cch-w47-rv-bl: subtract the refuse arm's one role line" }),
+    unknown);
 });
 
 test("cch-w47-s3: the authority reaches EVERY row, not just the first — .map's index argument cannot leak in", () => {

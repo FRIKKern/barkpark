@@ -2960,6 +2960,15 @@
   // unanswered /v1/me fails CLOSED. The copy-paste CLI chip is untouched in
   // every arm — it teaches the command, it does not fire a write.
   //
+  // cch-w47-rv-bl QUALIFIED THAT LAST SENTENCE WITHOUT MOVING THE CHIP. The chip
+  // still renders in every arm, byte for byte. What the sentence left out is that
+  // the CLI reaches the SAME resurrect/1 gate and collects the SAME 403 — so on
+  // the REFUSE arm the chip was the member's only remaining affordance and still
+  // read as an offer the system cannot honour. archivesPanelHtml now prints ONE
+  // line above the list on that arm alone (forbiddenEvidenceCopy's own answer to
+  // `{required:"admin", scope:"team"}`, never new copy), which turns the chip
+  // from an invitation into a reference. Grant and unknown are unchanged.
+  //
   // Every rule is a node-pinned pure function; the DOM mount (loadArchives) is
   // browser-verified.
 
@@ -3228,7 +3237,42 @@
     // authority argument, and any index but 0 is truthy, so every row past the
     // first would render its live Resurrect regardless of the answer.
     var authority = model.authority || "grant";
-    return '<div class="archive-list">' +
+    // cch-w47-rv-bl — THE REFUSE ARM NAMES THE AUTHORITY THE CHIP NEEDS.
+    //
+    // cch-w47-s3 omitted the live Resurrect for a refused member and left the
+    // copy-paste CLI chip standing in every arm, on the ruling that the chip
+    // TEACHES rather than writes. True — but the CLI hits the SAME route, and
+    // router.ex's resurrect/1 refuses every non-team-admin with
+    // `Auth.forbidden(required: "admin", scope: "team")`. So for a refused
+    // member the chip was the last affordance on the row and it still read as
+    // an invitation the system cannot honour: one layer quieter, not one layer
+    // more honest.
+    //
+    // THE RULING IS (a) — KEEP THE CHIP, SAY SO. Omitting it (option (c)) costs
+    // every member the ability to learn the command and hand it to someone who
+    // can run it; a per-row "needs admin" affix (option (b)) writes new copy on
+    // every row. One line, once, above the list, turns the chip from an offer
+    // into a reference.
+    //
+    // THE SENTENCE IS NOT AUTHORED HERE. It is forbiddenEvidenceCopy's answer to
+    // the EXACT payload that route sends — the same reader the members screen,
+    // the delivery log and the site-delete sheet already render a 403 through.
+    // Inventing a sentence here is how this epic got "Only the team owner can
+    // manage billing." onto the Activity screen (D448); reusing the reader means
+    // the console says what the server would say and nothing more. If the gate
+    // ever moves to `owner`, the literal below is the one line to change and the
+    // sentence follows from the map.
+    //
+    // REFUSE ONLY. "grant" and "unknown" render byte-identically to what shipped:
+    // "grant" is offered the live button and needs no apology, and "unknown" is
+    // an UNANSWERED /v1/me — asserting a role requirement there would state as
+    // fact something the console never read.
+    var refusalNote = authority === "refuse"
+      ? '<div class="archives-note"><p>' +
+          esc(forbiddenEvidenceCopy({ error: "forbidden", required: "admin", scope: "team" }) || "") +
+        "</p></div>"
+      : "";
+    return '<div class="archive-list">' + refusalNote +
       model.rows.map(function (row) { return archiveRowHtml(row, authority); }).join("") + "</div>";
   }
 

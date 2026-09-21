@@ -6496,6 +6496,51 @@ export const SCENARIOS = {
       secondIdentity: { me: betaMe, members: teamMembersBeta },
     },
   },
+  // ── cch-w47-rv-bl: the FIRST member x archives scenario in this corpus ─────
+  //
+  // The Archives panel's refuse arm had exactly one instrument before this: the
+  // pure helper, called with the string "refuse" by hand in __app.test.mjs. No
+  // scenario anywhere booted an actor whose own GET /v1/me answers role
+  // "member" onto #fleet with bundles in the store, so nothing proved that the
+  // authority answer the DOM mount reads (instanceAdminAuthority, at the
+  // loadArchives render site) ever reaches those helpers at all. A helper that
+  // is correct and never called is the vacuous green this epic keeps finding.
+  //
+  // It is the OWNER twin of `fleet-archives-stored`, field for field, with ONE
+  // difference: the third argument to me(). Same two bundles, same fqdns, same
+  // providers, same spec — so a diff of the two rendered panels isolates the
+  // authority answer and nothing else, which is what makes the grant arm's
+  // byte-identity assertable rather than asserted.
+  "fleet-archives-member": {
+    label: "Fleet Archives as a plain member — no live Resurrect, the CLI chip kept, and the server's own role sentence above the list",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      archives: {
+        status: 200,
+        body: {
+          ok: true,
+          archives: [
+            {
+              fqdn: "shop-9f2c1.barkpark.cloud", slug: "shop", source_provider: "hetzner",
+              created_at: tMinus(3 * 86400), bundle_ref: "s3://bundles/shop.tar.zst",
+              spec: { region: "fsn1", server_type: "cx22" },
+            },
+            {
+              fqdn: "blog-1a4d7.barkpark.cloud", slug: "blog", source_provider: "azure",
+              created_at: tMinus(9 * 86400), bundle_ref: "s3://bundles/blog.tar.zst",
+              spec: { region: "hel1", server_type: "cx32" },
+            },
+          ],
+        },
+      },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
