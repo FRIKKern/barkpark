@@ -564,6 +564,76 @@ GHOSTLOOP
     _want "arm11c never reports a clean scan"  0 '^ghost scan: '
     _want "arm11c never says OK"               0 'liveness: OK'
   fi
+  # ══════════════════════════════════════════════════════════════════════════
+  # arm 12 — THE COUNT IDENTITY (task-c767be8a820a9300)
+  #
+  # IDS[] is the liveness POPULATION: a loop that stops early hands every line
+  # below a smaller, entirely green list, and the lane reads "liveness: OK — 1
+  # row(s)" over a file holding three. These arms drive that truncation through
+  # the loop's FALSIFIABILITY SEAM with two stubs ON PATH that differ by EXACTLY
+  # ONE LINE — `cat > /dev/null` — so the only variable between red and green is
+  # whether a child in that body reads fd 0. Arm 12c mutates the identity out and
+  # shows the pre-fix behaviour: a clean OK over one of three.
+  # ══════════════════════════════════════════════════════════════════════════
+  echo "== arm 12: a stdin-reading child in the list loop shrinks the population — the count must see it"
+  mkdir -p "$d/probe-a" "$d/probe-b"
+  cat > "$d/probe-a/line-probe" <<'PROBEA'
+#!/usr/bin/env bash
+cat > /dev/null
+exit 0
+PROBEA
+  # THE CONTROL: byte-identical minus the stdin read.
+  sed -e '/^cat > \/dev\/null$/d' "$d/probe-a/line-probe" > "$d/probe-b/line-probe"
+  chmod +x "$d/probe-a/line-probe" "$d/probe-b/line-probe"
+  if [ "$(diff "$d/probe-a/line-probe" "$d/probe-b/line-probe" | grep -c '^< cat > /dev/null$')" = 1 ]; then
+    echo "ok   arm12 stubs differ by exactly the stdin read"
+  else
+    echo "FAIL arm12 stubs differ by more than the stdin read"; fails=$((fails+1))
+  fi
+  # THREE rows, all green, so a 1-of-N refusal cannot be an off-by-one and the
+  # control cannot be green for any reason other than reaching all of them.
+  printf '%s\n' task-aaa task-bbb task-ccc > "$d/lane/held3.txt"
+  _row task-aaa lead-x "$(_ago 2)" in_progress
+  _row task-bbb lead-x "$(_ago 2)" in_progress
+  _row task-ccc lead-x "$(_ago 2)" in_progress
+  printf '%s ok task-aaa\n' "$(_ago 1)" > "$d/lane/pulse.log"
+  echo "$ALIVE" > "$d/lane/pulse.pid"
+  _id_run() { # _id_run <probe-dir> ; sets $out/$rc
+    out=$(cd "$d" && PATH="$1:$d/bin:$PATH" STUB_DIR="$d" HELD_LIVENESS_LINE_PROBE=line-probe \
+          bash "${2:-$SELF}" "$d/lane" --held "$d/lane/held3.txt" --expect-worker lead-x \
+          --no-ghost-scan --pid-file "$d/lane/pulse.pid" --log "$d/lane/pulse.log" 2>&1); rc=$?
+  }
+
+  _id_run "$d/probe-a"
+  if [ "$rc" = 2 ]; then echo "ok   arm12 stdin-reading child exits 2 (refusal)"
+  else echo "FAIL arm12 exit $rc, wanted 2"; printf '%s\n' "$out" | _ind; fails=$((fails+1)); fi
+  _want "arm12 refusal names 1 of the 3"      1 'reached 1 of the 3 line\(s\)'
+  _want "arm12 refusal names the mechanism"   1 'READS STDIN'
+  _want "arm12 refusal forbids deleting it"   1 'deleting the count check'
+  _want "arm12 never says OK"                 0 'liveness: OK'
+  _want "arm12 prints no per-row verdict"     0 '^task-(aaa|bbb|ccc) .* ok$'
+
+  echo "== arm 12b: THE CONTROL — same stub minus the stdin read reaches all three"
+  _id_run "$d/probe-b"
+  if [ "$rc" = 0 ]; then echo "ok   arm12b control exits 0"
+  else echo "FAIL arm12b exit $rc, wanted 0"; printf '%s\n' "$out" | _ind; fails=$((fails+1)); fi
+  _last "arm12b verdict is OK"            'liveness: OK'
+  _want "arm12b checked all three rows"   3 '^task-(aaa|bbb|ccc) .* ok$'
+  _want "arm12b says 3 of the 3"          1 'all 3 of the 3 line\(s\)'
+
+  echo "== arm 12c: MUTANT — the identity removed reports a clean OK over 1 of 3"
+  # shellcheck disable=SC2016  # the $-names are THIS file's text to match, not ours to expand
+  sed -e 's/^if \[ "\$LINES_REACHED" != "\$HELD_FED" \]; then$/if false; then/' "$SELF" > "$d/nocount.sh"
+  if ! grep -q '^if false; then$' "$d/nocount.sh"; then
+    echo "FAIL arm12c: the mutation did not apply — the identity guard was reworded"; fails=$((fails+1))
+  else
+    _id_run "$d/probe-a" "$d/nocount.sh"
+    if [ "$rc" = 0 ]; then echo "ok   arm12c mutant exits 0 over 1 of 3"
+    else echo "FAIL arm12c mutant exit $rc, wanted 0"; printf '%s\n' "$out" | _ind; fails=$((fails+1)); fi
+    _want "arm12c mutant calls it OK"          1 'liveness: OK'
+    _want "arm12c mutant checked ONE row"      1 '^task-(aaa|bbb|ccc) .* ok$'
+  fi
+
   # Reap ONLY this selftest's own children. The helper itself never signals any process.
   kill "$GH_OWN" "$GH_PEER" 2>/dev/null; wait "$GH_OWN" "$GH_PEER" 2>/dev/null
 
@@ -624,13 +694,60 @@ if [ ! -f "$HELDFILE" ]; then
 fi
 command -v jq >/dev/null 2>&1 || { echo "held-liveness.sh: jq is required" >&2; exit 2; }
 
+# ── THE COUNT IDENTITY (task-c767be8a820a9300) ───────────────────────────────
+# IDS[] IS THE LIVENESS POPULATION. Everything below — every per-row verdict,
+# the ghost scan's overlap, "liveness: OK — N row(s) checked" — is computed over
+# whatever this one loop puts in it. A loop that stops early does not report a
+# problem; it reports a SMALLER, ENTIRELY GREEN population, and the lane reads
+# "OK" over rows nobody looked at. This is the instrument leads quote in their
+# status files, so a silent shrink here is a silent shrink of the whole lane's
+# evidence.
+#
+# The way it comes apart: this loop is fed by a FILE on fd 0, and any CHILD in
+# its body inherits fd 0. One stdin read in such a child swallows the rest of
+# the list and the loop ends AT EXIT 0 after one row. As written today no child
+# in this body reads fd 0 (the trim's `tr`/`sed` are fed by a pipe), so the
+# defect here is LATENT — which is exactly why the guard is a count and not fd
+# discipline: fd discipline is a property of every child this body will ever
+# gain, which nothing can hold, while the identity notices no matter WHY the
+# loop came up short. Nothing is redirected to </dev/null here: there is no
+# child to redirect, and adding one later must red this check, not be pre-
+# silenced by it.
+#
+# HELD_FED is the number of lines the file HANDED IN, counted outside the loop
+# from the same file. awk counts a final unterminated line as a record, which
+# matches this loop's `|| [ -n "$_line" ]` clause; the two readers have to agree
+# on what a line is or the identity is noise.
+HELD_FED=$(awk 'END{print NR}' "$HELDFILE"); [ -n "$HELD_FED" ] || HELD_FED=0
+# FALSIFIABILITY SEAM, and nothing else. A guard nothing can trip is
+# indistinguishable from a comment, and the loop below has no fd-0-inheriting
+# child to stub — so the selftest supplies one HERE, at exactly the position
+# and with exactly the fd inheritance a future child would have. Empty in every
+# real run (an unset variable is a no-op), set only by the identity arms of
+# --selftest. It is not a hook for callers and nothing else reads it.
+HELD_LINE_PROBE="${HELD_LIVENESS_LINE_PROBE:-}"
 IDS=()
+LINES_REACHED=0
 while IFS= read -r _line || [ -n "$_line" ]; do
+  # COUNTED FIRST, before any skip: a line is "reached" once this loop has read
+  # it, blank and comment lines included — HELD_FED counts those too.
+  LINES_REACHED=$((LINES_REACHED+1))
+  [ -n "$HELD_LINE_PROBE" ] && "$HELD_LINE_PROBE" >/dev/null 2>&1
   _line="${_line%%#*}"
   # trim surrounding whitespace without leaning on the caller's shell
   _line="$(printf '%s' "$_line" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   [ -n "$_line" ] && IDS+=("$_line")
 done < "$HELDFILE"
+
+# THE IDENTITY, CHECKED BEFORE ANY VERDICT — before the empty-list refusal too.
+# A loop that stopped early did not only miss rows, it also built the population
+# every later line is measured against, so even its refusals would be claims
+# over work it never did. Both numbers are in the sentence: "the loop is broken"
+# is unactionable, "reached 1 of the 9 rows your list holds" is not.
+if [ "$LINES_REACHED" != "$HELD_FED" ]; then
+  say "liveness: REFUSING — the held-list loop reached $LINES_REACHED of the $HELD_FED line(s) $HELDFILE handed it, so the liveness population is SHORT by $((HELD_FED - LINES_REACHED)) and every verdict below would be an OK over rows that were never read. It is NOT a finding about your claims — it is this instrument failing to do its own work, and the near-certain cause is that something in that loop body now READS STDIN: the list is on fd 0 and any child inherits fd 0, so one stdin read swallows the remaining lines and the loop ends after $LINES_REACHED iteration(s) at exit 0. Find the new stdin reader and give it its own input (for example '</dev/null'), then re-run. Do NOT satisfy this by deleting the count check: the count is the only thing that can see this at all."
+  exit 2
+fi
 
 if [ "${#IDS[@]}" -eq 0 ]; then
   say "liveness: EMPTY LIST — $HELDFILE lists no rows. An empty list is NOT 'every row is fine': it is the shape a list trimmed out from under you has. If your lane really holds nothing, stop the pulse loop."
@@ -855,5 +972,5 @@ if [ "$PROBLEMS" -gt 0 ]; then
   say "liveness: $PROBLEMS PROBLEM(S) — see the named lines above."
   exit 1
 fi
-say "liveness: OK — ${#IDS[@]} row(s) checked, $((${#IDS[@]} - CLOSED)) held by ${EXPECT:-<any worker>}, min lease ${MINLEFT:-n/a} min."
+say "liveness: OK — ${#IDS[@]} row(s) checked (all $LINES_REACHED of the $HELD_FED line(s) $HELDFILE handed in were read), $((${#IDS[@]} - CLOSED)) held by ${EXPECT:-<any worker>}, min lease ${MINLEFT:-n/a} min."
 exit 0
