@@ -11,6 +11,8 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
   import ExUnit.CaptureIO
 
+  alias Barkpark.BootModeSandbox
+
   alias Barkpark.Content.Document
   alias Mix.Tasks.Codelists.Staleness
 
@@ -50,7 +52,7 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
       output =
         capture_io(fn ->
-          Staleness.run(["--report"])
+          run_staleness(["--report"])
         end)
 
       assert output =~ "codelist staleness report"
@@ -72,7 +74,7 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
         }
       })
 
-      output = capture_io(fn -> Staleness.run(["--report"]) end)
+      output = capture_io(fn -> run_staleness(["--report"]) end)
 
       assert output =~ "book: rep-section"
       assert output =~ "outer.inner"
@@ -87,7 +89,7 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
       output =
         capture_io(fn ->
-          Staleness.run(["--report", "--current-issue", "75"])
+          run_staleness(["--report", "--current-issue", "75"])
         end)
 
       assert output =~ "current registry issue: 75"
@@ -121,7 +123,7 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
 
       output =
         capture_io(fn ->
-          Staleness.run(["--revalidate", "--book-id", "rev-known"])
+          run_staleness(["--revalidate", "--book-id", "rev-known"])
         end)
 
       assert output =~ "revalidate report for book: rev-known"
@@ -142,19 +144,19 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
       assert Repo.aggregate("codelists", :count) == 0
 
       assert_raise Mix.Error, ~r/codelists table is EMPTY/, fn ->
-        capture_io(fn -> Staleness.run(["--revalidate", "--book-id", "rev-blind"]) end)
+        capture_io(fn -> run_staleness(["--revalidate", "--book-id", "rev-blind"]) end)
       end
     end
 
     test "errors when --revalidate is given without --book-id" do
       assert_raise Mix.Error, ~r/--book-id/, fn ->
-        capture_io(fn -> Staleness.run(["--revalidate"]) end)
+        capture_io(fn -> run_staleness(["--revalidate"]) end)
       end
     end
 
     test "raises Mix.Error when --book-id refers to a missing doc" do
       assert_raise Mix.Error, ~r/book not found/i, fn ->
-        capture_io(fn -> Staleness.run(["--revalidate", "--book-id", "no-such-book"]) end)
+        capture_io(fn -> run_staleness(["--revalidate", "--book-id", "no-such-book"]) end)
       end
     end
   end
@@ -162,14 +164,28 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
   describe "errors" do
     test "raises Mix.Error when neither --report nor --revalidate is given" do
       assert_raise Mix.Error, ~r/missing mode/i, fn ->
-        capture_io(fn -> Staleness.run([]) end)
+        capture_io(fn -> run_staleness([]) end)
       end
     end
 
     test "raises on unknown switches" do
       assert_raise Mix.Error, fn ->
-        capture_io(fn -> Staleness.run(["--bogus"]) end)
+        capture_io(fn -> run_staleness(["--bogus"]) end)
       end
     end
+  end
+
+  # `run/1` calls `Barkpark.OneShot.boot!/0`, which writes the NODE-GLOBAL
+  # `:barkpark, :boot_mode` PERSISTENTLY and never puts it back — an operator
+  # one-shot exits, so it has no reason to. A test process does not exit, and
+  # the key is ONE value for the WHOLE NODE: this module ran and
+  # `Barkpark.ApplicationBootModeTest` then failed `assert App.boot_mode() ==
+  # :full` with `left: :one_shot`.
+  #
+  # `BootModeSandbox.protecting/1` restores in a `try … after` and re-reads the
+  # key, so a restore that does not land reds THIS module. Call the task
+  # through here and nowhere else.
+  defp run_staleness(argv) do
+    BootModeSandbox.protecting(fn -> Staleness.run(argv) end)
   end
 end

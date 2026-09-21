@@ -3,6 +3,8 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
 
   import ExUnit.CaptureIO
 
+  alias Barkpark.BootModeSandbox
+
   alias Barkpark.Content.Document
   alias Mix.Tasks.Bokbasen.Status
 
@@ -69,7 +71,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
 
       output =
         capture_io(fn ->
-          Status.run(["--book-id", "st-1"])
+          run_status(["--book-id", "st-1"])
         end)
 
       assert output =~ "doc_id"
@@ -89,7 +91,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
           "last_error" => %{"type" => "auth", "summary" => "AuthError"}
         })
 
-      output = capture_io(fn -> Status.run(["--book-id", "st-err"]) end)
+      output = capture_io(fn -> run_status(["--book-id", "st-err"]) end)
 
       assert output =~ "auth"
       assert output =~ "AuthError"
@@ -103,7 +105,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
       seed_book("c", %{"state" => "failed"})
       seed_book("d", %{"state" => "pending"})
 
-      output = capture_io(fn -> Status.run([]) end)
+      output = capture_io(fn -> run_status([]) end)
 
       for s <-
             ~w(pending staging staged polling accepted rejected failed cancelled cannot_cancel) do
@@ -117,14 +119,28 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
   describe "errors" do
     test "raises Mix.Error when --book-id refers to a missing doc" do
       assert_raise Mix.Error, ~r/book not found/i, fn ->
-        capture_io(fn -> Status.run(["--book-id", "missing-x"]) end)
+        capture_io(fn -> run_status(["--book-id", "missing-x"]) end)
       end
     end
 
     test "raises on unknown switches" do
       assert_raise Mix.Error, fn ->
-        capture_io(fn -> Status.run(["--bogus"]) end)
+        capture_io(fn -> run_status(["--bogus"]) end)
       end
     end
+  end
+
+  # `run/1` calls `Barkpark.OneShot.boot!/0`, which writes the NODE-GLOBAL
+  # `:barkpark, :boot_mode` PERSISTENTLY and never puts it back — an operator
+  # one-shot exits, so it has no reason to. A test process does not exit, and
+  # the key is ONE value for the WHOLE NODE: this module ran and
+  # `Barkpark.ApplicationBootModeTest` then failed `assert App.boot_mode() ==
+  # :full` with `left: :one_shot`.
+  #
+  # `BootModeSandbox.protecting/1` restores in a `try … after` and re-reads the
+  # key, so a restore that does not land reds THIS module. Call the task
+  # through here and nowhere else.
+  defp run_status(argv) do
+    BootModeSandbox.protecting(fn -> Status.run(argv) end)
   end
 end

@@ -3,6 +3,8 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
 
   import ExUnit.CaptureIO
 
+  alias Barkpark.BootModeSandbox
+
   alias Barkpark.Content.Document
   alias Mix.Tasks.Bokbasen.List, as: ListTask
 
@@ -45,7 +47,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
       seed_book("l-fail-2", "failed", submission_id: "s2")
       seed_book("l-ok-1", "accepted", submission_id: "s3")
 
-      output = capture_io(fn -> ListTask.run(["--status", "failed"]) end)
+      output = capture_io(fn -> run_list(["--status", "failed"]) end)
 
       assert output =~ "l-fail-1"
       assert output =~ "l-fail-2"
@@ -59,7 +61,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
         seed_book("limit-#{i}", "accepted", submission_id: "s#{i}")
       end
 
-      output = capture_io(fn -> ListTask.run(["--limit", "3"]) end)
+      output = capture_io(fn -> run_list(["--limit", "3"]) end)
 
       lines =
         output
@@ -75,13 +77,13 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
       seed_book("any", "accepted")
 
       assert_raise Mix.Error, ~r/invalid status/i, fn ->
-        capture_io(fn -> ListTask.run(["--status", "invalid_state"]) end)
+        capture_io(fn -> run_list(["--status", "invalid_state"]) end)
       end
 
       output =
         capture_io(:stderr, fn ->
           try do
-            ListTask.run(["--status", "still_invalid"])
+            run_list(["--status", "still_invalid"])
           rescue
             Mix.Error -> :ok
           end
@@ -92,15 +94,29 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
 
     test "raises on unknown switches" do
       assert_raise Mix.Error, fn ->
-        capture_io(fn -> ListTask.run(["--bogus"]) end)
+        capture_io(fn -> run_list(["--bogus"]) end)
       end
     end
   end
 
   describe "no rows" do
     test "prints friendly message when no submissions exist" do
-      output = capture_io(fn -> ListTask.run([]) end)
+      output = capture_io(fn -> run_list([]) end)
       assert output =~ "no matching submissions"
     end
+  end
+
+  # `run/1` calls `Barkpark.OneShot.boot!/0`, which writes the NODE-GLOBAL
+  # `:barkpark, :boot_mode` PERSISTENTLY and never puts it back — an operator
+  # one-shot exits, so it has no reason to. A test process does not exit, and
+  # the key is ONE value for the WHOLE NODE: this module ran and
+  # `Barkpark.ApplicationBootModeTest` then failed `assert App.boot_mode() ==
+  # :full` with `left: :one_shot`.
+  #
+  # `BootModeSandbox.protecting/1` restores in a `try … after` and re-reads the
+  # key, so a restore that does not land reds THIS module. Call the task
+  # through here and nowhere else.
+  defp run_list(argv) do
+    BootModeSandbox.protecting(fn -> ListTask.run(argv) end)
   end
 end
