@@ -34,13 +34,13 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     62 of this file's 69 `min-width` declarations are this escape, and none of
+     63 of this file's 70 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
-   break-all), 69 `min-width` (72 occurrences less the THREE that are `@media
+   break-all), 70 `min-width` (74 occurrences less the FOUR that are `@media
    (min-width: …)` preludes, which are not declarations at all), and 30
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
