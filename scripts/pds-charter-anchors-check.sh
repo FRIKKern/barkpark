@@ -406,9 +406,12 @@ else
       }
     ' "$TRIGGER_WORKFLOW" 2>&1)"
 
-  if printf '%s' "$trigger_out" | grep -q '^UNCHECKED'; then
+  # Here-strings, not `printf … | grep -q`: under this file's pipefail the
+  # reader's early exit SIGPIPEs the producer and 141 comes back, so a MATCH
+  # reads as a non-match. `$trigger_out` is arm E's whole transcript.
+  if grep -q '^UNCHECKED' <<<"$trigger_out"; then
     trigger_unchecked="$(printf '%s' "$trigger_out" | sed -n 's/^UNCHECKED\t//p' | head -1)"
-  elif ! printf '%s' "$trigger_out" | grep -q '^SETS'; then
+  elif ! grep -q '^SETS' <<<"$trigger_out"; then
     trigger_unchecked="the trigger parse produced no verdict line: $trigger_out"
   else
     trigger_gap_list="$(printf '%s' "$trigger_out" | grep '^GAP' | cut -f2- || true)"

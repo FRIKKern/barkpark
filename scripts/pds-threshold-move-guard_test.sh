@@ -39,6 +39,14 @@
 # ledger, no credential. Arm 12 is the only one that reads this repository, and
 # it reads history only.
 #
+# NO `printf … | grep -q` IN AN ARM. Under `set -o pipefail` grep -q exits at the
+# first match, printf takes SIGPIPE and dies 141, and pipefail hands 141 back —
+# so an arm whose subject BEHAVED CORRECTLY reports FAIL, and it does so only
+# when the output is long enough to fill the pipe buffer, i.e. under load. Every
+# arm here reads its output with a here-string, which has no producer process to
+# kill. scripts/pipefail-sigpipe-scan.sh ratchets on this shape and named all 19
+# of this file's occurrences (task-fb55d468c7dea75b).
+#
 # Exit 0 = every arm passed. Any failure exits 1 and names the arm.
 set -uo pipefail
 
@@ -114,7 +122,7 @@ run() { # run <PR_BODY> [extra args...]; prints output, sets RC
 printf 'unrelated\n' > README.md
 git add -A && git commit -qm "no threshold touched"
 run "a PR that moves nothing"
-if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'PASS: nothing watched moved'; then
+if [ "$RC" = 0 ] && grep -q 'PASS: nothing watched moved' <<<"$OUT"; then
   ok "no move -> exit 0, 'nothing watched moved'"
 else
   bad "1 no-move" "rc=$RC, want 0 with 'nothing watched moved'. Output:
@@ -128,7 +136,7 @@ HEAD_MOVED="$(git rev-parse HEAD)"
 run "fix(react): a failed reference fetch is no longer a missing document"
 RC_SILENT="$RC"; OUT_SILENT="$OUT"
 if [ "$RC" = 1 ] \
-   && printf '%s' "$OUT" | grep -q 'REFUSED  js/packages/react/.size-limit.json#limit#2 moved 22.5 KB -> 22.75 KB' ; then
+   && grep -q 'REFUSED  js/packages/react/.size-limit.json#limit#2 moved 22.5 KB -> 22.75 KB' <<<"$OUT" ; then
   ok "a silent cap move -> exit 1, naming the literal and BOTH values"
 else
   bad "2 silent-move" "rc=$RC, want 1 with a REFUSED line naming 22.5 KB -> 22.75 KB. Output:
@@ -140,8 +148,8 @@ run 'fix(react): a failed reference fetch is no longer a missing document
 
 Threshold-move: js/packages/react/.size-limit.json#limit#2 22.5 KB -> 22.75 KB — the error boundary adds 250 B; measured 22.7 KB, +0.98%, under the 2% regression bar.'
 if [ "$RC" = 0 ] \
-   && printf '%s' "$OUT" | grep -q 'STATED   js/packages/react/.size-limit.json#limit#2' \
-   && printf '%s' "$OUT" | grep -q 'PASS: every watched literal that moved is stated'; then
+   && grep -q 'STATED   js/packages/react/.size-limit.json#limit#2' <<<"$OUT" \
+   && grep -q 'PASS: every watched literal that moved is stated' <<<"$OUT"; then
   ok "THE SAME MOVE, STATED -> exit 0. The guard is not a freeze."
 else
   bad "3 not-a-freeze" "rc=$RC, want 0 with STATED + PASS. THIS IS THE ARM THAT MATTERS: if a
@@ -176,21 +184,21 @@ fi
 
 # ── 6. unreadable inputs are UNCHECKED, never a green ───────────────────────
 OUT="$(env -u PR_BODY -u PR_BODY_FILE bash "$GUARD" --base "$BASE" --head HEAD 2>&1)"; RC=$?
-if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'UNCHECKED: no PR body was supplied'; then
+if [ "$RC" = 2 ] && grep -q 'UNCHECKED: no PR body was supplied' <<<"$OUT"; then
   ok "no PR body at all -> exit 2 UNCHECKED, naming the missing input"
 else
   bad "6a no-body" "rc=$RC, want 2. Output:
 $OUT"
 fi
 OUT="$(PR_BODY=x bash "$GUARD" --base definitely-not-a-ref-9f3a --head HEAD 2>&1)"; RC=$?
-if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'does not resolve to a commit'; then
+if [ "$RC" = 2 ] && grep -q 'does not resolve to a commit' <<<"$OUT"; then
   ok "an unresolvable base ref -> exit 2 UNCHECKED"
 else
   bad "6b bad-ref" "rc=$RC, want 2. Output:
 $OUT"
 fi
 OUT="$(bash "$GUARD" --base "$BASE" --head HEAD --pr-body "$TMP/absent-body.md" 2>&1)"; RC=$?
-if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'cannot be read'; then
+if [ "$RC" = 2 ] && grep -q 'cannot be read' <<<"$OUT"; then
   ok "a PR body file that is not there -> exit 2 UNCHECKED"
 else
   bad "6c bad-body-file" "rc=$RC, want 2. Output:
@@ -203,7 +211,7 @@ cap_json "22.5 KB" > js/packages/react/.size-limit.json
 silencer_counts 45 > scripts/.silencer-counts
 git add -A && git commit -qm "raise the tenant-scope silencer count"
 run "raise the tenant-scope silencer count"
-if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'scripts/.silencer-counts#tenant-scope-baseline moved 44 -> 45'; then
+if [ "$RC" = 1 ] && grep -q 'scripts/.silencer-counts#tenant-scope-baseline moved 44 -> 45' <<<"$OUT"; then
   ok "a counts-roster bump (44 -> 45) reds on its own, keyed by NAME"
 else
   bad "7 counts-kind" "rc=$RC, want 1 naming tenant-scope-baseline 44 -> 45. Output:
@@ -214,7 +222,7 @@ fi
 ceiling_file "internal/cli/dirty.go" > .go-format-drift-ceiling
 git add -A && git commit -qm "grandfather one more gofmt-dirty file"
 run "grandfather one more gofmt-dirty file"
-if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q '\.go-format-drift-ceiling#entries moved 0 lines'; then
+if [ "$RC" = 1 ] && grep -q '\.go-format-drift-ceiling#entries moved 0 lines' <<<"$OUT"; then
   ok "a waiver SET gaining a member reds (entries 0 -> 1, digest-keyed)"
 else
   bad "8 roster-kind" "rc=$RC, want 1 naming .go-format-drift-ceiling#entries. Output:
@@ -227,7 +235,7 @@ printf '# the authored-head floor. Re-worded header, same number.\n# A second co
   > cloud/priv/static/__preview__/cssom-heads.baseline
 git add -A && git commit -qm "re-word a baseline's comment header"
 OUT="$(PR_BODY="re-word a baseline's comment header" bash "$GUARD" --base "$BASE9" --head HEAD 2>&1)"; RC=$?
-if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'PASS: nothing watched moved'; then
+if [ "$RC" = 0 ] && grep -q 'PASS: nothing watched moved' <<<"$OUT"; then
   ok "editing ONLY a watched baseline's comment header is not a move"
 else
   bad "9 prose-control" "rc=$RC, want 0 — the guard reds on re-worded prose, which teaches authors to route around it. Output:
@@ -258,7 +266,7 @@ cp "$GUARD" scripts/pds-threshold-move-guard.sh
 chmod +x scripts/pds-threshold-move-guard.sh
 git add -A && git commit -qm "drop a watched path"
 OUT="$(PR_BODY="drop a watched path" bash ./scripts/pds-threshold-move-guard.sh --base "$BASE10" --head HEAD 2>&1)"; RC=$?
-if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'REFUSED-DROP fixture/extra.baseline'; then
+if [ "$RC" = 1 ] && grep -q 'REFUSED-DROP fixture/extra.baseline' <<<"$OUT"; then
   ok "dropping a path from the guard's OWN roster reds (the row-9 hole)"
 else
   bad "10 roster-drop" "rc=$RC, want 1 with REFUSED-DROP fixture/extra.baseline. Output:
@@ -268,7 +276,7 @@ OUT="$(PR_BODY='drop a watched path
 
 Threshold-watch-drop: fixture/extra.baseline — the file was deleted from the tree and no check reads it as a reference value any more.' \
   bash ./scripts/pds-threshold-move-guard.sh --base "$BASE10" --head HEAD 2>&1)"; RC=$?
-if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'STATED-DROP  fixture/extra.baseline'; then
+if [ "$RC" = 0 ] && grep -q 'STATED-DROP  fixture/extra.baseline' <<<"$OUT"; then
   ok "the same drop, stated with a reason -> exit 0 (the drop arm is not a freeze either)"
 else
   bad "11 stated-drop" "rc=$RC, want 0 with STATED-DROP. Output:
@@ -282,7 +290,7 @@ if git rev-parse --verify --quiet "$INCIDENT^{commit}" >/dev/null 2>&1 \
    && git rev-parse --verify --quiet "$INCIDENT^^{commit}" >/dev/null 2>&1; then
   OUT="$(PR_BODY='fix(react): a failed reference fetch is no longer a missing document' \
     bash "$GUARD" --base "$INCIDENT^" --head "$INCIDENT" 2>&1)"; RC=$?
-  if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'moved 22.5 KB -> 22.75 KB'; then
+  if [ "$RC" = 1 ] && grep -q 'moved 22.5 KB -> 22.75 KB' <<<"$OUT"; then
     ok "PR #9601 ($INCIDENT), the commit that produced this task, is REFUSED on real history"
   else
     bad "12 incident-replay" "rc=$RC, want 1 naming 22.5 KB -> 22.75 KB on the real commit. Output:
@@ -359,8 +367,8 @@ silencer_counts 45  > "$FX/scripts/.silencer-counts"
 git -C "$FX" add -A && git -C "$FX" commit -qm "chore: bump the tenant-scope baseline" >/dev/null 2>&1 || true
 
 run_g "$GUARD" "chore: bump the tenant-scope baseline"
-if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'REFUSED  scripts/.silencer-counts#tenant-scope-baseline moved 44 -> 45' \
-   && ! printf '%s' "$OUT" | grep -q 'SHORT SWEEP'; then
+if [ "$RC" = 1 ] && grep -q 'REFUSED  scripts/.silencer-counts#tenant-scope-baseline moved 44 -> 45' <<<"$OUT" \
+   && ! grep -q 'SHORT SWEEP' <<<"$OUT"; then
   ok "13 CONTROL — a silent move of a LATER watched row is REFUSED, both identities silent"
 else
   bad "13 control-later-row" "rc=$RC, want 1 naming .silencer-counts 44 -> 45 with no SHORT SWEEP. Output:
@@ -369,8 +377,8 @@ fi
 
 if mut_splice "$GUARD" "$MUT/outer-short.sh" watched-count-identity; then
   run_g "$MUT/outer-short.sh" "chore: bump the tenant-scope baseline"
-  if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'SHORT SWEEP — examined 1 of 18 watched path(s)' \
-     && ! printf '%s' "$OUT" | grep -q '^PASS:'; then
+  if [ "$RC" = 2 ] && grep -q 'SHORT SWEEP — examined 1 of 18 watched path(s)' <<<"$OUT" \
+     && ! grep -q '^PASS:' <<<"$OUT"; then
     ok "14 OUTER SHORT — a drained fd 0 refuses naming both numbers (1 of 18), exit 2, no PASS"
   else
     bad "14 outer-short" "rc=$RC, want 2 naming 'examined 1 of 18'. Output:
@@ -380,8 +388,8 @@ else bad "14 outer-short" "no MUT-SPLICE marker for the watched sweep in $GUARD"
 
 if mut_cut "$MUT/outer-short.sh" "$MUT/outer-short-nocount.sh" watched-count-identity; then
   run_g "$MUT/outer-short-nocount.sh" "chore: bump the tenant-scope baseline"
-  if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'PASS: nothing watched moved' \
-     && ! printf '%s' "$OUT" | grep -q 'SHORT SWEEP'; then
+  if [ "$RC" = 0 ] && grep -q 'PASS: nothing watched moved' <<<"$OUT" \
+     && ! grep -q 'SHORT SWEEP' <<<"$OUT"; then
     ok "15 OUTER CUT — without the identity the same short read prints PASS over a real move (the defect, reproduced)"
   else
     bad "15 outer-cut" "rc=$RC, want 0 with 'PASS: nothing watched moved'. Output:
@@ -426,8 +434,8 @@ TWO_BODY='perf(react): two caps move at once
 Threshold-move: js/packages/react/.size-limit.json#limit#1 1.3 KB -> 1.4 KB — the root import gained a guard clause.'
 
 run_g2 "$GUARD" "$TWO_BODY"
-if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'REFUSED  js/packages/react/.size-limit.json#limit#2 moved 22.5 KB -> 22.75 KB' \
-   && printf '%s' "$OUT" | grep -q 'STATED   js/packages/react/.size-limit.json#limit#1'; then
+if [ "$RC" = 1 ] && grep -q 'REFUSED  js/packages/react/.size-limit.json#limit#2 moved 22.5 KB -> 22.75 KB' <<<"$OUT" \
+   && grep -q 'STATED   js/packages/react/.size-limit.json#limit#1' <<<"$OUT"; then
   ok "16a CONTROL — with two keys moved and one stated, the intact key loop STATES one and REFUSES the other"
 else
   bad "16a control-two-keys" "rc=$RC, want 1 with limit#1 STATED and limit#2 REFUSED. Output:
@@ -436,8 +444,8 @@ fi
 
 if mut_splice "$GUARD" "$MUT/inner-short.sh" key-count-identity; then
   run_g2 "$MUT/inner-short.sh" "$TWO_BODY"
-  if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'SHORT KEY SWEEP — examined 1 of 2 union key(s)' \
-     && ! printf '%s' "$OUT" | grep -q '^PASS:'; then
+  if [ "$RC" = 2 ] && grep -q 'SHORT KEY SWEEP — examined 1 of 2 union key(s)' <<<"$OUT" \
+     && ! grep -q '^PASS:' <<<"$OUT"; then
     ok "16 INNER SHORT — a drained fd 0 in the KEY loop refuses naming both numbers (1 of 2), exit 2"
   else
     bad "16 inner-short" "rc=$RC, want 2 naming 'examined 1 of 2 union key(s)'. Output:
@@ -447,9 +455,9 @@ else bad "16 inner-short" "no MUT-SPLICE marker for the key loop in $GUARD"; fi
 
 if mut_cut "$MUT/inner-short.sh" "$MUT/inner-short-nocount.sh" watched-count-identity; then
   run_g2 "$MUT/inner-short-nocount.sh" "$TWO_BODY"
-  if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'STATED   js/packages/react/.size-limit.json#limit#1' \
-     && ! printf '%s' "$OUT" | grep -q 'limit#2' \
-     && ! printf '%s' "$OUT" | grep -q 'SHORT KEY SWEEP'; then
+  if [ "$RC" = 0 ] && grep -q 'STATED   js/packages/react/.size-limit.json#limit#1' <<<"$OUT" \
+     && ! grep -q 'limit#2' <<<"$OUT" \
+     && ! grep -q 'SHORT KEY SWEEP' <<<"$OUT"; then
     ok "17 INNER CUT — without the identities the same short key read never sees limit#2 and the guard passes (the defect, reproduced)"
   else
     bad "17 inner-cut" "rc=$RC, want 0 with limit#1 STATED, limit#2 never mentioned. Output:
@@ -491,8 +499,8 @@ Threshold-watch-drop: fixture/a.baseline — the file was deleted from the tree 
 run_drop() { OUT="$(PR_BODY="$DROP_BODY" bash "$1" --base "$BASE_DROP" --head HEAD 2>&1)"; RC=$?; }
 
 run_drop "$DROPFX"
-if [ "$RC" = 1 ] && printf '%s' "$OUT" | grep -q 'STATED-DROP  fixture/a.baseline' \
-   && printf '%s' "$OUT" | grep -q 'REFUSED-DROP fixture/b.baseline'; then
+if [ "$RC" = 1 ] && grep -q 'STATED-DROP  fixture/a.baseline' <<<"$OUT" \
+   && grep -q 'REFUSED-DROP fixture/b.baseline' <<<"$OUT"; then
   ok "18 CONTROL — two drops, one stated: a is STATED, b is REFUSED"
 else
   bad "18 drop-control" "rc=$RC, want 1 with STATED-DROP a and REFUSED-DROP b. Output:
@@ -501,8 +509,8 @@ fi
 
 if mut_splice "$DROPFX" "$MUT/drop-short.sh" dropped-count-identity; then
   run_drop "$MUT/drop-short.sh"
-  if [ "$RC" = 2 ] && printf '%s' "$OUT" | grep -q 'SHORT DROP SWEEP — examined 1 of 2 dropped path(s)' \
-     && ! printf '%s' "$OUT" | grep -q 'REFUSED-DROP fixture/b.baseline'; then
+  if [ "$RC" = 2 ] && grep -q 'SHORT DROP SWEEP — examined 1 of 2 dropped path(s)' <<<"$OUT" \
+     && ! grep -q 'REFUSED-DROP fixture/b.baseline' <<<"$OUT"; then
     ok "19 DROP SHORT — a drained fd 0 refuses naming both numbers (1 of 2), exit 2"
   else
     bad "19 drop-short" "rc=$RC, want 2 naming 'examined 1 of 2 dropped path(s)'. Output:
@@ -512,9 +520,9 @@ else bad "19 drop-short" "no MUT-SPLICE marker for the roster-drop loop in $GUAR
 
 if mut_cut "$MUT/drop-short.sh" "$MUT/drop-short-nocount.sh" dropped-count-identity; then
   run_drop "$MUT/drop-short-nocount.sh"
-  if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'STATED-DROP  fixture/a.baseline' \
-     && ! printf '%s' "$OUT" | grep -q 'fixture/b.baseline' \
-     && ! printf '%s' "$OUT" | grep -q 'SHORT DROP SWEEP'; then
+  if [ "$RC" = 0 ] && grep -q 'STATED-DROP  fixture/a.baseline' <<<"$OUT" \
+     && ! grep -q 'fixture/b.baseline' <<<"$OUT" \
+     && ! grep -q 'SHORT DROP SWEEP' <<<"$OUT"; then
     ok "20 DROP CUT — without the identity the same short read never sees fixture/b's silencing and PASSES (the defect, reproduced)"
   else
     bad "20 drop-cut" "rc=$RC, want 0 with fixture/b never mentioned. Output:

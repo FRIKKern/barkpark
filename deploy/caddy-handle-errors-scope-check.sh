@@ -135,21 +135,29 @@ while IFS= read -r f; do
       *[!\ ]*) : ;;
       *) continue ;;
     esac
-    if printf '%s\n' "$body" | grep -qE "$COMMENT_RE"; then continue; fi
+    # HERE-STRINGS, not `printf … | grep -q`. Under this file's `pipefail`,
+    # `grep -q` answers at the first match and closes the pipe, `printf` takes
+    # SIGPIPE and dies 141, and pipefail hands 141 back as the test's status — a
+    # MATCH reported as a NON-match, and output-length dependent, so it hides on
+    # a short line and appears on a long one. `$body` is a whole source line and
+    # a minified .js or a base64 blob is one line. The Content-Type arm below
+    # already learned this; these five did not, and scripts/pipefail-sigpipe-scan.sh
+    # named every one of them.
+    if grep -qE "$COMMENT_RE" <<<"$body"; then continue; fi
     case "$f" in
       *.md)
         # Prose naming the shape, in backticks. An unbacktick'd match in the same
         # file is still a violation — this is a per-LINE rule, not a file skip.
-        if printf '%s\n' "$body" | grep -qE "$MD_PROSE_RE"; then continue; fi
+        if grep -qE "$MD_PROSE_RE" <<<"$body"; then continue; fi
         ;;
     esac
-    if printf '%s\n' "$body" | grep -qF -- "$DELIBERATE_RE"; then
+    if grep -qF -- "$DELIBERATE_RE" <<<"$body"; then
       deliberate_hits+=("$f:$line")
       continue
     fi
-    if printf '%s\n' "$body" | grep -qE "$SCOPED_RE"; then
+    if grep -qE "$SCOPED_RE" <<<"$body"; then
       scoped_files+=("$f:${line%%:*}")
-    elif printf '%s\n' "$body" | grep -qE "$BARE_RE"; then
+    elif grep -qE "$BARE_RE" <<<"$body"; then
       bare_hits+=("$f:$line")
     else
       # Neither pattern survives into the extracted body: the line matched the

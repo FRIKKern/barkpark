@@ -315,7 +315,12 @@ do_rollback() {
   rb_ok=0
   for _ in $(seq 1 36); do
     code="$(bp_curl_code -s -o /dev/null --max-time 6 "http://localhost:${RB_PORT}/" || echo 000)"
-    if echo "$code" | grep -qE '^(200|301|302)$'; then rb_ok=1; log "rollback slot $RB_SLOT healthy ($code)"; break; fi
+    # `case`, not `echo | grep -q`: under this file's `pipefail` the reader
+    # exits at the first match, `echo` takes SIGPIPE and pipefail hands back 141,
+    # so a HEALTHY code reads as unhealthy. `$code` is short enough that it has
+    # never fired here, but the shape is the hazard and a pattern match needs no
+    # pipe at all (fix 1 in scripts/pipefail-sigpipe-scan.sh's preference order).
+    case "$code" in 200|301|302) rb_ok=1; log "rollback slot $RB_SLOT healthy ($code)"; break ;; esac
     sleep 5
   done
   if [ "$rb_ok" != 1 ]; then
@@ -515,7 +520,9 @@ BARKPARK_PROVISIONER_SHA=""
 if [ -n "$PROV_BIN" ] && [ -f "$PROV_BIN" ]; then
   [ -x "$PROV_BIN" ] || chmod 0755 "$PROV_BIN" 2>/dev/null || true
   _prov_sha="$("$PROV_BIN" --version 2>/dev/null | head -1 | tr -d '[:space:]')"
-  if printf '%s' "$_prov_sha" | grep -qE '^[0-9a-f]{40}$'; then
+  # Here-string, not `printf | grep -q` — a producer process that can be killed
+  # by the reader's early exit is what returns 141 under pipefail.
+  if grep -qE '^[0-9a-f]{40}$' <<<"$_prov_sha"; then
     BARKPARK_PROVISIONER_SHA="$_prov_sha"
   else
     log "provisioner binary carries NO usable build sha (--version gave '${_prov_sha}') — reporting absent"
@@ -814,7 +821,9 @@ for _ in $(seq 1 36); do
   # SPA missing) is exactly the broken-deploy shape this gate exists to
   # catch, and 404 waved it through as "healthy". Only redirect/success on
   # '/' counts now.
-  if echo "$code" | grep -qE '^(200|301|302)$'; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
+  # `case`, not `echo | grep -q` — see the rollback probe above: under pipefail
+  # a SIGPIPE'd producer turns a healthy code into an unhealthy verdict.
+  case "$code" in 200|301|302) ok=1; log "slot $TARGET healthy ($code)"; break ;; esac
   sleep 5
 done
 if [ "$ok" != "1" ]; then

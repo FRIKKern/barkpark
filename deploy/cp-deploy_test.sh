@@ -117,15 +117,33 @@ echo "cp-deploy slot health-check status codes (pds-bl-w49)"
 # at ALL PASS, rc=0. Identical shape to the daemon-reload defect above: a second,
 # untouched occurrence answered for the broken one. Enumerating also means a
 # third probe added later is covered without touching this file.
-code_is_healthy() { echo "$1" | grep -qE "^(${HEALTH_RE})\$"; }  # replays the script's EXACT classification
+# THE SHAPE CHANGED, AND SO DID THIS READER (task-fb55d468c7dea75b). Both probes
+# used to classify with `echo "$code" | grep -qE '^(200|301|302)$'`, which is the
+# pipefail/SIGPIPE hazard scripts/pipefail-sigpipe-scan.sh ratchets: grep -q exits
+# at the first match, echo takes SIGPIPE, pipefail hands back 141, and a HEALTHY
+# code reads as unhealthy — under load, on the deploy's own health gate. They are
+# `case` now, which needs no pipe at all. This extraction follows the code rather
+# than pinning the old shape, and `code_is_healthy` replays a CASE pattern for the
+# same reason it used to replay a regex: the assertion must be the script's own
+# classification, not a second copy of it. (The replay lost its own `echo | grep -q`
+# in the move, which is one fewer site of the very shape this block now guards.)
+# `[[ =~ ]]`, not `case "$1" in ${HEALTH_RE})`: the `|` in a case pattern is
+# CASE SYNTAX, parsed before the expansion, so an alternation arriving inside a
+# variable is one literal string and every arm reds. That draft was written and
+# it failed here, loudly, which is the only reason this comment can be specific.
+# `=~` treats the expansion as an ERE, where `|` is the alternation it looks
+# like — and still no pipe, so the hazard this block now guards is not
+# reintroduced by its own replay.
+code_is_healthy() { [[ "$1" =~ ^(${HEALTH_RE})$ ]]; }
 n_health=0
 while IFS= read -r hl; do
   [ -n "$hl" ] || continue
   n_health=$((n_health + 1))
   lineno="${hl%%:*}"
   body="${hl#*:}"
-  HEALTH_RE="${body#*"grep -qE '^("}"
-  HEALTH_RE="${HEALTH_RE%%")\$'"*}"
+  # `  case "$code" in 200|301|302) ok=1; … ;; esac`  ->  `200|301|302`
+  HEALTH_RE="${body#*in }"
+  HEALTH_RE="${HEALTH_RE%%)*}"
   check "line $lineno: extracted the health-check regex class" "[ -n '$HEALTH_RE' ]"
   check "line $lineno: 200 (OK) classified healthy"                     "code_is_healthy 200"
   check "line $lineno: 301 (redirect) classified healthy"                "code_is_healthy 301"
@@ -134,7 +152,7 @@ while IFS= read -r hl; do
   check "line $lineno: 500 (server error) NOT healthy"                    "! code_is_healthy 500"
   check "line $lineno: 000 (curl failure / connection refused) NOT healthy" "! code_is_healthy 000"
 done <<EOF
-$(grep -n 'echo "\$code" | grep -qE' "$SCRIPT")
+$(grep -n 'case "\$code" in' "$SCRIPT")
 EOF
 # Both probes must still BE there. Deleting one entirely would otherwise leave
 # the survivor passing and this section silently half as strong.
