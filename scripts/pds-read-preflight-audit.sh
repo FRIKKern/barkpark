@@ -128,8 +128,14 @@ REG
 #   (b) an HTTP write to a ledger route        - curl -X POST .../v1/data/mutate|/v1/tasks/...
 # A line whose first non-blank character is `#` is never a candidate.
 candidates() {
-  local f rel stripped
+  local f rel stripped derived enumerated seen=0
   stripped="$(mktemp)" || die2 "mktemp failed"
+  # MATERIALISED, not consumed straight out of a process substitution: the
+  # count identity below needs an enumeration side that a short read cannot
+  # move, and `< <(find …)` gives it nothing to compare against.
+  derived="$(find "$SCRIPTS_DIR" -type f -name '*.sh' ! -name '*_test.sh' ! -name '*.test.sh' \
+             ! -name 'pds-read-preflight-audit.sh' | sort)"
+  enumerated="$(printf '%s' "$derived" | grep -c . || true)"
   # A PIPELINE IS NOT SAFE HERE. Under `set -o pipefail`, `grep -v … | grep -q …`
   # returns 141 whenever the -q side matches early enough to SIGPIPE the -v side,
   # and 141 is indistinguishable from "no match" to the `if`. That silently DROPPED
@@ -139,6 +145,11 @@ candidates() {
   # So the comment-stripped body goes to a FILE and every match is a plain, single
   # command whose exit status means only what it says.
   while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # MUT-SPLICE: derive-count-identity
+    # THE WORK SIDE of the derive identity — tallied above every `continue` in
+    # this body, so it counts scripts REACHED by the predicate.
+    seen=$((seen + 1))
     rel="${f#"$ROOT"/}"
     grep -vE '^[[:space:]]*#' "$f" >"$stripped" 2>/dev/null
     if grep -qE '(^[[:space:]]*|[;&][[:space:]]+|\|\|[[:space:]]+|&&[[:space:]]+|\$\(|`)("?\$\{?[A-Z_]*BP[A-Z_]*\}?"?|bp)[[:space:]]+(task[[:space:]]+(stamp|close|create|claim|pulse|release|stage|next|landed|reopen)|doc[[:space:]]+(create|patch|publish|unpublish|delete)|paper[[:space:]]+(create|publish)|bulldocs[[:space:]]+publish|seed|schema[[:space:]]+apply|onramp[[:space:]]+[a-z-]+[[:space:]]+--write)' "$stripped"; then
@@ -152,9 +163,23 @@ candidates() {
     # quoted heredoc that QUOTES write verbs verbatim, so the predicate — which
     # can strip comments but not heredoc bodies — would match the audit on its
     # own evidence. It issues no write of any kind; `prove` sends no token.
-  done < <(find "$SCRIPTS_DIR" -type f -name '*.sh' ! -name '*_test.sh' ! -name '*.test.sh' \
-             ! -name 'pds-read-preflight-audit.sh' | sort)
+  done <<< "$derived"
   rm -f "$stripped"
+  # ── THE COUNT IDENTITY, DERIVE SIDE (task-fb55d468c7dea75b) ────────────────
+  # This loop reads the derived script list on fd 0. Any body child that reads
+  # stdin — a future `grep` with no file operand, a `read`, an `ssh`, a pager —
+  # swallows the remaining paths and the loop ENDS EARLY with no error and no
+  # non-zero status. This function's banner is "Candidates are DERIVED by
+  # predicate (a write at a command position), never listed" — the whole point
+  # being that nobody has to remember a list. A truncated derive is a SHORTER
+  # candidate set stated with that same confidence, and the census below then
+  # prints "OK: every script that writes carries a disposition" over a
+  # population it never looked at.
+  # MUT-ANCHOR: derive-count-identity
+  if [ "$seen" -ne "$enumerated" ]; then
+    die2 "SHORT DERIVE — examined $seen of $enumerated script(s) enumerated by the candidate predicate. The derive loop ended before the list did (a loop-body child that reads stdin consumes the remaining paths silently); a partial derive must never be handed to the census as a complete one."
+  fi
+  # MUT-END: derive-count-identity
 }
 
 cmd_census() {
@@ -163,15 +188,26 @@ cmd_census() {
 
   local reg cand missing=0 n=0
   reg="$(registry)" || die2 "registry unreadable"
-  cand="$(candidates)"
+  # `|| die2`, and it is load-bearing: this file runs without `set -e`, and
+  # `candidates` is invoked inside a command substitution, so its own die2 exits
+  # only the SUBSHELL. Without this the derive refusal below would print to
+  # stderr and the census would carry on over an empty `$cand` — a refusal
+  # downgraded to a quieter green, which is the same defect one layer up.
+  cand="$(candidates)" || die2 "the candidate derive refused (its refusal is above); no census is printed over a derive that did not complete"
 
   say "=== read-preflight audit — the write-after-preflight census ==="
   say ""
   say "Candidates are DERIVED by predicate (a write at a command position), never listed."
   say ""
 
+  local enumerated
+  # THE ENUMERATION SIDE of the census identity, read BEFORE the loop so a short
+  # read cannot move it.
+  enumerated="$(printf '%s' "$cand" | grep -c . || true)"
+
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
+    # MUT-SPLICE: census-count-identity
     n=$((n + 1))
     local line disp pre why
     line="$(printf '%s\n' "$reg" | grep -F -- "$rel|" | head -1)"
@@ -192,6 +228,24 @@ cmd_census() {
     say "  why         : $why"
     say ""
   done <<<"$cand"
+
+  # ── THE COUNT IDENTITY, CENSUS SIDE (task-fb55d468c7dea75b) ────────────────
+  # Same shape, second loop: `done <<<"$cand"` is fd 0, and `$n` and `$missing`
+  # are BOTH read off it, so they agree with each other on a short read. A
+  # census that stopped after candidate 1 of 12 leaves `$missing` at 0 and
+  # prints "OK: every script that writes carries a disposition" — the exact
+  # false clear this audit exists to prevent. Only `$enumerated`, read before
+  # the loop, can disagree.
+  # MUT-ANCHOR: census-count-identity
+  if [ "$n" -ne "$enumerated" ]; then
+    warn "SHORT CENSUS — dispositioned $n of $enumerated derived candidate(s). The census loop"
+    warn "  ended before the candidate list did (a loop-body child that reads stdin consumes"
+    warn "  the remaining rows silently). A partial census must never print OK in the same"
+    warn "  words as a complete one. This is a fault in THIS script, not a finding about"
+    warn "  scripts/."
+    return 2
+  fi
+  # MUT-END: census-count-identity
 
   say "candidates: $n   undispositioned: $missing"
   if [ "$missing" -ne 0 ]; then
