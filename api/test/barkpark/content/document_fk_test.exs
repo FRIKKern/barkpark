@@ -4,11 +4,24 @@ defmodule Barkpark.Content.DocumentFkTest do
   changeset-FK-abort scar-class — the fourth sibling after MediaFile (W14) and
   bulldocs Event + SchemaDefinition (W16)).
 
-  `documents.workspace_id/project_id/dataset_id` are real Postgres FKs
-  (`references(:workspaces/:projects/:datasets, on_delete: :nilify_all)` from
-  migrations 20260527110100_add_tenancy_columns and
-  20260527131000_add_dataset_id_columns; default-derived constraint names
-  `documents_<col>_fkey`). Without `foreign_key_constraint/2` in the changeset,
+  `documents.workspace_id/project_id/dataset_id` are real Postgres FKs to
+  `:workspaces` / `:projects` / `:datasets`, default-derived constraint names
+  `documents_<col>_fkey`. The COLUMNS arrived in migrations
+  20260527110100_add_tenancy_columns and 20260527131000_add_dataset_id_columns;
+  their CURRENT delete action was set later, by
+  20260527160000_cascade_content_on_scope_delete, to `on_delete: :delete_all`
+  (SQL `ON DELETE CASCADE`), and nothing after it re-flips these twelve
+  content-table scope FKs. So a scope delete DELETES the document — it never
+  leaves the row alive with a NULLed scope column, and cannot manufacture a
+  `documents` row carrying `workspace_id IS NULL` beside a non-NULL
+  `project_id` (task-3e3367eba8695cec).
+
+  That action is not what THIS suite tests — a cascade fires on DELETE of a
+  live parent, while the abort below fires on INSERT against an id that is
+  already gone. The action is stated because reading it wrong is what sends a
+  reader hunting an orphan bug that cannot exist.
+
+  Without `foreign_key_constraint/2` in the changeset,
   an insert referencing a vanished row — a workspace/project/dataset deleted
   concurrently — RAISES Ecto.ConstraintError out of `Content.Writer`'s non-bang
   `Repo.insert` on the /v1/data/mutate and /api/documents write paths (a 500)
