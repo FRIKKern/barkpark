@@ -164,6 +164,11 @@ const DEFAULT_SCEN = [
   "tokens-revoke",
   "mixed-fleet",
   "overview-attention",
+  // The two call sites that had NO SCENARIO AT ALL until task-499cab525e65018b
+  // — the gap the enumeration above filed rather than implied. Same rule: names,
+  // validated against scenarios.mjs AND against this file's plans before Chrome.
+  "instance-pin-version",
+  "instance-update-conflict",
 ];
 
 // ── THE TOKEN REVEAL AS A DRIVEN STATE (cch-w21-bl-token-reveal-modal-oracle)
@@ -351,6 +356,52 @@ const LAUNCH_OPEN_PROBE =
   `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
   `r.querySelector('#new-launch-form, #launch-modal-slot'));})()`;
 
+// ── THE TWO CALL SITES THE ENUMERATION FOUND WITH NO SCENARIO ───────────────
+// (task-499cab525e65018b.) The table above reports 28 openModal call sites and
+// maps each to a scenario or to a GAP. There were exactly two GAPS —
+// `openPinModal` and `openUpdateConflictModal` — and a GAP is not something a
+// planFor() branch can close, because there was no screen to plan against:
+// pin-race.mjs tests the pin LOGIC and renders nothing. The fixtures now exist
+// (`instance-pin-version`, `instance-update-conflict`, both `instance-behind`
+// deep-copied), so these are the first two states this oracle drives that it
+// could not have driven at any earlier commit.
+//
+// THEY ARE OPENED BY THE SCENARIO'S OWN DECLARED `modal` DRIVER, not by a chain
+// in this file, and that is deliberate rather than lazy. #19677 promoted the
+// modal seam from shoot.sh's `account-modal*` NAME CONVENTION to a scenarios.mjs
+// FIELD that mock.js dispatches on; the account family's plan already rides that
+// same seam (`&modal=account`, land null, drive null). Driving these two from
+// here as well would fire the opener TWICE — mock.js's declared driver is
+// already clicking — and, worse, would certify a dialog this corpus's own PNGs
+// are NOT proven to reach. Asserting the geometry of exactly what the shot
+// contains is the point.
+const PIN_FORM_SCEN = "instance-pin-version";
+const UPDATE_CONFLICT_SCEN = "instance-update-conflict";
+
+// DERIVED from the fixture, never typed here: the instance id lives in
+// scenarios.mjs's IDS and a second copy of it in this file would be a constant
+// that can rot silently into "the right CSS on the wrong screen".
+const deepLinkOf = (scen) => SCENARIOS[scen].deepLink;
+
+// `#pin-form` and not `.modal-card`: the Updates panel's three OTHER `data-au`
+// controls (pause/resume/unpin) open no dialog at all, and the panel's Roll
+// back opens the GENERIC confirm — which has no form. The form is what makes
+// this the pin sheet.
+const PIN_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('pin-form') && document.getElementById('pin-go'));})()`;
+
+// `#update-force` is the override button, and it exists ONLY on a conflict copy
+// that carries a forceLabel. After the drive's FIRST click confirmUpdateInstance's
+// generic confirm is already up and `.modal-card` is already true, so a card
+// check alone would go green on the dialog this state exists to watch be
+// REPLACED.
+const CONFLICT_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('update-force'));})()`;
+
 // The landed tokens screen, before a single gesture. `?scen=` alone does not
 // route; the deep link does, and this asserts it arrived.
 const TOKENS_VIEW_PROBE =
@@ -446,6 +497,8 @@ const PLANNED_SCENS = new Set([
   CONFIRM_SHEET_SCEN,
   PALETTE_SCEN,
   LAUNCH_SCEN,
+  PIN_FORM_SCEN,
+  UPDATE_CONFLICT_SCEN,
 ]);
 const ACCOUNT_FAMILY_RE = /^account-modal/;
 const hasPlan = (s) => PLANNED_SCENS.has(s) || ACCOUNT_FAMILY_RE.test(s);
@@ -1088,6 +1141,62 @@ function planFor(scen) {
         requiredControl: ".launch-form button[type=submit]",
         requiredControlLabel: "Launch",
         requiredControlWhy: "the only control that submits this flow",
+      },
+    };
+  }
+
+  // ── THE PIN FORM (openPinModal) ──────────────────────────────────────────
+  // The FORM shape, and the first state here reached through an AUTHORITY-GATED
+  // control: `[data-au="pin"]` carries its live mount hook on the granted arm
+  // only (adminWriteControlHtml), so this dialog is one a plain member is never
+  // handed the button for. Opened by the scenario's declared driver.
+  if (scen === PIN_FORM_SCEN) {
+    return {
+      suffix: deepLinkOf(PIN_FORM_SCEN),
+      land: null,
+      drive: null,
+      open: PIN_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "pin-version",
+        dialogHost: "#pin-form",
+        dialogHostWhy:
+          "the click on the panel's Pin version control opened SOME dialog, but not the pin " +
+          "form - the same panel's Roll back opens the GENERIC confirm, which has no form at all",
+        requiredControl: "#pin-go",
+        requiredControlLabel: "Pin version",
+        requiredControlWhy:
+          "the only control that submits the freeze this dialog exists to set",
+      },
+    };
+  }
+
+  // ── THE PIN-CONFLICT SHEET (openUpdateConflictModal) ─────────────────────
+  // The REFUSAL shape, and the only state in this file whose dialog REPLACES
+  // another one: the drive clicks #inst-update (confirmUpdateInstance's generic
+  // confirm opens), then #update-go inside it, and the 409 the fixture's
+  // `instanceSelfUpdate` answers is what swaps that confirm for this sheet.
+  // Charter-relevant and the reason the state is worth its cost: a failed
+  // confirm never dies into a toast, so the geometry of the dialog the operator
+  // is LEFT in is exactly what the #4592 mechanism would take away.
+  if (scen === UPDATE_CONFLICT_SCEN) {
+    return {
+      suffix: deepLinkOf(UPDATE_CONFLICT_SCEN),
+      land: null,
+      drive: null,
+      open: CONFLICT_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "update-conflict",
+        dialogHost: "#update-force",
+        dialogHostWhy:
+          "a dialog is up, but it is still the GENERIC confirm the first click opened - " +
+          "#update-force exists only on a conflict copy carrying a forceLabel, so its absence " +
+          "means the 409 never landed or never classified as kind 'pinned'",
+        requiredControl: "#update-force",
+        requiredControlLabel: "Update anyway",
+        requiredControlWhy:
+          "the explicit override that is the whole reason this refusal is a dialog and not a toast",
       },
     };
   }

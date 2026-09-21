@@ -28,8 +28,22 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 ## The loop (per row)
 
 1. **T1 triage — you, cheap, before any worker.** `env -u BARKPARK_TOKEN bp task get <id>`
-   (criteria live under `doc.content`). Then prove the premise on `origin/main`:
-   `git show origin/main:<path>` + grep. Confirm the defect EXISTS, is REACHABLE, and is
+   (criteria live under `doc.content`). Then prove the premise AT THE REF, and fetch first —
+   **`git fetch origin main` and then `git show origin/main:<path>` + grep, from a worktree, never
+   `cat`/`grep`/`git show HEAD:` in the shared checkout.** Both halves are load-bearing: without
+   the fetch, `origin/main` is whatever ref is on disk, which is as old as the last fetch.
+   WHY INSPECTION CANNOT CATCH THIS, and why the rule is worded as a COMMAND and not a caution:
+   a stale checkout is a valid git repo, on `main`, clean, and every read of it SUCCEEDS. `cat`,
+   `grep`, `sed` and `git show HEAD:<path>` return exit 0 and well-formed, internally CONSISTENT
+   content — the file agrees with its own tests, its own comments and its sibling files, because
+   it is a coherent older SNAPSHOT of the tree, not a corruption of the current one. There is no
+   error, no empty read, no malformed byte to notice, so re-reading it more carefully cannot
+   help: the failure is a CONFIRMED ANSWER TO THE WRONG QUESTION. Measured 2026-09-21 — the
+   shared checkout was 581 commits behind and two agents filed two independent false findings off
+   it in one shift, one of them a P1 against an instrument that had already been fixed on main.
+   `held-liveness.sh` now prints that distance at the top of every loop (see the pulse section);
+   when it says `CHECKOUT STALE`, every unfetched read you have made this session is suspect.
+   Confirm the defect EXISTS, is REACHABLE, and is
    NOT ALREADY BUILT (search `gh pr list --search "<id>"` and the ledger for a PR). A
    filed row is a measurement with a timestamp; many are stale within hours. If the
    premise is false, close the row honestly: `bp task close <id> <you> <epoch> cancelled
@@ -241,7 +255,12 @@ ONLY what this prints:
   Do not hand-write that loop: run `.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh lead-<lane> $ORCH/lead-<lane>/held.s<N>.txt $ORCH/lead-<lane>/pulse.s<N>.log`, which drops a closed row from the round instead of striking the whole list for it. The held file and the log are YOUR SESSION's, from `session-files.sh open` — never the lane-wide `held.txt`.
   And running is not held: at the TOP OF EVERY LOOP, and again after ANY peer stand-down, run
   `.claude/skills/orchestrate-tasks/helpers/held-liveness.sh $ORCH/lead-<lane> --session s<N> --expect-worker lead-<lane> --pid-file $ORCH/lead-<lane>/pulse.s<N>.pid --log $ORCH/lead-<lane>/pulse.s<N>.log` (`--session` names YOUR list; a named list that is absent is exit 2, never a silent fallback to a peer's)
-  and read its exit code (0 held, 1 a NAMED violation, 2 an empty/missing list, 3 a ledger read refused). It reads the LEDGER's `claim.worker` and lease-until for every row in your held file and compares your pulse log's age and pid against the cadence — a loop that STOPS RUNNING prints nothing, so nothing else in this campaign can tell you. Quote its last line in your status file.
+  and read its exit code (0 held, 1 a NAMED violation, 2 an empty/missing list, 3 a ledger read refused,
+  4 the ghost scan could not enumerate any pulse-loop process — a failed read, never a clean verdict).
+  Its FIRST line is the checkout-distance banner: `CHECKOUT STALE: <dir> is N COMMIT(S) BEHIND …` when the
+  tree it was read from is behind `origin/main`, `checkout: … is LEVEL …` at zero, and `CHECKOUT DISTANCE
+  UNKNOWN` when it could not measure — which is never a zero. It is ADVISORY: it never changes the exit
+  code, so branch on the codes exactly as before. It does NOT fetch, so the number it prints is a FLOOR. It reads the LEDGER's `claim.worker` and lease-until for every row in your held file and compares your pulse log's age and pid against the cadence — a loop that STOPS RUNNING prints nothing, so nothing else in this campaign can tell you. Quote its last line in your status file.
 
 - **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
   routing to `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append-only, a table per date). Inbox

@@ -34,6 +34,11 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
+// THE BROWSER-SIDE HARNESS (task-5ffdec2b609404bc). This runner boots app.js
+// in a vm and never loads mock.js, so the two `modal`-declaring scenarios below
+// cannot be checked by RENDERING their dialog here — what they can be checked
+// for is that the seam they declare EXISTS on the other side.
+const MOCK_JS = fs.readFileSync(path.join(HERE, "mock.js"), "utf8");
 
 // ── index.html's shipped `hidden` (cch-w43-s6) ───────────────────────────────
 // The shim used to default EVERY element to hidden:false, and never read
@@ -4996,6 +5001,187 @@ const EXPECTATIONS = {
         !picker.includes('value="write"') && !picker.includes('value="deploy"') && !picker.includes('value="root"'),
         "write/deploy/root are not offered to a member",
       );
+    },
+  },
+  // ── THE MODAL SEAM'S TWO NEW SCREENS (task-5ffdec2b609404bc) ──────────────
+  // WHAT THESE CAN AND CANNOT ASSERT HERE, stated so a reader does not mistake
+  // the scope. This runner is a node:vm shim: it boots app.js and NEVER loads
+  // mock.js, so the dialog these two exist to photograph does not open in this
+  // process and no assertion here may pretend it does. The shot IS the evidence
+  // for the dialog (shoot.sh + the `modal` field), and modal-oracle.mjs is the
+  // evidence for its geometry.
+  //
+  // What this file OWNS is the half neither of those can see: that the scenario
+  // is its HOST's fixture plus one field (so any difference between the two
+  // shots is the dialog and nothing else), and that the driver it names is a
+  // real entry in mock.js's table rather than a string that silently shoots the
+  // bare shell. Both are exactly the failure the old `account-modal*` NAME
+  // CONVENTION made unrefusable.
+  "tokens-revoke-confirm": {
+    what: "the revoke CONFIRM SHEET's scenario: `tokens-revoke`'s fixture byte-for-byte, plus a declared `modal` driver that mock.js answers",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders. The dialog is shot over THIS.
+      const box = reg.get("token-list");
+      assert.equal(countMatches(box.innerHTML || "", 'class="token-row'), 4,
+        "the host screen must still render its four tokens — the dialog is shot OVER this list");
+
+      // 2 — the fixture is the host's, with nothing else moved. Deep equality,
+      //     not a spot check: if these ever diverge, a shot-hash difference
+      //     stops meaning "the dialog" and starts meaning "some other byte".
+      assert.deepEqual(
+        SCENARIOS["tokens-revoke-confirm"].data, SCENARIOS["tokens-revoke"].data,
+        "tokens-revoke-confirm must stay tokens-revoke's fixture exactly — that identity is " +
+        "what makes the two shots' difference attributable to the dialog alone");
+
+      // 3 — the declared driver EXISTS on the browser side. A typo'd name would
+      //     otherwise shoot the bare list under a filename promising a sheet.
+      assert.equal(SCENARIOS["tokens-revoke-confirm"].modal, "revoke-token");
+      assert.match(MOCK_JS, /"revoke-token": driveRevokeTokenSheet/,
+        "mock.js has no MODAL_DRIVERS entry named \"revoke-token\"");
+
+      // 4 — and the driver's own two selectors are the REAL ones app.js paints
+      //     (the `tokens-revoke` expectation above walks this same chain by
+      //     clicking it, which is what makes these two strings load-bearing).
+      assert.match(MOCK_JS, /whenPresent\("\.token-revoke\[data-id\]"/);
+      assert.match(MOCK_JS, /whenPresent\("#token-revoke-go", freezeShotSurface\)/);
+    },
+  },
+  "cmdk-palette": {
+    what: "the command palette's scenario: `mixed-fleet`'s fixture byte-for-byte, plus a declared `modal` driver that fires a REAL Cmd+K",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders one row per fixture instance.
+      const rows = countMatches(reg.get("fleet-body").innerHTML || "", "fleet-row");
+      assert.ok(rows >= SCENARIOS["cmdk-palette"].data.barkparks.length,
+        "the host fleet table must still render — the palette is shot OVER it");
+
+      // 2 — same identity argument as above.
+      assert.deepEqual(
+        SCENARIOS["cmdk-palette"].data, SCENARIOS["mixed-fleet"].data,
+        "cmdk-palette must stay mixed-fleet's fixture exactly");
+
+      // 3 — the driver exists, and it reaches the palette the way a PERSON does:
+      //     a dispatched keydown through app.js's own listener, which is what
+      //     puts the shot through that handler's four no-op guards instead of
+      //     around them. `openCommandPalette()` called directly would skip all
+      //     four and photograph a state no key press is proven to reach.
+      assert.equal(SCENARIOS["cmdk-palette"].modal, "cmdk");
+      assert.match(MOCK_JS, /cmdk: driveCommandPalette/,
+        "mock.js has no MODAL_DRIVERS entry named \"cmdk\"");
+      assert.match(MOCK_JS, /new KeyboardEvent\("keydown", \{\s*key: "k", metaKey: true/,
+        "the palette driver no longer dispatches a real Cmd+K keydown");
+      assert.match(APP_JS, /id="cmdk-input"/,
+        "the selector the driver waits for is gone from app.js");
+    },
+  },
+  // ── THE TWO CALL SITES THAT HAD NO SCENARIO (task-499cab525e65018b) ───────
+  // SAME SCOPE RULE as the two above, and it is worth restating because these
+  // two are the ones the enumeration in #19581 filed as GAPS: this runner never
+  // loads mock.js, so neither dialog opens in this process. The SHOT is the
+  // evidence that the dialog renders and modal-oracle.mjs is the evidence for
+  // its geometry. What is asserted here is the half those two cannot see — the
+  // fixture identity, the declared driver's existence, and, for the conflict,
+  // the REFUSAL ITSELF: route() is called and its answer is pushed through
+  // app.js's own classifier, in-process, so "the 409 reaches the pinned branch"
+  // is measured rather than asserted about a string.
+  "instance-pin-version": {
+    what: "the PIN VERSION form's scenario: `instance-behind`'s fixture byte-for-byte, plus a declared `modal` driver that clicks the panel's own live Pin control",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders, and it still OFFERS the control the
+      //     driver clicks. The live `data-au` mount hook, never the label: the
+      //     refused arm paints the same words on a disabled button, so a
+      //     label-only check cannot tell an offered verb from a withheld one.
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes('data-au="pin"'),
+        "the host Updates panel must paint the LIVE Pin version control — that click is the whole drive");
+      assert.ok(!body.includes("inst-life-disabled"),
+        "this fixture's actor is an owner; a disable-and-explain wrapper here means it lost its authority and the driver would click nothing");
+
+      // 2 — and the panel offers Pin for a REASON this fixture owns: the box is
+      //     unpinned, so autoupdateActions' showPin arm is the live one. A
+      //     fixture that gained a pinned_release would render Unpin instead and
+      //     this scenario would silently shoot a panel with no pin dialog
+      //     behind any button.
+      const acts = hooks.autoupdateActions(
+        SCENARIOS["instance-pin-version"].data.barkparks.find((b) => b.id === SCEN_IDS.behindInstance));
+      assert.equal(acts.showPin, true, "the fixture's box must be UNPINNED — showPin is what puts [data-au=pin] on screen");
+      assert.equal(acts.showUnpin, false);
+
+      // 3 — the fixture is the host's, with nothing else moved. Deep equality,
+      //     not a spot check: that identity is the entire reason a shot-hash
+      //     difference against `instance-behind` means "the dialog".
+      assert.deepEqual(
+        SCENARIOS["instance-pin-version"].data, SCENARIOS["instance-behind"].data,
+        "instance-pin-version must stay instance-behind's fixture exactly");
+
+      // 4 — the declared driver EXISTS on the browser side, and the two
+      //     selectors it waits for are the ones app.js paints. A typo'd driver
+      //     name would shoot the bare instance screen under a filename
+      //     promising a form — the precise lie the deleted `account-modal*`
+      //     name convention made unrefusable.
+      assert.equal(SCENARIOS["instance-pin-version"].modal, "pin-version");
+      assert.match(MOCK_JS, /"pin-version": drivePinVersionForm/,
+        "mock.js has no MODAL_DRIVERS entry named \"pin-version\"");
+      assert.match(MOCK_JS, /whenPresent\('\[data-au="pin"\]'/);
+      assert.match(MOCK_JS, /whenPresent\("#pin-go", freezeShotSurface\)/);
+      assert.match(APP_JS, /id="pin-go"/, "the selector the driver waits for is gone from app.js");
+    },
+  },
+  "instance-update-conflict": {
+    what: "the PIN-CONFLICT sheet's scenario: `instance-behind`'s fixture plus ONE key — a 409 pinned on POST /v1/barkparks/:id/self-update — which is the only branch that reaches openUpdateConflictModal",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders the CTA the drive's first click needs.
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes('id="inst-update"'),
+        "the host screen must still paint the live #inst-update CTA — it is the first of the drive's two clicks");
+
+      // 2 — the fixture is the host's plus EXACTLY ONE key, and it is named.
+      //     The pre-click bytes therefore cannot have moved: `instanceSelfUpdate`
+      //     answers a POST no scenario issues until someone presses Update.
+      const mine = { ...SCENARIOS["instance-update-conflict"].data };
+      const refusal = mine.instanceSelfUpdate;
+      delete mine.instanceSelfUpdate;
+      assert.deepEqual(mine, SCENARIOS["instance-behind"].data,
+        "instance-update-conflict must be instance-behind's fixture plus instanceSelfUpdate and nothing else");
+      assert.ok(refusal, "the refusal key is what this scenario exists for");
+
+      // 3 — THE REFUSAL, MEASURED END TO END IN THIS PROCESS. route() is asked
+      //     the question the click asks, and its answer is handed to app.js's
+      //     own classifier. Two failure modes this closes that a string check
+      //     cannot: a route arm that never matches the path (the arm was added
+      //     by this same change), and an envelope shape updateConflict() reads
+      //     as some OTHER kind — `other`, `not_found` — every one of which
+      //     dies into a toast and opens no dialog at all.
+      const served = route("instance-update-conflict", "POST",
+        "/v1/barkparks/" + SCEN_IDS.behindInstance + "/self-update");
+      assert.equal(served.status, 409, "the arm must answer the conflict, not fall through to the terminal /v1/ 200");
+      const c = hooks.updateConflict(served.body);
+      assert.equal(c.kind, "pinned",
+        "only kind 'pinned' on a NON-forced call reaches openUpdateConflictModal — every other kind toasts");
+      assert.equal(c.pin, "v0.8.4", "the sheet names the freeze, so the tag must survive the classifier");
+      // …and the copy it renders carries a forceLabel, which is what puts
+      // #update-force in the sheet at all — the selector the driver waits for
+      // and the one that tells this sheet from the confirm it replaced.
+      assert.ok(hooks.updateConflictCopy(c, served.body).forceLabel,
+        "no forceLabel means openUpdateConflictModal renders Cancel alone and #update-force never exists");
+
+      // 4 — the CONTROL for assertion 3: the default arm is NOT a refusal, so
+      //     the 409 above is this fixture's own doing and not something route()
+      //     answers everybody. `instance-behind` is the host itself.
+      const plain = route("instance-behind", "POST",
+        "/v1/barkparks/" + SCEN_IDS.behindInstance + "/self-update");
+      assert.equal(plain.status, 202,
+        "the host fixture must take the happy path — otherwise the conflict is route()'s default and this scenario measures nothing");
+
+      // 5 — the declared driver exists, and it reaches the sheet through TWO
+      //     real clicks rather than by calling the opener with a hand-built
+      //     copy object.
+      assert.equal(SCENARIOS["instance-update-conflict"].modal, "update-conflict");
+      assert.match(MOCK_JS, /"update-conflict": driveUpdateConflictSheet/,
+        "mock.js has no MODAL_DRIVERS entry named \"update-conflict\"");
+      assert.match(MOCK_JS, /whenPresent\("#inst-update"/);
+      assert.match(MOCK_JS, /whenPresent\("#update-go"/);
+      assert.match(MOCK_JS, /whenPresent\("#update-force", freezeShotSurface\)/);
+      assert.match(APP_JS, /id="update-force"/, "the selector the driver waits for is gone from app.js");
     },
   },
   "tokens-reveal": {
