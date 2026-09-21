@@ -772,8 +772,11 @@ function tableCellRows(editorJSON, projection) {
   const nodes = editorJSON?.content;
   if (!source.editable || !Array.isArray(nodes) || nodes.length !== 1 ||
       nodes[0]?.type !== "bpTable" || nodes[0]?.attrs?.bpId !== projection.id ||
-      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource"]) ||
+      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource", "colWidths"]) ||
       nodes[0]?.attrs?.bpTableSource != null ||
+      // Column widths (plan #25) are a canvas attribute; the per-block Studio editor edits plain
+      // grids, so a table carrying one fails closed here (read-only) and no widths reads as plain.
+      (Array.isArray(nodes[0]?.attrs?.colWidths) && nodes[0].attrs.colWidths.some((w) => w != null)) ||
       !Array.isArray(nodes[0].content)) return null;
   const liveRows = nodes[0].content;
   const hasHead = source.head != null;

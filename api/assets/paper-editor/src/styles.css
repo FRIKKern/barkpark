@@ -712,6 +712,10 @@
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
  * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
 .bp-canvas-table { position: relative; }
+/* Column-resize grips (plan #25): thin hit areas on each column's right edge, visible on hover. */
+.bp-canvas-table__resizers { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.bp-canvas-table__resize { position: absolute; width: 7px; cursor: col-resize; pointer-events: auto; opacity: 0; border-radius: 2px; background: var(--paper-accent-soft); transition: opacity 0.12s ease-out; }
+.bp-canvas-table:hover .bp-canvas-table__resize, .bp-canvas-table__resize:active { opacity: 1; }
 /* Idle controls add no reader spacing. When exposed, reserve their own space
  * BELOW the table: grids have no safe gutter for floating controls. */
 .bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }

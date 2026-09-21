@@ -52,6 +52,15 @@ carrying `rows` and `spans` (`spans: []` when the last one goes). Markdown canno
 spell a span, so such a table rides the sentinel. Studio's per-block editor edits
 plain grids only: a spanning cell fails closed there.
 
+## Column widths
+
+`cols[i].width` is an integer of CSS pixels beside the reader's column `type`;
+the article walker emits a `<colgroup>` (one `<col>` per column, `style="width:Npx"`
+where set), email keeps the plain grid. The canvas paints the same colgroup and
+offers a grip on every column's right edge; a drag sets that one column's width and
+lands as one `patch-block` carrying `cols` (`cols: []` when the last entry goes).
+BPML spells the column list as `<col type="num" width="220"/>` lines ahead of the rows.
+
 ## Verification
 
 Server: `api/lib/barkpark/portable_doc/table_editing.ex` and its matching test.

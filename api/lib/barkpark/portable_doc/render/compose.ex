@@ -890,6 +890,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       %{"kind" => "PdTable", "rows" => rows}
       |> table_put_col_types(col_types)
       |> table_put_spans(Map.get(b, "spans"), length(rows), rows |> List.first() |> List.wrap() |> length())
+      |> table_put_widths(Map.get(b, "cols"))
 
     head =
       if is_list(declared_head) and declared_head != [],
@@ -2495,6 +2496,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
   defp table_span_int(_v, _min), do: nil
+
+  # Column widths (Barkdown plan #25): `cols[i].width`, an integer of CSS pixels, rides PdTable as
+  # `widths` (nil where a column has none) — only when at least one column has one. Only the
+  # :article walker reads it (a <colgroup>); email keeps the plain grid.
+  defp table_put_widths(pd, cols) when is_list(cols) and cols != [] do
+    widths =
+      Enum.map(cols, fn
+        %{"width" => w} -> table_span_int(w, 1)
+        _ -> nil
+      end)
+
+    if Enum.any?(widths, &is_integer/1), do: Map.put(pd, "widths", widths), else: pd
+  end
+
+  defp table_put_widths(pd, _cols), do: pd
 
   defp table_put_col_types(pd, []), do: pd
   defp table_put_col_types(pd, types), do: Map.put(pd, "cols", types)

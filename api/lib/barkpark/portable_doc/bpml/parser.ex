@@ -71,6 +71,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "tr" => [],
     "th" => [],
     "td" => ~w(colspan rowspan),
+    "col" => ~w(type width),
     "meta" => [],
     "description" => [],
     "a" => ~w(href),
@@ -802,7 +803,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   end
 
   defp build_block("table", attrs, sc, cur) do
-    with {:ok, {head, rows}, cur} <- table_rows(sc, cur) do
+    with {:ok, {head, rows, cols}, cur} <- table_rows(sc, cur) do
       # Merged cells (Barkdown plan #24): a <td colspan/rowspan> is the origin of a span; the
       # cells it covers are printed as empty <td>s, so the grid stays rectangular.
       {rows, spans} = table_split_spans(rows)
@@ -813,6 +814,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> then(&if head == [], do: &1, else: Map.put(&1, "head", head))
         |> Map.put("rows", rows)
         |> then(&if spans == [], do: &1, else: Map.put(&1, "spans", spans))
+        |> then(&if cols == [], do: &1, else: Map.put(&1, "cols", cols))
 
       {:ok, block, cur}
     end
@@ -1158,11 +1160,11 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp table_rows(true, cur), do: {:ok, {[], []}, cur}
+  defp table_rows(true, cur), do: {:ok, {[], [], []}, cur}
 
-  defp table_rows(false, cur), do: table_rows_loop(cur, [], [], [])
+  defp table_rows(false, cur), do: table_rows_loop(cur, [], [], [], [])
 
-  defp table_rows_loop(cur, head, rows, errors) do
+  defp table_rows_loop(cur, head, rows, errors, cols) do
     cur = skip_ws(cur)
 
     case peek(cur) do
@@ -1170,15 +1172,38 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {errors, cur} = expect_close("table", cur, errors)
 
         if errors == [] do
-          {:ok, {Enum.reverse(head), Enum.reverse(rows)}, cur}
+          {:ok, {Enum.reverse(head), Enum.reverse(rows), Enum.reverse(cols)}, cur}
         else
           {:skip, errors, cur}
         end
 
       :tag ->
         case open_tag(cur) do
-          {:error, e} -> table_rows_loop(skip_to_next_tag(cur), head, rows, [e | errors])
-          {:ok, tag, _attrs, sc, cur2} -> table_row(cur, cur2, tag, sc, head, rows, errors)
+          {:error, e} ->
+            table_rows_loop(skip_to_next_tag(cur), head, rows, [e | errors], cols)
+
+          {:ok, "col", attrs, true, cur2} ->
+            # A column line: type (num | delta | spark) and/or a width in px (plan #25).
+            col =
+              %{}
+              |> put_attr("type", attrs)
+              |> then(fn m ->
+                case List.keyfind(attrs, "width", 0) do
+                  {"width", v} ->
+                    case Integer.parse(v) do
+                      {n, ""} when n > 0 -> Map.put(m, "width", n)
+                      _ -> m
+                    end
+
+                  nil ->
+                    m
+                end
+              end)
+
+            table_rows_loop(cur2, head, rows, errors, [col | cols])
+
+          {:ok, tag, _attrs, sc, cur2} ->
+            table_row(cur, cur2, tag, sc, head, rows, errors, cols)
         end
 
       _ ->
@@ -1188,17 +1213,17 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp table_row(cur, cur2, tag, sc, head, rows, errors) do
+  defp table_row(cur, cur2, tag, sc, head, rows, errors, cols) do
     if tag == "tr" and not sc do
       case row_cells(cur2, cur) do
         {:ok, {:head, cells}, cur3} ->
-          table_rows_loop(cur3, Enum.reverse(cells) ++ head, rows, errors)
+          table_rows_loop(cur3, Enum.reverse(cells) ++ head, rows, errors, cols)
 
         {:ok, {:body, cells}, cur3} ->
-          table_rows_loop(cur3, head, [cells | rows], errors)
+          table_rows_loop(cur3, head, [cells | rows], errors, cols)
 
         {:skip, es, cur3} ->
-          table_rows_loop(cur3, head, rows, es ++ errors)
+          table_rows_loop(cur3, head, rows, es ++ errors, cols)
       end
     else
       e =
@@ -1209,7 +1234,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           "wrap cells in <tr>…</tr>"
         )
 
-      table_rows_loop(consume_element(tag, sc, cur2), head, rows, [e | errors])
+      table_rows_loop(consume_element(tag, sc, cur2), head, rows, [e | errors], cols)
     end
   end
 

@@ -89,6 +89,14 @@ function tableAttributes() {
       keepOnSplit: false,
       parseHTML: () => null,
     },
+    // Column widths in CSS pixels (plan #25), null where a column has none; painted by the node
+    // view as a <colgroup>, stored on the block as `cols[i].width`. Not an HTML attribute.
+    colWidths: {
+      default: null,
+      rendered: false,
+      keepOnSplit: false,
+      parseHTML: () => null,
+    },
   };
 }
 
@@ -431,7 +439,89 @@ export const BpTable = Node.create({
       table.className = "bp-table";
       table.setAttribute("data-bp-type", "table");
       const tbody = document.createElement("tbody");
+      // Column widths (plan #25): a <colgroup> ahead of the body, one <col> per column, and a
+      // grip on every column's right edge that drags the width and commits it as an attribute.
+      const colgroup = document.createElement("colgroup");
+      colgroup.setAttribute("contenteditable", "false");
+      table.appendChild(colgroup);
       table.appendChild(tbody);
+      const resizers = document.createElement("div");
+      resizers.className = "bp-canvas-table__resizers";
+      resizers.contentEditable = "false";
+      const columnCountOf = (n) => gridWidth(toGrid(extractRows(n)));
+      const paintCols = (n) => {
+        const count = columnCountOf(n);
+        const widths = Array.isArray(n.attrs?.colWidths) ? n.attrs.colWidths : [];
+        while (colgroup.childNodes.length > count) colgroup.removeChild(colgroup.lastChild);
+        while (colgroup.childNodes.length < count) colgroup.appendChild(document.createElement("col"));
+        colgroup.childNodes.forEach((col, i) => { const w = widths[i]; col.style.width = Number.isInteger(w) && w > 0 ? w + "px" : ""; });
+      };
+      // The grips follow the first row whose cells cover every column (the head, or a row no
+      // span reaches into); measured on demand so they track typing and resizing.
+      const layoutGrips = () => {
+        const count = colgroup.childNodes.length;
+        const rowsEls = Array.from(table.querySelectorAll("tr"));
+        const full = rowsEls.find((tr) => tr.cells.length === count);
+        while (resizers.childNodes.length > count) resizers.removeChild(resizers.lastChild);
+        while (resizers.childNodes.length < count) {
+          const grip = document.createElement("div");
+          grip.className = "bp-canvas-table__resize";
+          grip.title = "Drag to resize the column";
+          grip.setAttribute("data-col", String(resizers.childNodes.length));
+          grip.addEventListener("pointerdown", (e) => startResize(e, Number(grip.getAttribute("data-col"))));
+          resizers.appendChild(grip);
+        }
+        if (!full || !editor.isEditable) { resizers.style.display = "none"; return; }
+        resizers.style.display = "";
+        const base = dom.getBoundingClientRect();
+        Array.from(full.cells).forEach((cell, i) => {
+          const r = cell.getBoundingClientRect();
+          const grip = resizers.childNodes[i];
+          grip.style.left = Math.round(r.right - base.left - 3) + "px";
+          grip.style.top = Math.round(r.top - base.top) + "px";
+          grip.style.height = Math.round(table.getBoundingClientRect().height) + "px";
+        });
+      };
+      const startResize = (e, col) => {
+        if (!editor.isEditable || e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const grip = e.currentTarget;
+        const count = colgroup.childNodes.length;
+        const startX = e.clientX;
+        const rowsEls = Array.from(table.querySelectorAll("tr"));
+        const full = rowsEls.find((tr) => tr.cells.length === count);
+        const startWidth = full ? full.cells[col].getBoundingClientRect().width : 120;
+        // Only columns that already have a width keep one; the dragged column gains its own. The
+        // others stay auto, so one drag never freezes the whole table (Notion resizes one column).
+        const current = Array.from({ length: count }, (_, i) => { const w = colgroup.childNodes[i].style.width; return w ? parseInt(w, 10) : null; });
+        let next = current.slice();
+        const onMove = (ev) => {
+          const w = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+          next = current.slice(); next[col] = w;
+          colgroup.childNodes[col].style.width = w + "px";
+          layoutGrips();
+        };
+        const onUp = () => {
+          grip.releasePointerCapture?.(e.pointerId);
+          grip.removeEventListener("pointermove", onMove);
+          grip.removeEventListener("pointerup", onUp);
+          grip.removeEventListener("pointercancel", onUp);
+          if (typeof getPos !== "function") return;
+          const pos = getPos();
+          if (pos == null) return;
+          const cur = editor.state.doc.nodeAt(pos);
+          if (!cur || cur.type.name !== "bpTable") return;
+          const widths = next.map((w) => (Number.isInteger(w) && w > 0 ? w : null));
+          if (JSON.stringify(widths) === JSON.stringify(cur.attrs.colWidths || null)) return;
+          editor.chain().command(({ tr }) => { tr.setNodeMarkup(pos, undefined, { ...cur.attrs, colWidths: widths.some((w) => w != null) ? widths : null }); return true; }).run();
+        };
+        grip.setPointerCapture?.(e.pointerId);
+        grip.addEventListener("pointermove", onMove);
+        grip.addEventListener("pointerup", onUp);
+        grip.addEventListener("pointercancel", onUp);
+      };
+      dom.addEventListener("mouseenter", () => layoutGrips());
 
       const rowRail = document.createElement("div");
       rowRail.className = "bp-canvas-table__rows";
@@ -516,6 +606,9 @@ export const BpTable = Node.create({
       let delColBtn = null;
       let delRowBtn = null;
 
+      // The grips overlay sits ahead of the table in the DOM (absolutely positioned over it), so the
+      // controls stay the table's next sibling.
+      dom.appendChild(resizers);
       dom.appendChild(table);
       dom.appendChild(controls);
 
@@ -597,6 +690,7 @@ export const BpTable = Node.create({
         }
       };
       repaint(node);
+      paintCols(node);
 
       return {
         dom,
@@ -604,13 +698,15 @@ export const BpTable = Node.create({
         update: (updated) => {
           if (updated.type.name !== "bpTable") return false;
           repaint(updated);
+          paintCols(updated);
+          if (resizers.style.display !== "none") layoutGrips();
           return true;
         },
         // A chrome event (a +col click) must NEVER become a PM transaction/caret jump;
         // an event inside the contentDOM cells MUST reach PM (cell typing/selection).
         stopEvent: (event) => {
           const t = event.target;
-          return controls.contains(t) || colRail.contains(t) || rowRail.contains(t);
+          return controls.contains(t) || colRail.contains(t) || rowRail.contains(t) || resizers.contains(t);
         },
         // Ignore mutations under the chrome rails; let PM see contentDOM (tbody)
         // mutations (the callout-node.js pattern).

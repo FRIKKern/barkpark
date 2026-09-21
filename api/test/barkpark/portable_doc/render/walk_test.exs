@@ -161,6 +161,14 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert length(Regex.scan(~r/<td/, email)) == 9
     end
 
+    test "column widths render as a <colgroup> on the article table only (plan #25)" do
+      table = %{"kind" => "PdTable", "head" => [[%{"kind" => "PdText", "children" => ["A"]}], [%{"kind" => "PdText", "children" => ["B"]}]], "rows" => [[[], []]], "widths" => [220, nil]}
+      html = Walk.render_body(table, @width, @article)
+      assert html =~ ~s(<table role="presentation" class="bp-table"><colgroup><col style="width:220px"><col></colgroup><thead>)
+      refute Walk.render_body(table, @width, @email) =~ "colgroup"
+      refute Walk.render_body(Map.delete(table, "widths"), @width, @article) =~ "colgroup"
+    end
+
     test "escapes HTML in string children" do
       node = %{"kind" => "PdText", "children" => ["<script>"]}
       html = Walk.render_body(node, @width, @email)

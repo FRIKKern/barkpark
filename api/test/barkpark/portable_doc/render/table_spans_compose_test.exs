@@ -33,6 +33,13 @@ defmodule Barkpark.PortableDoc.Render.TableSpansComposeTest do
            ]
   end
 
+  test "column widths ride PdTable as widths (nil where unset), only when one is set (plan #25)" do
+    pd = Compose.compose_block(Map.put(@table, "cols", [%{"width" => 220}, %{"type" => "num"}, %{}]), :article)
+    assert pd["widths"] == [220, nil, nil]
+    assert pd["cols"] == ["text", "num", "text"]
+    refute Map.has_key?(Compose.compose_block(Map.put(@table, "cols", [%{"type" => "num"}]), :article), "widths")
+  end
+
   test "the email arm never carries spans" do
     pd = Compose.compose_block(Map.put(@table, "spans", [%{"row" => 0, "col" => 0, "colspan" => 2}]), :email)
     assert pd["spans"] == [%{"row" => 0, "col" => 0, "colspan" => 2, "rowspan" => 1}] or not Map.has_key?(pd, "spans")

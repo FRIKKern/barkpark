@@ -1251,8 +1251,26 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<table role="presentation" class="bp-table">) <>
+      table_colgroup(Map.get(n, "widths"), max(length(head), body |> List.first() |> List.wrap() |> length())) <>
       thead <> "<tbody>#{tbody}</tbody></table>"
   end
+
+  # Column widths (Barkdown plan #25): one <col> per column, `style="width:Npx"` where a width is
+  # set. Integers only (compose.ex table_put_widths/2), so nothing here carries author text.
+  defp table_colgroup(widths, ncols) when is_list(widths) do
+    # One <col> per grid column: the stored list is trimmed to the last column that has a width.
+    padded = widths ++ List.duplicate(nil, max(0, ncols - length(widths)))
+
+    cols =
+      Enum.map_join(padded, "", fn
+        w when is_integer(w) and w > 0 -> ~s(<col style="#{escape_attr("width:#{w}px")}">)
+        _ -> "<col>"
+      end)
+
+    "<colgroup>#{cols}</colgroup>"
+  end
+
+  defp table_colgroup(_widths, _ncols), do: ""
 
   defp table(n, width, pal) do
     # Email table: horizontal rules only (a full 1px grid reads as a 2003

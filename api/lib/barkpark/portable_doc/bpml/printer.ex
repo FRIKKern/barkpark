@@ -225,7 +225,21 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
         "#{pad(d + 1)}<tr>#{tds}</tr>"
       end)
 
-    wrap("table", attr_str(b, ["id"]), head ++ rows, d)
+    # Columns (type for the reader's numeric/spark columns, width for Barkdown plan #25) print as
+    # self-closing <col> lines ahead of the rows, so a pull/push no longer drops them.
+    cols =
+      case Map.get(b, "cols") do
+        list when is_list(list) and list != [] ->
+          Enum.map(list, fn col ->
+            attrs = if is_map(col), do: attr_str(col, ["type", "width"]), else: ""
+            "#{pad(d + 1)}<col#{attrs}/>"
+          end)
+
+        _ ->
+          []
+      end
+
+    wrap("table", attr_str(b, ["id"]), cols ++ head ++ rows, d)
   end
 
   defp td_span_attrs(spans, r, c) do

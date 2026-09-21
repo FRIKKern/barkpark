@@ -2204,12 +2204,18 @@ function tableBlockToNode(block, bpId, bpType) {
     content.push({ type: "bpTableRow", content: [{ type: "bpTableCell" }] });
   }
 
+  // Column widths (plan #25): `cols[i].width` → the node's colWidths (null where unset), only when
+  // at least one column has one; the node view paints them as a <colgroup>.
+  const colsSrc = Array.isArray(block && block.cols) ? block.cols : [];
+  const widths = colsSrc.map((c) => (c && typeof c === "object" && Number.isInteger(c.width) && c.width > 0 ? c.width : null));
+  const colWidths = widths.some((w) => w != null) ? widths : null;
   return {
     type: "bpTable",
     attrs: {
       bpId,
       bpType: bpType || "table",
       bpTableSource: { block: deepClone(block) },
+      colWidths,
     },
     content,
   };
@@ -2298,6 +2304,22 @@ function tableNodeToBlock(node, id) {
   block.rows = rows;
   if (grid.spans.length) block.spans = grid.spans;
   else delete block.spans;
+  // Column widths back onto `cols` (kept beside the reader's column types); a column list with
+  // nothing left in it is dropped.
+  const widths = Array.isArray(node?.attrs?.colWidths) ? node.attrs.colWidths : null;
+  if (widths || (Array.isArray(block.cols) && block.cols.some((c) => c && typeof c === "object" && c.width != null))) {
+    const width = Math.max(rows.length ? rows[0].length : 0, head ? head.length : 0, widths ? widths.length : 0);
+    const cols = Array.from({ length: width }, (_, i) => {
+      const src = Array.isArray(block.cols) && block.cols[i] && typeof block.cols[i] === "object" ? { ...block.cols[i] } : {};
+      const w = widths ? widths[i] : null;
+      if (Number.isInteger(w) && w > 0) src.width = w;
+      else delete src.width;
+      return src;
+    });
+    while (cols.length && Object.keys(cols[cols.length - 1]).length === 0) cols.pop();
+    if (cols.some((c) => Object.keys(c).length)) block.cols = cols;
+    else delete block.cols;
+  }
   if (head) block.head = head;
   else if (Array.isArray(source?.head) && source.head.length) block.head = [];
   else if (!source || !Object.hasOwn(source, "head")) delete block.head;
@@ -2325,6 +2347,11 @@ function tableNodeToPatch(node, prevBlock) {
     (Array.isArray(node?.attrs?.bpTableSource?.block?.spans) && node.attrs.bpTableSource.block.spans.length > 0);
   if (Array.isArray(block.spans) && block.spans.length) patch.spans = block.spans;
   else if (hadSpans) patch.spans = [];
+  // Column widths ride `cols` on the patch; a table that lost its last column entry says `cols: []`.
+  const hadCols = (Array.isArray(prevBlock?.cols) && prevBlock.cols.length > 0) ||
+    (Array.isArray(node?.attrs?.bpTableSource?.block?.cols) && node.attrs.bpTableSource.block.cols.length > 0);
+  if (Array.isArray(block.cols) && block.cols.length) patch.cols = block.cols;
+  else if (hadCols) patch.cols = [];
   return patch;
 }
 
@@ -2337,7 +2364,7 @@ function tableNodeChanged(prevNode, nextNode) {
 
 function stableTableKey(node) {
   const b = tableNodeToBlock(node, null);
-  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows, spans: b.spans || null });
+  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows, spans: b.spans || null, cols: b.cols || null });
 }
 
 // ── eyebrow / byline / ingress / pullquote ⇄ canvas role prose node ──────────
