@@ -78,9 +78,49 @@ OUT="${OUT:-$HERE/__shots__}"
 REAP_BUDGET="${REAP_BUDGET:-10}"
 
 # ── locate a Chrome/Chromium binary ──────────────────────────────────────────
+#
+# THE PLAYWRIGHT HEADLESS SHELL GOES FIRST, AND THAT ORDER IS A MEASUREMENT.
+# On this Mac (2026-09-20, task-f8318f7734a52c52) the two binaries this function
+# used to consider FIRST both hang past the 15s poll under
+# `--headless=new --screenshot`: /Applications/Google Chrome.app and playwright's
+# full `chromium-1217` Chrome for Testing 147 each produced
+# `>> Done with FAILURES. 0 ok, 8 failed` on an 8-shot matrix. Only
+# `chromium_headless_shell-*/…/chrome-headless-shell` wrote PNGs — every GR129
+# number in PR #19583 came off that binary, driven by hand through CHROME=.
+# A harness whose auto-detection cannot shoot on the host it ships to is a
+# harness nobody runs, so the one that works is now the first thing tried.
+# (`CHROME=` still overrides everything, so a host where full Chrome is the
+# right answer is one env var away.)
+#
+# DERIVED, NEVER PINNED. The build number is a glob and the HIGHEST one wins:
+# a frozen `-1217` would rot the next `npx playwright install` and then lie
+# about why (GR53/GR80/GR83 — the same class as the frozen census this file
+# already refuses). The roots follow playwright's own layout, the one
+# scripts/studio-desk-measure.mjs quotes in its launch-failure fix text:
+# $PLAYWRIGHT_BROWSERS_PATH when set, else ~/Library/Caches/ms-playwright
+# (macOS) or ~/.cache/ms-playwright (Linux). Both the current
+# `chrome-headless-shell` basename and the older `headless_shell` are matched.
+playwright_headless_shell() {
+  local roots=() root hit
+  [[ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]] && roots+=("$PLAYWRIGHT_BROWSERS_PATH")
+  roots+=("$HOME/Library/Caches/ms-playwright" "$HOME/.cache/ms-playwright")
+  for root in "${roots[@]}"; do
+    [[ -d "$root" ]] || continue
+    # Sort on the BUILD NUMBER, numerically — a lexical sort puts 999 above
+    # 1217 and would silently pick a stale install.
+    hit="$(find "$root" -maxdepth 3 -type f \
+             \( -name 'chrome-headless-shell' -o -name 'headless_shell' \) 2>/dev/null \
+           | awk -F'chromium_headless_shell-' 'NF > 1 { split($2, p, "/"); print p[1] "\t" $0 }' \
+           | sort -n -k1,1 | tail -1 | cut -f2-)"
+    if [[ -n "$hit" && -x "$hit" ]]; then echo "$hit"; return; fi
+  done
+  echo ""
+}
+
 find_chrome() {
   if [[ -n "${CHROME:-}" ]]; then echo "$CHROME"; return; fi
   local candidates=(
+    "$(playwright_headless_shell)"
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     "/Applications/Chromium.app/Contents/MacOS/Chromium"
     "$(command -v google-chrome 2>/dev/null || true)"
@@ -420,6 +460,8 @@ shot() {
     sleep "$REAP_BUDGET"
     if kill -0 "$cpid"; then
       echo "  !! watchdog: chrome $cpid ignored TERM for ${REAP_BUDGET}s — killing tree" >&3
+      echo "  !!   binary: $CHROME_BIN" >&3
+      echo "  !!   shot:   ${scen}/${theme}/${width}${accent_sfx}" >&3
       pkill -9 -P "$cpid" || true
       kill -9 "$cpid" || true
     fi
@@ -446,7 +488,28 @@ shot() {
     echo "  ok  $(basename "$png")"
   else
     SHOTS_FAILED=$((SHOTS_FAILED + 1))
-    echo "  !! failed: ${scen}/${theme}/${width}${accent_sfx}"
+    # NAME THE BINARY, not just the shot. The measured failure on this host was
+    # a CANDIDATE fault, not a scenario fault: /Applications/Google Chrome.app
+    # and playwright's full chromium-1217 each ran the poll out on all 8 shots
+    # and the log said only `!! failed: <scenario>` eight times — which reads as
+    # "the app is broken" and sent a whole wave looking at app.js. Which binary
+    # wrote nothing, and for how long, is the fact that ends that search.
+    echo "  !! failed: ${scen}/${theme}/${width}${accent_sfx} — no PNG after ${waited}ms"
+    echo "  !!   binary: $CHROME_BIN"
+    if (( SHOTS_FAILED == 1 )); then
+      echo "  !!   This binary wrote NO PNG inside the ${waited}ms poll — a hang, not a crash."
+      echo "  !!   Measured on macOS 2026-09-20: /Applications/Google Chrome.app and"
+      echo "  !!   playwright's FULL chromium-* Chrome for Testing both hang here under"
+      echo "  !!   --headless=new --screenshot; only the playwright HEADLESS SHELL writes."
+      local shell_hint
+      shell_hint="$(playwright_headless_shell)"
+      if [[ -n "$shell_hint" && "$shell_hint" != "$CHROME_BIN" ]]; then
+        echo "  !!   Retry with: CHROME='$shell_hint' $0"
+      else
+        echo "  !!   No playwright headless shell found either — install one:"
+        echo "  !!     npx playwright install chromium-headless-shell"
+      fi
+    fi
   fi
 }
 
@@ -470,6 +533,9 @@ done <<< "$SCEN_TABLE"
 # inflation that made a 44-shot run report 49.
 if (( SHOTS_FAILED > 0 )); then
   echo ">> Done with FAILURES. $SHOTS_OK ok, $SHOTS_FAILED failed, into $OUT"
+  if (( SHOTS_OK == 0 )); then
+    echo ">> EVERY shot failed with CHROME_BIN=$CHROME_BIN — suspect the BINARY, not the app."
+  fi
   exit 1
 fi
 echo ">> Done. $SHOTS_OK PNG(s) shot this run into $OUT"

@@ -148,7 +148,7 @@ import { TaskList } from "./task-list-node.js";
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
 // PM derives the contentDOM from the content hole; getJSON round-trips the styled
 // element + bpId/bpType, and run-convert.js maps the block ⇄ node. See ./role-nodes.js.
-import { Eyebrow, Byline, Ingress, Pullquote } from "./role-nodes.js";
+import { Eyebrow, Byline, Ingress, Pullquote, Blockquote } from "./role-nodes.js";
 // editable table: the `table` block as FOUR hand-rolled NESTED nodes (bpTable >
 // bpTableRow > bpTableHeaderCell|bpTableCell), NOT @tiptap/extension-table. Cell bodies
 // are PM `inline*` holes reusing the shared inline serializer (marks round-trip); the
@@ -908,6 +908,7 @@ class BpPaperCanvas extends HTMLElement {
         Byline,
         Ingress,
         Pullquote,
+        Blockquote,
         // editable table: the four nested nodes (bpTable > bpTableRow >
         // bpTableHeaderCell|bpTableCell). Registers the container + row/cell types so
         // runToTiptap's { type:"bpTable", content:[rows…] } tree mounts with editable
@@ -1462,6 +1463,11 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
+    // A `saved:false` acknowledgement keeps the batch in flight: the Studio host's
+    // contract is that a failed head stays pending and its Retry resends the same
+    // batch verbatim, with later edits waiting behind it (__save_ack_mounted). A host
+    // that wants the other behaviour — drop the refused batch and fold it into the
+    // next edit — calls discardInflightOps(seq) instead.
     if (saved !== true) return false;
 
     // Diff against the local snapshot the author still sees. A canonical reply
@@ -1500,6 +1506,40 @@ class BpPaperCanvas extends HTMLElement {
     if (dirty) this._emitOps();
     else this._flushPendingServerBlocks();
     return true;
+  }
+
+  // The host's OTHER answer to a refused batch (a lifecycle veto such as "a published
+  // paper cannot be hollowed out", or a request that will not succeed by retrying):
+  // drop the in-flight batch WITHOUT advancing the baseline. `_blocks` still holds the
+  // last SAVED snapshot, so the next local edit diffs against it and carries the
+  // refused change along — the author keeps what they see, and it lands as soon as
+  // the server will take it (a batch that would hollow the paper saves once they
+  // write again). Edits made while the batch was travelling are emitted now: that
+  // diff already differs from the refused one. An unchanged vetoed batch is never
+  // resent on its own; resendPendingOps() is the host's explicit "try again".
+  // Without this seam a refused batch pinned the pipeline: every later edit queued
+  // behind it, never sent (found by Barkdown's editor-multiblock row: cut all, type).
+  discardInflightOps(seq) {
+    if (!this._acknowledgedSaves) return false;
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq) return false;
+    this._inflightOps = null;
+    const dirty = this._dirtyWhileInflight;
+    this._dirtyWhileInflight = false;
+    if (dirty) this._emitOps();
+    return true;
+  }
+
+  // Re-diff the live document against the saved baseline and emit the batch, if any
+  // and if nothing is in flight. The host's Retry after discardInflightOps: it must
+  // NOT resend the discarded ops (an insert would land twice); it asks for a fresh diff.
+  resendPendingOps() {
+    if (this._inflightOps || !this._editor) return false;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    return this._emitOps() === true;
   }
 
   // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────
@@ -1759,7 +1799,10 @@ class BpPaperCanvas extends HTMLElement {
     if (html || !text) return false;
     const lines = text.split(/\r?\n/);
     const blockish = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|---\s*$)/;
-    if (!lines.some((line) => blockish.test(line))) return false;
+    // A GFM pipe table announces itself by a delimiter row (dashes with a pipe) under a header line.
+    const tableDelimiter = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+    const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
+    if (!lines.some((line) => blockish.test(line)) && !pipeTable) return false;
     let nodes;
     try {
       const blocks = markdownToBlocks(text);
@@ -2134,14 +2177,15 @@ class BpPaperCanvas extends HTMLElement {
     const code = /^```$/.test(blockText);
     const quote = /^>\s$/.test(blockText);
     if (quote) {
-      // `> ` → the quote block (pullquote is the canvas's authored quote). The callout gesture
-      // `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside the quote.
+      // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
+      // quote; the pullquote stays article chrome, reached from the slash menu). The callout
+      // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
       const { state, view } = this._editor;
       const start = $from.before(1);
       const end = $from.after(1);
       // Keep the block's id so the save is a same-id replace-block, not remove + insert.
-      const quoteNode = state.schema.nodes.pullquote
-        ? state.schema.nodes.pullquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "pullquote" })
+      const quoteNode = state.schema.nodes.blockquote
+        ? state.schema.nodes.blockquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "blockquote" })
         : null;
       if (!quoteNode) return false;
       let tr = state.tr.replaceWith(start, end, quoteNode);
@@ -2206,7 +2250,9 @@ class BpPaperCanvas extends HTMLElement {
     // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body, and still rejects a paragraph nested in a list item. See
     // slashTriggerAllowsParent.
-    const inQuote = $from.depth === 1 && $from.parent.type.name === "pullquote";
+    // `> ` has already become a quote block (the plain blockquote now; a pullquote when one
+    // was authored from the menu), so the `[!note] ` that follows arrives inside it.
+    const inQuote = $from.depth === 1 && ($from.parent.type.name === "blockquote" || $from.parent.type.name === "pullquote");
     if (!inQuote && !slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
     const blockText = $from.parent.textContent;
     const atEnd = $from.parentOffset === blockText.length;

@@ -159,6 +159,31 @@ defmodule Barkpark.DbUndeclaredIndexCensusTest do
     end
   end
 
+  test "the derive loop's count identity is proved BOTH ways, and apart from the BLIND SPOT tally",
+       ctx do
+    # The manifest is the ALLOW side of the census. A derive loop that reads
+    # fewer migration files than `find` handed it produces a SHORTER declared
+    # set with no error and no non-zero status, and every index the unread
+    # migrations declared then reads UNDECLARED against a production database
+    # that is entirely correct.
+    #
+    # Named, not counted, and the pair is load-bearing: (m) alone could be
+    # satisfied by a script that refuses always, and (n) is the one that says
+    # the pre-existing BLIND SPOT tally is a DIFFERENT quantity — it counts
+    # declarations the parser opened and could not NAME, so a file it never
+    # opened leaves that number untouched while the manifest shrinks.
+    for arm <- [
+          "(o) QUIET: an unmutated derive over the same fixture emits the FULL manifest and refuses nothing",
+          "(m) RED: a stdin-draining child in the derive loop body makes the count identity refuse, naming 1 of 3, and no manifest is printed",
+          "(n) the BLIND SPOT tally does NOT move under that same short read"
+        ] do
+      assert ctx.out =~ "ok   " <> arm,
+             "the selftest no longer runs a green `#{arm}` arm. Without the trio the census " <>
+               "can go back to deriving its ALLOW set from a partial migration list and " <>
+               "calling correct production indexes UNDECLARED.\nOutput:\n#{ctx.out}"
+    end
+  end
+
   test "leg B is present: the census is a path elixir.yml dispatches the test job on" do
     ratchet = Path.expand(@ratchet_rel, __DIR__)
 

@@ -235,10 +235,45 @@
           // (role=alert) only once the 422 lands. Without this the drive merely
           // ASSUMED its own subject; now a shot that never reached the 422 says
           // so by name instead of quietly photographing the enroll form.
-          whenPresent("#a2f-error", function () {});
+          whenPresent("#a2f-error", freezeShotSurface);
         });
       });
     });
+  }
+
+  // ── FREEZE THE SHOT (gr-p5r7-badcode-shot-nondeterministic) ────────────────
+  // The drive above ends with the app's own error handler re-focusing the OTP
+  // field (`grep -n 'a2f-otp' ../app.js` — the confirm-error branch re-seeds
+  // and re-focuses it). A FOCUSED text input is the one thing in this harness
+  // that is not a function of the DOM: it carries a BLINKING CARET on a wall
+  // clock Chrome's --virtual-time-budget does not freeze, and the focus ring
+  // arrives through a CSS transition whose phase depends on when the capture
+  // poll happens to fire.
+  //
+  // MEASURED, not hypothesised. Two clean shoots of this scenario at
+  // origin/main 2ff0d2c1a (Chrome for Testing 147.0.7727.15, headless shell):
+  //   account-modal-2fa-badcode-light-1440-iris  c1350453… 395866 B
+  //                                              7cfb2b44… 395120 B
+  // while all four plain `account-modal` shots were byte-identical across the
+  // same two runs. `magick compare` put EVERY differing pixel inside one
+  // 228x88 device-pixel box — the #a2f-otp input — and the crops show the
+  // caret present in one run and absent in the other. It is NOT the QR, which
+  // is a byte-matched SVG (`grep -n 'THE GATE IS A BYTE-MATCH' ../app.js`).
+  //
+  // So freeze both sources at shoot time, in the PREVIEW harness only — app.js
+  // is untouched, and a real user still gets a real caret. Focus is KEPT: the
+  // shot must still show the focused, rejected field; only its blink phase and
+  // its in-flight transitions are removed. Setting `transition:none` mid-
+  // transition snaps the property to its final computed value, so what lands
+  // is the settled frame rather than an arbitrary one.
+  function freezeShotSurface() {
+    if (document.querySelector("style[data-preview-shot-freeze]")) return;
+    var s = document.createElement("style");
+    s.setAttribute("data-preview-shot-freeze", "caret+transition+animation");
+    s.textContent =
+      "*,*::before,*::after{caret-color:transparent !important;" +
+      "transition:none !important;animation:none !important}";
+    (document.head || document.documentElement).appendChild(s);
   }
 
   if (params.get("modal") === "account") {

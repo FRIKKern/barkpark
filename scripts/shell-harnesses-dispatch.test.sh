@@ -33,6 +33,12 @@
 #               regex over the same JSON (comments stripped from the body), so a
 #               new axis added to a loop alone reds here; mutation-proved by
 #               adding a fifth axis `q` to one loop in a scratch copy
+#   H  FALLBACK the `sets` step's REAL body is run over two staged repos — a
+#               head WITHOUT scripts/shell-harness-dispatch.sh (the base's copy
+#               must run, exit 0) and a head WITH its own (the head's copy must
+#               run). Both preconditions asserted before either verdict. This
+#               is the exit-127 that took every harness leg dark on 42 PRs
+#               (task-ecb7fc56b5868bfc)
 #
 # bash 3.2 compatible (macOS runs it too): no associative arrays, no mapfile.
 # python3 + PyYAML are the only unstubbed dependencies; their absence is exit 2
@@ -173,9 +179,16 @@ run = step["run"]
 #   · the scalar carries NO `${{` at all (it is a literal, never an expression)
 #   · the two GitHub values arrive as step `env:` under the names the script
 #     reads, or the script sees an empty event and an empty base
-#   · the scalar is a thin invocation of a script under scripts/, whose path is
+#   · the scalar is a THIN WRAPPER around a script under scripts/, whose path is
 #     READ FROM HERE rather than hardcoded, so the clauses below measure
-#     whatever the workflow actually runs
+#     whatever the workflow actually runs. It used to have to be ONE LINE. It no
+#     longer can be: the checkout is the PR HEAD while this file comes from the
+#     merge ref, so a head that predates the script's own creation commit ran
+#     the bare line into `No such file or directory`, exit 127, and took every
+#     harness leg dark with it (run 35517160933, task-ecb7fc56b5868bfc). The
+#     body therefore carries an absent-file fallback, and THAT is now asserted
+#     instead: one script path, a preamble small enough to read, an existence
+#     test, and a recovery that does not read the head tree.
 if "${{" in run:
     sys.stderr.write("the `sets` step's run: scalar carries a ${{ }} expression, so GitHub compiles it "
                      "into ONE expression under the 21000-char cap. Keep the body in a script file.\n")
@@ -188,11 +201,20 @@ for k, v in want_env.items():
         sys.stderr.write("the `sets` step must pass %s: %s as step env (got %r) — the script reads it "
                          "from the environment\n" % (k, v, env.get(k)))
         sys.exit(2)
-m = re.search(r"(scripts/[A-Za-z0-9._/-]+\.sh)", run)
-if not m or len(run.strip().splitlines()) != 1:
-    sys.stderr.write("the `sets` step must be a one-line invocation of a script under scripts/; got %r\n" % run)
+paths = sorted(set(re.findall(r"(scripts/[A-Za-z0-9._/-]+\.sh)", run)))
+if len(paths) != 1 or len(run.strip().splitlines()) > 24:
+    sys.stderr.write("the `sets` step must be a thin wrapper around exactly ONE script under "
+                     "scripts/ (found %r, %d line(s)); got %r\n"
+                     % (paths, len(run.strip().splitlines()), run))
     sys.exit(2)
-script_rel = m.group(1)
+if not (re.search(r"(?:\[\[?[ \t]+|\btest[ \t]+)-[efxrs][ \t]", run)
+        and re.search(r"\bgit[ \t]+(?:show|fetch|cat-file)\b", run)):
+    sys.stderr.write("the `sets` step has NO absent-file fallback: a PR head whose merge base "
+                     "predates the dispatcher's creation commit has this `run:` line and not the "
+                     "file, so the step exits 127 and every harness leg goes ABSENT. Test for the "
+                     "file and read the base's copy when it is missing.\n")
+    sys.exit(2)
+script_rel = paths[0]
 script_abs = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(wf))), "..", script_rel)
 script_abs = os.path.normpath(script_abs)
 if not os.path.isfile(script_abs):
@@ -641,6 +663,94 @@ PYM
   else
     bad "G2 could not build the mutant legs file"
   fi
+fi
+
+# ── H  THE ABSENT-FILE FALLBACK, HERMETICALLY (task-ecb7fc56b5868bfc) ────────
+# The checkout in this job is the PR HEAD; the workflow FILE comes from the
+# merge ref. So the moment the dispatcher body moved into scripts/ (befc8cbbf,
+# 2026-09-20T14:21Z), every head whose merge base predated that commit carried
+# the new `run:` line and NOT the file: `No such file or directory`, exit 127,
+# matrix never rendered, every harness leg ABSENT (run 35517160933 job
+# 106094923976, head 1badf9dc5). This arm runs the step's REAL body — extracted
+# from the workflow, not retyped — against two staged trees:
+#   H1  a head WITHOUT the script, with the base's copy reachable  -> exit 0,
+#       and the BASE's copy is what ran
+#   H2  a head WITH its own copy                                   -> exit 0,
+#       and the HEAD's copy is what ran (a PR editing the dispatcher must test
+#       its own edit, never the base's)
+# The precondition is asserted in both directions before either verdict is
+# believed: a "green" from a tree that quietly still had the file measures
+# nothing.
+SETS_BODY="$TMP/sets-body.sh"
+if python3 - "$WORKFLOW" "$SETS_BODY" <<'PYH'
+import sys, yaml
+wf, out = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(wf))
+steps = doc["jobs"]["changes"]["steps"]
+hit = [s for s in steps if s.get("id") == "sets"]
+if len(hit) != 1:
+    sys.stderr.write("expected exactly one `sets` step\n"); sys.exit(2)
+run = hit[0]["run"]
+if "${{" in run:
+    sys.stderr.write("the sets body carries a GitHub expression\n"); sys.exit(2)
+open(out, "w").write(run)
+PYH
+then
+  ok "H extracted the real \`sets\` body from the workflow ($(wc -l <"$SETS_BODY" | tr -d ' ') lines)"
+
+  _stage_repo() { # $1 = dir, $2 = "absent" | "present"
+    local r="$1" mode="$2"
+    mkdir -p "$r/scripts"
+    git -C "$r" init -q -b main
+    git -C "$r" config user.email t@t; git -C "$r" config user.name t
+    printf 'echo "RAN=base"\n' >"$r/scripts/shell-harness-dispatch.sh"
+    git -C "$r" add -A >/dev/null; git -C "$r" commit -qm base
+    # `origin/main` WITHOUT a network: the ref is what `git show` reads.
+    git -C "$r" update-ref refs/remotes/origin/main refs/heads/main
+    if [ "$mode" = absent ]; then
+      git -C "$r" rm -q scripts/shell-harness-dispatch.sh
+      git -C "$r" commit -qm "a head that predates the dispatcher"
+    else
+      printf 'echo "RAN=head"\n' >"$r/scripts/shell-harness-dispatch.sh"
+      git -C "$r" commit -qam "a head that edits the dispatcher"
+    fi
+  }
+
+  for mode in absent present; do
+    R="$TMP/fallback-$mode"; rm -rf "$R"; mkdir -p "$R"
+    _stage_repo "$R" "$mode" >/dev/null 2>&1
+    # PRECONDITION, both directions — never inferred from the exit code.
+    if [ "$mode" = absent ] && [ -f "$R/scripts/shell-harness-dispatch.sh" ]; then
+      bad "H($mode) the staged head still HAS the dispatcher — the case is vacuous"
+      continue
+    fi
+    if [ "$mode" = present ] && [ ! -f "$R/scripts/shell-harness-dispatch.sh" ]; then
+      bad "H($mode) the staged head LACKS the dispatcher — the case is vacuous"
+      continue
+    fi
+    if [ "$mode" = absent ]; then
+      ok "H(absent) precondition: the staged head has NO dispatcher, and origin/main does"
+    else
+      ok "H(present) precondition: the staged head carries its OWN dispatcher"
+    fi
+    rt="$TMP/rt-$mode"; mkdir -p "$rt"
+    hrc=0
+    ( cd "$R" && RUNNER_TEMP="$rt" GITHUB_BASE_REF=main GITHUB_OUTPUT="$TMP/out-$mode.txt" \
+        bash "$SETS_BODY" ) >"$TMP/h-$mode.out" 2>&1 || hrc=$?
+    if [ "$hrc" -eq 0 ]; then
+      ok "H($mode) the real step body exits 0"
+    else
+      bad "H($mode) the real step body exited $hrc: $(tail -3 "$TMP/h-$mode.out" | tr '\n' ' ')"
+    fi
+    want=base; [ "$mode" = present ] && want=head
+    if grep -q "RAN=$want" "$TMP/h-$mode.out"; then
+      ok "H($mode) the $want copy (RAN=$want) is the one that ran"
+    else
+      bad "H($mode) wanted RAN=$want, got: $(tr '\n' ' ' <"$TMP/h-$mode.out" | head -c 200)"
+    fi
+  done
+else
+  bad "H could not extract the \`sets\` body (the shape moved)"
 fi
 
 echo ""

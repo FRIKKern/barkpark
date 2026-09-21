@@ -117,7 +117,14 @@ function goFiles(root) {
 const CASE_RE = /^\s*case\s+((?:"[^"]*"\s*,\s*)*"[^"]*")\s*:/;
 const FUNC_RE = /^func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(/;
 const RETURN_RUN_RE = /return\s+(run[A-Z]\w*)\s*\(/;
-const VERB_EQ_RE = /\b(?:verb|resource|args\[0\]|rest\[0\]|sub|tail\[0\])\s*==\s*"([\w][\w.-]*)"/g;
+// `==` and `!=` are the SAME declaration of vocabulary. A guard written as a
+// refusal — `if args[0] != "schema" { usage; return }` in make_cmd.go — names
+// the one token this leaf accepts just as literally as `case "schema":` would,
+// and keying only on `==` made `bp make schema <name>` UNRESOLVED on a doc line
+// that was never wrong. Either operator is a branch ON that token: the parser
+// demonstrably knows the word. (It cannot manufacture a vacuous green: the
+// token is donated only to the node that already sits at that dispatch point.)
+const VERB_EQ_RE = /\b(?:verb|resource|args\[0\]|rest\[0\]|sub|tail\[0\])\s*(?:==|!=)\s*"([\w][\w.-]*)"/g;
 const FLAG_LITERAL_RE = /"(--[a-z0-9][a-z0-9-]*)"/g;
 const HZ_RE = /parseHzArgs\(\s*[^,]+,\s*\[\]string\{([^}]*)\}\s*,\s*\[\]string\{([^}]*)\}/;
 const STRING_RE = /"((?:[^"\\]|\\.)*)"/g;
@@ -164,7 +171,7 @@ const SCOPE_ONLY_RE = /([A-Z][a-z0-9]+)Only$/;
 // dispatch token is the PAIR (`task create`). nounBuiltins is that shape, and
 // donating its bare verbs to a node would make `bp <anything> create`
 // resolvable — the exact vacuous green source D exists to kill.
-const QUALIFIER_FIELD_RE = /\b(?:Noun|Group|Parent|Namespace|Family):\s*"[^"]+"/;
+const QUALIFIER_FIELD_RE = /\b(?:Noun|Group|Parent|Namespace|Family):\s*"([^"]+)"/;
 // the tokens a dispatcher's caller uses for "the verb the USER typed"
 const USER_TOKEN_RE = /\b(?:args|rest|tail|a|argv)\[0\]|\b(?:verb|sub|subcommand)\b/;
 const HANDLER_SKIP = new Set(["Verb", "Name", "Cmd", "Command", "Aliases", "Alias",
@@ -214,7 +221,22 @@ function literalElements(text, bodyStart, bodyEnd) {
 function parseTableEntry(elText) {
   const vm = elText.match(VERB_FIELD_RE);
   if (!vm) return null;
-  if (QUALIFIER_FIELD_RE.test(elText)) return { qualified: true };
+  const qm = elText.match(QUALIFIER_FIELD_RE);
+  if (qm) {
+    // [D3] A noun-qualified row dispatches the PAIR, never the bare verb. Its
+    // verbs must still NOT be donated to a node (that is the vacuous green
+    // `bp <anything> create` this source exists to kill) — but dropping the row
+    // entirely made a REAL front door invisible: `bp task create` is dispatched
+    // from nounBuiltins and was scored UNRESOLVED on three true doc lines. So
+    // the row is kept, keyed by its pair, and adjudicates only `<noun> <verb>`.
+    const off = elText.indexOf(`"${vm[1]}"`);
+    // The row's own handler names the LEAF, so this pair's flags still resolve
+    // against the real function ([C]/[E]) instead of falling to UNPROVEN. A
+    // registry row wraps its leaf in a func literal (`Run: func(…) int { return
+    // runTaskCreate(…) }`), which HANDLER_FIELD_RE cannot see, so read the call.
+    const lm = elText.match(/\b(run[A-Z]\w*)\s*\(/);
+    return { qualified: true, noun: qm[1], verb: vm[1], verbOff: off >= 0 ? off : 0, leaf: lm ? lm[1] : null };
+  }
   const names = [vm[1]];
   const am = elText.match(ALIASES_FIELD_RE);
   if (am) for (const s of am[1].matchAll(/"([^"]+)"/g)) names.push(s[1]);
@@ -278,8 +300,16 @@ function reachableVerbs(table, ctx) {
 }
 
 // Find every verb table in the CLI sources.
+//
+// Returns BOTH kinds of registry the CLI writes as a `[]T{…}` literal:
+//   · tables — bare-verb tables, dispatched by the verb alone. Attached to the
+//     functions that hand a user token into them (attachVerbTables).
+//   · pairs  — [D3] NOUN-QUALIFIED registries (nounBuiltins), where the
+//     dispatch token is the PAIR `<noun> <verb>`. These are never attached to a
+//     node; they adjudicate the pair and nothing else.
 function scanVerbTables(texts) {
   const tables = new Map();   // var name -> {name, file, entries}
+  const pairs = new Map();    // noun -> Map(verb -> "file:line")
   for (const [rel, text] of texts) {
     TABLE_DECL_RE.lastIndex = 0;
     let m;
@@ -289,15 +319,24 @@ function scanVerbTables(texts) {
       const end = matchBrace(text, open);
       if (end < 0) continue;
       const entries = [];
+      let qualified = false;
       for (const el of literalElements(text, open + 1, end - 1)) {
         const e = parseTableEntry(el.text);
         if (!e) continue;
-        if (e.qualified) { entries.length = 0; break; }   // noun-qualified table
         const lineOf = (off) => text.slice(0, el.start + off).split("\n").length;
+        if (e.qualified) {
+          // a noun-qualified row: record the PAIR, donate no bare verb
+          qualified = true;
+          if (!pairs.has(e.noun)) pairs.set(e.noun, new Map());
+          const at = `${rel}:${lineOf(e.verbOff)}`;
+          if (!pairs.get(e.noun).has(e.verb)) pairs.get(e.noun).set(e.verb, { at, leaf: e.leaf });
+          continue;
+        }
         e.at = new Map();
         for (const n of e.names) e.at.set(n, `${rel}:${lineOf(e.nameOff.get(n) ?? 0)}`);
         entries.push(e);
       }
+      if (qualified) { TABLE_DECL_RE.lastIndex = end; continue; }
       // one row is a struct literal, not a dispatch table
       if (entries.length < 2) continue;
       const prev = tables.get(varName);
@@ -305,7 +344,7 @@ function scanVerbTables(texts) {
       TABLE_DECL_RE.lastIndex = end;
     }
   }
-  return tables;
+  return { tables, pairs };
 }
 
 // Attach each verb table to every function that hands a USER-TYPED token into
@@ -313,8 +352,8 @@ function scanVerbTables(texts) {
 // (rendering it, counting it) donates nothing — that is what keeps a help
 // printer from making every verb resolvable everywhere.
 function attachVerbTables({ texts, fnBodies, funcFile, nodeFor }) {
-  const tables = scanVerbTables(texts);
-  if (tables.size === 0) return tables;
+  const { tables, pairs } = scanVerbTables(texts);
+  if (tables.size === 0) return { tables, pairs };
 
   // level 0 — functions that RANGE a table
   const provides = new Map();   // func -> Set(table var)
@@ -365,7 +404,7 @@ function attachVerbTables({ texts, fnBodies, funcFile, nodeFor }) {
       }
     }
   }
-  return tables;
+  return { tables, pairs };
 }
 
 function scanGo(root) {
@@ -503,15 +542,32 @@ function scanGo(root) {
     flushFn();
   }
 
-  attachVerbTables({ texts, fnBodies, funcFile, nodeFor });
+  const { pairs } = attachVerbTables({ texts, fnBodies, funcFile, nodeFor });
 
   if (!completionNouns || completionNouns.length === 0) {
     return { ok: false, why: `completionNouns not found in ${BUILTINS}` };
   }
   if (!rootFn) return { ok: false, why: "top-level `switch noun` dispatch not found in internal/cli" };
+  // [D3] POSITIVE CONTROL. An absence claim needs one: if the noun-qualified
+  // registry read silently yielded nothing — the file emptied, renamed,
+  // unreadable, or its field spelling refactored out from under
+  // QUALIFIER_FIELD_RE — then every `<noun> <verb>` built-in would go back to
+  // being invisible and this gate would RED true doc lines while reporting a
+  // clean load. A source that cannot be read is a FAILURE, never a skip, so
+  // the read REFUSES instead of answering "no pairs". The predicate is the
+  // SHAPE (any `[]T{…}` row carrying both a noun field and a verb field), not
+  // a filename: renaming noun_builtins.go breaks nothing, emptying it reds.
+  if (pairs.size === 0) {
+    return {
+      ok: false,
+      why: "no noun-qualified verb registry found under " + CLI_DIR +
+        " — source D3 cannot adjudicate any `<noun> <verb>` built-in " +
+        "(expected `[]T{ {Noun: \"…\", Verb: \"…\"}, … }`, e.g. nounBuiltins)",
+    };
+  }
   return {
     ok: true, nodes, funcFile, hz, hzAt, fileFlags, flagAt, nounsAt, globalsAt, synopses,
-    completionNouns: new Set(completionNouns), completionGlobals, rootFn,
+    completionNouns: new Set(completionNouns), completionGlobals, rootFn, pairs,
   };
 }
 
@@ -606,7 +662,7 @@ export function loadBpSources({ root = REPO_ROOT, offline = false, manifestPath 
     B: go.ok ? go.completionNouns : null,
     C: go.ok ? go.hz : null,
     Cat: go.ok ? go.hzAt : new Map(),
-    D: go.ok ? { nodes: go.nodes, funcFile: go.funcFile, rootFn: go.rootFn } : null,
+    D: go.ok ? { nodes: go.nodes, funcFile: go.funcFile, rootFn: go.rootFn, pairs: go.pairs } : null,
     E: go.ok ? go.fileFlags : null,
     Eat: go.ok ? go.flagAt : new Map(),
     Bat: go.ok ? go.nounsAt : BUILTINS,
@@ -618,13 +674,14 @@ export function loadBpSources({ root = REPO_ROOT, offline = false, manifestPath 
       B: go.ok ? go.completionNouns.size : 0,
       C: go.ok ? go.hz.size : 0,
       D: go.ok ? go.nodes.size : 0,
+      D3: go.ok ? [...go.pairs.values()].reduce((n, m) => n + m.size, 0) : 0,
       E: go.ok ? [...go.fileFlags.values()].reduce((n, s) => n + s.size, 0) : 0,
     },
     origins: {
       A: offline ? "(declared absent)" : manifestPath,
       B: BUILTINS,
       C: `${CLI_DIR}/**.go parseHzArgs allowlists`,
-      D: `${CLI_DIR}/**.go switch/case + verb== intercepts + verb tables`,
+      D: `${CLI_DIR}/**.go switch/case + verb==/!= intercepts + verb tables + noun-qualified built-in registry`,
       E: `${CLI_DIR}/**.go "--flag" literals`,
     },
   };
@@ -827,42 +884,56 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
         `(A manifest nouns, B completionNouns, D router switches)`);
       return res;
     }
-    // depth ≥ 2 — the router switch did not dispatch it. The manifest still can:
-    // a built-in noun (`task`) intercepts a few verbs client-side and lets every
-    // other one fall through to the manifest row.
+    // depth ≥ 2 — the router switch did not dispatch it. Two sources still can:
+    // [D3] the noun-qualified built-in registry (`bp task create` is dispatched
+    // from nounBuiltins and exists in NO manifest — it was UNRESOLVED on three
+    // true doc lines until this branch existed), and [A] the manifest, since a
+    // built-in noun intercepts a few verbs client-side and lets every other one
+    // fall through to its manifest row.
     const noun = res.path[0];
-    if (res.path.length === 1 && useA && sources.A.nouns.has(noun)) {
-      const verbSet = sources.A.verbs.get(noun) || new Set();
-      if (verbSet.has(tok)) {
+    const builtinVerbs = (res.path.length === 1 && useD && sources.D.pairs.get(noun)) || null;
+    const inA = res.path.length === 1 && useA && sources.A.nouns.has(noun);
+    if (builtinVerbs || inA) {
+      const manifestVerbs = inA ? (sources.A.verbs.get(noun) || new Set()) : new Set();
+      // WHERE a verb is adjudicated decides WHICH file the citation names: the
+      // manifest row, or the registry line that spells the pair.
+      const has = (v) => manifestVerbs.has(v) || !!(builtinVerbs && builtinVerbs.has(v));
+      const citeVerb = (v) => manifestVerbs.has(v)
+        ? cite("A", v, sources.A.at.get(`${noun}.${v}`))
+        : cite("D", v, builtinVerbs.get(v).at);
+      const src = (v) => (manifestVerbs.has(v) ? "A" : "D");
+      if (has(tok)) {
         res.path.push(tok);
-        res.via.push("A");
-        cite("A", tok, sources.A.at.get(`${noun}.${tok}`));
+        res.via.push(src(tok));
+        citeVerb(tok);
+        // a built-in's own handler is the leaf whose flags [C]/[E] enumerate
+        if (!manifestVerbs.has(tok) && builtinVerbs.get(tok).leaf) leafFn = builtinVerbs.get(tok).leaf;
         leaf = true;
         continue;
       }
       // a verb SUMMARY — `bp doc get/ls/query/…` — is a coverage GAIN, not a
       // suppression: it expands into one check per verb against this noun's
-      // manifest verb set, and a verb the noun lacks still REDs, named.
+      // verb set, and a verb the noun lacks still REDs, named.
       const alt = splitVerbAlternation(tok);
       if (alt) {
-        const missing = alt.filter((v) => !verbSet.has(v));
+        const missing = alt.filter((v) => !has(v));
         if (missing.length === 0) {
           res.path.push(tok);
-          res.via.push("A");
-          for (const v of alt) cite("A", v, sources.A.at.get(`${noun}.${v}`));
+          res.via.push(alt.some((v) => src(v) === "A") ? "A" : "D");
+          for (const v of alt) citeVerb(v);
           leaf = true;
           continue;
         }
         res.verdict = UNRESOLVED;
         res.reasons.push(
-          `\`bp ${noun} ${tok}\` — alternation lists verb(s) not in manifest noun \`${noun}\`: ` +
-          missing.join(", "));
+          `\`bp ${noun} ${tok}\` — alternation lists verb(s) not in noun \`${noun}\` ` +
+          `(manifest rows + noun-qualified built-ins): ` + missing.join(", "));
         return res;
       }
       res.verdict = UNRESOLVED;
       res.reasons.push(
-        `\`bp ${noun} ${tok}\` — \`${tok}\` is not a verb of manifest noun \`${noun}\` ` +
-        `and no router switch dispatches it`);
+        `\`bp ${noun} ${tok}\` — \`${tok}\` is neither a verb of noun \`${noun}\` ` +
+        `(manifest rows + noun-qualified built-ins) nor dispatched by a router switch`);
       return res;
     }
     if (!node) {

@@ -147,13 +147,20 @@ defmodule BarkparkWeb.PluginRoutesTest do
       Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
 
       # create_token/4 (no explicit workspace_id) binds to the seeded Default
-      # workspace AND creates a membership — so this token is a Default member
-      # with admin perms (the LV admin on_mount gate), but NOT a member of
+      # workspace AND creates a membership there — the workspace is named at
+      # the mint below — so this token is a Default member with admin perms
+      # (the LV admin on_mount gate), but NOT a member of
       # "scoped-plugin-other-ws".
       raw = "scoped-plugin-admin-token-#{System.unique_integer([:positive])}"
 
       {:ok, _api_token} =
-        Auth.create_token(raw, "scoped plugin admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          raw,
+          "scoped plugin admin",
+          "production",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
 
       {:ok, other_ws} =
         Barkpark.Tenancy.create_workspace(%{slug: "scoped-plugin-other-ws", name: "Other"})
