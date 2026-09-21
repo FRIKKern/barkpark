@@ -9985,17 +9985,40 @@
     // affordance for an up box; the in-flight / failed states keep their
     // honest chips (the SSE fast path in loadInstance patches
     // .fleet-url.provisioning in place — that class stays load-bearing).
+    var addressHtml = '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+      '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+
+    // cch DEFECT-D — THE ADDRESS SLOT IS NOT A SECOND PLACE TO SAY "FAILED".
+    // The two failed arms used to print a bare "— removal failed" / "—
+    // provisioning failed" in the slot under the H1. That em-dash lead is a
+    // FLEET-LIST idiom: in fleetRow the fragment hangs off the box name one
+    // line above it, so it reads as a continuation. Under a detail H1 that
+    // already carries the lifecycle pill ("Removal failed · <server error>")
+    // and, one block lower, the failure banner, it is an ORPHAN — an em dash
+    // with no antecedent, red, in the slot a reader scans for the address.
+    // Measured on instance-remove-failed: the same sentence three times inside
+    // ~130px, and the box's host was KNOWN the whole time (the Identity card
+    // prints it two columns to the right).
+    //
+    // A FAILED TEARDOWN DOES NOT REMOVE AN ADDRESS — it is failed precisely
+    // because the server is still there. So removeFailed now renders the real
+    // address whenever bp.host is set, exactly like a live box. The genuinely
+    // address-less states (a failed provision never gets a host; a teardown
+    // that failed after the host column was cleared) keep a red slot, but a
+    // LABELLED one: it leads with what the ADDRESS is, not with a third copy
+    // of the failure.
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
-        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        ? (bp.host
+            ? addressHtml
+            : '<div class="fleet-url failed">No address — removal failed</div>')
         : lc.failed
-          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          ? '<div class="fleet-url failed">No address — provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
-              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
-              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+            : addressHtml;
 
     // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
     // already carries label + detail ("Degraded · Health down"); its rules are
