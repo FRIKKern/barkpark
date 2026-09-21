@@ -309,29 +309,85 @@
     (document.head || document.documentElement).appendChild(s);
   }
 
-  if (params.get("modal") === "account") {
-    window.addEventListener("load", function () {
-      var tries = 0;
-      (function waitForMe() {
-        // Wait for the account chip to carry the real email — that is the
-        // observable proof /v1/me resolved, so the identity row and the 2FA
-        // on-state render from real data instead of the placeholder.
-        var chip = document.getElementById("acct-email");
-        var ready = chip && chip.textContent;
-        // `>= 40`, not `> 40`: the increment below lives inside `tries++ < 40`,
-        // so `tries` never exceeds 40 and the give-up branch was UNREACHABLE —
-        // a scenario whose /v1/me does not land simply stopped, silently, with
-        // no modal to photograph. Fixed with cch-w39-s2, which is the first
-        // change to make that path worth reaching.
-        if ((ready || tries >= 40) && appHooks && appHooks.openAccountModal) {
-          appHooks.openAccountModal();
-          // Scenario-specific post-open drive. Keyed on the scenario NAME, the
-          // same convention shoot.sh uses to derive ?modal=account at all.
-          if (scen === "account-modal-2fa-badcode") drive2faBadCode();
-          return;
-        }
-        if (tries++ < 40) window.setTimeout(waitForMe, 50);
-      })();
+  // ── 4d) THE MODAL SEAM, AS A DECLARED FIELD (task-5ffdec2b609404bc) ───────
+  // WHAT THIS REPLACED, and why it mattered far past tidiness. shoot.sh used to
+  // derive the one modal query it knew from a scenario NAME:
+  //
+  //     case "$scen" in account-modal*) modal_q="&modal=account" ;;
+  //
+  // so the ONLY dialog any PNG in this corpus could contain was the account
+  // modal, and a scenario could not ask for a different one at all. Re-derive
+  // the cost yourself rather than believing a number written here:
+  //
+  //     grep -n 'openModal(' ../app.js
+  //
+  // 31 hits, of which three are not calls (two prose lines and the
+  // `function openModal(html)` definition) => 28 call sites; the matrix reached
+  // ONE. The name convention was the reason: not one accent, theme or width was
+  // missing, the SEAM was.
+  //
+  // So scenarios.mjs carries `modal: "<driver>"` and shoot.sh passes it through
+  // verbatim. Each driver below reaches its dialog the way a PERSON does — the
+  // real click, the real keystroke — because a driver that calls the opener
+  // directly photographs a dialog no user path is proven to reach.
+  //
+  // `?modal=` on the URL still WINS over the field: hashchange-wiring.mjs and
+  // modal-oracle.mjs both drive `&modal=account` onto scenarios that declare
+  // nothing, and an override that a field could silently veto would break them.
+  var MODAL_DRIVERS = {
+    // openAccountModal — the original seam, unchanged in behaviour.
+    account: function () { openAccountModalThen(null); },
+    // Same opener, then the REAL enrollment through to the 422. This was ALSO a
+    // name convention (`if (scen === "account-modal-2fa-badcode")`) and it is
+    // now the scenario's own declared driver, so a renamed scenario keeps its
+    // drive instead of silently shooting the default phase.
+    "account-2fa-badcode": function () { openAccountModalThen(drive2faBadCode); },
+    // confirmRevokeToken — the confirm-sheet shape.
+    "revoke-token": driveRevokeTokenSheet,
+    // openCommandPalette — the `.modal-root:has(.cmdk)` arm.
+    cmdk: driveCommandPalette,
+  };
+
+  function openAccountModalThen(after) {
+    var tries = 0;
+    (function waitForMe() {
+      // Wait for the account chip to carry the real email — that is the
+      // observable proof /v1/me resolved, so the identity row and the 2FA
+      // on-state render from real data instead of the placeholder.
+      var chip = document.getElementById("acct-email");
+      var ready = chip && chip.textContent;
+      // `>= 40`, not `> 40`: the increment below lives inside `tries++ < 40`,
+      // so `tries` never exceeds 40 and the give-up branch was UNREACHABLE —
+      // a scenario whose /v1/me does not land simply stopped, silently, with
+      // no modal to photograph. Fixed with cch-w39-s2, which is the first
+      // change to make that path worth reaching.
+      if ((ready || tries >= 40) && appHooks && appHooks.openAccountModal) {
+        appHooks.openAccountModal();
+        if (after) after();
+        return;
+      }
+      if (tries++ < 40) { window.setTimeout(waitForMe, 50); return; }
+      // Reaching here means the hook itself never arrived (the `>= 40` arm
+      // above covers a slow /v1/me), which is a shot of the BARE SHELL under a
+      // filename promising a dialog. Say so in the pixels.
+      driveGaveUp("#acct-email + window.__bpTestHook");
+    })();
+  }
+
+  // THE CONFIRM SHEET (app.js confirmRevokeToken). A real click on a real row's
+  // Revoke, never a direct call: the button is bound by renderTokens()'s own
+  // delegation, so calling the function would route around the wiring the shot
+  // is supposed to certify. `.token-revoke[data-id]` and not `.token-row`: the
+  // `tokens-revoke` fixture carries an ALREADY-REVOKED token that renders a row
+  // with NO button, so a row poll can land before any button exists.
+  function driveRevokeTokenSheet() {
+    whenPresent(".token-revoke[data-id]", function (btn) {
+      btn.click();
+      // #token-revoke-go is the button that performs the irreversible DELETE —
+      // i.e. the sheet that is up is THIS sheet, not merely some dialog.
+      // freezeShotSurface for the same reason the badcode drive needs it: the
+      // sheet arrives with a focus transition.
+      whenPresent("#token-revoke-go", freezeShotSurface);
     });
   }
 
@@ -370,15 +426,61 @@
     driveStep(steps[i], function () { runDrive(steps, i + 1); });
   }
 
-  // The account modal has its own seam above (?modal=account, a shoot.sh name
-  // convention); this one is keyed on the scenario's OWN field, so nothing has
-  // to be taught twice.
+  // The modal seam has its own resolver below (startModalDrive, keyed on the
+  // scenario's declared `modal` field — task-5ffdec2b609404bc retired the
+  // shoot.sh `account-modal*` name convention); this one is keyed on the
+  // scenario's `drive` field, so nothing has to be taught twice.
   window.addEventListener("load", function () {
     scenariosReady.then(function (mod) {
       var def = mod && mod.SCENARIOS && mod.SCENARIOS[scen];
       if (def && def.drive && def.drive.length) runDrive(def.drive, 0);
     });
   });
+
+  // THE COMMAND PALETTE (app.js openCommandPalette). Dispatched as a REAL
+  // Cmd+K keydown, so the shot passes through the handler's four no-op guards
+  // (a modal already open, /new, /activate, no session) instead of around them.
+  // Re-fired each tick until the palette answers, because the keydown listener
+  // is installed during boot wiring and a single shot at first paint can lose
+  // that race; the `root.hidden` guard is what stops it firing once the palette
+  // is up. The palette focuses #cmdk-input, whose caret blinks on a wall clock
+  // --virtual-time-budget does not freeze — hence freezeShotSurface.
+  function driveCommandPalette() {
+    var tries = 0;
+    (function fire() {
+      if (document.getElementById("cmdk-input")) { freezeShotSurface(); return; }
+      var view = document.querySelector("section.view:not([hidden])");
+      var root = document.getElementById("modal-root");
+      if (view && root && root.hidden) {
+        document.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "k", metaKey: true, bubbles: true, cancelable: true,
+        }));
+      }
+      if (tries++ < 60) { window.setTimeout(fire, 50); return; }
+      driveGaveUp("#cmdk-input");
+    })();
+  }
+
+  // The resolution order, stated once: URL override, then the scenario's own
+  // declared field. An unknown name is NOT ignored — a typo'd driver would
+  // otherwise shoot the bare host screen under a filename promising a dialog,
+  // which is exactly the class of lie the drive-failed banner exists to kill.
+  function startModalDrive() {
+    scenariosReady.then(function (mod) {
+      var entry = mod && mod.SCENARIOS && mod.SCENARIOS[scen];
+      var name = params.get("modal") || (entry && entry.modal) || "";
+      if (!name) return;
+      var drive = MODAL_DRIVERS[name];
+      if (typeof drive !== "function") {
+        driveGaveUp('a MODAL_DRIVERS entry named "' + name + '"');
+        return;
+      }
+      drive();
+    });
+  }
+
+  if (document.readyState === "complete") startModalDrive();
+  else window.addEventListener("load", startModalDrive);
 
   // 5) Inert EventSource — the SPA opens one live stream at boot. It never fires
   //    on its own (a screenshot must be deterministic), but exposes a manual
