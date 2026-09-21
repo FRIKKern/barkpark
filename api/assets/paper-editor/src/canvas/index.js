@@ -3048,6 +3048,37 @@ class BpPaperCanvas extends HTMLElement {
   //     its debounce window, we QUEUE the update and apply it after that local
   //     state settles so we never yank the caret or erase an un-emitted draft —
   //     the diff baseline stays with the displayed snapshot until that render lands.
+  // A revision-owning host may present acknowledged external content while an
+  // idle rich-text caret remains focused. Unlike applyServerBlocks this never
+  // queues: true means the content and baseline landed synchronously; false
+  // means the host must retain its previous revision. The caller must fence old
+  // read/echo responses by revision. It never discards an unacknowledged draft.
+  applyServerBlocksIfIdle(blocks) {
+    if (!this._editor || this._mode === "source" || this._editor.view.composing ||
+        this._bubble?.hasFocus()) return false;
+    const active = this.ownerDocument.activeElement;
+    if (active && this.contains(active) && active !== this._editor.view.dom) return false;
+    // Some node views buffer fields outside ProseMirror. Flush their real input
+    // first so a recently blurred field cannot masquerade as an idle canvas.
+    this.querySelectorAll("[data-bp-type]").forEach(node => {
+      node.dispatchEvent(new CustomEvent("bp-flush-node"));
+    });
+    if (this.hasPendingChanges()) return false;
+    if (!Array.isArray(blocks)) throw new TypeError("Expected confirmed Paper blocks");
+    this._programmaticApply = true;
+    try {
+      this._applyExternalContent(blocks);
+      this._blocks = deepCloneBlocks(blocks);
+      this._clearPendingServerBlocks();
+      // These receipts already completed successfully; this newer authority
+      // supersedes them. Actual in-flight saves remain guarded above.
+      this._awaitingOwnEchoes = [];
+      return true;
+    } finally {
+      this._programmaticApply = false;
+    }
+  }
+
   applyServerBlocks(blocks, echoMeta = null) {
     if (!this._editor) return;
     const next = Array.isArray(blocks) ? blocks : [];
@@ -3317,6 +3348,18 @@ class BpPaperCanvas extends HTMLElement {
               } else {
                 tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
               }
+            }
+          } else if (node.isTextblock && replacement.isTextblock && node.type === replacement.type) {
+            // Keep a caret inside a changed paragraph/heading mapped to that
+            // same block. Whole-node replacement pushes it into the next sibling.
+            tr.setNodeMarkup(position, replacement.type, replacement.attrs, replacement.marks);
+            const start = node.content.findDiffStart(replacement.content);
+            if (start != null) {
+              const end = node.content.findDiffEnd(replacement.content);
+              let oldEnd = end.a, newEnd = end.b;
+              const overlap = start - Math.min(oldEnd, newEnd);
+              if (overlap > 0) { oldEnd += overlap; newEnd += overlap; }
+              tr.replaceWith(position + 1 + start, position + 1 + oldEnd, replacement.content.cut(start, newEnd));
             }
           } else {
             tr.replaceWith(position, position + node.nodeSize, replacement);
