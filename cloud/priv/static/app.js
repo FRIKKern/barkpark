@@ -26580,11 +26580,33 @@
   // Pure: the headline sentence per state. "unknown" is deliberately NOT worded
   // as reassurance — reading absence as health is the exact failure this block
   // exists to end.
+  //
+  // console-r21m DEFECT-F/H/I — THE UNKNOWN ARM SAID "No vitals to judge" AND
+  // THE VITALS WERE ON SCREEN. The banner has exactly ONE call site
+  // (metricsPanelHtml, `grep -n 'pressureBannerHtml(' app.js` → 1 render
+  // site + 1 hooks export), and that call site RETURNS EARLY on
+  // `model.absent`: a box that has never reported a beat gets the "Waiting
+  // for the first beat" empty state and no banner at all. So every render of
+  // the unknown arm that can exist sits directly above `.metrics-grid`.
+  // Measured on origin/main d5bea4de9, `?scen=metrics-stale#instance/…a1/
+  // metrics`, light/1440: "No vitals to judge" painted 96px above CPU 58%,
+  // Memory 57%, Disk 74%, Load 1.1 — four populated cards. The copy was not
+  // merely misleading in one fixture; it was false at every site it could
+  // reach.
+  // WHAT IS ACTUALLY ABSENT IS THE VERDICT, NOT THE VITALS. The `pressure`
+  // block is a SEPARATE key on the /metrics envelope from `series`
+  // (metricsSeries reads `payload.pressure` and `payload.series`
+  // independently), and pressureModel is TOTAL over a missing one — an older
+  // control plane sends readings and no pressure block at all. So the
+  // headline now names the thing that is missing. The `unknown`-means-never-
+  // calm contract is untouched: this is a rewording of ONE headline, not a
+  // new state, and the `pressure--unknown` class, the tone and every arm
+  // beside it are byte-identical.
   var PRESSURE_HEADLINES = {
     struggling: "This box is struggling",
     watch: "This box is under pressure",
     calm: "No resource pressure",
-    unknown: "No vitals to judge",
+    unknown: "No pressure verdict",
   };
 
   // Pure: a human byte size. null/absent → the honest em-dash, never "0 B".
@@ -26690,7 +26712,12 @@
     if (model.state === "struggling" || model.state === "watch") {
       detail = model.firing.map(function (x) { return x.text; }).join(" · ");
     } else if (model.state === "unknown") {
-      detail = "This box has not reported the numbers this verdict is made of.";
+      // console-r21m DEFECT-H, the second half of the same contradiction.
+      // "has not reported the numbers" reads as "there are no numbers" while
+      // the numbers are painted immediately below. It names the PRESSURE
+      // SIGNALS — the `pressure.signals` array this banner is made of — and
+      // then points at the readings that DID land, so the two boxes agree.
+      detail = "The last beat carried no pressure signals, so there is nothing to judge — the readings below are what the box did report.";
     }
 
     // The confidence line. It appears whenever the verdict was made on an
