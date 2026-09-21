@@ -26588,7 +26588,7 @@
   // `model.absent`: a box that has never reported a beat gets the "Waiting
   // for the first beat" empty state and no banner at all. So every render of
   // the unknown arm that can exist sits directly above `.metrics-grid`.
-  // Measured on origin/main 98c2eb628, `?scen=metrics-stale#instance/…a1/
+  // Measured on origin/main d5bea4de9, `?scen=metrics-stale#instance/…a1/
   // metrics`, light/1440: "No vitals to judge" painted 96px above CPU 58%,
   // Memory 57%, Disk 74%, Load 1.1 — four populated cards. The copy was not
   // merely misleading in one fixture; it was false at every site it could

@@ -14024,7 +14024,7 @@ test("diagnosis: the unknown verdict never claims there are no vitals ABOVE the 
   assert.match(html, /74%/);
   assert.match(html, /pressure--unknown/);
 
-  // REDS ON PRE-FIX BYTES. origin/main 98c2eb628 rendered
+  // REDS ON PRE-FIX BYTES. origin/main d5bea4de9 rendered
   // "No vitals to judge" + "This box has not reported the numbers this
   // verdict is made of." directly above those four cards.
   assert.doesNotMatch(html, /No vitals/);

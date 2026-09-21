@@ -14022,7 +14022,7 @@ async function main() {
     //
     //    THE DEFECT NO PAGE-LEVEL LEG IN THIS FILE COULD SEE. `.new-golive-row`
     //    never overflowed anything: it is a two-item flex line inside a fixed
-    //    card, and on origin/main 98c2eb628 its page, its card and its own box
+    //    card, and on origin/main d5bea4de9 its page, its card and its own box
     //    all measured clean while `#new-gh-name` sat at 26px — an empty ~40px
     //    outlined square with the greyed "Create GitHub repo" label beside it,
     //    which is what the accent-matrix re-review filed as DEFECT-F (and filed
@@ -14074,7 +14074,13 @@ async function main() {
           await setViewport(WIDTHS_W21M[0]);
           await nav(
             `${BASE}${sc.pathname}${sc.search}&scen=${arm.scen}&theme=${theme}`,
-            `document.querySelector('.new-golive-row') && document.querySelector('.new-golive-row .form-input')`,
+            // READINESS, KEYED ON THE ELEMENT THIS LEG MEASURES. `.new-golive-row
+            // .form-input` would be a population-blind singular wait on whichever
+            // golive row painted first — the view-scope census names that class and
+            // refuses it undischarged. `#new-gh-name` is the field under
+            // measurement and an id is one host by the HTML contract, so the wait
+            // and the measurement now agree on their subject.
+            `document.querySelector('.new-golive-row') && document.querySelector('#new-gh-name')`,
           );
           const row = [];
           for (const width of WIDTHS_W21M) {
@@ -14134,7 +14140,7 @@ async function main() {
             const floor = Math.min(parseFloat(m.gh.basis) || 120, 120);
             if (m.gh.fieldW < floor) {
               starved++;
-              fail(D, `${arm.scen}/${theme}@${width}: \`#new-gh-name\` painted ${m.gh.fieldW}px inside a ${m.gh.rowW}px row (floor ${floor}px) — the repo-name field is starved to an empty square while its sibling takes the line (origin/main 98c2eb628: 26px of 464 at 1440, light)`);
+              fail(D, `${arm.scen}/${theme}@${width}: \`#new-gh-name\` painted ${m.gh.fieldW}px inside a ${m.gh.rowW}px row (floor ${floor}px) — the repo-name field is starved to an empty square while its sibling takes the line (origin/main d5bea4de9: 26px of 464 at 1440, light)`);
             }
             for (const r of [m.gh, ...m.others]) {
               if (r.rowSW > r.rowCW + 1) {
@@ -14170,7 +14176,7 @@ async function main() {
         okLine(
           `THE GRANT ARM IS THE CONTROL AND IT DID NOT MOVE: ` +
           `${[...grantWidths].map(([k, v]) => `${k} field ${v.f}px h=${v.h}`).join(" · ")}. On origin/main ` +
-          `98c2eb628 the same cells measured field 305.23px / row height 38 at light@1440 — the remedy is ` +
+          `d5bea4de9 the same cells measured field 305.23px / row height 38 at light@1440 — the remedy is ` +
           `required to cost the screen everybody reaches nothing, and this line is where that is paid`,
         );
         okLine(

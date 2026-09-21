@@ -3439,7 +3439,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    disable-and-explain arm: `theater-ready-github-member` routes
    adminWriteControlHtml's refusal arm into this same row, and that arm is a
    `.inst-life-disabled` flex box carrying FORBIDDEN_ROLE_COPY.admin's whole
-   sentence beside the button. Measured on origin/main 98c2eb628, light,
+   sentence beside the button. Measured on origin/main d5bea4de9, light,
    1440: `.inst-life-disabled` took 430 of the 464px row and
    `#new-gh-name` was left 26px — an empty ~40px outlined square with the
    greyed "Create GitHub repo" label sitting outside it, which is the shape
@@ -3892,7 +3892,38 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
        .instance-card-head detail 3754/164 -> 164/164 @320, 3754/496 -> 496/496 @900
      Every host is fixed and there is nothing left to refuse — but ONE of them
      needed a second declaration OUTSIDE this block to make the wrap bind at all:
-     see `.fleet-status`'s `max-width: 100%` at :983 and the note there. */
+     see `.fleet-status`'s `max-width: 100%` at :983 and the note there.
+
+     ───────────────────────────────────────────────────────────────────────
+     console-r21m DEFECT-I — FILED AS "THE STATUS PILL HAS NO LENGTH CAP AND
+     BALLOONS TO SIX LINES". IT STAYS, AND THE REASON IS D267 ABOVE, RE-READ
+     AT origin/main d5bea4de9 RATHER THAN REMEMBERED.
+     The accent-matrix re-review (2026-09-20, `fleet-cruel-content`) is
+     looking at `overflow-wrap: anywhere` WORKING. The detail it saw is
+     `bp.provision_error` verbatim — a machine capture with no ceiling
+     anywhere between the worker socket and this box — and before cch-w23-s1
+     the SAME string painted 3754px THROUGH its own box and dragged
+     #overview to a documentElement.scrollWidth of 3860 against a 320px
+     viewport. Six lines inside the card is the remedy's own output: the
+     string is now inside the box it belongs to, at every width, in every
+     one of the three descendant scopes measured above.
+     THE FILED REMEDY — a length cap — IS THE ONE D267 ADJUDICATED AND
+     REFUSED, on measurement rather than taste: a 1648-char WORD-BROKEN
+     capture is completely clean at 320 and 390, while 512 characters in ONE
+     UNBROKEN TOKEN takes the page to 3555/320. The defect is TOKEN SHAPE,
+     not length, so any cap loose enough to keep a real capture readable
+     still lets one token paint through, and any cap tight enough to stop
+     the token truncates the only diagnostic the operator has for a failed
+     provision. A cap would therefore trade a bounded, ugly six lines for a
+     shredded error message AND an unfixed page-drag — strictly worse on
+     both axes.
+     THE REAL RESIDUAL IS VERTICAL, NOT HORIZONTAL, AND IT IS NOT THIS
+     BLOCK'S: a six-line detail is a long string rendered honestly. Bounding
+     the pill's HEIGHT (a line clamp with the full text still reachable) is a
+     separate remedy with a separate cost — it hides the tail of an error —
+     and it is not what the row asked for. Filing it as its own row is the
+     honest disposition; overturning D267 by stealth inside an F/H fix is
+     not. NO BYTES CHANGE HERE, deliberately. */
   overflow-wrap: anywhere;
 }
 .status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }
