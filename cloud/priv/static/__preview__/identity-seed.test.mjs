@@ -39,6 +39,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { SCENARIOS } from "./scenarios.mjs";
+import { replaceUnique } from "./anchored-replace.mjs";
 import { seedLocalFor, seedingScenarios, seedInjectTag, scenarioFromUrl, SEED_GLOBAL } from "./seed-inject.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -108,9 +109,15 @@ function boot({ scen, accent, seed, src = MOCK_SRC }) {
 // reproduced from the shipped file rather than pasted, so the control cannot
 // drift away from the subject.
 function overwriteRestored() {
-  const marker = "var seedLocal = window." + SEED_GLOBAL + ";";
-  assert.ok(MOCK_SRC.includes(marker), "the seed block's anchor moved — this control no longer removes anything");
-  return MOCK_SRC.replace(marker, "var seedLocal = null;");
+  // replaceUnique, not `.replace`: a bare string needle takes the FIRST match
+  // and is silent when the anchor drifts, which would leave this control
+  // mutating nothing while every assertion below still "passed".
+  return replaceUnique(
+    MOCK_SRC,
+    "var seedLocal = window." + SEED_GLOBAL + ";",
+    "var seedLocal = null;",
+    { what: "the seed-block control" },
+  );
 }
 
 // ── the seam is not vacuous ─────────────────────────────────────────────────
