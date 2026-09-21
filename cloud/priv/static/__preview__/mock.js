@@ -73,6 +73,39 @@
     }
   } catch (e) {}
 
+  // 2c) The SCENARIO's own pre-paint seed — and it WINS over 2b (GR12).
+  //
+  //     Ordering is the whole fix (task-a0258bec59b256d7). A scenario declares
+  //     `seedLocal: { bp_theme: "iris" }` in scenarios.mjs precisely to assert
+  //     that a PERSISTED identity survives; the accent axis in 2b writes the
+  //     SHOT's identity into that same key. Applied before 2b, the scenario is
+  //     silently overwritten and identity-iris renders whatever ?accent= said —
+  //     byte-identical to shell-root at all five accents, which is how the
+  //     matrix built to prove GR12 came to disprove nothing. Applied AFTER, the
+  //     scenario beats the axis. Do not reorder these two blocks, and do not
+  //     move the accent write below this one "for symmetry": identity-seed.test.mjs
+  //     reds on exactly that, at every accent.
+  //
+  //     The map arrives as bytes in the HTML, ahead of this file — serve.mjs
+  //     injects it (see __preview__/seed-inject.mjs for why an import cannot
+  //     work here). Absent (a page served by something else, or a scenario that
+  //     seeds nothing) this block is a no-op and 2b stands.
+  try {
+    var seedLocal = window.__PREVIEW_SEED_LOCAL;
+    if (seedLocal && typeof seedLocal === "object") {
+      for (var sk in seedLocal) {
+        if (!Object.prototype.hasOwnProperty.call(seedLocal, sk)) continue;
+        window.localStorage.setItem(sk, String(seedLocal[sk]));
+        // bp_theme also paints: app.js mirrors the key onto the root element at
+        // boot, but the pre-paint attribute is what 2b set and what a shot of
+        // the first frame captures, so the seed has to move it too.
+        if (sk === BP_THEME_KEY && BP_THEMES.indexOf(String(seedLocal[sk])) !== -1) {
+          document.documentElement.setAttribute("data-bp-theme", String(seedLocal[sk]));
+        }
+      }
+    }
+  } catch (e) {}
+
   // 3) The scenarios module, imported once and cached. Any fetch awaits it.
   var scenariosReady = import(SCENARIOS_URL).then(function (mod) {
     // A typo'd ?scen= silently renders the default scenario — say so, loudly.

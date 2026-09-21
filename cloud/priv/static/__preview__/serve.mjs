@@ -28,6 +28,9 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// The scenario's pre-paint localStorage seed, emitted as bytes AHEAD of
+// mock.js. Read seed-inject.mjs for why it cannot be an import inside mock.js.
+import { seedInjectTag, scenarioFromUrl } from "./seed-inject.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -92,7 +95,7 @@ function resolveInRoot(urlPath) {
   return abs;
 }
 
-function serveIndex(res) {
+function serveIndex(res, url) {
   let html;
   try {
     html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
@@ -101,9 +104,14 @@ function serveIndex(res) {
     res.end("index.html not found under " + ROOT);
     return;
   }
-  // Inject the mock exactly once, immediately before the app.js tag.
+  // Inject the mock exactly once, immediately before the app.js tag — preceded,
+  // when this request names a scenario that seeds localStorage, by that seed.
+  // ORDER: seed tag, then mock.js, then app.js. The seed is only DATA; mock.js
+  // is what applies it (and applies it after ?accent=, so the scenario wins the
+  // accent axis — task-a0258bec59b256d7).
+  const seedTag = seedInjectTag(scenarioFromUrl(url));
   const injected = html.includes(APP_TAG)
-    ? html.replace(APP_TAG, INJECTED)
+    ? html.replace(APP_TAG, seedTag + INJECTED)
     : html;
   res.writeHead(200, { "Content-Type": MIME[".html"], "Cache-Control": "no-store" });
   res.end(injected);
@@ -144,7 +152,7 @@ const server = http.createServer((req, res) => {
 
   // Root and the SPA entry paths get the injected shell.
   if (urlPath === "/" || urlPath === "/index.html" || urlPath === "/new") {
-    return serveIndex(res);
+    return serveIndex(res, req.url);
   }
 
   const abs = resolveInRoot(urlPath);
@@ -156,7 +164,7 @@ const server = http.createServer((req, res) => {
   fs.stat(abs, (err, stat) => {
     if (err || !stat.isFile()) {
       // Unknown path with no extension → SPA client route → the injected shell.
-      if (!path.extname(urlPath)) return serveIndex(res);
+      if (!path.extname(urlPath)) return serveIndex(res, req.url);
       res.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
       return res.end("not found");
     }

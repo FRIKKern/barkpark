@@ -2159,9 +2159,15 @@ jobs:
       #
       # THE PIN, and the reason there is one: `node --test` on a file that
       # still LOADS but registers ZERO tests reports one passing test and exits
-      # 0 (task-2c39c3b9e1f925c2). 230 is this step's selection on 2026-09-20,
-      # MEASURED on node 22.22.0 across the 15 suites the predicate selects
-      # (`# tests 230 / # pass 230 / # fail 0`, task-f8318f7734a52c52). It was 225
+      # 0 (task-2c39c3b9e1f925c2). 261 is this step's selection on 2026-09-21,
+      # MEASURED on node 22.22.0 across the 17 suites the predicate selects, by
+      # running this step's own selection and reading what it printed
+      # (`# tests 261 / # pass 261 / # fail 0`, task-a0258bec59b256d7);
+      # identity-seed.test.mjs and byte-comparability.test.mjs joined the
+      # selection with that task. The number was NOT computed from the previous
+      # pin: an arithmetic pin is a pin nobody re-earned, and the predicate's
+      # selection is what decides, not the diff. It was 230 across 15 on
+      # 2026-09-20 (node 22.22.0, task-f8318f7734a52c52). It was 225
       # across 14 on 2026-09-14 (node 22.22.0, origin/main c42fde07c);
       # badcode-freeze.test.mjs — the regression guard for the caret/transition
       # freeze #19583 lands in __preview__/mock.js — joined the selection with its
@@ -2176,7 +2182,7 @@ jobs:
       # moves this number, so bump it in the PR that changes either the suites or
       # the steps that name them. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: "__preview__ suites no other step runs (derived selection, 230-test exact pin)"
+      - name: "__preview__ suites no other step runs (derived selection, 261-test exact pin)"
         run: |
           set -euo pipefail
           dir=cloud/priv/static/__preview__
@@ -2213,16 +2219,16 @@ jobs:
           echo "selected (run by no other step):$todo"
 
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 230 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 230 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 261 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 261 — this pin can no longer lose"; exit 1; }
 
           # shellcheck disable=SC2086 # word splitting is the selection
           node --test $todo 2>&1 | tee /tmp/preview-unrun-suites.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/preview-unrun-suites.txt)
-          if [ "${tally:-0}" -ne 230 ]; then
-            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 230 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 230 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 261 ]; then
+            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 261 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 261 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "preview suites: ${tally} tests, exact pin 230 — the pin re-earned"
+          echo "preview suites: ${tally} tests, exact pin 261 — the pin re-earned"
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
