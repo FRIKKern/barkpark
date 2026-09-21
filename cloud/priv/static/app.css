@@ -3430,8 +3430,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-env-row .btn { flex: 0 0 auto; }
 
 .new-golive { border-top: 1px solid var(--border); padding-top: 16px; }
-.new-golive-row { display: flex; gap: 8px; margin-top: 8px; }
-.new-golive-row .form-input { flex: 1; }
+/* console-r21m DEFECT-F — THE ROW HAD NO FLOOR, SO THE FIELD PAID FOR THE
+   REFUSAL. `flex: 1` is `flex: 1 1 0%`: a ZERO flex base size, so the field
+   contributes nothing to the line's hypothetical width and absorbs every
+   pixel its sibling asks for. That is invisible while the sibling is a
+   BUTTON — `theater-ready-github` measured field 305.23 / button 150.77 in a
+   464px row — and it collapses the moment the sibling is the D428
+   disable-and-explain arm: `theater-ready-github-member` routes
+   adminWriteControlHtml's refusal arm into this same row, and that arm is a
+   `.inst-life-disabled` flex box carrying FORBIDDEN_ROLE_COPY.admin's whole
+   sentence beside the button. Measured on origin/main 98c2eb628, light,
+   1440: `.inst-life-disabled` took 430 of the 464px row and
+   `#new-gh-name` was left 26px — an empty ~40px outlined square with the
+   greyed "Create GitHub repo" label sitting outside it, which is the shape
+   the accent-matrix re-review filed as a collapsed button. The button is
+   fine; the FIELD is the casualty, and nothing on this screen said so.
+   THE REMEDY IS A FLOOR PLUS A WRAP, NOT A WIDTH ON THE SIBLING. A cap on
+   `.inst-life-disabled` would truncate the server's own refusal sentence —
+   the thing D428 exists to SHOW — so instead the field declares a real flex
+   base size and the line is allowed to break. Line breaking reads the flex
+   BASE size, so 220 + 430 + 8 > 464 puts the refusal arm on its own line and
+   hands the field the full 464; in the grant arm 220 + 151 + 8 < 464 keeps
+   one line and the field still grows to the identical 305.23px. MEASURED
+   BOTH WAYS by overflow-guard.mjs --defect W21m-wizard-refusal-row-field-floor:
+   member 26 -> 464 (row height 38 -> 82), owner 305.23 -> 305.23 (row height
+   38 -> 38, zero pixels moved). The second half is the point: this may not
+   cost the screen everybody reaches anything. */
+.new-golive-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.new-golive-row .form-input { flex: 1 1 220px; }
 .new-gh { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: left; }
 .new-gh .label { display: block; margin-bottom: 4px; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }

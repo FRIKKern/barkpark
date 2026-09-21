@@ -13979,7 +13979,11 @@ test("diagnosis: nothing measured reads UNKNOWN, never calm — silence is not h
       { key: "disk", state: "unknown", value: null },
     ],
   }));
-  assert.match(html, /No vitals to judge/);
+  // console-r21m DEFECT-H: the headline moved from "No vitals to judge" to
+  // "No pressure verdict". THE CONTRACT THIS TEST GUARDS IS UNCHANGED — the
+  // unknown state must never be dressed as calm — and both assertions below
+  // still carry it.
+  assert.match(html, /No pressure verdict/);
   assert.match(html, /pressure--unknown/);
   assert.doesNotMatch(html, /pressure--ok/);
   assert.doesNotMatch(html, /No resource pressure/);
@@ -13989,6 +13993,47 @@ test("diagnosis: nothing measured reads UNKNOWN, never calm — silence is not h
   const legacy = hooks.metricsSeries({ ok: true, beat: { status: "live" }, series: {} });
   assert.equal(legacy.pressure.state, "unknown");
   assert.doesNotMatch(hooks.pressureBannerHtml(legacy.pressure), /No resource pressure/);
+});
+
+test("diagnosis: the unknown verdict never claims there are no vitals ABOVE the vitals (console-r21m DEFECT-H)", () => {
+  // THE WHOLE PANEL, not the banner alone — the contradiction is between two
+  // boxes and no assertion on one of them can see it. This is the
+  // `metrics-stale` fixture's exact shape: a stale beat, four populated
+  // series, and NO `pressure` key (an older control plane, or a beat that
+  // carried readings but no signals), which is what pressureModel folds to
+  // the unknown state.
+  const model = hooks.metricsSeries({
+    ok: true,
+    beat: { status: "stale", age_seconds: 480 },
+    series: {
+      cpu: [{ value: 58 }], mem: [{ value: 57 }],
+      disk: [{ value: 74 }], load: [{ value: 1.1 }],
+    },
+  });
+  assert.equal(model.pressure.state, "unknown");
+  const html = hooks.metricsPanelHtml(model);
+
+  // PRECONDITION, ASSERTED: the readings are on the page. Without this the
+  // copy assertion below is a statement about an empty panel — and
+  // metricsPanelHtml returns the "Waiting for the first beat" empty state
+  // (no banner at all) whenever the beat is absent, so a fixture that drifted
+  // into `absent` would make every line under it vacuous.
+  assert.match(html, /metrics-grid/);
+  assert.match(html, /58%/);
+  assert.match(html, /57%/);
+  assert.match(html, /74%/);
+  assert.match(html, /pressure--unknown/);
+
+  // REDS ON PRE-FIX BYTES. origin/main 98c2eb628 rendered
+  // "No vitals to judge" + "This box has not reported the numbers this
+  // verdict is made of." directly above those four cards.
+  assert.doesNotMatch(html, /No vitals/);
+  assert.doesNotMatch(html, /has not reported the numbers/);
+
+  // And the state's own contract is still carried: absence is never dressed
+  // as calm.
+  assert.doesNotMatch(html, /No resource pressure/);
+  assert.match(html, /No pressure verdict/);
 });
 
 test("diagnosis: a PARTIAL verdict says so — even a calm one", () => {
