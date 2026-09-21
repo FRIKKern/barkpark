@@ -73,6 +73,21 @@
 #     `%H:%M:%SZ` (what it wrote before 2026-09-18 — and what every loop ALREADY RUNNING then
 #     keeps writing, because a loop is never edited in place). A line in neither shape is a
 #     refusal that NAMES both formats; it is never silently "stale".
+#   * THE CHECKOUT-DISTANCE BANNER (task-0d92408b59ae2190). Every run prints, BEFORE any row
+#     verdict, how far the git checkout this helper was read from is BEHIND the last-known
+#     `origin/main`. Measured 2026-09-21: the shared checkout was 581 commits behind and two
+#     independent false findings were filed in one shift off it, neither caught by inspection,
+#     because a stale read is not an error — `cat`, `grep` and `git show HEAD:<path>` all
+#     SUCCEED and return well-formed, internally consistent content that was true 581 commits
+#     ago. The failure is a CONFIRMED ANSWER TO THE WRONG QUESTION. This helper is the venue
+#     because every lead already runs it at the top of every loop; a doctrine line was already
+#     written and was read and then not applied, twice, on the same day.
+#     IT IS ADVISORY AND TOUCHES NOTHING. It never increments PROBLEMS and never changes the
+#     exit code — leads branch on 0/1/2/3/4 and that contract is unchanged (arm 13d proves it).
+#     IT NEVER FETCHES: a fetch on a per-loop helper is network on someone else's cadence, and
+#     an unfetched ref can only UNDER-report, so the number is a FLOOR and the line says so.
+#     A tree it cannot measure prints CHECKOUT DISTANCE UNKNOWN and NEVER a "0" — a failed read
+#     that renders byte-identical to a zero has already cost this campaign real incidents.
 #
 # USAGE
 #   held-liveness.sh "$ORCH/lead-security" --expect-worker lead-security \
@@ -92,6 +107,12 @@
 #   --tee FILE         append every printed line here as well.
 #   --no-ghost-scan    skip the ghost scan (e) entirely. For arms of the selftest that are about
 #                      something else; a lane should never pass it.
+#   --checkout DIR     the tree whose distance from origin/main the banner measures. Default:
+#                      the checkout this helper's own file lives in (if that file is not inside
+#                      one, the current directory), because the helper you are running comes
+#                      from the same tree as everything else you are reading.
+#   --no-checkout-banner  skip the distance banner entirely.
+#   --git-cmd CMD      the git used by the banner (default `git`). A TEST SEAM for arm 13.
 #   --ps-cmd CMD       the process enumerator for (e). Default `ps -axww -o pid=,args=`. A TEST
 #                      SEAM: the selftest drives the empty-population refusal with `--ps-cmd
 #                      true`. The matching itself is never stubbed — the positive-control arm
@@ -110,6 +131,7 @@
 #       4 = the ghost scan could not enumerate ANY pulse-loop process, not even this lane's own.
 #           A failed read must never be byte-identical to a zero, so this is its own code and its
 #           own line; it beats 1 for the same reason 3 does.
+#       The checkout-distance banner NEVER contributes to any of these. It is advisory text.
 set -u
 SELF="${BASH_SOURCE[0]}"
 
@@ -181,6 +203,77 @@ log_stamp_epoch() {
   LOGSTAMP_SHAPE="time-only"; LOGSTAMP_EPOCH="$e"; return 0
 }
 
+# ---- THE CHECKOUT-DISTANCE BANNER (task-0d92408b59ae2190) -----------------------------------
+# WHY IT LIVES IN THIS FILE AND NOT IN A BRIEF. On 2026-09-21 the shared checkout
+# /Volumes/SATECHI/github/barkpark was 581 commits behind origin/main. A lead filed a P1 against
+# an instrument that had already been fixed on main, and a builder sent two false corrections to
+# the lead who filed the row — both from reads that SUCCEEDED. The brief already said "helpers
+# from a FRESH worktree"; it was read, and then not applied, by two different agents on the same
+# day. A written finding does not fire by itself, so this one is a line of output on a command
+# every lead already runs.
+#
+# WHY INSPECTION CANNOT CATCH THE THING THIS MEASURES. The stale checkout is a valid git repo,
+# on main, clean. `cat`, `grep`, `sed` and `git show HEAD:<path>` all return exit 0 and
+# well-formed, internally CONSISTENT content — the file agrees with its own tests, its own
+# comments and its sibling files, because it is a coherent older SNAPSHOT of the tree, not a
+# corruption of the current one. There is no error, no empty read, no malformed byte to notice.
+# The failure is a confirmed answer to the wrong question, and the only thing that can see it is
+# a comparison against a ref the reader did not read the file from.
+#
+# WHAT IT DOES NOT DO:
+#   * It does not fetch. A helper on an 18-minute lead loop is the wrong place to put network
+#     traffic, and refs/remotes/origin/main on disk is already the thing every `git show
+#     origin/main:<path>` in the campaign resolves against — so measuring it is measuring what
+#     the reader will actually get. An unfetched ref can only ever UNDER-state the distance, so
+#     the number is a FLOOR and every branch of the line says so.
+#   * It does not touch PROBLEMS, REFUSALS or the exit code. Leads branch on 0/1/2/3/4.
+#   * It never prints "0" for a tree it could not measure. Three distinct refusals (not a repo /
+#     no origin/main ref / rev-list produced no number) each say UNKNOWN and say that it is not
+#     a zero, because an empty variable rendering as a confident 0 is the exact shape that has
+#     already cost this campaign real incidents.
+checkout_distance_banner() {
+  [ "$CHECKOUT_BANNER" = 1 ] || return 0
+  local d="$CHECKOUT_DIR" src top behind tip
+  if [ -n "$d" ]; then
+    src="--checkout"
+  else
+    d=$(cd -- "$(dirname -- "$SELF")" 2>/dev/null && pwd) || d=""
+    if [ -n "$d" ] && "$GIT_CMD" -C "$d" rev-parse --git-dir >/dev/null 2>&1; then
+      src="the tree this helper itself was read from"
+    else
+      d="$PWD"; src="the current directory — this helper's own file is not inside a checkout"
+    fi
+  fi
+  if ! "$GIT_CMD" -C "$d" rev-parse --git-dir >/dev/null 2>&1; then
+    say "CHECKOUT DISTANCE UNKNOWN: $d ($src) is not a git checkout, so its distance from origin/main was NOT measured. This is a failed measurement, NOT a zero."
+    return 0
+  fi
+  top=$("$GIT_CMD" -C "$d" rev-parse --show-toplevel 2>/dev/null); [ -n "$top" ] && d="$top"
+  if ! "$GIT_CMD" -C "$d" rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+    say "CHECKOUT DISTANCE UNKNOWN: $d ($src) has no refs/remotes/origin/main, so there is nothing on disk to measure against and the distance was NOT measured. This is a failed measurement, NOT a zero. Run: git -C $d fetch origin main"
+    return 0
+  fi
+  behind=$("$GIT_CMD" -C "$d" rev-list --count HEAD..refs/remotes/origin/main 2>/dev/null)
+  case "${behind:-}" in
+    ''|*[!0-9]*)
+      say "CHECKOUT DISTANCE UNKNOWN: 'git -C $d rev-list --count HEAD..refs/remotes/origin/main' produced no number, so the distance was NOT measured. This is a failed measurement, NOT a zero."
+      return 0;;
+  esac
+  # UTC, always. A local-offset stamp in a campaign whose agents compare times across lanes is
+  # how a "guessed clock" gets manufactured; and an unreadable date says so rather than printing
+  # an empty string that reads as a missing field.
+  tip=$(TZ=UTC0 "$GIT_CMD" -C "$d" log -1 --date=iso-strict-local --format=%cd refs/remotes/origin/main 2>/dev/null)
+  [ -n "$tip" ] || tip=$("$GIT_CMD" -C "$d" log -1 --format=%cI refs/remotes/origin/main 2>/dev/null)
+  [ -n "$tip" ] || tip="date unreadable"
+  if [ "$behind" -eq 0 ]; then
+    say "checkout: $d ($src) is LEVEL with the origin/main ref ON DISK — 0 commits behind, ref tip committed $tip. NO FETCH WAS PERFORMED, so this is a floor: fetch before you trust it (git -C $d fetch origin main)."
+    return 0
+  fi
+  say "CHECKOUT STALE: $d ($src) is $behind COMMIT(S) BEHIND the origin/main ref ON DISK (ref tip committed $tip), and NO FETCH WAS PERFORMED, so the real distance is $behind OR MORE."
+  say "CHECKOUT STALE: every cat / grep / 'git show HEAD:<path>' in that tree SUCCEEDS and hands you well-formed, internally consistent content that was true $behind commits ago — there is no error to notice, so the failure mode is a CONFIRMED ANSWER TO THE WRONG QUESTION, not a read that fails. Orient at the REF instead: git -C $d fetch origin main && git -C $d show origin/main:<path> | grep …  — or cut a worktree: git worktree add <dir> origin/main. (This banner is advisory; it did not change this run's exit code.)"
+  return 0
+}
+
 # ------------------------------------------------------------------ SELFTEST (no network) ----
 # Drives the helper against a stub `bp` on PATH, from a NON-REPO cwd, with real clock arithmetic
 # (every fixture timestamp is computed from `date` at run time, so no arm can pass by matching a
@@ -200,6 +293,17 @@ log_stamp_epoch() {
 #   5 a dead pid                         6 an unreadable ledger -> CANNOT READ, exit 3, and the
 #                                          output contains no "held"/"OK" reassurance
 #   7 an EMPTY held.txt -> exit 2 with its own line (an empty list is not "all held")
+#  13 THE CHECKOUT-DISTANCE BANNER, against REAL git repos this arm builds (no network):
+#     13a a checkout 2 commits behind its own refs/remotes/origin/main -> CHECKOUT STALE naming
+#         the count; 13b THE CONTROL, the SAME repo with the ref moved onto HEAD -> level, 0,
+#         and no CHECKOUT STALE line at all; 13c two unmeasurable trees (not a repo / no
+#         origin/main ref) -> UNKNOWN, each saying it is NOT a zero, and NEVER the string
+#         "0 commits behind"; 13d THE EXIT CONTRACT: 13a's firing banner over an all-held green
+#         lane still exits 0 and still ends on "liveness: OK"; 13e --no-checkout-banner is
+#         silent. MUTATION that must red 13b: make the zero branch print the STALE text (13a
+#         alone cannot tell a real measurement from a banner that always fires). MUTATION that
+#         must red 13c: replace either UNKNOWN say with the level line — an unmeasured tree then
+#         renders byte-identical to a measured zero, which is the defect, not the fix.
 #  11 THE GHOST SCAN's positive control: a real second process with a pulse-loop argv pulsing a
 #     row on this list -> NAMED, exit 1 (11a); the overlap removed while the same processes keep
 #     running -> the SAME arm goes GREEN (11b); an enumerator that returns nothing -> exit 4,
@@ -634,6 +738,65 @@ PROBEA
     _want "arm12c mutant checked ONE row"      1 '^task-(aaa|bbb|ccc) .* ok$'
   fi
 
+  echo "== arm 13: the checkout-distance banner, against real git repos built here"
+  # A REAL repo, not a fixture string: `git rev-list --count` is the thing under test, so
+  # stubbing git would only prove this file can echo its own expectation.
+  _g() { git -C "$1" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "${@:2}"; }
+  _mkrepo() { # _mkrepo <dir> -> a repo whose refs/remotes/origin/main is 2 commits AHEAD of HEAD
+    mkdir -p "$1"; git init -q "$1" >/dev/null 2>&1 || return 1
+    git -C "$1" symbolic-ref HEAD refs/heads/main
+    : > "$1/f"; _g "$1" add f >/dev/null 2>&1; _g "$1" commit -q -m A >/dev/null 2>&1
+    CK_BASE=$(git -C "$1" rev-parse HEAD)
+    echo b > "$1/f"; _g "$1" add f >/dev/null 2>&1; _g "$1" commit -q -m B >/dev/null 2>&1
+    echo c > "$1/f"; _g "$1" add f >/dev/null 2>&1; _g "$1" commit -q -m C >/dev/null 2>&1
+    CK_TIP=$(git -C "$1" rev-parse HEAD)
+    git -C "$1" update-ref refs/remotes/origin/main "$CK_TIP"
+    _g "$1" reset -q --hard "$CK_BASE" >/dev/null 2>&1
+  }
+  mkdir -p "$d/cks/plain"
+  if ! _mkrepo "$d/cks/behind"; then
+    echo "FAIL arm13: could not build a local git repo — the banner was NOT measured"; fails=$((fails+1))
+  else
+    # 13a: BEHIND. Same green lane as arm 1, so the ONLY new thing in the output is the banner.
+    _run "arm13a runs over a behind checkout" 0 -- "$d/lane" --expect-worker lead-x \
+         --no-ghost-scan --pid-file "$d/lane/pulse.pid" --checkout "$d/cks/behind"
+    _want "arm13a fires CHECKOUT STALE"          2 '^CHECKOUT STALE:'
+    _want "arm13a names the count"               1 'is 2 COMMIT\(S\) BEHIND'
+    _want "arm13a says the number is a floor"    1 'NO FETCH WAS PERFORMED, so the real distance is 2 OR MORE'
+    _want "arm13a states the failure mode"       1 'CONFIRMED ANSWER TO THE WRONG QUESTION'
+    _want "arm13a hands over the ref recipe"     1 'fetch origin main && git -C .* show origin/main:'
+    _want "arm13a never claims level"            0 'is LEVEL with'
+    # 13d: THE EXIT CONTRACT, measured on the very run whose banner fired.
+    _last "arm13d exit contract: still OK"       'liveness: OK'
+
+    # 13b: THE CONTROL. Same repo, same invocation shape, ref moved onto HEAD. A banner that
+    # always fires passes 13a; only this arm can tell that apart from a measurement.
+    git -C "$d/cks/behind" update-ref refs/remotes/origin/main "$(git -C "$d/cks/behind" rev-parse HEAD)"
+    _run "arm13b runs over a level checkout" 0 -- "$d/lane" --expect-worker lead-x \
+         --no-ghost-scan --pid-file "$d/lane/pulse.pid" --checkout "$d/cks/behind"
+    _want "arm13b is silent about staleness"     0 '^CHECKOUT STALE:'
+    _want "arm13b reads level, zero behind"      1 'is LEVEL with the origin/main ref ON DISK — 0 commits behind'
+    _last "arm13b exit contract: still OK"       'liveness: OK'
+
+    # 13c: the two unmeasurable trees. Neither may render as a zero.
+    _run "arm13c-i a non-repo dir" 0 -- "$d/lane" --expect-worker lead-x \
+         --no-ghost-scan --pid-file "$d/lane/pulse.pid" --checkout "$d/rows"
+    _want "arm13c-i says UNKNOWN"                1 '^CHECKOUT DISTANCE UNKNOWN:.*is not a git checkout'
+    _want "arm13c-i says NOT a zero"             1 'This is a failed measurement, NOT a zero'
+    _want "arm13c-i never renders a 0"           0 '0 commits behind'
+    git init -q "$d/cks/plain" >/dev/null 2>&1
+    _run "arm13c-ii a repo with no origin/main" 0 -- "$d/lane" --expect-worker lead-x \
+         --no-ghost-scan --pid-file "$d/lane/pulse.pid" --checkout "$d/cks/plain"
+    _want "arm13c-ii says UNKNOWN"               1 '^CHECKOUT DISTANCE UNKNOWN:.*no refs/remotes/origin/main'
+    _want "arm13c-ii says NOT a zero"            1 'This is a failed measurement, NOT a zero'
+    _want "arm13c-ii never renders a 0"          0 '0 commits behind'
+
+    # 13e: the opt-out prints nothing at all.
+    _run "arm13e --no-checkout-banner" 0 -- "$d/lane" --expect-worker lead-x \
+         --no-ghost-scan --pid-file "$d/lane/pulse.pid" --no-checkout-banner --checkout "$d/cks/plain"
+    _want "arm13e prints no banner line"         0 '^(CHECKOUT STALE|CHECKOUT DISTANCE UNKNOWN|checkout:)'
+  fi
+
   # Reap ONLY this selftest's own children. The helper itself never signals any process.
   kill "$GH_OWN" "$GH_PEER" 2>/dev/null; wait "$GH_OWN" "$GH_PEER" 2>/dev/null
 
@@ -645,6 +808,7 @@ PROBEA
 
 # ------------------------------------------------------------------ ARGUMENTS ----------------
 EXPECT=""; PIDFILE=""; PULSELOG=""; WARN=15; INTERVAL=18; LEASE=45; BP="bp"; GRACE=3
+CHECKOUT_BANNER=1; CHECKOUT_DIR=""; GIT_CMD="git"
 LANE=""; HELDARG=""; SESSION=""
 GHOSTSCAN=1; PS_CMD="ps -axww -o pid=,args="
 while [ $# -gt 0 ]; do
@@ -665,7 +829,10 @@ while [ $# -gt 0 ]; do
     --tee)            TEE="${2:-}"; shift 2;;
     --no-ghost-scan)  GHOSTSCAN=0; shift;;
     --ps-cmd)         PS_CMD="${2:-}"; shift 2;;
-    -h|--help)        sed -n '2,112p' "$SELF"; exit 0;;
+    --checkout)       CHECKOUT_DIR="${2:-}"; shift 2;;
+    --no-checkout-banner) CHECKOUT_BANNER=0; shift;;
+    --git-cmd)        GIT_CMD="${2:-}"; shift 2;;
+    -h|--help)        sed -n '2,135p' "$SELF"; exit 0;;
     --*)              echo "held-liveness.sh: unknown flag '$1'" >&2; exit 2;;
     *)                if [ -n "$LANE" ]; then echo "held-liveness.sh: one lane dir, got '$LANE' and '$1'" >&2; exit 2; fi
                       LANE="$1"; shift;;
@@ -677,6 +844,11 @@ done
 if [ -z "$LANE" ]; then
   echo "held-liveness.sh: no lane dir. usage: held-liveness.sh <lane-dir> [--expect-worker W] [--pid-file F] [--log F] [--warn-minutes N]" >&2; exit 2
 fi
+# FIRST LINE OF EVERY RUN. Printed before the held list is even resolved, so that the exit-2
+# refusals below ("NO LIST", "EMPTY LIST") carry it too — a lead whose lane dir looks wrong is
+# exactly a lead who may be reading a months-old tree. Advisory: it cannot change the exit code.
+checkout_distance_banner
+
 # THE LIST THIS SESSION OWNS. Precedence: an explicit --held file, else the
 # per-session name from --session, else the legacy lane-wide held.txt. Naming
 # a file that is not there is a REFUSAL below, never a silent fallback to the

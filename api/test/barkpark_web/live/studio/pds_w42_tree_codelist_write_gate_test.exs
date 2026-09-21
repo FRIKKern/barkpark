@@ -189,17 +189,71 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
   end
 
   # THE CHAIN, driven at its real entry point: the cid-targeted
-  # `tree_node_select` on the nested TreeCodelistField. The trailing `render/1`
-  # forces the parent to drain BOTH handle_info hops before anything is read —
-  # reading straight after `render_hook/3` reads before the messages are
-  # processed and reports a false "no write".
+  # `tree_node_select` on the nested TreeCodelistField.
+  #
+  # WHY THE TRAILING BARRIER IS A LOOP AND NOT A SINGLE `render/1`
+  # (task-30f870d54301df4b — this helper reddened main 12/20 at :308).
+  #
+  # The chain crosses THREE separate mailbox generations of the SAME LiveView
+  # process, each one enqueued by the process itself while handling the one
+  # before it:
+  #
+  #   G1  `send(self(), {:tree_codelist_change, …})`
+  #         tree_codelist_field.ex:179 (`maybe_notify_select/2`), during handle_EVENT
+  #   G2  `send(pid, {:phoenix, :send_update, …})`
+  #         Channel.send_update/3 — what `send_update/3` in
+  #         `Lifecycle.tree_codelist_change/2` compiles to — during G1's handle_INFO
+  #   G3  `send(self(), {:paper_op, …})`
+  #         paper_field_block.ex:352 (`persist/4`), during G2's component update
+  #
+  # ONLY G3's handler reaches the store. `render/1` is ONE barrier: it is
+  # `ClientProxy.ping!/3` -> `Phoenix.LiveView.Channel.ping/1` -> a single
+  # `GenServer.call`, which orders itself against the messages ALREADY in the
+  # mailbox WHEN IT ARRIVES — and G2/G3 are enqueued later, by the LiveView,
+  # at a moment the test process cannot order against. So how many hops one
+  # `render/1` drains is decided by the scheduler, not by the code: on an idle
+  # box the LiveView runs ahead and all three land before the ping (green); on
+  # a loaded one the ping overtakes G2, `render/1` returns, and
+  # `stored_value/1` — a direct SELECT that never touches the LiveView —
+  # reports the OLD value. That is the red: `left: "FBA"`, `right: "ESCALATED"`.
+  #
+  # The barrier below is therefore a convergence, not a count and not a sleep:
+  # ping, then ask whether the LiveView has anything left, and ping again until
+  # it is twice-quiet. Each iteration strictly advances the chain, so it
+  # terminates; the fuel only turns a hang into a named failure.
   defp tree_node_select(view, code) do
     view
     |> with_target("#tree-" <> @block_id)
     |> render_hook("tree_node_select", %{"code" => code})
 
-    render(view)
+    settle!(view)
     :ok
+  end
+
+  # Barrier until the LiveView process has nothing queued on two consecutive
+  # pings. One empty reading can be a window between a message arriving and the
+  # process dequeuing it; two, with a full barrier in between, cannot be the
+  # middle of this chain — every generation here is enqueued BEFORE the ping
+  # that precedes it is answered.
+  defp settle!(view, quiet \\ 0, fuel \\ 50)
+
+  defp settle!(_view, 2, _fuel), do: :ok
+
+  defp settle!(_view, _quiet, 0) do
+    flunk("""
+    the LiveView never went quiet after tree_node_select/2: 50 render/1 barriers \
+    and its mailbox was still non-empty. Either the select chain grew a repeating \
+    self-message, or the process is wedged.
+    """)
+  end
+
+  defp settle!(view, quiet, fuel) do
+    render(view)
+
+    case :erlang.process_info(view.pid, :message_queue_len) do
+      {:message_queue_len, 0} -> settle!(view, quiet + 1, fuel - 1)
+      _ -> settle!(view, 0, fuel - 1)
+    end
   end
 
   # What the component's OWN value is, as the editor renders it back: the

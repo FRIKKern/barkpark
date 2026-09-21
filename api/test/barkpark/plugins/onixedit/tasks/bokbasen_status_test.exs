@@ -3,6 +3,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
 
   import ExUnit.CaptureIO
 
+  alias Barkpark.BootModeSandbox
   alias Barkpark.Content.Document
   alias Mix.Tasks.Bokbasen.Status
 
@@ -69,7 +70,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
 
       output =
         capture_io(fn ->
-          Status.run(["--book-id", "st-1"])
+          BootModeSandbox.protecting(fn -> Status.run(["--book-id", "st-1"]) end)
         end)
 
       assert output =~ "doc_id"
@@ -89,7 +90,10 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
           "last_error" => %{"type" => "auth", "summary" => "AuthError"}
         })
 
-      output = capture_io(fn -> Status.run(["--book-id", "st-err"]) end)
+      output =
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn -> Status.run(["--book-id", "st-err"]) end)
+        end)
 
       assert output =~ "auth"
       assert output =~ "AuthError"
@@ -103,7 +107,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
       seed_book("c", %{"state" => "failed"})
       seed_book("d", %{"state" => "pending"})
 
-      output = capture_io(fn -> Status.run([]) end)
+      output = capture_io(fn -> BootModeSandbox.protecting(fn -> Status.run([]) end) end)
 
       for s <-
             ~w(pending staging staged polling accepted rejected failed cancelled cannot_cancel) do
@@ -117,13 +121,15 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenStatusTest do
   describe "errors" do
     test "raises Mix.Error when --book-id refers to a missing doc" do
       assert_raise Mix.Error, ~r/book not found/i, fn ->
-        capture_io(fn -> Status.run(["--book-id", "missing-x"]) end)
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn -> Status.run(["--book-id", "missing-x"]) end)
+        end)
       end
     end
 
     test "raises on unknown switches" do
       assert_raise Mix.Error, fn ->
-        capture_io(fn -> Status.run(["--bogus"]) end)
+        capture_io(fn -> BootModeSandbox.protecting(fn -> Status.run(["--bogus"]) end) end)
       end
     end
   end
