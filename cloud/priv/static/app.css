@@ -3430,8 +3430,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-env-row .btn { flex: 0 0 auto; }
 
 .new-golive { border-top: 1px solid var(--border); padding-top: 16px; }
-.new-golive-row { display: flex; gap: 8px; margin-top: 8px; }
-.new-golive-row .form-input { flex: 1; }
+/* console-r21m DEFECT-F — THE ROW HAD NO FLOOR, SO THE FIELD PAID FOR THE
+   REFUSAL. `flex: 1` is `flex: 1 1 0%`: a ZERO flex base size, so the field
+   contributes nothing to the line's hypothetical width and absorbs every
+   pixel its sibling asks for. That is invisible while the sibling is a
+   BUTTON — `theater-ready-github` measured field 305.23 / button 150.77 in a
+   464px row — and it collapses the moment the sibling is the D428
+   disable-and-explain arm: `theater-ready-github-member` routes
+   adminWriteControlHtml's refusal arm into this same row, and that arm is a
+   `.inst-life-disabled` flex box carrying FORBIDDEN_ROLE_COPY.admin's whole
+   sentence beside the button. Measured on origin/main d5bea4de9, light,
+   1440: `.inst-life-disabled` took 430 of the 464px row and
+   `#new-gh-name` was left 26px — an empty ~40px outlined square with the
+   greyed "Create GitHub repo" label sitting outside it, which is the shape
+   the accent-matrix re-review filed as a collapsed button. The button is
+   fine; the FIELD is the casualty, and nothing on this screen said so.
+   THE REMEDY IS A FLOOR PLUS A WRAP, NOT A WIDTH ON THE SIBLING. A cap on
+   `.inst-life-disabled` would truncate the server's own refusal sentence —
+   the thing D428 exists to SHOW — so instead the field declares a real flex
+   base size and the line is allowed to break. Line breaking reads the flex
+   BASE size, so 220 + 430 + 8 > 464 puts the refusal arm on its own line and
+   hands the field the full 464; in the grant arm 220 + 151 + 8 < 464 keeps
+   one line and the field still grows to the identical 305.23px. MEASURED
+   BOTH WAYS by overflow-guard.mjs --defect W21m-wizard-refusal-row-field-floor:
+   member 26 -> 464 (row height 38 -> 82), owner 305.23 -> 305.23 (row height
+   38 -> 38, zero pixels moved). The second half is the point: this may not
+   cost the screen everybody reaches anything. */
+.new-golive-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.new-golive-row .form-input { flex: 1 1 220px; }
 .new-gh { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: left; }
 .new-gh .label { display: block; margin-bottom: 4px; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
@@ -3866,7 +3892,38 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
        .instance-card-head detail 3754/164 -> 164/164 @320, 3754/496 -> 496/496 @900
      Every host is fixed and there is nothing left to refuse — but ONE of them
      needed a second declaration OUTSIDE this block to make the wrap bind at all:
-     see `.fleet-status`'s `max-width: 100%` at :983 and the note there. */
+     see `.fleet-status`'s `max-width: 100%` at :983 and the note there.
+
+     ───────────────────────────────────────────────────────────────────────
+     console-r21m DEFECT-I — FILED AS "THE STATUS PILL HAS NO LENGTH CAP AND
+     BALLOONS TO SIX LINES". IT STAYS, AND THE REASON IS D267 ABOVE, RE-READ
+     AT origin/main d5bea4de9 RATHER THAN REMEMBERED.
+     The accent-matrix re-review (2026-09-20, `fleet-cruel-content`) is
+     looking at `overflow-wrap: anywhere` WORKING. The detail it saw is
+     `bp.provision_error` verbatim — a machine capture with no ceiling
+     anywhere between the worker socket and this box — and before cch-w23-s1
+     the SAME string painted 3754px THROUGH its own box and dragged
+     #overview to a documentElement.scrollWidth of 3860 against a 320px
+     viewport. Six lines inside the card is the remedy's own output: the
+     string is now inside the box it belongs to, at every width, in every
+     one of the three descendant scopes measured above.
+     THE FILED REMEDY — a length cap — IS THE ONE D267 ADJUDICATED AND
+     REFUSED, on measurement rather than taste: a 1648-char WORD-BROKEN
+     capture is completely clean at 320 and 390, while 512 characters in ONE
+     UNBROKEN TOKEN takes the page to 3555/320. The defect is TOKEN SHAPE,
+     not length, so any cap loose enough to keep a real capture readable
+     still lets one token paint through, and any cap tight enough to stop
+     the token truncates the only diagnostic the operator has for a failed
+     provision. A cap would therefore trade a bounded, ugly six lines for a
+     shredded error message AND an unfixed page-drag — strictly worse on
+     both axes.
+     THE REAL RESIDUAL IS VERTICAL, NOT HORIZONTAL, AND IT IS NOT THIS
+     BLOCK'S: a six-line detail is a long string rendered honestly. Bounding
+     the pill's HEIGHT (a line clamp with the full text still reachable) is a
+     separate remedy with a separate cost — it hides the tail of an error —
+     and it is not what the row asked for. Filing it as its own row is the
+     honest disposition; overturning D267 by stealth inside an F/H fix is
+     not. NO BYTES CHANGE HERE, deliberately. */
   overflow-wrap: anywhere;
 }
 .status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }

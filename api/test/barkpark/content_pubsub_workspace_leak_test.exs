@@ -278,11 +278,13 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
       assert wid == ws_a.id
     end
 
-    test "PROOF the old bare topic WOULD have fanned B's event out to A", %{ws_b: ws_b} do
-      # Reconstruct the pre-fix subscribe: the bare `documents:#{dataset}` topic
-      # with NO workspace component. content.ex still broadcasts here additively,
-      # so a bare subscriber receives EVERY co-dataset tenant's event — the
-      # wasteful fan-out the fix removes.
+    test "the bare topic no longer fans B's event out at all", %{ws_b: ws_b} do
+      # The pre-fix subscribe: the bare `documents:#{dataset}` topic with NO
+      # workspace component. It used to receive EVERY co-dataset tenant's event
+      # (the fan-out the ws-keyed topic was added to avoid); since ruling (b) on
+      # task-b7e81f26e959106c it receives nothing about a workspace-owned
+      # document at all. `content_pubsub_global_topic_leak_test` carries the
+      # positive control (a shared-layer frame still arrives here).
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@list_dataset}")
 
       {:ok, _doc_b} =
@@ -290,22 +292,25 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
           workspace_id: ws_b.id
         )
 
-      # The bare topic receives B's event — proving the fan-out is real and the
-      # ws-scoped gate above is meaningful.
-      assert_receive {:document_changed, %{doc_id: "drafts.bare-b", workspace_id: wid}}, 1_000
-      assert wid == ws_b.id
+      refute_receive {:document_changed, %{doc_id: "drafts.bare-b"}}, 300
     end
 
-    test "nil-workspace (Default/flat) write still lands on the bare topic" do
-      # The back-compat path: a write without an explicit workspace (Default
-      # fallback) — the nil-scope listener keeps the bare subscribe, and
-      # content.ex always fires the bare topic, so self-delivery holds there too.
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@list_dataset}")
+    test "a Default/flat write lands on the DEFAULT workspace's keyed topic" do
+      # The back-compat path: a write without an explicit workspace lands in the
+      # seeded Default workspace (`WriteScope.resolve_write_scope/1`), so it is
+      # workspace-OWNED and is announced on that workspace's keyed topic — the
+      # topic every Default-tenant consumer (BoardLive, Recorder, Quiz.Bridge)
+      # joins through `Broadcast.subscribe_documents/2`.
+      default_ws = Tenancy.get_default_workspace()
+      assert %{id: default_id} = default_ws
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{default_id}:#{@list_dataset}")
 
       {:ok, _doc} =
         Content.create_document("post", %{"_id" => "default-doc", "title" => "D"}, @list_dataset)
 
-      assert_receive {:document_changed, %{doc_id: "drafts.default-doc"}}, 1_000
+      assert_receive {:document_changed,
+                      %{doc_id: "drafts.default-doc", workspace_id: ^default_id}},
+                     1_000
     end
   end
 

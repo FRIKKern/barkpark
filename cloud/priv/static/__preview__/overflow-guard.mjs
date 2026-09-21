@@ -328,6 +328,7 @@ const DEFECTS = [
   "W34-sites-read-failed-bounded",
   "W16-site-freshness-agrees-with-production-ladder",
   "W21m-member-head-title-floor",
+  "W21m-wizard-refusal-row-field-floor",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -14012,6 +14013,181 @@ async function main() {
           `(app.css's 899 block), where \`.detail-head-main\` already spans the head. That is why the remedy is ` +
           `scoped to a \`min-width: 900px\` block — an unscoped \`flex-basis\` on a column item is a HEIGHT basis, ` +
           `and would have bought the wide band at the cost of the stacked one`,
+        );
+      }
+    }
+
+
+    // ── W21m: THE WIZARD ROW'S FIELD HAS A FLOOR, IN BOTH AUTHORITY ARMS ────
+    //
+    //    THE DEFECT NO PAGE-LEVEL LEG IN THIS FILE COULD SEE. `.new-golive-row`
+    //    never overflowed anything: it is a two-item flex line inside a fixed
+    //    card, and on origin/main d5bea4de9 its page, its card and its own box
+    //    all measured clean while `#new-gh-name` sat at 26px — an empty ~40px
+    //    outlined square with the greyed "Create GitHub repo" label beside it,
+    //    which is what the accent-matrix re-review filed as DEFECT-F (and filed
+    //    as a collapsed BUTTON; the button measured 133.47x28 with its label
+    //    inside it, so the filing named the wrong element).
+    //
+    //    `flex: 1` is `flex: 1 1 0%`. A zero flex base size means the field
+    //    contributes NOTHING to the line's hypothetical width, so the sibling
+    //    takes its content width first and the field divides the remainder —
+    //    fine beside a button, ruinous beside D428's disable-and-explain arm,
+    //    which is a `.inst-life-disabled` flex box carrying
+    //    FORBIDDEN_ROLE_COPY.admin's whole sentence.
+    //
+    //    TWO ARMS, ONE ROW, AND THE SECOND IS THE POINT. The member arm is the
+    //    defect; the OWNER arm (`theater-ready-github`, same row, same card) is
+    //    the CONTROL, and it is asserted to be UNMOVED — a remedy that fixed
+    //    the refusal by reshaping the screen everybody reaches would red here
+    //    rather than pass as "the field is wide now". Both numbers are
+    //    measured, never inferred from the class list.
+    if (requested.includes("W21m-wizard-refusal-row-field-floor")) {
+      const D = "W21m-wizard-refusal-row-field-floor";
+      // 1440 is where the re-review shot it; 768 is this file's own tablet
+      // band; 390 is a phone, where the row has always wrapped and the field
+      // has always been the full width — a SHOULDER, unable to detect the
+      // defect, present to catch a remedy that breaks the narrow layout.
+      const WIDTHS_W21M = [1440, 768, 390];
+      // The floor is the authored flex-basis, and it is NOT re-typed from
+      // app.css: it is read off the live computed style below and asserted to
+      // be a real length, so deleting the declaration reds this leg rather
+      // than leaving it measuring a default.
+      const ARMS = [
+        { scen: "theater-ready-github-member", refuses: true },
+        { scen: "theater-ready-github", refuses: false },
+      ];
+      const { SCENARIOS: SC_W21M } = await import("./scenarios.mjs");
+      process.stdout.write(
+        `\n${D} — theater-ready-github{,-member} x ${WIDTHS_W21M.length} widths x 2 themes ` +
+        `(${ARMS.length * WIDTHS_W21M.length * 2} cells; the repo-name field's painted width against its own ` +
+        `row, in the REFUSAL arm and in the GRANT control, plus the row's box and the page)\n`,
+      );
+      let cells = 0, starved = 0, armMismatch = 0, boxOver = 0, pageOver = 0;
+      const grantWidths = new Map();
+      for (const arm of ARMS) {
+        const sc = SC_W21M[arm.scen];
+        if (!sc || !sc.pathname || !sc.search) {
+          return die(`${D}: SCENARIOS["${arm.scen}"] no longer carries pathname+search — the launch theater cannot be reached, so nothing was measured`);
+        }
+        for (const theme of ["light", "dark"]) {
+          await setViewport(WIDTHS_W21M[0]);
+          await nav(
+            `${BASE}${sc.pathname}${sc.search}&scen=${arm.scen}&theme=${theme}`,
+            // READINESS, KEYED ON THE ELEMENT THIS LEG MEASURES. `.new-golive-row
+            // .form-input` would be a population-blind singular wait on whichever
+            // golive row painted first — the view-scope census names that class and
+            // refuses it undischarged. `#new-gh-name` is the field under
+            // measurement and an id is one host by the HTML contract, so the wait
+            // and the measurement now agree on their subject.
+            `document.querySelector('.new-golive-row') && document.querySelector('#new-gh-name')`,
+          );
+          const row = [];
+          for (const width of WIDTHS_W21M) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              // D228: ITERATE. There are two `.new-golive-row`s on this screen
+              // (the GitHub row and the go-live URL row) and a querySelector
+              // would silently pick one — the wrong one, on any future reorder.
+              // The row this leg is about is the one that HOLDS the repo-name
+              // field, named by its id, and the other row is measured too.
+              `var rows=[].slice.call(document.querySelectorAll('.new-golive-row'));` +
+              `var out={theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:rows.length,gh:null,others:[]};` +
+              `rows.forEach(function(r){` +
+              `  var f=r.querySelector('.form-input');if(!f) return;` +
+              `  var rr=r.getBoundingClientRect(),fr=f.getBoundingClientRect();` +
+              `  var cs=getComputedStyle(f);` +
+              `  var rec={rowW:+rr.width.toFixed(2),rowH:+rr.height.toFixed(2),fieldW:+fr.width.toFixed(2),` +
+              `    basis:cs.flexBasis,wrap:getComputedStyle(r).flexWrap,` +
+              `    rowSW:r.scrollWidth,rowCW:r.clientWidth,` +
+              `    refusal:!!r.querySelector('.inst-life-disabled'),` +
+              `    live:!!r.querySelector('button:not([disabled])')};` +
+              `  if(f.id==='new-gh-name') out.gh=rec; else out.others.push(rec);` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.theme !== theme) fail(D, `${arm.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: no row, no measurement. A screen that stopped rendering
+            // the GitHub block would otherwise print a perfect table about
+            // nothing — the absence class this file refuses by name.
+            if (!m.gh) {
+              fail(D, `${arm.scen}/${theme}@${width}: no \`.new-golive-row\` holds \`#new-gh-name\` (${m.rows} golive row(s) on the page) — nothing was measured, this is not a pass`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            // AUDITED: the ARM is measured, not assumed from the scenario name.
+            // If a fixture drifted and the member screen started offering a
+            // live control, every width below would be measuring the grant arm
+            // while this leg claimed to have driven the refusal.
+            if (m.gh.refusal !== arm.refuses || m.gh.live === arm.refuses) {
+              armMismatch++;
+              fail(D, `${arm.scen}/${theme}@${width}: the row renders refusal=${m.gh.refusal} live-button=${m.gh.live}, but this arm is ${arm.refuses ? "the REFUSAL" : "the GRANT control"} — the authority arm under measurement is not the one named`);
+            }
+            // THE FLOOR ITSELF. A `flex-basis` of `0%`/`0px` IS the defect's
+            // mechanism, so reading it back off the live cascade is what makes
+            // deleting the declaration red this leg instead of leaving it
+            // measuring a browser default.
+            if (/^0(px|%)?$/.test(m.gh.basis)) {
+              fail(D, `${arm.scen}/${theme}@${width}: \`#new-gh-name\` computes flex-basis ${m.gh.basis} — a ZERO flex base size is the pre-fix mechanism: the field contributes nothing to the line and divides whatever its sibling leaves`);
+            }
+            // THE DEFECT: a field narrower than its own sibling's gap is not a
+            // field. The threshold is the AUTHORED basis where one is
+            // declared — never a number invented here — and 120px is the
+            // fallback floor below which no text input is usable.
+            const floor = Math.min(parseFloat(m.gh.basis) || 120, 120);
+            if (m.gh.fieldW < floor) {
+              starved++;
+              fail(D, `${arm.scen}/${theme}@${width}: \`#new-gh-name\` painted ${m.gh.fieldW}px inside a ${m.gh.rowW}px row (floor ${floor}px) — the repo-name field is starved to an empty square while its sibling takes the line (origin/main d5bea4de9: 26px of 464 at 1440, light)`);
+            }
+            for (const r of [m.gh, ...m.others]) {
+              if (r.rowSW > r.rowCW + 1) {
+                boxOver++;
+                fail(D, `${arm.scen}/${theme}@${width}: a \`.new-golive-row\` measures scrollWidth ${r.rowSW} > clientWidth ${r.rowCW} — the row is wider than the box that holds it`);
+              }
+            }
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${arm.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — the remedy dragged the page sideways`);
+            }
+            // THE CONTROL LEDGER. The grant arm's numbers at each width+theme
+            // are recorded and printed; they are what a reviewer compares a
+            // future reshape against, and they are the half of this leg that
+            // fails when a remedy "fixes" the refusal by moving the screen
+            // everybody reaches.
+            if (!arm.refuses) grantWidths.set(`${theme}@${width}`, { f: m.gh.fieldW, h: m.gh.rowH });
+            row.push(`${width}:field ${m.gh.fieldW}/${m.gh.rowW}px h=${m.gh.rowH} basis=${m.gh.basis} wrap=${m.gh.wrap} page ${m.psw}/${m.pcw}`);
+          }
+          process.stdout.write(`   ${arm.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (cells !== ARMS.length * WIDTHS_W21M.length * 2) {
+        fail(D, `only ${cells} of ${ARMS.length * WIDTHS_W21M.length * 2} cells ran — this leg's claim is about every one of them`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean: \`#new-gh-name\` is a usable field in BOTH authority arms, at ` +
+          `${WIDTHS_W21M.join("/")} in both themes, with the arm under measurement ASSERTED from the rendered ` +
+          `bytes (refusal = a \`.inst-life-disabled\` present and no live button; grant = the inverse) rather ` +
+          `than taken from the scenario name`,
+        );
+        okLine(
+          `THE GRANT ARM IS THE CONTROL AND IT DID NOT MOVE: ` +
+          `${[...grantWidths].map(([k, v]) => `${k} field ${v.f}px h=${v.h}`).join(" · ")}. On origin/main ` +
+          `d5bea4de9 the same cells measured field 305.23px / row height 38 at light@1440 — the remedy is ` +
+          `required to cost the screen everybody reaches nothing, and this line is where that is paid`,
+        );
+        okLine(
+          `THE FLOOR IS READ OFF THE LIVE CASCADE, NEVER RE-TYPED: every cell asserted \`#new-gh-name\`'s ` +
+          `computed \`flex-basis\` is not a zero base size, so deleting app.css's \`flex: 1 1 220px\` reds this ` +
+          `leg on the MECHANISM, and the painted-width assertion reds it on the PIXELS. Two doors, one defect`,
+        );
+        okLine(
+          `HONEST LIMIT: this leg drives the GitHub-connected launch theater only. The go-live URL row shares ` +
+          `\`.new-golive-row\` and is measured for box overflow on the same screens, but its own field is not ` +
+          `floor-asserted — no authority arm reaches it, so it has no sibling that can starve it`,
         );
       }
     }
