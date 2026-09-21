@@ -825,11 +825,12 @@ jobs:
       #
       # THE HOLE. `scripts/check-doc-budgets.sh` enforces byte budgets two ways.
       # The 39-row CAPS heredoc got a blocking reader in #18216
-      # (api/test/barkpark/doc_budget_cap_test.exs, under the required Elixir
-      # gate). Its sibling arm — HEADER DISCOVERY, which walks docs/**.md and
-      # enforces each file's own `budget: Ntok` header — got none, and the
-      # closed row's scope note called those docs "advisory-only", which reads
-      # as a tolerable gap. MEASURED on origin/main f11ac14d1 by running the
+      # (api/test/barkpark/doc_budget_cap_test.exs, which this job's workflow
+      # already dispatches). Its sibling arm — HEADER DISCOVERY, which walks
+      # docs/**.md and enforces each file's own `budget: Ntok` header — got
+      # none, and the closed row's scope note said those docs stayed unread,
+      # which reads as a tolerable gap. MEASURED on origin/main f11ac14d1 by
+      # running the
       # script: 109 docs are enforced ONLY by discovery, 38 of them are OVER
       # their own declared header TODAY (green solely because a FREEZE row pins
       # them at their measured size), and 0 of the 38 sat in any dispatched path
