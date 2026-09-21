@@ -196,6 +196,22 @@ export const CONFORMING = [
     name: "HASHCHANGE WIRING",
     sample: "!! HASHCHANGE WIRING (exit 2): REFUSED TO MEASURE",
   },
+  // adjacency-guard.mjs is the `run:` step of the `adjacency-guard` job added by
+  // #19336 and refuses under TWO names: the roster pre-flight (`!! ROSTER GUARD
+  // (exit 2) — refusing to boot Chrome:`) and every measurement refusal after it
+  // (`!! GUARD (exit 2): REFUSED TO MEASURE — …`, the no-Chrome line, the empty
+  // population, the stale server, the font pin). Both shapes were already spoken;
+  // nothing named them here, so the DERIVED fence test reddened on main's tip.
+  {
+    file: "cloud/priv/static/__preview__/adjacency-guard.mjs",
+    name: "ROSTER GUARD",
+    sample: "!! ROSTER GUARD (exit 2) — refusing to boot Chrome:",
+  },
+  {
+    file: "cloud/priv/static/__preview__/adjacency-guard.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): REFUSED TO MEASURE — the source population is EMPTY.",
+  },
   // pin-race.mjs is a `run:` step of its own job and refuses through ONE funnel
   // (`const refuse = async (why)`), which sets `process.exitCode = 2` rather
   // than calling process.exit(2) — the reason a reader keyed on the call shape
