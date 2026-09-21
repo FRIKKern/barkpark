@@ -99,6 +99,28 @@
 #                          selftest, which has no compiled build.
 set -euo pipefail
 
+# INTERPRETER GUARD — must stay POSIX-parseable and must stay ABOVE the first
+# process substitution (the `comm` at line ~300). bash reads a script
+# incrementally, so anything a guard sits AFTER is code a POSIX-mode shell has
+# already run. Under `sh` this file dies on that token with a bare
+# `syntax error near unexpected token (` and prints NOTHING on stdout, while
+# bash prints `ALL` — and its stdout IS the selection `elixir.yml` consumes
+# (`out="$(... | bash scripts/elixir-impacted-tests.sh --select)"`). An empty
+# selection reads exactly like "this diff impacts no tests", which is the
+# vacuous green scripts/posix-vacuous-green-census.sh exists to prevent. Every
+# caller in this repo already invokes it as `bash scripts/...`, so this refusal
+# is unreachable in production and changes no behaviour there.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "elixir-impacted-tests.sh: needs bash (this script uses process substitution); run: bash scripts/elixir-impacted-tests.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "elixir-impacted-tests.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/elixir-impacted-tests.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${BP_IMPACTED_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 API_DIR="${BP_IMPACTED_XREF_DIR:-$REPO_ROOT/api}"
