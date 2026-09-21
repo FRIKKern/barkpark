@@ -202,7 +202,7 @@ SCEN_MODAL="$(printf '%s\n' "$SCEN_TABLE" | cut -d$'\x1f' -f6 | grep -c . || tru
 # accident; this covers it on purpose. It is deliberately NOT a general rule
 # (a scenario is free to have no dialog); it is a rule about the seven names
 # the deleted line used to reach.
-ORPHANED="$(printf '%s\n' "$SCEN_TABLE" | awk -F$'\x1f' '$1 ~ /^account-modal/ && $5 == "" { print $1 }')"
+ORPHANED="$(printf '%s\n' "$SCEN_TABLE" | awk -F$'\x1f' '$1 ~ /^account-modal/ && $6 == "" { print $1 }')"
 if [[ -n "$ORPHANED" ]]; then
   echo "!! shoot.sh: scenario(s) named account-modal* declare NO \`modal\` field in scenarios.mjs:" >&2
   printf '   %s\n' $ORPHANED >&2
