@@ -382,6 +382,44 @@ defmodule Barkpark.Tasks.StageTest do
       assert resp.status == 422
       assert Jason.decode!(resp.resp_body)["reason"] == "illegal_transition"
     end
+
+    # THE ARM THAT MEASURES `Transitions.legal?/2` AT THIS DOOR.
+    #
+    # `check_stageable/2` is `(to in @stageable or from == to) and
+    # Transitions.legal?(from, to)`. Every refusal above names a target OUTSIDE
+    # `@stageable` (`done`, `in_progress`, `cancelled`), so the FIRST half
+    # answers and the AND-guard is never consulted: deleting
+    # `and Transitions.legal?(from, to)` from stage.ex left this whole file at
+    # 37 tests, 0 failures.
+    #
+    # `done → considering` is the shape only the AND-guard can refuse: the
+    # target IS stageable, `from != to`, and D7 forbids a terminal row
+    # re-entering thought (transitions_test.exs "done|cancelled → considering|
+    # researching is refused"). The precondition is asserted below so the arm
+    # cannot quietly become another `@stageable` refusal.
+    test "a DONE row staged to considering is a 422 — the target is stageable, the EDGE is not",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-done-to-considering")
+      task = mk_task!(doc_id, scope, %{"lifecycle_status" => "done"})
+
+      # PRECONDITION: the first half of the conjunction PERMITS this call, so a
+      # refusal can only come from Transitions.legal?/2.
+      assert "considering" in Barkpark.Tasks.Stage.stageable_targets()
+      refute Barkpark.Tasks.Transitions.legal?("done", "considering")
+
+      resp = stage(conn, doc_id, %{state: "considering", worker: "cycle-1", object: "research"})
+      assert resp.status == 422
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "illegal_transition"
+      assert payload["from"] == "done"
+      assert payload["to"] == "considering"
+
+      # Nothing moved, and no thought lease was minted on a finished row.
+      row = reload(task)
+      assert row.content["lifecycle_status"] == "done"
+      refute Map.has_key?(row.content, "engagement")
+    end
   end
 
   describe "POST /v1/tasks/:doc_id/stage — terminal-reopen truth (S1)" do
@@ -456,9 +494,17 @@ defmodule Barkpark.Tasks.StageTest do
   #
   # The widening is `to in @stageable or from == to`. These fixtures pin BOTH
   # halves — that the adjudication door opened, and that the MOVEMENT door did
-  # not. Revert the `or from == to` clause and the first test reds with
-  # {:illegal_transition, "done", "done"}; delete the `and Transitions.legal?/2`
-  # AND-guard and the open→done fixtures red instead.
+  # not. Revert the `or from == to` clause and these fixtures red with
+  # {:illegal_transition, "done", "done"} (measured: 37 tests, 4 failures).
+  #
+  # CORRECTED 2026-09-21: this comment used to add "delete the
+  # `and Transitions.legal?/2` AND-guard and the open→done fixtures red
+  # instead". They do NOT. `done` is outside `@stageable` and `open != done`,
+  # so the FIRST half of the conjunction already refuses open→done and the
+  # AND-guard is never reached — deleting it left the whole file green at
+  # 37 tests, 0 failures. The arm that actually measures the AND-guard is
+  # "a DONE row staged to considering is a 422", in the illegal-transitions
+  # block above, where the target IS stageable.
   describe "POST /v1/tasks/:doc_id/stage — terminal same-state adjudication (PDS wave 25)" do
     test "done → done WITH a disposition succeeds, stays done, and leaves the claim byte-identical",
          %{conn: conn, scope: scope} do
