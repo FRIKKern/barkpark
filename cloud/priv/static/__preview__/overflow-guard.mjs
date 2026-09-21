@@ -266,7 +266,7 @@ import { cuePaints, cueWhy, CUE_METRICS_FN } from "./cue-paint-verdict.mjs";
 // copied as a numeral would go stale the day the stylesheet grows a boundary
 // below 620, silently re-opening the gap in both files. breakpoint-sweep.mjs
 // guards its own main behind `process.argv[1]`, so importing it runs nothing.
-import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
+import { WIDTHS as SWEEP_WIDTHS, accentIdentities } from "./breakpoint-sweep.mjs";
 import { edgeCoverSentence } from "./edge-cover-verdict.mjs";
 import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
@@ -283,6 +283,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const DEFECTS = [
   "GR108-tablet-topbar-overflow",
+  "GRBLK-accent-scenario-matrix",
   "W20-phone-band-billing-chip",
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
@@ -305,6 +306,8 @@ const DEFECTS = [
   "W21-detail-url-text-page-bound",
   "W21-token-reveal-readable",
   "W20-attention-name-column",
+  "W20-attention-band-wrap-uniform",
+  "W20-attention-band-wrap-uniform",
   "W24-theater-failed-hostname-whole",
   "W26-instance-track-min-content",
   "W26-deploy-fail-clip",
@@ -324,6 +327,7 @@ const DEFECTS = [
   "W22-url-remedy-pricing",
   "W34-sites-read-failed-bounded",
   "W16-site-freshness-agrees-with-production-ladder",
+  "W21m-member-head-title-floor",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -826,6 +830,9 @@ const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
 // pins WHICH instance sub-tab landed, because all three instance routes share
 // the single #view-instance section.
 const INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+// The BEHIND box (IDS.behindInstance) — `instance-behind-member` deep-links it,
+// and it is a different row from INST above, not the same box in another state.
+const INST_BEHIND = "5b2c1e00-0000-4000-8000-0000000000a2";
 const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
 //
 // cchi-w23 — THE RAIL POPULATION IS DECLARED PER ROUTE, NEVER TALLIED AFTER THE
@@ -1724,6 +1731,183 @@ async function main() {
         // the band above the breakpoint had been cleared for the chip too; the
         // chip was only ever read at 768. The chip now answers for itself above.
         okLine(`0/${checks} PAGE-overflow cells across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint). The chip's own question is answered per-width above, not by this line.`);
+      }
+    }
+
+    // ── GRBLK: THE ACCENT AXIS. Every leg above this one drives exactly ONE
+    //    identity — the evergreen default — because no cell in this file has
+    //    ever carried `?accent=`. `grep -n -i accent cloud/priv/static/
+    //    __preview__/overflow-guard.mjs` returned NOTHING before this leg.
+    //    breakpoint-sweep.mjs's theme derivation says so in its own words
+    //    ("Identity is a SEPARATE AXIS with its own owner —
+    //    gr-blk-accent-scenario-sweep — and this sweep does not claim it");
+    //    this is that owner, living in the committed guard rather than in the
+    //    /tmp instrument the round-8 sweep used and lost.
+    //
+    //    THE ROSTER IS DERIVED, NEVER TYPED, on both axes:
+    //      · scenarios   from scenarios.mjs's own SCENARIO_NAMES (135 today).
+    //        The round-8 record and the filing row both say "86 scenarios /
+    //        860 runs"; the corpus has grown since and the filed denominator
+    //        is STALE. A typed 86 would have printed a plausible tally over a
+    //        roster it no longer matches, which is the failure this file's
+    //        "print the count, never narrate it" rule exists for. The module
+    //        is import()ed HERE rather than at the top of the file because it
+    //        is ~340KB and this is the only leg that needs the whole roster.
+    //      · accents     from app.css's own `[data-bp-theme="…"]` selectors
+    //        via breakpoint-sweep.mjs's accentIdentities(). A sixth skin
+    //        generated into BP_THEMES and app.css joins this matrix the day it
+    //        lands, with no edit here.
+    //
+    //    THE READ-BACK IS THE POINT, NOT CEREMONY (the W13 "a route is not a
+    //    query string" shape, one axis over). `?accent=` is consumed by
+    //    mock.js (`grep -n 'var accent = params.get' cloud/priv/static/
+    //    __preview__/mock.js`), which seeds localStorage and the root
+    //    attribute before app.js boots. If that pre-seed ever stops applying,
+    //    a sweep that only reads geometry prints a full, plausible five-accent
+    //    table in which all five columns are evergreen. So every cell reads
+    //    `data-bp-theme` and `data-theme` BACK off the root and reds when the
+    //    identity or the mode it measured is not the one it asked for.
+    //
+    //    ONE WIDTH, 768, ON PURPOSE. The accent switch changes COLOUR tokens,
+    //    not the layout algebra — but it also changes rendered TEXT nowhere,
+    //    so the only way it can move geometry is through a token that feeds a
+    //    border, a shadow or a font stack. 768 is the tablet breakpoint the
+    //    seal's tablet claim is about; widening this to the full WIDTHS ladder
+    //    would multiply an already 1350-cell matrix by eleven for a question
+    //    the other legs already answer at one identity.
+    //
+    //    THE DEFAULT IS THE SAMPLE, AND IT SAYS SO. The full matrix is 1350
+    //    page loads; this leg runs inside `Console gate` on every
+    //    console-touching PR, and a required gate is not the place to spend
+    //    that. Unset, the leg drives ONE scenario per DISTINCT ROUTE — a
+    //    predicate, not a hand-kept list, so a new route joins the sample by
+    //    existing — across every accent and both themes, and prints the
+    //    fraction of the corpus that is. `OVERFLOW_GUARD_ACCENT_MATRIX=full`
+    //    drives all of it. Either way the covered/total line is PRINTED from
+    //    the counters, and every cell prints its own row, so a reader can
+    //    recount the tally out of the transcript rather than trust it.
+    if (requested.includes("GRBLK-accent-scenario-matrix")) {
+      const D = "GRBLK-accent-scenario-matrix";
+      const { SCENARIO_NAMES, SCENARIOS } = await import("./scenarios.mjs");
+      const ACCENTS = accentIdentities(fs.readFileSync(path.join(ROOT, "app.css"), "utf8"));
+      // AUDITED (exit 2): a roster of fewer than two identities means the
+      // derivation stopped working, not that the console lost its skins — and
+      // a one-member "matrix" would print a green over an axis it never drove.
+      if (ACCENTS.length < 2) {
+        return die(
+          `${D}: the accent roster derived from app.css's [data-bp-theme="…"] selectors has ` +
+          `${ACCENTS.length} member(s) (${ACCENTS.join(", ") || "none"}). This leg's whole subject is the ` +
+          `identity axis, so a roster that small is a broken derivation — re-derive with ` +
+          `\`grep -n 'data-bp-theme=' cloud/priv/static/app.css\` and \`grep -n 'var BP_THEMES' cloud/priv/static/app.js\`. ` +
+          `Refusing to print a one-identity table under a five-identity name.`,
+        );
+      }
+      const ACCENT_MODE = String(process.env.OVERFLOW_GUARD_ACCENT_MATRIX || "").toLowerCase();
+      const FULL = ACCENT_MODE === "full";
+      // The route a scenario lands on, with instance/site UUIDs folded to <id>
+      // so two fixtures of the same screen are one route and not two.
+      const routeOf = (n) =>
+        SCENARIOS[n].pathname
+          ? `path:${SCENARIOS[n].pathname}`
+          : String(SCENARIOS[n].deepLink || "#overview").replace(/[0-9a-f]{8}-[0-9a-f-]{20,}/g, "<id>");
+      const sampleRoster = [];
+      {
+        const seenRoute = new Set();
+        for (const n of SCENARIO_NAMES) {
+          const r = routeOf(n);
+          if (seenRoute.has(r)) continue;
+          seenRoute.add(r);
+          sampleRoster.push(n);
+        }
+      }
+      const roster = FULL ? SCENARIO_NAMES.slice() : sampleRoster;
+      const total = roster.length * ACCENTS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${roster.length} scenarios x ${ACCENTS.length} accents x 2 themes @768 = ${total} cells` +
+        ` · accents DERIVED from app.css: ${ACCENTS.join(", ")}` +
+        ` · mode ${FULL
+          ? `FULL (OVERFLOW_GUARD_ACCENT_MATRIX=full) — the whole ${SCENARIO_NAMES.length}-scenario corpus`
+          : `SAMPLE (default) — ${roster.length} of ${SCENARIO_NAMES.length} scenarios, one per distinct route; ` +
+            `OVERFLOW_GUARD_ACCENT_MATRIX=full drives all ${SCENARIO_NAMES.length}`}\n`,
+      );
+      // The per-cell offender probe: the element whose right edge reaches
+      // furthest past the viewport, with its OWN scrollWidth/clientWidth, so a
+      // finding names a cell AND an element instead of handing the reader a
+      // page number to go hunting with.
+      const ACCENT_PROBE =
+        `(function(){var d=document.documentElement;var worst=null;` +
+        `if(d.scrollWidth>d.clientWidth){var cw=d.clientWidth;var all=document.querySelectorAll('body *');` +
+        `for(var i=0;i<all.length;i++){var e=all[i];var r=e.getBoundingClientRect();` +
+        `if(r.width===0&&r.height===0)continue;var right=Math.round(r.right);if(right<=cw)continue;` +
+        `if(!worst||right>worst.right){var cls=(typeof e.className==='string'&&e.className)?('.'+e.className.trim().split(/\\s+/).join('.')):'';` +
+        `worst={right:right,sw:e.scrollWidth,cw:e.clientWidth,sel:e.tagName.toLowerCase()+(e.id?('#'+e.id):'')+cls};}}}` +
+        `return {sw:d.scrollWidth,cw:d.clientWidth,theme:d.getAttribute('data-theme'),` +
+        `accent:d.getAttribute('data-bp-theme'),worst:worst};})()`;
+      let measured = 0, pageOver = 0, wrongAccent = 0, wrongTheme = 0;
+      for (const name of roster) {
+        const sc = SCENARIOS[name];
+        const pathPart = sc.pathname || "/";
+        const q = sc.search ? `${sc.search}&` : "?";
+        // A pathname scenario IS its own page (/new, /activate) and carries no
+        // hash; a hash scenario needs its deepLink or it renders #overview.
+        const hash = sc.pathname ? "" : String(sc.deepLink || "#overview");
+        for (const accent of ACCENTS) {
+          for (const theme of ["light", "dark"]) {
+            await setViewport(768);
+            const url = `${BASE}${pathPart}${q}scen=${name}&theme=${theme}&accent=${accent}${hash}`;
+            await nav(
+              url,
+              `document.querySelectorAll('section.view:not([hidden]), main.auth-screen:not([hidden]), main.new-screen:not([hidden])').length > 0`,
+            );
+            const m = await evalJs(ACCENT_PROBE);
+            measured++;
+            const over = m.sw > m.cw;
+            if (over) {
+              pageOver++;
+              fail(
+                D,
+                `${name}/${accent}/${theme}@768: documentElement scrollWidth ${m.sw} > clientWidth ${m.cw}` +
+                (m.worst
+                  ? ` — furthest element \`${m.worst.sel}\` right edge ${m.worst.right}px (its own scrollWidth ${m.worst.sw} / clientWidth ${m.worst.cw})`
+                  : ` — no descendant's right edge exceeded the viewport, so the overhang is the root box itself`),
+              );
+            }
+            if (m.accent !== accent) {
+              wrongAccent++;
+              fail(
+                D,
+                `${name}/${accent}/${theme}@768: the shell's data-bp-theme reads "${m.accent}" — the \`?accent=\` ` +
+                `pre-seed did NOT apply, so this cell measured a DIFFERENT identity than the one it asked for. ` +
+                `Every green in this column would be the same evergreen run wearing five names.`,
+              );
+            }
+            if (m.theme !== theme) {
+              wrongTheme++;
+              fail(D, `${name}/${accent}/${theme}@768: the shell's data-theme reads "${m.theme}" — the \`?theme=\` did not apply.`);
+            }
+            process.stdout.write(
+              `   cell ${name} ${accent} ${theme} 768 sw=${m.sw} cw=${m.cw} bp=${m.accent} mode=${m.theme} ` +
+              `${over ? `OVER ${m.worst ? m.worst.sel : "root"}` : "ok"}\n`,
+            );
+          }
+        }
+      }
+      // UNCONDITIONAL, on a clean run and a red one alike: a denominator a
+      // reader has to infer is a denominator the next summary gets to round.
+      process.stdout.write(
+        `   ${D}: MEASURED ${measured} of ${total} cells · ${pageOver} page-overflow offender(s) · ` +
+        `identity read back correct in ${measured - wrongAccent} of ${measured} · ` +
+        `mode read back correct in ${measured - wrongTheme} of ${measured}\n`,
+      );
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `0/${measured} page-overflow cells at 768px across ${roster.length} scenario(s) x ` +
+          `${ACCENTS.length} accents (${ACCENTS.join("/")}) x 2 themes` +
+          `${FULL ? ` — the WHOLE ${SCENARIO_NAMES.length}-scenario corpus` : ` — ${roster.length} of ${SCENARIO_NAMES.length} scenarios (one per distinct route)`}. ` +
+          `Every cell read its identity back off the root: ${measured} of ${measured} rendered under the accent asked for, ` +
+          `so this is five identities measured and not one measured five times. ` +
+          `THIS CLAIM IS 768px ONLY — the other widths in this file are driven at the default identity alone.`,
+        );
       }
     }
 
@@ -8882,13 +9066,32 @@ async function main() {
       // widened band; 905 is the first naturally-clean width and lives OUTSIDE
       // it, so a band widened past its evidence reds here instead of passing.
       const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 905, 1000];
-      const NAME_SCENS = ["overview-attention", "mixed-fleet"];
+      // cch-w20-bl: THE THIRD SCENARIO IS THE ONE THAT MAKES THE OTHER TWO
+      // MEAN SOMETHING. Every green above was string-conditional: the two
+      // fixtures here name their boxes Reporting / Marketing / Staging (52-69px
+      // at 14px/600), so `.attention-name`'s `text-overflow: ellipsis` was
+      // proven never to be NEEDED and never once proven to WORK.
+      // `overview-attention-long-name` is `overview-attention` with ONE string
+      // lengthened to an ordinary 71-character operator name — well inside the
+      // server's own `validate_length(:name, max: 255)` — so the pair is a
+      // two-armed control on one axis: ENGAGED on the long fixture, NEVER
+      // NEEDED on the short ones.
+      // WHY IT IS NOT MEASURED WITH scrollWidth. The remedy this leg guards
+      // carries `overflow: hidden` — so a truncated `.attention-name` reports
+      // scrollWidth == clientWidth and invariant (b) above is SATISFIED BY THE
+      // TRUNCATION. The only witness left is the full string's own width,
+      // measured off a detached clone wearing this element's computed font:
+      // rendered run measurably SHORTER than the whole name == the ellipsis
+      // did work.
+      const LONG_NAME_SCEN = "overview-attention-long-name";
+      const NAME_SCENS = ["overview-attention", "mixed-fleet", LONG_NAME_SCEN];
       const cellCount = NAME_SCENS.length * NAME_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${NAME_SCENS.length} scenarios x ${NAME_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; .attention-name box + text run vs the row's first action button)\n`,
       );
       let cells = 0, namesSeen = 0, collapsed = 0, clipped = 0, painted = 0, pageOver = 0;
+      let engagedCells = 0, sparedCells = 0, engageMiss = 0;
       for (const scen of NAME_SCENS) {
         for (const theme of ["light", "dark"]) {
           // Enter wide and assert the landed view — `?scen=` alone does not
@@ -8906,17 +9109,53 @@ async function main() {
               `(function(){` +
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,names:0,zero:[],cut:[],hit:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,names:0,zero:[],cut:[],hit:[],runs:[]};` +
+              `var long=${JSON.stringify(scen === LONG_NAME_SCEN)};` +
               `[].slice.call(v?v.querySelectorAll('.attention-row'):[]).forEach(function(r,i){` +
               `  var name=r.querySelector('.attention-name'); if(!name) return; out.names++;` +
               `  var label=(name.textContent||'').trim().slice(0,32);` +
+              // The WHOLE string's width, off a detached clone wearing this
+              // element's own computed font — the only thing `overflow: hidden`
+              // cannot hide.
+              `  var cs=getComputedStyle(name); var ghost=document.createElement('span');` +
+              `  ghost.style.cssText='position:absolute;left:-99999px;top:0;white-space:nowrap;visibility:hidden';` +
+              `  ghost.style.font=cs.font; ghost.style.fontWeight=cs.fontWeight; ghost.style.fontSize=cs.fontSize;` +
+              `  ghost.style.fontFamily=cs.fontFamily; ghost.style.letterSpacing=cs.letterSpacing;` +
+              `  ghost.textContent=(name.textContent||''); document.body.appendChild(ghost);` +
+              `  var full=ghost.getBoundingClientRect().width; ghost.remove();` +
+              `  out.runs.push({i:i,cw:name.clientWidth,full:+full.toFixed(2),n:(name.textContent||'').length});` +
               `  if(name.clientWidth<=0) out.zero.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
-              `  else if(name.scrollWidth>name.clientWidth) out.cut.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
+              // cch-w20-bl: `cut` is the KIND fixtures' invariant and only
+              // theirs. On `overview-attention-long-name` a cut name IS the
+              // shipped remedy — the ellipsis doing its job — so asserting
+              // "never cut" there would refuse the very treatment this leg was
+              // extended to prove. What measures the long fixture is the
+              // engagement arm below, and it is STRICTLY STRONGER than this
+              // line: it reads the whole STRING's width, where this reads a box.
+              `  if(name.clientWidth>0 && !long && name.scrollWidth>name.clientWidth) out.cut.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
               // The painted run, not the box: a Range over the name's contents
               // reports where the GLYPHS land even when the box is 0px wide.
               `  var btn=r.querySelector('.attention-acts button, .attention-acts a'); if(!btn) return;` +
               `  var rg=document.createRange(); rg.selectNodeContents(name);` +
               `  var tr=rg.getBoundingClientRect(), br=btn.getBoundingClientRect();` +
+              // cch-w20-bl: A RANGE RECT IS LAYOUT, NOT PAINT. The invariant
+              // this implements is "no glyph is PAINTED across the button", and
+              // a Range reports where the text is LAID OUT — which, under
+              // `overflow: hidden`, is not where any of it is drawn. Measured on
+              // this branch: the 71-character fixture laid a 476px run through a
+              // 234px clipped box and this line reported a 102.42 x 11.75px
+              // "overlap" of a button no glyph can reach. So the rect is clamped
+              // to the element's own border box WHEN AND ONLY WHEN that box
+              // clips. The clamp is a no-op for a box that does not (a collapsed
+              // .attention-name with no overflow:hidden — the exact pre-s9 state
+              // this check was written for — still reports its full run), so the
+              // original detector keeps every bit of its teeth.
+              `  var ox=getComputedStyle(name).overflowX;` +
+              `  if(ox==='hidden'||ox==='clip'||ox==='auto'||ox==='scroll'){` +
+              `    var nb=name.getBoundingClientRect();` +
+              `    tr={left:Math.max(tr.left,nb.left),right:Math.min(tr.right,nb.right),` +
+              `        top:Math.max(tr.top,nb.top),bottom:Math.min(tr.bottom,nb.bottom)};` +
+              `  }` +
               `  var ix=Math.min(tr.right,br.right)-Math.max(tr.left,br.left);` +
               `  var iy=Math.min(tr.bottom,br.bottom)-Math.max(tr.top,br.top);` +
               `  if(ix>0.5&&iy>0.5) out.hit.push({i:i,x:+ix.toFixed(2),y:+iy.toFixed(2),t:label,b:(btn.textContent||'').trim().slice(0,20)});` +
@@ -8955,7 +9194,28 @@ async function main() {
               painted++;
               fail(D, `${scen}/${theme}@${width} row${h.i} .attention-name: the text run of "${h.t}" overlaps the "${h.b}" button by ${h.x} x ${h.y}px — the name is painting THROUGH the row's own actions, not merely truncated`);
             }
-            const bad = m.zero.length + m.cut.length + m.hit.length + (m.psw > m.pcw ? 1 : 0);
+            // cch-w20-bl — the two-armed engagement control. On the long
+            // fixture the rendered run must be measurably shorter than the
+            // whole name at EVERY driven width (the ellipsis did work); on the
+            // two short fixtures it must never be (the ellipsis was never
+            // needed, which is what the 44 cells before this row actually
+            // proved). Either arm failing is a finding: a long name that fits
+            // means the fixture stopped being long, and a short name that is
+            // cut means this leg's kind control stopped being kind.
+            let engageBad = 0;
+            for (const r of m.runs) {
+              const engaged = r.full > r.cw + 0.5;
+              if (scen === LONG_NAME_SCEN) {
+                if (engaged) { engagedCells++; } else {
+                  engageBad++; engageMiss++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i} .attention-name: the whole ${r.n}-character name measures ${r.full}px and the column is ${r.cw}px — the run is NOT shorter than the string, so this fixture proves the ellipsis is never NEEDED, exactly the string-conditional green it was added to end`);
+                }
+              } else if (engaged) {
+                engageBad++; engageMiss++;
+                fail(D, `${scen}/${theme}@${width} row${r.i} .attention-name: the whole ${r.n}-character name measures ${r.full}px against a ${r.cw}px column — the KIND control is being truncated, so it is no longer the control this leg reads ${LONG_NAME_SCEN} against`);
+              } else { sparedCells++; }
+            }
+            const bad = m.zero.length + m.cut.length + m.hit.length + engageBad + (m.psw > m.pcw ? 1 : 0);
             row.push(`${width}:${m.names}n${bad ? " !" + bad : ""}`);
           }
           process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
@@ -8969,12 +9229,225 @@ async function main() {
           `action buttons, ${pageOver} pages scrolling sideways`,
         );
         okLine(
+          `the ellipsis on .attention-name is proven to WORK, not merely to be unnecessary: ${engagedCells} row-measurement(s) on ` +
+          `${LONG_NAME_SCEN} rendered a run measurably SHORTER than the whole 71-character name, and ${sparedCells} on the two ` +
+          `short-named fixtures rendered it whole — ${engageMiss} arm(s) of that control missed. cch-w20-bl was FILED saying ` +
+          `"scrollWidth > clientWidth is impossible here"; it is not. Measured on this branch at 769, row0 reads scrollWidth 476 ` +
+          `against clientWidth 234 — Chrome's scrollable overflow keeps the clipped text, ellipsis or no ellipsis. What scrollWidth ` +
+          `cannot say is whether the ELLIPSIS rendered or the glyphs were simply cut off, and on this fixture a cut IS the shipped ` +
+          `remedy — so \`cut\` is scoped to the two kind fixtures and the witness here is the whole string's own width, off a ` +
+          `clone wearing the element's computed font`,
+        );
+        okLine(
           `769-904 is the DRIVEN band (mixed-fleet was cut through 860; overview-attention through 880 on the ` +
           `OLD short fixture string and through 904 on the production-dominant one this fixture now serves — ` +
           `cch-w18-bl re-derived that upper edge rather than adjusting it). 900 is INSIDE the band and was a ` +
           `measured 67/62 cut before the edge moved; 905 is the first naturally-clean width and is the shoulder ` +
           `that catches a band widened past its own evidence. 768 and 1000 are the outer shoulders — already ` +
           `clean on origin/main, so they detect a remedy that breaks the stack or the desktop row, never a leak`,
+        );
+      }
+    }
+
+    // ── cch-w20-bl: THE WRAP POINT INSIDE 769-904 IS A RULE, NOT A SENTENCE ──
+    //    THE DEFECT, DRIVEN on the tree this lands on, `?scen=mixed-fleet
+    //    #overview` at 800, content box 482px: `.attention-row .status-pill`
+    //    carries no cap, so a row's pill is as wide as `statusOf(bp).detail`
+    //    says. Rows 0 and 1 measure 325.11px and 332.58px of pill and the
+    //    action cluster yields; row 2 measures 200.75px and keeps chip+name
+    //    inline (200.75 + 14 + 192 <= 482). One card, two row shapes, and which
+    //    shape a row wears is a property of its reason SENTENCE. Nothing is
+    //    hidden or unclickable — cch-w20-s9 measured that band clean at 44/44 —
+    //    so this leg measures RHYTHM, and it says so rather than dressing an
+    //    aesthetic finding as a defect.
+    //
+    //    IT IS AN A/B IN ONE BROWSER, NOT A MEMORY OF ANOTHER TREE. The remedy
+    //    is a single ADD (`flex: 0 0 100%` inside the band), so the tree it
+    //    lands on is reproduced EXACTLY by putting the initial `flex: 0 1 auto`
+    //    back over it — same Chrome, same fixture, same instant, one reflow
+    //    apart. A "before" quoted from a previous run of a previous checkout is
+    //    a claim about a tree nobody is measuring.
+    //
+    //    THE THIRD ASSERTION IS THE ONE THIS ROW EXISTS FOR. cch-w20-s9 priced
+    //    a floor-only candidate that bought this same column by taking the
+    //    width straight out of `.attention-row .status-pill-detail` — 165/165
+    //    to 0/165 at 830 — and REFUSED it, because that host belongs to
+    //    cch-w20-s6. So every cell here reads that detail's clientWidth on BOTH
+    //    sides and no cell may lose a pixel. A remedy that quietly robs s6 is
+    //    worse than the inconsistency it fixes, and "worse" is the kind of
+    //    thing only a measurement can say.
+    //
+    //    AND THE FOURTH IS THE CONTROL. A leg that asserts uniformity AFTER,
+    //    over a corpus that was already uniform, is green on an empty subject.
+    //    This one requires that at least one in-band cell be measurably
+    //    NON-uniform BEFORE, and refuses the whole leg if none is.
+    if (requested.includes("W20-attention-band-wrap-uniform")) {
+      const D = "W20-attention-band-wrap-uniform";
+      // BLOCK-SCOPED, like the leg above: 904 is the band's own upper edge
+      // (cch-w18-bl re-derived it), 769 its lower, and 768/905 are the
+      // shoulders either side — they exist to catch a remedy that leaks out of
+      // the band, where the GR109 stack below and the desktop row above each
+      // already give every child its own honest line.
+      const BAND_WIDTHS = [769, 800, 830, 860, 890, 904];
+      const SHOULDER_WIDTHS = [768, 905];
+      const WRAP_WIDTHS = [...SHOULDER_WIDTHS, ...BAND_WIDTHS].sort((a, b) => a - b);
+      // mixed-fleet is the only fixture with more than one attention row, so it
+      // is the only one that can BE non-uniform — the other two are here for
+      // the s6 half, which is per-row and needs no siblings.
+      const WRAP_SCENS = ["mixed-fleet", "overview-attention", "overview-attention-long-name"];
+      // The shape the band is meant to produce, stated rather than merely
+      // compared: the pill owns line one, the identity and its actions share
+      // line two. "All rows agree" alone would also pass on a card where every
+      // row was wrong in the same way.
+      const BAND_SHAPE = "status-pill / attention-main+attention-acts";
+      const wrapCells = WRAP_SCENS.length * WRAP_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${WRAP_SCENS.length} scenarios x ${WRAP_WIDTHS.length} widths x 2 themes` +
+        ` (${wrapCells} cells; flex-line shape per row + .status-pill-detail clientWidth on BOTH sides of the rule)\n`,
+      );
+      let wCells = 0, wRows = 0, mixedShape = 0, wrongShape = 0, robbed = 0, leaked = 0, wPageOver = 0;
+      let nonUniformBefore = 0, detailGained = 0, detailHeld = 0;
+      for (const scen of WRAP_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-overview' && v.querySelector('.attention-row .status-pill'));})()`,
+          );
+          const line = [];
+          for (const width of WRAP_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              // The shape of a flex line, read off geometry rather than off the
+              // rule under test: children sorted by top, a new line starting
+              // where one begins at or below the previous line's bottom.
+              // `align-items: center` puts a short pill BELOW a tall
+              // .attention-main on the SAME line, so a naive equal-tops test
+              // reads row 2 as three lines; the bottom-edge walk does not.
+              `var shapeOf=function(r){` +
+              `  var kids=[].slice.call(r.children);` +
+              `  var rects=kids.map(function(k){return k.getBoundingClientRect();});` +
+              `  var order=kids.map(function(k,j){return j;}).sort(function(a,b){return rects[a].top-rects[b].top;});` +
+              `  var lines=[],cur=null;` +
+              `  order.forEach(function(j){` +
+              `    if(!cur||rects[j].top>=cur.bottom-0.5){cur={bottom:rects[j].bottom,names:[]};lines.push(cur);}` +
+              `    cur.bottom=Math.max(cur.bottom,rects[j].bottom);cur.names.push(kids[j].className.split(' ')[0]);` +
+              `  });` +
+              `  return lines.map(function(l){return l.names.join('+');}).join(' / ');` +
+              `};` +
+              `var read=function(){` +
+              `  var v=document.querySelector('section.view:not([hidden])');` +
+              `  var rows=[].slice.call(v?v.querySelectorAll('.attention-row'):[]);` +
+              `  return {view:v?v.id:'none',rows:rows.map(function(r,i){` +
+              `    var det=r.querySelector('.status-pill-detail');` +
+              `    var pill=r.querySelector('.status-pill');` +
+              `    return {i:i,shape:shapeOf(r),` +
+              `      detCW:det?det.clientWidth:-1,detSW:det?det.scrollWidth:-1,` +
+              `      pillW:+pill.getBoundingClientRect().width.toFixed(2),` +
+              `      pillH:+pill.getBoundingClientRect().height.toFixed(2)};` +
+              `  })};` +
+              `};` +
+              // BEFORE = the tree this lands on, reproduced in place: the rule
+              // is one ADD, so restoring flex's initial value restores it
+              // exactly. It is removed again before AFTER is read, so the
+              // stylesheet the page ships with is what AFTER measures.
+              `var st=document.createElement('style');` +
+              `st.textContent='@media (min-width:769px) and (max-width:904px){.attention-row .status-pill{flex:0 1 auto !important}}';` +
+              `document.head.appendChild(st);` +
+              `var before=read();` +
+              `st.remove();` +
+              `var after=read();` +
+              `after.psw=d.scrollWidth;after.pcw=d.clientWidth;` +
+              `after.theme=d.getAttribute('data-theme');` +
+              `return {before:before,after:after};})()`,
+            );
+            wCells++;
+            const A = m.after, B = m.before;
+            if (A.view !== "view-overview") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${A.view}", asked for "view-overview" — the hash did not route, so nothing below this line measures the attention queue`);
+              line.push(`${width}:?`);
+              continue;
+            }
+            if (A.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${A.theme}" — the theme did not apply`);
+            if (A.rows.length === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero .attention-row rendered — nothing was measured, this is not a pass`);
+              line.push(`${width}:0r`);
+              continue;
+            }
+            if (B.rows.length !== A.rows.length) {
+              fail(D, `${scen}/${theme}@${width}: the A/B read ${B.rows.length} rows before and ${A.rows.length} after — the two sides are not the same card`);
+              line.push(`${width}:??`);
+              continue;
+            }
+            wRows += A.rows.length;
+            const inBand = width >= 769 && width <= 904;
+            let bad = 0;
+            if (A.psw > A.pcw) {
+              wPageOver++; bad++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${A.psw} > clientWidth ${A.pcw} — ${A.psw - A.pcw}px of the overview is off-screen sideways`);
+            }
+            // (1) the shape, in the band: one rule for every row.
+            const shapes = [...new Set(A.rows.map((r) => r.shape))];
+            const beforeShapes = [...new Set(B.rows.map((r) => r.shape))];
+            if (inBand) {
+              if (beforeShapes.length > 1) nonUniformBefore++;
+              if (shapes.length > 1) {
+                mixedShape++; bad++;
+                fail(D, `${scen}/${theme}@${width}: the card shows ${shapes.length} row shapes — ${A.rows.map((r) => `row${r.i} "${r.shape}" (pill ${r.pillW}px)`).join("; ")} — so the break point is still being decided by the reason string, not by a rule`);
+              }
+              for (const r of A.rows) {
+                if (r.shape !== BAND_SHAPE) {
+                  wrongShape++; bad++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i}: flex lines read "${r.shape}", the band's rule is "${BAND_SHAPE}" — uniformly wrong is not uniform`);
+                }
+              }
+            } else {
+              // (3) the shoulders: outside the band nothing may move at all.
+              for (let i = 0; i < A.rows.length; i++) {
+                if (A.rows[i].shape !== B.rows[i].shape || A.rows[i].pillW !== B.rows[i].pillW) {
+                  leaked++; bad++;
+                  fail(D, `${scen}/${theme}@${width} row${i}: OUTSIDE the band the rule changed the row — shape "${B.rows[i].shape}" -> "${A.rows[i].shape}", pill ${B.rows[i].pillW} -> ${A.rows[i].pillW}px. 769-904 is the whole of its business`);
+                }
+              }
+            }
+            // (2) cch-w20-s6's host, on both sides, every cell.
+            for (let i = 0; i < A.rows.length; i++) {
+              const b = B.rows[i], a = A.rows[i];
+              if (a.detCW < b.detCW - 0.01) {
+                robbed++; bad++;
+                fail(D, `${scen}/${theme}@${width} row${i} .attention-row .status-pill-detail: clientWidth ${b.detCW} -> ${a.detCW} — this rule took ${(b.detCW - a.detCW).toFixed(2)}px out of cch-w20-s6's host, which is the exact trade cch-w20-s9 refused (165/165 -> 0/165)`);
+              } else if (a.detCW > b.detCW + 0.01) { detailGained++; } else { detailHeld++; }
+            }
+            line.push(`${width}:${A.rows.length}r/${shapes.length}s${bad ? " !" + bad : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${line.join("  ")}\n`);
+        }
+      }
+      // (4) THE CONTROL. Without it this leg is a sentence about a subject it
+      // never saw.
+      if (nonUniformBefore === 0) {
+        fail(D, `the BEFORE side of every one of the ${wCells} cells was already uniform — so this leg asserted a property of a corpus that never lacked it and measured nothing. Either the A/B override stopped applying or the fixture that carries two row shapes left the roster`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${wCells} / ${wCells} cells clean (${wRows} .attention-row measurement(s) on BOTH sides of the rule) across ` +
+          `${WRAP_WIDTHS.join("/")} on ${WRAP_SCENS.join(" + ")}; ${mixedShape} cards showing more than one row shape, ` +
+          `${wrongShape} rows off the band's rule "${BAND_SHAPE}", ${leaked} shoulder rows moved by a band-scoped rule, ` +
+          `${wPageOver} pages scrolling sideways`,
+        );
+        okLine(
+          `cch-w20-s6's host is NOT robbed: .attention-row .status-pill-detail was read before and after in every cell — ` +
+          `${detailGained} row-measurement(s) GAINED width, ${detailHeld} held it exactly, ${robbed} lost any. The before side ` +
+          `is this tree with flex's initial value put back over the one ADD, read one reflow from the after side in the same ` +
+          `browser — not a number carried from another checkout`,
+        );
+        okLine(
+          `the control fired: ${nonUniformBefore} of the ${BAND_WIDTHS.length * 2 * WRAP_SCENS.length} in-band cells were ` +
+          `measurably NON-uniform BEFORE (mixed-fleet is the only fixture carrying more than one attention row, so it is the ` +
+          `only one that CAN be), which is what makes the AFTER verdict a measurement rather than a property of an empty set`,
         );
       }
     }
@@ -13304,6 +13777,241 @@ async function main() {
           `and be measuring the shipped sheet under another name: that is an exit-2 refusal here, not a pass), ` +
           `measured, and restored with the sheet removed inside the same synchronous pass. The DOM walk is scoped ` +
           `to \`section.view:not([hidden])\` and PLURAL`,
+        );
+      }
+    }
+
+    // ── W21m-member-head-title-floor ────────────────────────────────────────
+    //    THE HOLE THIS FILLS. Every instance-head leg in this file measures the
+    //    OWNER's header: W21-inst-head-320-copy-reachable drives `mixed-fleet`
+    //    and `panel-overview` (both owner fixtures) and asserts the PAGE plus
+    //    the copy controls; W13 sweeps 721-1024. None of them drives a MEMBER,
+    //    and the member is the only reader whose header carries a second
+    //    element — `.inst-life-reason`, the server's own "team admins only"
+    //    sentence that D428 disable-and-explain puts beside the strip. So the
+    //    one fixture where the head row holds a long sentence had never been
+    //    measured at desktop width by any instrument here.
+    //
+    //    WHAT IT MEASURES, driven on the pre-fix tree: `.detail-head--inst
+    //    .detail-actions` is authored `flex: 0 0 auto` while its own box wraps,
+    //    so its flex BASE size is the max-content sum of every chip plus that
+    //    whole sentence on one line, and `flex-shrink: 0` forbids it to give
+    //    any of it back. The sibling `.detail-head-main` carries `min-width: 0`
+    //    and therefore absorbs the entire deficit: the H1 is squeezed toward
+    //    its min-content width and the instance name wraps ONE LETTER PER LINE,
+    //    leaving the right-hand column of the header empty under the strip.
+    //    The numbers are printed per cell rather than typed here, because every
+    //    literal a header in this file has typed about pixels has rotted.
+    //
+    //    TWO QUESTIONS, both from the filed criterion. (1) the title's own
+    //    height: how many LINE BOXES its text occupies, measured with a Range
+    //    over the text node — the element's own rect merges every line into one
+    //    box and is green on the defect by construction. (2) the gap below the
+    //    actions strip inside the header: with the title collapsed the header
+    //    grows to the title's height while the strip stays two rows tall, so
+    //    the dead band is `head.bottom - actions.bottom`.
+    //
+    //    THE BAND IS THE ROW BAND, AND THE 768 CELL IS THE NO-REGRESSION
+    //    CONTROL. `.detail-head--inst` stacks to a column at <=899 (app.css's
+    //    899 block), where `.detail-head-main` already spans the head and the
+    //    title cannot be squeezed — so 768 must stay clean both before and
+    //    after, and a remedy expressed as a flex-BASIS would become a HEIGHT
+    //    basis there if it were not scoped above the stack.
+    if (requested.includes("W21m-member-head-title-floor")) {
+      const D = "W21m-member-head-title-floor";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      const MEM_CASES = [
+        { scen: "panel-overview-member", hash: `#instance/${INST}` },
+        { scen: "timeline-events-only", hash: `#instance/${INST}/timeline` },
+        { scen: "instance-behind-member", hash: `#instance/${INST_BEHIND}` },
+      ];
+      // 1280 IS DELIBERATELY ABSENT, and it is not an oversight. Driven, it
+      // reads BYTE-IDENTICAL to 1440 in both directions (pre-fix 2L/h78/
+      // dead131 and 7L/h273/dead434; post-fix 1L/h39/dead12 and 1L/h39/
+      // dead48), so it adds no question this axis does not already ask — and
+      // width-drivers.test.mjs's FLICK_VIEWPORTS mutation arm depends on 1280
+      // having exactly ONE driver in this file, so that removing it can
+      // produce the honest negative ("driven by NO other axis"). A second
+      // driver here would silently retire that arm's negative branch to buy a
+      // cell that measures nothing new. Re-derive with
+      // `node --test cloud/priv/static/__preview__/width-drivers.test.mjs`.
+      const MEM_WIDTHS = [1440, 1024, 900, 768];
+      // A title is allowed TWO lines; a third is the wrap this leg exists for.
+      const TITLE_LINE_CAP = 2;
+      // "no dead band taller than one row", and the number is DERIVED FROM
+      // THE MEASUREMENT IN BOTH DIRECTIONS rather than chosen a priori. Driven
+      // on origin/main bytes the SMALLEST pre-fix band in the row band is
+      // 131px (panel-overview-member / timeline-events-only at 1440) and the
+      // largest is 533px; driven on the remedy the LARGEST band left
+      // is 66px, on `instance-behind-member` at 900 — where the left column is
+      // legitimately the taller one because the behind box's `.status-pill`
+      // wraps under its own title inside `.detail-title-row`, which is CONTENT
+      // and not dead space (the row prints main/acts widths so a reader can
+      // see it). 96 sits strictly between those two populations: every pre-fix
+      // cell reds, every post-fix cell passes, and it is ~45% above the worst
+      // surviving band so a font or platform that paints a little taller does
+      // not flip it.
+      const DEAD_BAND_CAP = 96;
+      // ANTI-VACUITY 0 — the axis itself. The defect was filed at 1440; a leg
+      // that dropped it would pass having never visited the width it is named
+      // for, and the 768 control alone is clean on both trees.
+      for (const want of [1440, 768]) {
+        if (!MEM_WIDTHS.includes(want)) {
+          fail(D, `axis check: ${want} is not in this leg's width set — 1440 is the width the defect was filed at and 768 is the stacked no-regression control; a leg missing either cannot make the claim its ok-line makes`);
+        }
+      }
+      const memCells = MEM_CASES.length * MEM_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${MEM_CASES.length} member scenarios x ${MEM_WIDTHS.length} widths x 2 themes` +
+        ` (${memCells} cells; .detail-title-row h1 LINE BOXES + the gap under .detail-actions)\n`,
+      );
+      let cells = 0, headsSeen = 0, reasonsSeen = 0, overWrapped = 0, deadBands = 0, pageOver = 0;
+      let worstLines = 0, worstDead = 0;
+      for (const c of MEM_CASES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter AT the widest cell and pin the hash: `?scen=` alone renders
+          // #overview (the W13 routing trap), and an overview screen measured
+          // under an instance heading is a phantom table.
+          await setViewport(MEM_WIDTHS[0]);
+          await nav(
+            `${BASE}/?scen=${c.scen}&theme=${theme}${c.hash}`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-instance' && v.querySelector('.detail-head--inst .detail-title-row h1'));})()`,
+          );
+          const row = [];
+          for (const width of MEM_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var head=v?v.querySelector('.detail-head--inst'):null;` +
+              `var main=head?head.querySelector('.detail-head-main'):null;` +
+              `var h1=head?head.querySelector('.detail-title-row h1'):null;` +
+              `var acts=head?head.querySelector('.detail-actions'):null;` +
+              `var reason=head?head.querySelector('.inst-life-reason'):null;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),` +
+              ` hasHead:!!head,hasH1:!!h1,hasActs:!!acts,hasReason:!!reason,` +
+              ` psw:d.scrollWidth,pcw:d.clientWidth};` +
+              `if(!head||!h1) return out;` +
+              // LINE BOXES, not the element rect. A Range over the text node
+              // reports one rect per line box; the H1's own getBoundingClientRect
+              // merges them and reads ONE box however many lines are painted.
+              `var lines=0,lh=0,tn=null;` +
+              `for(var i=0;i<h1.childNodes.length;i++){var n=h1.childNodes[i];` +
+              ` if(n.nodeType===3&&n.nodeValue.trim()){tn=n;break;}}` +
+              `if(tn){var rg=document.createRange();rg.selectNodeContents(tn);` +
+              ` var rs=rg.getClientRects(),tops=[];` +
+              ` for(var j=0;j<rs.length;j++){var t=Math.round(rs[j].top*2)/2;` +
+              `  if(tops.indexOf(t)===-1)tops.push(t);` +
+              `  if(rs[j].height>lh)lh=rs[j].height;}` +
+              ` lines=tops.length;}` +
+              `var hr=head.getBoundingClientRect();` +
+              `out.titleLines=lines;out.lineH=+lh.toFixed(2);` +
+              `out.title=(h1.textContent||'').replace(/\\s+/g,' ').trim().slice(0,48);` +
+              `out.h1H=h1.clientHeight;out.headH=+hr.height.toFixed(2);` +
+              `out.mainW=main?+main.getBoundingClientRect().width.toFixed(2):null;` +
+              `out.actsW=acts?+acts.getBoundingClientRect().width.toFixed(2):null;` +
+              `out.deadBand=acts?+(hr.bottom-acts.getBoundingClientRect().bottom).toFixed(2):null;` +
+              `out.stacked=getComputedStyle(head).flexDirection==='column';` +
+              `if(reason){var r2=document.createRange();r2.selectNodeContents(reason);` +
+              ` var rr=r2.getClientRects(),t2=[];` +
+              ` for(var k=0;k<rr.length;k++){var tt=Math.round(rr[k].top*2)/2;` +
+              `  if(t2.indexOf(tt)===-1)t2.push(tt);}` +
+              ` out.reasonLines=t2.length;` +
+              ` out.reason=(reason.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40);}` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-instance") {
+              fail(D, `${c.scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace header`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) {
+              fail(D, `${c.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply, so the dark half of this run measured the light one`);
+            }
+            // VACUITY, three shapes. Each is a tree on which this leg would
+            // score a perfect zero having measured nothing it is named for.
+            if (!m.hasHead || !m.hasH1) {
+              fail(D, `${c.scen}/${theme}@${width}: \`.detail-head--inst\` ${m.hasHead ? "is present but carries no" : "is ABSENT, so there is no"} \`.detail-title-row h1\` — the header this leg measures is not in the DOM. An empty walk is not a clean walk`);
+              row.push(`${width}:0h`);
+              continue;
+            }
+            if (!m.hasActs) {
+              fail(D, `${c.scen}/${theme}@${width}: no \`.detail-actions\` in the head — the strip whose unshrinkable base size squeezes the title is the SUBJECT here, and with it gone the title has the whole row by default. This leg would pass having measured the absence of its own cause`);
+              row.push(`${width}:0a`);
+              continue;
+            }
+            if (!m.hasReason) {
+              fail(D, `${c.scen}/${theme}@${width}: no \`.inst-life-reason\` in the head — these three fixtures are MEMBER fixtures precisely because a member is answered with the server's own permission sentence (D428 disable-and-explain). Without it the strip is chips only, which is the OWNER header W21-inst-head-320-copy-reachable already covers, and this leg has no subject`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            headsSeen++;
+            reasonsSeen++;
+            if (m.titleLines === 0) {
+              fail(D, `${c.scen}/${theme}@${width}: the H1 "${m.title}" reported ZERO line boxes from a Range over its text node — the measurement did not bind (an empty or element-only H1), so the line cap below could not have fired`);
+              row.push(`${width}:0l`);
+              continue;
+            }
+            if (m.titleLines > worstLines) worstLines = m.titleLines;
+            if (m.deadBand != null && m.deadBand > worstDead) worstDead = m.deadBand;
+            // (1) THE TITLE. At most two lines, at every width in the band.
+            if (m.titleLines > TITLE_LINE_CAP) {
+              overWrapped++;
+              fail(D, `${c.scen}/${theme}@${width}: the instance name "${m.title}" is painted over ${m.titleLines} line boxes (H1 clientHeight ${m.h1H}px at a ${m.lineH}px line) — cap is ${TITLE_LINE_CAP}. \`.detail-head-main\` measures ${m.mainW}px beside a ${m.actsW}px \`.detail-actions\` in a ${m.pcw}px viewport: the strip took the row and the title is wrapping toward its min-content width`);
+            }
+            // (2) THE DEAD BAND. The header's own height past the strip.
+            if (m.deadBand != null && m.deadBand > DEAD_BAND_CAP) {
+              deadBands++;
+              fail(D, `${c.scen}/${theme}@${width}: ${m.deadBand}px of empty header sits under \`.detail-actions\` (head ${m.headH}px tall, H1 ${m.h1H}px) — the right-hand column of the header is dead space the collapsed title paid for, and everything below the header starts that far down the page`);
+            }
+            // (3) THE PAGE, the same strict equality every leg here asserts.
+            if (m.psw !== m.pcw) {
+              pageOver++;
+              fail(D, `${c.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways at rest`);
+            }
+            row.push(`${width}:${m.titleLines}L/h${m.h1H}/dead${m.deadBand}/main${m.mainW}/acts${m.actsW}/r${m.reasonLines}${m.stacked ? "/col" : ""}`);
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // RUN-LEVEL VACUITY: a leg whose every cell `continue`d must not reach
+      // the ok-line. Both counters are incremented only past the three
+      // presence refusals above.
+      if (headsSeen === 0) {
+        fail(D, `${D}: measured ZERO instance headers across all ${cells} cells — the member fixtures stopped painting \`.detail-head--inst\`, so nothing this leg is named for was measured`);
+      }
+      if (reasonsSeen === 0) {
+        fail(D, `${D}: measured ZERO \`.inst-life-reason\` sentences across all ${cells} cells — the permission copy that makes these fixtures MEMBER fixtures never rendered`);
+      }
+      if (cells !== memCells) {
+        fail(D, `${D}: ${cells} of ${memCells} cells measured — a half-driven run does not certify the band`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${headsSeen} \`.detail-head--inst\` measured, each carrying the ` +
+          `\`.inst-life-reason\` permission sentence) across ${MEM_WIDTHS.join("/")} on ` +
+          `${MEM_CASES.map((c) => c.scen).join(" + ")}: worst title ${worstLines} line box(es) against a cap of ` +
+          `${TITLE_LINE_CAP}, worst dead band under \`.detail-actions\` ${worstDead}px against a cap of ` +
+          `${DEAD_BAND_CAP}px, ${overWrapped} over-wrapped titles, ${deadBands} dead bands, ${pageOver} pages ` +
+          `scrolling sideways`,
+        );
+        okLine(
+          `THE TITLE IS MEASURED IN LINE BOXES, NOT IN ITS OWN RECT. \`h1.getBoundingClientRect()\` merges every ` +
+          `line into one box and reads identically on a one-line title and a one-letter-per-line one, so this leg ` +
+          `asks a \`Range\` over the H1's TEXT NODE and counts distinct rect tops. Restore ` +
+          `\`flex: 0 0 auto\` on \`.detail-head--inst .detail-actions\` (drop the min-width:900 block this PR adds ` +
+          `to app.css) and every 900-1440 cell reds naming the instance name, its line count and the pixels of ` +
+          `dead header under the strip — driven both ways`,
+        );
+        okLine(
+          `THE ${768}px CELL IS THE NO-REGRESSION CONTROL, and it is printed with a \`/col\` marker so the reader ` +
+          `can see it took the stacked branch: \`.detail-head--inst\` computes \`flex-direction: column\` at <=899 ` +
+          `(app.css's 899 block), where \`.detail-head-main\` already spans the head. That is why the remedy is ` +
+          `scoped to a \`min-width: 900px\` block — an unscoped \`flex-basis\` on a column item is a HEIGHT basis, ` +
+          `and would have bought the wide band at the cost of the stacked one`,
         );
       }
     }

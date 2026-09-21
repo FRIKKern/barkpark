@@ -87,7 +87,25 @@ func closeRefusalSourcePaths(t *testing.T) []string {
 // payload varies and may wrap a line. Both arms capture only the FAMILY name —
 // the part before the ':' on the wire — which is the key reasonKey reduces a
 // compound token to and the key codeExit must therefore hold.
-var closeRefusalRe = regexp.MustCompile(`\{:error, \{?:([a-z0-9_]+)`)
+//
+// THE SEPARATOR IS `\s+`, NOT A LITERAL SPACE, and that is load-bearing
+// (task-c674098c50ab054f). `mix format` wraps a tuple whose line exceeds the
+// line length, and when it does the atom moves to the NEXT line:
+//
+//	{:error,
+//	 :branch_only_evidence}
+//
+// A literal-space separator loses that reason entirely, in both directions: a
+// NEW reason becomes silently unbucketed (TestCodeExitCoversCloseRefusalVocabulary
+// greens while the reason reaches users at exit 2), and an EXISTING one is
+// misreported as no longer minted (TestCloseRefusalExclusionsAreLiveReasons reds
+// and tells you to delete a LIVE exclusion — correct in sign, wrong in
+// diagnosis). Neither is caught by the plausibility floor below, which catches a
+// total parse collapse, not one wrapped tuple. close.ex and stamp.ex happen to
+// have no wrapped `{:error,` today; 102 lines across api/lib do, 12 of them in
+// api/lib/barkpark/tasks/, so one added clause or one longer atom name is all it
+// takes. Go's `\s` matches `\n`, which is exactly the whitespace that matters here.
+var closeRefusalRe = regexp.MustCompile(`\{:error,\s+\{?:([a-z0-9_]+)`)
 
 // closeRefusalReasons parses the refusal vocabulary out of close.ex + stamp.ex.
 // It reads @doc prose as well as code on purpose: both are the module's own

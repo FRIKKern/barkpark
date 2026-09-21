@@ -17,6 +17,8 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
   """
   use Barkpark.DataCase, async: true
 
+  import Ecto.Query
+
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Repo
@@ -721,5 +723,75 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       after_snap = after_doc.content |> get_in(["blocks"]) |> hd() |> Map.get("snapshot")
       assert inspect(after_snap) =~ "V2-PUBLISHED"
     end
+  end
+
+  # ── sheet_embed_targets/2's LEGACY cond arms (task-5c1a72db61078040) ─────────
+  #
+  # `sheet_embed_targets/2` picks its scope with a three-arm cond: dataset_id,
+  # then workspace_id + dataset STRING, then dataset STRING + NULL workspace.
+  # Every document this suite writes goes through `Content.create_document/4`,
+  # whose write path RESOLVES-OR-CREATES the dataset row and stamps
+  # `dataset_id` — so arm 1 always wins and arms 2 and 3 were unreachable from
+  # the whole sheets suite. Measured: blanking arm 1 reds it (48 tests, 12
+  # failures); blanking arm 2 or arm 3 left 48 tests, 0 failures.
+  #
+  # Arms 2 and 3 are not dead code — they are the LEGACY row shape, a
+  # `dataset_id IS NULL` row the 20260527132000 backfill did not stamp (it only
+  # stamps rows whose dataset STRING matches a DEFAULT-project dataset slug).
+  # These two arms manufacture that shape the only way a test can: write through
+  # the normal path, then strip the stamp.
+  defp unstamp!(doc_ids, workspace_id) do
+    from(d in Document, where: d.doc_id in ^doc_ids)
+    |> Repo.update_all(set: [dataset_id: nil, workspace_id: workspace_id])
+  end
+
+  defp reload!(doc_id), do: Repo.get_by!(Document, doc_id: doc_id)
+
+  # `sheet_embed_targets/2` destructures refs as the [published, draft] PAIR its
+  # only caller builds; a single-element list raises a MatchError.
+  defp ref_pair(doc_id) do
+    pub = Barkpark.Content.DraftId.published_id(doc_id)
+    [pub, Barkpark.Content.DraftId.draft_id(pub)]
+  end
+
+  test "unstamped sheet WITH a workspace targets only that workspace's embedders" do
+    n = System.unique_integer([:positive])
+    ws = Barkpark.TenancyFixtures.create_workspace!().id
+    other_ws = Barkpark.TenancyFixtures.create_workspace!().id
+
+    sheet = create_sheet("ws-sheet-#{n}", "v")
+    mine = create_paper("ws-mine-#{n}", [sheet_block(sheet.doc_id)])
+    theirs = create_paper("ws-theirs-#{n}", [sheet_block(sheet.doc_id)])
+
+    unstamp!([sheet.doc_id, mine.doc_id], ws)
+    unstamp!([theirs.doc_id], other_ws)
+
+    ids =
+      Barkpark.Content.Sheets.sheet_embed_targets(reload!(sheet.doc_id), ref_pair(sheet.doc_id))
+      |> Enum.map(& &1.doc_id)
+      |> MapSet.new()
+
+    assert MapSet.member?(ids, mine.doc_id)
+    refute MapSet.member?(ids, theirs.doc_id)
+  end
+
+  test "unstamped sheet with NO workspace targets only the nil-workspace embedders" do
+    n = System.unique_integer([:positive])
+    other_ws = Barkpark.TenancyFixtures.create_workspace!().id
+
+    sheet = create_sheet("nows-sheet-#{n}", "v")
+    shared = create_paper("nows-shared-#{n}", [sheet_block(sheet.doc_id)])
+    tenant = create_paper("nows-tenant-#{n}", [sheet_block(sheet.doc_id)])
+
+    unstamp!([sheet.doc_id, shared.doc_id], nil)
+    unstamp!([tenant.doc_id], other_ws)
+
+    ids =
+      Barkpark.Content.Sheets.sheet_embed_targets(reload!(sheet.doc_id), ref_pair(sheet.doc_id))
+      |> Enum.map(& &1.doc_id)
+      |> MapSet.new()
+
+    assert MapSet.member?(ids, shared.doc_id)
+    refute MapSet.member?(ids, tenant.doc_id)
   end
 end

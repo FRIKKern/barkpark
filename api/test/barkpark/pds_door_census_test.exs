@@ -320,10 +320,36 @@ defmodule Barkpark.PdsDoorCensusTest do
     # this bump are paid together, and the count below reads 13 ON PURPOSE.
     # RE-DERIVED by running the census on this tree: it prints
     # `harnesses : 13` and names all three files.
-    assert out =~ ~r/harnesses\s+: 13 /,
-           "the derived harness count moved off 13. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a fourteenth harness landed (or one left), " <>
+    #
+    # A FOURTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-19):
+    # scripts/pds-citation-expand.test.sh, the harness for the compressed-citation
+    # guard scripts/pds-citation-expand.sh (task-b92409dc562dc20c, #19227). It is a
+    # harness by the same derived *.test.sh rule, it is wired into the pds-harnesses
+    # leg via .github/shell-harness-legs.json (not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. RE-DERIVED by running the census on this tree: it prints
+    # `harnesses : 14` and names the file — never by adding a delta to main's 13.
+    #
+    # A FIFTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-20):
+    # scripts/pds-secret-scan_test.sh, the first-ever harness for
+    # scripts/pds-secret-scan.sh (#19577, 342c912a7). It is a harness by the same
+    # derived *_test.sh rule, it is wired into the pds-harnesses leg via
+    # .github/shell-harness-legs.json (not a required context, so its disposition
+    # row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES denominator.
+    # LIKE the seventh, eighth and the 2026-09-16 three, it reddened main first:
+    # #19577 touched no api/** so the diff-scoped Elixir gate never ran this test,
+    # and main's push arm read "moved off 14" from 19:36Z until this bump landed.
+    # RE-DERIVED by running the census on this tree: it prints `harnesses : 15`
+    # and names the file — never by adding a delta to main's 14.
+    assert out =~ ~r/harnesses\s+: 15 /,
+           "the derived harness count moved off 15. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a sixteenth harness landed (or one left), " <>
              "say so on purpose.\n#{out}"
+
+    assert out =~ "pds-secret-scan_test.sh",
+           "the census stopped naming pds-secret-scan_test.sh among its derived " <>
+             "harnesses. The count above would still read 15 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     for named <- [
           "pds-artifact-retention.test.sh",

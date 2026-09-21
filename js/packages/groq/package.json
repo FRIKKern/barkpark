@@ -32,7 +32,8 @@
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests"
+    "lint": "eslint src tests",
+    "size": "size-limit"
   },
   "devDependencies": {
     "tsup": "^8.3.0",

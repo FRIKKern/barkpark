@@ -312,9 +312,27 @@ jobs:
 
   # ── the hermetic half (see the header: not a required context today) ────────
   # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
-  # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
-  # dispatch job would reintroduce exactly the conditional-absence shape the
-  # paths filter had. It renders on every PR, always, and its name is stable.
+  # and its name is stable. It IS dispatcher-gated: `needs: changes` plus
+  # `if: needs.changes.outputs.touched == 'true'` below, added deliberately by
+  # #15663 after measuring 4.58 min/exec across 1,227 PR pushes in a 4-day
+  # window for a question that does not vary with the PR ("has the required-set
+  # roster moved?"). So it does NOT run on every PR: on a PR that touches none
+  # of the dispatcher's paths it concludes `skipped`.
+  #
+  # THE PROPERTY THE OLD WORDING WAS REACHING FOR SURVIVES, RESTATED HONESTLY.
+  # What a required-adjacent name must never do is go ABSENT — an absent context
+  # routes to "expected" forever, the D18 deadlock this file's header warns
+  # about. There is still no workflow-level `on:.paths` key here (that is the
+  # mechanism that makes a name absent, and it must not come back). A JOB-LEVEL
+  # `if:` is a different mechanism: the job still RENDERS, with conclusion
+  # `skipped`, so the name is always present. That is why the dispatcher is
+  # legal here and a paths filter is not.
+  #
+  # BUT A SKIPPED CONCLUSION IS NOT A PASS, so this name CANNOT be required as
+  # it stands: `.github/required-checks.json` holds it out under `S7 EXCLUDED BY
+  # DECISION` (replacement trigger: cch-w37-bl-register-spec-gate-human-gate).
+  # Registering it would mean first removing the `needs:`/`if:` pair — a lead
+  # call with a measured cost, not a comment's assertion.
   spec-gate:
     name: Required-check spec gate
     needs: changes
@@ -378,10 +396,12 @@ jobs:
       # (advisory)` carries `continue-on-error: true`, so a floor breach there
       # prints and the job still concludes SUCCESS — a guard whose red is
       # swallowed is the defect class this workflow exists to delete. `spec-gate`
-      # is hermetic (the floor makes no API call and needs no credential),
-      # deliberately path-unfiltered so it renders on EVERY pull request rather
-      # than only on ones that look like CI changes, and its failure is a real
-      # red X. It is not a REQUIRED context today — registering it is a
+      # is hermetic (the floor makes no API call and needs no credential). It is
+      # NOT workflow-level paths-filtered, so its NAME renders on every pull
+      # request — but it is dispatcher-gated (`needs: changes` + `if: touched`,
+      # see the job comment above), so it RUNS only on a PR that touches the
+      # dispatcher's paths and concludes `skipped` otherwise. When it runs, its
+      # failure is a real red X. It is not a REQUIRED context today — registering it is a
       # branch-protection change and a lead call — so this is an unswallowed red
       # a human must read, which is strictly more than the advisory job can offer,
       # and it becomes blocking for free the day that name is registered.
@@ -617,8 +637,9 @@ jobs:
   # `workflow-job-shape` block above records for itself, applied again rather
   # than re-derived.
   #
-  # WHY IT IS DISPATCHER-INDEPENDENT. Like `workflow-job-shape` it carries no
-  # `needs: changes`, so it renders on EVERY pull request. The hazard it forbids
+  # WHY IT IS DISPATCHER-INDEPENDENT. Unlike `spec-gate` above — and like
+  # `workflow-job-shape` — this job carries NO `needs: changes` and no job-level
+  # `if:`, so it really does render on EVERY pull request. The hazard it forbids
   # is introduced by editing a workflow's `concurrency:` or by promoting a new
   # required context, and a guard that is ABSENT on the PR which does the thing
   # is worse than a guard that is noisy: the name would simply not appear, and
@@ -676,11 +697,19 @@ jobs:
   #
   # NOT a required context, and deliberately not proposed as one: arm (a) cannot
   # tell an intentional delete from a stale-tree delete (the script's own header
-  # says so), so its red is a question, not a verdict. It is not in
-  # .github/required-checks.json's required set and needs no exclusion row —
-  # exclusions exist to explain why a name that COULD be required is not, and
-  # `Every workflow job has runs-on+steps or uses`, the sibling job in this file,
-  # carries no row either.
+  # says so), so its red is a question, not a verdict.
+  #
+  # IT IS NOT IN THE REQUIRED SET, AND IT DOES CARRY AN EXCLUSION ROW. Checked
+  # against .github/required-checks.json, not assumed:
+  #     "context": "Head does not silently revert main (stale tree)",
+  #     "reason":  "S7 EXCLUDED BY DECISION: required-checks-drift.yml job
+  #                 `stale-tree` — … unregistered by decision, not by oversight"
+  # That row is hand-reasoned and must SURVIVE a regeneration — required-checks
+  # .json's `gofmt drift ceiling (blocking)` row records four names that
+  # "have SILENTLY LEFT this list on regeneration". The sibling
+  # `Every workflow job has runs-on+steps or uses` carries an S7 row too (same
+  # file, the entry immediately above this one); the earlier claim here that
+  # neither name had a row was wrong on both counts.
   stale-tree:
     name: Head does not silently revert main (stale tree)
     if: github.event_name == 'pull_request'

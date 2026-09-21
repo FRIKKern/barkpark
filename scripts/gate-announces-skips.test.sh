@@ -569,23 +569,33 @@ run_gate "Cloud gate: RED — the census failed" "$cloud_step" no 1 \
 console_step="$TMPROOT/step-console.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/console-harness.yml" console-gate "$console_step"
 run_gate "Console gate: api-only, nothing dispatched" "$console_step" yes 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped \
   R_ESCAPE=success O_CONSOLE=false
 run_gate "Console gate: the harness really ran" "$console_step" no 0 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success \
   R_ESCAPE=success O_CONSOLE=true
 run_gate "Console gate: RED — no reassuring notice on a failure" "$console_step" no 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success \
   R_ESCAPE=success O_CONSOLE=true
 
 security_step="$TMPROOT/step-security.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/security.yml" security-gate "$security_step"
+# O_LOCKS IS PART OF THIS FIXTURE, NOT AN OPTIONAL EXTRA (2026-09-20,
+# task-76e529e61d9e34d0). security.yml's `mix-audit` is gated on the dispatcher's
+# `locks` output, not on `api`, and the extracted step accepts a skip only
+# against a gate value of literally 'false'. An UNSET O_LOCKS is the empty
+# string, which that step correctly reads as CANNOT TELL and reds — so omitting
+# it here does not simulate a docs-only PR, it simulates a broken dispatcher.
+# THIS FILE IS THE SECOND HARNESS TO EXTRACT THIS STEP BODY
+# (scripts/security-gate-shape.test.sh is the first) AND EACH CARRIES ITS OWN
+# FIXTURE ENV: a new env binding in the aggregator must be added in BOTH, and
+# updating only one is exactly how this arm reddened.
 run_gate "Security gate: docs-only, nothing dispatched" "$security_step" yes 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false O_LOCKS=false V_SOBELOW=
 run_gate "Security gate: the scans really ran" "$security_step" no 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true O_LOCKS=true
 run_gate "Security gate: RED — no reassuring notice on a failure" "$security_step" no 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true O_LOCKS=true
 echo
 
 # ── case 5: the emitted annotation body actually says the derived sentence ──
@@ -618,11 +628,11 @@ run_gate "Cloud gate: docs-only" "$cloud_step" yes 0 \
   O_CLOUD=false O_CENSUS=false
 body_says "Cloud gate" - "NOTHING CLOUD RAN"
 run_gate "Console gate: api-only" "$console_step" yes 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped \
   R_ESCAPE=success O_CONSOLE=false
 body_says "Console gate" - "NOTHING CONSOLE RAN"
 run_gate "Security gate: docs-only" "$security_step" yes 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false O_LOCKS=false V_SOBELOW=
 body_says "Security gate" - "NOTHING SECURITY RAN"
 echo
 
@@ -738,23 +748,23 @@ red_names "Cloud gate: census failed" "$cloud_step" "census (reader corpus)" "co
   O_CLOUD=false O_CENSUS=true
 
 red_names "Console gate: cssom-parity failed" "$console_step" "cssom-parity" "tier-floor-render" \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success \
   R_ESCAPE=success O_CONSOLE=true
 red_names "Console gate: tier-floor-render failed" "$console_step" "tier-floor-render" "cssom-parity" \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success \
   R_ESCAPE=success O_CONSOLE=true
 
 red_names "Security gate: mix-audit failed" "$security_step" "mix-audit" "sobelow-inline-overlap" \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true O_LOCKS=true
 red_names "Security gate: sobelow-inline-overlap failed" "$security_step" "sobelow-inline-overlap" "mix-audit" \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=failure R_FINGERPRINT=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=failure R_FINGERPRINT=success R_AUDIT=success O_API=true O_LOCKS=true
 # The verdict-judged upstream must reach the SAME named set. It reds through
 # `decide_verdict`, not `decide`, and a set built only from `decide` call sites
 # would name every other job and silently omit this one — which is the original
 # "something is wrong, never which" defect, reintroduced for exactly the job
 # that could not be seen at all before.
 red_names "Security gate: Sobelow found a NEW finding" "$security_step" "sobelow" "mix-audit" \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true V_SOBELOW=MEASURED-DEFECT
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true O_LOCKS=true V_SOBELOW=MEASURED-DEFECT
 
 # The OTHER `bad=1` sites, which a failure-only guard would leave unaccumulated:
 # a skip against a gate that is not 'false', and an EMPTY result. Both are reds
@@ -788,7 +798,7 @@ echo
 # re-parallelises four sentences.
 echo "case 7b: naming the set did not flatten security.yml's advisory clause"
 run_gate "Security gate: RED" "$security_step" no 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true O_LOCKS=true
 SEC_ANN="$(grep '^::error' "$OUT" | tr '\n' ' ')"
 if has "$SEC_ANN" "advisory context, not one of the four required on main"; then
   ok "Security gate …still says it is advisory, not one of the four required"
@@ -804,7 +814,7 @@ fi
 # fact #11377 left on the floor: `measured` was collected and then discarded on
 # every red where no upstream published a REFUSED verdict.
 run_gate "Console gate: RED, no refusal" "$console_step" no 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success \
   R_ESCAPE=success O_CONSOLE=true V_CSSOM=MEASURED_DEFECT
 CON_ANN="$(grep '^::error' "$OUT" | tr '\n' ' ')"
 if has "$CON_ANN" "Measured defects (exit 1) in this run: cssom-parity"; then

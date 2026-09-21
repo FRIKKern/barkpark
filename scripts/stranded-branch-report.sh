@@ -147,7 +147,8 @@ resolve_ref() {
 PR_FILE=""
 PR_STATUS="ok"
 load_pr_heads() {
-  PR_FILE="$(mktemp -t strandedpr)" || die "mktemp failed"
+  # PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only.
+  PR_FILE="$(mktemp "${TMPDIR:-/tmp}/strandedpr.XXXXXX")" || die "mktemp failed"
   if [ -n "${STRANDED_PR_LIST_FILE:-}" ]; then
     if [ ! -f "$STRANDED_PR_LIST_FILE" ]; then PR_STATUS="missing"; return 1; fi
     cat "$STRANDED_PR_LIST_FILE" > "$PR_FILE"
@@ -194,13 +195,14 @@ run_report() {
       exit 3
     fi
   else
-    PR_FILE="$(mktemp -t strandedpr)"; : > "$PR_FILE"; PR_STATUS="skipped"
+    PR_FILE="$(mktemp "${TMPDIR:-/tmp}/strandedpr.XXXXXX")" || die "mktemp failed"
+    : > "$PR_FILE"; PR_STATUS="skipped"
   fi
 
   git rev-parse --verify --quiet "$BASE" >/dev/null || die "base ref '$BASE' does not resolve"
 
   local n_merged=0 n_pr=0 n_div=0 n_carrier=0
-  local rows; rows="$(mktemp -t strandedrows)"
+  local rows; rows="$(mktemp "${TMPDIR:-/tmp}/strandedrows.XXXXXX")" || die "mktemp failed"
 
   local short full merged ahead behind rl bucket ca cn cherry
   while IFS= read -r short; do
@@ -266,7 +268,7 @@ EOF
 # without a network.
 selftest() {
   local fails=0 tmp
-  tmp="$(mktemp -d -t strandedself)" || { echo "mktemp -d failed"; return 1; }
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/strandedself.XXXXXX")" || { echo "mktemp -d failed"; return 1; }
   local SCRIPT; SCRIPT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 
   (

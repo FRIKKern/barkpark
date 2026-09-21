@@ -78,9 +78,49 @@ OUT="${OUT:-$HERE/__shots__}"
 REAP_BUDGET="${REAP_BUDGET:-10}"
 
 # ── locate a Chrome/Chromium binary ──────────────────────────────────────────
+#
+# THE PLAYWRIGHT HEADLESS SHELL GOES FIRST, AND THAT ORDER IS A MEASUREMENT.
+# On this Mac (2026-09-20, task-f8318f7734a52c52) the two binaries this function
+# used to consider FIRST both hang past the 15s poll under
+# `--headless=new --screenshot`: /Applications/Google Chrome.app and playwright's
+# full `chromium-1217` Chrome for Testing 147 each produced
+# `>> Done with FAILURES. 0 ok, 8 failed` on an 8-shot matrix. Only
+# `chromium_headless_shell-*/…/chrome-headless-shell` wrote PNGs — every GR129
+# number in PR #19583 came off that binary, driven by hand through CHROME=.
+# A harness whose auto-detection cannot shoot on the host it ships to is a
+# harness nobody runs, so the one that works is now the first thing tried.
+# (`CHROME=` still overrides everything, so a host where full Chrome is the
+# right answer is one env var away.)
+#
+# DERIVED, NEVER PINNED. The build number is a glob and the HIGHEST one wins:
+# a frozen `-1217` would rot the next `npx playwright install` and then lie
+# about why (GR53/GR80/GR83 — the same class as the frozen census this file
+# already refuses). The roots follow playwright's own layout, the one
+# scripts/studio-desk-measure.mjs quotes in its launch-failure fix text:
+# $PLAYWRIGHT_BROWSERS_PATH when set, else ~/Library/Caches/ms-playwright
+# (macOS) or ~/.cache/ms-playwright (Linux). Both the current
+# `chrome-headless-shell` basename and the older `headless_shell` are matched.
+playwright_headless_shell() {
+  local roots=() root hit
+  [[ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]] && roots+=("$PLAYWRIGHT_BROWSERS_PATH")
+  roots+=("$HOME/Library/Caches/ms-playwright" "$HOME/.cache/ms-playwright")
+  for root in "${roots[@]}"; do
+    [[ -d "$root" ]] || continue
+    # Sort on the BUILD NUMBER, numerically — a lexical sort puts 999 above
+    # 1217 and would silently pick a stale install.
+    hit="$(find "$root" -maxdepth 3 -type f \
+             \( -name 'chrome-headless-shell' -o -name 'headless_shell' \) 2>/dev/null \
+           | awk -F'chromium_headless_shell-' 'NF > 1 { split($2, p, "/"); print p[1] "\t" $0 }' \
+           | sort -n -k1,1 | tail -1 | cut -f2-)"
+    if [[ -n "$hit" && -x "$hit" ]]; then echo "$hit"; return; fi
+  done
+  echo ""
+}
+
 find_chrome() {
   if [[ -n "${CHROME:-}" ]]; then echo "$CHROME"; return; fi
   local candidates=(
+    "$(playwright_headless_shell)"
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     "/Applications/Chromium.app/Contents/MacOS/Chromium"
     "$(command -v google-chrome 2>/dev/null || true)"
@@ -109,6 +149,15 @@ fi
 #             renders the logged-out card and files it under an activate name.
 #   search    app.js reads ?code=, ?template=, ?bp= and ?billing=portal out of
 #             location.search; dropping it silently voids the scenario's state.
+#   shotHeight  the VIEWPORT HEIGHT this scenario's subject needs. The default
+#             1000 is a FOLD, not a page: fleetSupportCardHtml and the offload
+#             watch ladder mount at the tail of the instance Overview column and
+#             fell below it, so nine scenarios shot byte-identical to
+#             shell-instance for as long as this matrix has existed
+#             (task-7bd507ea989ef248). Scrolling them into frame was tried and
+#             REJECTED: the scroll lands but the capture composites the old
+#             raster, leaving a blank band and a shot no reviewer should trust.
+#             A taller window has no such race.
 #
 # ── \x1f, NEVER TAB ──────────────────────────────────────────────────────────
 # The fields are joined and split on \x1f (US, the ASCII unit separator).
@@ -124,7 +173,7 @@ SCEN_TABLE="$(HERE="$HERE" node --input-type=module -e '
   const m = await import(new URL("scenarios.mjs", "file://" + process.env.HERE + "/").href);
   const US = String.fromCharCode(31);
   for (const [name, s] of Object.entries(m.SCENARIOS)) {
-    console.log([name, s.deepLink || "", s.pathname || "", s.search || ""].join(US));
+    console.log([name, s.deepLink || "", s.pathname || "", s.search || "", s.shotHeight || ""].join(US));
   }
 ')"
 THEMES=(light dark)
@@ -290,7 +339,12 @@ echo ">> Shooting into: $OUT"
 echo ">> Census (derived from scenarios.mjs): $SCEN_DEEP of $SCEN_TOTAL scenarios carry a deepLink"
 
 # Portable file size (macOS `stat -f%z`, GNU `stat -c%s`), 0 if absent.
-png_size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0; }
+# GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+# FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+# report instead of failing, and a BSD-first `||` chain never reaches the
+# GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on the
+# wrong platform instead of quietly.
+png_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo 0; }
 
 # Is the preview server still answering? Checked ONCE at boot was not enough:
 # when node died mid-run every remaining shot captured Chrome's
@@ -312,7 +366,18 @@ SHOTS_FAILED=0
 exec 3>&2
 
 shot() {
-  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}"
+  local scen="$1" theme="$2" width="$3" deep="${4:-}" accent="${5:-}" spath="${6:-}" ssearch="${7:-}" sheight="${8:-}"
+  # The viewport HEIGHT. 1000 is the shipped default and stays the default for
+  # every scenario that does not ask for more; a scenario whose subject mounts
+  # below that fold declares `shotHeight` in scenarios.mjs (see the field list
+  # above). A non-numeric value is refused rather than silently defaulted — a
+  # field-shift would otherwise hand this a scenario NAME and shoot 1000 anyway.
+  if [[ -n "$sheight" && ! "$sheight" =~ ^[0-9]+$ ]]; then
+    echo "!! shoot.sh: scenario '$scen' produced shotHeight '$sheight' (not a number)." >&2
+    echo "!! The scenario table split misaligned — check the \\x1f join, not a tab." >&2
+    exit 1
+  fi
+  local height="${sheight:-1000}"
   local accent_q="" accent_sfx=""
   if [[ -n "$accent" ]]; then accent_q="&accent=$accent"; accent_sfx="-$accent"; fi
   # The scenario's own query string, folded in as extra params (its leading "?"
@@ -377,7 +442,7 @@ shot() {
     --no-default-browser-check \
     --user-data-dir="$profile" \
     --force-device-scale-factor=2 \
-    --window-size="${width},1000" \
+    --window-size="${width},${height}" \
     --virtual-time-budget=5000 \
     --timeout=15000 \
     --screenshot="$png" \
@@ -415,6 +480,8 @@ shot() {
     sleep "$REAP_BUDGET"
     if kill -0 "$cpid"; then
       echo "  !! watchdog: chrome $cpid ignored TERM for ${REAP_BUDGET}s — killing tree" >&3
+      echo "  !!   binary: $CHROME_BIN" >&3
+      echo "  !!   shot:   ${scen}/${theme}/${width}${accent_sfx}" >&3
       pkill -9 -P "$cpid" || true
       kill -9 "$cpid" || true
     fi
@@ -441,20 +508,41 @@ shot() {
     echo "  ok  $(basename "$png")"
   else
     SHOTS_FAILED=$((SHOTS_FAILED + 1))
-    echo "  !! failed: ${scen}/${theme}/${width}${accent_sfx}"
+    # NAME THE BINARY, not just the shot. The measured failure on this host was
+    # a CANDIDATE fault, not a scenario fault: /Applications/Google Chrome.app
+    # and playwright's full chromium-1217 each ran the poll out on all 8 shots
+    # and the log said only `!! failed: <scenario>` eight times — which reads as
+    # "the app is broken" and sent a whole wave looking at app.js. Which binary
+    # wrote nothing, and for how long, is the fact that ends that search.
+    echo "  !! failed: ${scen}/${theme}/${width}${accent_sfx} — no PNG after ${waited}ms"
+    echo "  !!   binary: $CHROME_BIN"
+    if (( SHOTS_FAILED == 1 )); then
+      echo "  !!   This binary wrote NO PNG inside the ${waited}ms poll — a hang, not a crash."
+      echo "  !!   Measured on macOS 2026-09-20: /Applications/Google Chrome.app and"
+      echo "  !!   playwright's FULL chromium-* Chrome for Testing both hang here under"
+      echo "  !!   --headless=new --screenshot; only the playwright HEADLESS SHELL writes."
+      local shell_hint
+      shell_hint="$(playwright_headless_shell)"
+      if [[ -n "$shell_hint" && "$shell_hint" != "$CHROME_BIN" ]]; then
+        echo "  !!   Retry with: CHROME='$shell_hint' $0"
+      else
+        echo "  !!   No playwright headless shell found either — install one:"
+        echo "  !!     npx playwright install chromium-headless-shell"
+      fi
+    fi
   fi
 }
 
 # IFS is \x1f (US) — see the SCEN_TABLE note above for why a tab here is a
 # silent-corruption bug, not a style choice.
-while IFS=$'\x1f' read -r scen deep spath ssearch; do
+while IFS=$'\x1f' read -r scen deep spath ssearch sheight; do
   [[ -z "$scen" ]] && continue
   # SCEN filter: when set, skip any scenario not on the list.
   if [[ -n "$WANT_SCEN" && "$WANT_SCEN" != *" $scen "* ]]; then continue; fi
   for theme in "${THEMES[@]}"; do
     for width in "${WIDTHS[@]}"; do
       for accent in "${ACCENTS[@]}"; do
-        shot "$scen" "$theme" "$width" "$deep" "$accent" "$spath" "$ssearch"
+        shot "$scen" "$theme" "$width" "$deep" "$accent" "$spath" "$ssearch" "$sheight"
       done
     done
   done
@@ -465,6 +553,9 @@ done <<< "$SCEN_TABLE"
 # inflation that made a 44-shot run report 49.
 if (( SHOTS_FAILED > 0 )); then
   echo ">> Done with FAILURES. $SHOTS_OK ok, $SHOTS_FAILED failed, into $OUT"
+  if (( SHOTS_OK == 0 )); then
+    echo ">> EVERY shot failed with CHROME_BIN=$CHROME_BIN — suspect the BINARY, not the app."
+  fi
   exit 1
 fi
 echo ">> Done. $SHOTS_OK PNG(s) shot this run into $OUT"

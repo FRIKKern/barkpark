@@ -19,7 +19,12 @@ defmodule Barkpark.Content.Edges do
   alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition, Writer, WriteScope}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, scope_to_workspace: 3]
+    only: [
+      scope_to_workspace_or_global: 3,
+      scope_to_workspace: 3,
+      scope_to_owner: 2,
+      maybe_scope_to_grants: 2
+    ]
 
   @doc """
   Find all documents that reference a given document ID.
@@ -352,9 +357,47 @@ defmodule Barkpark.Content.Edges do
   # kept for expand/typeahead, but the emitted edge carries `ref_type = nil`, so
   # BOTH resolution paths — the per-target `resolve_target_existence/4` and the
   # batched `resolvable_targets/3` — take their type-AGNOSTIC arm and the edge
-  # resolves against any published document with that id. The two arms share the
-  # `:published` lens, so the gap-#2 contract (a typed and an untyped ref to the
-  # same target never disagree) is unaffected. Absent or false, nothing changes.
+  # resolves against any published document with that id. Absent or false,
+  # nothing changes.
+  #
+  # ── WHAT THE TYPE-AGNOSTIC ARM NARROWS BY (task-8f5938e3ba4d98c7) ────────
+  #
+  # RETRACTED, and named here so the claim cannot come back: this comment used
+  # to end “The two arms share the `:published` lens, so the gap-#2 contract (a
+  # typed and an untyped ref to the same target never disagree) is unaffected.”
+  # The lens half was true and the CONCLUSION was false. The typed arm
+  # (`Content.Query.resolvable_doc_ids/4`) stacks FOUR clauses — dataset,
+  # workspace-or-global, `maybe_scope_to_owner/4`, `maybe_scope_to_grants/2` —
+  # and the type-agnostic arm ran only the first two. So a `refTypeTolerant`
+  # field, or any wikilink carrying no refType, resolved an `owner_scoped` row
+  # belonging to ANOTHER user, and a grant-scoped caller's untyped ref resolved
+  # outside its grant ladder: the two arms disagreed for exactly the caller
+  # kinds the clamps exist for. Latent on today's routes only because the sole
+  # HTTP door to this pipeline is bearer-only and every bearer is the
+  # `:api_token` principal `Scope.scope_to_owner/2` deliberately exempts — an
+  # accident of routing, not a property of this code.
+  #
+  # `untyped_present_ids/3` now applies BOTH clamps, and the per-target fallback
+  # clause of `resolve_target_existence/4` DELEGATES to `untyped_resolvable/3`,
+  # so the two type-agnostic paths are one implementation and cannot drift by
+  # editing one of them:
+  #
+  #   * GRANTS — `maybe_scope_to_grants/2` verbatim. It is type-independent, and
+  #     a no-op unless `opts[:grant_scoped]` is set, so a member / token /
+  #     anonymous read stays byte-identical.
+  #   * OWNERSHIP — the untyped arm has no `type` to hand
+  #     `Content.owner_scoped?/3`, so the clamp is decided per CANDIDATE ROW: the
+  #     candidates' distinct types are split on `Content.owner_scoped?/3` (the
+  #     same predicate `maybe_scope_to_owner/4` gates on — `get_schema/3`, which
+  #     applies no grant narrowing of its own, so a grantee cannot make a type
+  #     look un-owner_scoped), rows of open types are kept as read, and rows of
+  #     owner_scoped types are RE-READ through `Scope.scope_to_owner/2` — the
+  #     canonical clause, never a local copy of its decision table. A nil
+  #     caller_context therefore fails CLOSED here exactly as it does typed.
+  #
+  # Pinned by `test/barkpark/content/edges_untyped_arm_parity_test.exs`, which
+  # asserts the gap-#2 contract DIRECTLY: for one caller and one target, the
+  # typed arm and the type-agnostic arm return the same visibility.
   defp dangling_ref_type(field) do
     if field["refTypeTolerant"] == true, do: nil, else: field["refType"]
   end
@@ -411,11 +454,18 @@ defmodule Barkpark.Content.Edges do
   # published row (get_document/4 matches `doc_id == to_id` where to_id is
   # already published-coalesced), and the untyped branch matches the published
   # id ONLY — NOT the `drafts.` twin. A draft-only target (no published twin)
-  # is therefore dangling under EITHER branch, so a typed ref and an untyped ref
-  # to the same target never disagree on dangling (gap #2 contract). This is
-  # why we do NOT copy reference_title/4's `or doc_id == draft` clause —
-  # reference_title intentionally falls back to the draft twin for a cosmetic
-  # title, which is the WRONG lens for published-dangling.
+  # is therefore dangling under EITHER branch. This is why we do NOT copy
+  # reference_title/4's `or doc_id == draft` clause — reference_title
+  # intentionally falls back to the draft twin for a cosmetic title, which is
+  # the WRONG lens for published-dangling.
+  #
+  # THE LENS IS HALF THE CONTRACT, NOT THE WHOLE OF IT (task-8f5938e3ba4d98c7).
+  # This block used to conclude from the shared lens alone that “a typed ref and
+  # an untyped ref to the same target never disagree on dangling”. They also have
+  # to agree on the ROW CLAMPS — ownership and grants — and for a non-admin
+  # `:user` caller on an `owner_scoped` type, or a `grant_scoped: true` caller,
+  # they did not. Branch (ii) now delegates to `untyped_resolvable/3`, which
+  # applies both; the refTypeTolerant block above is the canonical account.
   #
   # Returns true when the target is resolvable (NOT dangling).
   @spec resolve_target_existence(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
@@ -428,17 +478,12 @@ defmodule Barkpark.Content.Edges do
     end
   end
 
+  # The type-agnostic branch is NOT a second copy of the untyped presence query:
+  # it delegates to the batched arm with a one-pair list, so the per-target and
+  # the batched type-agnostic paths share one set of scope clauses by
+  # construction (see the refTypeTolerant block above for which clauses and why).
   defp resolve_target_existence(to_id, _ref_type, dataset, opts) do
-    pub_id = DraftId.published_id(to_id)
-
-    Document
-    |> where([d], d.doc_id == ^pub_id)
-    |> WriteScope.scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(
-      Keyword.get(opts, :workspace_id),
-      Keyword.get(opts, :project_id)
-    )
-    |> Repo.exists?()
+    untyped_resolvable([{to_id, nil}], dataset, opts) != []
   end
 
   @doc """
@@ -451,13 +496,17 @@ defmodule Barkpark.Content.Edges do
   a binary or nil; the returned `MapSet` holds the pairs that resolve, so a
   caller computes `dangling` as `not MapSet.member?(set, {to_id, ref_type})`.
 
-  SAME LENS, BY CONSTRUCTION — the typed arm delegates to
+  SAME LENS *AND* SAME ROW CLAMPS — the typed arm delegates to
   `Content.Query.resolvable_doc_ids/4`, which is `get_document/4`'s own scoping
   pipeline with `in` instead of `==`; the untyped arm is this module's own
   type-agnostic `:published` existence query with `in` instead of `==`. Both
   keep the published lens (`to_id` is published-coalesced and no `drafts.` twin
-  is matched), so a typed and an untyped ref to the same target still never
-  disagree.
+  is matched), AND both apply the ownership and grant clamps — the lens alone
+  was never enough to make the arms agree, and for a non-admin `:user` caller on
+  an `owner_scoped` type, or a `grant_scoped: true` caller, it did not (the
+  retraction in the `refTypeTolerant` block above). With both halves in place a
+  typed and an untyped ref to the same target do not disagree for any caller;
+  `test/barkpark/content/edges_untyped_arm_parity_test.exs` is what says so.
 
   WHY IT EXISTS: `extract_edges/2`'s default `dangling: :resolve` is ONE
   un-batched round-trip per reference value per document. `Content.Graph`'s
@@ -498,8 +547,19 @@ defmodule Barkpark.Content.Edges do
 
   defp untyped_resolvable(pairs, dataset, opts) do
     pub_ids = pairs |> Enum.map(fn {to_id, _} -> DraftId.published_id(to_id) end) |> Enum.uniq()
+    present = untyped_present_ids(pub_ids, dataset, opts)
 
-    present =
+    Enum.filter(pairs, fn {to_id, _} ->
+      MapSet.member?(present, DraftId.published_id(to_id))
+    end)
+  end
+
+  # The published doc_ids among `pub_ids` this caller may actually SEE — the
+  # type-agnostic half of the gap-#2 contract. Bounded at two queries: one for
+  # the candidates, one re-read of the owner_scoped slice through the canonical
+  # owner clause. The refTypeTolerant block above carries the full rationale.
+  defp untyped_present_ids(pub_ids, dataset, opts) do
+    base =
       Document
       |> where([d], d.doc_id in ^pub_ids)
       |> WriteScope.scope_to_dataset(dataset, opts)
@@ -508,13 +568,39 @@ defmodule Barkpark.Content.Edges do
         Keyword.get(opts, :workspace_id),
         Keyword.get(opts, :project_id)
       )
-      |> select([d], d.doc_id)
-      |> Repo.all()
-      |> MapSet.new()
+      # Type-INDEPENDENT, so it rides the base query: a grant names a doc_id
+      # rung regardless of how the referring field declared its refType. No-op
+      # unless `opts[:grant_scoped]` — members, tokens and anonymous reads are
+      # byte-identical to the pre-clamp query.
+      |> maybe_scope_to_grants(opts)
 
-    Enum.filter(pairs, fn {to_id, _} ->
-      MapSet.member?(present, DraftId.published_id(to_id))
-    end)
+    candidates = base |> select([d], {d.doc_id, d.type}) |> Repo.all()
+
+    {owner_scoped_types, open_types} =
+      candidates
+      |> Enum.map(fn {_doc_id, type} -> type end)
+      |> Enum.uniq()
+      |> Enum.split_with(&Content.owner_scoped?(&1, dataset, opts))
+
+    open_set = MapSet.new(open_types)
+
+    open_hits =
+      for {doc_id, type} <- candidates, MapSet.member?(open_set, type), do: doc_id
+
+    owned_hits =
+      case owner_scoped_types do
+        [] ->
+          []
+
+        types ->
+          base
+          |> where([d], d.type in ^types)
+          |> scope_to_owner(Keyword.get(opts, :caller_context))
+          |> select([d], d.doc_id)
+          |> Repo.all()
+      end
+
+    MapSet.new(open_hits ++ owned_hits)
   end
 
   @doc """
@@ -941,12 +1027,17 @@ defmodule Barkpark.Content.Edges do
   Outbound edges of a document id (indexed `(from_id, kind)` scan). Ordered by
   `inserted_at` ASC — the forward-BFS input for Phase 4. `:kind` opt narrows to
   one kind.
+
+  `:workspace_id` is an OPTIONAL tenant bind (see `maybe_scope_edges_to_workspace/2`):
+  supplied, the scan returns only edges BOTH of whose endpoint documents sit in
+  that workspace; omitted, the scan is unchanged (explicit global read).
   """
   @spec list_outbound_edges(binary(), keyword()) :: [Barkpark.Content.Edge.t()]
   def list_outbound_edges(from_id, opts \\ []) do
     Barkpark.Content.Edge
     |> where([e], e.from_id == ^from_id)
     |> maybe_filter_edge_kind(opts)
+    |> maybe_scope_edges_to_workspace(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
@@ -955,12 +1046,17 @@ defmodule Barkpark.Content.Edges do
   Inbound edges of a document id (indexed `(to_id, kind)` scan). Ordered by
   `inserted_at` ASC — the reverse-walk input for the Studio unpublish guard
   (Phase 4/5). `:kind` opt narrows to one kind.
+
+  `:workspace_id` is an OPTIONAL tenant bind (see `maybe_scope_edges_to_workspace/2`):
+  supplied, the scan returns only edges BOTH of whose endpoint documents sit in
+  that workspace; omitted, the scan is unchanged (explicit global read).
   """
   @spec list_inbound_edges(binary(), keyword()) :: [Barkpark.Content.Edge.t()]
   def list_inbound_edges(to_id, opts \\ []) do
     Barkpark.Content.Edge
     |> where([e], e.to_id == ^to_id)
     |> maybe_filter_edge_kind(opts)
+    |> maybe_scope_edges_to_workspace(opts)
     |> order_by([e], asc: e.inserted_at)
     |> Repo.all()
   end
@@ -970,6 +1066,64 @@ defmodule Barkpark.Content.Edges do
       nil -> query
       kind -> where(query, [e], e.kind == ^to_string(kind))
     end
+  end
+
+  # THE EDGE-SCAN TENANT BIND (task-4b942de098205a47), defence-in-depth.
+  #
+  # `content_edges` carries NO tenancy column of its own — an edge's tenancy is
+  # its two endpoint DOCUMENTS' (`documents.workspace_id`). So the bind is a
+  # join on both endpoints, not a column filter.
+  #
+  # OMITTED BIND IS PERMITTED, NOT REFUSED. With no `:workspace_id` in `opts`
+  # the query is returned UNTOUCHED — the same explicit-global read the
+  # pre-bind code always did. This mirrors the nil arm of
+  # `Content.Scope.scope_to_workspace_or_global/3` and is deliberate: the
+  # existing callers (`Content.Graph.neighbor_edges/4`,
+  # `Content.Graph.backlinks`, `EdgeProjector.Projector`) seed `from_id`/`to_id`
+  # from a scoped `documents.id` PK resolution, so they are structurally safe
+  # today; refusing an omitted bind would be a NEW contract across all of them
+  # with no defect to justify it. The bind adds a second fence for callers that
+  # resolve a pk by any other route.
+  #
+  # BOTH endpoints are bound, not just the far one: the near endpoint fences a
+  # caller that arrived with an unscoped pk, the far endpoint fences the walk
+  # from expanding into another tenant. The joins are INNER on `documents.id`
+  # (an FK-enforced, non-null PK on both sides — `Content.Edge`'s "dangling
+  # targets are NEVER stored"), so they can drop no row a bound scan should
+  # return.
+  #
+  # `:shared_only` (what `BarkparkWeb.ScopeHelpers.scope_opts/1` emits for a
+  # request that resolved no workspace) means the shared layer —
+  # `workspace_id IS NULL` — and never "every tenant", matching
+  # `Content.Scope.scope_to_workspace/3`'s sentinel arm.
+  defp maybe_scope_edges_to_workspace(query, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      nil -> query
+      workspace_id -> scope_edges_to_workspace(query, workspace_id)
+    end
+  end
+
+  defp scope_edges_to_workspace(query, workspace_id) do
+    query
+    |> join(:inner, [e], f in Document, on: f.id == e.from_id, as: :edge_from_doc)
+    |> join(:inner, [e], t in Document, on: t.id == e.to_id, as: :edge_to_doc)
+    |> edge_workspace_clause(workspace_id)
+  end
+
+  defp edge_workspace_clause(query, :shared_only) do
+    where(
+      query,
+      [edge_from_doc: f, edge_to_doc: t],
+      is_nil(f.workspace_id) and is_nil(t.workspace_id)
+    )
+  end
+
+  defp edge_workspace_clause(query, workspace_id) do
+    where(
+      query,
+      [edge_from_doc: f, edge_to_doc: t],
+      f.workspace_id == ^workspace_id and t.workspace_id == ^workspace_id
+    )
   end
 
   defp fetch_content_edge!(from_id, to_id, kind) do

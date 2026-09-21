@@ -396,6 +396,56 @@ relay (`postfix` service) — see `cloud/postfix/README.md` for its DNS/TLS/
 Hetzner-port-25 setup; nothing extra is needed in this deploy pipeline.
 Its TLS cert renews on its own schedule — see below.
 
+## Smoke a box: read the Caddy upstream, or use the public URL
+
+**There is no repo-wide app port.** A single-checkout box (the `89.167.28.206`
+micro-block, `docs/ops/PROD_OPS.md`) serves one BEAM on `:4000`. A `.slots`
+blue/green host — guerrilla, and every host this pipeline deploys — runs
+`barkpark-slot@blue` on `:4000` and `@green` on `:4001`, and **only one of them
+is bound at a time**: whichever slot is live. The live port is not a constant
+and is not derivable from the repo; the only source of truth ON the box is the
+Caddy upstream line:
+
+```bash
+grep -n reverse_proxy /etc/caddy/Caddyfile   # the slot line, e.g. localhost:4001
+ss -ltnp | grep beam                         # exactly one beam.smp, on that port
+```
+
+**The portable smoke test is the PUBLIC URL, never a hardcoded port:**
+
+```bash
+curl -s https://<host>/status.json | jq -r .commit   # the sha the box RUNS
+curl -s -o /dev/null -w '%{http_code}\n' https://<host>/api/schemas
+```
+
+A hardcoded `curl http://localhost:4000/api/schemas` reads a **healthy**
+`.slots` box as dead. Measured on guerrilla (`157.180.90.121`) 2026-09-19
+08:51 UTC: `/etc/caddy/Caddyfile:144` is `reverse_proxy localhost:4001`, `ss
+-ltnp` shows one `beam.smp` on `*:4001` and no `:4000` row,
+`barkpark-slot@blue` is `inactive` / `@green` `active`, and from the box
+`127.0.0.1:4000/api/schemas` returns `000` while `:4001` returns `200` — while
+`https://guerrilla.barkpark.cloud/status.json` served commit `38075b447` and
+`/api/schemas` returned `200` the whole time. Probing the ports from OUTSIDE
+teaches nothing either way: they are firewalled asymmetrically (`:4000`
+refuses, rc=7; `:4001` times out, rc=28), so neither failure distinguishes
+"wrong port" from "box down".
+
+`CLAUDE.md` Golden Rule 6 still reads `curl http://localhost:4000/api/schemas`.
+That is correct only on the micro-block, and Golden Rules are verbatim-exempt
+(an edit needs explicit owner sign-off), so read it as "smoke it after deploy",
+with the port taken from the Caddy upstream — or the public URL — on any other
+host.
+
+**Stale `bp` server entries.** `~/.config/barkpark/config.json`'s
+`known_servers` is a cache of whatever `bp connect` was once pointed at, never
+a deploy artifact: nothing in this pipeline rewrites it when a slot flips. A
+`guerrilla-ip` entry of `http://157.180.90.121:4000` was still present on
+2026-09-19 and cannot connect (nothing is bound there, and the port is
+firewalled from outside anyway). Target a deployed host by its **hostname**
+entry (`https://guerrilla.barkpark.cloud`); re-run `bp connect <https URL>` to
+replace an `ip:port` entry, and treat any `ip:4000` row as stale by
+construction.
+
 ## A control-plane deploy eats a scheduled cron tick — the decision
 
 `Oban.Plugins.Cron` (OSS) enqueues only on a tick a **running node observes**; it

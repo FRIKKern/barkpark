@@ -89,6 +89,15 @@ type SiteBuildLogBytes struct {
 	// quieter half of the same fault.
 	BoxStatus int      `json:"box_status"`
 	BoxError  BoxError `json:"box_error"`
+
+	// THE SIBLING KEYS, DERIVED FROM THE REDUCER. `BoxErrorEnvelope.fields/1`
+	// ALWAYS returns three keys, not one: it REDUCES the box's error envelope
+	// so `box_error` stays the string it is typed as, and routes the two facts
+	// that actually route an incident — the box's own message and request_id —
+	// to keys of their own. A struct that declares only `box_error` reads both
+	// as "" forever, and json.Unmarshal says nothing about it.
+	BoxErrorMessage   string `json:"box_error_message"`
+	BoxErrorRequestID string `json:"box_error_request_id"`
 }
 
 // Scrubbed reports whether the control plane said these bytes were folded

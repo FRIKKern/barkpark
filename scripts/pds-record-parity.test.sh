@@ -902,6 +902,161 @@ if command -v gh >/dev/null 2>&1; then
   esac
 fi
 
+# ══ AXIS B, THE COUNT IDENTITY — a tally only over the whole id list ══════════
+#
+# WHY (task-d5485c04e0e63488). The axis B sweep reads the unique task id list on
+# fd 0 and runs children in its body. A body child that reads stdin swallows the
+# remaining ids: the loop ENDS EARLY with no error and no non-zero status, every
+# tally is smaller, the divergent set is EMPTY, and the arm prints a GREEN AXIS B
+# over 1 id of 4 in the same words it uses for 4 of 4. The failure direction is
+# silence, which is the direction a parity check cannot afford.
+#
+# FOUR ARMS, and the middle two are the whole proof:
+#   1  POSITIVE CONTROL — an unmutated copy over $FX still prints the full tally
+#      with the SAME numbers as the in-tree run above. Without it the identity
+#      could satisfy every arm below by refusing everything.
+#   2  RED-WITHOUT — drain spliced in AND the identity block cut between its MUT
+#      markers: the truncated sweep prints a green TALLY at exit 0.
+#   3  GREEN-WITH — the same drain, identity intact: UNCHECKED naming BOTH
+#      numbers, and NO TALLY on either stream.
+#   4  the per-owner loop, whose own reconciliation is computed outside itself
+#      and therefore cannot see its own truncation.
+echo
+echo "AXIS B — THE COUNT IDENTITY (a tally only over the whole id list)"
+
+MUTROOT="$TMP/axisb-identity"
+mkdir -p "$MUTROOT"
+# The mutant copies live outside the repo, so their own `cd $(dirname $0)/..`
+# lands in a plain directory with no scripts/pr-task-gate.sh. The extractor is
+# handed to them by absolute path through the arm's own env hook — the SAME
+# canonical extractor the in-tree runs use, never a second grammar.
+export PDS_RECORD_PARITY_EXTRACTOR="$PWD/scripts/pr-task-gate.sh"
+PDS_RECORD_PARITY_NOW=1800000000
+
+mut_plant() { # mut_plant <name> — a pristine copy of the arm, returns its path
+  mkdir -p "$MUTROOT/$1/scripts"
+  cp "$ARM" "$MUTROOT/$1/scripts/pds-record-parity.sh"
+  printf '%s\n' "$MUTROOT/$1/scripts/pds-record-parity.sh"
+}
+
+# `splice_drain <file> <marker>` — replace the arm's own no-op marker with a
+# child that DRAINS fd 0. `cat >/dev/null` is the minimal honest stand-in for
+# the realistic adversary (a `gh` with no `</dev/null`, a `psql`, an `ssh`).
+splice_drain() {
+  local f="$1" marker="$2" n
+  n="$(grep -c "^ *: # MUT-BODY: ${marker}\$" "$f" | tr -d ' ')"
+  if [ "$n" != "1" ]; then
+    harness_fail "the ${marker} marker appears ${n} time(s) in the arm — the splice would mutate nothing or too much"
+    return 1
+  fi
+  sed "s|^\\( *\\): # MUT-BODY: ${marker}\$|\\1cat >/dev/null # MUT-BODY: ${marker}|" "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  if cmp -s "$f" "$ARM"; then
+    harness_fail "splicing the drain at ${marker} changed nothing — the control arm would prove nothing"
+    return 1
+  fi
+  return 0
+}
+
+# `cut_block <file> <name>` — delete everything between MUT-ANCHOR: <name> and
+# MUT-END: <name>, inclusive. This is the REVERT half: it puts the arm back into
+# the shape it had before this task, so arm 2 can show what that shape printed.
+cut_block() {
+  local f="$1" name="$2" n
+  n="$(grep -c "MUT-ANCHOR: ${name}\$" "$f" | tr -d ' ')"
+  if [ "$n" != "1" ]; then
+    harness_fail "the ${name} MUT-ANCHOR appears ${n} time(s) — the revert would cut nothing or too much"
+    return 1
+  fi
+  awk -v a="MUT-ANCHOR: ${name}" -v b="MUT-END: ${name}" '
+    index($0, a) { skip = 1 } { if (!skip) print } index($0, b) { skip = 0 }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  return 0
+}
+
+# ── ARM 1: THE POSITIVE CONTROL ──────────────────────────────────────────────
+# An unmutated copy, planted outside the repo, over the SAME $FX window as the
+# in-tree axis B fixtures. Same red, same numbers. If this ever diverges from
+# the in-tree run the mutants below are measuring the planting, not the splice.
+MUT_OK="$(mut_plant intact)"
+run_at "$MUT_OK" 1 "POSITIVE CONTROL — an intact planted copy still reds over the whole window" -- --axis b --fixture-dir "$FX"
+says "task ids:   4 distinct across 6 PRs" "the intact copy enumerates all four ids"
+says "AXIS B TALLY" "the intact copy PRINTS the tally"
+says "terminal (done|cancelled):   2" "…with the same terminal count as the in-tree run"
+says "LEAF slices (REDDING):          1" "…and the same redding headline"
+says_not "UNCHECKED: axis B swept" "the identity does not fire on a complete sweep"
+
+# ── ARM 2: RED-WITHOUT (the arm as it was before this task) ──────────────────
+# Drain spliced AND the identity cut. The sweep dies after ONE id — `sort -u`
+# puts `fixture-cancelled` first, which is terminal — so the arm prints a tally
+# of 1 terminal, an EMPTY divergent set, and PARITY at exit 0. Four ids were
+# enumerated; one was looked at; nothing in the output says so. This is the
+# defect, executed.
+MUT_RED="$(mut_plant red-without)"
+if splice_drain "$MUT_RED" axis-b-loop-body && cut_block "$MUT_RED" axis-b-count-identity; then
+  run_at "$MUT_RED" 0 "RED-WITHOUT — drained fd 0 + identity CUT greens a sweep of 1 id in 4" -- --axis b --fixture-dir "$FX"
+  says "task ids:   4 distinct across 6 PRs" "the truncated run still ENUMERATED four ids"
+  says "AXIS B TALLY" "…and still printed the tally"
+  says "terminal (done|cancelled):   1" "…over ONE id (the in-tree run counts 2 terminal)"
+  says "LEAF slices (REDDING):          0" "…with an EMPTY redding set, in a window that has one"
+  says "pds-record-parity: PARITY" "…and a full-throated PARITY verdict over 1 of 4"
+  says_not "UNCHECKED" "nothing in the pre-fix output says the sweep was short"
+fi
+
+# ── ARM 3: GREEN-WITH (the identity, doing the work) ─────────────────────────
+# The SAME drain, identity intact. The only difference between arms 2 and 3 is
+# the block this task added.
+MUT_GREEN="$(mut_plant green-with)"
+if splice_drain "$MUT_GREEN" axis-b-loop-body; then
+  run_at "$MUT_GREEN" 2 "GREEN-WITH — the same drain is REFUSED, not greened" -- --axis b --fixture-dir "$FX"
+  says "UNCHECKED: axis B swept 1 of 4 task id(s)" "the refusal names BOTH numbers"
+  says "a loop-body child that reads" "the refusal names the mechanism, not just the mismatch"
+  says_not "AXIS B TALLY" "the tally is WITHHELD — a partial sweep cannot print it"
+  says_not "terminal (done|cancelled):" "no tally line survives the refusal"
+  says_not "pds-record-parity: PARITY" "the refusal is not dressed up as a pass"
+fi
+
+# ── ARM 4: THE PER-OWNER LOOP ────────────────────────────────────────────────
+# A window with TWO distinct owners, so a truncated grouping loop is visible as
+# a missing block. The pre-existing reconciliation (`covering N of M`) is
+# computed from the leaves FILE and the tally, both outside this loop, so it
+# passes word for word on a truncated report; only the loop's own identity sees
+# it. FXOWN gives two leaf reds under two different parents.
+FXOWN="$TMP/fxown"
+mkdir -p "$FXOWN"
+# root-a carries TWO leaves and root-b one, so `sort -rn` on the owner counts is
+# TOTALLY ordered: root-a is always first. A tie would make WHICH block survives
+# the truncation an implementation detail of sort(1), and an assertion about it
+# would be a coin flip wearing a proof's clothes.
+prs "$FXOWN/prs.json" \
+  "701|2026-01-01T00:00:00Z|fixture-leaf-a" \
+  "702|2026-01-02T00:00:00Z|fixture-leaf-a2" \
+  "703|2026-01-05T04:00:00Z|fixture-leaf-b"
+ledger "$FXOWN" fixture-leaf-a  200 "$(task_doc fixture-leaf-a  open fixture-root-a)"
+ledger "$FXOWN" fixture-leaf-a2 200 "$(task_doc fixture-leaf-a2 open fixture-root-a)"
+ledger "$FXOWN" fixture-leaf-b  200 "$(task_doc fixture-leaf-b  open fixture-root-b)"
+run_at "$MUT_OK" 1 "POSITIVE CONTROL — the intact copy prints BOTH owner blocks" -- --axis b --fixture-dir "$FXOWN"
+says "OWNER fixture-root-a" "the first owner block is printed"
+says "OWNER fixture-root-b" "the second owner block is printed"
+says "owners:     2  covering 3 of 3 leaf red(s)" "the pre-existing reconciliation agrees"
+
+MUT_OWN="$(mut_plant owner-drain)"
+if splice_drain "$MUT_OWN" axis-b-owner-body; then
+  run_at "$MUT_OWN" 2 "a drained per-owner loop is UNCHECKED, not a one-block report" -- --axis b --fixture-dir "$FXOWN"
+  says "the per-owner report printed 1 of 2 owner block(s)" "the owner identity names both numbers"
+  says "PREFIX of the report, not the report" "the refusal says what the blocks above actually are"
+fi
+
+# The same drain with the owner identity CUT: the truncated report passes the
+# pre-existing `covering N of M` reconciliation word for word, which is the
+# whole reason that check could not be the guard.
+MUT_OWN_RED="$(mut_plant owner-red-without)"
+if splice_drain "$MUT_OWN_RED" axis-b-owner-body && cut_block "$MUT_OWN_RED" axis-b-owner-identity; then
+  run_at "$MUT_OWN_RED" 1 "RED-WITHOUT — a one-block report still passes the OLD reconciliation" -- --axis b --fixture-dir "$FXOWN"
+  says "owners:     1  covering 3 of 3 leaf red(s)" "the old check sees 3 of 3 while ONE block was printed"
+  says_not "OWNER fixture-root-b" "the second owner's block is missing and nothing says so"
+fi
+
+unset PDS_RECORD_PARITY_EXTRACTOR
+
 # ══ THE TWO NEW MECHANISMS, REVERTED ONE AT A TIME ═══════════════════════════
 #
 # A fixture that passes against the SHIPPED arm proves the arm passes. It does
@@ -1310,19 +1465,59 @@ says "UNCHECKED: no charter at" "the UNCHECKED names the missing charter"
 # moving commits. On a shallow checkout there is nothing here to measure, and a
 # harness that silently skipped would be the vacuous green this file exists to
 # refuse — so the skip is PRINTED and the reason is named.
-if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f "$CH_F" ]; then
+# OPT-IN, AND THE REASON IS A REQUIRED-GATE ONE. Everything else in this file is
+# hermetic: it runs in a mktemp -d that is not a git repo, reads no live ledger
+# row and no real charter. This block is the exception — it reads THIS CHECKOUT'S
+# charter and THIS CHECKOUT'S git history, so its verdict changes whenever main
+# moves. api/test/barkpark/pds_record_parity_test.exs shells this file from the
+# REQUIRED Elixir gate, and its moduledoc states the invariant this block breaks:
+# "record-parity's harness is HERMETIC … so it gates the ARM's own logic against
+# regression, NOT the epic's record", and warns that a live finding redding a
+# required gate "would be repaired by deleting the baseline inside a day".
+# That is not hypothetical. On 2026-09-20 commit 406978270 moved
+# scripts/pds-pull-proof.sh with no PDS-D recording its blob — a CORRECT axis-F
+# finding — and it redded the required Elixir gate on every open PR in two lanes
+# at once, for authors who had touched none of this.
+# So the dynamic half is now opt-in. The pds-harnesses leg sets
+# PDS_PARITY_DYNAMIC=1; that leg is the REPORTER this file's own header says such
+# reds belong to ("REPORTER, never a gate … must never carry a required check
+# name"). Unset, the block SKIPS AND SAYS SO — never silently.
+if [ "${PDS_PARITY_DYNAMIC:-0}" = "1" ] \
+   && git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f "$CH_F" ]; then
 
   run 0 "axis F is GREEN on this checkout's real charter" -- --axis f
   says "window boundary ....... 1f15017bf" "the live boundary is the pinned floor, not the oldest ledger row"
-  says "IN WINDOW ....... 21" "the pinned floor puts the former anchor 58d1bd3a5 INSIDE the window"
+
+  # DERIVED, NOT PINNED. These counts were literals — 21 in-window and 0
+  # unrecorded — and a literal here is a second, hand-maintained copy of a number
+  # the subject computes from git. Every legitimate thaw of scripts/pds-pull-proof.sh
+  # moves the in-window count by one and reds five arms that have nothing to do
+  # with the change. That is what happened on 2026-09-20 (21 -> 22 via 406978270).
+  # The PROPERTY these arms assert is not "the number is 21"; it is "the boundary
+  # does NOT move when ledger rows are deleted" and "a deletion is counted once
+  # per row". Both are relative, so derive the baseline and assert the DELTA.
+  AF_WINDOW=""; AF_UNREC=""
+  if [[ "$LAST_OUT" =~ IN\ WINDOW\ \.+\ ([0-9]+) ]]; then AF_WINDOW="${BASH_REMATCH[1]}"; fi
+  if [[ "$LAST_OUT" =~ unrecorded\ \.+\ ([0-9]+) ]]; then AF_UNREC="${BASH_REMATCH[1]}"; fi
+  CHECKS=$((CHECKS + 1))
+  if [ -n "$AF_WINDOW" ] && [ -n "$AF_UNREC" ]; then
+    echo "ok    baseline DERIVED from the subject: IN WINDOW ${AF_WINDOW}, unrecorded ${AF_UNREC}"
+  else
+    FAILURES=$((FAILURES + 1))
+    echo "FAIL  could not derive the axis-F baseline from the subject's own output"
+    echo "      An empty baseline would make every delta arm below compare against"
+    echo "      nothing and pass vacuously — refusing instead."
+    AF_WINDOW="__UNDERIVED__"; AF_UNREC="__UNDERIVED__"
+  fi
+  says "IN WINDOW ....... ${AF_WINDOW}" "the pinned floor puts the former anchor 58d1bd3a5 INSIDE the window"
 
   # THE REGRESSION ARM. Delete the row that used to BE the anchor. Under the old
   # derivation this printed `IN WINDOW 19 · unrecorded 0 · PARITY` rc 0.
   sed '/e219e97ccf7f33797c86a2b84d998d599b6bda31/d' "$CH_F" > "$TMP/f-anchor.md"
   run 1 "deleting the OLDEST ledger row REDS axis F (it used to print PARITY)" -- --axis f --charter "$TMP/f-anchor.md"
   says "58d1bd3a5" "the red NAMES the commit whose record was deleted"
-  says "IN WINDOW ....... 21" "the window did NOT shrink to absorb the deletion — that shrink WAS the defect"
-  says "unrecorded .......................... 1" "exactly one row went missing and exactly one is reported"
+  says "IN WINDOW ....... ${AF_WINDOW}" "the window did NOT shrink to absorb the deletion — that shrink WAS the defect"
+  says "unrecorded .......................... $((AF_UNREC + 1))" "exactly one row went missing and exactly one MORE is reported"
 
   # ITERATED. One row could be a special case; four rows in one pass is the shape
   # of a charter split that drops the oldest block as historical noise.
@@ -1331,8 +1526,8 @@ if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f 
       -e '/7a703fd641f77b906dcbd40f004f7639cdc9b2ae/d' \
       -e '/f99216471f9cd914064b9e6fc4bc3b6ee59a6da2/d' "$CH_F" > "$TMP/f-oldest4.md"
   run 1 "deleting the FOUR oldest ledger rows in one pass REDS axis F" -- --axis f --charter "$TMP/f-oldest4.md"
-  says "unrecorded .......................... 4" "all four deletions are counted, not just the newest of them"
-  says "IN WINDOW ....... 21" "four deletions did not move the boundary either"
+  says "unrecorded .......................... $((AF_UNREC + 4))" "all four deletions are counted, not just the newest of them"
+  says "IN WINDOW ....... ${AF_WINDOW}" "four deletions did not move the boundary either"
   says "58d1bd3a5" "the oldest of the four is named"
   says "13c379bcd" "the newest of the four is named"
 
@@ -1348,8 +1543,18 @@ if git rev-parse --verify --quiet "${FLOOR_F}^{commit}" >/dev/null 2>&1 && [ -f 
   says_not "DIVERGENT" "the copy does not red"
 else
   CHECKS=$((CHECKS + 1))
-  echo "ok    axis F's history fixtures SKIPPED — ${FLOOR_F} is not in this checkout (shallow clone)"
-  echo "      the static and no-fallback checks above still ran; only the 25-commit walk is unmeasurable here"
+  if [ "${PDS_PARITY_DYNAMIC:-0}" != "1" ]; then
+    echo "ok    axis F's history fixtures SKIPPED — PDS_PARITY_DYNAMIC is not 1"
+    echo "      This is the HERMETIC run. The dynamic half reads this checkout's real"
+    echo "      charter and git history, so its verdict moves with main and cannot sit"
+    echo "      under a required gate. The pds-harnesses leg sets PDS_PARITY_DYNAMIC=1"
+    echo "      and is where an axis-F red belongs. Run it by hand the same way:"
+    echo "          PDS_PARITY_DYNAMIC=1 bash scripts/pds-record-parity.test.sh"
+    echo "      Everything above this line ran, and it is the arm's own logic."
+  else
+    echo "ok    axis F's history fixtures SKIPPED — ${FLOOR_F} is not in this checkout (shallow clone)"
+    echo "      the static and no-fallback checks above still ran; only the 25-commit walk is unmeasurable here"
+  fi
 fi
 
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense

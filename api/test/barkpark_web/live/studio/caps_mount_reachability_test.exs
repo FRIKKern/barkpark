@@ -116,7 +116,16 @@ defmodule BarkparkWeb.Studio.CapsMountReachabilityTest do
 
   defp admin_token!(label) do
     raw = "#{label}-#{Ecto.UUID.generate()}"
-    {:ok, token} = Auth.create_token(raw, label, @dataset, ["read", "write", "admin"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        label,
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {raw, token}
   end
 

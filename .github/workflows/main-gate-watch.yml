@@ -100,6 +100,11 @@ on:
       - "scripts/main-gate-watch.sh"
       - "scripts/main-gate-watch.test.sh"
       - "scripts/main-gate-watch-route.sh"
+      # The owed-ness library the watch SOURCES (task-2253e13aba12fbe8). Without
+      # this line a PR changing only the glob matcher — the thing that decides
+      # whether a MISSING scream fires at all — dispatches no harness, and the
+      # both-ways proof in §16 never runs on the change that could break it.
+      - "scripts/lib/main-push-owedness.sh"
       - "scripts/main-verdict-presence.sh"
       - "scripts/main-verdict-presence.test.sh"
       - ".github/main-push-workflows.txt"

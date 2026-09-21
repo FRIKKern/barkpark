@@ -1737,7 +1737,11 @@ them today, on a unit with `MemoryHigh=infinity`). **CORRECTED 2026-09-16,
 `dr-bl-w6-memoryswapmax-not-memoryhigh`: the census is 32-of-33, not 32-of-32.** The 30-day window
 holds 33 kills, and the 33rd is `bp-oom-probe-B.service` — our OWN memcg probe, deliberately killed
 inside its own cgroup. Quoting 32-of-32 launders a probe we fired into a perfect record we
-observed; the beam share is 97.0%, not 100%. Every `beam.smp` kill remains `global_oom` /
+observed; the beam share is 97.0%, not 100%. **CORROBORATION STAMPED 2026-09-20,
+`dr-bl-w6-memoryswapmax-not-memoryhigh` c3:** the 32-of-32 claim was refutable by this repo's OWN committed
+evidence six weeks before anyone corrected it — `tooling/grip/ledger/beam-bound-inputs-2026-08-06.md:56`
+records *"32 beam.smp + 1 python3"*, i.e. 33 kills with a non-beam 33rd, dated 2026-08-06. The census was
+never 32-of-32 in any window we measured; the denominator was dropped in the retelling, not in the reading. Every `beam.smp` kill remains `global_oom` /
 `CONSTRAINT_NONE` with `task_memcg` = a `barkpark-slot` unit, so the reading the sentence rests on
 is unchanged. The correct input is PSS+swap or, better, the per-slot
 cgroup `MemoryPeak`/`MemorySwapPeak` systemd already keeps — **and a prerequisite nobody had named is now
@@ -2114,8 +2118,13 @@ cgroup counters, which are PID-agnostic, so it never depended on the beam-PID pi
 **`MemorySwapMax`** (live: the green slot holds 1,307 MB of the box's 1,956 MB of used swap and swapped out
 114 MB in two minutes; `MemorySwapPeak` 1,332.6 MB), and the real unbuilt prerequisites are persisting
 per-slot swap peaks across restarts (systemd resets them) and choosing unit-vs-slice placement. Filed, not
-taken. Also filed: PSI `memory-full avg10` measured **0.60**, not the 4.46 this charter has been quoting —
-do not re-quote it.
+taken. Also filed: PSI `memory-full avg10` measured **0.60** on guerrilla 2026-09-16, read from
+`/proc/pressure/memory` (`full avg10=0.60 avg60=0.58 avg300=0.63`, `some avg10=3.42`) — not the 4.46 this
+charter has been quoting; do not re-quote it. **DERIVATION STAMPED 2026-09-20,
+`dr-bl-w6-memoryswapmax-not-memoryhigh` c3:** this sentence carried the corrected figure with no date and
+no box, which is the exact shape that let 4.46 spread in the first place. A PSI `avg10` is a ten-second
+rolling average; quoted bare it is indistinguishable from a fresh reading, so every re-use of 0.60 must
+carry this date and this box or be re-measured.
 
 ---
 

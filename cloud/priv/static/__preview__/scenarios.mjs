@@ -3325,6 +3325,55 @@ const teamMembersCruel = teamMembers.concat([
 const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
   mem.user_id === "usr_ada" ? Object.assign({}, mem, { role: "member" }) : mem);
 
+// ── DEFECT-E · THE `drive` FIELD (task-7bd507ea989ef248) ────────────────────
+// Nine scenarios below (fleet-support-*, offload-*, verify-no-credentials) shot
+// BYTE-IDENTICAL to shell-instance in all 20 accent x theme x width cells, in
+// four independent runs. The filing guessed "their data never reaches route()
+// or their screen is gone"; MEASURED, both guesses are wrong. Their data DOES
+// reach route() and their screens DO exist — two other causes were hiding:
+//
+//   BELOW THE FOLD. fleetSupportCardHtml mounts at the TAIL of the instance
+//   Overview main column (after the verify slot, the update panel and the Sites
+//   card). shoot.sh shoots a VIEWPORT (`--window-size="${width},1000"`), so a
+//   card that paints perfectly is simply not in frame. Proof: booted in
+//   smoke.mjs's DOM, #instance-body is 8811 / 9120 / 7304 bytes for
+//   fleet-support-{provisioning,online,failed} against shell-instance's 7049.
+//
+//   CLICK-GATED, and no label said so. `orderTask`/`fleetRoster` are read only
+//   by pollOffloadWatch, which mounts after Offload -> File the order; the
+//   `instanceVerify` 404 is read only by runVerifyNow, i.e. behind [data-vf-run].
+//   Those five scenarios render their PRE-click state, which is shell-instance.
+//
+// `drive` is the declarative repair: an ordered step list mock.js replays after
+// load against the REAL app (nothing is faked into the DOM), so the shot shows
+// the state the label promises. Steps:
+//   { click: sel }           click it — the app's own handler runs
+//   { fill: sel, value: v }  set an input's value
+//   { await: sel }           wait for it to exist (an arrival assertion)
+// Every step waits for its selector; a step that never arrives paints the red
+// PREVIEW DRIVE FAILED banner (mock.js's driveGaveUp), so a drive that did not
+// land can never again collapse back into a byte-identical twin. smoke.mjs
+// reads this field too — see assertDefectEScenariosAreNotShellInstance.
+// And `shotHeight` is the OTHER half of the repair, for the below-the-fold
+// cause: shoot.sh's default viewport is `${width},1000`, so a card mounting at
+// the tail of the instance Overview column is simply not in frame. Scrolling it
+// in was BUILT AND MEASURED FIRST, and rejected: the scroll lands, but the
+// headless capture composites the pre-scroll raster, so the PNG carries a blank
+// band and the subject still off-frame — a shot no reviewer should trust, under
+// a filename promising the state. A taller window has no such race.
+// 2400 is measured, not guessed: at 1440/light the offload ladder's last rung
+// sits at y≈1340 and the 6-rung support theater is taller still.
+const SHOT_TALL = 2400;
+// The offload ladder, driven through the REAL flow: Offload -> the order modal
+// -> File the order -> offloadFiled mounts the watch panel and polls the
+// scenario's own roster + orderTask, so each rung paints its own frame.
+const DRIVE_OFFLOAD_LADDER = [
+  { click: "[data-offload-support]" },
+  { fill: "#offload-title", value: "Summarise the release notes" },
+  { click: "#offload-go" },
+  { await: "[data-offload-watch]" },
+];
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -4726,6 +4775,58 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── cch-w20-bl: THE LONG INSTANCE NAME, WHICH NO FIXTURE HAD EVER CARRIED ──
+  // `.attention-name` has carried `overflow: hidden; text-overflow: ellipsis;
+  // white-space: nowrap` since cch-w20-s9, and NOTHING in this corpus had ever
+  // made it use them. Every attention-queue fixture names its box in one word
+  // — Reporting, Marketing, Staging — which measure 52-69px at 14px/600, so the
+  // W20-attention-name-column leg's 44 green cells all proved the same thing:
+  // that the ellipsis was never NEEDED. A green that rests on a fixture string
+  // is conditional on that string, and the string was ours, not the server's.
+  //
+  // THIS NAME IS ORDINARY, NOT CRUEL, AND THAT IS THE POINT. `Barkpark.changeset`
+  // validates `name` at max 255 (cloud/lib/barkpark_cloud/registry/barkpark.ex,
+  // `validate_length(:name, min: 1, max: 255)`), and the cruel twins in this
+  // corpus — `fleet-cruel-content`, `members-cruel-content` — sit AT that cap.
+  // This one is 71 characters, well inside it: the shape an operator types when
+  // one word cannot tell two boxes apart. The blind spot was never the 255-char
+  // wall, which overflow-guard already drives elsewhere; it was the ORDINARY
+  // long name, which nothing drove at all.
+  //
+  // Everything else is `overview-attention` verbatim — the same degraded box,
+  // the same production-dominant "Health unknown · Agent offline" pair, the
+  // same `liveInstance` beside it — so the ONE axis between the two fixtures is
+  // the name, and the W20-attention-name-column leg reads them as a pair:
+  // engaged here, never needed there. Registered as breakpoint-sweep RESIDUE
+  // rather than a cell, the same home `overview-attention` and
+  // `overview-never-reported` have: what it exists to measure is one box's
+  // rendered text against its own column, which is overflow-guard's axis.
+  "overview-attention-long-name": {
+    label: "Overview attention — the degraded box wears a 71-character operator name, so .attention-name's ellipsis must engage",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-degraded-long",
+          name: "Reporting — EU customer analytics, billing reconciliation and retention",
+          slug: "reporting-eu",
+          url: "https://reporting-eu-5b2c1e.barkpark.cloud",
+          host: "reporting-eu-5b2c1e.barkpark.cloud",
+          health_status: "unknown",
+          agent_status: "offline",
+          version: "0.9.2",
+          last_seen_at: tMinus(1200),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
   // ── cch-w34-s6 (REVIEW ADDITION): the NEVER-REPORTED box, on screen ────────
   // The slice made `unreported` reachable and proved it through the pure hooks
   // and 26 harness assertions — but shipped no fixture, so the one state a
@@ -5841,7 +5942,8 @@ export const SCENARIOS = {
   },
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
-    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main",
+    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main [below the fold — driven into frame]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5853,7 +5955,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-online": {
-    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step",
+    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step [below the fold — driven into frame]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5866,7 +5969,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-failed": {
-    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online)",
+    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online) [below the fold — driven into frame]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5878,7 +5982,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-empty": {
-    label: "Fleet card — no supports yet: the add-a-support CTA on a live main (+ nested #fleet list)",
+    label: "Fleet card — no supports yet: the add-a-support CTA on a live main [below the fold — driven into frame; its DOM IS shell-instance's, the shot is not]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5894,7 +5999,9 @@ export const SCENARIOS = {
   // the task read + the roster read into filed -> claimed -> working -> done with
   // honest blocked/failed terminals. Each scenario pins one rung.
   "offload-filing": {
-    label: "Offload — the order is filed (open), waiting for the support to claim it",
+    label: "Offload — the order is filed (open), waiting for the support to claim it [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5906,7 +6013,9 @@ export const SCENARIOS = {
     },
   },
   "offload-working": {
-    label: "Offload — the support has claimed AND is WORKING the order (roster beats working)",
+    label: "Offload — the support has claimed AND is WORKING the order (roster beats working) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5918,7 +6027,9 @@ export const SCENARIOS = {
     },
   },
   "offload-done": {
-    label: "Offload — the order is DONE (terminal success; the poll stops)",
+    label: "Offload — the order is DONE (terminal success; the poll stops) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5930,7 +6041,9 @@ export const SCENARIOS = {
     },
   },
   "offload-blocked": {
-    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps)",
+    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -6020,7 +6133,8 @@ export const SCENARIOS = {
     },
   },
   "verify-no-credentials": {
-    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
+    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision [click-gated: the 404 is read only by runVerifyNow, behind Run first check]",
+    drive: [{ click: "[data-vf-run]" }, { await: "[data-vf-reprovision]" }],
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -6114,6 +6228,66 @@ export const SCENARIOS = {
         provision_steps: failedSteps,
         provision_console: failedConsole,
       })],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // ── cch-w45-s5-fu · THE INSTANCE SCREEN WITH /v1/me UNANSWERED ─────────────
+  // The corpus had never booted the instance screen on a FAILED /v1/me at all
+  // (meFault appeared only on #billing and the operator console), so every
+  // claim about the instance screen's unknown arm — including "the still-
+  // checking control has an exit" — was argued from the render conditions and
+  // never measured.
+  //
+  // THE ACTOR IS AN OWNER. The role is irrelevant here on purpose: the read
+  // never lands, so instanceAdminAuthority() answers "unknown" for everybody
+  // and the arm under test is the one that claims NOTHING about the role.
+  //
+  // THE BOX IS SUSPENDED AND HOSTED, which is the whole point. The Updates
+  // panel renders for every box with a host, while the header's actions strip
+  // draws only the CLI disclosure in the suspended arm — no adminWriteControlHtml
+  // control at all, so the strip emits no group reason and therefore no exit.
+  // (The filing named a live box with a custom host as the reachable case. It is
+  // not: Connect agent is gated on lc.live ALONE, so a live box always draws a
+  // grouped control and always gets the header exit. The lifecycle arms that
+  // draw no grouped control while still rendering the Updates panel are the
+  // reachable ones, and `suspended` is the committed fixture that is both.)
+  //
+  // times: 1 — the fault is ONE-SHOT (the billing-me-recovers precedent), so the
+  // same fixture measures both halves: the first read fails and the panel paints
+  // the still-checking Rollback, and the exit's re-read can then LAND, which is
+  // the only way to prove the exit exits rather than merely renders.
+  "instance-suspended-me-unreadable": {
+    label: "Instance Updates panel with /v1/me unanswered on a SUSPENDED box — the still-checking Roll back needs an exit the header strip cannot provide (its suspended arm draws no grouped control)",
+    authed: true,
+    deepLink: "#instance/" + IDS.suspendedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [suspendedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // THE TWIN THAT MAKES THE BINDING LOAD-BEARING. Same one-shot /v1/me fault,
+  // but a LIVE box one release behind: its header strip DOES draw grouped
+  // controls (Update / Connect agent), so the header carries an exit AND the
+  // Updates strip now carries its own — two [data-me-retry] in one subtree,
+  // which is exactly the shape the old first-match binding made impossible to
+  // ship. Without this fixture "bind every match" is a change no committed
+  // scenario can tell apart from the code it replaced.
+  "instance-behind-me-unreadable": {
+    label: "Instance screen with /v1/me unanswered on a LIVE behind box — TWO still-checking strips, TWO exits, and the second one must not be dead bytes",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [behindInstance],
       subscription: activeSub,
       sites: [],
       audit: [],
@@ -6320,6 +6494,51 @@ export const SCENARIOS = {
       // — not two static objects a check picks between, which would prove
       // nothing about what the console did.
       secondIdentity: { me: betaMe, members: teamMembersBeta },
+    },
+  },
+  // ── cch-w47-rv-bl: the FIRST member x archives scenario in this corpus ─────
+  //
+  // The Archives panel's refuse arm had exactly one instrument before this: the
+  // pure helper, called with the string "refuse" by hand in __app.test.mjs. No
+  // scenario anywhere booted an actor whose own GET /v1/me answers role
+  // "member" onto #fleet with bundles in the store, so nothing proved that the
+  // authority answer the DOM mount reads (instanceAdminAuthority, at the
+  // loadArchives render site) ever reaches those helpers at all. A helper that
+  // is correct and never called is the vacuous green this epic keeps finding.
+  //
+  // It is the OWNER twin of `fleet-archives-stored`, field for field, with ONE
+  // difference: the third argument to me(). Same two bundles, same fqdns, same
+  // providers, same spec — so a diff of the two rendered panels isolates the
+  // authority answer and nothing else, which is what makes the grant arm's
+  // byte-identity assertable rather than asserted.
+  "fleet-archives-member": {
+    label: "Fleet Archives as a plain member — no live Resurrect, the CLI chip kept, and the server's own role sentence above the list",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      archives: {
+        status: 200,
+        body: {
+          ok: true,
+          archives: [
+            {
+              fqdn: "shop-9f2c1.barkpark.cloud", slug: "shop", source_provider: "hetzner",
+              created_at: tMinus(3 * 86400), bundle_ref: "s3://bundles/shop.tar.zst",
+              spec: { region: "fsn1", server_type: "cx22" },
+            },
+            {
+              fqdn: "blog-1a4d7.barkpark.cloud", slug: "blog", source_provider: "azure",
+              created_at: tMinus(9 * 86400), bundle_ref: "s3://bundles/blog.tar.zst",
+              spec: { region: "hel1", server_type: "cx32" },
+            },
+          ],
+        },
+      },
     },
   },
 };

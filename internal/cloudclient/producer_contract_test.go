@@ -41,6 +41,7 @@ package cloudclient
 // finds every one of them and cannot go stale.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -446,6 +447,11 @@ var buildLogBytesEnvelopeKeys = []string{
 	// the producer has merged them since the route was written, and the Go
 	// struct simply never declared them.
 	"box_status", "box_error",
+	// The reducer's other two keys. `box_error` is NOT written literally in
+	// BuildLogBytes any more — #19341 moved all three spellings into
+	// `BoxErrorEnvelope.fields/1` — so these are anchored by FOLLOWING the
+	// call, not by matching a literal. See boxErrorEnvelopeKeys below.
+	"box_error_message", "box_error_request_id",
 }
 
 // expectedBuildLogBytesTags is the pinned json tag list of SiteBuildLogBytes, IN
@@ -461,8 +467,10 @@ var expectedBuildLogBytesTags = []string{
 	// @bytes_keys, in its declared order
 	"slug", "record", "log_state", "log_scrub", "log_path", "log_bytes",
 	"tail_bytes", "truncated", "tail", "evicted_at",
-	// the refusal envelope
+	// the refusal envelope, then the box_error reducer's three keys in the
+	// order `BoxErrorEnvelope.wire/3` writes them
 	"error", "detail", "reason", "box_log_state", "box_status", "box_error",
+	"box_error_message", "box_error_request_id",
 }
 
 // THE ORDER LOCK. Not merely a set: the row asks for serializer ORDER, and order
@@ -489,12 +497,19 @@ func TestSiteBuildLogBytesDecoderMatchesProducer(t *testing.T) {
 	}
 	src := string(raw)
 
+	// THE INDIRECTION IS PART OF THE PRODUCER. A key this module emits through
+	// a shared reducer it CALLS is written just as surely as one spelled out
+	// here; only the spelling moved modules. Reading the literal alone made
+	// this guard red on #19341, a refactor with an UNCHANGED wire shape — and a
+	// guard that reds on a no-op refactor teaches the edit-the-test reflex.
+	indirect := producerIndirectKeys(t, src)
+
 	envelope := map[string]bool{}
 	for _, k := range buildLogBytesEnvelopeKeys {
-		if !strings.Contains(src, k+":") {
-			t.Errorf("the envelope key %q is not written anywhere in BuildLogBytes — "+
-				"either the producer dropped it (the Go field will read as its zero value "+
-				"forever) or this anchor is stale.", k)
+		if !strings.Contains(src, k+":") && !indirect[k] {
+			t.Errorf("the envelope key %q is written neither literally in BuildLogBytes "+
+				"nor by any reducer it calls — either the producer dropped it (the Go "+
+				"field will read as its zero value forever) or this anchor is stale.", k)
 			continue
 		}
 		envelope[k] = true
@@ -536,6 +551,204 @@ func TestBuildLogBytesAllowlistExtractorIsNotBlind(t *testing.T) {
 				"genuinely gained a relayed field — if the latter, add it here AND to "+
 				"expectedBuildLogBytesTags in the serializer's order, and teach the Go "+
 				"struct to decode it.", k)
+		}
+	}
+}
+
+// ─── THE REDUCER, AND EVERY DECODER THAT MUST KEEP UP WITH IT ────────────────
+//
+// THE DEFECT THIS SECTION EXISTS FOR (task-bb5b44bcc5e233af). The guard above
+// anchored each envelope key with strings.Contains(src, k+":") against ONE
+// producer file. #19341 moved `box_error:` out of BuildLogBytes and into the
+// shared reducer `BoxErrorEnvelope.fields/1`. The wire shape did not change by
+// one byte; the guard went red anyway — a FALSE red, and the kind that gets
+// silenced by editing the test.
+//
+// And underneath it, the real drift the guard could not see: fields/1 has
+// ALWAYS returned THREE keys (box_error, box_error_message,
+// box_error_request_id) and the Go structs declared one. json.Unmarshal drops
+// unmodelled keys in silence, so the box's own message and request_id — the two
+// facts that route an incident to the box instead of to this client — read as
+// "" forever while looking shipped. The guard was blind to it because its key
+// list was a SECOND HAND-TYPED COPY of the producer's: the stale set asserted
+// against the stale set.
+//
+// So the reducer's key set is now READ FROM THE REDUCER, and the set of modules
+// subject to it is DERIVED by walking cloud/lib for callers — never a list
+// typed here, which is a snapshot of what someone checked rather than a rule
+// about what exists.
+
+// boxErrorEnvelopePath is the reducer that owns the box_error* wire keys.
+func boxErrorEnvelopePath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(repoRoot(t), "cloud", "lib", "barkpark_cloud", "sites", "box_error_envelope.ex")
+}
+
+// reBoxErrorWireMap captures the map literal `wire/3` builds — the ONE place
+// the reducer names its wire keys.
+var reBoxErrorWireMap = regexp.MustCompile("(?s)defp wire\\([^)]*\\) do\\s*%\\{(.*?)\\n\\s*\\}")
+
+// reWireKey pulls `some_key:` out of that map literal.
+var reWireKey = regexp.MustCompile(`(?m)^\s*([a-z_][a-z0-9_]*):`)
+
+// boxErrorEnvelopeKeys returns every key BoxErrorEnvelope.fields/1 can put on
+// the wire, read from the reducer's own source.
+//
+// NOT-BLIND, LOUDLY: an unreadable file, an unmatched shape and an empty key
+// set are each t.Fatalf, never a pass and never a skip. An extractor that
+// returns nothing makes every assertion built on it vacuously true, which is
+// the dark-gate failure this whole file exists to prevent.
+func boxErrorEnvelopeKeys(t *testing.T) []string {
+	t.Helper()
+	path := boxErrorEnvelopePath(t)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read the box_error reducer at %s: %v", path, err)
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		t.Fatalf("the box_error reducer at %s is EMPTY — every key assertion built on "+
+			"it would pass vacuously", path)
+	}
+	m := reBoxErrorWireMap.FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("`defp wire(…) do %%{…}` not found in %s — the reducer this guard reads "+
+			"has moved or changed shape; re-establish the pairing before editing this test", path)
+	}
+	var keys []string
+	for _, sub := range reWireKey.FindAllStringSubmatch(m[1], -1) {
+		keys = append(keys, sub[1])
+	}
+	if len(keys) == 0 {
+		t.Fatalf("the wire map in %s parsed to ZERO keys — the extractor is blind and "+
+			"every finding it reports is untrustworthy", path)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// producerIndirectKeys returns the wire keys a producer module emits through
+// reducers it CALLS, derived by reading each reducer's source. Keyed on the
+// call site, so a module that stops calling the reducer stops inheriting its
+// keys — the guard follows the code, not a note about the code.
+func producerIndirectKeys(t *testing.T, src string) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	if strings.Contains(src, "BoxErrorEnvelope.fields(") {
+		for _, k := range boxErrorEnvelopeKeys(t) {
+			keys[k] = true
+		}
+	}
+	return keys
+}
+
+// boxErrorEnvelopeCallers walks cloud/lib and returns the repo-relative path of
+// every module that calls BoxErrorEnvelope.fields/1. DERIVED — a new route that
+// adopts the reducer appears here without anyone remembering to add it.
+func boxErrorEnvelopeCallers(t *testing.T) []string {
+	t.Helper()
+	root := filepath.Join(repoRoot(t), "cloud", "lib")
+	var found []string
+	seen := 0
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".ex") {
+			return nil
+		}
+		seen++
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(raw), "BoxErrorEnvelope.fields(") {
+			rel, relErr := filepath.Rel(repoRoot(t), path)
+			if relErr != nil {
+				return relErr
+			}
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("cannot walk the cloud producers under %s: %v", root, err)
+	}
+	if seen == 0 {
+		t.Fatalf("the walk of %s read ZERO .ex files — an empty caller set would make "+
+			"every pairing assertion below vacuously true", root)
+	}
+	sort.Strings(found)
+	return found
+}
+
+// boxErrorEnvelopeDecoders pairs each CALLER of the reducer with the Go struct
+// that decodes that route's body. The pairing is the judgement a parser cannot
+// make; the caller SET it is checked against is derived, so a route that adopts
+// the reducer without a paired decoder reds here instead of going quiet.
+var boxErrorEnvelopeDecoders = map[string]reflect.Type{
+	"cloud/lib/barkpark_cloud/sites/build_log.ex":       reflect.TypeOf(SiteBuildLogRecord{}),
+	"cloud/lib/barkpark_cloud/sites/build_log_bytes.ex": reflect.TypeOf(SiteBuildLogBytes{}),
+}
+
+// THE SIBLING LOCK. Every key the reducer can emit is declared by EVERY Go
+// struct that decodes a body it was merged into — not just the two files the
+// filing happened to name.
+func TestBoxErrorEnvelopeKeysAreDeclaredByEveryDecoder(t *testing.T) {
+	keys := boxErrorEnvelopeKeys(t)
+	callers := boxErrorEnvelopeCallers(t)
+
+	for _, caller := range callers {
+		typ, ok := boxErrorEnvelopeDecoders[caller]
+		if !ok {
+			t.Errorf("%s calls BoxErrorEnvelope.fields/1 but no Go struct is paired with "+
+				"it here. Either its body is decoded by a struct that must declare %v, or "+
+				"nothing in this client reads that route — say which, in the pairing map.",
+				caller, keys)
+			continue
+		}
+		tags := declaredTags(typ)
+		for _, k := range keys {
+			if !contains(tags, k) {
+				t.Errorf("%s merges BoxErrorEnvelope.fields/1, which emits %q, but %s does "+
+					"not declare it. json.Unmarshal drops unmodelled keys silently, so that "+
+					"field reads as its zero value forever while looking shipped.",
+					caller, k, typ.Name())
+			}
+		}
+	}
+
+	for paired := range boxErrorEnvelopeDecoders {
+		if !contains(callers, paired) {
+			t.Errorf("the pairing map lists %q, which no longer calls "+
+				"BoxErrorEnvelope.fields/1 — a stale pairing pins a decoder to a producer "+
+				"that stopped speaking.", paired)
+		}
+	}
+}
+
+// NOT-BLIND CONTROL for both extractors above. The reducer's key set is pinned
+// as a SET, and the caller walk is pinned to find AT LEAST the two routes that
+// demonstrably call it. Without this, an extractor that silently matched
+// nothing would turn the whole section green and say nothing.
+func TestBoxErrorEnvelopeExtractorsAreNotBlind(t *testing.T) {
+	keys := boxErrorEnvelopeKeys(t)
+	want := []string{"box_error", "box_error_message", "box_error_request_id"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("BoxErrorEnvelope.wire/3 parsed to %v, want %v. Either the parse went "+
+			"blind/wide, or the reducer genuinely changed its wire keys — if the latter, "+
+			"pin the new set HERE and teach every decoder in the pairing map to declare it.",
+			keys, want)
+	}
+
+	callers := boxErrorEnvelopeCallers(t)
+	for _, demonstrated := range []string{
+		"cloud/lib/barkpark_cloud/sites/build_log.ex",
+		"cloud/lib/barkpark_cloud/sites/build_log_bytes.ex",
+	} {
+		if !contains(callers, demonstrated) {
+			t.Errorf("the caller walk did not find %q, which demonstrably calls "+
+				"BoxErrorEnvelope.fields/1 — the walk is blind and every pairing verdict "+
+				"it produced is untrustworthy", demonstrated)
 		}
 	}
 }

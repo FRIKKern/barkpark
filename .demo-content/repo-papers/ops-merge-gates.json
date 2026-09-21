@@ -6989,7 +6989,7 @@
       "id": "b97",
       "type": "heading",
       "level": 3,
-      "text": "The doc-gates roster (it is not two scripts — it is twenty-eight)"
+      "text": "The doc-gates roster (it is not two scripts)"
     },
     {
       "id": "b98",
@@ -7239,7 +7239,7 @@
     {
       "id": "b102",
       "type": "code",
-      "value": "grep -cE '^[[:space:]]*- name: .*\\(fails this job\\)' .github/workflows/doc-gates.yml   # → 28\ngrep -cE '^[[:space:]]*- name: .*\\(tripwire\\)'        .github/workflows/doc-gates.yml   # → 10"
+      "value": "grep -cE '^[[:space:]]*- name: .*\\(fails this job\\)' .github/workflows/doc-gates.yml\ngrep -cE '^[[:space:]]*- name: .*\\(tripwire\\)'        .github/workflows/doc-gates.yml"
     },
     {
       "id": "b103",

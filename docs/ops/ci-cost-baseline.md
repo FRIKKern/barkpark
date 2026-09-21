@@ -238,3 +238,21 @@ PR, 28 of 55 check runs were that single workflow running every harness for one 
 two edits to the same file that merge clean textually can still both be wrong. The wiring follows
 that PR rather than racing it. This is a declared gap, not an oversight: a selftest nothing runs is
 the defect `task-1360445b9cf32243` was filed against, and it is owed here.
+
+## The per-JOB successor table (2026-09-20)
+
+The table above is per DAY and per WORKFLOW, over a sampled repo-wide feed. That unit cannot
+answer the diet question, because the unit you may MOVE is a JOB: a workflow-level `paths:` key
+makes every name in the file ABSENT and deadlocks any required context in it, so only a job-level
+`if:` is available. `scripts/ci-measure.sh --per-job` reports at that unit, and
+`scripts/ci-measure-evidence/2026-09-20-per-job-pull-request.txt` is its output over
+2026-09-18T15:02:56Z .. 2026-09-20T09:28:29Z — 1,000 completed `pull_request` runs listed, 955
+descended into (50 per workflow), 3,601 job rows from `actions/runs/<id>/jobs`, sorted by
+execs × median. Re-derive with `bash scripts/ci-measure.sh --per-job`; it refuses rather than
+printing a table over an empty feed or zero parsed rows.
+
+Two corrections that file makes to the bullets above, both MEASURED rather than argued:
+`required-checks-drift` is no longer the open item — it is already dispatcher-gated and executed
+5 of 49 runs in the window (44 zero-step, 40 skipped), which is the venue ruling of
+`task-7ef9d81ed33d2b9c` having landed. And `compose-smoke`'s red rate is 0/31 here, not 0.43:
+that number dated its own window, not the workflow.

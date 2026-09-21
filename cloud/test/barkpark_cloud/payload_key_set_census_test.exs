@@ -2006,7 +2006,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # envelope's four keys, `code` and `message` were already in the package union
   # and ride free, so exactly TWO new NAMES land. MEASURED by the PIN CO-EDIT arm
   # ("@go_tag_pinned 381 -> 383"), never by arithmetic from the diff.
-  @go_tag_pinned 383
+  #
+  # cli-r21j-boxerror (task-bb5b44bcc5e233af), MEASURED 2026-09-20 by the
+  # 999-technique on this branch rebased onto origin/main — the pin set to 999
+  # and the per-pin refusal printed "385 json tag(s) found in
+  # internal/cloudclient, the PIN is EXACTLY 999", never 383 + 2. 383 -> 385:
+  # `BoxErrorEnvelope.fields/1` has emitted `box_error_message` and
+  # `box_error_request_id` as SIBLING top-level keys since #19341 while no Go
+  # decoder declared either, so json.Unmarshal dropped both in silence. Both are
+  # names the package did not have — TWO new NAMES — and each lands at TWO sites
+  # (SiteBuildLogRecord in site_build_log.go and SiteBuildLogBytes in
+  # site_build_log_bytes.go), so they move this NAME floor AND enter the SITE
+  # register below at 2 apiece.
+  @go_tag_pinned 385
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2101,6 +2113,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # quieter half of the same fault. This register is the only guard that can
     # notice either site dying.
     "box_error" => 2,
+    # cli-r21j-boxerror (task-bb5b44bcc5e233af), MEASURED 2026-09-20 by the
+    # 999-technique on this branch rebased onto origin/main — the SITE arm's
+    # four-way diff printed "newly duplicated: box_error_message x2,
+    # box_error_request_id x2", never derived by adding 4 to the old site total.
+    # Both are NEW NAMES (so `@go_tag_pinned` moves 383 -> 385 for them), born
+    # here at 2 because each is declared on BOTH log decoders: SiteBuildLogRecord
+    # (site_build_log.go) and SiteBuildLogBytes (site_build_log_bytes.go). The
+    # producer has emitted them beside `box_error` since #19341; the name floor
+    # can see them appear but only this register can notice EITHER site dying.
+    "box_error_message" => 2,
+    "box_error_request_id" => 2,
     "box_log_state" => 2,
     # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
     # NEWLY DUPLICATED, 1 -> 2, and born alongside `box_error` for the same

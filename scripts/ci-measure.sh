@@ -87,6 +87,13 @@ JL_EVENT="${CI_MEASURE_JL_EVENT:-pull_request}"
 JL_JOB_PREFIX="${CI_MEASURE_JL_JOB_PREFIX:-Test (Elixir}"
 JL_PROBE_STEP="${CI_MEASURE_JL_PROBE_STEP:-Is the compile-closure instrument alive?}"
 JL_RAW_OUT=""; JL_RAW_IN=""
+# --per-job defaults. PJ_RUNS is the per-WORKFLOW cap on how many completed
+# pull_request runs are descended into; PJ_PAGES is how many 100-run pages of the
+# repo-wide pull_request feed are walked to find them. 10 pages is the endpoint's
+# own 1000-item ceiling, which is why it is the default and not a larger number:
+# asking for page 11 returns nothing and says nothing (see THE 1000-ITEM CAP).
+PJ_RUNS="${CI_MEASURE_PJ_RUNS:-50}"
+PJ_PAGES="${CI_MEASURE_PJ_PAGES:-10}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) SINCE="${2:-}"; shift 2 ;;
@@ -95,6 +102,9 @@ while [ $# -gt 0 ]; do
     --allow-mixed-concurrency) ALLOW_MIXED=1; shift ;;
     --sample) SAMPLE="${2:-}"; shift 2 ;;
     --job-latency) MODE=joblat; shift ;;
+    --per-job) MODE=perjob; shift ;;
+    --runs) PJ_RUNS="${2:-}"; shift 2 ;;
+    --pages) PJ_PAGES="${2:-}"; shift 2 ;;
     --workflow) JL_WORKFLOW="${2:-}"; shift 2 ;;
     --event) JL_EVENT="${2:-}"; shift 2 ;;
     --job-prefix) JL_JOB_PREFIX="${2:-}"; shift 2 ;;
@@ -2336,11 +2346,208 @@ PY
   return $rc
 }
 
+# ---------------------------------------------------------------------------
+# per_job — THE CI DIET TABLE, one row per (workflow, JOB), over the last N
+# completed pull_request runs of every workflow that fires on a PR.
+# (task-76e529e61d9e34d0, child of task-dee226be3107a98b.)
+#
+# WHY A NEW MODE AND NOT THE REPORT MODE. `--since/--until` reports per DAY and
+# per WORKFLOW, over a sampled repo-wide feed. The diet question is narrower and
+# needs a different unit: "which JOB, on the per-PR path, costs the most across
+# a PR push", which is a per-JOB number over a per-WORKFLOW population. A
+# workflow row cannot answer it — moving a workflow is exactly the mistake the
+# venue rules forbid (a workflow-level `paths:` makes every required name in the
+# file ABSENT and deadlocks the PR); the unit you may move is the JOB.
+#
+# WHAT IT READS, AND AT WHICH LEVEL. The run list is an INDEX only: the
+# projection is `{id, path, created_at}` and `.conclusion` is deliberately NOT in
+# it, so there is no run rollup in the payload for `continue-on-error` to launder
+# (see .github/run-level-readers.allow). Every conclusion this mode reads comes
+# from `actions/runs/<id>/jobs`, per JOB.
+#
+# THE COMPUTE RULE IS THE ONE AT THE TOP OF THIS FILE and it is not relaxed here:
+# a job's minutes come from its STEP spans, so a job with zero executed steps
+# contributes ZERO, whatever its wall clock says. Cancelled jobs and zero-step
+# jobs are COUNTED, in their own columns, and never summed into minutes. They are
+# printed because a job that is cancelled on half its runs is a queue symptom
+# worth seeing, not because they are compute.
+#
+# THE SORT IS execs x median, NOT median. A 4-minute job that fires twice is not
+# the diet target; a 40-second job that fires on every one of 50 pushes is. The
+# table is sorted by that product and prints it as its own column so the ordering
+# is checkable rather than asserted.
+#
+# WHAT IT IS NOT. It is not a sample and it is not scaled: within the stated
+# window it walks EVERY completed pull_request run of each workflow up to the
+# --runs cap, so the medians are real medians. What it IS bounded by is the
+# window the feed reaches (10 pages = 1000 runs = GitHub's own ceiling) — a
+# workflow with fewer than --runs runs in that window is reported at its true,
+# smaller n, and the n is in the table.
+#
+#   bash scripts/ci-measure.sh --per-job
+#   bash scripts/ci-measure.sh --per-job --runs 50 --raw-out jobs.ndjson
+#   bash scripts/ci-measure.sh --per-job --raw-in jobs.ndjson      # no network
+# ---------------------------------------------------------------------------
+per_job_mode() {
+  local raw meta
+  raw="$(mktemp)"; meta="$(mktemp)"
+
+  if [ -n "$JL_RAW_IN" ]; then
+    [ -r "$JL_RAW_IN" ] || { echo "ci-measure --per-job: --raw-in '$JL_RAW_IN' is unreadable" >&2; rm -f "$raw" "$meta"; return 1; }
+    cat "$JL_RAW_IN" > "$raw"
+  else
+    local listing pairs
+    listing="$(mktemp)"; pairs="$(mktemp)"
+    local page
+    for page in $(seq 1 "$PJ_PAGES"); do
+      gh api "repos/$REPO/actions/runs?event=pull_request&status=completed&per_page=100&page=$page" \
+        -q '.workflow_runs[] | [.id, .path, .created_at] | @tsv' 2>/dev/null
+    done > "$listing"
+    if [ ! -s "$listing" ]; then
+      echo "ci-measure --per-job: the pull_request run feed came back EMPTY. That is not" >&2
+      echo "  'a quiet repo' — it is an unauthenticated or rate-limited gh. REFUSING to" >&2
+      echo "  print a table over zero runs." >&2
+      rm -f "$raw" "$meta" "$listing" "$pairs"; return 1
+    fi
+    PJ_CAP="$PJ_RUNS" python3 - "$listing" "$pairs" > "$meta" <<'WPY'
+import sys, json, os, collections
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
+cap = int(os.environ["PJ_CAP"])
+ts = sorted(r[2] for r in rows if len(r) > 2)
+seen = collections.Counter(); keep = []
+for rid, path, created in rows:
+    seen[path] += 1
+    if seen[path] <= cap: keep.append((rid, path))
+with open(sys.argv[2], "w") as fh:
+    for rid, path in keep: fh.write(f"{rid}\n")
+print(json.dumps({"__pjwindow__": True, "first": ts[0], "last": ts[-1],
+                  "runs_listed": len(rows), "runs_descended": len(keep), "cap": cap,
+                  "runs_in_window_by_workflow": dict(collections.Counter(r[1] for r in rows))}))
+WPY
+    # One jobs call PER RUN. Parallel because this is a few hundred calls and a
+    # serial walk of them is slower than the window it measures.
+    xargs -P 8 -I{} sh -c \
+      'gh api "repos/'"$REPO"'/actions/runs/{}/jobs?per_page=100" -q "[.jobs[] | {run_id, workflow_name, name, conclusion, started_at, completed_at, steps: [.steps[]? | {started_at, completed_at}]}] | .[] | @json" 2>/dev/null' \
+      < "$pairs" > "$raw"
+    cat "$meta" >> "$raw"
+    rm -f "$listing" "$pairs"
+    if [ -n "$JL_RAW_OUT" ]; then cp "$raw" "$JL_RAW_OUT"; fi
+  fi
+
+  per_job_analyze < "$raw"
+  local rc=$?
+  rm -f "$raw" "$meta"
+  return $rc
+}
+
+per_job_analyze() {
+  local pyf; pyf="$(mktemp)"
+  cat > "$pyf" <<'PY'
+import json, sys, datetime, collections, statistics
+
+def parse(ts):
+    if not ts: return None
+    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+window = None
+rows = collections.defaultdict(lambda: {"exec_min": [], "cancelled": 0,
+                                        "zero_step": 0, "red": 0, "skipped": 0, "n": 0})
+runs = collections.defaultdict(set)
+parsed = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: j = json.loads(line)
+    except json.JSONDecodeError: continue
+    if j.get("__pjwindow__"): window = j; continue
+    parsed += 1
+    wf = j.get("workflow_name") or "?"
+    key = (wf, j.get("name") or "?")
+    r = rows[key]; r["n"] += 1
+    if j.get("run_id"): runs[wf].add(j["run_id"])
+    concl = j.get("conclusion")
+    if concl == "cancelled": r["cancelled"] += 1
+    if concl == "failure": r["red"] += 1
+    if concl == "skipped": r["skipped"] += 1
+    # THE COMPUTE RULE: minutes come from STEP spans, never the wall clock.
+    st = [(parse(s.get("started_at")), parse(s.get("completed_at"))) for s in (j.get("steps") or [])]
+    st = [(a, b) for a, b in st if a and b]
+    if st:
+        r["exec_min"].append((max(b for _, b in st) - min(a for a, _ in st)).total_seconds() / 60.0)
+    else:
+        r["zero_step"] += 1
+
+if parsed == 0:
+    print("ci-measure --per-job: ZERO job rows parsed. A table over nothing is not a", file=sys.stderr)
+    print("  small table, it is a broken read. REFUSING.", file=sys.stderr)
+    sys.exit(1)
+
+out = []
+for (wf, name), r in rows.items():
+    ex = r["exec_min"]
+    med = statistics.median(ex) if ex else 0.0
+    out.append({
+        "workflow": wf, "job": name, "jobs": r["n"], "execs": len(ex),
+        "median_min": round(med, 2), "total_min": round(sum(ex), 2),
+        "rank_min": round(len(ex) * med, 2),
+        "cancelled": r["cancelled"], "zero_step": r["zero_step"],
+        "skipped": r["skipped"], "red": r["red"],
+    })
+out.sort(key=lambda d: -d["rank_min"])
+
+if window:
+    print(f"CI PER-JOB DIET TABLE — window {window['first']} .. {window['last']}")
+    print(f"  population: {window['runs_listed']} completed pull_request runs listed; "
+          f"{window['runs_descended']} descended into (cap {window['cap']} runs per workflow)")
+else:
+    print("CI PER-JOB DIET TABLE — WINDOW UNKNOWN (no __pjwindow__ meta row in the input)")
+print(f"  {parsed} job rows read from actions/runs/<id>/jobs. Minutes are STEP-derived:")
+print("  a job with zero executed steps contributed ZERO compute whatever its wall clock said.")
+print("  `cancel` and `0step` are COUNTS, never minutes, and are excluded from every minute column.")
+print("  Sorted by execs x median (the column `rank`), not by median.")
+print()
+hdr = f"{'workflow':<26}{'job':<52}{'execs':>6}{'med':>8}{'total':>9}{'rank':>9}{'cancel':>7}{'0step':>6}{'skip':>6}{'red':>5}"
+print(hdr); print("-" * len(hdr))
+for d in out:
+    print(f"{d['workflow'][:25]:<26}{d['job'][:51]:<52}{d['execs']:>6}"
+          f"{d['median_min']:>8.2f}{d['total_min']:>9.1f}{d['rank_min']:>9.1f}"
+          f"{d['cancelled']:>7}{d['zero_step']:>6}{d['skipped']:>6}{d['red']:>5}")
+print("-" * len(hdr))
+tot = sum(d["total_min"] for d in out)
+nruns = sum(len(v) for v in runs.values())
+print(f"{'TOTAL':<26}{'':<52}{sum(d['execs'] for d in out):>6}{'':>8}{tot:>9.1f}"
+      f"{sum(d['rank_min'] for d in out):>9.1f}{sum(d['cancelled'] for d in out):>7}"
+      f"{sum(d['zero_step'] for d in out):>6}{sum(d['skipped'] for d in out):>6}"
+      f"{sum(d['red'] for d in out):>5}")
+print()
+print("PER-WORKFLOW ROLLUP — job-minutes and the per-run cost of carrying the workflow at all")
+print(f"{'workflow':<34}{'runs':>7}{'jobs':>7}{'total_min':>11}{'min/run':>10}")
+by_wf = collections.defaultdict(lambda: {"total": 0.0, "jobs": 0})
+for d in out:
+    by_wf[d["workflow"]]["total"] += d["total_min"]; by_wf[d["workflow"]]["jobs"] += d["execs"]
+for wf, v in sorted(by_wf.items(), key=lambda kv: -kv[1]["total"]):
+    n = len(runs.get(wf, ())) or 1
+    print(f"{wf[:33]:<34}{len(runs.get(wf, ())):>7}{v['jobs']:>7}{v['total']:>11.1f}{v['total']/n:>10.2f}")
+print()
+print(f"PER PR PUSH (the number the diet is about): {tot/max(1,max(len(v) for v in runs.values())):.1f} job-minutes"
+      f" across {len(out)} distinct job names, estimated as total_min / the busiest workflow's run count"
+      f" ({max(len(v) for v in runs.values())} runs) — i.e. one push's worth.")
+PY
+  python3 "$pyf"
+  local rc=$?
+  rm -f "$pyf"
+  return $rc
+}
+
 if [ "$MODE" = joblat ]; then
   [ -n "$SINCE" ] && [ -n "$UNTIL" ] || { echo "ci-measure: --job-latency needs --since and --until" >&2; usage; }
   job_latency; exit $?
 fi
 
+
+if [ "$MODE" = perjob ]; then
+  per_job_mode; exit $?
+fi
 
 if [ "$MODE" = value ]; then
   [ -n "$SINCE" ] || { echo "ci-measure: --value-audit needs --since" >&2; usage; }

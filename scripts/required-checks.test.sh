@@ -2448,6 +2448,7 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Billing tier floor (rendered)"
         --expect-unrendered "Overflow guard (rendered)"
         --expect-unrendered "Modal CSSOM oracle (rendered)"
+        --expect-unrendered "Destroy-vs-primary adjacency (rendered)"
         --expect-unrendered "Go gate"
         --expect-unrendered "go vet + test"
         --expect-unrendered "Dispatch (Go paths)"
@@ -2716,7 +2717,20 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # touches .github/** or scripts/**. This is the SIXTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
         # this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "the breaker measurement's preconditions can still be UNMET")
+        --expect-unrendered "the breaker measurement's preconditions can still be UNMET"
+        # studio-scrim-threshold.yml jobs `changes` and `scrim` are CREATED by the
+        # same commit as their .exclusions rows (task scrim-control-uncied-and-
+        # fixture-drift): they postdate the frozen fixture pair, so the pair cannot
+        # render them and the generator reports them LOST. UNLIKE most names here
+        # the cause is NOT a paths filter — that workflow deliberately has none, so
+        # the `scrim` job renders a SKIPPED conclusion on every PR and both names
+        # WILL be renderable on any head sampled after this merge. They are
+        # acknowledged only because the fixture pair is frozen behind them.
+        # DERIVED, not remembered: the job printed exactly these two as
+        # MISSING ACK_EX on run 35553647416 (head 99b11ec52), in this order, with
+        # these two lines to paste.
+        --expect-unrendered "Dispatch (scrim paths)"
+        --expect-unrendered "Studio scrim threshold control")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

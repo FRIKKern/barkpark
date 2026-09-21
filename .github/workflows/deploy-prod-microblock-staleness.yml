@@ -1,0 +1,175 @@
+name: Prod micro-block staleness
+
+# THE READER THAT IS NOT A PERSON (task-dd27173ac5b52b0c, criterion 2).
+#
+# 89.167.28.206 is named as production in CLAUDE.md and docs/ops/PROD_OPS.md,
+# and it is NOT a deploy.yml target — that workflow's only SSH hosts are
+# CP_HOST and GUERRILLA_HOST. Its deploy is a human running `git pull` ON THE
+# BOX. So nothing in this repo compared its commit to origin/main, and on
+# 2026-09-20 it was measured 2891 commits and 23 migrations behind while
+# serving HTTP 200 on every health surface the repo offers. Twenty days of
+# drift were invisible BY CONSTRUCTION: no instrument was pointed at it.
+#
+# This workflow is that instrument. It needs no credential — the box publishes
+# its commit over plain HTTP at /status.json — and it writes nothing anywhere.
+#
+# VENUE IS DECIDED PER JOB, never per file.
+#
+#   prod-microblock-selftest  — schedule + dispatch + EVERY pull_request. It runs the harness
+#               scripts/prod-microblock-staleness-check.test.sh, which is pure
+#               bash over a stubbed network and finishes in seconds, so it sits
+#               inside the CI-policy budget ("a PR runs only what can block it,
+#               or finishes under 60 s"). It carries NO `paths:` filter on
+#               purpose: a filter that hides the job on almost every head is
+#               how a workflow ends up with no owner — a job that renders on
+#               every PR has one by construction, the author whose PR reds it.
+#               This job is deliberately NOT in .github/required-checks.json's
+#               required set; it is a reader, never a required context.
+#
+#   prod-microblock-read      — schedule + dispatch ONLY (`if:` below). It runs the reader
+#               against the live box. On a pull_request head that answer is
+#               about a SERVER, not about the PR's code, so a PR could neither
+#               cause the red nor clear it. A BEHIND box (exit 3) reds the
+#               SCHEDULED run, which is exactly the intended behaviour: the gap
+#               is the finding. Exit 4 (CANNOT-READ) reds too and is a
+#               different sentence — never confuse it with "0 commits behind",
+#               which is the defect the harness above exists to forbid.
+#
+#   prod-microblock-report-scheduled-failure — a red on a cron fails into the void (see
+#               scripts/scheduled-arm-health.sh: studio-journey-smoke's cron
+#               failed 47 of 47 times and cost nobody a second). This job is
+#               the human surface, the same idiom deploy-harnesses.yml uses.
+#
+# CHECKOUT DEPTH. The reader resolves the served sha and counts commits against
+# origin/main, so the `prod-microblock-read` job needs the WHOLE history (`fetch-depth: 0`). A
+# shallow clone would make every served sha unresolvable and turn every run
+# into CANNOT-READ — loud, but about the checkout, not the box.
+#
+# KNOBS, read from the script rather than invented here:
+# PROD_MICROBLOCK_STATUS_URL / _REF / _MAX_BEHIND / _MIGRATION_PATH / _CURL.
+# The defaults are the ones that matter (the real box, origin/main, 0 tolerated
+# commits behind, any pending migration reds), so nothing is set below.
+
+on:
+  schedule:
+    # Every six hours. The box's deploy is a human action, so a tighter cadence
+    # measures nothing new; a looser one lets a migration sit unnoticed for a
+    # working day.
+    - cron: "40 2,8,14,20 * * *"
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  prod-microblock-selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The staleness reader's own harness passes, and its tally is read as a NUMBER
+        run: |
+          set -uo pipefail
+          # FLOOR, not a pass/fail read. `bash x.test.sh; [ $? -eq 0 ]` is
+          # satisfied by a harness that asserted nothing at all — the vacuous
+          # green this repo keeps re-finding. So the SUMMARY line is parsed by
+          # number and compared against a floor, and a zero-arm run reds.
+          MIN_ARMS=20
+          out="$(bash scripts/prod-microblock-staleness-check.test.sh 2>&1)" && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          summary="$(printf '%s\n' "$out" | grep -E '^SUMMARY: [0-9]+ passed, [0-9]+ failed$' | tail -1)"
+          if [ -z "$summary" ]; then
+            echo "::error title=No tally::The harness printed no 'SUMMARY: N passed, M failed' line, so its exit $rc adjudicates nothing. A harness that dies before its tally is indistinguishable from one that ran zero arms."
+            exit 1
+          fi
+          passed="$(printf '%s' "$summary" | sed -E 's/^SUMMARY: ([0-9]+) passed.*/\1/')"
+          failed="$(printf '%s' "$summary" | sed -E 's/.*, ([0-9]+) failed$/\1/')"
+          echo "tally: passed=$passed failed=$failed floor=$MIN_ARMS exit=$rc"
+          if [ "$failed" -ne 0 ]; then
+            echo "::error title=Harness arms FAILED::$failed arm(s) failed in scripts/prod-microblock-staleness-check.test.sh."
+            exit 1
+          fi
+          if [ "$passed" -lt "$MIN_ARMS" ]; then
+            echo "::error title=Harness shrank::Only $passed assertion(s) passed; the floor is $MIN_ARMS. A clean green over a corpus that shrank is a gate that stopped looking, not a pass. Restore the arms, or lower MIN_ARMS deliberately in this step."
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Harness exit disagrees with its tally::0 failed arms but exit $rc — the harness died after its SUMMARY."
+            exit 1
+          fi
+          echo "$passed arms passed, 0 failed (floor $MIN_ARMS): arm 1 is the POSITIVE CONTROL — it proves the reader SEES a real gap."
+      - name: The reader refuses loudly rather than answering zero when it cannot read
+        run: |
+          set -uo pipefail
+          # A SECOND, INDEPENDENT CONTROL, here in the workflow rather than in
+          # the harness: point the reader at a host that does not exist and
+          # prove the answer is CANNOT-READ (exit 4) and not a green. If this
+          # ever exits 0, the scheduled `read` job's greens below mean nothing.
+          out="$(PROD_MICROBLOCK_STATUS_URL=http://prod-microblock-staleness.invalid/status.json \
+            bash scripts/prod-microblock-staleness-check.sh 2>&1)" && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 4 ]; then
+            echo "::error title=Unreadable box did not exit CANNOT-READ::expected exit 4, got $rc. A failed read that is not distinguishable from a green reproduces the exact defect this reader guards."
+            exit 1
+          fi
+          if printf '%s' "$out" | grep -q '0 commits behind'; then
+            echo "::error title=Failed read claimed zero::the unreachable-host arm printed '0 commits behind'."
+            exit 1
+          fi
+          echo "control: an unreachable box exits 4 (CANNOT-READ) and never says '0 commits behind'."
+
+  prod-microblock-read:
+    # PR heads are excluded: the verdict is about a SERVER, so a PR can neither
+    # cause it nor clear it. Schedule and manual dispatch only.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The reader resolves the served sha in THIS clone and counts commits
+          # to origin/main. Anything shallower makes every sha unresolvable.
+          fetch-depth: 0
+      - name: Does 89.167.28.206 run what origin/main holds?
+        run: |
+          set -uo pipefail
+          out="$(bash scripts/prod-microblock-staleness-check.sh 2>&1)" && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          case "$rc" in
+            0) echo "OK: the prod micro-block is at origin/main within its threshold." ;;
+            3) echo "::error title=Prod micro-block is BEHIND::The box at 89.167.28.206 is not running origin/main. It is not a deploy.yml target; its deploy is a human running \`git pull\` on the box. Plan and rollback: docs/ops/prod-microblock-pull-plan.md" ;;
+            4) echo "::error title=Prod micro-block state is UNKNOWN::The reader could not read the box. This is NOT '0 commits behind' — nothing has been proven about the box. Fix the read before trusting any green here." ;;
+            5) echo "::error title=Prod micro-block has FORKED::The served sha is not an ancestor of origin/main — a branch build, a revert, or rewritten history." ;;
+            *) echo "::error title=Unexpected exit $rc::scripts/prod-microblock-staleness-check.sh documents 0/3/4/5 only. An undocumented code is an instrument fault, not a verdict about the box." ;;
+          esac
+          exit "$rc"
+
+  prod-microblock-report-scheduled-failure:
+    needs: [prod-microblock-read]
+    # A red on a cron fails into the void. This is the only reader of that red.
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: prod-microblock-staleness
+          CI_FAILURE_DETAIL: |
+            The scheduled reader for the prod micro-block 89.167.28.206 is RED.
+            Read the `read` job's log for WHICH verdict fired — they are four
+            different sentences and only one of them is "the box is behind":
+              exit 3 BEHIND      the box is not running origin/main
+              exit 4 CANNOT-READ the box's state is UNKNOWN (never "0 behind")
+              exit 5 FORKED      the served sha is not an ancestor of origin/main
+            This box is NOT a deploy.yml target. Its deploy is a human running
+            `git pull` on the box; the plan, the backup and the rollback are in
+            docs/ops/prod-microblock-pull-plan.md. Close this issue once a
+            scheduled run is green again.
+        run: bash scripts/file-ci-failure-issue.sh

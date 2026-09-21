@@ -2455,7 +2455,12 @@ defmodule Barkpark.Content.Writer do
   # for an unscoped one, or the same document would keep its `status` field in
   # one workspace and lose it in another. The two-step resolver is the lookup
   # that walks tenant → workspace → global.
-  defp schema_declares_status?(type, dataset, opts) do
+  # Public (`@doc false`) because the PATCH door needs the SAME question, and
+  # a second copy of it in `Content.Mutations` is how the two doors drift apart
+  # — task-949bee3f1fb1d304 exists precisely because #17346 taught one door to
+  # ask and left the other one guessing.
+  @doc false
+  def schema_declares_status?(type, dataset, opts) do
     case Content.resolve_schema(type, dataset, opts) do
       {:ok, %{fields: fields}} when is_list(fields) ->
         Enum.any?(fields, fn

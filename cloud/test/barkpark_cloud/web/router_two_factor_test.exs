@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.TwoFactorRateLimiter
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -201,6 +202,10 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
     end
 
     test "more than 5 attempts/min → 429 rate_limited" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       {user, _team} = user_with_team()
       {_codes, _secret, _t} = enable_two_factor(user)
 

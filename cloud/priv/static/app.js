@@ -2479,6 +2479,43 @@
     return { state: state, label: LIFECYCLE_PILL_LABEL[state] || "Unknown", cls: instanceLifecycleClass(state) };
   }
 
+  // cch-r21l: THE LIFECYCLE STATE CHIP IS A statusMeta ROLE, NOT ITS OWN FAMILY.
+  // RULING (task-c74cf3120f6bca69): `.inst-life-pill` was a STATE chip — the same
+  // idea the fleet row already paints through statusMetaPill — wearing a second
+  // vocabulary. Its base rule was a clone of `.status-pill`'s box (same
+  // inline-flex/gap/height/padding/border/radius metrics, only font-weight
+  // differed), it was hand-emitted in lifecycleActionRowHtml and then RE-CLASSED
+  // imperatively in runDecommission, so the one-emitter predicate decision 24
+  // bought (E13 arm (f)) could never see it. It is absorbed here.
+  //
+  // The role per state is READ OFF the S4 token, never invented: app.css paints
+  // `.bp-inst--provisioning { color: var(--info) }`, `--live { var(--ok) }`,
+  // `--degraded { var(--warn) }`, `--stopped { var(--muted-text) }`,
+  // `--decommissioned { var(--danger) }`. Suspended additionally takes the
+  // `stopped` VARIANT (dim + dashed hairline), which is what the ladder already
+  // says for "a thing that was deliberately halted".
+  //
+  // The DOMAIN is held against LIFECYCLE_PILL_LABEL by the harness, so a sixth
+  // lifecycle state cannot arrive with a label and no role.
+  var LIFECYCLE_PILL_ROLE = {
+    provisioning:   { role: "info" },
+    live:           { role: "ok" },
+    degraded:       { role: "warn" },
+    stopped:        { role: "neutral", variant: "stopped" },
+    decommissioned: { role: "danger" }
+  };
+
+  // The ONE lifecycle-state chip emitter. Both the pure render and the optimistic
+  // decommission repaint go through it, so the chip has exactly one author.
+  // An unplaceable state degrades to a neutral chip labelled "Unknown" — never a
+  // fabricated hue.
+  function lifecycleStatePillHtml(state) {
+    var r = LIFECYCLE_PILL_ROLE[state] || { role: "neutral" };
+    return statusMetaPill(
+      { role: r.role, variant: r.variant || "", label: LIFECYCLE_PILL_LABEL[state] || "Unknown" },
+      instanceLifecycleClass(state));
+  }
+
   // Region · size meta for a fleet row (blank-tolerant — pre-S6 rows carry null
   // region/server_type). Renders nothing when both are absent so an old row never
   // shows an empty "·". Presentation only; the values are server-stamped slugs.
@@ -2818,12 +2855,10 @@
   // no test pins and nothing keeps in step.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
-    // The label sits in its own span so it stays neutral (--text) while the dot
-    // carries the S4 state hue (the model.pill.cls bp-inst--<state> tints color,
-    // the dot reads it through currentColor) — mirrors .status-pill.
-    var pill = '<span class="inst-life-pill ' + model.pill.cls + '">' +
-      '<span class="inst-life-dot" aria-hidden="true"></span>' +
-      '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
+    // cch-r21l: the state chip IS a statusMeta pill now (see lifecycleStatePillHtml
+    // for the ruling). It used to open its own span on the retired inst-life-pill
+    // family here; that hand-built chip is exactly the shape E13 arm (f) refuses.
+    var pill = lifecycleStatePillHtml(model.pill.state);
 
     // cch-w38-s1 — an UNKNOWN authority reuses the shipped checking grammar
     // verbatim (no new copy, no new CSS): while /v1/me is in flight or failed
@@ -2924,6 +2959,15 @@
   // unknown arm omits too: resurrect stands up (and bills) a real box, so an
   // unanswered /v1/me fails CLOSED. The copy-paste CLI chip is untouched in
   // every arm — it teaches the command, it does not fire a write.
+  //
+  // cch-w47-rv-bl QUALIFIED THAT LAST SENTENCE WITHOUT MOVING THE CHIP. The chip
+  // still renders in every arm, byte for byte. What the sentence left out is that
+  // the CLI reaches the SAME resurrect/1 gate and collects the SAME 403 — so on
+  // the REFUSE arm the chip was the member's only remaining affordance and still
+  // read as an offer the system cannot honour. archivesPanelHtml now prints ONE
+  // line above the list on that arm alone (forbiddenEvidenceCopy's own answer to
+  // `{required:"admin", scope:"team"}`, never new copy), which turns the chip
+  // from an invitation into a reference. Grant and unknown are unchanged.
   //
   // Every rule is a node-pinned pure function; the DOM mount (loadArchives) is
   // browser-verified.
@@ -3193,7 +3237,42 @@
     // authority argument, and any index but 0 is truthy, so every row past the
     // first would render its live Resurrect regardless of the answer.
     var authority = model.authority || "grant";
-    return '<div class="archive-list">' +
+    // cch-w47-rv-bl — THE REFUSE ARM NAMES THE AUTHORITY THE CHIP NEEDS.
+    //
+    // cch-w47-s3 omitted the live Resurrect for a refused member and left the
+    // copy-paste CLI chip standing in every arm, on the ruling that the chip
+    // TEACHES rather than writes. True — but the CLI hits the SAME route, and
+    // router.ex's resurrect/1 refuses every non-team-admin with
+    // `Auth.forbidden(required: "admin", scope: "team")`. So for a refused
+    // member the chip was the last affordance on the row and it still read as
+    // an invitation the system cannot honour: one layer quieter, not one layer
+    // more honest.
+    //
+    // THE RULING IS (a) — KEEP THE CHIP, SAY SO. Omitting it (option (c)) costs
+    // every member the ability to learn the command and hand it to someone who
+    // can run it; a per-row "needs admin" affix (option (b)) writes new copy on
+    // every row. One line, once, above the list, turns the chip from an offer
+    // into a reference.
+    //
+    // THE SENTENCE IS NOT AUTHORED HERE. It is forbiddenEvidenceCopy's answer to
+    // the EXACT payload that route sends — the same reader the members screen,
+    // the delivery log and the site-delete sheet already render a 403 through.
+    // Inventing a sentence here is how this epic got "Only the team owner can
+    // manage billing." onto the Activity screen (D448); reusing the reader means
+    // the console says what the server would say and nothing more. If the gate
+    // ever moves to `owner`, the literal below is the one line to change and the
+    // sentence follows from the map.
+    //
+    // REFUSE ONLY. "grant" and "unknown" render byte-identically to what shipped:
+    // "grant" is offered the live button and needs no apology, and "unknown" is
+    // an UNANSWERED /v1/me — asserting a role requirement there would state as
+    // fact something the console never read.
+    var refusalNote = authority === "refuse"
+      ? '<div class="archives-note"><p>' +
+          esc(forbiddenEvidenceCopy({ error: "forbidden", required: "admin", scope: "team" }) || "") +
+        "</p></div>"
+      : "";
+    return '<div class="archive-list">' + refusalNote +
       model.rows.map(function (row) { return archiveRowHtml(row, authority); }).join("") + "</div>";
   }
 
@@ -3680,6 +3759,20 @@
             (rotated ? '<span class="prov-row-when" data-prov-rotated>credential updated ' +
               esc(rotated) + "</span>" : "") + "</span>" +
         "</span>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `providers-connected`). RULED:
+        // `.btn .btn-ghost .btn-sm` IS the console's sanctioned secondary tier
+        // (50+ sites), NOT a missing class. The re-review's "no button chrome"
+        // is a RESTING-STATE reading: `.btn-ghost` zeroes only background and
+        // border-color, so the control keeps `.btn`'s 28px box, its padding, its
+        // `:hover { background: var(--muted-surface) }` and the house
+        // `.btn:focus-visible` ring. Promoting this one to a filled tier would
+        // make it the loudest thing on the providers screen and leave 50 ghost
+        // siblings inconsistent. Destructiveness is carried where it belongs —
+        // `canDisconnect` gates it, and the click opens the TYPED-confirm
+        // (`grep -n 'function confirmDisconnectProvider' app.js`), which is the
+        // affordance that actually protects the account. If the resting ghost
+        // tier is ever re-decided, it is re-decided for `.btn-ghost` in app.css,
+        // once, not for three buttons the matrix happened to photograph.
         (canDisconnect
           ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
             esc(p.kind || "") + '">Disconnect&hellip;</button>'
@@ -9017,10 +9110,25 @@
   // hint is retracted to what is true: this step does not tick itself, and the
   // "Open Studio →" action stays, because publishing is still the real next move.
   // Pinned in __app.test.mjs (the old sentence was asserted by NOTHING).
+  //
+  // cch-w55-bl — THE ACK CONTROL NOW EXISTS, AND IT IS THE WHOLE FIX (charter
+  // D902, ending 1 of the three the row named). The server half was already
+  // built and already routed: `Accounts.ack_onboarding_step/2` ticks the step,
+  // `POST /v1/onboarding {action:"ack", step:"published_doc"}` reaches it, and
+  // `onboarding_status/1` ORs the ack with the never-written `content` event.
+  // Only the console was missing — {action:"skip"} was the one onboarding
+  // action this file POSTed, so the plane's own "reachable via the user-ack
+  // path" prose (accounts.ex, agent_event.ex) described a path no customer had.
+  // A pending published_doc step now renders "Mark as done" beside the Studio
+  // nudge, gated on canManage for the SAME reason the Dismiss button is: the
+  // route is owner/admin-only, so a member would get a silent 403. Still no
+  // producer, deliberately — ticking a checkbox you ticked yourself is an
+  // honest self-report; inventing an agent endpoint to observe it is the
+  // "build the actor before deciding the effect" trap this wave refuses.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
-    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →" },
+    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →", ack: "Mark as done" },
   ];
   // Pure: the render model for the runway steps. done marks render a mint check,
   // pending steps render their ordinal digit. The instance-step hint carries the
@@ -9046,6 +9154,14 @@
         // The Open Studio nudge shows only while the published_doc step is still
         // open (and only when there is a live box to open it on).
         action: (!isDone && spec.action && spec.key === "published_doc" && opts.studioId) ? spec.action : "",
+        // The ack control (cch-w55-bl): the ONLY path a customer has to this
+        // step, since no producer writes the `content` event it would otherwise
+        // derive from. Pending only (acking a done step is a no-op the server
+        // would accept and the card would not change), and canManage only —
+        // POST /v1/onboarding is owner/admin-gated, so a member's click would be
+        // a silent 403. Unlike the Studio nudge it does NOT need a live box: the
+        // user may well have published on an instance this console can't link.
+        ack: (!isDone && spec.ack && opts.canManage) ? spec.ack : "",
       };
     });
   }
@@ -9068,6 +9184,14 @@
         (st.action
           ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
               esc(opts.studioId) + '">' + esc(st.action) + "</button>"
+          : "") +
+        // Styled by the SAME .runway-step-action rule as the Studio nudge (no
+        // new class: E12 requires every emitted class to have an app.css rule,
+        // and this button wants that rule's exact look). The click hook is the
+        // data attribute, which E12 does not govern.
+        (st.ack
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-ack="' +
+              esc(st.key) + '">' + esc(st.ack) + "</button>"
           : "") +
       "</div>";
     }).join("");
@@ -9445,6 +9569,26 @@
     if (dismiss) dismiss.addEventListener("click", function () { dismissRunway(dismiss); });
     slot.querySelectorAll("[data-runway-studio]").forEach(function (b) {
       b.addEventListener("click", function () { openStudio(b.getAttribute("data-runway-studio"), null); });
+    });
+    slot.querySelectorAll("[data-runway-ack]").forEach(function (b) {
+      b.addEventListener("click", function () { ackRunwayStep(b, b.getAttribute("data-runway-ack")); });
+    });
+  }
+
+  // cch-w55-bl — tick a step the control plane cannot observe. POST
+  // /v1/onboarding {action:"ack", step} appends the step to onboarding_state.acked
+  // (Accounts.ack_onboarding_step/2); onboarding_status/1 then ORs that ack with
+  // the agent-derived signal, so the step stays done across reloads and tabs.
+  // Owner/admin only (the button is hidden otherwise — same rule as Dismiss), so
+  // a 403 is not expected; any non-2xx re-enables the button and toasts, and the
+  // card is NOT optimistically ticked — the next read is the truth.
+  function ackRunwayStep(btn, step) {
+    if (!step) return;
+    if (btn) btn.disabled = true;
+    api("POST", "/v1/onboarding", { action: "ack", step: step }).then(function (r) {
+      if (r.ok) { loadOverview(); return; }
+      if (btn) btn.disabled = false;
+      toast({ kind: "error", title: "Couldn't mark that step done", body: friendly(r.data, "Please try again.") });
     });
   }
 
@@ -9985,17 +10129,40 @@
     // affordance for an up box; the in-flight / failed states keep their
     // honest chips (the SSE fast path in loadInstance patches
     // .fleet-url.provisioning in place — that class stays load-bearing).
+    var addressHtml = '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+      '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+
+    // cch DEFECT-D — THE ADDRESS SLOT IS NOT A SECOND PLACE TO SAY "FAILED".
+    // The two failed arms used to print a bare "— removal failed" / "—
+    // provisioning failed" in the slot under the H1. That em-dash lead is a
+    // FLEET-LIST idiom: in fleetRow the fragment hangs off the box name one
+    // line above it, so it reads as a continuation. Under a detail H1 that
+    // already carries the lifecycle pill ("Removal failed · <server error>")
+    // and, one block lower, the failure banner, it is an ORPHAN — an em dash
+    // with no antecedent, red, in the slot a reader scans for the address.
+    // Measured on instance-remove-failed: the same sentence three times inside
+    // ~130px, and the box's host was KNOWN the whole time (the Identity card
+    // prints it two columns to the right).
+    //
+    // A FAILED TEARDOWN DOES NOT REMOVE AN ADDRESS — it is failed precisely
+    // because the server is still there. So removeFailed now renders the real
+    // address whenever bp.host is set, exactly like a live box. The genuinely
+    // address-less states (a failed provision never gets a host; a teardown
+    // that failed after the host column was cleared) keep a red slot, but a
+    // LABELLED one: it leads with what the ADDRESS is, not with a third copy
+    // of the failure.
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
-        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        ? (bp.host
+            ? addressHtml
+            : '<div class="fleet-url failed">No address — removal failed</div>')
         : lc.failed
-          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          ? '<div class="fleet-url failed">No address — provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
-              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
-              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+            : addressHtml;
 
     // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
     // already carries label + detail ("Degraded · Health down"); its rules are
@@ -10351,6 +10518,15 @@
     if (updates && updates.isConnected !== false) {
       updates.innerHTML = updatePanelActionsHtml(bp, authority);
       wireUpdatePanel(bp);
+      // cch-w45-s5-fu: this strip now carries the unknown arm's exit too, and
+      // the innerHTML above just destroyed whichever button was wired. Same
+      // selfHealing:false the header strip takes, and for the same reason —
+      // loadMe re-enters this repaint, never this view's loader, so a
+      // SUCCESSFUL retry must still re-render or the strip keeps saying
+      // "Checking capabilities…" against an answer the console holds.
+      wireMeRetry(updates, function () {
+        loadInstance(bp.id, (instanceAuthorityMount || {}).tab);
+      }, false);
     }
   }
 
@@ -10498,12 +10674,13 @@
   // The live decommission with an optimistic pill + rollback (mirrors the pure
   // lifecycleOptimistic reducer). Same DELETE the Remove button issued.
   function runDecommission(bp, ctl) {
-    var pill = $("#inst-lifecycle-actions .inst-life-pill");
+    // cch-r21l: the optimistic repaint goes through the SAME emitter as the pure
+    // render (lifecycleStatePillHtml). It used to rewrite `className` and
+    // `innerHTML` by hand — a second author for the chip that no static check
+    // could see, because it never spelled a class attribute at all.
+    var pill = $("#inst-lifecycle-actions .inst-life-head .status-pill");
     var prev = pill ? pill.outerHTML : null;
-    if (pill) {
-      pill.className = "inst-life-pill " + instanceLifecycleClass("decommissioned");
-      pill.innerHTML = '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(LIFECYCLE_PILL_LABEL.decommissioned);
-    }
+    if (pill) pill.outerHTML = lifecycleStatePillHtml("decommissioned");
     api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
       if (r.status === 200 || r.status === 202) {
         fleetCache = null;
@@ -10527,7 +10704,7 @@
       // SHAPE: DELETE /v1/barkparks/:id refuses FLAT ({error:"forbidden",required,
       // scope} / {error:"no_team"}), NOT the nested {error:{code}} rollbackInstance
       // reads; the dual-shape read below covers both so neither can be misclassified.
-      var back = $("#inst-lifecycle-actions .inst-life-pill");
+      var back = $("#inst-lifecycle-actions .inst-life-head .status-pill");
       if (back && prev) back.outerHTML = prev;
       var derr = (r.data && r.data.error) || {};
       var dcode = typeof derr === "string" ? derr : derr.code;
@@ -11980,15 +12157,24 @@
     // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
-    // authority-gated (no exit here: the page's one [data-me-retry] rides the
-    // header, where the still-checking arm first appears).
+    // authority-gated.
     buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "", "", UPDATE_ACTIONS_REASON_ID);
     // cch-w47-rv-bl: ONE reason for the strip. The pointer test (rather than
     // re-deriving which arms fired) keeps this correct if a future control is
     // added or a policy block goes missing — no grouped control, no span.
+    // cch-w45-s5-fu — THIS STRIP CARRIES ITS OWN EXIT. It used to pass "" and
+    // say so in words: "the page's one [data-me-retry] rides the header, where
+    // the still-checking arm first appears". That is false on every lifecycle
+    // arm whose header actions draw no adminWriteControlHtml control — a
+    // SUSPENDED box (and a removing one) still has a host, so this panel still
+    // renders and its Roll back still takes the unknown arm, while the header
+    // strip emits only the CLI disclosure and therefore no group reason and no
+    // exit. The result was a disabled "Checking capabilities…" with nothing on
+    // screen that could re-ask /v1/me. wireMeRetry now binds EVERY match in the
+    // subtree, so this second copy is a live button and not dead bytes.
     return buttons + (buttons.indexOf('aria-describedby="' + UPDATE_ACTIONS_REASON_ID + '"') === -1
       ? ""
-      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, ""));
+      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, meRetryHtml()));
   }
 
   function updatePanelHtml(bp, authority) {
@@ -13819,9 +14005,11 @@
         // (POST /v1/barkparks/:id/api/webhooks/:webhook_id/test-send → the
         // instance's one-shot synthetic probe, SINGLE attempt, delivery row
         // written with a NULL endpoint_id so a failed test never perturbs the
-        // auto-disable streak). No copy-as-CLI chip beside it on purpose: `bp
-        // cloud webhook` has no test-send verb today, and a chip for a command
-        // that does not exist is worse than no chip (backlog gr-bl-cli-test-send).
+        // auto-disable streak). The verb NOW EXISTS on the CLI side — `bp cloud
+        // webhook test-send` (internal/cli/cloud_webhook_cmd.go,
+        // runCloudWebhookTestSend; grep `case "test-send", "test":`) — so the
+        // chip this comment used to withhold is emitted below with the rest of
+        // the .wh-cli row. gr-bl-cli-test-send.
         '<button class="btn btn-sm" type="button" data-wh-test>Send test</button>' +
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
         '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
@@ -13835,6 +14023,12 @@
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
         cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
+        // The twin of the `Send test` button above. The verb spelling is the
+        // one C7's parser dispatches — internal/cli/cloud_webhook_cmd.go's
+        // `case "test-send", "test":` — and internal/cli/cloud_webhook_cmd_test.go
+        // pins this exact prefix as webhookTestSendChip, so a rename on either
+        // side reds a test rather than handing an operator a dead command.
+        cliChipHtml(webhookCliChip("test-send", instance, dataset)) +
         cliChipHtml(webhookCliChip("deliveries", instance, dataset)) +
         cliChipHtml(webhookCliChip("rm", instance, dataset)) +
       "</div>" +
@@ -16468,6 +16662,36 @@
     // The chip is exactly the arm a non-admin already gets — one grammar, one
     // .set-chip, no new CSS.
     //
+    // cch-w48-bl-site-repo-chip-visual-weight — AND THE CHIP IS NOW GONE FROM
+    // THE BADGES ROW, because the fact it was carrying is ALREADY on this
+    // screen and always was. The Details rail's "Repository" row (see
+    // `railRowHtml("Repository", repo)` below) renders `owner/repo@branch` in
+    // mono for EVERY actor, unpredicated on authority or readiness — a strict
+    // SUPERSET of the chip's text, since the chip omitted the branch. So the
+    // withheld arms delete no information: they delete a DUPLICATE, and the
+    // rail row is the honest home for a read-only fact.
+    //
+    // WHY NOT A BADGES-SCOPED RULE. The alternative was a
+    // `.fleet-badges .set-chip` rule sized to btn-sm. Measured in headless
+    // Chrome on this screen, the chip computes font-size 12px — the SAME as
+    // #site-deploy — and differs on height (22 vs 28) and colour (muted-text,
+    // transparent ground). So a restyle would have to grow it to button height
+    // and button colour, i.e. make a non-interactive span look like the
+    // buttons on either side of it, which is the worse outcome: .fleet-badges
+    // is a row of CONTROLS, and the honest fix is that it stops carrying a
+    // non-control at all. It also costs a CSS rule and a cssom-heads baseline
+    // regeneration for a duplicate of a row two inches away.
+    //
+    // AND IT WAS NOT ONLY A WEIGHT PROBLEM. `.set-chip` carries
+    // `white-space: nowrap`, and github_repo's only server-side ceiling is the
+    // varchar(255) column (registry/site.ex `validate_github_repo/1` is a
+    // FORMAT check with no length clause). Driven at a 320px viewport on the
+    // preview's 255-char cruel repo fixture, the chip measured 1658px wide and
+    // put documentElement.scrollWidth at 2688 against a 320 clientWidth — a
+    // 2368px sideways scroll on the whole page. The rail row held the FULL
+    // 511-char `repo@branch` span in 250px at the same width, because `.v`
+    // wraps. Removing the chip removes the overhang with it.
+    //
     // NO SENTENCE, at either withholding. This function's own s2 note settles
     // it: sentences belong to the POST-hoc refusal (the server's own words
     // through friendly()); a sentence at a PRE-hoc omit invents a refusal for
@@ -16477,7 +16701,7 @@
     var githubOffered = authority === "grant" && githubReady === "ready";
     var githubControl = githubOffered
       ? '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>"
-      : (site.github_repo ? '<span class="set-chip">' + githubLabel + "</span>" : "");
+      : "";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
@@ -17400,6 +17624,22 @@
   // highlighted; the honest "Rolled back" completion pill + a link to the now-serving
   // URL read here instead. The "restored" branch shows nothing here (its cue is the
   // marked row). `url` is server data → escaped. Pure.
+  //
+  // cch-r21l RULING (task-c74cf3120f6bca69) — `.deploys-rollback-pill` STAYS ITS
+  // OWN COMPONENT; it is deliberately NOT absorbed into the .status-pill ladder,
+  // and this comment is the reason so the next sweep does not re-open it.
+  // The ladder is a STATE vocabulary: every `.status-pill` names what a thing IS
+  // right now (a deploy is building, a box is live) and carries a dot whose hue
+  // is that state's role. This marker names an EVENT that has already finished,
+  // it labels no entity, it has no state to be in, and it is one flex child of a
+  // composite banner (`.deploys-rollback-note`) — 20px tall, dotless, --text-xs,
+  // tinted to the BANNER's info wash rather than to a role. Giving it a role
+  // would assert a semantic it does not have ("this deploy's status is Rolled
+  // back" is false — `current_deployment_id` is UNCHANGED on this branch, which
+  // is exactly why no row is highlighted and this banner reads instead), and
+  // giving it a dot would make a settled completion look like a live state.
+  // A distinct affordance keeping its own component is not a second grammar; a
+  // second way to say the SAME thing is, and that is what .inst-life-pill was.
   function deployRollbackBannerHtml(flashView) {
     if (!flashView || flashView.kind !== "previous") return "";
     var link = flashView.url
@@ -19512,6 +19752,12 @@
         : "Connect a " + name + " account to provision here. Until then we launch a fully-managed instance for you.";
       return '<div class="launch-catalog-empty">' +
         '<p class="dim">' + lead + "</p>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `empty`). RULED as the ghost tier
+        // BY DESIGN — same ruling as `providerRosterHtml`'s Disconnect above.
+        // It is also NOT this screen's primary action: the lead sentence right
+        // above says a managed instance launches anyway, so the screen's primary
+        // is the launch submit and this is the secondary BYO detour. A filled
+        // tier here would out-shout the door that actually works.
         '<button class="btn btn-ghost btn-sm launch-connect-provider" type="button" data-kind="' + esc(kind) + '">Connect ' + name + "</button></div>";
     }
     if (vs.state === "unavailable") {
@@ -20324,10 +20570,33 @@
     // Always read the real subscription before deciding what to show — the plan
     // state is the server's truth, never assumed.
     if (!subLoaded && !subError) {
-      box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
+      // cch-w49-bl-repaint — THE COLD ARM IS ENTERED MORE THAN ONCE PER BOOT,
+      // and every entry used to buy a whole extra render chain. A #billing deep
+      // link reaches renderBilling from applyRoute, and loadMe's billing seam
+      // re-enters it the moment /v1/me lands — both while the subscription is
+      // still in flight. Each entry re-wrote this placeholder AND attached its
+      // own `.then(renderBilling)`, so the FINAL card was painted once per cold
+      // entry, and each of those paints started its own ceiling read, doubling
+      // again. Measured on the shipped bytes: 6 / 8 / 6 writes to
+      // #billing-recommended for billing-past-due / -portal-return /
+      // -cancelling.
+      //
+      // Two guards, both about the SECOND caller doing nothing:
+      //   • the placeholder is written only when it is not already on screen.
+      //     Safe HERE and nowhere else on this screen: the loading div carries
+      //     no listener and no state, so skipping the write cannot strand a
+      //     handler (the plan card below DOES carry handlers, which is why its
+      //     paint is deduped by not RE-RENDERING, never by skipping a write).
+      //   • only the caller that STARTS the read subscribes the re-render. A
+      //     caller that merely joins an in-flight read is already covered by
+      //     the initiator's continuation.
+      var loadingHtml = '<div class="loading">Loading your plan&hellip;</div>';
+      if (box.innerHTML !== loadingHtml) box.innerHTML = loadingHtml;
       showBillingSection("#billing-manage-section", false);
       showBillingSection("#billing-cancel-section", false);
-      loadSubscription().then(renderBilling);
+      var startsSubRead = !subInflight;
+      var subRead = loadSubscription();
+      if (startsSubRead) subRead.then(renderBilling);
       return;
     }
 
@@ -20384,7 +20653,22 @@
     // is one line under it, and holding the card behind a second read would
     // trade a real absence for a spinner. The repaint is once — the loaded flag
     // makes the recursion terminal.
-    if (!billingQuotaLoaded) { loadBillingCeiling().then(function () { renderBilling(); }); }
+    // cch-w49-bl-repaint — the recursion is still terminal, and now it is also
+    // SINGLE. Two things changed: only the caller that STARTS the ceiling read
+    // subscribes a re-render (a second renderBilling arriving while the read is
+    // open used to attach a second one, so the card was repainted once per
+    // entry), and the re-render fires only when the answer actually MOVED the
+    // screen. `planCeilingHtml(billingQuota)` is the ceiling's only consumer,
+    // so a read that lands on the same value — overwhelmingly nil → nil, which
+    // is every team without an ACTIVE subscription, past_due included — would
+    // repaint byte-identical markup and destroy the card's live handlers to do
+    // it.
+    if (!billingQuotaLoaded && !ceilingInflight) {
+      var quotaBefore = billingQuota;
+      loadBillingCeiling().then(function () {
+        if (billingQuota !== quotaBefore) renderBilling();
+      });
+    }
 
     var band = billingOwnerAuthority();
     if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
@@ -20790,7 +21074,14 @@
         // an ACTION section carries the action (never a save-row, never a button
         // buried in a status card). "See all plans" stays: it toggles the grid,
         // a read affordance the card owns.
-        '<a class="plan-more" id="plan-more">See all plans</a>' +
+        // gr-r21m-defect-jk (DEFECT-K, screen `billing-cancelling`) — RULED a
+        // read/disclosure affordance by the GR33 note directly above, not an
+        // action tier, so "the primary action renders as plain body text"
+        // mis-reads it. The real residual it hid — a bare `<a>` with no href, no
+        // role and no tabindex, i.e. the one control this card owns was not
+        // keyboard reachable — IS fixed: it is a real button now, boxed
+        // identically by `.plan-more` in app.css and in the shared focus ring.
+        '<button class="plan-more" id="plan-more" type="button">See all plans</button>' +
       "</div>";
   }
 
@@ -21473,15 +21764,42 @@
   // and deliberately has none, and there the retry must repaint on BOTH
   // outcomes or a successful read leaves the stale unknown picker on screen,
   // which is the exact lie this slice exists to kill.
+  // cch-w45-s5-fu — EVERY [data-me-retry] IN THE SUBTREE, not the first one.
+  // This used to bind `root.querySelector("[data-me-retry]")`, and that single
+  // binding was load-bearing in the WRONG direction: because a second copy of
+  // the exit would be a DEAD button, five call sites reasoned their way OUT of
+  // emitting one ("the page's ONE shipped exit is already on screen beside
+  // it"), and the instance screen's Updates strip was left with none at all on
+  // every lifecycle arm whose header draws no grouped control — a disabled
+  // "Checking capabilities…" Roll back with no way to re-ask. Measured, not
+  // argued: the committed instance-suspended-me-unreadable scenario booted the
+  // instance screen on a failed /v1/me and #instance-body contained ZERO
+  // [data-me-retry].
+  //
+  // Binding all of them is the smaller of the two available fixes. The other
+  // was to hoist ONE exit to the instance screen, above the strips — rejected
+  // because the exit is an explanation attached to a specific disabled control
+  // (it sits inside the strip's own reason span, which is what
+  // `aria-describedby` points at), and a screen-level button would either
+  // duplicate the header's or float unanchored above two strips that can appear
+  // independently of each other. A per-strip exit keeps the D428 grammar; this
+  // makes the second one LIVE.
+  //
+  // Each button owns its own disable, so pressing one does not blank the other;
+  // whichever repaint wins replaces both nodes anyway.
   function wireMeRetry(root, repaint, selfHealing) {
-    var btn = root && root.querySelector ? root.querySelector("[data-me-retry]") : null;
-    if (!btn) return;
-    btn.addEventListener("click", function () {
-      btn.disabled = true;
-      loadMe().then(function () {
-        if (selfHealing === false || meState() !== "loaded") repaint();
-      });
-    });
+    var btns = root && root.querySelectorAll ? root.querySelectorAll("[data-me-retry]") : null;
+    if (!btns || !btns.length) return;
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          loadMe().then(function () {
+            if (selfHealing === false || meState() !== "loaded") repaint();
+          });
+        });
+      })(btns[i]);
+    }
   }
 
   function setAccountChip(team, email) {
@@ -21726,13 +22044,22 @@
   // leaves `billingQuotaLoaded` false — an unanswered ceiling must never render
   // as an absent one and must never render as a number either, and both of
   // those are the same OMIT, so there is no error surface here to build.
+  // cch-w49-bl-repaint: SINGLE-FLIGHT. Two callers arriving while the read is
+  // open share one GET and one answer instead of issuing two. The ref is
+  // cleared only by the flight that owns it, so a reset that drops it mid-read
+  // (sign-out, below) cannot be un-done by the stale promise settling later.
+  var ceilingInflight = null;
   function loadBillingCeiling() {
-    return api("GET", "/v1/usage/summary").then(function (r) {
+    if (ceilingInflight) return ceilingInflight;
+    var flight = api("GET", "/v1/usage/summary").then(function (r) {
+      if (ceilingInflight === flight) ceilingInflight = null;
       if (!r.ok) return billingQuota;
       billingQuotaLoaded = true;
       billingQuota = usageInstanceCeiling(r.data && r.data.usage);
       return billingQuota;
     });
+    ceilingInflight = flight;
+    return flight;
   }
 
   // The declared checkout capability, or "" when the server has not told us.
@@ -21742,8 +22069,17 @@
     return capCache && typeof capCache.checkout === "string" ? capCache.checkout : "";
   }
 
+  // cch-w49-bl-repaint: SINGLE-FLIGHT, for the same reason as the ceiling and
+  // with wider reach — six call sites read this, and a #billing deep link had
+  // two of them open at once (applyRoute's cold render and loadMe's billing
+  // seam), so the console issued GET /v1/subscription twice per boot. Sharing
+  // one flight also makes "am I the caller that started this read?" answerable,
+  // which is what lets renderBilling subscribe exactly one re-render.
+  var subInflight = null;
   function loadSubscription() {
-    return api("GET", "/v1/subscription").then(function (r) {
+    if (subInflight) return subInflight;
+    var flight = api("GET", "/v1/subscription").then(function (r) {
+      if (subInflight === flight) subInflight = null;
       if (r.ok) {
         subLoaded = true;
         subError = false;
@@ -21761,6 +22097,8 @@
       renderBillingChip();  // GR20: the topbar trial/past-due chip follows too
       return subCache;
     });
+    subInflight = flight;
+    return flight;
   }
 
   // cch-w50-bl: reads the WHOLE vocabulary (catalog ∪ PLAN_NAMES), not just the
@@ -28041,6 +28379,13 @@
       // so the next account can never read the previous team's ceiling.
       billingQuota = null;
       billingQuotaLoaded = false;
+      // cch-w49-bl-repaint: the two single-flight refs are per-SESSION too. Left
+      // standing, the next account's first read would be handed the previous
+      // one's promise and paint that team's plan. Dropping the ref cannot be
+      // undone by the old flight settling later — each flight clears the ref
+      // only while it still owns it.
+      subInflight = null;
+      ceilingInflight = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared

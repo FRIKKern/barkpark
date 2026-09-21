@@ -44,7 +44,16 @@ defmodule BarkparkWeb.Studio.StudioBetaDocumentReplayTest do
     doc: doc
   } do
     raw = "beta-document-replay-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "Beta document replay", @dataset, ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "Beta document replay",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
     {:ok, view, _html} =
@@ -94,7 +103,16 @@ defmodule BarkparkWeb.Studio.StudioBetaDocumentReplayTest do
              Content.get_document(Content.draft_id(@doc_id), @doc_type, @dataset)
 
     raw = "beta-document-identity-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta document identity", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta document identity",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
     {:ok, view, _html} =

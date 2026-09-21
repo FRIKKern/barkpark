@@ -331,6 +331,14 @@ const HOOKS = [
   // its own sibling by re-render, not by pointing at a container), which is why
   // it needs its own row rather than riding #inst-cli-toggle's.
   { key: "button.bp-console-toggle[data-tl-console-toggle]", route: null, what: "expand/collapse the provisioning console tail", source: "markup: local disclosure — flips instanceConsoleCollapsed and re-renders, no api() call on the path" },
+  // cch-w47-rv-bl: the FLEET LIST's own two controls, which entered this sweep's
+  // view with `fleet-archives-member` — the first member actor ever to render
+  // #fleet-body. Neither is new to the console; both are new to the MEMBER
+  // corpus, and the sweep refused on both as UNACCOUNTED before these rows.
+  // Each is named from wireFleetRows (app.js), the one function that binds them,
+  // not from the shape the reader printed.
+  { key: "div.fleet-row[data-id]", route: null, what: "drill into an instance's detail view", source: "markup: wireFleetRows sets location.hash = #instance/<id> — hash navigation, no api() call on the path" },
+  { key: "button.btn.btn-primary.btn-sm.fleet-open-studio[data-id]", route: "POST /v1/barkparks/:*/studio-link", what: "open Studio from a fleet row", source: "census PIN: openStudio — Auth.require_user at the router, pinned `member`; the SAME function #new-open-studio's row above cites, bound here by wireFleetRows" },
   // The two DISABLED shapes. They still need rows — accounting is not
   // conditional on being enabled — and their fence is recorded as elevated so
   // that the day one of them renders ENABLED to a member, it is a FINDING and
@@ -582,7 +590,7 @@ const KNOWN = [
 // numbers were RE-DERIVED by RUNNING this sweep and reading what it PRINTED
 // ("the member-actor corpus is 15, pinned at 14" and "the committed corpus grew
 // to 133 scenario(s), pinned at 132"), never by adding one.
-const PIN_MEMBER_SCENARIOS = 15;
+const PIN_MEMBER_SCENARIOS = 16;
 // 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
 // (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
@@ -723,9 +731,38 @@ const PIN_MEMBER_SCENARIOS = 15;
 // envelope, not the roster), so the member slice does not move and
 // PIN_MEMBER_SCENARIOS stays where it is — the same case `instance-sites-
 // unreadable` above set. RE-DERIVED by RUNNING this sweep and reading what it
-// PRINTED ("the committed corpus grew to 135 scenario(s), pinned at 134") and
-// the actor-set line, which still says 15, never by adding one.
-const PIN_TOTAL_SCENARIOS = 135;
+// PRINTED ("the committed corpus grew to 137 scenario(s), pinned at 135") and
+// the actor-set line, which still says 15, never by adding one. The two new
+// scenarios are `cch-w45`'s unknown-arm fixtures (`instance-suspended-me-
+// unreadable`, `instance-behind-me-unreadable`); neither declares role
+// "member", and the actor-set line the sweep PRINTED still reads 15, so the
+// member slice is unmoved and PIN_MEMBER_SCENARIOS stays at 15.
+// 137 -> 138 (cch-w20-bl): `overview-attention-long-name`, the corpus's first
+// fixture to hand `.attention-name` a string its own column cannot seat, so the
+// first able to prove that ellipsis ENGAGES instead of never being needed. The
+// member slice STAYS at 15 — the case the note above forbids bumping: its `me`
+// is the ordinary OWNER (`me("Acme Inc", …)`, copied verbatim from
+// `overview-attention`), so it cannot answer role="member" by construction.
+// 138 was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 138 scenario(s), pinned at 137") and the actor-set
+// line, which still says 15 — never by adding one.
+// 138 -> 139, and the member slice 15 -> 16 (cch-w47-rv-bl): `fleet-archives-
+// member`, the corpus's FIRST member x archives fixture — a plain member on
+// #fleet with bundles in the store, which is the actor the Archives panel's
+// refuse arm is about and which no scenario had ever booted. Its `me` passes
+// "member" as the third argument, so BOTH pins move; this is the second case
+// the note above allows (the member slice itself moved). Both numbers were
+// RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the member-
+// actor corpus is 16, pinned at 15" and "the committed corpus grew to 139
+// scenario(s), pinned at 138"), never by adding one to each.
+//
+// IT ALSO BROUGHT #fleet-body INTO THE MEMBER SWEEP'S VIEW FOR THE FIRST TIME.
+// Every member fixture before it entered on a settings tab, an instance detail
+// or a /new theater, so the fleet LIST's own two controls had never been
+// accounted for a member actor and the sweep REFUSED on both as UNACCOUNTED.
+// Their rows are in HOOKS above, each named from the wiring rather than from
+// the shape (see wireFleetRows in app.js).
+const PIN_TOTAL_SCENARIOS = 139;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

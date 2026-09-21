@@ -670,6 +670,50 @@
 # app.css on this branch (MISSES 0, MULTISET DEFICITS 0, styleguide.html unchanged at 84).
 # The +2 with MISSES 0 is the unrecorded-ADD shape the ratchet's own failure text tells
 # you to confirm before bumping, not a parity defect.
+#
+# Re-measured 2026-09-20 (cch-w20-bl, the attention-band wrap point): 1332 authored
+# heads, MISSES 0 — a +1 ADD, not a parity defect, which is the distinction this
+# file's own failure text says to confirm before bumping. The one new head is
+# `.attention-row .status-pill` inside the 769-904 band, added so the wrap point is
+# decided by a rule rather than by the reason STRING: the pill takes the whole flex
+# line, so nothing can share it at any width for any string. It is a NEW head rather
+# than declarations on an existing one because that selector had no in-band rule
+# before. RE-DERIVED by RUNNING cssom-parity.mjs and reading the number it PRINTED
+# ("1332 authored rule heads, sidecar baseline is 1331"), never by adding one, and
+# re-run AFTER the final rebase onto origin/main — a baseline shot before the last
+# rebase is stale on arrival and reds the merge nobody re-ran.
+# cch-r21l pill-families 2026-09-20 (console/r21l-pill-families, task-c74cf3120f6bca69):
+# 1332 -> 1329, -3 authored rule heads, ZERO added. `.inst-life-pill`, `.inst-life-dot`
+# and `.inst-life-label` are RETIRED: the instance lifecycle chip was a second grammar
+# for the state the fleet row already paints through statusMetaPill, and it is absorbed
+# into `.status-pill` + a LIFECYCLE_PILL_ROLE role (see the tombstone in app.css and
+# __css_check E13 arms (f)/(g), which now red BY NAME if any of the three comes back as
+# a rule or as a class literal).
+# NOT arithmetic. 1329 is the return of cssom-parity.mjs's own exported
+# `authoredHeads(app.css).length` run on this branch; the SAME call on origin/main's
+# app.css returned 1332, matching the baseline it replaces, and that control is what
+# says the -3 is this diff and not a resolver difference. The multiset diff of the two
+# head lists is exactly [.inst-life-pill, .inst-life-dot, .inst-life-label] removed and
+# NOTHING added.
+# MISSES is not re-measured here (it needs a browser) and nothing in this diff adds a
+# construct the CSSOM parses differently from the authored text: every head removed is
+# a plain class selector in the top-level cascade, and none is added.
+# Re-measured 2026-09-21 (task-4f071458f1c59358, the member instance header's title
+# floor): 1329 -> 1331, +2 authored rule heads, ZERO removed. Both are inside ONE new
+# `@media (min-width: 900px)` block above the existing 899 stack:
+# `.detail-head--inst .detail-head-main` and `.detail-head--inst .detail-actions`.
+# MISSES 0 in the same run, which is what makes this an unrecorded ADD rather than a
+# parity defect — the distinction the ratchet's own failure text tells you to confirm
+# before bumping.
+# NOT arithmetic — and this entry is the second measurement, not the first: the branch
+# was cut when the baseline read 1332 and recorded 1334, then the pill-families retirement
+# above landed 1332 -> 1329 underneath it. The rebase conflict was resolved by RE-RUNNING
+# the instrument on the rebased tree, never by re-adding 2 to the new floor. 1331 is the
+# return of cssom-parity.mjs's own exported `authoredHeads(app.css).length` on this branch;
+# the SAME call on origin/main's app.css returned 1329, matching the baseline it replaces,
+# and that control is what says the +2 is this diff and not a resolver difference. The
+# multiset diff of the two head lists is exactly [.detail-head--inst .detail-head-main,
+# .detail-head--inst .detail-actions] ADDED and NOTHING removed.
 1331
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored

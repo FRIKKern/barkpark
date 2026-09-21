@@ -1014,7 +1014,12 @@ cmd_plan() {
 # each removal names one path the loop proved it owns.
 
 art_uid_of() { # dir -> numeric owner uid ('' when unreadable)
-  stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true
+  # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+  # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+  # report instead of failing, and a BSD-first `||` chain never reaches the
+  # GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on
+  # the wrong platform instead of quietly.
+  stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || true
 }
 
 art_dir_age_hours_ok() { # dir min_hours -> 0 when OLDER than min_hours
@@ -2459,6 +2464,71 @@ gate_d_verdict() { # <gh_rc> [<run-id>=<verdict> ...] -> the cond_d text; 0 = OK
   return 0
 }
 
+# ── THE PER-RUN DESCENT, AND ITS COUNT IDENTITY (task-adad29e7487ed2b6) ─────
+# EXTRACTED so it can be driven from a fixture. The loop below used to sit
+# inline in the full-export precondition block, wedged between an ssh memory
+# probe and a `df`, which meant the only route to its behaviour was a live
+# export against a live box — the exact shape PDS-D31 forbids buying a
+# demonstration with. Its body is otherwise unchanged.
+#
+# WHY THE IDENTITY EXISTS. `$gh_out` is read on fd 0 (a heredoc). Any body
+# child that reads stdin — a `gh` invoked with `--input -`, a future `ssh`, a
+# `psql`, a stray `read` — swallows the remaining run ids, the loop ENDS EARLY
+# with no error and no non-zero status, and `d_pairs` is simply SHORTER than
+# the listing it was built from. gate_d_verdict is worst-case over the pairs it
+# is HANDED, so a run it never examined cannot be represented: an in-flight
+# `instance` deploy on run 3 of 3 then reads as "every one of them is
+# CONTROL-PLANE ONLY", or — if the loop died on iteration 1 of 1 — as "no
+# deploy.yml run in progress". That is the precise false-clear this gate exists
+# to prevent, and it is the same sentence a true clear uses.
+#
+# THE IDENTITY IS: pairs built == NON-EMPTY lines the enumeration handed the
+# loop. Non-empty on both sides, because the body's own `[ -n "$d_run" ] ||
+# continue` arm skips a blank line without appending a pair, so a blank line
+# must not be counted on the enumeration side either. `awk 'NF'` and the body
+# guard agree on what "non-empty" means: a whitespace-only line is NF==0 on one
+# side and IFS-stripped to empty on the other.
+#
+# It is the same identity scripts/pds-secret-scan.sh landed in #19577 over its
+# table list, and the same one the deploy.yml anchor loop landed in #19561.
+gate_d_conditions() { # <gh_rc> <gh_out> -> the cond_d text; 0 = OK
+  local gh_rc="${1-0}" gh_out="${2-}"
+  local d_run d_jobs d_jrc d_pairs=() d_enumerated=0
+
+  if [ "$gh_rc" -eq 0 ] && [ -n "$gh_out" ]; then
+    # COUNTED BEFORE THE LOOP READS A BYTE. This is the number of in-flight
+    # runs the enumeration HANDED the loop; `${#d_pairs[@]}` below is the number
+    # it actually examined. Nothing else in this block can tell "3 of 3" from
+    # "1 of 3" — both look like a completed loop.
+    d_enumerated="$(printf '%s\n' "$gh_out" | awk 'NF { n++ } END { print n+0 }')"
+
+    while read -r d_run; do
+      [ -n "$d_run" ] || continue
+      d_jrc=0
+      # MUT-ANCHOR: gate-d-body-child
+      d_jobs="$(gh run view "$d_run" --json jobs \
+                  -q '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv' 2>/dev/null)" || d_jrc=$?
+      if [ "$d_jrc" -ne 0 ]; then
+        d_pairs+=("$d_run=unknown:gh run view exited $d_jrc, so this run's job graph was never read")
+      else
+        d_pairs+=("$d_run=$(deploy_run_instance_verdict "$d_jobs")")
+      fi
+    done <<EOF
+$gh_out
+EOF
+
+    # MUT-ANCHOR: gate-d-count-identity
+    if [ "${#d_pairs[@]}" -ne "$d_enumerated" ]; then
+      printf 'UNKNOWN (SHORT RUN SCAN — built %s run/verdict pair(s) from the %s in-flight deploy.yml run(s) the enumeration handed the loop. The loop ended before the list did, so %s run(s) were never examined and cannot be represented in the verdict; a gate that looked at part of the listing must never clear in the same words as one that looked at all of it)\n' \
+        "${#d_pairs[@]}" "$d_enumerated" "$((d_enumerated - ${#d_pairs[@]}))"
+      return 1
+    fi
+    # MUT-END: gate-d-count-identity
+  fi
+
+  gate_d_verdict "$gh_rc" ${d_pairs[@]+"${d_pairs[@]}"}
+}
+
 acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
   FULL_WHY=""
   local stale_note=""
@@ -2574,23 +2644,13 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     # the whole defect PDS-D746 thaws this block to fix — the discriminator is
     # the `instance` job, and it is only visible one level down, in the run's
     # own job graph.
-    local d_run d_jobs d_jrc d_pairs=()
-    if [ "$gh_rc" -eq 0 ] && [ -n "$gh_out" ]; then
-      while read -r d_run; do
-        [ -n "$d_run" ] || continue
-        d_jrc=0
-        d_jobs="$(gh run view "$d_run" --json jobs \
-                    -q '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv' 2>/dev/null)" || d_jrc=$?
-        if [ "$d_jrc" -ne 0 ]; then
-          d_pairs+=("$d_run=unknown:gh run view exited $d_jrc, so this run's job graph was never read")
-        else
-          d_pairs+=("$d_run=$(deploy_run_instance_verdict "$d_jobs")")
-        fi
-      done <<EOF
-$gh_out
-EOF
-    fi
-    cond_d="$(gate_d_verdict "$gh_rc" ${d_pairs[@]+"${d_pairs[@]}"})" || ok=0
+    #
+    # THE DESCENT AND ITS COUNT IDENTITY LIVE IN gate_d_conditions (above), so
+    # both directions are reachable from a fixture rather than only from a live
+    # export (PDS-D31). It refuses outright when it built fewer run/verdict
+    # pairs than the enumeration handed it — a short loop can no longer hand
+    # gate_d_verdict a truncated pair list and have it read as a clear.
+    cond_d="$(gate_d_conditions "$gh_rc" "$gh_out")" || ok=0
   else
     cond_d="UNKNOWN (gh is not on PATH, so an in-flight deploy cannot be ruled out)"; ok=0
   fi

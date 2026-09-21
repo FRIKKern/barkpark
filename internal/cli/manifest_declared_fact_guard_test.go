@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -34,9 +35,18 @@ import (
 // found (#14115, #14297, #14300, #14304, #14305, #14306) would have been stale
 // before it merged. So the guard keys on the SHAPE instead:
 //
-//	a strings.Contains / HasPrefix / HasSuffix whose HAYSTACK is a field
-//	reached off a value of a manifest.* type — i.e. code asking a rendered
-//	string a question that the same struct already answers with a typed field.
+//	a strings.* MATCHER (isStringMatchFamily: Contains…, HasPrefix,
+//	HasSuffix, Index…, LastIndex…, EqualFold, Count, Cut…, SplitN) whose
+//	HAYSTACK is a field reached off a value of a manifest.* type, wrappers
+//	and all (manifestHaystack looks through strings.ToLower(…), string(…),
+//	a helper call) — i.e. code asking a rendered string a question that the
+//	same struct already answers with a typed field.
+//
+// Both halves of that were an enumeration once, and an enumeration is a
+// snapshot: the callee set was literally {Contains, HasPrefix, HasSuffix} and
+// the haystack had to BE a selector chain, so strings.Index, strings.EqualFold
+// and a one-call wrapper each walked past the gate reading as obvious
+// instances of the class (task-0ab3dfa73662ee68). Both are predicates now.
 //
 // ── Why the manifest package itself is (correctly) out of scope ─────────────
 //
@@ -71,7 +81,7 @@ import (
 // manifest-declared value.
 type manifestFactHit struct {
 	Pos  string
-	Fn   string // Contains | HasPrefix | HasSuffix
+	Fn   string // the strings.* matcher: Contains, Index, EqualFold, …
 	Expr string // e.g. cmd.HTTP.PathTemplate
 	Root string // the identifier
 	Type string // the manifest type it is bound to
@@ -212,18 +222,10 @@ func scanWithManifestBindings(fset *token.FileSet, f *ast.File, bound map[string
 		if !ok || pkg.Name != "strings" {
 			return true
 		}
-		switch fn.Sel.Name {
-		case "Contains", "HasPrefix", "HasSuffix":
-		default:
+		if !isStringMatchFamily(fn.Sel.Name) {
 			return true
 		}
-		root, depth, ok := selectorRoot(c.Args[0])
-		if !ok || depth == 0 {
-			// depth 0 means the haystack is a bare identifier (a line, a
-			// rawURL, a flag token) — free text, not a declared field.
-			return true
-		}
-		typ, ok := bound[root]
+		_, root, ok := manifestHaystack(c.Args[0], bound)
 		if !ok {
 			return true
 		}
@@ -232,11 +234,85 @@ func scanWithManifestBindings(fset *token.FileSet, f *ast.File, bound map[string
 			Fn:   fn.Sel.Name,
 			Expr: renderSelector(c.Args[0]),
 			Root: root,
-			Type: typ,
+			Type: bound[root],
 		})
 		return true
 	})
 	return hits
+}
+
+// isStringMatchFamily is the CALLEE half of the predicate: does strings.<name>
+// ask a question OF its first argument's spelling?
+//
+// It is a rule, not a list. The first spelling of this gate enumerated exactly
+// {Contains, HasPrefix, HasSuffix}, and an enumeration is a snapshot: the same
+// defect written with strings.Index, strings.EqualFold or strings.Count walked
+// straight past it while reading as an obvious instance of the class
+// (task-0ab3dfa73662ee68). Keying on the family PREFIX means the members Go
+// adds next — ContainsFunc, CutPrefix, IndexRune — arrive already covered.
+//
+// Deliberately NOT in the family: the transforming half of the package
+// (ToLower, TrimPrefix, Replace, Fields, Join …). Those produce a string; they
+// do not decide anything from one, so on their own they are not this defect.
+// A transform WRAPPING a match is still caught, because the match above it is
+// what is matched and manifestHaystack looks through the wrapper.
+func isStringMatchFamily(name string) bool {
+	for _, family := range []string{
+		"Contains",  // Contains, ContainsAny, ContainsRune, ContainsFunc
+		"HasPrefix", // HasPrefix
+		"HasSuffix", // HasSuffix
+		"Index",     // Index, IndexAny, IndexByte, IndexRune, IndexFunc
+		"LastIndex", // LastIndex, LastIndexAny, LastIndexByte
+		"EqualFold", // EqualFold
+		"Count",     // Count
+		"Cut",       // Cut, CutPrefix, CutSuffix
+		"SplitN",    // SplitN, SplitAfterN — "the part before the token"
+	} {
+		if strings.HasPrefix(name, family) {
+			return true
+		}
+	}
+	return false
+}
+
+// manifestHaystack is the HAYSTACK half: inside a string match's first
+// argument, find the field selector reached off an identifier already bound to
+// a declaring type, looking THROUGH any wrapping call.
+//
+// The looking-through is the point. `selectorRoot` alone reports !ok the
+// moment arg 0 is a CallExpr, so
+//
+//	strings.Contains(strings.ToLower(cmd.HTTP.PathTemplate), "/media")
+//
+// — the same defect with a normalisation step in front of it — was invisible
+// to the first spelling of this gate (task-0ab3dfa73662ee68). A conversion
+// (`string(cmd.X)`) and a local helper (`norm(cmd.X)`) hid it the same way.
+//
+// Only arg 0's own subtree is walked: `strings.Contains(line, cmd.HTTP.Method)`
+// asks about `line`, and a declared value used as the NEEDLE is reading the
+// declaration, not sniffing it.
+func manifestHaystack(e ast.Expr, bound map[string]string) (hay ast.Expr, root string, ok bool) {
+	switch v := e.(type) {
+	case *ast.ParenExpr:
+		return manifestHaystack(v.X, bound)
+	case *ast.CallExpr:
+		for _, a := range v.Args {
+			if h, r, found := manifestHaystack(a, bound); found {
+				return h, r, true
+			}
+		}
+		return nil, "", false
+	}
+	r, depth, rootOK := selectorRoot(e)
+	// depth 0 means the haystack is a bare identifier (a line, a rawURL, a
+	// flag token) — free text, not a declared field.
+	if !rootOK || depth == 0 {
+		return nil, "", false
+	}
+	if _, isBound := bound[r]; !isBound {
+		return nil, "", false
+	}
+	return e, r, true
 }
 
 // selectorRoot walks a.b.c down to `a`, reporting how many selectors it peeled.
@@ -262,6 +338,17 @@ func renderSelector(e ast.Expr) string {
 		return v.Name
 	case *ast.SelectorExpr:
 		return renderSelector(v.X) + "." + v.Sel.Name
+	case *ast.ParenExpr:
+		return "(" + renderSelector(v.X) + ")"
+	case *ast.BasicLit:
+		return v.Value
+	case *ast.CallExpr:
+		// So a wrapped haystack reports the shape that was actually written.
+		args := make([]string, 0, len(v.Args))
+		for _, a := range v.Args {
+			args = append(args, renderSelector(a))
+		}
+		return renderSelector(v.Fun) + "(" + strings.Join(args, ", ") + ")"
 	default:
 		return "<expr>"
 	}
@@ -271,25 +358,56 @@ func renderSelector(e ast.Expr) string {
 // surface of this repo (there are no root .go files).
 var guardScanRoots = []string{"internal", "cmd"}
 
-// TestNoStringMatchStandsInForAManifestDeclaredFact is the live gate. It
-// carries NO waiver list: the tree is at zero today (403 non-test
-// strings.Contains/HasPrefix/HasSuffix lines across internal/ and cmd/, none
-// of them of this shape), so the next instance reds by itself.
+// manifestKnownHits are the hits this gate has READ AT THE SOURCE and cleared,
+// spelled by SHAPE (hitShape) rather than by position, so moving the line does
+// not silence the clearance and a second site of the same shape is not waived
+// by accident. The list is checked in BOTH directions: an entry that stops
+// appearing reds too, so a clearance cannot outlive the code it describes.
 //
-// KNOWN BLIND SPOT, stated rather than papered over: the detector is
-// SYNTACTIC. Copying the field into a local first —
+// It exists because widening the callee set to the whole matching family
+// (task-0ab3dfa73662ee68) made the gate see one manifest-bound site the narrow
+// three-name set never could:
+//
+//   - errors.go enumeratingSibling cuts cmd.Verb on "-" to find the verb's
+//     FAMILY (`member-rm` → `member-ls`). The hyphen is the verb id's own
+//     grammar — the same category as the "--flag=" parsing the negative
+//     control clears — and the manifest declares no family field to read
+//     instead. Read at the source 2026-09-20.
+//
+// Keep this list at the length of what has been read. It is NOT the escape
+// hatch for a fresh hit: the remedy for one of those is to read the typed
+// field.
+var manifestKnownHits = []string{
+	"strings.Cut(cmd.Verb) on manifest.Command",
+}
+
+// TestNoStringMatchStandsInForAManifestDeclaredFact is the live gate. Beyond
+// the one read-and-cleared shape in manifestKnownHits the tree is at zero, so
+// the next instance reds by itself.
+//
+// KNOWN BLIND SPOT, stated rather than papered over — and it is now ONE thing,
+// not the head of a list. The detector is SYNTACTIC, so copying the field into
+// a local first —
 //
 //	tmpl := cmd.HTTP.PathTemplate
 //	if strings.Contains(tmpl, "/media") { … }
 //
 // defeats it, measured 2026-09-16 by doing exactly that to run.go and watching
-// the gate stay green. Closing that needs go/types, which this module does not
-// vendor (no golang.org/x/tools). The gate is therefore a tripwire on the
-// shape people actually write, not a proof of absence — the same bargain
-// internal/apiclient/manifest_path_drift_test.go strikes. If a hit ever turns
-// out to be legitimate, read the typed field or say in a comment why the
-// spelling IS the fact — do not append a line to a table here, and do not
-// launder it through a local.
+// the gate stay green. Closing THAT needs go/types, which this module does not
+// vendor (no golang.org/x/tools).
+//
+// The three escapes that used to sit alongside it are closed, not documented:
+// a wrapped haystack (strings.Contains(strings.ToLower(cmd.X), …)), a matcher
+// outside the original three names (strings.Index, strings.EqualFold), and the
+// two combined were each purely syntactic and needed no go/types at all — they
+// were an enumeration masquerading as a rule (task-0ab3dfa73662ee68). See
+// TestManifestFactDetectorFiresThroughTheWholeMatchFamilyAndAWrappedHaystack,
+// which pins all three.
+//
+// The gate is therefore a tripwire on the shape people actually write, not a
+// proof of absence — the same bargain internal/apiclient/manifest_path_drift_
+// test.go strikes. If a hit turns out to be legitimate, read the typed field or
+// record its SHAPE above with what you read; do not launder it through a local.
 func TestNoStringMatchStandsInForAManifestDeclaredFact(t *testing.T) {
 	repo := repoRootForGuard(t)
 	fset := token.NewFileSet()
@@ -326,9 +444,32 @@ func TestNoStringMatchStandsInForAManifestDeclaredFact(t *testing.T) {
 	if scanned < 200 {
 		t.Fatalf("scanned only %d non-test .go files under %v — the sweep did not reach the tree", scanned, guardScanRoots)
 	}
+	known := map[string]bool{}
+	for _, k := range manifestKnownHits {
+		known[k] = false
+	}
 	for _, h := range all {
+		shape := hitShape(manifestQualifier, h)
+		if _, isKnown := known[shape]; isKnown {
+			known[shape] = true
+			continue
+		}
 		t.Errorf("%s: strings.%s(%s, …) asks a rendered string a question %s.%s already answers with a typed field — read the declaration, not the spelling (task-ce8f04315a6d1f10)",
 			h.Pos, h.Fn, h.Expr, manifestQualifier, h.Type)
+	}
+	// A clearance that no longer describes the tree is a stale reading, so it
+	// reds instead of standing quietly.
+	stale := []string{}
+	for shape, seen := range known {
+		if !seen {
+			stale = append(stale, shape)
+		}
+	}
+	sort.Strings(stale)
+	if len(stale) > 0 {
+		t.Errorf("manifestKnownHits entr(ies) %v no longer appear in the tree. Each was read at the source before it was "+
+			"written down; the code it described has moved or changed, so drop the entry rather than leaving a clearance "+
+			"standing over something nobody has read.", stale)
 	}
 }
 
@@ -470,6 +611,82 @@ func TestManifestFactDetectorStaysQuietOnLegitimateStringWork(t *testing.T) {
 	}
 	if hits := scanManifestFactStringMatches(fset, f); len(hits) != 0 {
 		t.Fatalf("detector fired on legitimate string work: %+v", hits)
+	}
+}
+
+// escapedFactShapes is the RED CONTROL for the widening: the three shapes that
+// were measured PASSING this gate on 2026-09-18 (task-0ab3dfa73662ee68) while
+// being the same defect as the seed — a rendered manifest string asked a
+// question the struct already answers.
+//
+//  1. the haystack wrapped in a call, so arg 0 is a CallExpr and the old
+//     selector-only walk gave up;
+//  2. strings.Index, outside the old three-name callee set;
+//  3. strings.EqualFold, likewise.
+//
+// A synthetic fixture cannot prove the LIVE gate sees them — only the tree
+// sweep does that, and the row's probes did, at run.go — but it does keep the
+// predicate from silently narrowing back.
+const escapedFactShapes = `package cli
+
+import (
+	"strings"
+
+	"barkpark/internal/manifest"
+)
+
+func wrapped(cmd manifest.Command) bool {
+	return strings.Contains(strings.ToLower(cmd.HTTP.PathTemplate), "/media")
+}
+
+func indexed(cmd manifest.Command) bool {
+	return strings.Index(cmd.HTTP.PathTemplate, "/media") >= 0
+}
+
+func folded(cmd manifest.Command) bool {
+	return strings.EqualFold(cmd.HTTP.Method, "POST")
+}
+`
+
+func TestManifestFactDetectorFiresThroughTheWholeMatchFamilyAndAWrappedHaystack(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "escapes.go", escapedFactShapes, 0)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := map[string]bool{}
+	for _, h := range scanManifestFactStringMatches(fset, f) {
+		if h.Type != "Command" {
+			t.Errorf("hit %+v is not bound to manifest.Command", h)
+		}
+		got[h.Fn+"("+h.Expr+")"] = true
+	}
+	for _, want := range []string{
+		"Contains(strings.ToLower(cmd.HTTP.PathTemplate))",
+		"Index(cmd.HTTP.PathTemplate)",
+		"EqualFold(cmd.HTTP.Method)",
+	} {
+		if !got[want] {
+			t.Errorf("escape %s was NOT reported — the detector has narrowed back to an enumeration. Hits: %v", want, got)
+		}
+	}
+}
+
+// TestStringMatchFamilyExcludesTheTransformingHalf holds the other side: the
+// family is a rule, and a rule that said yes to everything in the strings
+// package would make this gate a ban on the package rather than a detector.
+func TestStringMatchFamilyExcludesTheTransformingHalf(t *testing.T) {
+	for _, name := range []string{"Contains", "ContainsAny", "HasPrefix", "HasSuffix",
+		"Index", "IndexByte", "LastIndex", "EqualFold", "Count", "Cut", "CutPrefix", "SplitN"} {
+		if !isStringMatchFamily(name) {
+			t.Errorf("strings.%s asks a question of its first argument but is not in the family", name)
+		}
+	}
+	for _, name := range []string{"ToLower", "ToUpper", "TrimSpace", "TrimPrefix", "TrimSuffix",
+		"Replace", "ReplaceAll", "Join", "Fields", "Title", "Repeat", "NewReplacer"} {
+		if isStringMatchFamily(name) {
+			t.Errorf("strings.%s only PRODUCES a string — flagging it makes the gate a ban on the package, not a detector", name)
+		}
 	}
 }
 

@@ -16447,3 +16447,50 @@ name unrelated code.
   failed, that one). It rides `research-coverage-suite.yml`, which is not one of main's four
   required contexts and cannot block. Widening check 1.2 to name its own files remains the standing
   ask, now recorded twice.
+
+- **PDS-D761 — THAW RECORD for `406978270`: `scripts/pds-pull-proof.sh` carried a BSD-first `stat`
+  chain that was silently wrong on every Linux runner.** *Filed by lead-deploy s25. Number minted
+  through `bash scripts/pds-record-parity.sh --allocate-d 1` (PDS-D725), reserved in
+  `tooling/pds/d-number-reservations.tsv` in the same commit as this block. This is a HISTORICAL
+  thaw record under PDS-D759(i), never a statement of the current freeze (PDS-D732).*
+
+  **THE BLOBS, READ AND NOT TYPED** — `git rev-parse`, never `shasum` (PDS-D154):
+  - pre  `git rev-parse 406978270^:scripts/pds-pull-proof.sh` → `49f54d35e5377f1be67bc765f56a90567ba4af99`
+  - post `git rev-parse 406978270:scripts/pds-pull-proof.sh`  → `9348ea41735f482cd7638977943ba0dc2dba77db`
+
+  **WHAT MOVED.** One functional line, plus five lines of comment explaining it. `+6 −1`
+  (`git diff --numstat 406978270^..406978270 -- scripts/pds-pull-proof.sh`). The line:
+
+      - stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true
+      + stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || true
+
+  **WHY IT IS A CORRECTION AND NOT A WEAKENING — the merits, since a thaw is sanctioned on them.**
+  `-f` means opposite things in the two `stat`s. On BSD/macOS `stat -f FORMAT path` renders the
+  path with that format. On GNU coreutils `-f` prints FILE SYSTEM status and the format flag is
+  `-c`. So on a Linux runner the BSD-first form does not fail over to the GNU form: it writes a
+  block-count report for the containing filesystem to STDOUT, exits, and the `||` chain either
+  never fires or appends the right number to that garbage. Every uid this helper returned on Linux
+  was nonsense, and nothing anywhere reported an error. GNU-first is the safe ordering because BSD
+  `stat` rejects `-c` outright, so the wrong platform fails loudly instead of quietly. No assertion
+  was relaxed and no arm was removed; a helper that silently returned garbage on one platform now
+  returns a uid on both.
+
+  **THE MEASUREMENT THAT FOUND IT.** `scripts/pds-artifact-retention.test.sh` read **35 pass / 0
+  fail** on macOS and **24 pass / 11 fail** on ubuntu from the identical tree (run 35504059438, job
+  106061128225). The file had never once STARTED on Linux before that run — a GNU `mktemp` refusal
+  killed it at line 44 (fixed in `eea79a5aa`, #19419) — so eleven arms had been failing invisibly
+  for as long as the BSD-ism had been there. `scripts/stat-portability-check.sh` now refuses the
+  spelling tree-wide, with a planted-RED positive control and a refusal on an empty population.
+
+  **WHY THIS RECORD EXISTS AT ALL, and the finding is worth more than the thaw.** `406978270`
+  merged with no PDS-D naming its blob, so axis F correctly reported DIVERGENT. That red landed on
+  the REQUIRED Elixir gate — `api/test/barkpark/pds_record_parity_test.exs` shells the harness —
+  and blocked three PRs across two lanes belonging to authors who had touched none of this. Both
+  the test's moduledoc ("the harness is HERMETIC … it gates the ARM's own logic, NOT the epic's
+  record") and the harness header ("REPORTER, never a gate … must never carry a required check
+  name") already forbade that wiring, and the moduledoc had predicted the consequence: a live
+  finding redding a required gate "would be repaired by deleting the baseline inside a day".
+  #19490 made the live half opt-in on `PDS_PARITY_DYNAMIC=1`, set by the `pds-harnesses` reporter
+  leg, and replaced five pinned count literals with values derived from the subject's own output.
+  This block closes the other half: the thaw is now recorded, so the reporter can go green on the
+  record rather than on a threshold.

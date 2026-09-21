@@ -30,6 +30,7 @@ defmodule BarkparkCloud.Web.RouterAppTokenTest do
   alias BarkparkCloud.{Accounts, Registry, Repo}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.Vault
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.StudioLinkFakeHttpClient
   alias BarkparkCloud.Web.Router
 
@@ -262,6 +263,10 @@ defmodule BarkparkCloud.Web.RouterAppTokenTest do
     end
 
     test "app_token:<ip> bucket → 429 past 10 hits/min; other buckets untouched (D7)" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       {user, _team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)
 

@@ -1022,6 +1022,598 @@ else
   bad "python3+pyyaml unavailable — the wiring half of section 14 CANNOT READ, and an unread wiring is not a proven one"
 fi
 
+# ═══ 15. THE WATCH MUST NOT COUNT ITSELF AS A REASON TO WAIT ═════════════════
+# RECORDED FROM PRODUCTION, not imagined. Scheduled run 35492442980
+# (2026-09-20T05:44Z, tip 56e0dbca4) printed:
+#
+#     still in flight on this tip — a row that is absent may yet appear:
+#       main-gate-watch #35492442980 (status=in_progress)
+#     RED      Elixir gate — conclusion=failure
+#     ok       Cloud gate
+#     WAITING  Console gate — no check run row YET, and a workflow run on this
+#              sha is still in flight: main-gate-watch #35492442980
+#
+# Its SOLE in-flight row was ITSELF. `Console gate` had never rendered on that
+# sha and never did: re-running the identical script on the identical sha once
+# that run went terminal prints `MISSING  Console gate` and exits 1. The watch
+# is reading the tip WHILE RUNNING ON the tip, and it renders none of the
+# watched contexts, so its own run can never be the run that makes an absent row
+# appear. On that day only the unrelated `Elixir gate` red carried the run to a
+# scream. With Elixir green — the fixture below — the MISSING row alone decided
+# the verdict, and it read WAITING = exit 2 = green while a required context was
+# absent from main's tip. That is a vacuous green in the repo's own
+# MISSING-detector, which is the single thing this file exists to prevent.
+section "15. a watch that counts its own run cannot report MISSING"
+
+# 56e0dbca4's real rows, reduced to the three watched contexts, with Elixir gate
+# flipped to success so the SELF-EXCLUSION is the only thing deciding the exit
+# code. Console gate is absent because it genuinely never rendered on that sha.
+cat > "$FX/self-inflight-checks.json" <<'JSON'
+{"check_runs": [
+  {"name": "Elixir gate", "status": "completed", "conclusion": "success", "started_at": "2026-09-20T05:10:00Z", "id": 106029000001},
+  {"name": "Cloud gate", "status": "completed", "conclusion": "success", "started_at": "2026-09-20T05:11:00Z", "id": 106029000002}
+]}
+JSON
+
+# Every run on the tip terminal EXCEPT the watch's own run — the exact shape of
+# the 05:44 read.
+cat > "$FX/self-inflight-runs.json" <<'JSON'
+{"workflow_runs": [
+  {"name": "elixir", "status": "completed", "id": 35492000001},
+  {"name": "cloud", "status": "completed", "id": 35492000002},
+  {"name": "console-harness", "status": "completed", "id": 35492000003},
+  {"name": "main-gate-watch", "status": "in_progress", "id": 35492442980}
+]}
+JSON
+
+# DRIVEN THROUGH THE ENVIRONMENT, NOT A NEW FLAG (review of this slice). The
+# first cut of this section passed `--self-run-id` on both arms. Against the
+# pre-fix script that flag is an UNKNOWN ARGUMENT — exit 3 — so every
+# RED-WITHOUT assertion reddened on argument rejection and measured nothing
+# about the defect. GITHUB_RUN_ID is what GitHub Actions actually sets, the
+# pre-fix script ignores it completely, and the same command line therefore
+# exercises the real behavioural difference: identical argv, identical fixtures,
+# one environment variable, two opposite verdicts.
+self_watch() { # GITHUB_RUN_ID value ("" = unset)
+  if [ -n "$1" ]; then
+    env GITHUB_RUN_ID="$1" bash "$WATCH" --sha 56e0dbca4 \
+      --protection-file "$FX/protection.json" \
+      --check-runs-file "$FX/self-inflight-checks.json" \
+      --runs-file "$FX/self-inflight-runs.json" > "$OUT" 2>&1
+  else
+    env -u GITHUB_RUN_ID bash "$WATCH" --sha 56e0dbca4 \
+      --protection-file "$FX/protection.json" \
+      --check-runs-file "$FX/self-inflight-checks.json" \
+      --runs-file "$FX/self-inflight-runs.json" > "$OUT" 2>&1
+  fi
+  echo $?
+}
+
+# ── RED WITHOUT: no run id in the environment, so nothing is excluded — the
+# pre-fix behaviour, and the behaviour of the FIXED script when it is not told
+# which run is its own.
+rc="$(self_watch "")"
+if [ "$rc" = "2" ] && grep -q "WAITING  Console gate" "$OUT"; then
+  ok "WITHOUT a self run id: MISSING Console gate is softened to WAITING, exit 2 — production run 35492442980's bug, reproduced"
+else
+  bad "WITHOUT a self run id: expected exit 2 + 'WAITING  Console gate', got exit $rc"; cat "$OUT" >&2
+fi
+if [ "$rc" != "1" ]; then
+  ok "WITHOUT it the run does NOT scream — a required context absent from main's tip reads as green"
+else
+  bad "WITHOUT it the run screamed; the fixture no longer reproduces the defect"
+fi
+if grep -q "main-gate-watch #35492442980" "$OUT"; then
+  ok "WITHOUT it the watch cites its OWN run as the reason a row may yet appear"
+else
+  bad "WITHOUT it the watch does not cite its own run; the fixture is not the production shape"
+fi
+
+# ── GREEN WITH: the SAME argv and the SAME fixtures, plus the GITHUB_RUN_ID
+# that GitHub Actions sets on every run. Against the pre-fix script this arm is
+# byte-identical to the one above and still exits 2 — which is precisely what
+# makes it a mutation proof rather than an argument-parsing test.
+rc="$(self_watch 35492442980)"
+if [ "$rc" = "1" ]; then
+  ok "WITH GITHUB_RUN_ID set: SAME argv, SAME payload -> scream (exit 1) — the fix is load-bearing"
+else
+  bad "WITH GITHUB_RUN_ID set: expected exit 1, got $rc"; cat "$OUT" >&2
+fi
+if grep -q "MISSING  Console gate" "$OUT"; then
+  ok "WITH it Console gate is correctly named MISSING — no check run at all, every OTHER run terminal"
+else
+  bad "WITH it Console gate is still not reported MISSING"; cat "$OUT" >&2
+fi
+if ! grep -q "WAITING" "$OUT"; then
+  ok "WITH it nothing is WAITING — the watch's own run was the entire in-flight set"
+else
+  bad "WITH it something is still WAITING"; cat "$OUT" >&2
+fi
+if grep -q "ignoring this watch's own run #35492442980" "$OUT"; then
+  ok "the exclusion is STATED in the output, not silent — a reader can see why MISSING was reached"
+else
+  bad "the self-exclusion is silent; an unexplained verdict is how a watch gets distrusted"
+fi
+
+# ── the exclusion is keyed on the RUN ID, never the workflow NAME ────────────
+# A name-keyed fix would delete every main-gate-watch run from the in-flight
+# set, including a genuinely concurrent second one, and would break the moment
+# the workflow is renamed. This arm fails against a name-keyed implementation.
+cat > "$FX/self-inflight-runs-other.json" <<'JSON'
+{"workflow_runs": [
+  {"name": "elixir", "status": "completed", "id": 35492000001},
+  {"name": "cloud", "status": "completed", "id": 35492000002},
+  {"name": "main-gate-watch", "status": "in_progress", "id": 35492999999}
+]}
+JSON
+rc="$(env GITHUB_RUN_ID=35492442980 bash "$WATCH" --sha 56e0dbca4 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs-other.json" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "2" ] && grep -q "main-gate-watch #35492999999" "$OUT"; then
+  ok "a DIFFERENT main-gate-watch run (#35492999999) still counts as in flight -> WAITING; the exclusion is id-keyed, not name-keyed"
+else
+  bad "a different main-gate-watch run was excluded too — the fix is name-keyed, got exit $rc"; cat "$OUT" >&2
+fi
+
+# ── the explicit flag exists too, for a caller that is not GitHub Actions ────
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 56e0dbca4 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs.json" \
+  --self-run-id 35492442980 > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+  ok "--self-run-id reaches the same verdict as the environment default"
+else
+  bad "--self-run-id does not reach the MISSING verdict, got exit $rc"; cat "$OUT" >&2
+fi
+
+# ── the live workflow must actually supply the id ────────────────────────────
+# The script defaults SELF_RUN_ID from GITHUB_RUN_ID, which GitHub Actions sets
+# on every run, so the live path needs no argument. Assert the default exists:
+# without it the fix ships inert and this whole section measures nothing.
+if grep -q 'SELF_RUN_ID="${GITHUB_RUN_ID:-}"' "$WATCH"; then
+  ok "SELF_RUN_ID defaults from GITHUB_RUN_ID — the live scheduled run excludes itself with no workflow change"
+else
+  bad "SELF_RUN_ID does not default from GITHUB_RUN_ID; the fix is inert in production"
+fi
+
+
+# ═══ 16. NOT_OWED: the alarm is narrowed, and it is narrowed BOTH ways ═══════
+# task-2253e13aba12fbe8. #19414 stopped this watch counting its own run as a
+# reason to WAIT — correct — and thereby converted a MUTED problem into a LOUD
+# false one: 42 of the last 50 main tips carry no `Console gate` check run at
+# all, because .github/workflows/console-harness.yml is paths-filtered on its
+# `push:` arm (and ONLY there — every PR head still renders the context).
+#
+# EVERY ARM BELOW IS DRIVEN BY A REAL SHA'S REAL FILE LIST, and the two
+# directions are proven against each other, because the easy way to "fix" this
+# is to make the MISSING arm unreachable — which silences the detector.
+#
+#   9980425e6  internal/cli/... only        -> NOT_OWED, exit 0
+#   56e0dbca4  .claude/skills/... only      -> NOT_OWED, exit 0
+#   a5260f609  cloud/lib/** (a WATCHED path) -> STILL MISSING x3, exit 1
+section "16. NOT_OWED — a paths-declined context is silent, a touched one still screams"
+
+CF="$TMP/changed"; mkdir -p "$CF"
+printf '%s\n' 'internal/cli/manifest_declared_fact_guard_test.go' > "$CF/9980425e6.txt"
+printf '%s\n' '.claude/skills/orchestrate-tasks/helpers/held-liveness.sh' > "$CF/56e0dbca4.txt"
+cat > "$CF/a5260f609.txt" <<'FILES'
+cloud/lib/barkpark_cloud/publish_clock.ex
+cloud/lib/barkpark_cloud/web/router.ex
+cloud/test/barkpark_cloud/deploy_ledger_reachability_test.exs
+cloud/test/barkpark_cloud/publish_clock_test.exs
+cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs
+internal/cli/cloud_deploy_census_cmd.go
+FILES
+
+# The console-harness push arm really is the thing under test, so the fixture is
+# the REPO'S OWN workflow directory and the REPO'S OWN manifest. A synthetic
+# workflow would prove the matcher and nothing about the live filter.
+WFDIR="$REPO_ROOT/.github/workflows"
+MFST="$REPO_ROOT/.github/main-push-workflows.txt"
+
+# The ground the whole section stands on. If console-harness.yml stops being
+# CONDITIONAL, or its Console gate job is renamed, every arm below goes vacuous
+# while still passing — so both are asserted, not assumed.
+if grep -q '^\.github/workflows/console-harness\.yml	CONDITIONAL$' "$MFST"; then
+  ok "PRECONDITION: console-harness.yml is CONDITIONAL in the committed manifest — the tier is read, not invented"
+else
+  bad "PRECONDITION FAILED: console-harness.yml is not CONDITIONAL in $MFST; section 16 measures nothing"
+fi
+if grep -q 'name: Console gate' "$WFDIR/console-harness.yml"; then
+  ok "PRECONDITION: the job named 'Console gate' lives in console-harness.yml — the mapping is DERIVED from the tree"
+else
+  bad "PRECONDITION FAILED: no job named 'Console gate' in console-harness.yml; the context->workflow derivation is stale"
+fi
+
+# ── direction 1: a declined sha goes silent ─────────────────────────────────
+# Fixture: the recorded 56e0dbca4 payload, whose Console gate row never existed,
+# with NOTHING in flight. Before this change that is `MISSING Console gate`,
+# exit 1 — proven by section 15's `--self-run-id` arm on this very payload.
+for sha in 9980425e6 56e0dbca4; do
+  rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha "$sha" \
+    --protection-file "$FX/protection.json" \
+    --check-runs-file "$FX/self-inflight-checks.json" \
+    --runs-file "$FX/self-inflight-runs.json" \
+    --self-run-id 35492442980 \
+    --workflows-dir "$WFDIR" --manifest "$MFST" \
+    --changed-files-file "$CF/$sha.txt" > "$OUT" 2>&1; echo $?)"
+  if [ "$rc" = "0" ]; then
+    ok "$sha touched no console path -> exit 0; the 84% false alarm is gone"
+  else
+    bad "$sha still exits $rc; the declined sha is not silent"; cat "$OUT" >&2
+  fi
+  if grep -q "NOT_OWED Console gate" "$OUT"; then
+    ok "$sha names Console gate NOT_OWED — the silence is PRINTED, never merely absent"
+  else
+    bad "$sha does not print NOT_OWED; a silent subtraction is unauditable"; cat "$OUT" >&2
+  fi
+  if grep -q "MISSING  Console gate" "$OUT"; then
+    bad "$sha still reports MISSING Console gate"
+  else
+    ok "$sha no longer reports MISSING Console gate"
+  fi
+done
+
+# ── direction 2: THE NEGATIVE CONTROL. It must keep failing. ────────────────
+# a5260f609 touched cloud/lib/** , which console-harness.yml's push arm watches,
+# and STILL rendered no Console gate row. That is a genuinely unjudged tip and
+# the whole reason the MISSING arm exists. If this arm ever passes at exit 0,
+# the repair has silenced the detector wholesale and section 3 above is the only
+# thing standing between that and production.
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha a5260f609 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/a5260f609.json" \
+  --runs-file "$FX/a5260f609-runs.json" \
+  --workflows-dir "$WFDIR" --manifest "$MFST" \
+  --changed-files-file "$CF/a5260f609.txt" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ]; then
+  ok "a5260f609 touched cloud/lib/** and still rendered nothing -> STILL exit 1; the alarm is narrowed, not silenced"
+else
+  bad "a5260f609 exits $rc WITH its real file list; the MISSING arm has been made unreachable"; cat "$OUT" >&2
+fi
+n="$(grep -c "MISSING  " "$OUT")"
+if [ "$n" = "3" ]; then
+  ok "a5260f609 still reports MISSING on all THREE watched contexts, file list and all"
+else
+  bad "a5260f609 reports $n MISSING rows with its file list, expected 3"; cat "$OUT" >&2
+fi
+if grep -q "NOT_OWED" "$OUT"; then
+  bad "a5260f609 produced a NOT_OWED row; a sha that TOUCHED a watched path was excused"; cat "$OUT" >&2
+else
+  ok "a5260f609 produces NO NOT_OWED row — owed-ness is decided by the file list, not by the tier alone"
+fi
+
+# ── the discriminator IS the file list, proven by swapping only it ──────────
+# Same sha, same payloads, same argv — only the changed-files fixture differs.
+# If the verdict does not move, the file list is decorative and both arms above
+# are passing for a reason that has nothing to do with paths.
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha a5260f609 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/a5260f609.json" \
+  --runs-file "$FX/a5260f609-runs.json" \
+  --workflows-dir "$WFDIR" --manifest "$MFST" \
+  --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "NOT_OWED Console gate" "$OUT" && [ "$(grep -c "MISSING  " "$OUT")" = "2" ]; then
+  ok "swapping ONLY the file list moves Console gate from MISSING to NOT_OWED (3 MISSING -> 2 + 1 NOT_OWED) — the file list is the discriminator"
+else
+  bad "the file list did not move the verdict on a5260f609; it is decorative, got exit $rc"; cat "$OUT" >&2
+fi
+if grep -q "MISSING  Cloud gate" "$OUT" && grep -q "MISSING  Elixir gate" "$OUT"; then
+  ok "...and the two ALWAYS-tier contexts are untouched by the swap — only the CONDITIONAL one moves"
+else
+  bad "an ALWAYS-tier context moved with the file list; the tier is not being read"; cat "$OUT" >&2
+fi
+
+# ── FAIL CLOSED: no file list must buy no silence ───────────────────────────
+# Every pre-existing arm of this harness passes no --changed-files-file, so this
+# is what keeps the other 109 measuring what they measured. Asserted directly
+# rather than inferred from their totals.
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 56e0dbca4 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs.json" \
+  --self-run-id 35492442980 \
+  --workflows-dir "$WFDIR" --manifest "$MFST" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+  ok "with NO --changed-files-file the verdict is MISSING, exit 1 — unknown owed-ness fails CLOSED"
+else
+  bad "an unknown file list bought silence (exit $rc); the matcher fails OPEN"; cat "$OUT" >&2
+fi
+
+# ── FAIL CLOSED: an unreadable manifest must not excuse anything ────────────
+rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 9980425e6 \
+  --protection-file "$FX/protection.json" \
+  --check-runs-file "$FX/self-inflight-checks.json" \
+  --runs-file "$FX/self-inflight-runs.json" \
+  --self-run-id 35492442980 \
+  --workflows-dir "$WFDIR" --manifest "$TMP/no-such-manifest.txt" \
+  --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+  ok "a missing manifest yields UNKNOWN -> OWED -> MISSING; the tier list cannot be deleted into silence"
+else
+  bad "a missing manifest silenced the watch (exit $rc)"; cat "$OUT" >&2
+fi
+
+# ── MUTATION: the tier must actually be READ from the manifest ──────────────
+# A copy of the manifest with console-harness.yml demoted to ALWAYS must make
+# the declined sha scream again. If it does not, the manifest read is inert and
+# the script is deciding owed-ness some other way.
+sed 's|^\.github/workflows/console-harness\.yml	CONDITIONAL$|.github/workflows/console-harness.yml	ALWAYS|' \
+  "$MFST" > "$TMP/manifest-always.txt"
+if grep -q '^\.github/workflows/console-harness\.yml	ALWAYS$' "$TMP/manifest-always.txt"; then
+  rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 9980425e6 \
+    --protection-file "$FX/protection.json" \
+    --check-runs-file "$FX/self-inflight-checks.json" \
+    --runs-file "$FX/self-inflight-runs.json" \
+    --self-run-id 35492442980 \
+    --workflows-dir "$WFDIR" --manifest "$TMP/manifest-always.txt" \
+    --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+  if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+    ok "MUTATION: demoting console-harness.yml to ALWAYS in the manifest restores the scream — the tier is genuinely read from the file"
+  else
+    bad "MUTATION SURVIVED: the manifest tier is inert (exit $rc); owed-ness is being decided elsewhere"; cat "$OUT" >&2
+  fi
+else
+  bad "could not build the ALWAYS-mutant manifest; the mutation arm measured nothing"
+fi
+
+# ── MUTATION: the paths list must actually be READ from the workflow ────────
+# A copy of the workflow tree whose console-harness push paths are replaced by a
+# pattern matching 9980425e6's one file must flip it from NOT_OWED to MISSING.
+MUTWF="$TMP/wf-mutant"; rm -rf "$MUTWF"; mkdir -p "$MUTWF"
+cp "$WFDIR"/console-harness.yml "$MUTWF/" 2>/dev/null
+python3 - "$MUTWF/console-harness.yml" <<'MUT'
+import sys, re
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+# Replace the whole push-arm paths: block with a single pattern that matches
+# internal/cli/**, which 9980425e6 touched and the real filter does not select.
+out, seen, skipping = [], False, False
+for line in src.splitlines(True):
+    if not seen and re.match(r"^    paths:\s*$", line):
+        out.append("    paths:\n"); out.append('      - "internal/cli/**"\n')
+        seen, skipping = True, True
+        continue
+    if skipping:
+        if re.match(r'^      - ', line):
+            continue
+        skipping = False
+    out.append(line)
+open(p, "w", encoding="utf-8").write("".join(out))
+sys.stderr.write("mutated\n" if seen else "NOT MUTATED\n")
+MUT
+if grep -q 'internal/cli/\*\*' "$MUTWF/console-harness.yml"; then
+  ok "built the paths-mutant workflow (push paths -> internal/cli/**)"
+  rc="$(env -u GITHUB_RUN_ID bash "$WATCH" --sha 9980425e6 \
+    --protection-file "$FX/protection.json" \
+    --check-runs-file "$FX/self-inflight-checks.json" \
+    --runs-file "$FX/self-inflight-runs.json" \
+    --self-run-id 35492442980 \
+    --workflows-dir "$MUTWF" --manifest "$MFST" \
+    --changed-files-file "$CF/9980425e6.txt" > "$OUT" 2>&1; echo $?)"
+  if [ "$rc" = "1" ] && grep -q "MISSING  Console gate" "$OUT"; then
+    ok "MUTATION: a push paths: list that DOES select 9980425e6's file restores the scream — the glob is matched against the real workflow, not hardcoded"
+  else
+    bad "MUTATION SURVIVED: rewriting the workflow's paths: did not change the verdict (exit $rc); the matcher is not reading the file"; cat "$OUT" >&2
+  fi
+else
+  bad "could not build the paths-mutant workflow; the mutation arm measured nothing"
+fi
+
+# The library is SOURCED, so a PR that changes only it changes this watch's
+# verdict — and must dispatch this harness. An undispatched target is how a
+# matcher gets edited with nothing measuring it.
+if grep -q '"scripts/lib/main-push-owedness.sh"' "$WF"; then
+  ok "the pull_request paths: filter lists scripts/lib/main-push-owedness.sh — a PR touching only the matcher still runs this harness"
+else
+  bad "scripts/lib/main-push-owedness.sh is not in $WF's paths: filter; editing the matcher dispatches nothing"
+fi
+
+bash -n "$REPO_ROOT/scripts/lib/main-push-owedness.sh" \
+  && ok "scripts/lib/main-push-owedness.sh passes bash -n" \
+  || bad "scripts/lib/main-push-owedness.sh has a syntax error"
+
+# The sharing is the point: one manifest, read by BOTH instruments. Before this
+# change `grep -c main-push-workflows scripts/main-gate-watch.sh` was 0 and the
+# two answered differently on the same sha BY CONSTRUCTION.
+if [ "$(grep -c 'main-push-workflows' "$WATCH")" -ge 1 ] \
+   && [ "$(grep -c 'main-push-workflows' "$REPO_ROOT/scripts/main-verdict-presence.sh")" -ge 1 ]; then
+  ok "both main-gate-watch.sh and main-verdict-presence.sh read .github/main-push-workflows.txt — one tier list, not two"
+else
+  bad "the two instruments do not share the tier manifest; a second hand-maintained list is back"
+fi
+
+# ═══ 17. AN ABBREVIATED SHA NEVER ANSWERS OFF AN EMPTY RUN FEED ══════════════
+# task-0a44c3bc96baa8cc. The two endpoints disagree about prefixes and only one
+# says so: `commits/<sha>/check-runs` accepts `a5260f609`; `actions/runs?head_sha=`
+# matches the full oid ONLY and answers HTTP 200 with an EMPTY list. Every guard
+# in read_workflow_runs() fires on transport or shape and NONE on that, so the
+# in-flight set came back empty for the wrong reason and the watch screamed
+# MISSING at a tip that was still running.
+#
+# MEASURED LIVE, 2026-09-20T13:36Z, on tip 769c39bd6959f1adb7428b72d9dde4237421640d
+# with four runs in flight: the full oid printed WAITING and exited 2, while
+# `--sha 769c39bd6` printed MISSING and exited 1. Same commit, same minute.
+#
+# THE STUB BELOW MODELS THAT ASYMMETRY AND NOTHING ELSE. It serves RAW payloads
+# and lets the script apply its own jq — a stub that returned the finished
+# answer would route around the code under test. The run-feed arm compares the
+# `head_sha=` it was handed against the full oid and serves the recorded runs
+# only on an exact match; anything shorter gets `{"total_count":0,...}`, which
+# is precisely what GitHub does.
+section "17. an abbreviated sha is widened before any head_sha= query"
+
+S17="$TMP/s17"; mkdir -p "$S17/bin" "$S17/fx"
+# A synthetic oid that is NOT an object in this checkout, so full_oid()'s local
+# `git rev-parse` arm cannot resolve it and the API arm is the one measured.
+S17_FULL="1234567890abcdef1234567890abcdef12345678"
+S17_SHORT="1234567890a"
+printf '%s' "$S17_FULL" > "$S17/fx/FULL"
+cp "$FX/protection.json" "$S17/fx/protection.json"
+
+cat > "$S17/bin/gh" <<STUB
+#!/usr/bin/env bash
+FXD="$S17/fx"
+STUB
+cat >> "$S17/bin/gh" <<'STUB'
+args="$*"
+full="$(cat "$FXD/FULL")"
+head_sha=""
+for a in "$@"; do case "$a" in head_sha=*) head_sha="${a#head_sha=}" ;; esac; done
+case "$args" in
+  *"/branches/"*"/protection"*)
+    cat "$FXD/protection.json"; exit 0 ;;
+  *"/actions/runs"*)
+    # THE ASYMMETRY. Full oid -> the recorded feed. Anything else -> empty, 200.
+    if [ "$head_sha" = "$full" ]; then cat "$FXD/runs.json"
+    else echo '{"total_count": 0, "workflow_runs": []}'; fi
+    exit 0 ;;
+  *"/check-runs"*)
+    # This endpoint ACCEPTS a prefix: same rows either way. That is why the bug
+    # is invisible from the check-run side alone.
+    cat "$FXD/checks.json"; exit 0 ;;
+  *-q*files*)
+    # changed-files read: unknown, so every paths-filtered context stays OWED.
+    exit 1 ;;
+  *"/commits/"*)
+    s=""
+    for a in "$@"; do case "$a" in */commits/*) s="${a##*/commits/}" ;; esac; done
+    case "$full" in "$s"*) printf '{"sha": "%s"}\n' "$full"; exit 0 ;; esac
+    echo '{"message": "No commit found for SHA"}' >&2; exit 1 ;;
+esac
+echo "gh stub: unrouted args: $args" >&2; exit 97
+STUB
+chmod +x "$S17/bin/gh"
+
+s17_run() { # sha, script
+  PATH="$S17/bin:$PATH" env -u GITHUB_RUN_ID bash "${2:-$WATCH}" \
+    --sha "$1" --repo FRIKKern/barkpark --branch main > "$OUT" 2>&1
+  echo $?
+}
+
+# ── 17a. the stub itself reproduces GitHub's asymmetry ──────────────────────
+# Asserted BEFORE it is used to judge anything: a stub that served the same feed
+# for both forms would make every arm below vacuously green.
+cp "$FX/runs-all-inflight.json" "$S17/fx/runs.json"
+cp "$FX/empty-payload.json"     "$S17/fx/checks.json"
+a="$(PATH="$S17/bin:$PATH" gh api --paginate -X GET -f head_sha="$S17_FULL" -f per_page=100 repos/FRIKKern/barkpark/actions/runs | jq '.workflow_runs | length')"
+b="$(PATH="$S17/bin:$PATH" gh api --paginate -X GET -f head_sha="$S17_SHORT" -f per_page=100 repos/FRIKKern/barkpark/actions/runs | jq '.workflow_runs | length')"
+if [ "$a" = "3" ] && [ "$b" = "0" ]; then
+  ok "the stub reproduces the real asymmetry: head_sha=<full> lists 3 runs, head_sha=<prefix> lists 0"
+else
+  bad "the stub does not reproduce the asymmetry (full=$a, prefix=$b); every arm below would be vacuous"
+fi
+c="$(PATH="$S17/bin:$PATH" gh api --paginate -X GET -f per_page=100 "repos/FRIKKern/barkpark/commits/$S17_SHORT/check-runs" | jq '.check_runs | length')"
+if [ "$c" = "0" ]; then
+  ok "the stub's check-runs arm answers a PREFIX (the endpoint that accepts one) — the bug is invisible from this side"
+else
+  bad "the stub's check-runs arm did not answer a prefix"
+fi
+
+# ── 17b. THE PARITY ASSERTION: both forms, one verdict ──────────────────────
+rc_full="$(s17_run "$S17_FULL")"
+if [ "$rc_full" = "2" ] && grep -q "WAITING " "$OUT"; then
+  ok "full oid + 3 runs in flight -> WAITING (exit 2)"
+else
+  bad "full oid -> expected exit 2 WAITING, got $rc_full"; cat "$OUT" >&2
+fi
+rc_short="$(s17_run "$S17_SHORT")"
+if [ "$rc_short" = "2" ] && grep -q "WAITING " "$OUT"; then
+  ok "ABBREVIATED sha + the same 3 runs in flight -> WAITING (exit 2), the SAME verdict"
+else
+  bad "abbreviated sha -> expected exit 2 WAITING, got $rc_short"; cat "$OUT" >&2
+fi
+if [ "$rc_full" = "$rc_short" ]; then
+  ok "the two sha forms agree (exit $rc_full = exit $rc_short) — INVERTS the measured 2-vs-1 split"
+else
+  bad "the two sha forms disagree: full=$rc_full short=$rc_short"
+fi
+if grep -q "resolved the sha argument '$S17_SHORT' to the full oid $S17_FULL" "$OUT"; then
+  ok "the widening is PRINTED, naming both the argument and the oid it became"
+else
+  bad "the widening is silent; a reader cannot tell which sha was actually queried"; cat "$OUT" >&2
+fi
+if ! grep -q "MISSING  " "$OUT"; then
+  ok "the abbreviated form reaches NO MISSING row — the failed-read-equals-zero answer is gone"
+else
+  bad "the abbreviated form still reports MISSING off an empty run feed"; cat "$OUT" >&2
+fi
+
+# ── 17c. THE CONTROL: a genuinely never-judged tip still screams, both ways ──
+# a5260f609aa2bfe0e76a5983e6992a694776acef, recorded: 3 check runs (none of them
+# a watched context) and 9 workflow runs, ALL terminal. If the fix worked by
+# softening MISSING rather than by widening the sha, this arm reds.
+cp "$FX/a5260f609.json"      "$S17/fx/checks.json"
+cp "$FX/a5260f609-runs.json" "$S17/fx/runs.json"
+rc_full="$(s17_run "$S17_FULL")"
+n_full="$(grep -c "MISSING  " "$OUT")"
+rc_short="$(s17_run "$S17_SHORT")"
+n_short="$(grep -c "MISSING  " "$OUT")"
+if [ "$rc_full" = "1" ] && [ "$n_full" = "3" ]; then
+  ok "CONTROL full oid: 9 terminal runs, no watched row -> MISSING x3, exit 1"
+else
+  bad "CONTROL full oid: expected exit 1 with 3 MISSING rows, got exit $rc_full / $n_full rows"; cat "$OUT" >&2
+fi
+if [ "$rc_short" = "1" ] && [ "$n_short" = "3" ]; then
+  ok "CONTROL abbreviated: the SAME scream survives the widening — MISSING x3, exit 1"
+else
+  bad "CONTROL abbreviated: expected exit 1 with 3 MISSING rows, got exit $rc_short / $n_short rows"; cat "$OUT" >&2
+fi
+
+# ── 17d. MUTATION: remove the widening and 17b reds ─────────────────────────
+# The arms above are only load-bearing if they can fail. Neutralise full_oid()'s
+# result at the one call site and the abbreviated form must fall back to MISSING
+# while the full oid stays WAITING — i.e. exactly the split measured live.
+MUT17="$TMP/main-gate-watch-noresolve.sh"
+# shellcheck disable=SC2016  # the $ is LITERAL: these patterns match shell source
+sed 's/^    full="\$(full_oid "\$sha")"$/    full="$sha"/' "$WATCH" > "$MUT17"
+# shellcheck disable=SC2016  # likewise — grepping for the literal string full="$sha"
+if ! cmp -s "$MUT17" "$WATCH" && grep -q 'full="\$sha"' "$MUT17"; then
+  ok "built the no-widening mutant (full_oid's result replaced by the raw argument)"
+  cp "$FX/runs-all-inflight.json" "$S17/fx/runs.json"
+  cp "$FX/empty-payload.json"     "$S17/fx/checks.json"
+  m_full="$(s17_run "$S17_FULL" "$MUT17")"
+  m_short="$(s17_run "$S17_SHORT" "$MUT17")"
+  if [ "$m_full" = "2" ] && [ "$m_short" = "1" ] && grep -q "MISSING  " "$OUT"; then
+    ok "MUTATION SURVIVED NOTHING: without the widening the abbreviated form reds to MISSING/exit 1 while the full oid still WAITs at exit 2 — 17b measures the fix"
+  else
+    bad "MUTATION SURVIVED: the no-widening mutant answered full=$m_full short=$m_short; §17b would pass with the fix removed"; cat "$OUT" >&2
+  fi
+else
+  bad "could not build the no-widening mutant; §17b measured nothing"
+fi
+
+# ── 17e. a prefix that resolves to nothing is REFUSED, not answered ──────────
+rc="$(s17_run "deadbee")"
+if [ "$rc" = "3" ]; then
+  ok "an unresolvable prefix exits 3 (CONFIGURATION FAULT), not 1"
+else
+  bad "an unresolvable prefix -> expected exit 3, got $rc"; cat "$OUT" >&2
+fi
+if grep -q "the sha argument 'deadbee' is not a full 40-character commit oid" "$OUT"; then
+  ok "the refusal NAMES the argument it refused"
+else
+  bad "the refusal does not name the argument"; cat "$OUT" >&2
+fi
+if ! grep -q "MISSING  " "$OUT"; then
+  ok "the refusal never reaches a MISSING verdict — a query it could not satisfy answers nothing"
+else
+  bad "an unresolvable prefix still produced a MISSING verdict"; cat "$OUT" >&2
+fi
+
+# ── 17f. the hermetic fixture path is untouched by the gate ─────────────────
+# Every arm above §17 drives an ABBREVIATED sha with --check-runs-file, and none
+# of them issues a head_sha= query. The gate must therefore not fire there, or
+# this whole file would red on a change that fixes nothing about it.
+rc="$(run_watch a5260f609 "$FX/a5260f609.json" "$FX/protection.json" "$WATCH" "$FX/a5260f609-runs.json")"
+if [ "$rc" = "1" ] && ! grep -q "is not a full 40-character commit oid" "$OUT"; then
+  ok "the gate does not fire on the hermetic path — recorded payloads are keyed by the sha the harness names"
+else
+  bad "the gate fired on a fixture-fed run (exit $rc); the harness's own shas are not queried against any endpoint"; cat "$OUT" >&2
+fi
+
 bash -n "$WATCH" && ok "main-gate-watch.sh passes bash -n" || bad "main-gate-watch.sh has a syntax error"
 
 echo

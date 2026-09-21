@@ -96,8 +96,25 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
     end
   end
 
+  # One row in `codelists`, the table `current_registry/0` reads. The sandbox
+  # starts it EMPTY (the boot seeders ran outside the transaction), which is
+  # the exact state the narrowed boot leaves on a never-served box — and which
+  # the task now refuses rather than diffing against nothing.
+  defp seed_registry(list_id, issue) do
+    {:ok, _} =
+      Barkpark.Content.Codelists.register("onixedit", list_id, %{
+        issue: issue,
+        name: "test " <> list_id,
+        values: []
+      })
+
+    :ok
+  end
+
   describe "--revalidate --book-id" do
     test "prints a diff section for a known book" do
+      seed_registry("onixedit:notification_type", "73")
+
       seed_book("rev-known", %{
         "f" => %{"codelistId" => "onixedit:notification_type", "issue_version" => "73"}
       })
@@ -111,6 +128,22 @@ defmodule Mix.Tasks.Codelists.StalenessTest do
       assert output =~ "changed:"
       assert output =~ "removed:"
       assert output =~ "added:"
+    end
+
+    test "refuses an EMPTY codelists table instead of diffing against nothing" do
+      # task-e2c484370ef8fb51: under `app.start` the boot seeders filled the
+      # table before the task ran, so this state was unreachable; under
+      # `Barkpark.OneShot` a never-served database has 0 rows, and
+      # `revalidate/2` against `%{}` would print every ref as "removed".
+      seed_book("rev-blind", %{
+        "f" => %{"codelistId" => "onixedit:notification_type", "issue_version" => "73"}
+      })
+
+      assert Repo.aggregate("codelists", :count) == 0
+
+      assert_raise Mix.Error, ~r/codelists table is EMPTY/, fn ->
+        capture_io(fn -> Staleness.run(["--revalidate", "--book-id", "rev-blind"]) end)
+      end
     end
 
     test "errors when --revalidate is given without --book-id" do

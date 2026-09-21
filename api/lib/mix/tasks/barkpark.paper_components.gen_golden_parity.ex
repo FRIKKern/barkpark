@@ -404,6 +404,29 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       "section"
     ]
 
+  # The minimum population a PROJECTED collection must carry for a surface's
+  # fixture-driven realization loop to measure anything. Declared HERE — beside
+  # the `*_projection/1` functions that produce the population, and upstream of
+  # all three mirrors — so the floor has exactly ONE home. An emptied projection
+  # makes every per-row assertion downstream vacuous while the freshness leg
+  # (committed mirror == `build/1`) still agrees with the emptied generator, so
+  # the floor is the only control that reds. Values match the strictness the Go
+  # leg (internal/pdrender/component_golden_test.go) already enforces.
+  @population_floors %{
+    {"notes", "rows"} => 2,
+    {"cards", "cards"} => 2,
+    {"roadmap", "lanes"} => 2,
+    {"roadmap", "scale"} => 1
+  }
+
+  @doc """
+  The declared population floor for one `{type, projection key}` pair.
+
+  Raises for a pair that carries no declared floor — a test asking for a key the
+  projection does not carry is itself the defect, and a silent default would hide it.
+  """
+  def population_floor(type, key), do: Map.fetch!(@population_floors, {type, key})
+
   @impl Mix.Task
   def run(_args) do
     for type <- types() do

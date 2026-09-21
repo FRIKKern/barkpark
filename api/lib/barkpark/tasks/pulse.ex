@@ -50,7 +50,7 @@ defmodule Barkpark.Tasks.Pulse do
       current_epoch: 1,
       check_holder: 2,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -220,7 +220,7 @@ defmodule Barkpark.Tasks.Pulse do
             "api",
             Map.merge(
               %{"pulse" => Map.merge(now, %{"worker" => worker_id, "epoch" => next_epoch})},
-              caller_stamp(caller_token_id)
+              caller_stamp(caller_token_id, session)
               |> Map.merge(SessionId.session_stamp(session))
             )
           )

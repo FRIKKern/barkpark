@@ -1170,9 +1170,14 @@ run_dispatch "$ORDERS_FILE" "$ROSTER_R6" "$CAP_USD"
 expect_line 'SPEND CAP REACHED ($5.0000 >= $5.00) — dispatch halted, 0/2 orders placed'
 info "tripped state re-confirmed (freeze fired)"
 
-INODE_BEFORE="$(stat -f %i "$LEDGER" 2>/dev/null || stat -c %i "$LEDGER")"
+# GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+# FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+# report instead of failing, and a BSD-first `||` chain never reaches the
+# GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on the
+# wrong platform instead of quietly.
+INODE_BEFORE="$(stat -c %i "$LEDGER" 2>/dev/null || stat -f %i "$LEDGER")"
 : > "$LEDGER"
-INODE_AFTER="$(stat -f %i "$LEDGER" 2>/dev/null || stat -c %i "$LEDGER")"
+INODE_AFTER="$(stat -c %i "$LEDGER" 2>/dev/null || stat -f %i "$LEDGER")"
 [ "$INODE_BEFORE" = "$INODE_AFTER" ] || efail "the truncate replaced the file (inode $INODE_BEFORE -> $INODE_AFTER) — not an in-place zero"
 info "ledger truncated IN PLACE (inode $INODE_BEFORE unchanged); scratch server + shell untouched — no process restarted"
 show_ledger

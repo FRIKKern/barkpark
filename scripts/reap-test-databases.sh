@@ -170,7 +170,12 @@ while IFS='|' read -r oid name conns; do
   # GUARD 2 — age. No directory means no age, and no age means no reap.
   dir="$PGDATA/base/$oid"
   if [ ! -d "$dir" ]; then UNDATED+=("$name"); continue; fi
-  mtime="$(stat -f '%m' "$dir" 2>/dev/null || stat -c '%Y' "$dir" 2>/dev/null)"
+  # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+  # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+  # report instead of failing, and a BSD-first `||` chain never reaches the
+  # GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on
+  # the wrong platform instead of quietly.
+  mtime="$(stat -c '%Y' "$dir" 2>/dev/null || stat -f '%m' "$dir" 2>/dev/null)"
   case "${mtime:-}" in ''|*[!0-9]*) UNDATED+=("$name"); continue ;; esac
 
   age=$(( NOW - mtime ))

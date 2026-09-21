@@ -109,12 +109,14 @@ defmodule Barkpark.EdgeProjector.TypedEndpointBindingTest do
       publish!(
         "task",
         name,
-        Map.merge(Barkpark.LabelFixtures.with_labels(), %{
-          "kind" => "task",
-          "lifecycle_status" => "open",
-          "wave_paper" => paper_slug,
-          "acceptance_criteria" => [%{"criterion" => "cited", "met" => false}]
-        }),
+        Barkpark.TaskBriefFixtures.with_brief(
+          Map.merge(Barkpark.LabelFixtures.with_labels(), %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "wave_paper" => paper_slug,
+            "acceptance_criteria" => [%{"criterion" => "cited", "met" => false}]
+          })
+        ),
         scope
       )
 

@@ -426,6 +426,18 @@ function makeDom() {
     let groups = [];
     // The registry ids this element's CURRENT markup declares (see declaredBy).
     let ownIds = new Set();
+    // cch-w49-bl-repaint: how many times this element's innerHTML was WRITTEN.
+    // Not derivable from the final markup — a card painted once and a card
+    // painted six times identically leave byte-identical state behind, and the
+    // difference between them is the whole defect. Every write is counted,
+    // including the ones that set the same string, because in a browser
+    // `innerHTML =` destroys and rebuilds the subtree regardless.
+    let htmlWriteCount = 0;
+    // …and how many of those writes set the string that was ALREADY there. This
+    // is the sharp end: a repaint that changes nothing still destroys and
+    // rebuilds the subtree in a browser, taking every listener on it with it,
+    // so an identical repaint is pure loss — never a no-op.
+    let htmlRepeatWrites = 0;
     const handlers = Object.create(null);
     const attrs = Object.create(null);
 
@@ -551,11 +563,16 @@ function makeDom() {
       closest() { return null; },
       getClientRects() { return []; },
       get children() { return kids.slice(); },
+      // Harness-internal (leading underscore), never something app.js reads.
+      _htmlWrites() { return htmlWriteCount; },
+      _htmlRepeatWrites() { return htmlRepeatWrites; },
     };
 
     Object.defineProperty(el, "innerHTML", {
       get() { return html; },
       set(v) {
+        htmlWriteCount++;
+        if (String(v == null ? "" : v) === html) htmlRepeatWrites++;
         html = String(v == null ? "" : v);
         kids = parseChildren(html, makeEl);
         groups = parseGroups(html, kids, makeEl, el);
@@ -3248,6 +3265,30 @@ const EXPECTATIONS = {
       assert.ok(grid.includes("instance-card--warn"), "the degraded card carries the amber accent");
     },
   },
+  // cch-w20-bl. The ONE axis between this fixture and `overview-attention` is
+  // the instance name, so this expectation pins the name and nothing else that
+  // its twin above does not already pin. The exclusion is the load-bearing
+  // half: the name must arrive at the DOM WHOLE. `.attention-name`'s ellipsis
+  // is a PAINT treatment — if a truncation ever moved into the markup, the
+  // person would lose the tail from the link's href-bearing text and from every
+  // assistive reading of it, and the overflow-guard leg that measures the
+  // rendered run against the full string would still read "engaged".
+  "overview-attention-long-name": {
+    what: "the degraded box's 71-character operator name reaches the DOM whole, for the ellipsis to bound in paint",
+    check(reg) {
+      const body = (reg.get("overview-body") || {}).innerHTML || "";
+      const NAME = "Reporting — EU customer analytics, billing reconciliation and retention";
+      assert.equal(NAME.length, 71, "the fixture name is the 71 characters this expectation is written about");
+      assert.ok(body.includes("attention-row"), "an attention row renders");
+      assert.ok(body.includes(">" + NAME + "</a>"), "the whole name is the link's text — never truncated in the markup");
+      assert.ok(!body.includes("…"), "no ellipsis CHARACTER is written into the markup; the ellipsis is CSS");
+      assert.ok(
+        body.includes("Health unknown · Agent offline"),
+        "the row carries the same production-dominant reason its short-named twin does",
+      );
+      assert.ok(body.includes("View instance"), "the row offers View instance");
+    },
+  },
   // cch-w34-s6 (REVIEW ADDITION). Every string below is DERIVED FROM THE
   // FIXTURE, and the EXCLUSIONS are the load-bearing half: the row carries
   // `health_status: "up"`, so a console that reprints its cached column would
@@ -3442,6 +3483,71 @@ const EXPECTATIONS = {
       // The CLI command is NOT authority-gated — it teaches, it does not write.
       assert.ok(arch.includes("bp cloud instance resurrect"), "every reader keeps the copy-paste CLI affordance");
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
+    },
+  },
+  // ── cch-w47-rv-bl: the REFUSE arm of the same panel, end to end ────────────
+  //
+  // The twin above boots the default OWNER. This one boots the SAME two bundles
+  // for an actor whose own GET /v1/me answers role "member" — the first member x
+  // archives scenario in the corpus. Until it existed, the refuse arm was proven
+  // only where __app.test.mjs hands the pure helper the string "refuse" by hand:
+  // a helper that is right and never reached is the vacuous green this epic keeps
+  // finding, and nothing anywhere proved that instanceAdminAuthority's answer
+  // travels from the loadArchives render site into these helpers at all.
+  //
+  // EVERY EXPECTED STRING IS DERIVED, NOT TYPED. The role sentence comes out of
+  // the shipped reader (hooks.friendly on the exact payload router.ex's
+  // resurrect/1 sends), and the refuse-arm bytes come out of the shipped pure
+  // pair called on this scenario's OWN fixture. So a copy edit in app.js moves
+  // both sides together and this expectation cannot go stale into a false green;
+  // what it pins is the RELATION — mount bytes == refuse render, and refuse !=
+  // grant — which is exactly the thing a regression breaks.
+  "fleet-archives-member": {
+    what: "the Archives panel refused: no live Resurrect, the CLI chip kept, and ONE server-owned line saying which role the command needs",
+    check(reg, hooks) {
+      const arch = (reg.get("archives-body") || {}).innerHTML || "";
+      // THE PRECONDITION, ASSERTED — not assumed. Both assertions below are
+      // about what a REFUSED member sees; measured against an owner they would
+      // pass or fail for reasons that have nothing to do with authority.
+      assert.equal(hooks.meState(), "loaded",
+        "fleet-archives-member must boot with /v1/me ANSWERED — got " + hooks.meState() +
+        ", and an unanswered read takes the 'unknown' arm, so nothing below measures the refuse arm");
+      assert.equal(hooks.meFlags().role, "member",
+        "fleet-archives-member must boot a plain member — got " + JSON.stringify(hooks.meFlags().role));
+      // The panel really rendered the list (an empty/error arm would pass the
+      // absence assertions below for free).
+      assert.ok(arch.includes("archive-list"), "the populated archive list renders for a member too");
+      assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle, unchanged by authority");
+      // THE REFUSAL LINE, in the server's own words. `friendly` is the shipped
+      // 403 reader; this is the payload router.ex's resurrect/1 really sends
+      // (`Auth.forbidden(required: "admin", scope: "team")`).
+      const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+      assert.ok(roleSentence && roleSentence.includes("admin role"),
+        "the shipped 403 reader must answer this payload with the admin-role sentence; got: " + roleSentence);
+      assert.ok(arch.includes(roleSentence),
+        "the refuse arm prints the server's own role sentence above the list; got: " + arch.slice(0, 600));
+      // The live write stays OMITTED (cch-w47-s3's ruling, unweakened) …
+      assert.ok(!arch.includes("archive-resurrect-btn"),
+        "a member the route refuses is offered no live Resurrect");
+      // … and the CLI chip stays on EVERY row (cch-w47-rv-bl ruled (a), not (c):
+      // a member must still be able to learn the command and hand it on).
+      assert.ok(countMatches(arch, "bp cloud instance resurrect") >= 2,
+        "the copy-paste CLI chip is kept on every row — the ruling labels it, it does not delete it");
+      // THE MOUNT IS WIRED TO THE HELPER, and the two arms really differ. Both
+      // sides are computed from this scenario's own fixture through the shipped
+      // pure pair, so this is a diff of rendered BYTES, not of two hand-written
+      // strings.
+      const payload = SCENARIOS["fleet-archives-member"].data.archives.body;
+      const refused = hooks.archivesPanelHtml(hooks.archivesModel(payload, "refuse"));
+      const granted = hooks.archivesPanelHtml(hooks.archivesModel(payload, "grant"));
+      assert.equal(arch, refused,
+        "the DOM mount must render exactly the pure refuse arm — if these differ, instanceAdminAuthority's answer is not reaching the helpers");
+      assert.notEqual(refused, granted,
+        "the refused member's rendered bytes must differ from the granted ones");
+      assert.ok(!granted.includes(roleSentence),
+        "the grant arm never carries the role sentence — it is offered the button and has nothing to apologise for");
+      assert.ok(granted.includes("archive-resurrect-btn"),
+        "the grant arm still offers the live Resurrect (this is the control: the refuse assertions above could otherwise pass on a panel that offers it to nobody)");
     },
   },
 
@@ -5988,6 +6094,101 @@ const EXPECTATIONS = {
     },
   },
 
+  // ── cch-w45-s5-fu · THE UPDATES STRIP'S STILL-CHECKING ARM HAS AN EXIT ─────
+  // THE HOLE, MEASURED BEFORE IT WAS FIXED. Booted against origin/main's app.js
+  // this scenario rendered #instance-body with ZERO [data-me-retry] anywhere in
+  // its bytes, while the Updates panel carried a disabled "Roll back…" pointing
+  // at an "inst-update-actions-reason" span reading "Checking capabilities…".
+  // The exit lived only on the header's actions strip, and the suspended arm of
+  // that strip draws the CLI disclosure alone — no adminWriteControlHtml
+  // control, so no group reason and no exit. A three-valued offer whose unknown
+  // arm cannot be left is the D437 shape, one surface deeper.
+  //
+  // FOUR THINGS ARE ASSERTED AND NONE OF THEM IS REDUNDANT:
+  //   1. the PRECONDITION — the panel really is in the unknown arm (otherwise
+  //      an exit assertion would be about a screen that never needed one);
+  //   2. the header strip drew NO grouped control, which is what makes this the
+  //      reachable case rather than one the header already covers;
+  //   3. the exit is inside the Updates strip's own markup, not merely
+  //      somewhere on the page;
+  //   4. it WORKS — the click re-reads /v1/me and the arm RESOLVES to the live
+  //      [data-rollback] mount hook. Renders-but-dead is the failure wireMeRetry's
+  //      first-match binding used to guarantee for a second copy of the button,
+  //      so a presence-only assertion here would have passed on the broken shape.
+  "instance-suspended-me-unreadable": {
+    what: "the Updates panel's still-checking Roll back on a box whose header strip offers nothing — the exit renders IN THE STRIP and, when pressed, re-reads /v1/me and resolves the arm",
+    async check(reg, hooks, ctx) {
+      const bodyEl = reg.get("instance-body");
+      const before = (bodyEl || {}).innerHTML || "";
+      assert.ok(before.length > 0, "#instance-body rendered empty");
+      // 1. The precondition: the unknown arm really is on screen.
+      assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
+        "the Roll back offer is not in the unknown arm — there is no still-checking state here to need an exit");
+      assert.ok(before.includes('<span class="inst-life-note" id="inst-update-actions-reason">Checking capabilities&hellip;</span>'),
+        "the strip states the unknown honestly (no reason claimed) — the arm this exit belongs to");
+      assert.equal(before.indexOf("data-rollback"), -1,
+        "the live rollback mount hook must be withheld while /v1/me is unanswered");
+      // 2. The header strip cannot be the exit's home HERE: the suspended arm
+      //    draws no adminWriteControlHtml control at all, so it emits no group
+      //    reason — the pointer's absence is the measurement.
+      assert.equal(before.indexOf('aria-describedby="inst-header-actions-reason"'), -1,
+        "this fixture stopped being the reachable case: the header strip drew a grouped control, so it carries the exit and the Updates strip is covered by it");
+      // 3. The exit is IN the Updates strip, not merely somewhere on the page.
+      const stripOpen = '<div class="update-panel-actions" id="inst-update-actions">';
+      const at = before.indexOf(stripOpen);
+      assert.ok(at !== -1, "the Updates action strip did not render");
+      const strip = before.slice(at, before.indexOf("</div></div><section", at) + 6);
+      assert.ok(strip.includes('<button class="btn btn-primary btn-sm" data-me-retry type="button">Retry</button>'),
+        "the still-checking Updates strip carries NO exit — the only way out of 'Checking capabilities…' would have to be a page reload; got: " + strip);
+      // 4. It works. The fault is one-shot, so the re-read can land.
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      const btns = bodyEl.querySelectorAll("[data-me-retry]");
+      assert.equal(btns.length, 1, "exactly one exit in #instance-body — the Updates strip's own");
+      const fired = btns[0].click();
+      assert.ok(fired > 0, "[data-me-retry] dispatched " + fired + " handler(s) — the button RENDERS but is DEAD (wireMeRetry binds the first match only, so a second copy of the exit is bytes and not an exit)");
+      await ctx.settle();
+      assert.ok(ctx.countCalls("GET", "/v1/me") >= 2, "the retry never re-issued the /v1/me read");
+      const after = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(after.includes('data-rollback="1"'),
+        "the landed 200 owner did not resolve the arm — the exit re-read but the strip never repainted; got: " + after);
+      assert.equal(after.indexOf("inst-update-actions-reason"), -1,
+        "the still-checking note survived an answered /v1/me — the arm did not resolve, it was only appended to");
+      assert.equal(after.indexOf("data-me-retry"), -1,
+        "the exit is still offered after the answer landed — an exit that outlives the unknown it exits is the same lie in the other direction");
+    },
+  },
+
+  // The binding's own test. The Updates strip's exit is the SECOND
+  // [data-me-retry] in this subtree, and the first-match binding it replaced
+  // would have left it rendering and dead — the precise reason five call sites
+  // talked themselves out of emitting an exit at all. Asserted by INDEX and by
+  // handler count, never by presence.
+  "instance-behind-me-unreadable": {
+    what: "a live behind box with /v1/me unanswered — the header strip and the Updates strip each carry an exit, and the SECOND one is wired, not decoration",
+    async check(reg, hooks, ctx) {
+      const bodyEl = reg.get("instance-body");
+      const before = (bodyEl || {}).innerHTML || "";
+      assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-header-actions-reason">Update to v0.9.2</button></div>'),
+        "the header strip is not in the unknown arm — this fixture exists for the TWO-strip case");
+      assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
+        "the Updates strip is not in the unknown arm");
+      const btns = bodyEl.querySelectorAll("[data-me-retry]");
+      assert.equal(btns.length, 2,
+        "expected TWO exits (one per still-checking strip) and got " + btns.length + " — the case this binding exists for is not on screen");
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      // The SECOND one: the header's is bound by any implementation.
+      const fired = btns[1].click();
+      assert.ok(fired > 0,
+        "the Updates strip's exit dispatched " + fired + " handler(s) — it RENDERS and does NOTHING, which is the dead-bytes outcome a first-match binding guarantees for every copy after the first");
+      await ctx.settle();
+      assert.ok(ctx.countCalls("GET", "/v1/me") >= 2, "the second exit never re-issued the /v1/me read");
+      const after = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(after.includes('data-rollback="1"') && after.includes('id="inst-update"'),
+        "the landed answer did not resolve BOTH strips; got: " + after);
+      assert.equal(after.indexOf("data-me-retry"), -1, "the exits retire once the read lands");
+    },
+  },
+
   // ── cch-w12-followup-login-fixture-gap · THE IDENTITY CHANGE, DRIVEN ────────
   // THE SEAM. render()'s logged-out arm serves the sign-out click AND the 401
   // auto-bounce, and NEITHER reloads — so every per-account cache standing in
@@ -6709,11 +6910,171 @@ async function assertBillingStatesNoNumeralItCannotSupport() {
 // each other and to the corpus: late-/v1/me, then billing-numerals, then the
 // census guard and the scenarios.
 
+// ── cch-w49-bl-repaint · THE MONEY CARD IS PAINTED ONCE PER FACT ────────────
+// Measured on origin/main by instrumenting this shim's innerHTML setter across
+// the whole billing corpus: #billing-recommended took 6 writes on ten of the
+// eleven billing actors and 8 on billing-portal-return, of which 4 and 5 set
+// the string that was ALREADY there. The cause is that the cold arm of
+// renderBilling is entered more than once per boot — applyRoute paints it on a
+// #billing deep link, and loadMe's billing seam re-enters it when /v1/me lands,
+// both while GET /v1/subscription is still open — and each entry started its
+// OWN subscription read and subscribed its OWN re-render, each of which then
+// started its own ceiling read and subscribed another.
+//
+// TWO PREDICATES, neither a magic number:
+//   (1) ZERO identical-consecutive writes. A repaint that changes nothing still
+//       destroys and rebuilds the subtree in a browser, taking the card's
+//       "See all plans" listener with it, and pays a full layout for pixels
+//       nobody can tell apart. A repaint must change something or not happen.
+//   (2) ONE GET per read per boot. The duplicate paints were not free client
+//       work — each came with a duplicate request to the control plane.
+// Both are properties, not tallies, so a new billing scenario is covered the
+// day it is added and no baseline needs re-cutting when the copy changes.
+async function assertBillingPaintsOncePerFact() {
+  const scens = SCENARIO_NAMES.filter((n) => n.startsWith("billing-"));
+  const broken = [];
+  const line = [];
+  for (const scen of scens) {
+    const boot = bootScenario(scen, {});
+    await flush();
+    const box = boot.registry.get("billing-recommended");
+    if (!box) { broken.push(scen + ": #billing-recommended was never written at all"); continue; }
+    const writes = box._htmlWrites();
+    const repeats = box._htmlRepeatWrites();
+    const subs = boot.calls.filter((c) => c.path.endsWith("/v1/subscription")).length;
+    const usage = boot.calls.filter((c) => c.path.endsWith("/v1/usage/summary")).length;
+    line.push(scen.replace(/^billing-/, "") + " " + writes + "w/" + repeats + "r/" + subs + "s/" + usage + "u");
+    if (repeats > 0) {
+      broken.push(scen + ": " + repeats + " of " + writes + " writes to #billing-recommended repainted " +
+        "BYTE-IDENTICAL markup — every one of those destroys the card's live handlers to redraw the same pixels");
+    }
+    if (subs !== 1) broken.push(scen + ": GET /v1/subscription issued " + subs + " times in one boot (want 1)");
+    if (usage !== 1) broken.push(scen + ": GET /v1/usage/summary issued " + usage + " times in one boot (want 1)");
+  }
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " billing-repaint — " + scens.length +
+    " billing actors, writes/repeats/sub-GETs/usage-GETs: " + line.join(", ") + "\n");
+  if (broken.length) {
+    process.stdout.write("\nbilling repaint guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+
+// ── DEFECT-E · THE SHELL-INSTANCE TWIN GUARD (task-7bd507ea989ef248) ─────────
+// Nine scenarios shot BYTE-IDENTICAL to shell-instance in all 20 accent x theme
+// x width cells — four independent runs, one sha256 across all ten names. A
+// full-count green matrix certified them anyway, because a shot count says
+// "N files exist", never "N DISTINCT screens exist". This is that missing
+// predicate. It is an assertion over a CLASSIFICATION, not a flat "they must
+// differ", because the nine have TWO causes and a guard that cannot tell them
+// apart would have to accept the weaker one for all nine:
+//
+//   fold  — the scenario paints its own state; the identity was purely a
+//           SHOOTING artifact (fleetSupportCardHtml mounts at the tail of the
+//           Overview column, under shoot.sh's 1000px fold). It must declare a
+//           `shotHeight`, and #instance-body must differ from shell-instance's.
+//   click — the state the label names is behind a click (pollOffloadWatch,
+//           runVerifyNow), so the pre-click DOM legitimately IS
+//           shell-instance's. The DRIVE is what gets asserted: it must exist,
+//           and its FIRST selector must resolve in the painted DOM — a drive
+//           whose entry control is not on screen cannot start.
+//   both  — offload-*: click-gated AND the mounted ladder is below the fold.
+//
+// fleet-support-empty is the one honest "fold" entry whose DOM is shell-
+// instance's (an empty support card is shell-instance's own default render), so
+// it is classified "fold-only": shotHeight required, DOM equality allowed. Its
+// tall shot is the only image in the corpus showing the add-a-support CTA.
+//
+// MUTATION-PROVED in both directions — see the PR body.
+const SHELL_INSTANCE_TWINS = {
+  "fleet-support-provisioning": { fold: true, dom: true },
+  "fleet-support-online": { fold: true, dom: true },
+  "fleet-support-failed": { fold: true, dom: true },
+  "fleet-support-empty": { fold: true, dom: false },
+  "offload-filing": { fold: true, click: true },
+  "offload-working": { fold: true, click: true },
+  "offload-done": { fold: true, click: true },
+  "offload-blocked": { fold: true, click: true },
+  "verify-no-credentials": { click: true },
+};
+
+// The selector a drive step names, whichever verb it uses.
+function driveStepSelector(step) {
+  return (step && (step.click || step.fill || step.await)) || "";
+}
+
+// Does `sel` resolve in the painted body? The shim is a string DOM, so this is
+// a SHAPE match over the selector forms the drives use — an attribute selector
+// and an id — and it THROWS on anything else rather than answering "true" for a
+// form it cannot actually check.
+function selectorPaints(html, sel) {
+  const attr = sel.match(/^\[([a-z-]+)\]$/);
+  if (attr) return html.includes(attr[1] + "=") || html.includes(" " + attr[1] + ">") || html.includes(" " + attr[1] + " ");
+  const id = sel.match(/^#([a-z0-9-]+)$/i);
+  if (id) return html.includes('id="' + id[1] + '"');
+  throw new Error("selectorPaints cannot check " + JSON.stringify(sel) + " — teach it that form");
+}
+
+async function assertDefectEScenariosAreNotShellInstance() {
+  const baseBoot = bootScenario("shell-instance");
+  await flush();
+  const baseline = (baseBoot.registry.get("instance-body") || {}).innerHTML || "";
+  assert.ok(baseline.length > 0, "shell-instance must paint #instance-body — the whole guard is relative to it");
+  assert.ok(!SCENARIOS["shell-instance"].shotHeight,
+    "shell-instance is the REFERENCE shot and must keep the default fold — a shotHeight here moves the baseline under all nine");
+
+  const problems = [];
+  for (const name of Object.keys(SHELL_INSTANCE_TWINS)) {
+    const want = SHELL_INSTANCE_TWINS[name];
+    const scen = SCENARIOS[name];
+    if (!scen) { problems.push(name + ": listed here but absent from SCENARIOS"); continue; }
+    const boot = bootScenario(name);
+    await flush();
+    const html = (boot.registry.get("instance-body") || {}).innerHTML || "";
+    // The DOM comparison is #instance-body — the container shell-instance and
+    // all nine share. The SELECTOR check needs more: this shim's innerHTML is a
+    // per-element STRING, so a slot filled later by its own id (#instance-verify
+    // is filled async by loadInstanceVerify) never appears inside the parent's
+    // bytes. Sweep every element the boot touched, or [data-vf-run] reads as
+    // "does not paint" when it painted perfectly one element down.
+    const painted = [...boot.registry.values()].map((el) => (el && el.innerHTML) || "").join("\n");
+
+    if (want.fold && !(scen.shotHeight > 1000)) {
+      problems.push(name + ": its subject mounts below shoot.sh's 1000px fold and it declares no taller shotHeight");
+    }
+    if (want.click) {
+      const drive = scen.drive;
+      if (!Array.isArray(drive) || drive.length === 0) {
+        problems.push(name + ": click-gated with no `drive` — its shot collapses back onto shell-instance");
+      } else {
+        const entry = driveStepSelector(drive[0]);
+        if (!entry) problems.push(name + ": drive step 0 names no selector");
+        else if (!selectorPaints(painted, entry)) {
+          problems.push(name + ": drive entry " + JSON.stringify(entry) + " does not paint — the drive cannot start");
+        }
+      }
+    }
+    if (want.dom && html === baseline) {
+      problems.push(name + ": #instance-body is BYTE-IDENTICAL to shell-instance — its own state never painted");
+    }
+    if (!/\[(click-gated|below the fold)/.test(scen.label)) {
+      problems.push(name + ": its label must say how the shot is separated (below the fold / click-gated)");
+    }
+  }
+  if (problems.length) {
+    process.stdout.write("\nshell-instance twin guard FAILED:\n" + problems.map((p) => "  - " + p).join("\n") + "\n");
+    assert.fail(problems.length + " DEFECT-E scenario(s) cannot be told apart from shell-instance");
+  }
+  process.stdout.write("  ok   shell-instance twins — 9 scenario(s): 8 shot past the fold, 5 drive a real click, 3 also differ in DOM\n");
+}
+
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
+  await assertBillingPaintsOncePerFact();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
+  await assertDefectEScenariosAreNotShellInstance();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);

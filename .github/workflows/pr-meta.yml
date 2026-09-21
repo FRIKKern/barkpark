@@ -314,6 +314,41 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/shim-trigger-filter-check.sh
 
+      # ── workflow-root-only-check ──────────────────────────────────────────────
+      # THE THIRD MEMBER OF THE SAME FAMILY, and the bluntest. The two ratchets
+      # above ask whether a workflow that GitHub reads renders its name on the
+      # right heads. This one asks the question underneath both: does GitHub read
+      # the file AT ALL?
+      #
+      # Actions parses workflows from exactly one directory — `.github/workflows/`
+      # at the repository ROOT. `js/.github/workflows/` held FIVE files that had
+      # never run once, TWO of them (ci.yml, release.yml) same-named shadows of
+      # real root workflows, which is how the tree stayed invisible: a reader
+      # greps `ci.yml`, finds a file, and never asks which one GitHub reads. One
+      # of the five was also the only caller of a "smoke test" that exited 0 for
+      # every input. All six are deleted (task-7a49b8c2e3104aa2); this step is
+      # what stops the SEVENTH, which will be added by someone who never heard of
+      # this row.
+      #
+      # IT LIVES HERE, IN THE PATH-AGNOSTIC JOB, ON PURPOSE. A nested
+      # .github/workflows/ can be created under ANY directory, so the same
+      # argument this file's header makes for the symlink gate applies verbatim:
+      # a paths-filtered lane fires only when the guard's own files change, which
+      # is the shape of a check that is green because it never ran. It is manifest
+      # reading only — one `git ls-files` — so it costs no measurable time.
+      #
+      # Selftest first, same discipline as its two siblings: the scan's own
+      # discrimination matrix (including the arm proving it keys on PATH and not
+      # on FILENAME, which is the shadow case) runs before its verdict over the
+      # tree means anything.
+      - name: Prove the root-only workflow guard can fail (--selftest)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/workflow-root-only-check.sh --selftest
+
+      - name: Every workflow file is in the repository-root .github/workflows/
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/workflow-root-only-check.sh
+
       # ── dispatch-filter-staleness-check ───────────────────────────────────────
       # THE TWIN OF THE RATCHET ABOVE, one step later in the same story. That one
       # refuses a paths filter where a name must always render. This one refuses

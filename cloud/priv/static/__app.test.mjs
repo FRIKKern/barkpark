@@ -2694,15 +2694,23 @@ const wrapTmp = (name, css) => {
   fs.writeFileSync(f, css, "utf8");
   return f;
 };
-// The FOUR PINNED copies, byte-identical cores under four DIFFERENT jackets.
+// The FIVE PINNED copies, byte-identical cores under DIFFERENT jackets.
 // Every synthetic case below is built on top of these so the two anti-vacuity
 // guards (zero copies, missing pinned host) never mask the leg under test.
 // `.attention-row` joined the pin in W20-S6's review commit, in the same change
 // that added it to WRAP_REQUIRED_HOSTS — the fourth copy was counted but not
 // required, so a scan losing exactly that copy still read clean.
+// `.detail-title-row` joined it the same way one wave later
+// (cch-w24-bl-detail-title-row-not-a-required-wrap-host): cch-w24-s2 authored
+// the fifth copy and bumped the app.css COUNT pin below 4 -> 5, but left it out
+// of WRAP_REQUIRED_HOSTS, so a scan degrading to 4-of-5 that lost exactly the
+// failed instance's own detail header still read clean. It is spelt as its own
+// line here (app.css ships it as a comma member of the `.instance-card-head`
+// prelude) because the survivor loop below filters these lines by host prefix.
 const WRAP_SURVIVORS = [
   ".attention-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".detail-rail .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; }",
+  ".detail-title-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".fleet-status .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".instance-card-head .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
 ].join("\n");
@@ -2734,7 +2742,7 @@ test("cch-w19-s4: E14 does NOT assert the jacket — a jacketless fourth host gr
   const f = wrapTmp("jacketless.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { " + WRAP_CORE_TEXT + " }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 0, "a jacketless fourth host with the full core must GREEN:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the next copy:\n" + r.out);
+  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the next copy:\n" + r.out);
   assert.match(r.out, /0 E14 error\(s\)/, r.out);
 });
 
@@ -2746,9 +2754,9 @@ test("cch-w19-s4: a fourth host dropping one core declaration reds under BOTH co
     const f = wrapTmp("drift.css", WRAP_SURVIVORS + "\n" + sel + " { white-space: normal; height: auto; padding-top: 2px; padding-bottom: 2px; }\n");
     const r = runCssCheck("--wrap-parity-check", f);
     assert.equal(r.status, 1, sel + " drops min-height and must RED:\n" + r.out);
-    assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the three survivors stay ok:\n" + r.out);
+    assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the other survivors stay ok:\n" + r.out);
     assert.match(r.out, /\.op-gate/, "and the error must name the drifting host:\n" + r.out);
-    for (const ok of [".detail-rail", ".fleet-status", ".instance-card-head"]) {
+    for (const ok of [".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
       assert.ok(!new RegExp("E14 [^\\n]*\\" + ok + " \\.status-pill declares").test(r.out), ok + " must not be blamed:\n" + r.out);
     }
   }
@@ -2762,7 +2770,7 @@ test("cch-w19-s4: the trigger is the DECLARATION, not the selector", () => {
   const f = wrapTmp("outofscope.css", WRAP_SURVIVORS + "\n.some-rail .status-pill { margin-left: 4px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 0, "a wrapper-scoped rule declaring no core property must not red:\n" + r.out);
-  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
+  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
   assert.ok(!/some-rail/.test(r.out), "and must not be mentioned at all:\n" + r.out);
 });
 
@@ -2778,13 +2786,13 @@ test("cch-w19-s4: a vacuous green is refused — zero copies is an ERROR", () =>
   assert.match(r.out, /0 wrapper-scoped wrap copy\(ies\)/, "the bare .status-pill must not count as a copy:\n" + r.out);
 });
 
-test("cch-w19-s4: the three survivor selectors are pinned — losing one reds", () => {
+test("cch-w19-s4: the survivor selectors are pinned — losing one reds", () => {
   // The zero-guard cannot see PARTIAL blindness: a scan degrading to 1 of 4
   // still reports clean. These pins close that, and they are same-file pins of
   // this repo's OWN selectors (pin-your-own, derive-foreign). `.attention-row`
   // joined the loop with W20-S6's fourth copy — a pin that is not driven here
   // is a pin nobody has proven can bite.
-  for (const host of [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"]) {
+  for (const host of [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
     const kept = WRAP_SURVIVORS.split("\n").filter((l) => !l.startsWith(host + " ")).join("\n");
     const f = wrapTmp("missing.css", kept + "\n");
     const r = runCssCheck("--wrap-parity-check", f);
@@ -2815,11 +2823,16 @@ test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all five copies there"
   // a rule-head count and visible to this one, which is the whole point of
   // keeping both.
   //
-  // NOT ALSO ADDED TO `WRAP_REQUIRED_HOSTS` (__css_check.mjs). Doing so is the
-  // stronger pin and W20-S6's precedent — counted-but-not-required cannot see a
-  // scan degrading to 4-of-5 — but it cascades into every E14 fixture
-  // stylesheet, which is a deliberate edit to a curated oracle rather than a
-  // review repair. Filed as `cch-w24-bl-detail-title-row-not-a-required-wrap-host`.
+  // NOW ALSO IN `WRAP_REQUIRED_HOSTS` (__css_check.mjs), which is the stronger
+  // pin and W20-S6's precedent: counted-but-not-required could not see a scan
+  // degrading to 4-of-5. That was deferred from the w24 review because it
+  // cascades into every E14 fixture stylesheet — a deliberate edit to a curated
+  // oracle — and landed as its own slice,
+  // `cch-w24-bl-detail-title-row-not-a-required-wrap-host`. THE COUNT BELOW AND
+  // THE REQUIRED-HOST LIST ARE NOT REDUNDANT: the count notices a NEW copy
+  // (nothing requires a host that does not exist yet), the required list
+  // notices a LOST one. This test drives both, and the survivor loop above
+  // drives the new pin against a synthetic stylesheet that omits it.
   const appCss = fileURLToPath(new URL("./app.css", import.meta.url));
   const r = runCssCheck("--wrap-parity-check", appCss);
   assert.equal(r.status, 0, "app.css must be green under E14:\n" + r.out);
@@ -2846,8 +2859,8 @@ test("cch-w19-bl-e14: a shorthand-only fourth copy is COUNTED and REDS", () => {
   const f = wrapTmp("shorthand.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { padding: 2px 11px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 1, "a shorthand fourth copy must RED, not vanish:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED — invisibility was the defect:\n" + r.out);
-  assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the four survivors stay ok:\n" + r.out);
+  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED — invisibility was the defect:\n" + r.out);
+  assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the five survivors stay ok:\n" + r.out);
   assert.match(r.out, /\.op-gate \.status-pill declares padding —/, "the error must name the host AND the shorthand:\n" + r.out);
   assert.match(r.out, /set through the shorthand `padding: 2px 11px`/, "and say WHY, not just 'not declared':\n" + r.out);
 });
@@ -2859,8 +2872,8 @@ test("cch-w19-bl-e14: shorthand plus the core RESTATED in longhand after it gree
   const f = wrapTmp("legal.css", WRAP_SURVIVORS +
     "\n.op-gate .status-pill { white-space: normal; height: auto; min-height: 24px; padding: 2px 11px; padding-top: 2px; padding-bottom: 2px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 0, "shorthand + longhand restatement is a legal fifth copy:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it is still COUNTED:\n" + r.out);
+  assert.equal(r.status, 0, "shorthand + longhand restatement is a legal sixth copy:\n" + r.out);
+  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it is still COUNTED:\n" + r.out);
   assert.match(r.out, /0 E14 error\(s\)/, r.out);
 });
 
@@ -3152,6 +3165,28 @@ test("cchi-w20: --citation-inventory runs ABOVE the gate body, so a red gate can
   // census banner appears in this output and this test reds.
   const r = runCssCheck("--citation-inventory");
   assert.equal(r.status, 0, r.out);
+  // NON-VACUITY FLOOR, BEFORE THE TWO ABSENCE ASSERTIONS. Both of those are of
+  // the form !/x/.test(r.out), and the empty string satisfies both — so on its
+  // own this test could not tell "the inventory correctly exited above the gate
+  // body" from "the inventory printed nothing at all". That is not theoretical:
+  // gating the sub-mode to process.exit(0) before printing anything left this
+  // test green. Pin a COUNT the real run exceeds, derived here rather than
+  // hardcoded, so an EMPTY or TRUNCATED stdout reds instead of passing.
+  const invRows = r.out.split("\n").filter((l) => /^\s*ruled=\s*\d+\s+E11=\s*\d+\s+\S/.test(l));
+  assert.ok(invRows.length > 10, `the inventory must PRINT its per-file rows, got ${invRows.length} row(s):\n` + r.out);
+  const expectedRows = citationScanSetFrom(fileURLToPath(new URL(".", import.meta.url)));
+  assert.equal(
+    invRows.length,
+    expectedRows.length,
+    `the inventory must emit one row per scanned file (${expectedRows.length} expected):\n` + r.out,
+  );
+  // And the totals line must be PRESENT and whole — a stdout cut mid-stream
+  // keeps the rows above it and loses this, which the row count alone can miss.
+  assert.match(
+    r.out,
+    /\d+ file\(s\) scanned \(.*\), \d+ shipped-E11 hit\(s\), \d+ ruled-alternation hit\(s\), \d+ E17 refusal\(s\)/,
+    "the inventory's totals line must survive to the end of stdout:\n" + r.out,
+  );
   assert.ok(!/classes checked/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
   assert.ok(!/contrast pairs/.test(r.out), "the inventory must exit BEFORE the gate body runs:\n" + r.out);
 });
@@ -8008,9 +8043,39 @@ test("webhookCardHtml reflects active state (Active pill + Disable) and carries 
   assert.match(html, /data-wh-rotate/);
   assert.match(html, /data-wh-deliveries/);
   assert.match(html, /data-wh-delete/);
-  for (const verb of ["show", "toggle", "rotate", "deliveries", "rm"]) {
+  for (const verb of ["show", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
     assert.match(html, new RegExp("bp cloud webhook " + verb + " abc"));
   }
+});
+
+// The `Send test` button's copy-as-CLI twin. This is the pair the card used to
+// break: the button shipped while `bp cloud webhook` had no test-send verb, so
+// the chip was deliberately withheld. The verb landed (internal/cli/
+// cloud_webhook_cmd.go, `case "test-send", "test":`), and the CLI side pins the
+// same prefix as webhookTestSendChip in internal/cli/cloud_webhook_cmd_test.go.
+// What is asserted here is the EXACT clipboard payload, inside the .wh-cli row —
+// not merely "the string appears somewhere in the card" — so removing the
+// cliChipHtml(webhookCliChip("test-send", …)) call from webhookCardHtml reds it.
+test("webhookCardHtml: the Send test button has a CLI twin whose copied command is exactly `bp cloud webhook test-send <instance>`", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", url: "https://x/h", active: true }, "abc", "production");
+  // Precondition: the action this chip is the twin OF is actually rendered.
+  assert.match(html, /data-wh-test>Send test</,
+    "precondition: the Send test action button is missing, so this test would pass vacuously");
+
+  const cli = html.split('<div class="wh-cli">')[1].split("</div>")[0];
+  assert.ok(cli.includes('data-copy="bp cloud webhook test-send abc"'),
+    "the .wh-cli row carries no test-send chip: " + cli);
+  assert.ok(cli.includes(">bp cloud webhook test-send abc<"),
+    "the test-send chip's visible command text is not the copied command: " + cli);
+
+  // Off-default dataset rides the ratified `--dataset <ds>` suffix, same as the
+  // sibling chips — a staging card must not copy a production command.
+  const staging = hooks.webhookCardHtml(
+    { id: "wh1", url: "https://x/h", active: true }, "abc", "staging");
+  const stagingCli = staging.split('<div class="wh-cli">')[1].split("</div>")[0];
+  assert.ok(stagingCli.includes('data-copy="bp cloud webhook test-send abc --dataset staging"'),
+    "the test-send chip does not forward an off-default dataset: " + stagingCli);
 });
 
 test("webhookCardHtml reflects disabled state (neutral pill + Enable)", () => {
@@ -10503,8 +10568,21 @@ test("coherence: tokenRows reads live and flags unresolved tokens as gaps", () =
 });
 
 test("coherence: fixtureToHtml paints role words + hex chips and stays escape-safe", () => {
-  const golden = fs.readFileSync(LIFECYCLE_FIXTURE, "utf8");
-  const html = hooks.coherenceFixtureToHtml(golden);
+  // THE PAINT ASSERTIONS RUN ON A LOCAL PROBE, NOT ON THE GOLDEN. They used to
+  // read LIFECYCLE_FIXTURE and then pin `#2563eb` — a token VALUE owned by
+  // design/tokens.json and regenerated by the TUI lane. That made a legitimate,
+  // wholly foreign token regeneration red this console test on the next
+  // unrelated cloud PR, which is the defect gr-backlog-coherence-fixture-durable
+  // exists to remove. What this test owns is the TRANSFORM; the golden's
+  // contents are not its subject. A real-golden arm follows, and it asserts only
+  // properties no regeneration can move.
+  const probe = [
+    "state         glyph  ascii  role   light      dark",
+    "in_progress   ~      ~      info   #2563eb    #60a5fa",
+    "blocked       !      !      warn   #d97706    #fbbf24",
+    "done          v      v      ok     #0d9488    #2dd4bf",
+  ].join("\n");
+  const html = hooks.coherenceFixtureToHtml(probe);
   // Emitted lifecycle roles are wrapped in the shared token classes.
   assert.match(html, /<span class="bp-lc-info">info<\/span>/);
   assert.match(html, /<span class="bp-lc-warn">warn<\/span>/);
@@ -10520,6 +10598,22 @@ test("coherence: fixtureToHtml paints role words + hex chips and stays escape-sa
   assert.match(evil, /<span class="bp-lc-ok">ok<\/span>/);
   // No false positive: a substring like "workshop" is NOT a role word.
   assert.ok(!hooks.coherenceFixtureToHtml("workshop broker").includes("bp-lc-"));
+
+  // THE REAL-SHAPE ARM. A probe-only test can pass over a transform that
+  // explodes on the bytes the page actually renders, so the committed golden is
+  // still fed through it — but only for properties that are true of ANY
+  // regenerated golden: it produces output, and nothing in it can break out of
+  // the <pre>. No assertion here names a token value, a role word or a row, so
+  // regenerating internal/taskboard/testdata/styleguide_lifecycle.txt cannot
+  // red this test.
+  const goldenHtml = hooks.coherenceFixtureToHtml(
+    fs.readFileSync(LIFECYCLE_FIXTURE, "utf8"),
+  );
+  assert.ok(goldenHtml.length > 0, "the real golden must still transform to something");
+  assert.ok(
+    !/<(?!\/?span\b)/.test(goldenHtml),
+    "the transform emits only <span> — anything else means golden bytes reached the DOM unescaped",
+  );
 });
 
 // cch-w26-s5. The test above pins PRESENCE — the four role words it names all
@@ -10585,25 +10679,106 @@ test("coherence: the helper block is byte-identical in app.js and coherence.html
   );
 });
 
-test("coherence: the embedded TUI fixtures are byte-identical to the committed goldens", () => {
+// gr-backlog-coherence-fixture-durable. THE DRIFT TEST IS GONE BECAUSE THE
+// DRIFT IS GONE. coherence.html used to embed a byte-copy of each Go golden in
+// a <script type="text/plain"> block and this slot asserted byte-identity
+// against the committed file. That assertion was correct and still catastrophic
+// in ownership: the TUI/design lane regenerates those goldens as a matter of
+// course (it did exactly that in #4393), and the very next CLOUD pull request —
+// touching nothing the TUI owns — inherited the red, with "re-embed
+// styleguide_lifecycle.txt verbatim" as its only repair. A path-filter widening
+// (gr-p5-coherence-fixture, #4432) made the break visible sooner; it could not
+// remove the second copy.
+//
+// So the second copy is removed. The page FETCHES each golden from
+// /__fixtures__/…, __preview__/serve.mjs maps those routes to the canonical
+// files, and the two tests below pin the read-through instead of the copy.
+// NEITHER READS GOLDEN CONTENT — they read the page, the server's route table,
+// and the goldens' EXISTENCE — so a regenerated golden cannot red the console
+// harness. The one thing that still can is DELETING or RENAMING a golden, which
+// genuinely breaks this page and belongs to the PR that does it.
+
+test("coherence: the TUI goldens are READ, never embedded — no byte-copy survives", () => {
   const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
-  const embed = (id) => {
-    const m = pageSrc.match(
-      new RegExp('<script type="text/plain" id="' + id + '">([\\s\\S]*?)</script>'),
+  assert.ok(
+    !/<script[^>]*type="text\/plain"[^>]*id="co-fixture-/.test(pageSrc),
+    "coherence.html embeds a golden byte-copy again — the whole point is that it " +
+      "fetches from /__fixtures__/ instead; a copy re-introduces the cross-lane red",
+  );
+  // Stronger than "no such tag": no golden BYTES at all, anywhere in the page.
+  // The probe is DERIVED from each golden's own first line, so it cannot go
+  // stale — and it can only ever fail by the page containing those bytes, which
+  // is the defect. Regenerating a golden moves the probe, never the verdict.
+  for (const [label, file] of [["lifecycle", LIFECYCLE_FIXTURE], ["tokens", TOKENS_FIXTURE]]) {
+    assert.ok(fs.existsSync(file), label + " golden is missing: " + file);
+    const head = fs.readFileSync(file, "utf8").split("\n")[0];
+    assert.ok(head.length > 10, label + " golden's first line is too short to be a probe");
+    assert.ok(
+      !pageSrc.includes(head),
+      "coherence.html carries the " + label + " golden's first line verbatim — it is " +
+        "copying the fixture again instead of reading it",
     );
-    assert.ok(m, "coherence.html must embed the " + id + " fixture");
-    return m[1];
-  };
-  assert.equal(
-    embed("co-fixture-lifecycle"),
-    fs.readFileSync(LIFECYCLE_FIXTURE, "utf8"),
-    "lifecycle fixture drifted — re-embed styleguide_lifecycle.txt verbatim",
+  }
+});
+
+test("coherence: serve.mjs routes every fixture URL the page fetches to a real golden", () => {
+  const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
+  const serveSrc = fs.readFileSync(
+    new URL("./__preview__/serve.mjs", import.meta.url), "utf8",
   );
-  assert.equal(
-    embed("co-fixture-tokens"),
-    fs.readFileSync(TOKENS_FIXTURE, "utf8"),
-    "tokens fixture drifted — re-embed styleguide_tokens.txt verbatim",
+  // The route table, read out of serve.mjs rather than restated here — a second
+  // hand-kept list of paths is the very thing this slice deleted.
+  const table = serveSrc.match(/const FIXTURE_ROUTES = \{([\s\S]*?)\n\};/);
+  assert.ok(table, "serve.mjs must declare FIXTURE_ROUTES");
+  const routes = [...table[1].matchAll(
+    /"(\/__fixtures__\/[^"]+)":\s*path\.join\(\s*REPO_ROOT,\s*"([^"]+)"\)/g,
+  )].map((m) => ({ url: m[1], rel: m[2] }));
+  assert.equal(routes.length, 2, "expected exactly the two TUI goldens, got " + routes.length);
+
+  // Every URL the page fetches is served, and every served URL is fetched —
+  // both directions, so neither a dead route nor a 404-in-the-browser can hide.
+  const fetched = [...pageSrc.matchAll(/"(\/__fixtures__\/[^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    [...new Set(fetched)].sort(),
+    routes.map((r) => r.url).sort(),
+    "coherence.html's fetched fixture URLs and serve.mjs's routes disagree",
   );
+
+  // The routes resolve to the canonical goldens, and those files exist.
+  // EXISTENCE ONLY — never contents.
+  assert.deepEqual(
+    routes.map((r) => r.rel).sort(),
+    [
+      "internal/pdrender/testdata/styleguide_tokens.txt",
+      "internal/taskboard/testdata/styleguide_lifecycle.txt",
+    ],
+    "the fixture routes no longer point at the canonical Go goldens",
+  );
+  for (const r of routes) {
+    assert.ok(
+      fs.existsSync(path.join(REPO_ROOT, r.rel)),
+      r.url + " routes to " + r.rel + ", which does not exist — the page would 404",
+    );
+  }
+  // AND serve.mjs's OWN ROOT RESOLVES TO THE REPO ROOT. Measured, not assumed:
+  // the first cut of this route wrote `path.resolve(HERE, "../../..")` —
+  // correct for __app.test.mjs, one level short for a file in __preview__ — and
+  // every assertion above passed while a live fetch of the route 404'd. A test
+  // that only compares STRINGS cannot see a resolution bug, so recompute it.
+  const rootLit = serveSrc.match(/const REPO_ROOT = path\.resolve\(HERE, "([^"]+)"\)/);
+  assert.ok(rootLit, "serve.mjs must derive REPO_ROOT from HERE");
+  assert.equal(
+    path.resolve(path.join(REPO_ROOT, "cloud/priv/static/__preview__"), rootLit[1]),
+    REPO_ROOT,
+    "serve.mjs's REPO_ROOT does not resolve to the repo root — /__fixtures__/ would 404",
+  );
+
+  // Both are declared in the console dispatcher's path set, so the harness
+  // re-runs when one is deleted or renamed (the only change that can red this).
+  const decl = fs.readFileSync(path.join(REPO_ROOT, "scripts/console-path-escape-check.sh"), "utf8");
+  for (const r of routes) {
+    assert.ok(decl.includes("\n" + r.rel + "\n"), r.rel + " is not declared in CONSOLE_PATHS");
+  }
 });
 
 // ── C10: Usage sub-tab + Members settings panel ─────────────────────────────
@@ -12359,8 +12534,15 @@ test("S11b: JS never invents a reason — a false verb with no gap and no defaul
 test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled reason, and danger decommission", () => {
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "hetzner", host: "h", name: "web" });
   const html = hooks.lifecycleActionRowHtml(m);
-  assert.match(html, /inst-life-pill bp-inst--live/); // S4 token consumed on the pill
-  assert.match(html, /Live/);
+  // cch-r21l: the lifecycle chip is a statusMeta pill now — `.inst-life-pill` was a
+  // second grammar for the state the fleet row already paints, and is retired. The
+  // pin is the WHOLE chip, so the absorption cannot be half-reverted: the family,
+  // the ROLE the state maps to (live -> ok, read off `.bp-inst--live { var(--ok) }`),
+  // the S4 token still riding as the identity class, and the shared dot/label parts.
+  assert.match(html, /<span class="status-pill status-pill--ok bp-inst--live">/);
+  assert.match(html, /<span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Live<\/span>/);
+  assert.ok(!/inst-life-pill|inst-life-dot|inst-life-label/.test(html),
+    "the retired .inst-life-pill chip family must not be emitted — one state grammar");
   assert.match(html, /bp cloud instance archive web/); // CLI affordance verbatim
   assert.match(html, /via the bp CLI/);
   assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // server-owned reason, escaped as the SPA escapes it
@@ -14457,8 +14639,32 @@ test("cch-w47-s3: an UNKNOWN /v1/me fails CLOSED — resurrect bills a real box,
   const unknown = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "unknown"));
   assert.ok(unknown.indexOf("archive-resurrect-btn") === -1, "an unanswered role authorises nothing");
   assert.equal((unknown.match(/class="archive-row"/g) || []).length, 2);
-  // Every non-grant answer renders the same way — one rule, not a per-value fork.
-  assert.equal(unknown, hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse")));
+  // cch-w47-rv-bl SPLIT THIS ASSERTION, and the split is the point of the slice.
+  //
+  // It used to read `assert.equal(unknown, refuse)` under the words "every
+  // non-grant answer renders the same way — one rule, not a per-value fork".
+  // That was true of the OFFER and was being asserted of the whole PANEL, so it
+  // quietly forbade the one sentence a refusal can carry and silence cannot.
+  // The shared rule survives intact below (neither arm draws the button); what
+  // is no longer shared is the EXPLANATION, because "unknown" means /v1/me was
+  // never answered — there is no `required` role to name and claiming one would
+  // state as fact a thing the console never read.
+  const refuseArm = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse"));
+  assert.ok(refuseArm.indexOf("archive-resurrect-btn") === -1, "a refusal authorises nothing either");
+  const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+  assert.ok(roleSentence.indexOf("admin role") !== -1,
+    "the shipped 403 reader must answer resurrect/1's payload with the admin-role sentence; got: " + roleSentence);
+  assert.ok(refuseArm.indexOf(roleSentence) !== -1, "the refuse arm names the role the CLI chip needs");
+  assert.ok(unknown.indexOf(roleSentence) === -1, "an unanswered /v1/me names no role");
+  // And the two arms differ by EXACTLY that line — nothing else moved.
+  // Through replaceUnique (the file's own import), never a bare `.replace`: a bare
+  // string needle takes the FIRST match and says nothing when it matches twice, so a
+  // panel that grew a second archives-note would subtract only one and still pass.
+  // replaceUnique REFUSES both drift and ambiguity instead.
+  assert.equal(
+    replaceUnique(refuseArm, '<div class="archives-note"><p>' + roleSentence + "</p></div>", "",
+      { what: "cch-w47-rv-bl: subtract the refuse arm's one role line" }),
+    unknown);
 });
 
 test("cch-w47-s3: the authority reaches EVERY row, not just the first — .map's index argument cannot leak in", () => {
@@ -15667,9 +15873,21 @@ test("cch-w45-s5: rollbackInstance is no longer appended unconditionally — the
   assert.doesNotMatch(unknown, /data-rollback/);
   assert.equal(cchW45S5Reason(unknown), null);
   assert.match(unknown, /Checking capabilities/);
-  // The page's ONE exit lives in the header; a second [data-me-retry] here
-  // would be a DEAD control (wireMeRetry binds the first match only).
-  assert.doesNotMatch(unknown, /data-me-retry/);
+  // cch-w45-s5-fu — THE STRIP CARRIES ITS OWN EXIT. This used to assert the
+  // OPPOSITE ("the page's ONE exit lives in the header; a second here would be
+  // a DEAD control"), and that reasoning is what left the panel exit-less on
+  // every lifecycle arm whose header strip draws no grouped control: a
+  // suspended or removing box still has a host, so this panel still renders and
+  // its Roll back still takes the unknown arm, while the header offers only the
+  // CLI disclosure. wireMeRetry binds every match in the subtree now, so the
+  // second copy is live.
+  assert.equal(unknown.split("data-me-retry").length - 1, 1,
+    "the still-checking Updates strip must carry exactly one exit of its own; got " +
+    (unknown.split("data-me-retry").length - 1));
+  // …and only on the unknown arm: an ANSWERED authority has nothing to re-read.
+  for (const a of ["grant", "refuse"]) {
+    assert.doesNotMatch(hooks.updatePanelHtml(CCH_W45_S5_LIVE, a), /data-me-retry/);
+  }
 });
 
 test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (instanceDetailHtml)", () => {
@@ -15981,15 +16199,20 @@ test("cch-w47-rv-bl: the unknown arm dedupes the same way — one 'Checking capa
     assert.ok(strip.indexOf(S) === -1, name + ": the unknown arm borrowed the refusal's sentence");
   }
 
-  // ONE shared exit, unchanged: wireMeRetry binds the FIRST [data-me-retry], so
-  // the copies this slice removed were already dead bytes. It rides the header
-  // strip — the page's shipped home for it.
-  assert.equal(unknown.split("data-me-retry").length - 1, 1,
-    "exactly one /v1/me retry on the screen; got " + (unknown.split("data-me-retry").length - 1));
-  assert.match(hooks.instanceHeaderActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
-    "…and it is the header strip's, where it shipped");
-  assert.doesNotMatch(hooks.updatePanelActionsHtml(CCH_W47_RV_BL_BOX, "unknown"), /data-me-retry/,
-    "a second exit in the updates strip would be a control nothing binds");
+  // ONE exit PER STRIP — the dedupe is per group, not per page. cch-w45-s5-fu
+  // changed the rule this block used to state ("exactly one on the screen,
+  // riding the header"): wireMeRetry binds EVERY [data-me-retry] in the
+  // subtree, so a strip that states an unknown states its own way out of it.
+  // The per-page count is therefore the number of still-checking STRIPS (here
+  // two: header + updates), never one, and never one per control.
+  assert.equal(unknown.split("data-me-retry").length - 1, 2,
+    "one exit per still-checking strip (header + updates); got " + (unknown.split("data-me-retry").length - 1));
+  for (const [name, render] of CCH_W47_RV_BL_STRIPS.map((x) => [x[0], x[1]])) {
+    const strip = render("unknown");
+    assert.equal(strip.split("data-me-retry").length - 1, 1,
+      name + ": a still-checking strip states exactly one exit — zero strands it, two is the per-control " +
+      "duplication this slice deleted");
+  }
 });
 
 test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
@@ -18354,14 +18577,21 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
 // and every __preview__/*.mjs returned zero before this test existed, so the
 // string could be changed, or re-added, with no exit code anywhere).
 //
-// `Accounts.published_doc?/1` (accounts.ex:2764) derives the step from an
-// `AgentEvent` of type "content" with `payload->>'published_count' > 0`. The
-// four `record_event/3` call sites in cloud/lib write "health" (router.ex:1378),
-// "space" (router.ex:1423), "verify" (router.ex:2627) and "status"
-// (health/staleness_worker.ex:91) — never "content" — and the agent's HTTP
+// `Accounts.published_doc?/1` derives the step from an `AgentEvent` of type
+// "content" with `payload->>'published_count' > 0`. The four `record_event/3`
+// call sites in cloud/lib write "health" and "space" (the agent-report and
+// agent-space handlers in web/router.ex), "verify" (the verify-run handler) and
+// "status" (`Health.StalenessWorker`) — never "content" — and the agent's HTTP
 // surface has no content endpoint, so no producer exists and none was built
-// here. The manual ack (`ack_onboarding_step/2`, router.ex:1701) is unreachable
-// too: {action:"skip"} is the only onboarding action app.js POSTs.
+// here. That is still true after cch-w55-bl (charter D902) and is pinned
+// server-side by `agent_event_producer_census_test.exs`.
+//
+// cch-w55-bl — the SECOND half of the sentence above has since been fixed: the
+// manual ack (`Accounts.ack_onboarding_step/2`, via POST /v1/onboarding
+// {action:"ack"}) used to be unreachable because {action:"skip"} was the only
+// onboarding action app.js POSTed. It is now reachable — see the ack-control
+// tests below. The hint stays retracted: an ack is the USER saying so, which
+// is not the plane noticing.
 test("cch-w55-s3: the published-document step never promises the plane will notice", () => {
   const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
   const step = [...hooks.runwayStepModel(ob, { instanceName: "Production", studioId: "b1" })][2];
@@ -18374,6 +18604,44 @@ test("cch-w55-s3: the published-document step never promises the plane will noti
   // …and the whole runway carries the retraction, not just the model row.
   const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
   assert.ok(!/notice automatically/i.test(card), "the rendered runway makes no detection promise either");
+});
+
+// cch-w55-bl — THE STEP HAD NO PRODUCER **AND NO CONTROL**, so it was a
+// checkbox no customer could tick except by dismissing the whole runway.
+// Charter D902 ships ending 1: the ack control the server half has backed since
+// C-02. These tests pin the control's EXISTENCE, its two gates, and the fact
+// that it is the published_doc step alone that carries it.
+test("cch-w55-bl: the pending published-document step carries an ack control for an owner/admin", () => {
+  const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  const model = [...hooks.runwayStepModel(ob, { canManage: true, instanceName: "Production", studioId: "b1" })];
+  assert.equal(model[2].ack, "Mark as done");
+  // ONLY the third step — subscription and instance are server-observable and
+  // must never offer a self-report that could contradict Billing or Registry.
+  assert.equal(model[0].ack, "");
+  assert.equal(model[1].ack, "");
+  // The ack does NOT need a live box (the user may have published on an
+  // instance this console cannot link), unlike the Studio nudge which does.
+  const noBox = [...hooks.runwayStepModel(ob, { canManage: true, studioId: "" })];
+  assert.equal(noBox[2].ack, "Mark as done");
+  assert.equal(noBox[2].action, "");
+  // Rendered, with the hook the click wiring reads.
+  const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
+  assert.match(card, /data-runway-ack="published_doc"/);
+  assert.match(card, /Mark as done/);
+});
+
+test("cch-w55-bl: the ack control is hidden for a member and for an already-done step", () => {
+  const pending = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  // POST /v1/onboarding is owner/admin-only (Auth.require_current_team_admin),
+  // so a member's button would be a silent 403 — the same rule as Dismiss.
+  const member = [...hooks.runwayStepModel(pending, { canManage: false, studioId: "b1" })];
+  assert.equal(member[2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(pending, { canManage: false }), /data-runway-ack/);
+  // Done — nothing left to self-report, whether it went done by ack or (one
+  // day) by an agent-reported content event.
+  const done = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: true }] };
+  assert.equal([...hooks.runwayStepModel(done, { canManage: true, studioId: "b1" })][2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(done, { canManage: true, studioId: "b1" }), /data-runway-ack/);
 });
 
 test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", () => {
@@ -19289,8 +19557,17 @@ const S2_GH_SITE = {
 const S2_DEPLOY_BTN = '<button class="btn btn-primary btn-sm" id="site-deploy"';
 const s2Badges = (html) =>
   html.slice(html.indexOf('<div class="fleet-badges">'), html.indexOf(S2_DEPLOY_BTN));
+// cch-w48-bl-site-repo-chip-visual-weight: the DETAILS RAIL's Repository row,
+// which is where the read-only repo fact lives for every actor and always did.
+// The withheld arms used to duplicate it in .fleet-badges as a `.set-chip`;
+// the rail row is a strict SUPERSET of that text (it carries `@branch` too),
+// so pinning the rail is what keeps "the badges chip is gone" from being a
+// deletion of information rather than a deletion of a duplicate.
+const s2RailRepo = (span) =>
+  new RegExp('<span class="k">Repository</span><span class="v"><span class="mono">' +
+    span + '</span></span>');
 
-test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admin; the connected member keeps the repo name as a non-interactive chip", () => {
+test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admin; the connected member keeps the repo name in the Details rail", () => {
   const connected = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
 
   // THE PAIRED POSITIVE CONTROL: the admin arm still emits exactly one control,
@@ -19319,7 +19596,12 @@ test("cch-w48-s2: siteDetailHtml — #site-github is offered ONLY to a team admi
   // member's hands; omitting it would delete information the payload gave them.
   const memberConn = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "refuse");
   assert.doesNotMatch(memberConn, /site-github/);
-  assert.match(memberConn, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  // cch-w48-bl-site-repo-chip-visual-weight: the fact survives in the DETAILS
+  // RAIL — `owner/repo@branch`, a superset of what the badges chip carried —
+  // and the badges cluster holds no chip at all, so it is a row of CONTROLS
+  // again rather than a row of controls with one metadata pill in it.
+  assert.match(memberConn, s2RailRepo("acme/site@main"));
+  assert.doesNotMatch(s2Badges(memberConn), /set-chip/);
   assert.doesNotMatch(s2Badges(memberConn), /<button|disabled|title=/);
   assert.doesNotMatch(memberConn, /admin on this team|You need the/);
 });
@@ -19331,13 +19613,14 @@ test("cch-w48-s2: siteDetailHtml's authority input FAILS CLOSED — an unknown a
   // fail-open this epic exists to kill.
   const unknown = hooks.siteDetailHtml(connected, null, [], "acme.com", [], "unknown");
   assert.doesNotMatch(unknown, /site-github/);
-  assert.match(unknown, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  assert.match(unknown, s2RailRepo("acme/site"));
+  assert.doesNotMatch(s2Badges(unknown), /set-chip/);
   // An OMITTED argument is the same class of ignorance — a call site that never
   // heard about the authority term must not silently re-open the door.
   const absent = hooks.siteDetailHtml(connected, null, [], "acme.com", []);
   assert.doesNotMatch(absent, /site-github/);
-  // …and the read-legal fact still survives on both closed arms.
-  assert.match(absent, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  // …and the read-legal fact still survives on both closed arms — in the rail.
+  assert.match(absent, s2RailRepo("acme/site"));
   // A garbage authority is not a grant either (only the literal "grant" is).
   assert.doesNotMatch(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "admin"), /site-github/);
 });
@@ -19383,7 +19666,8 @@ test("cch-w48-bl: siteDetailHtml withholds #site-github on an UNCONFIGURED deplo
   // GET; whether the App is wired up today says nothing about whether this site
   // is linked, so deleting the repo name would destroy information the payload
   // handed the person.
-  assert.match(adminUnconfigured, /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+  assert.match(adminUnconfigured, s2RailRepo("acme/site@main"));
+  assert.doesNotMatch(s2Badges(adminUnconfigured), /set-chip/);
 
   // An UNCONNECTED site on an unconfigured deployment loses the whole control —
   // there is no fact left to keep.
@@ -19422,9 +19706,73 @@ test("cch-w48-bl: the readiness argument FAILS CLOSED — unknown, garbage and a
   assert.doesNotMatch(
     hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
     /id="site-github"/);
-  // …and the chip survives every closed arm.
+  // …and the read-legal fact survives every closed arm, in the Details rail.
   assert.match(hooks.siteDetailHtml(connected, null, [], "acme.com", [], "grant"),
-    /<span class="set-chip"><span class="mono">acme\/site<\/span><\/span>/);
+    s2RailRepo("acme/site"));
+});
+
+// ── cch-w48-bl-site-repo-chip-visual-weight: .fleet-badges IS A ROW OF CONTROLS
+//
+// cch-w48-s2 gave every withheld arm of #site-github the repo name as a
+// `.set-chip` inside `.fleet-badges`. The chip was a settings-row metadata pill
+// standing in a row of btn-sm controls — measured in headless Chrome on this
+// screen it computes the SAME font-size as #site-deploy (12px) but 22px tall
+// against the buttons' 28px, in --muted-text on a transparent ground — and it
+// was a DUPLICATE: the Details rail's "Repository" row already renders
+// `owner/repo@branch` in mono for every actor, unpredicated, which is a strict
+// superset of the chip's text.
+//
+// THE SHAPE CHOSEN IS RELOCATION, NOT A BADGES-SCOPED RULE. Restyling would
+// mean growing a NON-INTERACTIVE span to button height and button colour in a
+// row whose every other child is clickable — the worse outcome — and it would
+// cost a CSS rule plus a cssom-heads baseline regeneration to duplicate a fact
+// the same render already carries two rows down. Nothing is relocated in the
+// code: the rail row predates this change and is untouched. What is deleted is
+// the duplicate.
+//
+// AND THE CHIP WAS AN OVERFLOW, NOT ONLY A WEIGHT. `.set-chip` is
+// `white-space: nowrap` and github_repo's only server-side ceiling is the
+// varchar(255) column (`validate_github_repo/1` in
+// cloud/lib/barkpark_cloud/registry/site.ex is a FORMAT check with no length
+// clause). At a 320px viewport on the preview corpus's 255-char cruel repo the
+// chip measured 1658px wide and documentElement.scrollWidth read 2688 against
+// clientWidth 320 — the whole page scrolled 2368px sideways. The rail row held
+// the full 511-char `repo@branch` span in 250px at the same width.
+test("cch-w48-bl: siteDetailHtml — the badges cluster carries NO metadata pill on any withheld arm, and the repo fact lives in the Details rail", () => {
+  const branched = { ...S2_GH_SITE, github_repo: "acme/site", github_branch: "main" };
+  const bare = { ...S2_GH_SITE, github_repo: "acme/site" };
+  // Every arm on which #site-github is withheld, by BOTH axes and by both
+  // flavours of ignorance. Each is named so a failure says which arm broke.
+  const withheld = [
+    ["member + connected", hooks.siteDetailHtml(branched, null, [], "acme.com", [], "refuse", null, null, null, "ready"), "acme/site@main"],
+    ["member + connected, readiness unknown", hooks.siteDetailHtml(branched, null, [], "acme.com", [], "refuse"), "acme/site@main"],
+    ["authority unknown", hooks.siteDetailHtml(bare, null, [], "acme.com", [], "unknown", null, null, null, "ready"), "acme/site"],
+    ["authority omitted", hooks.siteDetailHtml(bare, null, [], "acme.com", []), "acme/site"],
+    ["admin + unconfigured deployment", hooks.siteDetailHtml(branched, null, [], "acme.com", [], "grant", null, null, null, "unconfigured"), "acme/site@main"],
+  ];
+  for (const [arm, html, span] of withheld) {
+    assert.doesNotMatch(html, /id="site-github"/, arm + ": the door is withheld on this arm");
+    // THE WHOLE RENDER, not just the badges slice: a "fix" that moved the pill
+    // into the rail instead of deleting it would satisfy a badges-scoped
+    // negative while still shipping a settings-row pill on this screen.
+    assert.doesNotMatch(html, /set-chip/,
+      arm + ": .fleet-badges is a row of controls — a metadata pill does not belong on this screen at all");
+    // …and the read-legal fact is NOT deleted with it. GET /v1/sites/:id is
+    // require_user, so github_repo is already legally this person's.
+    assert.match(html, s2RailRepo(span),
+      arm + ": the Details rail must still name the repository, or this is a deletion of information");
+  }
+  // THE PAIRED POSITIVE CONTROL. Without it every assertion above is satisfied
+  // by a siteDetailHtml that rendered nothing: the admin arm still emits
+  // EXACTLY ONE #site-github, byte-identically to before this change, and the
+  // rail row is unchanged underneath it.
+  const open = hooks.siteDetailHtml(branched, null, [], "acme.com", [], "grant", null, null, null, "ready");
+  assert.equal((open.match(/id="site-github"/g) || []).length, 1);
+  assert.match(open, /<button class="btn btn-ghost btn-sm" id="site-github" type="button"><span class="mono">acme\/site<\/span><\/button>/);
+  assert.match(open, s2RailRepo("acme/site@main"));
+  // The badges cluster the button sits in carries no pill either — the admin
+  // arm is a control, not a control PLUS the duplicate it replaced.
+  assert.doesNotMatch(s2Badges(open), /set-chip/);
 });
 
 test("cch-w48-s2 (review): a /v1/me that lands LATE re-decides the site screen — the fence must not strand a real admin", () => {
@@ -21791,12 +22139,17 @@ test("REVIEW FIX (GR80 leg 3): the verdict is three-way and the toast never cont
   assert.match(pending.body, /hasn't answered yet/);
 });
 
-test("GR80 leg 3: the webhook action bar offers Send test, and no CLI chip for a verb bp lacks", () => {
+// AMENDED (gr-bl-cli-test-send): this test used to assert the INVERSE of its
+// second half — `!/webhook test-send acme/` — because `bp cloud webhook` had no
+// test-send verb and a chip for a non-existent command is worse than no chip.
+// The verb landed (internal/cli/cloud_webhook_cmd.go, `case "test-send", "test":`),
+// so the absence assertion was the stale half and is now the presence assertion.
+test("GR80 leg 3: the webhook action bar offers Send test, and the CLI chip for the verb bp now has", () => {
   const card = hooks.webhookCardHtml(
     { id: "wh_1", url: "https://example.com/hook", active: true }, "acme", "production");
   assert.match(card, /data-wh-test/, "the action bar carries the test-send affordance");
   assert.match(card, />Send test</);
-  assert.ok(!/webhook test-send acme/.test(card), "no copy-as-CLI chip: bp cloud webhook has no test-send verb");
+  assert.ok(/webhook test-send acme/.test(card), "the copy-as-CLI chip for test-send is missing from the card");
   // The existing bar is intact — this is an addition, not a re-composition.
   for (const hook of ["data-wh-edit", "data-wh-toggle", "data-wh-rotate", "data-wh-deliveries", "data-wh-delete"]) {
     assert.ok(card.includes(hook), "the bar keeps " + hook);
@@ -24805,7 +25158,11 @@ function railDom() {
     isConnected: true,
     addEventListener() {},
     querySelector(sel) { return this.controls[sel] || null; },
-    querySelectorAll() { return []; },
+    // cch-w45-s5-fu: wireMeRetry now binds EVERY [data-me-retry] in the
+    // subtree, so a stub whose querySelectorAll hard-returns [] binds NOTHING
+    // and every "the exit is wired" assertion below would pass by measuring an
+    // incapacity of this file. It answers the SAME node querySelector does.
+    querySelectorAll(sel) { const c = this.controls[sel]; return c ? [c] : []; },
     getAttribute() { return null; },
   };
   return {
@@ -25039,7 +25396,11 @@ function instanceScreenDom() {
     },
     addEventListener() {},
     querySelector(sel) { return this.controls[sel] || null; },
-    querySelectorAll() { return []; },
+    // cch-w45-s5-fu: wireMeRetry now binds EVERY [data-me-retry] in the
+    // subtree, so a stub whose querySelectorAll hard-returns [] binds NOTHING
+    // and every "the exit is wired" assertion below would pass by measuring an
+    // incapacity of this file. It answers the SAME node querySelector does.
+    querySelectorAll(sel) { const c = this.controls[sel]; return c ? [c] : []; },
     getAttribute() { return null; },
   });
   const strip = mk();
@@ -25167,9 +25528,16 @@ test("cch-w47-bl: the same repaint is SCOPED — a foreign instance and a foreig
 // NOTHING PINNED THAT. The count is a property of an arm no test counts, on a
 // fixture (custom_host set) that no authority test uses, and it is one
 // `!bp.custom_host` away from going back to zero. This is that pin, in both
-// directions: not zero (the row's defect) and not two (wireMeRetry binds the
-// FIRST match, so a second control is a dead button that looks like a way out).
-test("cch-w47-bl: a live CUSTOM-HOST box carries exactly ONE [data-me-retry] while /v1/me is out", () => {
+// directions: not zero (the row's defect) and not per-control (the duplication
+// cch-w47-rv-bl deleted).
+//
+// cch-w45-s5-fu RAISED THE PAGE COUNT FROM ONE TO TWO, deliberately. The
+// header-only exit was never reachable from the Updates strip on a lifecycle
+// arm whose header draws no grouped control, so that strip now states its own,
+// and wireMeRetry binds EVERY match rather than the first — which is what makes
+// a second control a live exit instead of the dead button this comment used to
+// warn about. The invariant is now ONE PER STILL-CHECKING STRIP.
+test("cch-w47-bl: a live CUSTOM-HOST box carries one [data-me-retry] per still-checking strip while /v1/me is out", () => {
   hooks.clearMe();
   assert.equal(hooks.instanceAdminAuthority(), "unknown", "sanity: the fixture's arm is the unknown one");
 
@@ -25184,15 +25552,18 @@ test("cch-w47-bl: a live CUSTOM-HOST box carries exactly ONE [data-me-retry] whi
 
   assert.equal(strip.split("data-me-retry").length - 1, 1,
     "the still-checking header strip of a CUSTOM-HOST box must carry exactly ONE exit. Zero is the filed defect " +
-    "(the page's only way out of a disabled Roll back would be a full reload); two is the founding class again — " +
-    "wireMeRetry binds the FIRST match, so the second is a dead button that reads as a way out. Got: " + strip);
+    "(the page's only way out of a disabled Roll back would be a full reload); two WITHIN ONE STRIP is the " +
+    "per-control duplication cch-w47-rv-bl deleted. Got: " + strip);
 
   // …and page-wide, because [data-rollback] lives in a different card and the
   // row's whole complaint is about what the PAGE offers, not what one strip does.
   const page = hooks.instanceDetailHtml(W47BL_CUSTOM_HOST_BP, "overview", { ready: false }, "unknown");
-  assert.equal(page.split("data-me-retry").length - 1, 1,
-    "the whole instance screen of a custom-host box carries exactly ONE exit while the answer is out. Got " +
-    (page.split("data-me-retry").length - 1));
+  assert.equal(page.split("data-me-retry").length - 1, 2,
+    "the whole instance screen of a custom-host box carries ONE exit PER still-checking strip (header + updates) " +
+    "while the answer is out — the Updates strip cannot borrow the header's on the lifecycle arms where the " +
+    "header draws no grouped control at all. Got " + (page.split("data-me-retry").length - 1));
+  assert.equal(hooks.updatePanelActionsHtml(W47BL_CUSTOM_HOST_BP, "unknown").split("data-me-retry").length - 1, 1,
+    "…and the second one is the Updates strip's own, beside the Roll back it exits");
   // The control this exit exists FOR is on that page, DISABLED. Asserted on the
   // label and the group pointer, not on `data-rollback`: adminWriteControlHtml
   // drops the mount hook entirely on the non-grant arms (that is the point — the
@@ -27296,6 +27667,9 @@ function launchContainer() {
     getAttribute() { return null; },
     querySelector(sel) { return this.controls[sel] || null; },
     querySelectorAll(sel) {
+      // cch-w45-s5-fu: wireMeRetry binds every match now, so the control map
+      // has to answer the plural lookup as well as the singular one.
+      if (this.controls[sel]) return [this.controls[sel]];
       if (sel !== ".runway-sub") return [];
       const out = [];
       const re = /<p class="runway-sub">([^<]*)<\/p>/g;
@@ -34892,4 +35266,71 @@ test("cch-r21-w16: the webhooks tab keeps its member-tier reads and drops only t
     "the shell's default authority stopped being 'grant'");
   assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "unknown"), grant,
     "an unanswered /v1/me was treated as a determinate refusal in the shell");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// cch-r21m DEFECT-D — THE ADDRESS SLOT UNDER THE INSTANCE H1.
+//
+// Found by the 2760-shot accent matrix (gr-backlog-accent-matrix-rereview,
+// 2026-09-20) on instance-remove-failed, instance-remove-failed-member and
+// instance-failed-member, at all 5 accents, both themes, 1440: a bare red
+// italic "— removal failed" / "— provisioning failed" sat where the address
+// belongs. Accent-independent, so it was never a token bug.
+//
+// The em-dash lead is a FLEET-LIST idiom — in fleetRow it hangs off the box
+// name printed one line above. Under a detail H1 it has no antecedent, and the
+// lifecycle pill on that same line plus the banner one block down already say
+// the failure, so instance-remove-failed printed it THREE times in ~130px.
+// Worse, removeFailedInstance carries a host: the console suppressed a known
+// address to repeat a failure. A failed teardown is failed BECAUSE the server
+// is still there.
+//
+// These two pin the corrected bytes. Both RED on the pre-fix app.js: the first
+// because the slot rendered no `detail-url-text` at all, the second on the
+// leading em dash. Tail-append (OC9).
+// ════════════════════════════════════════════════════════════════════════════
+
+const CCH_R21M_REMOVE_FAILED = {
+  id: "b-rf", name: "Retired", slug: "retired",
+  url: "https://retired-5b2c1e.barkpark.cloud", host: "retired-5b2c1e.barkpark.cloud",
+  provision_status: "succeeded", deprovision_status: "failed",
+  deprovision_error: "hcloud: server delete returned 409 (a volume is still attached)",
+};
+
+test("cch-r21m DEFECT-D: a FAILED TEARDOWN still shows the address it never removed", () => {
+  const html = hooks.instanceHeaderHtml(CCH_R21M_REMOVE_FAILED);
+  // The slot renders the host, with the same copy affordance a live box gets.
+  assert.match(html, /detail-url-text">https:\/\/retired-5b2c1e\.barkpark\.cloud</,
+    "BEFORE: the address slot printed a bare '— removal failed' and hid a host the Identity card was printing two columns away");
+  assert.match(html, /data-copy="https:\/\/retired-5b2c1e\.barkpark\.cloud"/);
+  // …and the ORPHAN fragment is gone from the whole header: no em-dash-led
+  // failure sentence anywhere. The banner keeps the failure, once.
+  assert.doesNotMatch(html, /&mdash; removal failed/,
+    "BEFORE: the orphan em-dash fragment rendered in the address slot");
+  assert.match(html, /<b>Removal failed\.<\/b>/,
+    "the banner is the header's ONE home for the failure sentence");
+
+  // A teardown that failed AFTER the host column was cleared has no address to
+  // show — it keeps a red slot, but a LABELLED one that leads with the address.
+  const hostless = { ...CCH_R21M_REMOVE_FAILED, url: null, host: null };
+  const hl = hooks.instanceHeaderHtml(hostless);
+  assert.match(hl, /fleet-url failed">No address — removal failed</,
+    "BEFORE: the address-less teardown printed an orphan em dash instead of naming the slot");
+});
+
+test("cch-r21m DEFECT-D: a FAILED PROVISION labels its empty address slot, never an orphan em dash", () => {
+  const html = hooks.instanceHeaderHtml({ id: "b-fp", name: "Reporting", provision_status: "failed" });
+  assert.match(html, /fleet-url failed">No address — provisioning failed</,
+    "BEFORE: the slot read '— provisioning failed' — an em dash with nothing in front of it");
+  assert.doesNotMatch(html, /&mdash; provisioning failed/);
+
+  // THE SHAPE, not the two literals: no arm of this header may open the
+  // address slot with an em dash. `removing` is the remaining in-flight arm
+  // and is deliberately excluded here — it is out of DEFECT-D's scope and
+  // still ships its chip — so this predicate is scoped to the failed class.
+  for (const bp of [CCH_R21M_REMOVE_FAILED, { ...CCH_R21M_REMOVE_FAILED, url: null, host: null },
+                    { id: "b-fp", name: "Reporting", provision_status: "failed" }]) {
+    assert.doesNotMatch(hooks.instanceHeaderHtml(bp), /class="fleet-url failed">\s*(&mdash;|—)/,
+      "a failed-state address slot opened with an em dash again");
+  }
 });

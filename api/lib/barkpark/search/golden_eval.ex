@@ -21,6 +21,14 @@ defmodule Barkpark.Search.GoldenEval do
           failures: [map()]
         }
 
+  # `fixture_path/2` builds the path from `File.cwd!()` (or an explicitly passed
+  # fixtures dir) plus the `surface` argument, which run/3 constrains to
+  # "documents" | "media" in its own guard — the caller never supplies a path
+  # segment. Sobelow flags the File.read! because the argument is a variable.
+  # This annotation replaces a line-pinned baseline row whose fingerprint
+  # embeds vuln_line_no: the waiver now travels with the function, so a
+  # refactor that moves the call out from under it makes the finding reappear.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec run(String.t(), String.t(), keyword()) :: metrics()
   def run(surface, scope, opts \\ []) when surface in ["documents", "media"] do
     path = fixture_path(surface, Keyword.get(opts, :fixtures_dir))

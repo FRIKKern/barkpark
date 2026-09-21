@@ -339,7 +339,8 @@ cmd_fetch() {
     esac
   done
   [ -n "$task_id" ] && [ -n "$idx" ] || { usage; exit "$EX_REFUSED"; }
-  [ -n "$out" ] || out="$(mktemp -t "pds-crown-c${idx}")" || die "mktemp failed"
+  # PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only.
+  [ -n "$out" ] || out="$(mktemp "${TMPDIR:-/tmp}/pds-crown-c${idx}.XXXXXX")" || die "mktemp failed"
 
   local tmp; tmp=$(scratch_dir)
   task_json "$task_id" "$tmp/task.json"

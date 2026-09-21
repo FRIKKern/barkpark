@@ -40,6 +40,7 @@ defmodule BarkparkCloud.Web.RouterSigninRateBucketTest do
   import Plug.Conn
 
   alias BarkparkCloud.DeviceAuth.RateLimiter
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -65,6 +66,10 @@ defmodule BarkparkCloud.Web.RouterSigninRateBucketTest do
 
   describe "sign-in rate bucket is keyed per forwarded client address" do
     test "one client exhausting its budget does not rate-limit a different client" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       for i <- 1..@start_limit do
         conn = start_from("203.0.113.5")
         assert conn.status == 200, "start #{i} from 203.0.113.5 expected 200, got #{conn.status}"
@@ -84,6 +89,10 @@ defmodule BarkparkCloud.Web.RouterSigninRateBucketTest do
     end
 
     test "the second client keeps its OWN full budget, not the first client's remainder" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       for _ <- 1..(@start_limit + 1), do: start_from("203.0.113.5")
       assert start_from("203.0.113.5").status == 429
 

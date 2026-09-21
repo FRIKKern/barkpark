@@ -3315,4 +3315,219 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       end
     end
   end
+
+  # ── the prune DROP path at the CAP BOUNDARY, and at the REAL 10,000 ───────
+  #
+  # HOW THIS BLOCK WAS SCOPED, because the drop path was NOT uncovered before
+  # it. Two filesystem arms already drive it ("terminal RECORDS that tie on
+  # mtime are pruned deterministically too", "the terminal-record cap prunes to
+  # the cap, keeps the NEWEST, and spares other names") and three permutation
+  # arms pin `terminal_records_to_evict/2`'s ordering. What none of them touched
+  # is the BOUNDARY — one under the cap, exactly at it, one over — which is
+  # where an off-by-one in the drop lives and where nothing above would notice
+  # it: every existing arm sits far over its cap (3 against 1, 12 against 5), so
+  # an `Enum.drop(max - 1)` or `Enum.drop(max + 1)` still condemns a non-empty,
+  # merely wrong-sized set and every one of those assertions still passes.
+  #
+  # And none of them ran at 10,000. The census arm's own comment argues the real
+  # cap out of scope — "5, not 10_000: seeding the real cap means 10,001 real
+  # files" — which is true of FILES and quietly also skipped the pure function,
+  # where 10,001 maps cost nothing. Both are covered here: the boundary table
+  # below includes the real cap, and one arm seeds 10,001 REAL records and
+  # sweeps at the production default, so the cap's first binding in production
+  # is no longer its first execution anywhere.
+
+  @boundary_caps [1, 4, 10_000]
+
+  # Distinct, ascending mtimes, so "newest" is unambiguous and the condemned set
+  # is fully determined WITHOUT leaning on the path tie-break (which has its own
+  # arms above). Here the tie-break must never be consulted at all.
+  defp boundary_entry(i),
+    do: %{
+      path: "/run/state/bnd-#{String.pad_leading("#{i}", 6, "0")}.terminal.json",
+      size: 100,
+      mtime: DateTime.from_unix!(1_770_000_000 + i)
+    }
+
+  defp boundary_entries(n), do: Enum.map(1..n//1, &boundary_entry/1)
+
+  describe "the terminal-record cap at its BOUNDARY (dr-w22 c1)" do
+    test "one UNDER the cap, and exactly AT it, condemn nothing" do
+      for cap <- @boundary_caps, n <- [cap - 1, cap], n > 0 do
+        entries = boundary_entries(n)
+
+        # NON-VACUITY: the fixture really reached the size this arm is about. A
+        # setup that silently built the wrong number would let a no-op drop path
+        # pass the assertion below for the wrong reason.
+        assert length(entries) == n
+
+        assert DeployRunner.terminal_records_to_evict(entries, cap) == [],
+               "cap #{cap} with #{n} record(s) condemned something at or below the cap"
+      end
+    end
+
+    test "one OVER the cap condemns exactly one record, and it is the OLDEST" do
+      for cap <- @boundary_caps do
+        n = cap + 1
+        entries = boundary_entries(n)
+        assert length(entries) == n
+
+        condemned = DeployRunner.terminal_records_to_evict(entries, cap)
+
+        assert length(condemned) == 1,
+               "cap #{cap} with #{n} records condemned #{length(condemned)}, not 1 — " <>
+                 "an off-by-one at the boundary"
+
+        assert hd(condemned).path == boundary_entry(1).path,
+               "cap #{cap} dropped the wrong END of the ordering — the newest record " <>
+                 "lost its tombstone and the oldest kept one"
+      end
+    end
+
+    test "the survivors are the NEWEST `cap` records, and the condemned are the rest" do
+      cap = 4
+      entries = boundary_entries(cap + 3)
+      assert length(entries) == cap + 3
+
+      condemned = DeployRunner.terminal_records_to_evict(entries, cap)
+      condemned_paths = MapSet.new(condemned, & &1.path)
+      survivors = Enum.reject(entries, &MapSet.member?(condemned_paths, &1.path))
+
+      assert Enum.map(condemned, & &1.path) == Enum.map([3, 2, 1], &boundary_entry(&1).path)
+      assert Enum.map(survivors, & &1.path) == Enum.map(4..7//1, &boundary_entry(&1).path)
+    end
+  end
+
+  describe "the 10,000-record cap BINDS, exercised at the production default (dr-w22 c1)" do
+    @tag timeout: 600_000
+    test "10,001 records sweep down to exactly 10,000 and the dropped one is the OLDEST" do
+      dir = run_dir()
+      # NO cap override, deliberately: a lowered cap proves a different number,
+      # and the criterion is about THIS one.
+      recorder_cfg(dir)
+      assert DeployRunner.retention_caps().max_terminal_records == 10_000
+
+      base = System.os_time(:second) - 20_000
+      n = 10_001
+
+      for i <- 1..n//1 do
+        path = Path.join(dir, "bigcap-#{String.pad_leading("#{i}", 6, "0")}.terminal.json")
+        File.write!(path, Jason.encode!(%{"slug" => "bigcap", "run_tag" => "r#{i}"}))
+        File.touch!(path, base + i)
+      end
+
+      # NON-VACUITY, stated against the cap actually in force rather than a
+      # literal: a seed that silently landed 9,999 files would make a drop path
+      # that does nothing at all look correct below.
+      seeded = terminal_names(dir)
+      assert length(seeded) == n
+      assert length(seeded) > DeployRunner.retention_caps().max_terminal_records
+
+      DeployRunner.retention_sweep()
+
+      kept = terminal_names(dir)
+
+      assert length(kept) == 10_000,
+             "the sweep left #{length(kept)} records against a 10,000 cap"
+
+      refute "bigcap-000001.terminal.json" in kept
+      assert "bigcap-000002.terminal.json" in kept
+      assert "bigcap-010001.terminal.json" in kept
+    end
+  end
+
+  # ── the orphan tombstone reads as an explicit UNKNOWN in every corpus reader
+  #
+  # HOW THE READER SET WAS DERIVED, by following the code rather than by
+  # inheriting a list. The corpus is the `*.terminal.json` files under
+  # `run_state_dir()`. Exactly one function opens them — `read_terminal_record/1`
+  # in DeployRunner — and it has four call sites: `disk_log_state/1`,
+  # `list_terminal_records/1`, `find_terminal_record/2`, and `tombstone/2`, which
+  # is the WRITER and not a reader. Following the first three upward gives the
+  # whole reader set: `build_record/2` (the single-record door),
+  # `build_records/1` (the LIST door), and `status/1` by way of
+  # `load_latest_terminal_record/1`. Above those sits one HTTP door —
+  # `BarkparkWeb.SiteDeployController`'s `render_build_record/1` — covered by an
+  # arm in that controller's own test file. BarkparkCloud's `BoxRelay` and
+  # `BuildLog` consume that door's JSON over HTTP; they never touch the corpus,
+  # so they inherit what it emits rather than reading it.
+  #
+  # One of those arms already existed: "a log evicted before its run finalized
+  # is still not 'never recorded'" covers `build_record/2`. The LIST door and
+  # `status/1` were unpinned — and the LIST door is precisely where the failure
+  # the criterion names lives, because omitting a row there is invisible.
+
+  describe "an orphan tombstone is an explicit unknown, never an omission (dr-w22 c2)" do
+    setup do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      # A REAL orphan, not a planted fixture: bytes on disk from a run that
+      # never reached finalize, so there is no record to merge onto and
+      # `orphan_tombstone/2` has to fabricate one.
+      File.write!(Path.join(dir, "orphan2-o1.log"), "partial output\n")
+
+      # A fully finalized neighbour in the SAME corpus, so every assertion below
+      # can tell "the orphan reads as unknown" apart from "this reader answers
+      # nil for everything".
+      deploy_and_finalize("orphan2ok", "k1")
+
+      put_cfg(max_build_logs: 0)
+      assert %{evicted: 2} = DeployRunner.retention_sweep()
+
+      # PRECONDITION, asserted rather than assumed: without the fabricated
+      # tombstone nothing below is measuring the case at all.
+      assert File.exists?(Path.join(dir, "orphan2-o1.terminal.json")),
+             "the sweep did not fabricate the orphan tombstone"
+
+      {:ok, dir: dir}
+    end
+
+    test "the LIST door keeps the orphan's row rather than dropping it" do
+      records = DeployRunner.build_records()
+      slugs = Enum.map(records, & &1.slug)
+
+      assert "orphan2" in slugs,
+             "the orphan row was OMITTED from build_records/0 — the exact failure the " <>
+               "criterion forbids: a deployment with no exit code stops existing"
+
+      orphan = Enum.find(records, &(&1.slug == "orphan2"))
+      neighbour = Enum.find(records, &(&1.slug == "orphan2ok"))
+
+      # EXPLICIT unknown means the key is PRESENT and its value is nil — not the
+      # key being absent, which reads downstream as a field nobody asked about.
+      for key <- [:build_id, :exit_code, :unit_name, :started_at, :finished_at] do
+        assert Map.has_key?(orphan, key), "#{key} is absent from the orphan's rendering"
+        assert Map.fetch!(orphan, key) == nil, "#{key} was invented for a record that has none"
+      end
+
+      # THE CONTROL for those nils: the same reader fills the same keys for a
+      # record that HAS them, so the nils above belong to the orphan and not to
+      # a reader that renders everything empty.
+      assert neighbour.exit_code == 0
+      assert neighbour.unit_name =~ "bp-site-build-orphan2ok-k1-"
+
+      # And it says WHY, instead of leaving a reader to guess at the nils.
+      assert orphan.log_state == :evicted
+      assert orphan.failure_reason =~ "no exit code was ever recorded"
+    end
+
+    test "status/1 answers ABOUT the orphan instead of calling the slug idle" do
+      orphan = DeployRunner.status("orphan2")
+      never = DeployRunner.status("orphan2-never-deployed")
+
+      assert orphan.state == :done
+      assert orphan.log_state == :evicted
+      assert orphan.exit_code == nil
+      assert orphan.failure_reason =~ "no exit code was ever recorded"
+
+      assert Map.has_key?(orphan, :content_rev)
+      assert orphan.content_rev == nil
+
+      # THE CONTROL: a slug nobody ever deployed is a DIFFERENT answer. Without
+      # this, "everything is nil and idle" would satisfy the assertions above.
+      assert never.state == :idle
+      assert never.log_state == :never_recorded
+    end
+  end
 end

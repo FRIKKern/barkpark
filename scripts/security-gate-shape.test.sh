@@ -310,7 +310,12 @@ assert_fact agg_name "Security gate"
 assert_fact dispatcher_present True
 assert_fact dispatcher_if ""
 assert_fact dispatcher_matrix False
-assert_fact dispatcher_outputs "api"
+# TWO outputs since 2026-09-20 (task-76e529e61d9e34d0): `api` gates the three
+# code-reading jobs, `locks` gates mix-audit, whose question is about the
+# lockfiles and not about any source file. Pinned as the exact comma-joined set,
+# so ADDING a third — a new venue split nobody judged in the aggregator — reds
+# here, and so does silently dropping `locks` back to one.
+assert_fact dispatcher_outputs "api,locks"
 echo "  info — continue-on-error jobs in security.yml: '$(fact coe_jobs)'"
 echo "  info — Security gate needs: '$(fact agg_needs)'"
 echo
@@ -352,10 +357,34 @@ assert_fact_min blocking_count 3
 echo
 
 echo "case 3: every heavy job is gated on the dispatcher, not on a path filter"
-for j in sobelow sobelow-inline-overlap sobelow-baseline-fingerprint mix-audit; do
+# THE THREE CODE-READING JOBS share one gate: they analyse api/ source, so any
+# api/ change can change what they say.
+for j in sobelow sobelow-inline-overlap sobelow-baseline-fingerprint; do
   assert_fact "if::$j" "needs.changes.outputs.api == 'true'"
   assert_fact "needs::$j" "changes"
 done
+# mix-audit IS NOT ONE OF THEM (2026-09-20, task-76e529e61d9e34d0). It reads no
+# source at all: it resolves the LOCKFILES against an advisory database, so its
+# gate is the lock set, not the api set. This line is the ratchet on that
+# decision — it is pinned by predicate, so silently reverting the job to the
+# `api` gate (which would put 2.58 median minutes back on every api/ PR push)
+# reds here by name rather than passing as "still gated on the dispatcher".
+assert_fact "if::mix-audit" "needs.changes.outputs.locks == 'true'"
+assert_fact "needs::mix-audit" "changes"
+# …and the gate it is judged against in the aggregator must be the SAME output.
+# A job gated on `locks` and judged against `O_API` reds every lock-untouched
+# api/ PR ("skipped though its gate said true"), which is the exact wiring
+# mistake this pair exists to make impossible to leave half-done.
+if grep -Eq '^ *decide "mix-audit" +"\$\{R_AUDIT\}" +"\$\{O_LOCKS' "$WF"; then
+  ok "the aggregator judges mix-audit's skip against O_LOCKS, the output that gates it"
+else
+  no "the aggregator does not judge mix-audit against O_LOCKS — a skip authorised by locks=false would red"
+fi
+if grep -q 'O_LOCKS: \${{ needs.changes.outputs.locks }}' "$WF"; then
+  ok "the aggregator binds O_LOCKS from the dispatcher"
+else
+  no "O_LOCKS is not bound in the aggregator — it would always be empty, and an empty gate is not 'false'"
+fi
 echo
 
 # ── case 4: the mutants — every assertion above must be able to FIRE ────────
@@ -525,10 +554,17 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
-# dispatch <label> <expected-rc> <expected-api> <event> <base>
+# dispatch <label> <expected-rc> <expected-api> <event> <base> <expected-locks>
+#
+# THE SIXTH ARGUMENT IS REQUIRED, not optional (2026-09-20,
+# task-76e529e61d9e34d0). An optional one would leave every pre-existing call
+# site silently unmeasured on the new output, and an output no arm reads is
+# exactly how a venue split disarms a gate without reddening anything. `-` is
+# the explicit "this arm does not reach a verdict" marker, the same spelling the
+# api column already uses for the refusal cases.
 dispatch() {
-  local label="$1" want="$2" wa="$3" ev="$4" bs="$5"
-  local rc got
+  local label="$1" want="$2" wa="$3" ev="$4" bs="$5" wl="${6:?dispatch: the expected locks value is required}"
+  local rc got gotl
   : >"$TMPROOT/gh_output"
   (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -549,6 +585,12 @@ dispatch() {
   else
     no "  …emitted api=$got, wanted api=$wa"
   fi
+  gotl="$(sed -n 's/^locks=//p' "$TMPROOT/gh_output")"
+  if [ "$gotl" = "$wl" ]; then
+    ok "  …emits locks=$gotl"
+  else
+    no "  …emitted locks='$gotl', wanted locks=$wl"
+  fi
 }
 
 says() {
@@ -563,20 +605,20 @@ git -C "$DR" checkout -q -b docs-only
 : >"$DR/docs/another.md"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm docs >/dev/null 2>&1
-dispatch "docs-only PR" 0 false pull_request "$BASE_SHA"
+dispatch "docs-only PR" 0 false pull_request "$BASE_SHA" false
 
 git -C "$DR" checkout -q -b apichange "$BASE_SHA"
 printf 'x\n' >"$DR/api/lib/thing.ex"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm api >/dev/null 2>&1
-dispatch "api/** PR" 0 true pull_request "$BASE_SHA"
+dispatch "api/** PR" 0 true pull_request "$BASE_SHA" false
 
 # the workflow's own file is in the set — editing the gate must run the gate
 git -C "$DR" checkout -q -b wfchange "$BASE_SHA"
 printf 'x\n' >"$DR/.github/workflows/security.yml"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm wf >/dev/null 2>&1
-dispatch "security.yml-only PR" 0 true pull_request "$BASE_SHA"
+dispatch "security.yml-only PR" 0 true pull_request "$BASE_SHA" true
 
 # …and a NEIGHBOURING workflow is not, so the filter is a filter and not a
 # tautology that returns true for everything.
@@ -584,10 +626,43 @@ git -C "$DR" checkout -q -b otherwf "$BASE_SHA"
 printf 'x\n' >"$DR/.github/workflows/elixir.yml"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm otherwf >/dev/null 2>&1
-dispatch "elixir.yml-only PR" 0 false pull_request "$BASE_SHA"
+dispatch "elixir.yml-only PR" 0 false pull_request "$BASE_SHA" false
 
-# push to main never skips, regardless of what changed
-dispatch "push event" 0 true push ""
+# ── THE LOCK SET (task-76e529e61d9e34d0) ─────────────────────────────────
+# `api/** PR` above already carries the headline: api=true with locks=FALSE —
+# an api/lib edit runs Sobelow and does NOT run the CVE audit. These two arms
+# are the other side of it, so the pair cannot pass by the lock arm being
+# unreachable: a lockfile edit MUST dispatch the audit, and a lockfile in the
+# OTHER tree (cloud/) must too, because the second oracle reads both.
+git -C "$DR" checkout -q -b lockchange "$BASE_SHA"
+mkdir -p "$DR/api"
+printf 'lock\n' >"$DR/api/mix.lock"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm lock >/dev/null 2>&1
+dispatch "api/mix.lock PR" 0 true pull_request "$BASE_SHA" true
+
+git -C "$DR" checkout -q -b cloudlock "$BASE_SHA"
+mkdir -p "$DR/cloud"
+printf 'lock\n' >"$DR/cloud/mix.lock"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm cloudlock >/dev/null 2>&1
+# api=FALSE, locks=TRUE — the ONE shape that proves the two outputs are
+# independent and not two names for the same predicate. (The job is still gated
+# behind this dispatcher only; the pre-existing topological note in the
+# mix-audit step about cloud-only PRs is what this arm now makes reachable.)
+dispatch "cloud/mix.lock-only PR" 0 false pull_request "$BASE_SHA" true
+
+git -C "$DR" checkout -q -b oraclechange "$BASE_SHA"
+mkdir -p "$DR/scripts"
+printf 'x\n' >"$DR/scripts/hex-audit-oracle.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oracle >/dev/null 2>&1
+dispatch "the oracle script itself" 0 false pull_request "$BASE_SHA" true
+
+# push to main never skips, regardless of what changed — BOTH sets, because a
+# `locks` that forgot this arm would strand the CVE audit off main entirely and
+# the venue move would be a deletion wearing a venue move's comment.
+dispatch "push event" 0 true push "" true
 
 # ── THE FALSE-GREEN CLASSES the plain `--name-only` producer let through ────
 # Wave 10 closed these in elixir.yml, cloud.yml and console-harness.yml; this
@@ -605,21 +680,21 @@ git -C "$DR" checkout -q -b dquote "$BASE_SHA"
 printf 'x\n' >"$DR/api/lib/we\"ird.ex"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm dquote >/dev/null 2>&1
-dispatch 'a path containing a double quote' 0 true pull_request "$BASE_SHA"
+dispatch 'a path containing a double quote' 0 true pull_request "$BASE_SHA" false
 
 # (2) a rename OUT of the declared set. Analysed code just left api/** — the
 #     scan MUST run — but rename detection names only docs/.
 git -C "$DR" checkout -q -b renameout "$BASE_SHA"
 git -C "$DR" mv api/lib/moved.ex docs/moved.ex >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renameout >/dev/null 2>&1
-dispatch "a rename OUT of the declared set" 0 true pull_request "$BASE_SHA"
+dispatch "a rename OUT of the declared set" 0 true pull_request "$BASE_SHA" false
 
 # (3) …and a rename INTO the set still classifies true — `--no-renames` prints
 #     BOTH sides, so closing (2) must not have cost the obvious direction.
 git -C "$DR" checkout -q -b renamein "$BASE_SHA"
 git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
-dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
+dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA" false
 
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
@@ -627,13 +702,13 @@ dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
 # leaves its author with a red check run and no self-service fix. It dispatches
 # TRUE — the whole security suite: expensive, never wrong. Everything else reds.
 git -C "$DR" checkout -q -b emptydiff "$BASE_SHA"
-dispatch "empty diff (base == HEAD)" 0 true pull_request "$(git -C "$DR" rev-parse HEAD)"
+dispatch "empty diff (base == HEAD)" 0 true pull_request "$(git -C "$DR" rev-parse HEAD)" true
 says "changed-file set is EMPTY" "names the shape"
 says "::warning" "as a WARNING, not a brick"
-dispatch "unresolvable base sha" 1 - pull_request 0000000000000000000000000000000000000000
+dispatch "unresolvable base sha" 1 - pull_request 0000000000000000000000000000000000000000 -
 says "not resolvable in this checkout" "refuses to guess a base"
 says "::error::" "refuses with an annotation"
-dispatch "missing base sha" 1 - pull_request ""
+dispatch "missing base sha" 1 - pull_request "" -
 says "carries no base sha" "says why"
 says "::error::" "refuses with an annotation"
 
@@ -646,7 +721,7 @@ mkdir -p "$DR/api/lib"
 printf 'z\n' >"$DR/api/lib/orphan.ex"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm orphan >/dev/null 2>&1
-dispatch "a base with no common ancestor" 1 - pull_request "$BASE_SHA"
+dispatch "a base with no common ancestor" 1 - pull_request "$BASE_SHA" -
 says "share NO common ancestor" "names the condition, not a raw git fatal"
 says "refusing a two-dot fallback" "refuses the fallback that sweeps in the whole base"
 echo
@@ -682,13 +757,25 @@ gate() {
 gate "everything succeeded" 0 \
   R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
 gate "docs-only: gated jobs skipped against api=false" 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false O_LOCKS=false V_SOBELOW=
+# ── THE VENUE MOVE, BOTH DIRECTIONS (task-76e529e61d9e34d0) ────────────────
+# The new shape is api=true + locks=false: an api/ PR that does not move a
+# lockfile. Without the first arm the move is unmeasured; without the second the
+# gate would accept ANY mix-audit skip and the move would have silently disarmed
+# the CVE audit's aggregation instead of relocating it. Both arms run the
+# EXTRACTED step body, so neither is a paraphrase of the decision in CI.
+gate "api PR that touches no lockfile: the CVE audit skipped against locks=false" 0 \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=skipped O_API=true O_LOCKS=false
+gate "the CVE audit skipped though locks said true" 1 \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=skipped O_API=true O_LOCKS=true
+gate "the CVE audit skipped with an EMPTY locks gate (unbound O_LOCKS)" 1 \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=skipped O_API=true
 gate "a blocking job FAILED" 1 \
   R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
 gate "the CVE audit was CANCELLED" 1 \
   R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=cancelled O_API=true
 gate "a job skipped though its gate said true" 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=skipped O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=success R_AUDIT=success O_API=true O_LOCKS=true
 gate "the dispatcher itself failed" 1 \
   R_CHANGES=failure R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=
 gate "an EMPTY result (job not in needs)" 1 \
@@ -747,7 +834,7 @@ gate "an unrecognised verdict word" 1 \
 # job never ran. Without this arm the CANNOT-READ rule above would red every
 # docs-only head.
 gate "docs-only: Sobelow legitimately not dispatched" 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false V_SOBELOW=
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false O_LOCKS=false V_SOBELOW=
 echo
 
 # ── case 7: the baseline census in security.yml's header is DERIVED, not told ─

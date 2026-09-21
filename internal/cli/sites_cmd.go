@@ -1601,22 +1601,23 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 			}
 			return logBytes.TailText()
 		}(),
-		"pre_recorder":    rec.PreRecorder(),
-		"error":           nilIfEmpty(rec.Error),
-		"detail":          nilIfEmpty(rec.Detail),
-		"box_log_state":   nilIfEmpty(rec.BoxLogState),
-		"box_status":      nilIfZero(rec.BoxStatus),
-		"box_error":       nilIfEmptyBoxError(rec.BoxError),
-		"box_request_id":  nilIfEmpty(rec.BoxError.RequestID),
-		"log_path":        nilIfEmpty(rec.LogPath),
-		"log_bytes":       rec.LogBytes,
-		"exit_code":       rec.ExitCode,
-		"failure_reason":  nilIfEmpty(rec.FailureReason),
-		"journal_command": nilIfEmpty(rec.JournalCommand),
-		"started_at":      nilIfEmpty(rec.StartedAt),
-		"finished_at":     nilIfEmpty(rec.FinishedAt),
-		"evicted_at":      nilIfEmpty(rec.EvictedAt),
-		"stages":          buildLogStagePayload(rec.Stages),
+		"pre_recorder":      rec.PreRecorder(),
+		"error":             nilIfEmpty(rec.Error),
+		"detail":            nilIfEmpty(rec.Detail),
+		"box_log_state":     nilIfEmpty(rec.BoxLogState),
+		"box_status":        nilIfZero(rec.BoxStatus),
+		"box_error":         nilIfEmptyBoxError(rec.BoxError),
+		"box_request_id":    nilIfEmpty(firstNonEmpty(rec.BoxErrorRequestID, rec.BoxError.RequestID)),
+		"box_error_message": nilIfEmpty(firstNonEmpty(rec.BoxErrorMessage, rec.BoxError.Message)),
+		"log_path":          nilIfEmpty(rec.LogPath),
+		"log_bytes":         rec.LogBytes,
+		"exit_code":         rec.ExitCode,
+		"failure_reason":    nilIfEmpty(rec.FailureReason),
+		"journal_command":   nilIfEmpty(rec.JournalCommand),
+		"started_at":        nilIfEmpty(rec.StartedAt),
+		"finished_at":       nilIfEmpty(rec.FinishedAt),
+		"evicted_at":        nilIfEmpty(rec.EvictedAt),
+		"stages":            buildLogStagePayload(rec.Stages),
 	}
 	if out.emitStructured(payload) {
 		if payload["ok"] == true {
@@ -1650,7 +1651,7 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 		// the box rather than to this client. Dropping them here is what let a
 		// 16-day outage read as a CLI bug (task-3468f99ad5a4e9b8), so the line
 		// is printed whenever the box said anything at all.
-		if line := rec.BoxError.Line(); line != "" {
+		if line := cloudclient.BoxErrorLine(rec.BoxError, rec.BoxErrorMessage, rec.BoxErrorRequestID); line != "" {
 			msg += fmt.Sprintf(" — the box itself said: %s", line)
 		}
 		if rec.BoxStatus != 0 {
@@ -1763,7 +1764,7 @@ func renderSiteBuildLogBytes(out *writer, b cloudclient.SiteBuildLogBytes, err e
 		// The bytes route relays box_error through the same producer clause the
 		// record route does. It reached no operator before this because the
 		// struct never declared the key, not because the box stayed quiet.
-		if line := b.BoxError.Line(); line != "" {
+		if line := cloudclient.BoxErrorLine(b.BoxError, b.BoxErrorMessage, b.BoxErrorRequestID); line != "" {
 			msg += fmt.Sprintf(" — the box itself said: %s", line)
 		}
 		if b.BoxStatus != 0 {

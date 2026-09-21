@@ -85,6 +85,8 @@ defmodule Barkpark.Content.PublishTerminalCriteriaFenceTest do
       "acceptance_criteria" => [%{"criterion" => @c0, "met" => false}]
     }
     |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+    # The Tasks plugin's :before_publish brief wall (inert until #19303).
+    |> Barkpark.TaskBriefFixtures.with_brief()
   end
 
   defp doc_write(doc_id, content, scope) do

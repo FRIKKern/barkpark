@@ -24,7 +24,12 @@ while true; do
     [ -L "$(dirname "$f")" ] && continue   # skip symlinked resume aliases (lead-<lane>-r -> lead-<lane>)
     # lane+session, so two sessions of one lane are two independent watch keys.
     lane="$(basename "$(dirname "$f")")/$(basename "$f" .md)"
-    sig=$(stat -f '%m %z' "$f" 2>/dev/null || stat -c '%Y %s' "$f")
+    # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+    # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a
+    # block-count report instead of failing, and a BSD-first `||` chain
+    # never reaches the GNU form. BSD stat rejects `-c` outright, so
+    # GNU-first fails loudly on the wrong platform instead of quietly.
+    sig=$(stat -c '%Y %s' "$f" 2>/dev/null || stat -f '%m %z' "$f")
     prev=$(cat "$SIG/$lane" 2>/dev/null || true)
     if [ "$prev" != "$sig" ]; then
       printf '%s' "$sig" > "$SIG/$lane"

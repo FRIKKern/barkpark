@@ -196,6 +196,31 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       api: ${{ steps.sets.outputs.api }}
+      # THE SECOND SET (2026-09-20, task-76e529e61d9e34d0). `api` gates the
+      # three code-reading jobs; `locks` gates the ONE job that does not read
+      # code at all. `mix-audit` asks a question about the DEPENDENCY TREE —
+      # "does a lock we ship resolve to a package with a published advisory" —
+      # and the only things in this tree that can change that answer are the
+      # lockfiles, the manifests that produce them, the advisory baseline, and
+      # the oracle scripts themselves. An `api/lib/*.ex` edit cannot introduce a
+      # CVE, and for 25 of the last 49 pull_request runs of this workflow
+      # (MEASURED, window 2026-09-18T15:02:56Z..2026-09-20T09:28:29Z,
+      # `bash scripts/ci-measure.sh --per-job`) that is exactly the run this job
+      # spent 2.58 median minutes on — 61.2 job-minutes in 42 hours.
+      #
+      # THE COVERAGE THAT IS NOT LOST, and why this is a VENUE move rather than
+      # a deletion: the `push: branches:[main]` arm at the top of this file is
+      # paths-filtered on `api/**`, and the step below emits `api=true` AND
+      # `locks=true` unconditionally for any non-pull_request event — so EVERY
+      # merge that touches api/ still runs the full CVE audit on main, at the
+      # same granularity as before. What stops is re-asking the question on each
+      # PR push whose diff cannot have changed the answer.
+      #
+      # AND THE ANSWER CAN CHANGE WITH NO DIFF AT ALL — a new advisory is
+      # published upstream and no PR on earth moves. That is a CLOCK, not a
+      # diff, and the per-PR path never caught it either; the push:main arm
+      # fires on the next api/ merge and main-red-owner.yml owns the red.
+      locks: ${{ steps.sets.outputs.locks }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -223,8 +248,9 @@ jobs:
             # push-to-main (and anything else): NEVER skip. Main is the branch
             # every other run is compared against; a partial main is worse than
             # a slow one, and there is no reviewer left to notice.
-            echo "event '$event' is not a pull_request — the security path set is true."
+            echo "event '$event' is not a pull_request — the security path sets are true."
             echo "api=true" >> "$GITHUB_OUTPUT"
+            echo "locks=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -275,6 +301,7 @@ jobs:
             # truly unsafe answer.
             echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching api=true and running the WHOLE security suite rather than skipping it — a skip here would green a gate nothing measured. Cost: the full Sobelow + mix-audit run."
             echo "api=true" >> "$GITHUB_OUTPUT"
+            echo "locks=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -322,10 +349,26 @@ jobs:
           # if both were damage inflates the finding — the UNSCANNED 12 are the
           # whole of it, and they are severe alone.
           api=false
+          locks=false
           while IFS= read -r f; do
             [ -n "$f" ] || continue
             case "$f" in
               api/* | .github/workflows/security.yml) api=true ;;
+            esac
+            # THE LOCK SET — mix-audit's OWN inputs, and nothing else. Every
+            # entry is a file whose contents can change what the two CVE oracles
+            # say; the rest of api/ cannot. Keep it in sync with the steps of the
+            # `mix-audit` job, which is what scripts/security-gate-shape.test.sh
+            # case 3 pins.
+            case "$f" in
+              api/mix.lock | api/mix.exs \
+              | cloud/mix.lock | cloud/mix.exs \
+              | .github/hex-audit-baseline.txt \
+              | .github/workflows/security.yml \
+              | scripts/hex-audit-oracle.sh \
+              | scripts/main-red-breaker.sh \
+              | scripts/breaker-capture.sh \
+              | scripts/run-instrument.sh) locks=true ;;
             esac
           done <<EOF
           $changed
@@ -338,9 +381,22 @@ jobs:
               exit 1
               ;;
           esac
+          # SAME POLARITY AS `api`, and asserted rather than assumed: an
+          # uninterpretable value here would skip the CVE audit, and
+          # `security-gate`'s `decide` accepts a skip only against a gate value
+          # of literally 'false' — so a garbage value reds the aggregate rather
+          # than greening over a job nothing ran. Refusing here says WHY.
+          case "${locks}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict locks=${locks}."
+              exit 1
+              ;;
+          esac
 
-          echo "verdict: api=${api}"
+          echo "verdict: api=${api} locks=${locks}"
           echo "api=${api}" >> "$GITHUB_OUTPUT"
+          echo "locks=${locks}" >> "$GITHUB_OUTPUT"
 
   gate-shape:
     # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher, the
@@ -845,7 +901,14 @@ jobs:
     # this job (OTP 27.0) and prod both run. It is the single documented
     # suppression below; revisit if esaml ships a patched release.
     needs: changes
-    if: needs.changes.outputs.api == 'true'
+    # GATED ON ITS OWN INPUTS, not on `api` (2026-09-20, task-76e529e61d9e34d0).
+    # A JOB-level `if:`, never a workflow-level `paths:` — the check run
+    # `Dependency CVE audit (mix_audit over mix.lock, non-blocking)` still
+    # RENDERS on every PR head, with conclusion `skipped`, so no context becomes
+    # ABSENT and nothing can deadlock. The rationale, the coverage that is
+    # preserved, and the measurement are on the dispatcher's `locks` output
+    # above. OWNER: lead-gates (honest-gates).
+    if: needs.changes.outputs.locks == 'true'
     outputs:
       # REFUSED when main-red-breaker.sh exited 2 — it could not DECIDE
       # ownership, which is not a claim that this PR is clean. Read by
@@ -1060,6 +1123,12 @@ jobs:
           R_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.result }}
           R_AUDIT: ${{ needs.mix-audit.result }}
           O_API: ${{ needs.changes.outputs.api }}
+          # mix-audit is gated on `locks`, so `locks` is the value `decide` must
+          # judge its skip against. Passing O_API here would reject a skip the
+          # dispatcher DID authorise: api=false skips everything, but
+          # api=true + locks=false is a LEGITIMATE mix-audit skip that O_API
+          # alone reads as 'skipped though its gate said true' and reds.
+          O_LOCKS: ${{ needs.changes.outputs.locks }}
           # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ───────────
           # `R_*` is a RESULT — success/failure/skipped — and a failure on that
           # channel is ONE word over two utterly different facts: "I measured
@@ -1079,7 +1148,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "dispatcher outputs: api='${O_API}'"
+          echo "dispatcher outputs: api='${O_API}' locks='${O_LOCKS:-}'"
           echo
 
           bad=0
@@ -1254,7 +1323,7 @@ jobs:
           decide "gate-shape"              "${R_SHAPE}"   "NEVER"
           decide "sobelow-inline-overlap"  "${R_OVERLAP}" "${O_API}"
           decide "sobelow-baseline-fingerprint" "${R_FINGERPRINT}" "${O_API}"
-          decide "mix-audit"               "${R_AUDIT}"   "${O_API}"
+          decide "mix-audit"               "${R_AUDIT}"   "${O_LOCKS:-}"
 
           echo
           if [ "$bad" -ne 0 ]; then

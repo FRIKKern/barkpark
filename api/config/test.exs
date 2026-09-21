@@ -271,6 +271,25 @@ config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
 # unaffected (`Barkpark.StudioChat.Supervisor.children/0` proves it).
 config :barkpark, Barkpark.StudioChat.BlockedSweeper, enabled: false
 
+# Managed-runtime admission ceiling (Barkpark.StudioChat.RuntimeAdmission).
+# The cap is NODE-GLOBAL: a lease count over the single shared
+# `Barkpark.StudioChat.RecorderRegistry`, with a deliberately conservative
+# production default of 3. In test that default is not a policy, it is a
+# CONCURRENCY CEILING BELOW THE SUITE'S OWN FAN-OUT. 44 call sites across nine
+# async test files call `Recorder.ensure/1` without an explicit limit, ExUnit
+# runs `schedulers_online()` cases at once (4 on the CI runner, far more on a
+# dev Mac), so the moment a fourth async test holds a Recorder while three
+# others still do, `acquire/2` answers `{:error, {:managed_runtime_capacity, 3}}`
+# and the fourth test reds — on whatever diff happens to be under it. Measured
+# on `Elixir gate` runs 35515018409 (branch cli-r21k-dedupwall, a CLI diff) and
+# 35249228901 (main), both failing `chat_live_test.exs:6661` with that exact
+# tuple. Raise the ceiling out of the suite's reach here; prod/dev keep the 3.
+# Tests that ASSERT backpressure are unaffected: they pass an explicit
+# `managed_runtime_limit` in opts (opts win over app env, and an invalid 0 still
+# falls back to the module's own @default_limit 3), or they
+# `Application.put_env` their own cap per-test (chat_controller_test.exs:1571).
+config :barkpark, Barkpark.StudioChat.RuntimeAdmission, max_managed_runtimes: 128
+
 # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Pin the classic in-process
 # Port lifecycle in test: `:auto` would flip to the systemd transient-unit path
 # on any host where `systemd-run` happens to resolve (some Linux CI images),
