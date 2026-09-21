@@ -1563,6 +1563,136 @@ $("$SCRIPT" --print-set compile)
 EOF
 echo
 
+# ── case 6b: a glob-consumed family is dispatched WHOLE ────────────────────
+# task-ac7392fa242a09ef. The sets used to name nine `scripts/pds-*` files one
+# at a time while scripts/pds-door-census.sh — the program
+# api/test/barkpark/pds_door_census_test.exs shells — enumerates
+# `scripts/pds-*.sh` / `scripts/pds-*.exs` / `tooling/pds/*.mjs` from the tree.
+# deploy #19577 added the tenth file, the dispatcher answered `test=false`,
+# mix-test SKIPPED and the required `Elixir gate` reported SUCCESS over zero
+# tests (run 35532446963) while that same test reddened main's push arm.
+#
+# EVERY ARM HERE PROBES A PATH THAT IS NOT ON DISK. Asking about a file the
+# tree already holds is the assertion a nine-file hand list passes, which is
+# how the hole survived: the dispatcher answers about a RULE, not about a
+# directory listing, and only an absent member can tell the two apart.
+#
+# DERIVED, never typed: the families come back out of `--print-families`, so
+# retiring a program retires its arms and no arm can certify a family nobody
+# enumerates. Deriving ZERO is itself a failure — the loop would otherwise
+# pass vacuously the day the extractor goes blind.
+echo "case 6b: glob-consumed families are dispatched whole"
+fams="$("$SCRIPT" --print-families 2>/dev/null || true)"
+if [ -z "$fams" ]; then
+  no "derived ZERO glob-consumed families — the derivation went blind and every arm below would pass vacuously"
+else
+  nfam=0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    prog="${row%%	*}"
+    fam="${row#*	}"
+    nfam=$((nfam + 1))
+    probe="$(sed -e 's,\*\*,zz-harness-absent-member,g' -e 's,\*,zz-harness-absent-member,g' <<<"$fam")"
+    if [ -e "$REAL_ROOT/$probe" ]; then
+      no "$fam: the probe member $probe EXISTS on disk — this arm would prove nothing"
+    elif [ "$(m "$probe" test)" = true ]; then
+      ok "$fam (enumerated by $prog): an absent member $probe -> test true"
+    else
+      no "$fam (enumerated by $prog): an absent member $probe -> test FALSE — the family is only partially declared"
+    fi
+  done <<EOF
+$fams
+EOF
+  ok "derived $nfam family row(s) from the programs themselves"
+fi
+# THE INCIDENT'S OWN PATHS, named because a class that cannot reproduce its
+# founding case is a class nobody checked. Both are real scripts/pds-* names;
+# the first landed in #19577 and matched NOTHING on 97271476d.
+check_match "scripts/pds-secret-scan_test.sh" test true
+check_match "scripts/pds-zz-new.sh" test true
+check_match "scripts/pds-zz-new.exs" test true
+check_match "tooling/pds/zz-new.mjs" test true
+# …and the family is a FAMILY, not a licence for the tree it lives in. A
+# scripts/ path no api test consumes must still skip the suite, or the fix has
+# bought coverage by dispatching everything, which is the over-inclusion the
+# templates/** and tooling/** notes in the ratchet refuse.
+check_match "scripts/deploy-rebuild.sh" test false
+check_match "scripts/which-gates.sh" test false
+check_match "tooling/scaffy-duels/zz-unrelated.txt" test false
+# The `*` is single-segment: it must not eat a `/`.
+check_match "scripts/pds-nested/inner.sh" test false
+echo
+
+# ── case 6c: the derivation cannot silently go empty ───────────────────────
+# Two different failures, deliberately given two different answers, because
+# conflating them is what a first cut of this got wrong:
+#
+# (a) PROGRAMS READ, ZERO FAMILIES — the extractor rotted. Nothing survives
+#     this: every mode exits 2 before it can answer. Mutated by blinding the
+#     enumeration-verb regex, the one line between the credited families and
+#     the unfiltered form that swallowed `scripts/**` out of the ratchet's own
+#     prose.
+# (b) THE PRODUCTION SHAPE. elixir.yml runs the PINNED script out of
+#     `$RUNNER_TEMP/elixir-dispatcher-pinroot` — a directory holding exactly one
+#     file — with its CWD on the head checkout. The families must still derive
+#     there, or the fix is inert in the only place it ships. Asserted with the
+#     absent member, not an on-disk one.
+# (c) NO PROGRAM TO READ AT ALL — a fixture tree. `--check` REFUSES (it only
+#     ever runs against the real checkout, from elixir.yml's unfiltered
+#     path-escape job), while `--match` says so on stderr and contributes no
+#     derived half. Forcing `true` here instead would make every dispatcher
+#     fixture below answer `test=true` for a docs-only diff, i.e. certify the
+#     shim can never skip — a green bought by measuring nothing.
+echo "case 6c: a blind derivation refuses rather than answering quietly"
+BLINDDIR="$TMPROOT/blind"
+mkdir -p "$BLINDDIR"
+sed -e "s|^ELIXIR_FAMILY_ENUM_VERBS=.*|ELIXIR_FAMILY_ENUM_VERBS='zzzz-no-such-verb-zzzz'|" \
+  "$SCRIPT" >"$BLINDDIR/blinded.sh"
+if ! grep -q "zzzz-no-such-verb-zzzz" "$BLINDDIR/blinded.sh"; then
+  no "could not blind ELIXIR_FAMILY_ENUM_VERBS — the mutation did not apply and (a) would be vacuous"
+else
+  out="$(ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$BLINDDIR/blinded.sh" --match test <<<'api/lib/barkpark.ex' 2>&1)" && rc=0 || rc=$?
+  if [ "${rc:-0}" = 2 ]; then
+    ok "(a) a blinded extractor exits 2 rather than answering"
+  else
+    no "(a) a blinded extractor exited ${rc:-0} and answered '$out'"
+  fi
+  if has "$out" "ZERO path families derived"; then
+    ok "(a) names the blindness"
+  else
+    no "(a) did not name the blindness: $out"
+  fi
+fi
+# (b) the pin root, built exactly as elixir.yml builds it, run from the real
+#     checkout — the shipped invocation.
+PINROOT="$TMPROOT/pinroot"
+rm -rf "$PINROOT"
+mkdir -p "$PINROOT/scripts"
+cp "$SCRIPT" "$PINROOT/scripts/elixir-path-escape-check.sh"
+out="$(cd "$REAL_ROOT" && bash "$PINROOT/scripts/elixir-path-escape-check.sh" --match test <<<'scripts/pds-zz-new.sh' 2>&1)" && rc=0 || rc=$?
+if [ "$out" = true ]; then
+  ok "(b) the PINNED script, run from the checkout, still dispatches an absent family member"
+else
+  no "(b) the pinned script answered '$out' (rc=${rc:-0}) — the fix is inert in the shipped invocation"
+fi
+# (c) a tree with no declared program in it.
+NOPROG="$TMPROOT/noprog"
+rm -rf "$NOPROG"
+mkdir -p "$NOPROG/scripts"
+out="$(ELIXIR_FAMILY_ROOT="$NOPROG" bash "$SCRIPT" --match test <<<'docs/setup/SETUP.md' 2>&1)" && rc=0 || rc=$?
+if has "$out" "NO declared program found under"; then
+  ok "(c) --match names a family root it cannot derive from"
+else
+  no "(c) degraded without naming the reason: $out"
+fi
+out="$(ELIXIR_FAMILY_ROOT="$NOPROG" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "${rc:-0}" != 0 ]; then
+  ok "(c) --check refuses a family root it can derive nothing from (exit ${rc:-0})"
+else
+  no "(c) --check PASSED against a tree it could derive nothing from — vacuous"
+fi
+echo
+
 # ── case 7: a bad set name is an error, not a silent false ──────────────────
 echo "case 7: an unknown set name errors"
 out="$("$SCRIPT" --match nonsense <<<'api/x' 2>&1)" && rc=0 || rc=$?

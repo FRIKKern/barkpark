@@ -908,6 +908,15 @@ derived_family_sources() {
       *) continue ;;
     esac
     [ -f "$ELIXIR_FAMILY_ROOT/$g" ] || continue
+    # NEVER THIS FILE OR ITS HARNESS. A program cannot be a source of its own
+    # declarations: the globs in the lists above and in this prose are the
+    # DECLARATION, not an enumeration, and crediting them made the unfiltered
+    # extractor swallow `scripts/**` out of this very comment block. It is also
+    # what tells a checkout from the dispatcher's PIN ROOT, which holds exactly
+    # this one file and would otherwise look like a tree with one program in it.
+    case "${g##*/}" in
+      elixir-path-escape-check.sh | elixir-path-escape-check.test.sh) continue ;;
+    esac
     printf '%s\n' "$g"
   done | LC_ALL=C sort -u
 }
@@ -958,6 +967,15 @@ EOF
 
 derived_family_globs() {
   [ -z "$ELIXIR_FAMILY_GLOBS" ] || printf '%s\n' "$ELIXIR_FAMILY_GLOBS"
+}
+
+# The enumeration-verb lines of one program, as a STRING. Callers then ask
+# `grep -qF … <<<"$lines"` rather than ending a pipeline in `grep -q` (house
+# D37: -q exits on the first match, the writer takes SIGPIPE, pipefail promotes
+# 141 and the match that DID occur reads as a miss).
+family_enum_lines() {
+  grep -v '^[[:space:]]*#' "$ELIXIR_FAMILY_ROOT/$1" |
+    grep -E "$ELIXIR_FAMILY_ENUM_VERBS" || true
 }
 
 # A member of a family that CANNOT be on disk. This is what proves the
@@ -1819,11 +1837,28 @@ family_blind_note() {
   esac
 }
 
-# The extractor going blind with its sources RIGHT THERE is never survivable:
-# it is the silent-empty this whole mechanism exists to refuse.
+# THE TWO BLIND STATES GET TWO ANSWERS, and the split is the whole contract.
+#
+#   extractor — programs were read and ZERO families came back. Rot: a regex
+#     died, the verb list stopped matching. Never survivable, every mode
+#     exits 2. This is the silent-empty the criterion refuses.
+#   root — there is no program to read. The family root is not a Barkpark
+#     checkout: the harness's fixture repos are this shape and so is the
+#     dispatcher's PIN ROOT (elixir.yml: `mkdir -p "$pinroot/scripts"`, one
+#     file in it). Exiting 2 here would deadlock every PR from inside the
+#     dispatcher, which the pin block explicitly declines to do, and forcing
+#     `true` would make every fixture answer `test=true` for a docs-only diff.
+#     So: WARN, contribute no derived half, and let `--check` refuse — which
+#     is teeth, not a shrug, because `--check` runs from elixir.yml's
+#     UNFILTERED `path-escape` job on every PR and against the real checkout.
+#     In production `--match` never reaches this state: the dispatcher's cwd is
+#     the head checkout even when the SCRIPT comes from the pin root.
 if [ "$ELIXIR_FAMILY_BLIND" = extractor ]; then
   family_blind_note
   exit 2
+fi
+if [ "$ELIXIR_FAMILY_BLIND" = root ] && [ "$mode" != --check ]; then
+  family_blind_note
 fi
 
 case "$mode" in
@@ -1834,9 +1869,8 @@ case "$mode" in
       [ -n "$__g" ] || continue
       while IFS= read -r __s; do
         [ -n "$__s" ] || continue
-        if grep -v '^[[:space:]]*#' "$ELIXIR_FAMILY_ROOT/$__s" |
-          grep -E "$ELIXIR_FAMILY_ENUM_VERBS" |
-          grep -qF -- "$__g"; then
+        __lines="$(family_enum_lines "$__s")"
+        if grep -qF -- "$__g" <<<"$__lines"; then
           printf '%s\t%s\n' "$__s" "$__g"
         fi
       done <<EOF
@@ -1860,17 +1894,6 @@ EOF
     # can never disagree about what a path set contains.
     want="${2:?--match needs compile|test}"
     assert_set_name "$want"
-    # FAIL CLOSED, LOUDLY. With no program to read, the derived half of the
-    # test set is missing and a `false` here is exactly the skip that greened
-    # a required gate over zero tests. Refusing instead would exit 2 inside
-    # elixir.yml's dispatcher and deadlock the PR, which the pin block above it
-    # explicitly declines to do. So: run the suite, and say why.
-    if [ "$ELIXIR_FAMILY_BLIND" = root ] && [ "$want" = test ]; then
-      family_blind_note
-      echo "elixir-path-escape-check: --match test answers TRUE (fail-closed) rather than skipping a suite it cannot reason about." >&2
-      echo "true"
-      exit 0
-    fi
     ere="$(set_ere "$want")"
     if grep -Eq -- "$ere"; then
       echo "true"
@@ -2038,13 +2061,15 @@ while IFS= read -r fam; do
   fam_uncovered=$((fam_uncovered + 1))
   echo "::error::elixir-path-escape-check: UNDECLARED glob-consumed family: $fam" >&2
   echo "    a member that is not on disk ($probe) does NOT match the test path set" >&2
-  printf '%s\n' "$ELIXIR_FAMILY_SOURCES" | while IFS= read -r fsrc; do
+  while IFS= read -r fsrc; do
     [ -n "$fsrc" ] || continue
-    if grep -v '^[[:space:]]*#' "$ELIXIR_FAMILY_ROOT/$fsrc" |
-      grep -E "$ELIXIR_FAMILY_ENUM_VERBS" | grep -qF -- "$fam"; then
+    fam_lines="$(family_enum_lines "$fsrc")"
+    if grep -qF -- "$fam" <<<"$fam_lines"; then
       echo "    enumerated by: $fsrc" >&2
     fi
-  done
+  done <<EOF
+$ELIXIR_FAMILY_SOURCES
+EOF
 done <<EOF
 $ELIXIR_FAMILY_GLOBS
 EOF
