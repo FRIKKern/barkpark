@@ -103,6 +103,49 @@ defmodule Barkpark.Search.BodyBoundTest do
       assert bounded["_bodyTruncated"] == true
     end
 
+    test "a paper body's `html` twin is DROPPED when it exceeds the cap" do
+      # THE DEFECT: `body` is `%{"blocks" => …, "html" => …}` and only `blocks`
+      # was bounded, so 91% of a BOUNDED live response was the untouched twin.
+      html = String.duplicate("<p style=\"margin:0 0 16px\">z</p>", 500)
+      doc = %{"body" => %{"blocks" => blocks(50, 100), "html" => html, "style" => "normal"}}
+
+      # PRECONDITION: the corpus really carries the key under test. Without
+      # this the assertions below pass on a body that never had an `html`.
+      assert String.length(doc["body"]["html"]) > 250
+
+      [bounded] = BodyBound.apply_bound([doc], 250)
+
+      refute Map.has_key?(bounded["body"], "html"),
+             "bodyChars must not ship a whole rendered body beside a cut block prefix"
+
+      # The rest of the body is bounded/preserved exactly as before.
+      assert length(bounded["body"]["blocks"]) == 3
+      assert bounded["body"]["style"] == "normal"
+      assert bounded["_bodyTruncated"] == true
+    end
+
+    test "an `html` twin that already fits the cap is kept whole and unflagged" do
+      # Dropping unconditionally would truncate a short paper nobody asked to
+      # truncate — the absence of `_bodyTruncated` has to stay a real statement.
+      html = "<p>short</p>"
+      doc = %{"body" => %{"blocks" => blocks(1, 10), "html" => html}}
+
+      [bounded] = BodyBound.apply_bound([doc], 1000)
+
+      assert bounded["body"]["html"] == html
+      refute Map.has_key?(bounded, "_bodyTruncated")
+    end
+
+    test "a body map carrying ONLY `html` is bounded too" do
+      # The old head matched on `%{"blocks" => _}`; a legacy HTML-only paper
+      # body fell through the whole function untouched.
+      doc = %{"body" => %{"html" => String.duplicate("<p>x</p>", 1000)}}
+      [bounded] = BodyBound.apply_bound([doc], 100)
+
+      refute Map.has_key?(bounded["body"], "html")
+      assert bounded["_bodyTruncated"] == true
+    end
+
     test "a string body is cut to the cap" do
       doc = %{"body" => String.duplicate("a", 5000)}
       [bounded] = BodyBound.apply_bound([doc], 100)
