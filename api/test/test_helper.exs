@@ -206,4 +206,17 @@ ALTER TABLE chat_bridge.connector_installs
   ADD COLUMN IF NOT EXISTS chat_token_ref text
 """)
 
+# ── shared-test-database banner (task-71dd1eb49e334fbb) ───────────────────
+#
+# MUST run BEFORE `Sandbox.mode(:manual)`: the probes need to see COMMITTED
+# rows, and after :manual every query is trapped in a per-test transaction that
+# sees only its own writes.
+#
+# This PRINTS and never raises. It is deliberately not a refusal — CI runs
+# unpartitioned by design (`.github/workflows/elixir.yml` gives the job its own
+# ephemeral postgres service and sets no MIX_TEST_PARTITION), so a refusal keyed
+# on "unpartitioned" would red the required Elixir gate on every PR. The full
+# reasoning, and what each probe is a rule about, is in the module.
+Barkpark.SharedTestDb.report!(Barkpark.Repo)
+
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

@@ -1,0 +1,66 @@
+# REAL ExUnit capture, produced by:
+#   cd api && MIX_TEST_PARTITION=w7probe CC=/usr/bin/clang ../scripts/mix-test-strict.sh test/barkpark/connectors/install_schema_test.exs
+# on branch api/r21n-testdb. These are the actual bytes, warnings and all.
+# shared_test_db_test.exs reads them and then damages a COPY, so the two
+# arms of the capture reader differ by the damage and nothing else.
+# ---
+SET to_id = pub.id
+FROM documents d, documents pub
+WHERE e.to_id = d.id
+  AND d.doc_id LIKE 'drafts.%'
+  AND pub.doc_id = substring(d.doc_id from 8)
+  AND pub.type = d.type
+  AND pub.dataset = d.dataset
+  AND pub.workspace_id IS NOT DISTINCT FROM d.workspace_id
+  AND pub.project_id IS NOT DISTINCT FROM d.project_id
+ []
+
+22:36:54.698 [debug] QUERY OK db=10.1ms
+SET statement_timeout = 0 []
+
+22:36:54.718 [debug] QUERY OK db=10.1ms
+SELECT 1
+  FROM pg_index i
+  JOIN pg_class c ON c.oid = i.indexrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relname::text = $1
+   AND n.nspname = current_schema()
+   AND NOT i.indisvalid
+ ["media_files_ds_inserted_at_id_index"]
+
+22:36:54.739 [debug] QUERY OK db=10.1ms
+CREATE INDEX CONCURRENTLY IF NOT EXISTS media_files_ds_inserted_at_id_index
+  ON media_files (dataset_id, inserted_at DESC, id DESC)
+ []
+
+22:36:54.778 [debug] QUERY OK db=30.1ms
+RESET statement_timeout []
+22:36:59.356 [warning] [Operator] The instance-operator allowlist is UNSET (BARKPARK_OPERATOR_EMAILS and BARKPARK_OPERATOR_TOKEN_IDS are
+both empty), so the `admin` permission alone still opens these eight INSTANCE-GLOBAL
+route groups to ANY admin-permissioned token, including one whose only membership is an
+admin seat in a single workspace:
+  1. POST|GET /v1/admin/self-update, POST /v1/admin/rollback, POST|GET /v1/admin/site-deploy
+  2. GET /v1/plugins
+  3. GET|PUT|DELETE /v1/plugins/settings/:plugin_name
+  4. GET /v1/secrets, GET /v1/secrets/:name, GET /v1/secrets/:name/audit,
+     PUT /v1/secrets/:name, DELETE /v1/secrets/:name
+  5. POST /v1/status/incidents, POST /v1/status/incidents/:id/resolve
+  6. POST /api/playground
+  7. POST /api/workspaces/:workspace_slug/import
+  8. GET /v1/instance/site-deploy, GET /v1/instance/metrics
+On a SINGLE-TENANT instance that is fine — the only admin is the operator. On a
+MULTI-TENANT one it hands your first customer-admin the instance: run-secrets in
+cleartext, the instance-wide plugin credentials record, and the release itself.
+Set BARKPARK_OPERATOR_EMAILS (comma-separated operator emails) and/or BARKPARK_OPERATOR_TOKEN_IDS
+(comma-separated api_token ids) to arm the allowlist; once either is non-empty the
+eight groups are allowlist-only and fail closed.
+
+BARKPARK-SHARED-TEST-DB: banner itself failed (no function clause matching in Barkpark.SharedTestDb.explain/1)
+Running ExUnit with seed: 343107, max_cases: 8
+Excluding tags: [:bokbasen_integration, :flaky, :boot_test, :plugin_routes, :requires_vips, :requires_node, :idp_interop, :real_binary, :live_probe]
+
+..............
+Finished in 4.0 seconds (0.00s async, 4.0s sync)
+14 tests, 0 failures
+[os_mon] cpu supervisor port (cpu_sup): Erlang has closed
+[os_mon] memory supervisor port (memsup): Erlang has closed
