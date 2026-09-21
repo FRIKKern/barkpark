@@ -70,7 +70,13 @@ defmodule BarkparkWeb.Studio.StudioCriteriaTextEditTest do
     raw = "w25-crit-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      Barkpark.Auth.create_token(raw, "w25-crit", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        raw,
+        "w25-crit",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     scoped_conn() |> Plug.Test.init_test_session(%{"api_token" => raw})
   end

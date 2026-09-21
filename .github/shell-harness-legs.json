@@ -437,6 +437,11 @@
         "env": { "PDS_PARITY_DYNAMIC": "1" }
       },
       {
+        "name": "pds-secret-scan count identity (5 arms, psql stubbed — no DB, no network)",
+        "run": "bash scripts/pds-secret-scan_test.sh",
+        "env": {}
+      },
+      {
         "name": "pds-scratch-target two-root coexistence + teardown",
         "run": "bash scripts/pds-scratch-target_test.sh",
         "env": {}

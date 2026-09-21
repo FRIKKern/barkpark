@@ -28,7 +28,13 @@ defmodule BarkparkWeb.Studio.StudioBetaSectionColumnsEditingTest do
     raw = "beta-section-columns-writer-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "Beta Section and Columns editing", @dataset, ["read", "write"])
+      Auth.create_token(
+        raw,
+        "Beta Section and Columns editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
