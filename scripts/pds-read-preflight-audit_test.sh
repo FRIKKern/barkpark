@@ -284,5 +284,105 @@ else
 fi
 
 echo
+echo "=== arms: THE TWO fd-0 COUNT IDENTITIES (task-fb55d468c7dea75b) ==="
+# Both loops in this audit read their enumeration on fd 0: `candidates()` walks
+# the derived script list, and `cmd_census` walks `$cand`. Every figure either
+# one prints — `candidates: N`, `undispositioned: M` — is read off the SAME
+# loop, so a body child that steals stdin truncates it and the audit prints a
+# SHORTER census in the same confident words. The banner it prints one line
+# above is "Candidates are DERIVED by predicate … never listed", which is
+# exactly the claim a truncated derive silently breaks.
+#
+# The derive arms are the sharper demonstration: the first derived path in sort
+# order writes nothing, so a derive that stops at it yields ZERO candidates and
+# the audit prints "OK: every script that writes carries a disposition" — a
+# clean green over three writers it never looked at.
+# ── THE MUTATION HELPERS (task-fb55d468c7dea75b) ─────────────────────────────
+# A count identity is a guard over a defect nobody can trigger by hand, so the
+# only way to show it MEANS anything is to build the defect: splice a
+# stdin-draining child into the loop body and watch the guard refuse, then CUT
+# the guard out of the same mutated copy and watch the old verdict come back.
+# Both operate on a COPY; the live script is never touched.
+#
+# `cat >/dev/null` is the minimal honest specimen of the hazard: it is what a
+# `gh` without `</dev/null`, an `ssh`, a `psql` or a `read` does to fd 0 — it
+# consumes the remainder, so the loop ends after ONE iteration with exit 0 and
+# nothing printed.
+mut_splice() { # <src> <dst> <marker-name>
+  awk -v m="# MUT-SPLICE: $3" '{ print } index($0, m) { print "cat >/dev/null" }' "$1" > "$2"
+  grep -q '^cat >/dev/null$' "$2" || { printf 'mut_splice: marker %s not found in %s\n' "$3" "$1" >&2; return 2; }
+}
+mut_cut() { # <src> <dst> <block-name>
+  awk -v a="# MUT-ANCHOR: $3" -v b="# MUT-END: $3" '
+    index($0, a) { skip = 1; cut = 1 }
+    !skip { print }
+    index($0, b) { skip = 0 }
+    END { if (!cut) exit 3 }' "$1" > "$2"
+}
+# A tree with ONE non-writer (sorting first) and THREE writers.
+mk_count_tree() { # <root>
+  local root="$1" i=1
+  mk_tree "$root"
+  while [ "$i" -le 3 ]; do
+    printf '#!/usr/bin/env bash\nbp task stamp task-deadbeef%s --criterion 0\n' "$i" > "$root/scripts/w$i.sh"
+    i=$((i + 1))
+  done
+}
+
+mk_count_tree "$TMP/count"
+CNT_AUDIT="$TMP/count/scripts/pds-read-preflight-audit.sh"
+run_cnt() { out="$(PDS_AUDIT_ROOT="$TMP/count" bash "$1" census 2>&1)"; rc=$?; }
+
+# ── CONTROL: the intact audit derives four scripts and censuses three ────────
+run_cnt "$CNT_AUDIT"
+if [ "$rc" -eq 1 ] && grep -q 'candidates: 3   undispositioned: 3' <<<"$out" \
+   && ! grep -q 'SHORT DERIVE' <<<"$out" && ! grep -q 'SHORT CENSUS' <<<"$out"; then
+  ok "CONTROL: an intact run derives 4 and censuses 3, both identities silent"
+else bad "CONTROL: an intact run derives 4 and censuses 3, both identities silent (rc=$rc)"; printf '%s\n' "$out" | sed -n '1,12p'; fi
+
+# ── DERIVE, SHORT READ: a stdin-draining child must be REFUSED ───────────────
+if mut_splice "$CNT_AUDIT" "$TMP/count/derive-short.sh" derive-count-identity; then
+  run_cnt "$TMP/count/derive-short.sh"
+  if [ "$rc" -eq 2 ] && grep -q 'SHORT DERIVE — examined 1 of 4' <<<"$out" \
+     && ! grep -q '^OK: every script that writes' <<<"$out"; then
+    ok "DERIVE SHORT: a drained fd 0 refuses naming both numbers (1 of 4), exit 2, no census"
+  else bad "DERIVE SHORT: a drained fd 0 refuses naming both numbers (1 of 4), exit 2, no census (rc=$rc)"; printf '%s\n' "$out" | sed -n '1,12p'; fi
+else bad "DERIVE SHORT: no MUT-SPLICE marker for the derive loop in the audit"; fi
+
+# ── DERIVE, CUT: the same short read prints a CLEAN GREEN over zero ──────────
+# This is the defect verbatim: no candidate is derived, no candidate is missing,
+# and the audit says every script that writes carries a disposition — over three
+# writers whose files it never opened.
+if mut_cut "$TMP/count/derive-short.sh" "$TMP/count/derive-short-nocount.sh" derive-count-identity; then
+  run_cnt "$TMP/count/derive-short-nocount.sh"
+  if [ "$rc" -eq 0 ] && grep -q 'candidates: 0   undispositioned: 0' <<<"$out" \
+     && grep -q 'OK: every script that writes carries a disposition' <<<"$out"; then
+    ok "DERIVE CUT: without the identity the same short read prints a CLEAN GREEN over 0 of 3 writers (the defect, reproduced)"
+  else bad "DERIVE CUT: without the identity the same short read prints a CLEAN GREEN over 0 of 3 writers (rc=$rc)"; printf '%s\n' "$out" | sed -n '1,12p'; fi
+else bad "DERIVE CUT: no MUT-ANCHOR block for the derive identity in the audit"; fi
+
+# ── CENSUS, SHORT READ: the second loop, same shape ──────────────────────────
+if mut_splice "$CNT_AUDIT" "$TMP/count/census-short.sh" census-count-identity; then
+  run_cnt "$TMP/count/census-short.sh"
+  if [ "$rc" -eq 2 ] && grep -q 'SHORT CENSUS — dispositioned 1 of 3' <<<"$out" \
+     && ! grep -q 'candidates: 1   undispositioned: 1' <<<"$out"; then
+    ok "CENSUS SHORT: a drained fd 0 refuses naming both numbers (1 of 3), exit 2, no count line"
+  else bad "CENSUS SHORT: a drained fd 0 refuses naming both numbers (1 of 3), exit 2, no count line (rc=$rc)"; printf '%s\n' "$out" | sed -n '1,12p'; fi
+else bad "CENSUS SHORT: no MUT-SPLICE marker for the census loop in the audit"; fi
+
+# ── CENSUS, CUT: the same short read reports a THIRD of the population ───────
+# Not a green — three undispositioned writers still red — but the NUMBER is the
+# lie: "1 script(s) write without a registered disposition" where three do, in
+# the words a complete census uses. A worklist that omits two thirds of itself
+# is how an undispositioned writer stays undispositioned.
+if mut_cut "$TMP/count/census-short.sh" "$TMP/count/census-short-nocount.sh" census-count-identity; then
+  run_cnt "$TMP/count/census-short-nocount.sh"
+  if [ "$rc" -eq 1 ] && grep -q 'candidates: 1   undispositioned: 1' <<<"$out" \
+     && ! grep -q 'SHORT CENSUS' <<<"$out"; then
+    ok "CENSUS CUT: without the identity the same short read reports 1 of 3 writers as the whole census (the defect, reproduced)"
+  else bad "CENSUS CUT: without the identity the same short read reports 1 of 3 writers as the whole census (rc=$rc)"; printf '%s\n' "$out" | sed -n '1,12p'; fi
+else bad "CENSUS CUT: no MUT-ANCHOR block for the census identity in the audit"; fi
+
+echo
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

@@ -5786,6 +5786,11 @@ export const SCENARIOS = {
     label: "Account modal — identity, sessions, password on demand, 2FA OFF (the not-enrolled state)",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5802,6 +5807,11 @@ export const SCENARIOS = {
     label: "Account modal — the NINE-session shape (the one that broke on live); escape hatches sit below the list",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5832,6 +5842,11 @@ export const SCENARIOS = {
     label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5861,6 +5876,11 @@ export const SCENARIOS = {
     label: "Account modal — the CRUEL identity: a 158-character email local part, the longest name a person can actually own (validate_length(:email, max: 160))",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: cruelAccountMe,
       barkparks: [liveInstance],
@@ -5874,6 +5894,11 @@ export const SCENARIOS = {
     label: "Account modal — enrollment rejected: 422 invalid_otp, inline in the #pw-error grammar (never a toast)",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account-2fa-badcode",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5888,6 +5913,11 @@ export const SCENARIOS = {
     label: "Account modal — 2FA already ON: the on-row, read free from /v1/me's two_factor_enabled",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: (function () {
         const m = me("Guerrilla");
@@ -5930,6 +5960,11 @@ export const SCENARIOS = {
     label: "Account modal — /v1/me never lands: the two-factor row reads Unknown, offers Retry, and never offers setup",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       meFault: { status: 500, body: { error: "internal" } },
@@ -6543,6 +6578,118 @@ export const SCENARIOS = {
   },
 };
 
+// ── THE MODAL SEAM'S FIRST TWO NEW SCREENS (task-5ffdec2b609404bc) ──────────
+// Until the `modal` field above existed, the ONLY dialog any PNG in this
+// harness could show was the account modal, because shoot.sh derived
+// `?modal=account` from the `account-modal*` NAME. Re-derive the scale of that
+// blind spot yourself — the number is not a memory:
+//
+//   grep -n 'openModal(' cloud/priv/static/app.js
+//
+// 31 hits, of which THREE are not calls (two prose lines and the
+// `function openModal(html)` definition) => 28 call sites, ONE of which the
+// matrix reached.
+//
+// These two are the first two it could not. They are deliberately NOT new
+// fixtures: each is its HOST scenario's data, deep-copied, plus one field. That
+// is the whole point of the comparison the task asks for — if the shot of
+// `tokens-revoke-confirm` differs from the shot of `tokens-revoke`, the ONLY
+// thing that can have made the difference is the dialog, because every other
+// byte of the scenario is the same by construction.
+//
+// JSON round trip, not a shared reference: route() mutates `data` through the
+// per-boot state bag (the revoke DELETE splices the token list), and a shared
+// object would let one scenario's drive rewrite the other's fixture inside a
+// single smoke.mjs process. Everything in `data` is plain JSON.
+const copyData = (name) => JSON.parse(JSON.stringify(SCENARIOS[name].data));
+
+// confirmRevokeToken — the CONFIRM-SHEET shape: a short, action-bearing dialog
+// built from an inline HTML string with no model object behind it. Reached by a
+// REAL click on a REAL row's Revoke button (mock.js's "revoke-token" driver),
+// never by calling the function, so the delegation renderTokens() installs is
+// part of what the shot certifies.
+SCENARIOS["tokens-revoke-confirm"] = {
+  ...SCENARIOS["tokens-revoke"],
+  label:
+    "API tokens — the REVOKE CONFIRM SHEET itself, opened by a real click on a real row: the typed-danger dialog over its own list",
+  data: copyData("tokens-revoke"),
+  modal: "revoke-token",
+};
+
+// openCommandPalette — the `.modal-root:has(.cmdk)` family. app.css carries
+// modal-scoped `:has(.cmdk)` rules that NO image in this corpus exercised at
+// ANY accent; this scenario is the first one that does. Reached by the REAL
+// Cmd/Ctrl+K keydown path (mock.js's "cmdk" driver), which means the shot also
+// passes through the handler's four no-op guards rather than around them.
+SCENARIOS["cmdk-palette"] = {
+  ...SCENARIOS["mixed-fleet"],
+  label:
+    "The command palette over a real estate — the .modal-root:has(.cmdk) arm, opened by the real Cmd/Ctrl+K keydown",
+  data: copyData("mixed-fleet"),
+  modal: "cmdk",
+};
+
+// ── THE TWO CALL SITES WITH NO SCENARIO AT ALL (task-499cab525e65018b) ──────
+// PR #19581 derived every `openModal(` call site in app.js — re-derive it, the
+// number is not a memory:
+//
+//   grep -n 'openModal(' cloud/priv/static/app.js
+//
+// 31 hits, THREE of which are not calls (two prose lines and the
+// `function openModal(html)` definition) => 28 call sites. Twenty-six of them
+// have a host screen somewhere in this corpus, so widening the oracle to one is
+// a planFor() branch. TWO had no scenario at ALL:
+//
+//   openUpdateConflictModal   the pin-conflict sheet
+//   openPinModal              the pin-version form
+//
+// `pin-race.mjs` tests the pin LOGIC and renders nothing, so no PNG in this
+// harness has ever contained either dialog and the CSSOM oracle could not
+// certify them. These two scenarios are what closes that.
+//
+// BOTH RIDE `instance-behind`, and neither invents a fixture: that scenario is
+// already the corpus's only owner-actor box whose Updates panel paints both the
+// live `#inst-update` CTA and the live `[data-au="pin"]` policy control
+// (`behindInstance` carries `pinned_release: null`, so autoupdateActions'
+// `showPin` is true). Same deep-copy discipline as the two above: whatever the
+// two shots differ by is the dialog, because every other byte is the host's.
+SCENARIOS["instance-pin-version"] = {
+  ...SCENARIOS["instance-behind"],
+  label:
+    "Instance Updates panel — the PIN VERSION form itself, opened by a real click on the panel's own Pin version control: a release-tag input over the box it freezes",
+  data: copyData("instance-behind"),
+  modal: "pin-version",
+};
+
+// The conflict sheet needs a REFUSAL, and it is the ONE thing these two do not
+// share. `instanceSelfUpdate` is the only key added to the host's fixture, and
+// it changes NOTHING that renders before the click: it answers a POST that no
+// scenario issues until a person presses Update.
+//
+// The box is deliberately NOT pinned in its own fixture. That is not an
+// oversight, it is the state this dialog exists FOR: the console's copy of the
+// row was read before the pin landed, so the operator is looking at a box that
+// offers "Update to v0.9.2" and the plane refuses with a pin they cannot see.
+// Pinning the fixture would move the Autoupdate rail's badge and the panel's
+// buttons, and the host screen under the sheet would stop being the one
+// `instance-behind` already pins.
+SCENARIOS["instance-update-conflict"] = {
+  ...SCENARIOS["instance-behind"],
+  label:
+    "Instance Updates — the PIN-CONFLICT sheet: the plane answers the self-update 409 pinned, and the refusal names the freeze and offers the explicit override rather than dying into a toast",
+  data: {
+    ...copyData("instance-behind"),
+    // The typed envelope app.js's updateConflict() reads: `data.error.code`,
+    // with the tag on `pinned_release`. `kind: "pinned"` on a non-forced call
+    // is the ONLY branch that reaches openUpdateConflictModal.
+    instanceSelfUpdate: {
+      status: 409,
+      body: { error: { code: "pinned", pinned_release: "v0.8.4" } },
+    },
+  },
+  modal: "update-conflict",
+};
+
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
 export const DEFAULT_SCENARIO = "empty";
 
@@ -6930,6 +7077,21 @@ export function route(name, method, path, state) {
   if (bpRollback && method === "POST") {
     return d.instanceRollback ||
       { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
+  }
+  // task-499cab525e65018b — POST /v1/barkparks/:id/self-update, the seam the
+  // Update CTA presses. UNMODELLED until now: it fell through to the terminal
+  // `/v1/` 200 {} at the bottom of route(), and a 200 is not the 202 the plane
+  // answers, so every preview click on Update took updateInstance's REFUSAL
+  // branch, classified `{}` as the unnamed `other` kind and died into a toast.
+  // The consequence is the one this row was filed for: `openUpdateConflictModal`
+  // — reached ONLY from `c.kind === "pinned" && !opts.force` — was structurally
+  // unreachable from this harness, at any width, theme or accent.
+  // Same shape as the rollback arm directly above: default 202, and a scenario
+  // drives one named refusal through `d.instanceSelfUpdate`.
+  const bpSelfUpdate = p.match(/^\/v1\/barkparks\/([^/]+)\/self-update$/);
+  if (bpSelfUpdate && method === "POST") {
+    return d.instanceSelfUpdate ||
+      { status: 202, body: { status: "updating" } };
   }
   // cch-w49-s7 — the plane puts D554's `billing_capability` on this 200 as a
   // TOP-LEVEL SIBLING (router.ex: `%{subscription: …, billing_capability:
