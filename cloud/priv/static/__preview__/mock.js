@@ -331,9 +331,27 @@
   // real click, the real keystroke — because a driver that calls the opener
   // directly photographs a dialog no user path is proven to reach.
   //
-  // `?modal=` on the URL still WINS over the field: hashchange-wiring.mjs and
-  // modal-oracle.mjs both drive `&modal=account` onto scenarios that declare
-  // nothing, and an override that a field could silently veto would break them.
+  // PRECEDENCE: THE SCENARIO'S FIELD WINS, and `?modal=` is the FALLBACK for a
+  // scenario that declares none. This was the other way round for one commit
+  // and it SILENTLY DOWNGRADED a dialog. hashchange-wiring.mjs, modal-oracle
+  // .mjs and overflow-guard.mjs all append a flat `&modal=account` to whatever
+  // scenario they are pointed at, which is exactly right for the many that
+  // declare nothing — but `account-modal-2fa-badcode` declares
+  // `account-2fa-badcode`, the SAME opener followed by the real enrollment
+  // through to the 422. Letting the URL's generic `account` win replaced the
+  // specific driver with the general one: the modal still opened, `.modal-card`
+  // still painted, and only `#a2f-error` was missing — so nothing threw, no
+  // drive-failed banner appeared, and overflow-guard.mjs sat at `expr-false`
+  // 238 times and refused at exit 2 with a READINESS TIMEOUT that named no
+  // cause. MEASURED, both directions, on the same URL: origin/main's mock.js
+  // rendered #a2f-error (53731 B of DOM), the inverted precedence did not
+  // (38696 B), and dropping `&modal=account` from the URL made this tree render
+  // it again from the field alone.
+  //
+  // A URL that names a driver the scenario ALSO names is a no-op either way
+  // (`account-modal` declares `account`, which is what all three instruments
+  // append), so nothing that relied on the override loses anything: an override
+  // only ever mattered where the field was empty, and there it still applies.
   var MODAL_DRIVERS = {
     // openAccountModal — the original seam, unchanged in behaviour.
     account: function () { openAccountModalThen(null); },
@@ -504,14 +522,16 @@
     });
   }
 
-  // The resolution order, stated once: URL override, then the scenario's own
-  // declared field. An unknown name is NOT ignored — a typo'd driver would
-  // otherwise shoot the bare host screen under a filename promising a dialog,
-  // which is exactly the class of lie the drive-failed banner exists to kill.
+  // The resolution order, stated once: the scenario's own declared field, then
+  // the `?modal=` URL fallback (see PRECEDENCE above — the inverse of this
+  // order is what downgraded account-modal-2fa-badcode to the plain account
+  // modal). An unknown name is NOT ignored — a typo'd driver would otherwise
+  // shoot the bare host screen under a filename promising a dialog, which is
+  // exactly the class of lie the drive-failed banner exists to kill.
   function startModalDrive() {
     scenariosReady.then(function (mod) {
       var entry = mod && mod.SCENARIOS && mod.SCENARIOS[scen];
-      var name = params.get("modal") || (entry && entry.modal) || "";
+      var name = (entry && entry.modal) || params.get("modal") || "";
       if (!name) return;
       var drive = MODAL_DRIVERS[name];
       if (typeof drive !== "function") {
