@@ -43,6 +43,15 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
     end
   end
 
+  # The `send_resp(200, iodata)` below is a REVIEWED false positive: `iodata` is
+  # the ONIX document `Export.to_iodata/1` rendered from a stored document, and
+  # the response is sent as `application/xml` with a `content-disposition`
+  # attachment header — it is never interpreted as HTML in a browsing context.
+  # MIGRATED FROM `.sobelow-skips` (hg-bl-sobelow-fingerprint-to-inline-
+  # migration): the old row was `…/export_controller.ex:52,64EB26D`, pinned to a
+  # LINE, which is why this file used to forbid adding an `alias`. That
+  # constraint is gone — the annotation binds to this function, not to line 52.
+  # sobelow_skip ["XSS.SendResp"]
   defp render_onix(conn, doc, pub_id) do
     case Export.to_iodata(book_doc_from(doc, pub_id)) do
       {:ok, iodata} ->
@@ -51,14 +60,11 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
         |> put_resp_header("content-disposition", ~s|attachment; filename="#{pub_id}.onix"|)
         |> send_resp(200, iodata)
 
-      # NO `alias BarkparkWeb.ErrorResponse` IN THIS FILE, ON PURPOSE. The
-      # `send_resp(200, iodata)` three lines above is a REVIEWED false positive
-      # pinned by line in api/.sobelow-skips
-      # (`…/export_controller.ex:52,64EB26D`). An alias line would push it to 53
-      # and red the advisory Sobelow job over a finding nobody introduced, and
-      # security.yml:265 forbids regenerating that baseline on a dev toolchain.
-      # Fully-qualified calls keep the anchor valid; this comment sits BELOW the
-      # anchored line so it cannot move it either.
+      # Fully-qualified `BarkparkWeb.ErrorResponse` calls, no `alias`. This used
+      # to be load-bearing: the send_resp finding above was pinned by LINE in
+      # api/.sobelow-skips, so an alias line would have shifted it. It is now an
+      # inline `# sobelow_skip` above `render_onix/3`, so adding an alias is safe
+      # — the style is kept only because the file already reads this way.
       {:error, {:xsd_invalid, reasons}} ->
         BarkparkWeb.ErrorResponse.emit_custom(
           conn,

@@ -546,6 +546,11 @@ defmodule Barkpark.StudioChat.Runtime do
     end
   end
 
+  # `String.to_atom/1` is applied to `provider`, which is one of the runtime's
+  # own registered provider names, not arbitrary request input — the atom set is
+  # bounded by the provider roster. Inline rather than a line-pinned
+  # `.sobelow-skips` row so the waiver travels with the function.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp registered_provider_ready(host, provider) do
     capabilities = Map.get(host, :capabilities) || Map.get(host, "capabilities") || %{}
     providers = Map.get(capabilities, "providers") || Map.get(capabilities, :providers) || %{}

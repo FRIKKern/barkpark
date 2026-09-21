@@ -1,4 +1,6 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
+lib/barkpark/codelists/editeur.ex	parse_xml
+lib/barkpark/codelists/editeur.ex	seed_thema
 lib/barkpark/content/validation.ex	get_in_field
 lib/barkpark/coupled_artifacts.ex	read_lines
 lib/barkpark/coupled_artifacts.ex	required_contexts
@@ -15,15 +17,18 @@ lib/barkpark/media/blobstore/s3.ex	warm_cache
 lib/barkpark/media/delivery/search.ex	run_tags_facet_sql
 lib/barkpark/media/image_backend/magick.ex	run_bounded
 lib/barkpark/media/image_metadata.ex	maybe_lqip
+lib/barkpark/media/probe.ex	read_prefix
 lib/barkpark/media/renditions.ex	delete_for_file
 lib/barkpark/media/renditions.ex	generate
 lib/barkpark/plugins/bulldocs.ex	register_schemas
 lib/barkpark/plugins/frt.ex	load_schema!
+lib/barkpark/plugins/github.ex	validate_settings
 lib/barkpark/plugins/github/health.ex	queue_snapshot
 lib/barkpark/plugins/github/health.ex	zero_queue
 lib/barkpark/plugins/grip.ex	register_schemas
 lib/barkpark/plugins/indx/persistence.ex	load
 lib/barkpark/plugins/indx/persistence.ex	save
+lib/barkpark/plugins/manifest.ex	parse_and_validate!
 lib/barkpark/plugins/media.ex	load_schema!
 lib/barkpark/plugins/onixedit.ex	book_raw_with_subschemas
 lib/barkpark/plugins/onixedit/export.ex	to_file
@@ -32,6 +37,9 @@ lib/barkpark/plugins/onixedit/export/validator.ex	bounded_xmllint
 lib/barkpark/plugins/onixedit/export/validator.ex	run_xmllint
 lib/barkpark/plugins/onixedit/schemas/contributor.ex	definition_map
 lib/barkpark/plugins/onixedit/schemas/text_content.ex	definition_map
+lib/barkpark/plugins/onixedit/web/export_controller.ex	render_onix
+lib/barkpark/plugins/registry/boot_collectors.ex	module_from_plugin_dir
+lib/barkpark/plugins/registry/boot_collectors.ex	module_of_configured_entry
 lib/barkpark/plugins/registry/discovery.ex	manifest_names_for_module
 lib/barkpark/plugins/registry/discovery.ex	try_register_plugin_dir
 lib/barkpark/plugins/registry/discovery.ex	try_register_plugin_dir_in_whitelist
@@ -41,6 +49,7 @@ lib/barkpark/plugins/sheets/web/export_controller.ex	delimited
 lib/barkpark/plugins/sheets/web/export_controller.ex	export_html
 lib/barkpark/plugins/sheets/web/export_controller.ex	export_xlsx
 lib/barkpark/plugins/sheets/web/import_controller.ex	read_upload
+lib/barkpark/plugins/tickets/attachments.ex	store
 lib/barkpark/release.ex	seed
 lib/barkpark/release/secrets.ex	read_existing
 lib/barkpark/release/secrets.ex	write_env
@@ -103,8 +112,10 @@ lib/barkpark/studio_chat/provider/claude.ex	init
 lib/barkpark/studio_chat/provider/claude.ex	read_stderr_tail
 lib/barkpark/studio_chat/provider/claude.ex	rewrite_mcp_config
 lib/barkpark/studio_chat/provider/claude.ex	write_mcp_config
+lib/barkpark/studio_chat/runtime.ex	registered_provider_ready
 lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
+lib/barkpark/sync/pusher.ex	reason_atom
 lib/barkpark/tasks/queue_gate.ex	fetch
 lib/barkpark/tasks/queue_gate.ex	fetch_optional
 lib/barkpark/tasks/validation.ex	fetch
@@ -140,6 +151,7 @@ lib/barkpark/tenancy/workspace_bundle/janitor.ex	owner_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	remove
 lib/barkpark_web/controllers/bulldocs_email_controller.ex	show
 lib/barkpark_web/controllers/cycle_fleet_controller.ex	release_paper_render
+lib/barkpark_web/controllers/error_html.ex	render
 lib/barkpark_web/controllers/media_controller.ex	maybe_send_file
 lib/barkpark_web/controllers/saml_controller.ex	slo
 lib/barkpark_web/controllers/share_link_controller.ex	serve
@@ -151,3 +163,4 @@ lib/barkpark_web/controllers/workspace_controller.ex	spill_body
 lib/barkpark_web/layouts.ex	paper_stylesheet
 lib/barkpark_web/live/studio/chat_live.ex	consume_attachments
 lib/barkpark_web/plugs/idempotency.ex	replay
+lib/barkpark_web/router/plugins.ex	public_root_session_name

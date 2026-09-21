@@ -85,6 +85,11 @@ defmodule Barkpark.Plugins.Manifest do
   Raises on JSON decode failure or validation failure.
   """
   @spec parse_and_validate!(Path.t()) :: map()
+  # `File.read!/1` reads `path`, a plugin directory this process discovered on
+  # disk (`Discovery.plugin_dirs_in/1`), never a request-supplied path.
+  # Inline rather than a line-pinned `.sobelow-skips` row: the fingerprint is
+  # `type,file:line,HASH` and shifts on any edit above the call.
+  # sobelow_skip ["Traversal.FileModule"]
   def parse_and_validate!(path) when is_binary(path) do
     path
     |> File.read!()

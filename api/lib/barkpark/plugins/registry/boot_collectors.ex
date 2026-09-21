@@ -213,6 +213,11 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
 
   defp module_of_configured_entry({_name, module}) when is_atom(module), do: module
 
+  # `File.read/1` reads `plugin.json` under a directory enumerated by
+  # `Discovery.plugin_dirs_in/1` from `Discovery.default_paths/0`; `name` is only
+  # COMPARED against the decoded manifest, never joined into the path.
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["Traversal.FileModule"]
   defp module_of_configured_entry(name) when is_binary(name) do
     # Resolve a string plugin_name by reading the manifest off disk.
     Discovery.default_paths()
@@ -231,6 +236,10 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
 
   defp module_of_configured_entry(_), do: nil
 
+  # `File.read/1` reads `plugin.json` under `dir`, which the caller obtained from
+  # `Discovery.plugin_dirs_in/1` — a boot-time disk enumeration, not user input.
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["Traversal.FileModule"]
   defp module_from_plugin_dir(dir) do
     manifest_path = Path.join(dir, "plugin.json")
 
