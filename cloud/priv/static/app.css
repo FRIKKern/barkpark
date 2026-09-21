@@ -591,6 +591,7 @@ a:hover { text-decoration: underline; }
 .inst-tab:focus-visible,
 .affix-btn:focus-visible,
 .btn-link:focus-visible,
+.plan-more:focus-visible,
 .modal-x:focus-visible,
 .toast-close:focus-visible,
 .topbar-link:focus-visible {
@@ -1703,7 +1704,24 @@ select.form-input {
 .plan-feats { list-style: none; padding: 0; margin: 18px 0 22px; display: flex; flex-direction: column; gap: 10px; }
 .plan-feats li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .plan-feats .ck { color: var(--success); font-weight: 700; }
-.plan-more { display: block; text-align: center; margin: 14px 0 0; font-size: 13px; color: var(--muted-text); cursor: pointer; }
+/* gr-r21m-defect-jk (DEFECT-K, screen `billing-cancelling`). RULED: this is a
+   READ/DISCLOSURE affordance by design — the GR33 comment at its emitter
+   (`grep -n '"See all plans" stays' app.js`) makes the card STATE-ONLY and keeps
+   the grid toggle as the one thing it owns — so "the primary action renders as
+   plain body text" mis-classifies it: it is not an action tier at all, and it
+   must NOT be promoted to `.btn-primary` beside the real billing CTAs.
+   THE RESIDUAL WAS REAL AND IS FIXED HERE: it shipped as a bare `<a>` with no
+   href, no role and no tabindex, so the one control this card owns was not
+   keyboard reachable and announced as nothing. It is now a `<button
+   type="button">`; these three declarations (`font: inherit`, no background, no
+   border, `width: 100%`) reproduce the anchor's box EXACTLY under
+   `display: block` + `text-align: center`, and the shared `:focus-visible` ring
+   above now lists it. */
+.plan-more {
+  display: block; text-align: center; margin: 14px 0 0; font-size: 13px;
+  color: var(--muted-text); cursor: pointer;
+  font: inherit; font-size: 13px; width: 100%; background: none; border: 0; padding: 0;
+}
 .plan-more:hover { color: var(--text); }
 #billing-tiers { margin-top: 24px; }
 /* cch-w49-s7 — the sentence that replaces an omitted Subscribe. #billing-tiers
@@ -6221,6 +6239,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    Trial state (countdown chip + ratified CTA), the GR17 dunning banner, the
    quota line on tier cards, and the GR20 topbar billing chip. Append-only tail;
    new rules ride the v4 ladder (--cc-*) directly — no new legacy-alias uses. */
+/* gr-r21m-defect-jk RULING (DEFECT-J, RETRACTED AS FILED). The re-review read
+   this chip, `.billing-chip--trial`, `.am-link`, `.invite-ico--info` and
+   `.tlv-coalesce-toggle` as "a fixed blue that ignores the accent" and asked for
+   them to be routed through the accent variable. THEY MUST NOT BE. GR57 is the
+   standing ruling: `.btn-link` colours itself `var(--primary)`, which IS the
+   user-selectable accent (redefined in ten `[data-bp-theme]` blocks across five
+   identities), so an accent-routed link renders terracotta under ember and
+   orchid under charple. `--info` = `--cc-blue` is declared ONLY in `:root` and
+   `[data-theme="dark"]` — accent-independent BY CONSTRUCTION — and GR57 says in
+   so many words: "Ship a scoped variant, never repurpose `--primary`." The
+   charter already records one builder retracting this exact finding
+   (gr-p5r7-reshoot-verify). `__css_check` E21 now holds the invariant in BOTH
+   directions so the next reviewer meets a gate instead of re-deriving it.
+
+   WHAT WAS ACTUALLY WRONG, and it is the whole of DEFECT-J's true content: this
+   rule and `.billing-chip--trial` were the only two CONSUMER rules in the file
+   that reached past the role token `--info` to the raw ramp token `--cc-blue`.
+   Same pixels today (the alias is 1:1), but a ramp token with consumers is a
+   second front door: retune `--info` for contrast and these two chips silently
+   do not follow. Both now read `var(--info)`, which is the token their own
+   background and border already used, and E21 arm (b) reds if a third appears. */
 .trial-chip {
   font-family: var(--mono);
   font-size: var(--text-xs);
@@ -6228,7 +6267,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   letter-spacing: 0.02em;
   padding: 3px 9px;
   border-radius: var(--pill);
-  color: var(--cc-blue);
+  color: var(--info);
   background: hsl(var(--info-hsl) / 0.12);
   border: 1px solid hsl(var(--info-hsl) / 0.3);
   white-space: nowrap;
@@ -6318,8 +6357,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   text-overflow: ellipsis;
 }
 .billing-chip:hover { text-decoration: none; }
+/* Reads the ROLE token, not the ramp — see the gr-r21m-defect-jk ruling on
+   `.trial-chip` above; `__css_check` E21 arm (b) holds it. */
 .billing-chip--trial {
-  color: var(--cc-blue);
+  color: var(--info);
   background: hsl(var(--info-hsl) / 0.1);
   border: 1px solid hsl(var(--info-hsl) / 0.3);
 }

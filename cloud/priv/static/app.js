@@ -3759,6 +3759,20 @@
             (rotated ? '<span class="prov-row-when" data-prov-rotated>credential updated ' +
               esc(rotated) + "</span>" : "") + "</span>" +
         "</span>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `providers-connected`). RULED:
+        // `.btn .btn-ghost .btn-sm` IS the console's sanctioned secondary tier
+        // (50+ sites), NOT a missing class. The re-review's "no button chrome"
+        // is a RESTING-STATE reading: `.btn-ghost` zeroes only background and
+        // border-color, so the control keeps `.btn`'s 28px box, its padding, its
+        // `:hover { background: var(--muted-surface) }` and the house
+        // `.btn:focus-visible` ring. Promoting this one to a filled tier would
+        // make it the loudest thing on the providers screen and leave 50 ghost
+        // siblings inconsistent. Destructiveness is carried where it belongs —
+        // `canDisconnect` gates it, and the click opens the TYPED-confirm
+        // (`grep -n 'function confirmDisconnectProvider' app.js`), which is the
+        // affordance that actually protects the account. If the resting ghost
+        // tier is ever re-decided, it is re-decided for `.btn-ghost` in app.css,
+        // once, not for three buttons the matrix happened to photograph.
         (canDisconnect
           ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
             esc(p.kind || "") + '">Disconnect&hellip;</button>'
@@ -19738,6 +19752,12 @@
         : "Connect a " + name + " account to provision here. Until then we launch a fully-managed instance for you.";
       return '<div class="launch-catalog-empty">' +
         '<p class="dim">' + lead + "</p>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `empty`). RULED as the ghost tier
+        // BY DESIGN — same ruling as `providerRosterHtml`'s Disconnect above.
+        // It is also NOT this screen's primary action: the lead sentence right
+        // above says a managed instance launches anyway, so the screen's primary
+        // is the launch submit and this is the secondary BYO detour. A filled
+        // tier here would out-shout the door that actually works.
         '<button class="btn btn-ghost btn-sm launch-connect-provider" type="button" data-kind="' + esc(kind) + '">Connect ' + name + "</button></div>";
     }
     if (vs.state === "unavailable") {
@@ -21054,7 +21074,14 @@
         // an ACTION section carries the action (never a save-row, never a button
         // buried in a status card). "See all plans" stays: it toggles the grid,
         // a read affordance the card owns.
-        '<a class="plan-more" id="plan-more">See all plans</a>' +
+        // gr-r21m-defect-jk (DEFECT-K, screen `billing-cancelling`) — RULED a
+        // read/disclosure affordance by the GR33 note directly above, not an
+        // action tier, so "the primary action renders as plain body text"
+        // mis-reads it. The real residual it hid — a bare `<a>` with no href, no
+        // role and no tabindex, i.e. the one control this card owns was not
+        // keyboard reachable — IS fixed: it is a real button now, boxed
+        // identically by `.plan-more` in app.css and in the shared focus ring.
+        '<button class="plan-more" id="plan-more" type="button">See all plans</button>' +
       "</div>";
   }
 
