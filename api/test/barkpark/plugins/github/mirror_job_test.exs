@@ -1411,6 +1411,91 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       refute_received {:enqueued, %{fields: %{doc_id: "gh-parent"}}}
     end
 
+    # -------------------------------------------------------------------------
+    # (d2) RE-PARENT RESIDUE (gr-bl-github-mirror-reparent-residue): a row that
+    # stops being cap-flattened must lose its parent_marker, or the issue BODY
+    # keeps naming the OLD epic while the native tree shows the new one.
+    # -------------------------------------------------------------------------
+
+    test "(d2) a native link CLEARS a stale parent_marker and records the parent", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Moved child", "parent_id" => "gh-new-parent"}, scope)
+
+      # The row's history: it USED to hang under an over-cap parent, so the
+      # cap-flatten fallback stamped a marker and the body renders it.
+      {:ok, _} =
+        Link.put(
+          id,
+          @dataset,
+          %{repo: @repo, issue: 72, state: "synced", parent_marker: "gh-old-parent"},
+          scope
+        )
+
+      stub_get(bypass, 72)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/72", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 72, "state" => "open"}))
+      end)
+
+      # Its new parent is UNDER the cap, so relations links it natively.
+      linked = fn _task, _repo, _num, _dataset -> {:linked, 900} end
+      enq = fn payload -> send(self(), {:enqueued, payload}) end
+
+      assert :ok =
+               MirrorJob.reconcile(id, @dataset, seams(relations_impl: linked, enqueue_fun: enq))
+
+      gh = Link.get(reload(id, scope))
+      # The marker is ERASED (the key is present and nil — `hydrate_parent_marker`
+      # reads that as absent, so the next body render drops the fence)…
+      assert Map.fetch!(gh, "parent_marker") == nil
+      # …and the parent the link was made under is RECORDED, so the next
+      # re-parent knows which link to remove.
+      assert gh["sub_issue_parent"] == 900
+
+      # THIS pass already PATCHed the body from the stale marker, so one bounded
+      # relink re-renders it without the fence.
+      assert_received {:enqueued, %{fields: %{relink: true, relink_attempt: 3}, schedule_in: 60}}
+    end
+
+    test "(d3) a settled native link writes no relations stamp and enqueues nothing", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Settled child", "parent_id" => "gh-new-parent"}, scope)
+
+      # Already recorded under 900 and carrying NO marker: nothing to settle.
+      {:ok, _} =
+        Link.put(
+          id,
+          @dataset,
+          %{repo: @repo, issue: 73, state: "synced", sub_issue_parent: 900},
+          scope
+        )
+
+      stub_get(bypass, 73)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/73", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 73, "state" => "open"}))
+      end)
+
+      linked = fn _task, _repo, _num, _dataset -> {:linked, 900} end
+      enq = fn payload -> send(self(), {:enqueued, payload}) end
+
+      assert :ok =
+               MirrorJob.reconcile(id, @dataset, seams(relations_impl: linked, enqueue_fun: enq))
+
+      gh = Link.get(reload(id, scope))
+      assert gh["sub_issue_parent"] == 900
+      refute Map.has_key?(gh, "parent_marker")
+      refute_received {:enqueued, _}
+    end
+
     test "(e) hydrated blocker_issue_refs land in the PATCH body as a blocks marker", %{
       bypass: bypass,
       scope: scope

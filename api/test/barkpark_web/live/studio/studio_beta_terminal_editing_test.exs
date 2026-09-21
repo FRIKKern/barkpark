@@ -26,7 +26,16 @@ defmodule BarkparkWeb.Studio.StudioBetaTerminalEditingTest do
       )
 
     raw = "beta-terminal-writer-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta Terminal editing", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta Terminal editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 
