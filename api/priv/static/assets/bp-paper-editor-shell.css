@@ -958,10 +958,20 @@
        --bp-codeblock- and --paper- tokens as the reader <pre> so the editable code
        renders byte-identically (0.9rem/1.5, mono, ink). Keep BYTE-IDENTICAL with
        assets/paper-editor/src/styles.css. */
+    /* The highlight layer under the textarea (code-node.js + code-highlight.js, plan #27): the SAME
+       text painted with hljs-* tokens, metrics identical to the island above it, which shows only its
+       caret and selection. Keep BYTE-IDENTICAL with the styles.css copy (the code-interior test checks). */
+    .bp-canvas-code-hl {
+      position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+      margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
+      display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      color: var(--paper-ink); white-space: pre; overflow-wrap: normal; background: transparent;
+    }
     .bp-canvas-code-area {
-  display: block;
+      position: relative; z-index: 1; color: transparent; caret-color: var(--paper-ink);
+      display: block;
       font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
-      color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
+      white-space: pre; overflow-wrap: normal;
       background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
     }
     /* loop-epic/parity-callout: `bp-canvas-callout` is a thin edit-only layout

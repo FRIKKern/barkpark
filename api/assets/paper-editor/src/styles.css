@@ -1,3 +1,5 @@
+/* The code tokens: one rule set shared with the reader (Render.Stylesheet appends the same file) — an @import must lead. */
+@import "../../paper-surface/code-tokens.css";
 /* bp-paper-editor — standalone portable stylesheet.
  *
  * Extracted from api/lib/barkpark_web/layouts/root.html.heex's inline <style>
@@ -781,10 +783,19 @@
  * pre; transparent/borderless so only the frame paints. NONE of this touches
  * the island contract (stopEvent/ignoreMutation), so editing is unaffected.
  * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+/* The highlight layer under the textarea: the SAME text painted with hljs-* tokens (code-highlight.js),
+ * metrics identical to the island above it, which shows only its caret and selection. */
+.bp-canvas-code-hl {
+  position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+  margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
+  display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  color: var(--paper-ink); white-space: pre; overflow-wrap: normal; background: transparent;
+}
 .bp-canvas-code-area {
+  position: relative; z-index: 1; color: transparent; caret-color: var(--paper-ink);
   display: block;
   font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
-  color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
+  white-space: pre; overflow-wrap: normal;
   background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
 }
 .bp-paper-editor-body blockquote {
@@ -1616,3 +1627,4 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-paper-format__btn--highlight { background: hsl(var(--warn-hsl) / 0.35); color: var(--paper-ink); border-radius: 3px; }
 /* The highlight mark inside the canvas; the reader's paper-surface.css carries the same rule (mirrored above). */
 bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn-hsl) / 0.35); color: inherit; padding: 0 0.12em; border-radius: 2px; box-decoration-break: clone; }
+

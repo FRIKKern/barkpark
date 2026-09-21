@@ -69,6 +69,8 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
+// THE tokenizer, shared with the reader (plan #27): the highlight layer under the textarea.
+import { highlightHtml } from "../code-highlight.js";
 
 // The TipTap node NAME is `bpCode`, NOT `code` — `code` is already the StarterKit
 // INLINE code MARK (extension-code: name:'code', parses <code>), which the canvas
@@ -237,6 +239,22 @@ export const Code = Node.create({
       const area = document.createElement("textarea");
       area.className = "bp-canvas-code-area";
       area.setAttribute("spellcheck", "false");
+      // The highlight layer: the same text painted with hljs-* tokens under the (transparent-text)
+      // textarea — one tokenizer with the reader, so the tokens match /papers/:slug (plan #27).
+      const hl = document.createElement("code");
+      hl.className = "bp-canvas-code-hl";
+      hl.setAttribute("aria-hidden", "true");
+      let hlKey = null;
+      const paintHighlight = () => {
+        const key = langInput.value + "\u0000" + area.value;
+        if (key === hlKey) return;
+        hlKey = key;
+        // A trailing newline needs a visible line so the layer's height follows the textarea's rows.
+        hl.innerHTML = highlightHtml(area.value, langInput.value) + (area.value.endsWith("\n") ? " " : "");
+        hl.scrollTop = area.scrollTop;
+        hl.scrollLeft = area.scrollLeft;
+      };
+      area.addEventListener("scroll", () => { hl.scrollTop = area.scrollTop; hl.scrollLeft = area.scrollLeft; });
       // S9 code-interior: the textarea's typography (font / size / line-height /
       // colour / whitespace / transparent-borderless frame / width / resize) now
       // lives in the `.bp-canvas-code-area` CSS rule (both sinks), token-bound to
@@ -247,6 +265,7 @@ export const Code = Node.create({
       // island contract (stopEvent/ignoreMutation), so editing is unaffected.
 
       dom.appendChild(langInput);
+      dom.appendChild(hl);
       dom.appendChild(area);
 
       // Paint the controls from the node's current attrs. Re-run on every update()
@@ -288,6 +307,7 @@ export const Code = Node.create({
         if (area.value !== value && !writeTimer) area.value = value;
         syncRows();
         if (langInput.value !== lang) langInput.value = lang;
+        paintHighlight();
         // Editability mirrors the editor's mode.
         const editable = editor.isEditable;
         area.readOnly = !editable;
@@ -368,6 +388,7 @@ export const Code = Node.create({
       };
       const onAreaInput = () => {
         syncRows();
+        paintHighlight();
         scheduleWrite();
       };
       const flushPending = () => {
@@ -436,6 +457,7 @@ export const Code = Node.create({
       // must not snap back to hidden while they are focused, and clearing it while
       // idle must re-hide it once blur+mouseleave settle).
       langInput.addEventListener("input", syncChrome);
+      langInput.addEventListener("input", paintHighlight);
 
       return {
         dom,

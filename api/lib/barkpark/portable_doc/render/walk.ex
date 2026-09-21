@@ -550,7 +550,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp heading_align_attr(n) do
     case heading_align_style(n) do
       [] -> ""
-      styles -> ~s( style="#{Enum.join(styles, ";")}")
+      styles -> ~s( style="#{escape_attr(Enum.join(styles, ";"))}")
     end
   end
 

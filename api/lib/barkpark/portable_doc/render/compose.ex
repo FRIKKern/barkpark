@@ -670,7 +670,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      %{"kind" => "_raw", "html" => Figures.code_block_html(code_source(b), code_emphasis(b))}
+      %{"kind" => "_raw", "html" => Figures.code_block_html(code_source(b), code_emphasis(b), Map.get(b, "lang"))}
     end
   end
 
