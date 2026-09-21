@@ -59,6 +59,42 @@
 # for "tests failed" — `… || echo REFUSED` called a red suite a refusal, and the
 # remedy for each is the opposite one (fix the argv vs fix the code).
 #
+# THE LINE ARM (task-11a8c96b5b1d7156, reproduced 2026-09-22): a path that
+# exists and IS a *_test.exs file can still run zero tests when it carries a
+# `:LINE` suffix that resolves to no test. ExUnit selects the test declared
+# CLOSEST AT OR BEFORE the address (ExUnit.Filters.has_tag/3 for {:line, n}:
+# `tags.line <= line` and `closest_test_before_line/2`, plus an exact match on a
+# `describe` line). An address ABOVE every declaration in the file therefore
+# selects nothing — `All tests have been excluded.` / `0 tests, 0 failures
+# (N excluded)` at EXIT 0. Measured on Elixir 1.19.5, not assumed:
+#
+#   line 6 (inside a helper, above the first test)  -> 0 tests, 0 failures, rc 0
+#   line 11 (a `describe` line)                     -> 2 tests, rc 0
+#   line 12 (a `test` line) and every line below it -> 1 test,  rc 0
+#
+# That is how a studio worker's post-fix N=20 control printed `0 tests, 0
+# failures (3 excluded)` twenty times at exit 0: the same PR's fix had inserted
+# a helper ABOVE the addressed line, so the address no longer named a test. A
+# green with no subject — the assertion is fine, the code path never arrives.
+#
+# The refusal DISTINGUISHES the two cases, because the remedies differ:
+#   STALE ADDRESS          — the line DID name a test at a git revision this
+#                            checkout can read, and an edit moved it. The
+#                            message names the revision, the test, and the line
+#                            it sits on NOW, so the operator can re-address.
+#   NEVER NAMED A TEST     — the line resolved to nothing at that revision
+#                            either. The address was wrong when it was written.
+#   (UNCLASSIFIED          — no readable git revision to compare against; the
+#                            refusal still fires, it just cannot say which.)
+#
+# ONE-DIRECTIONAL, deliberately: the declaration scan is a generous regex over
+# `test` / `describe` / `property` / `doctest` at the head of a line. A line it
+# matches by accident only LOWERS the first-declaration line, i.e. makes the
+# guard refuse LESS. A file in which it recognises NO declaration at all (every
+# test produced by a project-local macro, say) is left alone entirely — the
+# guard needs at least one declaration before it will refuse anything, so it can
+# never red a run that `mix test` would have given a subject.
+#
 # HONEST LIMIT, stated once: the test-file pattern here is ExUnit's default
 # `*_test.exs`. A project that sets a custom `test_pattern` in its Mix project
 # config would need that pattern taught here; neither api/mix.exs nor
@@ -105,6 +141,139 @@ strip_line_suffix() {
   printf '%s' "$t"
 }
 
+# The line numbers `strip_line_suffix` takes OFF, oldest first. ExUnit accepts a
+# repeatable suffix (`foo_test.exs:12:40`), and each one is addressed
+# independently, so each one is checked independently.
+line_suffixes() {
+  local t="$1" out="" n=""
+  while :; do
+    case "$t" in
+      *:[0-9]|*:[0-9][0-9]|*:[0-9][0-9][0-9]|*:[0-9][0-9][0-9][0-9]|*:[0-9][0-9][0-9][0-9][0-9])
+        n="${t##*:}"; out="$n $out"; t="${t%:*}" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# Declarations in an ExUnit file, as `LINE<TAB>KIND<TAB>REST`. Deliberately
+# generous: see the ONE-DIRECTIONAL note in the header. Reads stdin so it can be
+# pointed at a working-tree file OR at `git show <rev>:<path>` without a temp
+# file rule of its own.
+decl_lines() {
+  grep -nE '^[[:space:]]*(test|describe|property|doctest)([[:space:]]|\()' \
+    | sed -e 's/^\([0-9][0-9]*\):[[:space:]]*\([a-z][a-z]*\)[[:space:](]*/\1\t\2\t/'
+}
+
+# Does line $2 resolve to a test, given the declarations on stdin?
+#   0 = yes   1 = no   2 = cannot tell (no declaration recognised at all)
+# The rule is ExUnit's, measured above: the closest TEST declaration at or
+# before the line, or an exact hit on a DESCRIBE line.
+line_resolves() {
+  local line="$1" first_test="" saw_any=0 l k
+  while IFS="$(printf '\t')" read -r l k _rest; do
+    case "$l" in ''|*[!0-9]*) continue ;; esac
+    saw_any=1
+    case "$k" in
+      describe) [ "$l" -eq "$line" ] && return 0 ;;
+      *) if [ -z "$first_test" ] || [ "$l" -lt "$first_test" ]; then first_test="$l"; fi ;;
+    esac
+  done
+  [ "$saw_any" -eq 1 ] || return 2
+  [ -n "$first_test" ] || return 2
+  [ "$line" -ge "$first_test" ] && return 0
+  return 1
+}
+
+# The declaration a line WOULD have resolved to, as `LINE<TAB>KIND<TAB>REST`.
+closest_decl() {
+  local line="$1" best="" l row
+  while IFS= read -r row; do
+    l="${row%%	*}"
+    case "$l" in ''|*[!0-9]*) continue ;; esac
+    [ "$l" -le "$line" ] && best="$row"
+  done
+  printf '%s' "$best"
+}
+
+# Which git revisions this checkout can compare a file against, best first. A
+# stale address is one that resolved at a revision and does not resolve now, so
+# without a revision the two cases are indistinguishable and the refusal says so
+# rather than guessing.
+git_candidate_revs() {
+  local dir="$1" mb=""
+  command -v git >/dev/null 2>&1 || return 0
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  git -C "$dir" rev-parse --verify --quiet HEAD >/dev/null 2>&1 || return 0
+  echo "HEAD"
+  mb="$(git -C "$dir" merge-base HEAD origin/main 2>/dev/null)"
+  if [ -n "$mb" ] && [ "$mb" != "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" ]; then
+    echo "$mb"
+  fi
+}
+
+# The refusal body for one unresolvable `file:LINE`. Multi-line on purpose: the
+# operator has to learn WHICH address went stale and WHERE its test went, or the
+# message is just "no tests ran" with extra words.
+explain_line_address() {
+  local path="$1" line="$2" spec="$3"
+  local dir base rel rev was decl old_line old_kind old_name new_line shift_by
+  local first_test rc
+
+  first_test="$(decl_lines < "$path" | awk -F'\t' '$2 != "describe" { print $1; exit }')"
+
+  printf 'line address resolves to no test: %s\n' "$spec"
+  printf '      ExUnit runs the test declared closest AT OR BEFORE the address. Line %s is\n' "$line"
+  if [ -n "$first_test" ]; then
+    printf '      above the first test declaration in this file (line %s), so it selects nothing\n' "$first_test"
+  else
+    printf '      above every test declaration in this file, so it selects nothing\n'
+  fi
+  printf '      and `mix test` would still exit 0 with a "0 tests, 0 failures (N excluded)" trailer.\n'
+
+  dir="$(dirname "$path")"
+  base="$(basename "$path")"
+  rel=""
+  for rev in $(git_candidate_revs "$dir"); do
+    [ -n "$rel" ] || rel="$(git -C "$dir" ls-files --full-name -- "$base" 2>/dev/null | head -1)"
+    [ -n "$rel" ] || break
+    was="$(git -C "$dir" show "$rev:$rel" 2>/dev/null | decl_lines)"
+    [ -n "$was" ] || continue
+    line_resolves "$line" <<< "$was"; rc=$?
+    [ "$rc" -eq 0 ] || continue
+
+    # STALE: it resolved at $rev and does not resolve now.
+    decl="$(closest_decl "$line" <<< "$was")"
+    old_line="$(printf '%s' "$decl" | cut -f1)"
+    old_kind="$(printf '%s' "$decl" | cut -f2)"
+    old_name="$(printf '%s' "$decl" | cut -f3- | sed -e 's/[[:space:]]*do[[:space:]]*$//')"
+    printf '      STALE ADDRESS: at %s this line DID name a test — %s %s, declared\n' \
+      "$rev" "$old_kind" "$old_name"
+    new_line=""
+    if [ -n "$old_name" ]; then
+      new_line="$(decl_lines < "$path" | awk -F'\t' -v n="$old_name" \
+        'index($3, substr(n,1,60)) == 1 { print $1; exit }')"
+    fi
+    if [ -n "$new_line" ]; then
+      shift_by=$((new_line - old_line))
+      printf '      at line %s there and at line %s HERE (shifted by %+d). Re-address at :%s.\n' \
+        "$old_line" "$new_line" "$shift_by" "$new_line"
+    else
+      printf '      at line %s there, and no declaration with that name is in the file now.\n' "$old_line"
+    fi
+    printf '      An edit in this tree moved it: inserting a helper shifts every line below it.\n'
+    return 0
+  done
+
+  if [ -n "$rel" ]; then
+    printf '      NEVER NAMED A TEST: no readable revision of this file resolves line %s to a\n' "$line"
+    printf '      test either, so the address was wrong when it was written — not shifted.\n'
+  else
+    printf '      UNCLASSIFIED: this file is not in a readable git revision, so the guard cannot\n'
+    printf '      say whether the address went stale or was never a test. It refuses either way.\n'
+  fi
+}
+
 refusals=""
 note_refusal() { refusals="${refusals}  $1"$'\n'; }
 
@@ -123,7 +292,7 @@ fi
 # forwards the ORIGINAL argv, byte for byte — that is what makes the control
 # (same test count as bare `mix test`) true by construction rather than by care.
 validate_args() {
-  local tok spec path found positional_only=0
+  local tok spec path found ln lrc decls positional_only=0
   while [ "$#" -gt 0 ]; do
     tok="$1"
 
@@ -159,6 +328,20 @@ validate_args() {
         *_test.exs) : ;;
         *) note_refusal "argument matches no test (not a *_test.exs file): $spec" ;;
       esac
+
+      # MUT: line-guard — a path that exists, IS a test file, and still runs
+      # zero tests because its `:LINE` suffix is above every declaration.
+      # Scoped to specs that CARRY a line suffix: a bare path is byte-for-byte
+      # unaffected by this arm.
+      decls="$(decl_lines < "$path")"
+      for ln in $(line_suffixes "$spec"); do
+        line_resolves "$ln" <<< "$decls"; lrc=$?
+        [ "$lrc" -eq 0 ] && continue
+        # 2 = no declaration recognised at all (macro-generated tests). Silent
+        # on purpose: refusing there could red a run that has a real subject.
+        [ "$lrc" -eq 2 ] && continue
+        note_refusal "$(explain_line_address "$path" "$ln" "$spec")"
+      done
     fi
     shift
   done
