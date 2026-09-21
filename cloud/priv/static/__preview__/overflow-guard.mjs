@@ -329,6 +329,7 @@ const DEFECTS = [
   "W16-site-freshness-agrees-with-production-ladder",
   "W21m-member-head-title-floor",
   "W21m-wizard-refusal-row-field-floor",
+  "W24-word-break-alias-population",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -9503,7 +9504,14 @@ async function main() {
     //        kind, not by convenience.
     //      SEVEN ARE THE ALIAS ON SURFACES THIS LEG CANNOT REACH, and each is
     //        named with the reason it went unmeasured rather than "it has
-    //        always been there":
+    //        always been there". TWO OF THOSE REASONS WERE LATER MEASURED FALSE
+    //        by the row this paragraph filed — see W24-word-break-alias-
+    //        population below, which drove all seven: `.rail-row .v` drags the
+    //        page to 668/320 on deletion WITH its `min-width: 0` in place, and
+    //        `.new-step-probe` does have a fixture (the instance rail's
+    //        `failedSteps`, which carries two `progress` entries). The
+    //        paragraph is corrected here rather than rewritten, so the next
+    //        reader sees which inferences did not survive a measurement:
     //          .rail-row .v          already carries its own `min-width: 0`, so
     //                                the escape the tear needs is present.
     //          .new-step-probe       same screen, same family as the converted
@@ -9519,9 +9527,12 @@ async function main() {
     //                                this property.
     //          .wh-del-err, .tlv-detail   webhooks and timeline detail; no leg
     //                                in this file renders either.
-    //        All seven are filed as cch-w24-bl-word-break-alias-remaining-seven
-    //        — a POPULATION to triage with a fixture each, never a to-do list
-    //        to convert.
+    //        All seven were filed as cch-w24-bl-word-break-alias-remaining-
+    //        seven — a POPULATION to triage with a fixture each, never a to-do
+    //        list to convert. That triage ran: the fixture separated THREE
+    //        (.bp-console-line, .deploy-console-line, .wh-del-err, now
+    //        `overflow-wrap: anywhere`) and could not separate the other four,
+    //        which keep the alias with the numbers written at the declaration.
     //
     //    D274/D292: no line numbers. Every citation above is a grep or a class.
     if (requested.includes("W24-theater-failed-hostname-whole")) {
@@ -14188,6 +14199,272 @@ async function main() {
           `HONEST LIMIT: this leg drives the GitHub-connected launch theater only. The go-live URL row shares ` +
           `\`.new-golive-row\` and is measured for box overflow on the same screens, but its own field is not ` +
           `floor-asserted — no authority arm reaches it, so it has no sibling that can starve it`,
+        );
+      }
+    }
+
+    // ── W24: THE `word-break: break-word` POPULATION OUTSIDE /new ───────────
+    //    cch-w24-s4 converted the two alias sites that bit on the /new failure
+    //    screen and REFUSED to sweep the rest, filing the remaining seven as a
+    //    population to triage with a fixture each. This leg is that triage, and
+    //    it ships the fixture rather than the verdict: one 78-char host — 63
+    //    octets, the legal maximum DNS label, plus `.barkpark.cloud` — is
+    //    substituted into each site's OWN text nodes and the element is
+    //    measured under the shipped cascade.
+    //
+    //    WHAT THE FIXTURE SEPARATED, AND WHAT IT COULD NOT. Driven across four
+    //    candidate values (the alias, `overflow-wrap: break-word`,
+    //    `overflow-wrap: anywhere`, and no declaration at all), the seven split
+    //    3/4 on a measured axis rather than on taste:
+    //      THREE the fixture SEPARATES, now converted to `anywhere`:
+    //        .bp-console-line    break-word -> scrollWidth 735 vs clientWidth 224
+    //        .deploy-console-line  -> 658/230 (deploy-detail-cruel), 583/230 (live)
+    //        .wh-del-err         -> box 561.61 in a 248px parent, inside a
+    //                               `.wh-del-card { overflow: hidden }`, so the
+    //                               clip is SILENT TEXT LOSS, not a scrollbar
+    //      FOUR it CANNOT, left alone with a written reason at the declaration:
+    //        .rail-row .v, .new-step-probe, .deploy-detail, .tlv-detail — all
+    //        three values measure identically to the decimal at every one.
+    //    A conversion no fixture could have refused is the green-by-
+    //    construction this wave exists to forbid, so those four were not swept.
+    //
+    //    TWO CORRECTIONS TO THE FILING, both measured here rather than argued:
+    //      · `.rail-row .v` was filed as safe because it "already carries its
+    //        own min-width: 0". Delete its break declaration WITH that escape
+    //        still in place and the page drags to 668 against a 320 viewport.
+    //        The escape is present and it is not what holds the page.
+    //      · `.new-step-probe` was filed as having no fixture that can produce
+    //        it, because `theaterFailedSteps` mounts no probe rows. True on
+    //        /new; false on the instance rail, where `failedSteps` carries two
+    //        `status: "progress"` entries and the `failed` scenario paints
+    //        them. This leg drives that mount.
+    //
+    //    THE LEG HAS BOTH HALVES, and a patch must pass both. (a) THE CASCADE:
+    //    each converted site must compute `word-break: normal` +
+    //    `overflow-wrap: anywhere`, so restoring the alias reds by name — the
+    //    conversion is geometrically identical to the alias, which is exactly
+    //    why a geometry-only leg could not police it. (b) THE GEOMETRY: every
+    //    one of the seven must CONTAIN the cruel host in its own box, which is
+    //    what `overflow-wrap: break-word` fails at the three converted sites
+    //    and what a plain deletion fails at all seven. Without (b) this leg
+    //    would be a spelling checker; without (a) it would pass on the alias it
+    //    was written to retire.
+    //
+    //    D274/D292: no line numbers. Every citation above is a grep or a class.
+    if (requested.includes("W24-word-break-alias-population")) {
+      const D = "W24-word-break-alias-population";
+      // The cruel host is the LONGEST LEGAL one, not an arbitrarily huge one —
+      // RFC 1035 caps a DNS label at 63 octets. Built, never pasted, so its
+      // length is a fact of this line. Same anchor cch-w24-s4 used.
+      const CRUEL = "a".repeat(63) + ".barkpark.cloud";
+      // 320 is the DRIVEN width (every number in the comment above and in
+      // app.css's per-site comments was measured there); 430 is a SHOULDER —
+      // already contained on origin/main, so it can only catch a remedy that
+      // breaks the wider phone layout.
+      const WB_WIDTHS = [320, 430];
+      // CONVERTED: the cascade is asserted here as well as the geometry.
+      // KEPT: geometry only — the alias is what app.css still ships, with the
+      // reason written at the declaration.
+      const CONVERTED = new Set([".bp-console-line", ".deploy-console-line", ".wh-del-err"]);
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      // The instance/site ids are DERIVED from the fixture module, never
+      // transcribed: a transcribed uuid rots silently into "the overview screen
+      // rendered instead" and every cell below would measure the wrong page.
+      const hashOf = (name) => {
+        const sc = SCENARIOS[name];
+        if (!sc || !sc.deepLink) return null;
+        return sc.deepLink;
+      };
+      const CASES = [
+        // EVERY readiness walk here is SCOPED TO THE LIVE VIEW, the way
+        // cch-w24-s5 scoped `.fleet-row`: app.js routes by `section.hidden` and
+        // never clears a view, so a document-wide `.tlv-row` matched 5 nodes
+        // inside a hidden `#view-activity` and W35-hash-nav-hidden-view-residue
+        // refused this leg by name for it. The scope is the fix, not a register
+        // entry.
+        { scen: "failed", ready: `document.querySelector('section.view:not([hidden]) .new-step-probe')`,
+          sels: [".rail-row .v", ".new-step-probe", ".bp-console-line"] },
+        { scen: "deploy-detail-cruel", ready: `document.querySelector('section.view:not([hidden]) .deploy-row')`,
+          sels: [".deploy-detail", ".deploy-console-line"] },
+        { scen: "site-deploy-rail-live", ready: `document.querySelector('section.view:not([hidden]) .deploy-row')`,
+          sels: [".deploy-console-line"] },
+        // The delivery log is behind the card's own `Deliveries` button and
+        // arrives on a fetch, so the click is followed by a SETTLE on the
+        // element this case exists to measure — a measurement taken in the gap
+        // would report "zero painted .wh-del-err" about a screen that was about
+        // to paint one.
+        { scen: "webhooks-autodisabled", ready: `document.querySelector('section.view:not([hidden]) .wh-card')`,
+          click: "section.view:not([hidden]) [data-wh-deliveries]", settle: "section.view:not([hidden]) .wh-del-err", sels: [".wh-del-err"] },
+        { scen: "activity", ready: `document.querySelector('section.view:not([hidden]) .tlv-row')`, click: "section.view:not([hidden]) .tlv-toggle",
+          sels: [".tlv-detail"] },
+        { scen: "timeline", ready: `document.querySelector('section.view:not([hidden]) .tlv-row')`, click: "section.view:not([hidden]) .tlv-toggle",
+          sels: [".tlv-detail"] },
+      ];
+      // COVERAGE, ASSERTED AND NOT ASSUMED: the seven this row owns are named
+      // once, here, and every one must be measured by some case below. A
+      // selector that stops rendering would otherwise leave this leg printing a
+      // clean table about six sites while the seventh went unwatched.
+      const OWNED = [".rail-row .v", ".new-step-probe", ".deploy-console-line", ".deploy-detail", ".bp-console-line", ".wh-del-err", ".tlv-detail"];
+      const covered = new Set(CASES.flatMap((c) => c.sels));
+      for (const sel of OWNED) {
+        if (!covered.has(sel)) {
+          return die(`${D}: \`${sel}\` is one of the seven this row owns and no case in this leg renders it — the population would be measured six-sevenths and reported whole`);
+        }
+      }
+      for (const c of CASES) {
+        if (!hashOf(c.scen)) {
+          return die(`${D}: SCENARIOS["${c.scen}"] no longer carries a deepLink — the route cannot be reached, so nothing about ${c.sels.join("/")} was measured`);
+        }
+      }
+      const cellCount = CASES.length * WB_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${CASES.length} scenarios x ${WB_WIDTHS.length} widths x 2 themes (${cellCount} cells; ` +
+        `a ${CRUEL.length}-char host — a 63-octet DNS label, the legal maximum — substituted into each site's OWN ` +
+        `text nodes, every matching element then asserted to contain it, and the ${CONVERTED.size} converted sites ` +
+        `asserted on the LIVE CASCADE too). h= is the tallest box the cruel host produced, REPORTED: the ` +
+        `min-content the alias lowers is bought with vertical room and no pixel of it is pinned\n`,
+      );
+      // The measurement is one synchronous pass: substitute, force layout,
+      // measure, restore. Nothing under app.css or app.js is in this leg's
+      // diff — the cruel host is a DOM edit undone before the next cell.
+      const wbProbe = (sel) =>
+        `(function(){` +
+        `var SEL=${JSON.stringify(sel)};var CR=${JSON.stringify(CRUEL)};` +
+        `var ns=[].slice.call(document.querySelectorAll('section.view:not([hidden]) '+SEL))` +
+        `  .filter(function(e){return e.getClientRects().length;});` +
+        `var d=document.documentElement;` +
+        `if(!ns.length) return {n:0,psw:d.scrollWidth,pcw:d.clientWidth};` +
+        // THE CASCADE IS READ BEFORE THE SUBSTITUTION, off the shipped sheet.
+        `var cs0=getComputedStyle(ns[0]);` +
+        `var saved=[],hit=0;` +
+        `ns.forEach(function(e){var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);var n;` +
+        // The timestamp column of a console line is `flex: 0 0 auto`: putting
+        // the cruel host THERE manufactures a spill no string the product can
+        // emit would cause, and the leg would be asserting against its own
+        // fixture. Measured: it drove .bp-console-line to 626/224 and 1993.9px
+        // of single-character line boxes on a tree that is otherwise clean.
+        `  while((n=w.nextNode())){var t=n.nodeValue||'';if(!t.trim()) continue;` +
+        `    if(n.parentElement&&n.parentElement.closest('.bp-console-ts,.deploy-console-ts')) continue;` +
+        `    var toks=t.split(/(\s+)/);var bi=-1,bl=0;` +
+        `    toks.forEach(function(x,i){if(!/^\s+$/.test(x)&&x.length>bl){bl=x.length;bi=i;}});` +
+        `    if(bi<0) continue;` +
+        `    saved.push([n,t]);toks[bi]=CR;n.nodeValue=toks.join('');hit++;}});` +
+        `void d.offsetWidth;` +
+        `var rows=ns.map(function(e){var r=e.getBoundingClientRect();` +
+        `  var pe=e.parentElement;var pr=pe?pe.getBoundingClientRect():null;` +
+        `  return {cls:(e.className||e.tagName||'?').toString().slice(0,40),` +
+        `    sw:e.scrollWidth,cw:e.clientWidth,w:+r.width.toFixed(2),` +
+        `    pw:pr?+pr.width.toFixed(2):-1,psw2:pe?pe.scrollWidth:-1,pcw2:pe?pe.clientWidth:-1,` +
+        `    h:+r.height.toFixed(1)};});` +
+        `var out={n:ns.length,hit:hit,rows:rows,psw:d.scrollWidth,pcw:d.clientWidth,` +
+        `  wb:cs0.wordBreak,ow:cs0.overflowWrap};` +
+        `saved.forEach(function(x){x[0].nodeValue=x[1];});void d.offsetWidth;` +
+        `return out;})()`;
+      let cells = 0, elsSeen = 0, subs = 0, spills = 0, cascadeBad = 0, pageOver = 0, tallest = 0;
+      for (const c of CASES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the landed screen through the readiness
+          // expression — `?scen=` alone renders #overview (the W13/W15 note),
+          // and a phantom surface is worse than none.
+          await setViewport(WB_WIDTHS[WB_WIDTHS.length - 1]);
+          await nav(`${BASE}/?scen=${c.scen}&theme=${theme}${hashOf(c.scen)}`, c.ready);
+          if (c.click) {
+            const clicked = await evalJs(
+              `(function(){var n=[].slice.call(document.querySelectorAll(${JSON.stringify(c.click)}));` +
+              `n.forEach(function(e){try{e.click();}catch(x){}});return n.length;})()`,
+            );
+            if (!clicked) {
+              return die(`${D}: ${c.scen} rendered no \`${c.click}\` to open — \`${c.sels.join("/")}\` is behind that control, so a run without it would report a perfect table about a collapsed row`);
+            }
+            if (c.settle) {
+              const t0 = Date.now();
+              let ok = false;
+              while (Date.now() - t0 < 5000) {
+                ok = !!(await evalJs(`!!document.querySelector(${JSON.stringify(c.settle)})`));
+                if (ok) break;
+                await sleep(100);
+              }
+              if (!ok) {
+                return die(`${D}: ${c.scen} never painted \`${c.settle}\` within 5000ms of opening \`${c.click}\` — the delivery log did not arrive, so this case would have measured an empty box`);
+              }
+            }
+          }
+          const row = [];
+          for (const width of WB_WIDTHS) {
+            await setViewport(width);
+            cells++;
+            for (const sel of c.sels) {
+              const m = await evalJs(wbProbe(sel));
+              if (!m.n) {
+                fail(D, `${c.scen}/${theme}@${width}: zero painted \`${sel}\` in the visible view — the surface this site lives on did not render, so nothing about it was measured and this is not a pass`);
+                row.push(`${sel}:0`);
+                continue;
+              }
+              if (!m.hit) {
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: the cruel host replaced nothing — every text node was empty or whitespace, so the stress measured no string at all`);
+              }
+              elsSeen += m.n;
+              subs += m.hit;
+              // (a) THE CASCADE, converted sites only.
+              if (CONVERTED.has(sel)) {
+                if (m.wb !== "normal" || m.ow !== "anywhere") {
+                  cascadeBad++;
+                  fail(D, `${c.scen}/${theme}@${width} ${sel}: computes word-break:${m.wb} overflow-wrap:${m.ow}, expected normal/anywhere — cch-w24-s4's deprecated alias is back on a site this row converted, and it is geometrically indistinguishable from the remedy, so nothing else in this leg can see it`);
+                }
+              }
+              // (b) THE GEOMETRY, every site.
+              for (const r of m.rows) {
+                if (r.sw > r.cw + 1) {
+                  spills++;
+                  fail(D, `${c.scen}/${theme}@${width} ${sel} (.${r.cls}): scrollWidth ${r.sw} > clientWidth ${r.cw} — a ${CRUEL.length}-char host does not fit its own box. \`overflow-wrap: break-word\` and a bare deletion both land here; \`anywhere\` and the alias do not`);
+                }
+                if (r.pw >= 0 && r.w > r.pw + 1) {
+                  spills++;
+                  fail(D, `${c.scen}/${theme}@${width} ${sel} (.${r.cls}): box ${r.w} is wider than its ${r.pw}px parent (parent ${r.psw2}/${r.pcw2}) — on a clipping ancestor that is silent text loss rather than a scrollbar`);
+                }
+                if (r.h > tallest) tallest = r.h;
+              }
+              if (m.psw > m.pcw) {
+                pageOver++;
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the screen is off-screen sideways under the cruel host`);
+              }
+              const worst = m.rows.reduce((a, b) => (b.sw - b.cw > a.sw - a.cw ? b : a), m.rows[0]);
+              const tall = m.rows.reduce((a, b) => (b.h > a.h ? b : a), m.rows[0]);
+              // PRINTED AT EVERY WIDTH, not only on failure: "the remedy cost no
+              // horizontal room" is a claim about these numbers, and a row that
+              // prints them only when it fires cannot be quoted for it.
+              row.push(`${width}:${sel} ${m.n}n/${m.hit}s ${worst.sw}/${worst.cw} h=${tall.h} page=${m.psw}/${m.pcw}`);
+            }
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${CASES.length} scenarios and ${WB_WIDTHS.join("/")} in both ` +
+          `themes: ${elsSeen} painted element(s) walked, ${subs} text node(s) actually carried the ` +
+          `${CRUEL.length}-char host (counted, not assumed — a substitution that hit nothing is a FAILURE above, ` +
+          `not a pass), ${spills} box spill(s), ${pageOver} page(s) scrolling sideways`,
+        );
+        okLine(
+          `THE CASCADE HALF: ${CONVERTED.size} converted site(s) — ${[...CONVERTED].join(", ")} — asserted to ` +
+          `compute word-break:normal + overflow-wrap:anywhere on the SHIPPED sheet, read before the substitution. ` +
+          `\`anywhere\` and the alias it replaces are identical to the decimal at every cell here, which is ` +
+          `precisely why this assertion exists: restore \`word-break: break-word\` in app.css and this half reds ` +
+          `by site name while every geometry number below stays green`,
+        );
+        okLine(
+          `THE GEOMETRY HALF, which is what the cheap remedy loses: \`overflow-wrap: break-word\` preserves ` +
+          `min-content, and at the three converted sites that measured 735/224 (.bp-console-line), 658/230 and ` +
+          `583/230 (.deploy-console-line) and a 561.61px box in a 248px clipping parent (.wh-del-err). A bare ` +
+          `deletion lands the same way AND, at the four sites this row did NOT convert, drives the page to ` +
+          `668/320 (.rail-row .v) and 665/320 (.new-step-probe) — so the written reason at each of those four ` +
+          `declarations is falsifiable here rather than decorative`,
+        );
+        okLine(
+          `VERTICAL COST, REPORTED AND NOT PINNED: the tallest box the cruel host produced anywhere in this run ` +
+          `was ${tallest}px. Lowering min-content is what keeps the string inside its box and it is paid for in ` +
+          `lines, so a pixel pinned here would make the leg unsatisfiable by the very remedy it certifies`,
         );
       }
     }
