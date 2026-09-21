@@ -3,6 +3,7 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
 
   import ExUnit.CaptureIO
 
+  alias Barkpark.BootModeSandbox
   alias Barkpark.Content.Document
   alias Mix.Tasks.Bokbasen.List, as: ListTask
 
@@ -45,7 +46,10 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
       seed_book("l-fail-2", "failed", submission_id: "s2")
       seed_book("l-ok-1", "accepted", submission_id: "s3")
 
-      output = capture_io(fn -> ListTask.run(["--status", "failed"]) end)
+      output =
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn -> ListTask.run(["--status", "failed"]) end)
+        end)
 
       assert output =~ "l-fail-1"
       assert output =~ "l-fail-2"
@@ -59,7 +63,8 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
         seed_book("limit-#{i}", "accepted", submission_id: "s#{i}")
       end
 
-      output = capture_io(fn -> ListTask.run(["--limit", "3"]) end)
+      output =
+        capture_io(fn -> BootModeSandbox.protecting(fn -> ListTask.run(["--limit", "3"]) end) end)
 
       lines =
         output
@@ -75,13 +80,15 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
       seed_book("any", "accepted")
 
       assert_raise Mix.Error, ~r/invalid status/i, fn ->
-        capture_io(fn -> ListTask.run(["--status", "invalid_state"]) end)
+        capture_io(fn ->
+          BootModeSandbox.protecting(fn -> ListTask.run(["--status", "invalid_state"]) end)
+        end)
       end
 
       output =
         capture_io(:stderr, fn ->
           try do
-            ListTask.run(["--status", "still_invalid"])
+            BootModeSandbox.protecting(fn -> ListTask.run(["--status", "still_invalid"]) end)
           rescue
             Mix.Error -> :ok
           end
@@ -92,14 +99,14 @@ defmodule Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest do
 
     test "raises on unknown switches" do
       assert_raise Mix.Error, fn ->
-        capture_io(fn -> ListTask.run(["--bogus"]) end)
+        capture_io(fn -> BootModeSandbox.protecting(fn -> ListTask.run(["--bogus"]) end) end)
       end
     end
   end
 
   describe "no rows" do
     test "prints friendly message when no submissions exist" do
-      output = capture_io(fn -> ListTask.run([]) end)
+      output = capture_io(fn -> BootModeSandbox.protecting(fn -> ListTask.run([]) end) end)
       assert output =~ "no matching submissions"
     end
   end
