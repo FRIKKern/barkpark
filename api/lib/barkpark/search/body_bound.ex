@@ -36,6 +36,12 @@ defmodule Barkpark.Search.BodyBound do
   * **Honesty.** A hit whose tree was cut carries `"_bodyTruncated" => true`.
     The absence of that key is a positive statement that the hit is whole —
     without it a consumer cannot tell a short document from a cut one.
+  * **Every prose-bearing key.** A paper `body` is `%{"blocks" => …,
+    "html" => …}` — the block list and its rendered twin. Both are bounded:
+    `blocks` to a whole-block prefix, `html` DROPPED when it exceeds the cap
+    (see `bound_body_html/2` for why dropped rather than sliced). The invariant
+    is per-HIT, not per-key: under `?bodyChars=n` no body key a consumer would
+    read as prose carries more than ~n characters.
 
   ## What it does NOT do
 
@@ -136,9 +142,8 @@ defmodule Barkpark.Search.BodyBound do
           {doc, false}
         end
 
-      {:ok, %{"blocks" => blocks} = body} when is_list(blocks) ->
-        {kept, cut?} = prefix(blocks, max)
-        {Map.put(doc, "body", Map.put(body, "blocks", kept)), cut?}
+      {:ok, body} when is_map(body) ->
+        bound_body_map(doc, body, max)
 
       {:ok, body} when is_list(body) ->
         {kept, cut?} = prefix(body, max)
@@ -146,6 +151,73 @@ defmodule Barkpark.Search.BodyBound do
 
       _ ->
         {doc, false}
+    end
+  end
+
+  # A paper body is `%{"blocks" => …, "html" => …}` (`PortableDoc.Projection`
+  # `project_body/2` writes BOTH, off the same free-block list). Bounding only
+  # `blocks` left the twin whole, so the bound was a fraction of what it claimed:
+  # measured on guerrilla 50bc81f43, 2026-09-20, the `bodyChars=1000` seed
+  # answered 6,129,873 B of which `body.html` was 5,565,150 B across 94 paper
+  # hits — against `body.blocks` at 224,512 B. 91% of a BOUNDED response was the
+  # key the bound never looked at.
+  defp bound_body_map(doc, body, max) do
+    {body, cut_blocks?} = bound_body_blocks(body, max)
+    {body, cut_html?} = bound_body_html(body, max)
+
+    {Map.put(doc, "body", body), cut_blocks? or cut_html?}
+  end
+
+  defp bound_body_blocks(body, max) do
+    case Map.fetch(body, "blocks") do
+      {:ok, blocks} when is_list(blocks) ->
+        {kept, cut?} = prefix(blocks, max)
+        {Map.put(body, "blocks", kept), cut?}
+
+      _ ->
+        {body, false}
+    end
+  end
+
+  # `html` is DROPPED, not sliced, when it exceeds the bound. Three reasons, in
+  # order:
+  #
+  #   1. It is a DERIVED TWIN of `blocks`, not an independent value. Once the
+  #      block list is cut to a prefix, the full render is stale by definition;
+  #      a prefix-consistent render would mean calling `PortableDoc.Render` per
+  #      hit on the read path, which is a different (and much more expensive)
+  #      change than a projection bound.
+  #   2. A PREFIX OF HTML IS NOT HTML. Cutting mid-markup hands a consumer an
+  #      unbalanced fragment; the one thing this module promises about what it
+  #      returns is that the shape still parses. Absent is honest, truncated is
+  #      a trap — and `_bodyTruncated` already exists to say "there was more".
+  #   3. NO SEARCH CONSUMER READS IT. The finder
+  #      (`templates/search-starter/lib/find.ts` `deriveBody/1`) walks
+  #      `body.blocks` and a string body; every HTML-rendering surface in the
+  #      repo (`web/components/document-detail.tsx`, the search-starter twin)
+  #      reads the TOP-LEVEL `body_html` off a single-document fetch, never
+  #      `body.html` off a search hit.
+  #
+  # The measure is the raw string length, not its prose: the rendered body
+  # carries inline styles (a 10-character paragraph renders as ~200 characters
+  # of markup), so a prose-only measure would keep hundreds of KB under a
+  # 1000-character cap. For an opaque string the honest statement of how much it
+  # carries is how long it is — and raw length >= prose length, so the prose
+  # invariant holds a fortiori.
+  #
+  # A body whose `html` already fits the cap is kept WHOLE: a short paper under
+  # a generous bound is not truncated, and must not be flagged as if it were.
+  defp bound_body_html(body, max) do
+    case Map.fetch(body, "html") do
+      {:ok, html} when is_binary(html) ->
+        if String.length(html) > max do
+          {Map.delete(body, "html"), true}
+        else
+          {body, false}
+        end
+
+      _ ->
+        {body, false}
     end
   end
 
