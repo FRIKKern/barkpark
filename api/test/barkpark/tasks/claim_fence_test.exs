@@ -127,4 +127,69 @@ defmodule Barkpark.Tasks.ClaimFenceTest do
       assert {:error, :stale_claim} = ClaimFence.verify(doc.id, expected)
     end
   end
+
+  # ─── tenancy refusals: exactly ONE expected field off ────────────────────
+  #
+  # The cond in verify_task/2 is SEQUENTIAL: doc_id -> workspace_id ->
+  # project_id -> dataset_id. A fixture that mismatches two of them only ever
+  # reaches the first, so each test below starts from a fully-matching
+  # expectation and overrides exactly ONE key. Deleting that arm from
+  # claim_fence.ex must red that test and only that test.
+
+  describe "tenancy refusals" do
+    setup %{scope: scope} do
+      task = mk_task!(uniq("cf-tenancy"), scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "worker-tenancy", scope)
+
+      doc = Repo.get!(Document, claimed.id)
+      claim = doc.content["claim"]
+
+      matching = %{
+        doc_id: doc.doc_id,
+        worker_id: claim["worker"],
+        epoch: claim["epoch"],
+        work_digest: claim["work_digest"],
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        dataset_id: doc.dataset_id
+      }
+
+      # Control: the un-perturbed expectation verifies, so every red below is
+      # caused by the ONE overridden key and not by the fixture.
+      assert {:ok, _} = ClaimFence.verify(doc.id, matching)
+
+      %{doc: doc, matching: matching}
+    end
+
+    test "a doc_id that is not the task's returns {:error, :task_doc_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | doc_id: matching.doc_id <> "-other"}
+
+      assert {:error, :task_doc_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a workspace_id that is not the task's returns {:error, :task_workspace_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | workspace_id: Ecto.UUID.generate()}
+
+      refute expected.workspace_id == matching.workspace_id
+      assert {:error, :task_workspace_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a project_id that is not the task's returns {:error, :task_project_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | project_id: Ecto.UUID.generate()}
+
+      refute expected.project_id == matching.project_id
+      assert {:error, :task_project_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a dataset_id that is not the task's returns {:error, :task_dataset_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | dataset_id: Ecto.UUID.generate()}
+
+      refute expected.dataset_id == matching.dataset_id
+      assert {:error, :task_dataset_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+  end
 end
