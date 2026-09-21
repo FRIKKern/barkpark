@@ -5192,17 +5192,21 @@ async function main() {
     //    into view — and the copy renders ABOVE that button.
     //
     //    THE FIXTURE IS THE FIRST HALF OF THIS LEG (wave-23 clause 4). The
-    //    shipped `providers-unverified` copy is a 168-character PARAPHRASE and
-    //    it measures CLEAN at every geometry here: on that string the defect
+    //    `providers-unverified` copy is the SHORT one — 169 characters, and
+    //    since cch-w23-bl-real-hetzner-remediation-scenario it is
+    //    `connect_remediation("hetzner")` VERBATIM rather than the
+    //    168-character paraphrase it was — and it measures CLEAN at every
+    //    geometry here: on that string the defect
     //    cannot be produced, so a leg driving it would be green by
     //    construction with a perfectly real browser. `providers-empty` — the
     //    scenario the defect was reproduced on — therefore now carries
     //    `connect_remediation("azure")` VERBATIM, 275 characters, the longest
-    //    clause the server can send (cloud/lib/barkpark_cloud/failure_copy.ex
-    //    :361-375, whose four clauses measure 169/275/206/88). The length is
+    //    clause the server can send (cloud/lib/barkpark_cloud/failure_copy.ex,
+    //    `grep -n 'def connect_remediation' ` — four clauses, measuring
+    //    169/275/206/88). The length is
     //    ASSERTED per cell against that number — a corpus that understates the
-    //    server is a corpus that certifies nothing — and the paraphrase is
-    //    kept as the labelled SHORT control so a regression on ordinary copy
+    //    server is a corpus that certifies nothing — and the server's SHORT
+    //    clause is kept as the short control so a regression on ordinary copy
     //    is still visible.
     //
     //    D228, AND IT BITES TWICE HERE. `#cred-remediation` is rendered by TWO
@@ -5233,26 +5237,30 @@ async function main() {
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.
       // Two kinds because they are the only two `available: true` providers in
       // app.js's PROVIDERS list and they render DIFFERENT credential forms
-      // (four fields vs one token); two scenarios because a fixture carries ONE
-      // `providerConnect` response and `route()` never sees the request body,
-      // so the string is a property of the SCENARIO, not of the kind.
+      // (four fields vs one token).
       //   · `providers-empty` — the scenario the defect was reproduced on —
-      //     now carries `connect_remediation("azure")` VERBATIM: 275 chars, the
+      //     carries `connect_remediation("azure")` VERBATIM: 275 chars, the
       //     longest the server can send.
-      //   · `providers-unverified` keeps its 168-character PARAPHRASE and is
-      //     driven here as the SHORT control, labelled as such. It is one
-      //     character under the real hetzner clause (169), so it does not
-      //     materially understate it — but it is NOT the server's string, and
-      //     that is written down rather than papered over:
-      //     cch-w23-bl-real-hetzner-remediation-scenario owns
-      //     giving the real 169 its own key (a new `SCENARIOS` key is refused
-      //     by breakpoint-sweep.mjs's census, which this slice is fenced out
-      //     of). A leg that only ever drove the worst string could not tell
-      //     you the shorter one regressed, which is why the short cell is here
-      //     at all.
+      //   · `providers-unverified` is the SHORT cell, and since
+      //     cch-w23-bl-real-hetzner-remediation-scenario it is the SERVER'S
+      //     short string: `connect_remediation("hetzner")`, 169 chars,
+      //     verbatim. It used to be a 168-character PARAPHRASE — one character
+      //     under the real clause, honestly labelled as such, but a string the
+      //     server has never sent — because a fixture carried ONE
+      //     `providerConnect` response and `route()` never saw the request
+      //     body, so the string was a property of the SCENARIO and not of the
+      //     kind. `route(name, method, path, state, body)` (scenarios.mjs) plus
+      //     mock.js's parse of `init.body` removed that limit; the fixture is
+      //     now a per-kind map and no new `SCENARIOS` key was needed, so
+      //     breakpoint-sweep.mjs's census moved by zero.
+      //     Neither number is typed twice: breakpoint-sweep.test.mjs extracts
+      //     `connect_remediation/1`'s clauses from failure_copy.ex and reds if
+      //     any remediation in the corpus is not one of them.
+      //   A leg that only ever drove the worst string could not tell you the
+      //   shorter one regressed, which is why the short cell is here at all.
       const CRED_CELLS = [
         { scen: "providers-empty", kind: "azure", chars: 275, src: "connect_remediation(\"azure\"), verbatim" },
-        { scen: "providers-unverified", kind: "hetzner", chars: 168, src: "the 168-char paraphrase, driven as the SHORT control" },
+        { scen: "providers-unverified", kind: "hetzner", chars: 169, src: "connect_remediation(\"hetzner\"), verbatim — the SHORT control" },
       ];
       // [width, height]. HEIGHT IS THE VARIABLE HERE, which is why this leg
       // cannot use the file's width sets: 390x390 is the filed reproduction,
@@ -5450,12 +5458,16 @@ async function main() {
         okLine(
           `THE STRINGS, ASSERTED PER CELL AND ATTRIBUTED: ` +
           `${CRED_CELLS.map((c) => `${c.scen} ${c.kind} >= ${c.chars}ch (${c.src})`).join("; ")}. ` +
-          `The azure number is re-derived from cloud/lib/barkpark_cloud/failure_copy.ex:361-375, whose four ` +
-          `clauses measure 169/275/206/88 — NOT the 89 the filed row cites, and NOT at the \`registry/\` path it ` +
-          `cites, which does not exist. The 168-character paraphrase measures CLEAN at every geometry here: ` +
-          `driving it ALONE is green by construction (wave-23 clause 4), which is why it is the short control ` +
-          `and never the only cell. No length bound was added anywhere — the copy is the product, and the ` +
-          `remedy is where the viewport lands`,
+          `The azure number is re-derived from cloud/lib/barkpark_cloud/failure_copy.ex — located by ` +
+          `\`grep -n 'def connect_remediation'\`, NOT by a line range, because the one this leg used to print ` +
+          `(:361-375) had drifted off the clauses by ~670 lines — whose four clauses measure 169/275/206/88 — ` +
+          `NOT the 89 the filed row cites, and NOT at the \`registry/\` path it cites, which does not exist. BOTH cells are now the server's own bytes: the short cell drives ` +
+          `connect_remediation("hetzner") VERBATIM (169), not the 168-character paraphrase this leg used to ` +
+          `label as such — cch-w23-bl-real-hetzner-remediation-scenario gave route() the POSTed body so one ` +
+          `scenario can answer per KIND. The short string measures CLEAN at every geometry here: driving it ` +
+          `ALONE is green by construction (wave-23 clause 4), which is why it is the short control and never ` +
+          `the only cell. No length bound was added anywhere — the copy is the product, and the remedy is ` +
+          `where the viewport lands`,
         );
       }
     }

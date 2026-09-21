@@ -1572,7 +1572,7 @@ test("the ownership map's own family numerals are recounted from the literal", (
   // delete the arm.
   //
   // IT LIVES INSIDE THIS TEST RATHER THAN BESIDE IT ON PURPOSE: this file's test
-  // count is pinned EXACTLY (two-sided) at 82 in .github/workflows/
+  // count is pinned EXACTLY (two-sided) at 89 in .github/workflows/
   // console-harness.yml, and the assertions belong to the bullet this test
   // already owns. A separate `test()` would have been a clearer failure NAME at
   // the cost of a workflow bump in a file this change has no business touching.
@@ -1837,4 +1837,134 @@ test("the refusal PRINTS the list it read and names the escape hatch", () => {
   const other = [830, 720];
   assert.match(nonAscendingRefusal(other, ascendingViolation(other)), /--widths 830,720/);
   assert.doesNotMatch(nonAscendingRefusal(other, ascendingViolation(other)), /900/);
+});
+
+// ── cch-w23-bl-real-hetzner-remediation-scenario ─────────────────────────
+// THE CONNECT-REMEDIATION MIRROR LOCK.
+//
+// `connect_remediation/1` lives in cloud/lib/barkpark_cloud/failure_copy.ex and
+// its sentences also appear as LITERALS in scenarios.mjs, because a module the
+// browser loads cannot read the Elixir source at run time. Before this arm the
+// two sides were an UNLOCKED MIRROR: two hand-typed copies of one truth with no
+// shared fixture, each well covered by its own suite. Reword the server and
+// every suite on both sides stays green while the preview corpus certifies a
+// string the server stopped sending — which is exactly how a 168-character
+// "hetzner" sentence that NO clause has ever produced lived in the corpus for a
+// whole wave, and got driven by overflow-guard.mjs's W23 leg as the short cell.
+//
+// NOTHING BELOW IS A HAND-TYPED EXPECTATION. The clauses are extracted from
+// failure_copy.ex; the corpus side is read out of the imported SCENARIOS
+// literal; the assertion is set membership between the two. Re-word the Elixir
+// and this arm probes the NEW wording.
+//
+// IT REFUSES RATHER THAN PASSING. An unreadable or clause-less failure_copy.ex
+// throws by name instead of yielding an empty set that every corpus string
+// would then trivially fail — and, more dangerously, an empty CORPUS side is
+// caught by its own floor, because a rename of `providerConnect` would
+// otherwise leave this lock quiet, and quiet reads exactly like agreement.
+const FAILURE_COPY_EX = path.resolve(ROOT, "..", "..", "lib", "barkpark_cloud", "failure_copy.ex");
+
+// A `def connect_remediation("<kind>") do` (or `(_kind)`) head whose whole body
+// is one string literal on the next line. A clause whose body is anything else
+// is simply not extracted — this reader claims only what it can read.
+const CONNECT_CLAUSE_RE =
+  /def\s+connect_remediation\(\s*(?:"([a-z0-9_]+)"|_kind)\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"\s*\n\s*end/g;
+
+function connectRemediationClauses() {
+  const src = fs.readFileSync(FAILURE_COPY_EX, "utf8");
+  if (!src.trim()) {
+    throw new Error("REFUSED: cloud/lib/barkpark_cloud/failure_copy.ex read empty — " +
+      "the connect-remediation mirror cannot be derived, so this lock will not green");
+  }
+  const out = {};
+  CONNECT_CLAUSE_RE.lastIndex = 0;
+  let m;
+  while ((m = CONNECT_CLAUSE_RE.exec(src))) {
+    out[m[1] || "_kind"] = m[2].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (Object.keys(out).length === 0) {
+    throw new Error("REFUSED: no connect_remediation/1 clause matched in failure_copy.ex — " +
+      "the clause shape changed and this reader went blind");
+  }
+  return out;
+}
+
+// Every `remediation` string any scenario can answer POST /v1/providers with,
+// across BOTH fixture shapes: the flat { status, body } response and the
+// per-kind map cch-w23-bl-real-hetzner-remediation-scenario added.
+function corpusConnectRemediations(scenarios) {
+  const rows = [];
+  for (const [name, scen] of Object.entries(scenarios)) {
+    const pc = scen && scen.data && scen.data.providerConnect;
+    if (!pc || typeof pc !== "object") continue;
+    const arms = "status" in pc ? { "": pc } : pc;
+    for (const [key, res] of Object.entries(arms)) {
+      const text = res && res.body && res.body.remediation;
+      if (typeof text === "string") rows.push({ name, key, text });
+    }
+  }
+  return rows;
+}
+
+test("cch-w23: every connect remediation in the corpus is a VERBATIM connect_remediation/1 clause, and the real hetzner one is among them", () => {
+  const server = connectRemediationClauses();
+
+  // POSITIVE CONTROL ON THE SERVER READ, and it fails DIFFERENTLY from the
+  // comparison below: this is the extraction going blind, not the two sides
+  // disagreeing. The two kinds the console can actually connect
+  // (app.js's `available: true` providers) plus the fallback must all resolve.
+  for (const kind of ["hetzner", "azure", "_kind"]) {
+    assert.equal(typeof server[kind], "string",
+      `failure_copy.ex has no literal connect_remediation(${JSON.stringify(kind)}) clause — ` +
+      "the server side of this mirror is not speaking, and a lock that cannot read must RED");
+    assert.ok(server[kind].length > 40,
+      `the extracted ${kind} clause is ${server[kind].length} characters — the regex is matching something that is not the sentence`);
+  }
+  // The clauses must DISCRIMINATE, or set membership below is vacuous: a
+  // failure_copy.ex that had collapsed to one sentence would make every corpus
+  // string "match" whatever it was copied from.
+  assert.equal(new Set(Object.values(server)).size, Object.keys(server).length,
+    "two connect_remediation/1 clauses are byte-identical — per-kind copy has collapsed server-side");
+
+  const rows = corpusConnectRemediations(SCENARIOS);
+
+  // FLOOR ON THE CORPUS READ. A rename of `providerConnect`, or a fixture
+  // restructure, would empty this list and leave the loop below iterating
+  // nothing — green, and blind. Two is the honest floor: `providers-empty`'s
+  // flat response and at least one arm of `providers-unverified`'s kind map.
+  assert.ok(rows.length >= 2,
+    `only ${rows.length} providerConnect remediation(s) found in the corpus — this lock has gone blind, ` +
+    "re-point corpusConnectRemediations() at the fixture shape on disk rather than accepting the green");
+
+  const known = new Set(Object.values(server));
+  for (const row of rows) {
+    assert.ok(known.has(row.text),
+      `scenario "${row.name}" (providerConnect${row.key ? "." + row.key : ""}) answers a remediation string ` +
+      "that NO connect_remediation/1 clause produces — the corpus is certifying copy the server has never " +
+      `sent:\n  corpus: ${JSON.stringify(row.text)}`);
+  }
+
+  // A named kind must answer ITS OWN clause, not merely SOME clause: a map that
+  // gave hetzner the azure sentence would pass set membership alone.
+  for (const row of rows) {
+    if (row.key && row.key !== "_default" && server[row.key] !== undefined) {
+      assert.equal(row.text, server[row.key],
+        `scenario "${row.name}" answers the WRONG clause for kind "${row.key}"`);
+    }
+  }
+
+  // THE CRITERION ITSELF: the real hetzner clause is IN the corpus. Before this
+  // row it was not — the corpus carried azure verbatim and a paraphrase for
+  // hetzner — so this assertion is the one that fails on origin/main's fixture.
+  assert.ok(rows.some((r) => r.text === server.hetzner),
+    "no scenario answers connect_remediation(\"hetzner\") verbatim — the server's real Hetzner remediation " +
+    "is not in the preview corpus, which is the whole subject of cch-w23-bl-real-hetzner-remediation-scenario");
+
+  // NON-VACUITY: the membership rule must actually REJECT. One character off the
+  // real clause — the shape a paraphrase has — must not be accepted.
+  assert.equal(known.has(server.hetzner.slice(0, -1)), false,
+    "the membership set accepts a truncated clause — this lock cannot lose");
+  assert.equal(known.has("We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, " +
+    "revoke the old token, then generate a fresh Read & Write token for this project."), false,
+    "the membership set accepts the retracted 168-character paraphrase — this lock cannot lose");
 });
