@@ -473,52 +473,6 @@
       </div>
     </div>
 
-    <!-- Committed Go golden fixtures, embedded VERBATIM (byte-identical to the
-         source .txt — drift-guarded in __app.test.mjs). Rendered through the
-         shared coherenceFixtureToHtml transform, never re-typed by hand. -->
-    <script type="text/plain" id="co-fixture-lifecycle">Barkpark lifecycle vocabulary (emitted from design/tokens.json)
-state         glyph  ascii  role   light      dark
------------   -----  -----  -----  -------    -------
-in_progress   ⠋      ~      info   #2563eb    #60a5fa
-blocked       !      !      warn   #d97706    #fbbf24
-done          ✓      v      ok     #0d9488    #2dd4bf
-closed        ✓      v      ok     #0d9488    #2dd4bf
-cancelled     ✕      x      -      #a1a1aa    #71717a
-ready         ○      o      -      #18181b    #e7edf2
-open          ○      .      -      #71717a    #5f6b78
-considering   ◌      ?      -      #a1a1aa    #71717a
-researching   ◎      R      -      #7c3aed    #a78bfa
-
-spinner frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
-reduced-motion still: ⠿
-</script>
-    <script type="text/plain" id="co-fixture-tokens">pdrender status tones (emitted from design/tokens.json)
-tone     light      dark
-------   -------    -------
-info     #3b82f6    #3b82f6
-ok       #137236    #45c474
-warn     #ba7008    #f8ab25
-danger   #b42222    #ef6161
-neutral  #374151    #9ca3af
-
-pdrender chrome/reading roles (threaded onto tokens_gen.go)
-role         light      dark
-----------   -------    -------
-accent       #15804e    #3fcf8e
-ink          #18181b    #e4e4e7
-body         #3f3f46    #a1a1aa
-dim          #a1a1aa    #52525b
-rule         #e4e4e7    #27272a
-code-fg      #be123c    #fda4af
-code-bg      #f4f4f5    #27272a
-terra        #a23925    #d98a6a
-label        #6e6e77    #a1a1aa
-
-reading tokens
-font stack:     "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif
-heading weight: 600
-body size:      18px
-</script>
 
     <script>
 (function () {
@@ -661,16 +615,42 @@ body size:      18px
       .join("");
   }
 
-  // Render the embedded golden fixtures through the shared transform.
+  // The committed Go goldens, READ from their one source at render time.
+  //
+  // This page used to carry a byte-copy of each golden in a
+  // <script type="text/plain"> block, with a byte-identity test in
+  // __app.test.mjs. Two sources of truth: regenerating a TUI golden (a wholly
+  // legitimate, wholly foreign change) reddened the console harness on the
+  // NEXT unrelated cloud PR, repaired only by a hand re-embed. Now the bytes
+  // live in exactly one place and this pane fetches them. __preview__/serve.mjs
+  // owns the /__fixtures__/ routes; regenerate a golden and this pane follows
+  // with no edit here.
+  var TUI_FIXTURES = [
+    ["/__fixtures__/styleguide_lifecycle.txt", "co-tui-lifecycle"],
+    ["/__fixtures__/styleguide_tokens.txt", "co-tui-tokens"],
+  ];
+
   function paintTui() {
-    var pairs = [
-      ["co-fixture-lifecycle", "co-tui-lifecycle"],
-      ["co-fixture-tokens", "co-tui-tokens"],
-    ];
-    pairs.forEach(function (pair) {
-      var src = document.getElementById(pair[0]);
+    TUI_FIXTURES.forEach(function (pair) {
       var dst = document.getElementById(pair[1]);
-      if (src && dst) dst.innerHTML = coherenceFixtureToHtml(src.textContent);
+      if (!dst) return;
+      dst.textContent = "Loading " + pair[0] + "…";
+      fetch(pair[0], { cache: "no-store" })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.text();
+        })
+        .then(function (text) {
+          dst.innerHTML = coherenceFixtureToHtml(text);
+        })
+        .catch(function (e) {
+          // An honest empty state, never a fabricated fixture: this pane has no
+          // fallback bytes to show, which is the whole point.
+          dst.textContent =
+            "Could not load " + pair[0] + " (" +
+            ((e && e.message) || e) + ") — open this page through the preview " +
+            "server (make cloud-preview), not file://.";
+        });
     });
   }
 
