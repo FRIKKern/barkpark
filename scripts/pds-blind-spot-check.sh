@@ -471,6 +471,83 @@ FIXTURE
   arm "a file naming a meter only in a COMMENT is not obliged" 0 'ok    scripts/pds-fx-good.sh'
   rm -f "$tmp/scripts/pds-fx-prose.sh"
 
+  # ═══ ARMS 10-12: THE SCAN-SET COUNT IDENTITY (task-fb55d468c7dea75b) ═══════
+  # run_check walks the scan set on fd 0 (`done <<EOF` / `$files`). $scanned,
+  # $obliged and $fails are ALL read off that loop, so a body child that steals
+  # stdin truncates it and the run prints
+  #     GREEN — all N metering instrument(s) carry the sentence …
+  # over a population it stopped reading — and the DRIFT arm, asked of EVERY
+  # scanned file, is exactly the arm a file never reached can never fail.
+  # $enumerated, counted BEFORE the loop, is the only quantity that disagrees.
+  #
+  #   10 CONTROL  two compliant instruments, intact: GREEN over BOTH, and no
+  #               refusal printed
+  #   11 SHORT    a stdin-draining child spliced into the scan loop: the identity
+  #               must REFUSE naming both numbers, exit 1, and NO GREEN
+  #   12 CUT      the identity block cut from the SAME mutated copy: the short
+  #               read now prints "GREEN — all 1 metering instrument(s)" at
+  #               exit 0, over a scan set of 4. The defect, reproduced
+  #
+  # `pds-aaa-good.sh` sorts FIRST in the scan set on purpose: the short read must
+  # reach a COMPLIANT instrument, or arm 12 would red on the zero-meters guard
+  # instead of printing the false green this identity exists to stop.
+  cp "$tmp/scripts/pds-fx-good.sh" "$tmp/scripts/pds-aaa-good.sh"
+
+  # A mutated copy of the check. `mut-check.sh` is NOT `pds-*.sh`, so it does not
+  # join the scan set it is measuring; SCRIPT_DIR still resolves to $tmp/scripts,
+  # so it sources the same pds-blind-spot.sh the original does.
+  mut_arm() { # $1 label · $2 script · $3 wanted rc · $4 substring that MUST appear · $5 substring that must NOT
+    set +e
+    out="$(bash "$2" --root "$tmp" 2>&1)"
+    rc=$?
+    set -e
+    local hit=no miss=no
+    case "$out" in *"$4"*) hit=yes ;; esac
+    case "$out" in *"$5"*) miss=yes ;; esac
+    if [ "$rc" = "$3" ] && [ "$hit" = 'yes' ] && [ "$miss" = 'no' ]; then
+      say "  PASS  $1 (rc=$rc)"
+      pass=$((pass + 1))
+    else
+      say "  FAIL  $1 — rc=$rc (wanted $3), wanted: $4 · must not carry: $5"
+      say "$out" | sed 's/^/        /'
+      fail=$((fail + 1))
+    fi
+  }
+
+  arm "ARM 10 CONTROL — two compliant instruments, intact scan, GREEN over both" 0 'GREEN — all 2 metering instrument(s)'
+
+  # THE MARKER NAME IS ASSEMBLED, NEVER WRITTEN OUT. The mutant is a copy of
+  # THIS FILE, so a literal `# MUT-ANCHOR: <name>` anywhere in these arms is a
+  # second match for the cut — and the first version of arm 12 cut its own awk
+  # program in half and reported a bash syntax error instead of the defect.
+  # `$mk` keeps the only literal occurrences of the full name on the guard
+  # itself, several hundred lines above.
+  local mk='scanset-count-''identity'
+  awk -v m="# MUT-SPLICE: $mk" \
+      '{ print } index($0, m) { print "cat >/dev/null" }' \
+      "$tmp/scripts/$SELF" > "$tmp/scripts/mut-check.sh"
+  if grep -q '^cat >/dev/null$' "$tmp/scripts/mut-check.sh"; then
+    mut_arm "ARM 11 SHORT — a drained fd 0 refuses naming both numbers, no GREEN" \
+      "$tmp/scripts/mut-check.sh" 1 'reached 1 of 4 file(s) enumerated into the scan set' 'GREEN —'
+  else
+    say "  FAIL  ARM 11 SHORT — no MUT-SPLICE marker for $mk in $SELF"
+    fail=$((fail + 1))
+  fi
+
+  awk -v a="# MUT-ANCHOR: $mk" -v b="# MUT-END: $mk" '
+    index($0, a) { skip = 1; cut = 1 }
+    !skip { print }
+    index($0, b) { skip = 0 }
+    END { if (!cut) exit 3 }' "$tmp/scripts/mut-check.sh" > "$tmp/scripts/mut-check-nocount.sh"
+  if [ -s "$tmp/scripts/mut-check-nocount.sh" ]; then
+    mut_arm "ARM 12 CUT — without the identity the same short read prints GREEN over 1 of 4 (the defect)" \
+      "$tmp/scripts/mut-check-nocount.sh" 0 'GREEN — all 1 metering instrument(s)' 'reached 1 of 4'
+  else
+    say "  FAIL  ARM 12 CUT — no MUT-ANCHOR block for $mk in $SELF"
+    fail=$((fail + 1))
+  fi
+  rm -f "$tmp/scripts/pds-aaa-good.sh" "$tmp/scripts/mut-check.sh" "$tmp/scripts/mut-check-nocount.sh"
+
   say ""
   say "SELFTEST: $pass PASS / $fail FAIL of $((pass + fail)) arms"
   if [ "$fail" -gt 0 ]; then
