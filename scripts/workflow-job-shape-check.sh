@@ -33,10 +33,43 @@
 # alongside its subject. This check is wired in required-checks-drift.yml
 # instead, which is deliberately path-unfiltered and renders on every PR.
 #
+# THE THIRD CLAUSE — A HEAD-SHA CHECKOUT THAT RUNS A REPO SCRIPT (wave r21l).
+# Same end state, one stage later: a check run that is ABSENT rather than red.
+# A dispatcher job checks out `ref: …pull_request.head.sha` (deliberately — the
+# three-dot diff must describe THIS PR) and then runs a script out of the
+# checked-out tree. The WORKFLOW FILE comes from the merge ref, so it is always
+# the new one; the TREE is the PR head, so it is whatever the contributor
+# branched from. The moment a step's body is EXTRACTED into scripts/, every head
+# whose merge base predates that extraction has the new `run:` line and no file:
+# `bash: scripts/x.sh: No such file or directory`, exit 127. MEASURED: #19505
+# (befc8cbbf) moved the shell-harness dispatcher into
+# scripts/shell-harness-dispatch.sh at 14:21Z on 2026-09-20; run 35517160933 job
+# 106094923976 died at exit 127 on head 1badf9dc5, and 42 open PRs were affected
+# 4 hours later. The old inline body came from the merge ref and could never be
+# missing — so the extraction, not the step, is the hazard, and it is one
+# refactor away in any workflow.
+#
+# So this script ENUMERATES every (workflow, job, step) where a head-sha
+# checkout is followed by a `run:` that invokes a repo script, PRINTS the whole
+# population (a scan that silently matched nothing is the failure mode a census
+# must not have), and splits it by what the failure LOOKS like:
+#   REFUSE  the job declares `outputs:` or another job `needs:` it — its death
+#           DELETES the dependent jobs, so the defect renders no check run at
+#           all and reads as "nothing to run". Invisible. Must carry a fallback.
+#   WARN    nothing depends on the job — exit 127 is a loud red on a check run
+#           that exists. Visible, so it is reported, not refused.
+# A FALLBACK is an existence test (`[ -f … ]`/`test -x …`) plus a recovery that
+# reads the file from somewhere other than the head tree (`git show`/`git fetch`
+# of the base ref). Prefer the head's own copy when present, so a PR that edits
+# the script tests its own edit.
+#
 # EXIT CODES
 #   0  every job AND every step in every parsed file has a legal shape
-#   1  at least one job or step is malformed (or a file is unparseable) — named
-#   2  CANNOT MEASURE: zero files, zero jobs, no PyYAML, or a bad flag.
+#   1  at least one job or step is malformed (or a file is unparseable), or a
+#      GATING head-sha step runs a repo script with no absent-file fallback
+#   2  CANNOT MEASURE: zero files, zero jobs, no PyYAML, or a bad flag — or a
+#      scan OF THIS REPO'S OWN .github/workflows that enumerated ZERO head-sha
+#      script steps (the detector itself went blind).
 #      Never a vacuous green: an empty scan is a failure, not a pass.
 #
 # USAGE
@@ -82,6 +115,7 @@ done
 run_check() {
   python3 - "$@" <<'PY'
 import os
+import re
 import sys
 
 try:
@@ -113,6 +147,112 @@ jobs_seen = 0
 steps_seen = 0
 files_parsed = 0
 
+# ── the head-sha clause's vocabulary ────────────────────────────────────────
+# DOES THIS STEP EXECUTE A REPO SCRIPT? Two shapes, and the second one is not
+# optional: a command-position-only regex goes blind the moment a step assigns
+# the path to a variable (`src=scripts/x.sh; … bash "$src"`) — which is exactly
+# the shape a FIX for this defect takes, so the detector would stop seeing the
+# step it had just made safe. Merely NAMING a script is not executing it:
+# security.yml's dispatcher lists four scripts/ paths as `case` patterns over
+# the changed-path set, and those are data, not commands.
+# A command position, allowing the `VAR=v cmd …` prefix a shell permits there.
+_CMD = (
+    r"(?:(?:^|[;&|(`]|&&|\|\||\bthen\b|\bdo\b|\belse\b)[ \t]*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=[^ \t\n]*[ \t]+)*)"
+)
+# An interpreter, INCLUDING the two sourcing forms — a sourced script is as
+# absent as an executed one and dies the same way.
+_INTERP = (
+    r"(?:(?:bash|sh|zsh|python3|python|node|ruby|perl|exec|source|\.)[ \t]+"
+    r"(?:-\S+[ \t]+)*)"
+)
+# A `$VAR/`, `${VAR}/` or `${VAR:-.}/` prefix on the path is still that path.
+_PFX = r"(?:\$\{?[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}?/)?"
+_SCRIPT = r"scripts/[A-Za-z0-9._/@+-]*\.(?:sh|bash|py|mjs|cjs|js|rb|pl|exs|ts)"
+# (a) a literal path at command position: `bash scripts/x.sh`, `./scripts/x.sh`
+LITERAL_EXEC = re.compile(
+    _CMD + _INTERP + r"[\"']?" + _PFX + r"(" + _SCRIPT + r")"
+    + r"|" + _CMD + r"[\"']?\./(" + _SCRIPT + r")",
+    re.M,
+)
+# (b) a variable assigned a scripts/ path, and that variable executed.
+SCRIPT_ASSIGN = re.compile(r"(\w+)=[\"']?[^\"'\n]*?(" + _SCRIPT + r")")
+VAR_EXEC = re.compile(_CMD + _INTERP + r"?[\"']?\$\{?(\w+)\}?", re.M)
+
+
+def _uncommented(run):
+    """The run body with whole-line shell comments removed."""
+    return "\n".join(
+        ln for ln in run.splitlines() if not ln.lstrip().startswith("#")
+    )
+
+
+def executed_scripts(run):
+    """Every repo script this run body actually executes."""
+    body = _uncommented(run)
+    found = {m.group(1) or m.group(2) for m in LITERAL_EXEC.finditer(body)}
+    assigned = {}
+    for m in SCRIPT_ASSIGN.finditer(body):
+        assigned.setdefault(m.group(1), m.group(2))
+    if assigned:
+        for m in VAR_EXEC.finditer(body):
+            if m.group(1) in assigned:
+                found.add(assigned[m.group(1)])
+    return sorted(found)
+
+
+# An existence test, and a recovery that does not read the head tree.
+HAS_EXISTS = re.compile(r"(?:\[\[?[ \t]+|\btest[ \t]+)-[efxrs][ \t]")
+HAS_RECOVERY = re.compile(r"\bgit[ \t]+(?:show|fetch|cat-file)\b")
+
+head_sha_pop = []   # (path, job_id, idx, step_name, scripts, gating, ok)
+
+
+def scan_head_sha_clause(path, jobs):
+    """Enumerate head-sha-pinned steps that execute a repo script."""
+    needed = set()
+    for other in jobs.values():
+        if not isinstance(other, dict):
+            continue
+        n = other.get("needs")
+        if isinstance(n, str):
+            needed.add(n)
+        elif isinstance(n, list):
+            needed.update(x for x in n if isinstance(x, str))
+
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        # GATING: something downstream cannot run without this job, so this
+        # job's death is an ABSENCE, not a red.
+        gating = bool(job.get("outputs")) or job_id in needed
+        pinned = False
+        for idx, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if isinstance(uses, str) and "actions/checkout" in uses:
+                with_ = step.get("with")
+                ref = ""
+                if isinstance(with_, dict):
+                    ref = str(with_.get("ref") or "")
+                # A later checkout without the pin REPLACES the tree, so the
+                # pin is a property of the most recent checkout, not the job.
+                pinned = "pull_request.head.sha" in ref
+                continue
+            run = step.get("run")
+            if not pinned or not isinstance(run, str):
+                continue
+            found = executed_scripts(run)
+            if not found:
+                continue
+            ok = bool(HAS_EXISTS.search(run) and HAS_RECOVERY.search(run))
+            name = step.get("name") if isinstance(step.get("name"), str) else ""
+            head_sha_pop.append((path, job_id, idx, name, found, gating, ok))
+
 for path in files:
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -140,6 +280,8 @@ for path in files:
     if not isinstance(jobs, dict) or not jobs:
         bad.append((path, None, "`jobs:` is empty or not a mapping"))
         continue
+
+    scan_head_sha_clause(path, jobs)
 
     for job_id, job in jobs.items():
         jobs_seen += 1
@@ -195,6 +337,63 @@ for path in files:
             "has neither (runs-on + steps) nor uses: — missing %s" % ", ".join(missing),
         ))
 
+# ── the head-sha clause: print the POPULATION, then judge it ────────────────
+# Printed whenever it is non-empty, pass or fail. A census whose regex quietly
+# stopped matching reports "0 problems" in exactly the same words as a clean
+# tree; the only difference a reader can see is the population itself.
+if head_sha_pop:
+    sys.stderr.write(
+        "head-sha script population — %d step(s) run a repo script from a "
+        "`ref: …pull_request.head.sha` checkout:\n" % len(head_sha_pop)
+    )
+    for path, job_id, idx, name, found, gating, ok in head_sha_pop:
+        verdict = "OK  " if ok else ("RED " if gating else "WARN")
+        label = "step[%d]" % idx + (' (name: "%s")' % name if name else "")
+        sys.stderr.write(
+            "  %s %s: job `%s` %s -> %s   [%s, fallback=%s]\n"
+            % (
+                verdict,
+                path,
+                job_id,
+                label,
+                ", ".join(found),
+                "GATING (outputs/needs)" if gating else "non-gating",
+                "yes" if ok else "NO",
+            )
+        )
+
+for path, job_id, idx, name, found, gating, ok in head_sha_pop:
+    if ok or not gating:
+        continue
+    label = "step[%d]" % idx + (' (name: "%s")' % name if name else "")
+    bad.append((
+        path, job_id,
+        "%s runs %s from a `ref: …pull_request.head.sha` checkout with NO "
+        "absent-file fallback — a head whose merge base predates that script "
+        "exits 127, and because this job is GATING (outputs/needs) the "
+        "dependent jobs render no check run at all. Prefer the head's copy, "
+        "else read the base's: `[ -f <script> ] || git show "
+        "\"origin/${GITHUB_BASE_REF:-main}:<script>\" > \"$RUNNER_TEMP/...\"`"
+        % (label, ", ".join(found)),
+    ))
+
+# THE DETECTOR'S OWN FLOOR. Armed only for a scan of a real .github/workflows
+# tree: fixture directories in the selftest legitimately contain no such step,
+# but this repo's own workflows contain several, and a regex that stops
+# matching would otherwise publish a silent green.
+floor_armed = any(
+    os.path.isdir(a)
+    and os.path.normpath(a).endswith(os.path.join(".github", "workflows"))
+    for a in args
+)
+if floor_armed and not head_sha_pop:
+    sys.stderr.write(
+        "workflow-job-shape-check: scanned a real .github/workflows tree and "
+        "enumerated ZERO head-sha script steps — the detector is blind, "
+        "CANNOT MEASURE (rc 2)\n"
+    )
+    sys.exit(2)
+
 # ORDER MATTERS. The coverage floor exists to stop a VACUOUS GREEN, so it only
 # fires when nothing was found AND nothing was measured. A file that would not
 # parse is a real finding — rc 1 — even though it contributed zero jobs; if the
@@ -225,8 +424,8 @@ if bad:
     sys.exit(1)
 
 print(
-    "workflow-job-shape-check: OK — %d file(s), %d job(s), %d step(s); every job has runs-on+steps or uses, and every step exactly one of run:/uses:"
-    % (files_parsed, jobs_seen, steps_seen)
+    "workflow-job-shape-check: OK — %d file(s), %d job(s), %d step(s); every job has runs-on+steps or uses, every step exactly one of run:/uses:, and every GATING head-sha step that runs a repo script (%d enumerated) carries an absent-file fallback"
+    % (files_parsed, jobs_seen, steps_seen, len(head_sha_pop))
 )
 sys.exit(0)
 PY
@@ -449,6 +648,134 @@ jobs:
           TOKEN: ${{ secrets.TOKEN }}
 YML
   _expect '(k) name:+env: step with no run: reds' 1 "$tmp/name-env-step"
+
+  # ── the head-sha clause: BOTH controls, on the REAL file ──────────────────
+  # (l) POSITIVE CONTROL. This repo's own .github/workflows must be green AND
+  # must enumerate a non-empty population that INCLUDES the dispatch job — a
+  # green from a detector that found nothing is the failure this clause exists
+  # to prevent, and it is indistinguishable from a clean tree in the exit code.
+  local real_wf
+  real_wf="${root:-.}/.github/workflows"
+  if [ ! -d "$real_wf" ]; then
+    printf 'FAIL  %-46s\n' '(l) the real .github/workflows is missing'
+    fails=$((fails + 1))
+  else
+    _expect '(l) the real .github/workflows is green' 0 "$real_wf"
+    out="$LAST_OUT"
+    if grep -qE 'OK .*shell-harnesses\.yml: job `changes` step\[1\]' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(l) population NAMES the dispatch job, OK'
+    else
+      printf 'FAIL  %-46s\n' '(l) population does not carry the dispatch job'
+      fails=$((fails + 1))
+    fi
+    if grep -qE 'head-sha script population — [1-9][0-9]* step' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(l) the population printed is non-empty'
+    else
+      printf 'FAIL  %-46s\n' '(l) no non-empty population printed'
+      fails=$((fails + 1))
+    fi
+  fi
+
+  # (m) NEGATIVE CONTROL, on a COPY OF THE REAL shell-harnesses.yml: delete the
+  # two lines that ARE the fallback (the existence test and the base-ref read)
+  # and the very job the fix repaired must red. A synthetic fixture proves the
+  # rule; this proves it on the shape this repo actually ships.
+  local realsh
+  realsh="${root:-.}/.github/workflows/shell-harnesses.yml"
+  if [ ! -f "$realsh" ]; then
+    printf 'FAIL  %-46s\n' '(m) the real shell-harnesses.yml is missing'
+    fails=$((fails + 1))
+  else
+    mkdir -p "$tmp/hs-clean" "$tmp/hs-planted"
+    cp "$realsh" "$tmp/hs-clean/wf.yml"
+    _expect '(m) a copied REAL shell-harnesses is green' 0 "$tmp/hs-clean"
+    local a1 a2 n1 n2
+    a1='if [ -f "$src" ]; then'
+    a2='git show "origin/$base:scripts/'
+    n1="$(grep -c -F -e "$a1" "$tmp/hs-clean/wf.yml" || true)"
+    grep -v -F -e "$a1" -e "$a2" "$tmp/hs-clean/wf.yml" >"$tmp/hs-planted/wf.yml" || true
+    n2="$(grep -c -F -e "$a1" "$tmp/hs-planted/wf.yml" || true)"
+    # ASSERT THE PLANT APPLIED before believing its red.
+    if [ "$n1" -ge 1 ] && [ "$n2" = "0" ]; then
+      printf 'PASS  %-46s (%s -> 0)\n' '(m) the fallback plant APPLIED' "$n1"
+    else
+      printf 'FAIL  %-46s (before=%s after=%s)\n' \
+        '(m) the fallback plant did not apply' "$n1" "$n2"
+      fails=$((fails + 1))
+    fi
+    _expect '(m) the de-fallbacked dispatch job reds' 1 "$tmp/hs-planted"
+    out="$LAST_OUT"
+    if grep -q 'job `changes`' <<<"$out" &&
+       grep -qE 'step\[[12]\]' <<<"$out" &&
+       grep -q 'NO absent-file fallback' <<<"$out"; then
+      printf 'PASS  %-46s\n' '(m) red names workflow:job:step + the clause'
+    else
+      printf 'FAIL  %-46s\n' '(m) the red is not locatable'
+      printf '%s\n' "$out" | sed 's/^/      | /'
+      fails=$((fails + 1))
+    fi
+  fi
+
+  # (n) THE GATING SPLIT, synthetic. The same bare step is a RED in a job other
+  # jobs need (its death DELETES them — an absent check run) and a WARN in a job
+  # nothing depends on (its death is a red check run a human can see).
+  mkdir -p "$tmp/hs-gating" "$tmp/hs-lonely"
+  cat >"$tmp/hs-gating/wf.yml" <<'YML'
+name: gating
+on: [pull_request]
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      any: ${{ steps.sets.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - id: sets
+        name: Compute the changed-path set
+        run: bash scripts/shell-harness-dispatch.sh
+  harness:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YML
+  sed -e 's/^    outputs:$/    # no outputs/' -e 's/^      any: .*$//' \
+      -e 's/^  harness:$/  unrelated:/' -e 's/^    needs: changes$//' \
+      "$tmp/hs-gating/wf.yml" >"$tmp/hs-lonely/wf.yml"
+  _expect '(n) a GATING bare head-sha step reds' 1 "$tmp/hs-gating"
+  out="$LAST_OUT"
+  if grep -q 'GATING' <<<"$out"; then
+    printf 'PASS  %-46s\n' '(n) the red says the job is GATING'
+  else
+    printf 'FAIL  %-46s\n' '(n) the red does not say GATING'
+    fails=$((fails + 1))
+  fi
+  _expect '(n) the same step, non-gating, WARNs (rc 0)' 0 "$tmp/hs-lonely"
+  out="$LAST_OUT"
+  if grep -q 'WARN' <<<"$out"; then
+    printf 'PASS  %-46s\n' '(n) the non-gating twin is still ENUMERATED'
+  else
+    printf 'FAIL  %-46s\n' '(n) the non-gating twin vanished from the census'
+    fails=$((fails + 1))
+  fi
+
+  # (o) THE DETECTOR'S OWN FLOOR. A tree that looks like the real one
+  # (.github/workflows) and yields zero head-sha script steps is the regex
+  # having gone blind — CANNOT MEASURE, never a green.
+  mkdir -p "$tmp/blind/.github/workflows"
+  cat >"$tmp/blind/.github/workflows/wf.yml" <<'YML'
+name: nothing-pinned
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/whatever.sh
+YML
+  _expect '(o) a blind detector = CANNOT MEASURE (rc 2)' 2 "$tmp/blind/.github/workflows"
 
   # (g) a bad flag must never exit 0. Run the SCRIPT, not run_check.
   local rc=0

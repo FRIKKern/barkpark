@@ -30,7 +30,16 @@ defmodule BarkparkWeb.Studio.WidthBucketSeamTest do
 
   setup %{conn: conn} do
     {_ws, _proj} = TenancyFixtures.ensure_default_scope!()
-    {:ok, _} = Auth.create_token(@readonly, "width-bucket readonly", @dataset, ["read"])
+
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "width-bucket readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {:ok, conn: conn}
   end
 

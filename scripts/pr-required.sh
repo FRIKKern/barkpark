@@ -4,6 +4,11 @@
 # PR's current head and prints one line per required context with its real status/conclusion.
 #
 # CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …" / "CONFLICTING: 4/4 … DIRTY") is ALWAYS THE LAST LINE. MERGEABLE now also means not DIRTY.
+# The verdict line now carries a VERDICT-AGE annotation AFTER the count — either
+# " [verdict <n> min old, <m> commit(s) behind <base>]" or, when the verdict is stale,
+# " (STALE VERDICT: <n> min old, <m> commits behind - update-branch before merging)". The
+# LEADING TOKEN IS UNCHANGED: merge-sweep.sh (MERGEABLE*), pr-watch.sh (MERGEABLE:*) and
+# merge-check.sh (MERGEABLE*) all prefix-match, so an appended clause is invisible to them.
 # Callers do `| tail -1`. Anything appended after it silently swaps what every wrapper reads
 # (measured 2026-09-02: an EARLY RED section appended here made a lane's watcher report a job
 # name where the verdict should be, and would have stopped the merge sweep merging anything).
@@ -14,7 +19,12 @@
 # disagreeing / stale-head guard SELF-HEALING: REST agrees with the branch, so the script adopts
 # the REST sha and CONTINUES to an ordinary verdict about the BRANCH commit / the fetch refspec
 # CREATING the tracking ref in a repo with NO default refspec / the FORCED refspec surviving a
-# non-fast-forward update, which a non-forced refspec skips the entire guard on) against a stub `gh` on PATH,
+# non-fast-forward update, which a non-forced refspec skips the entire guard on / a STALE
+# verdict / a FRESH verdict that must NOT be annotated stale / a verdict 0 commits behind that
+# must NOT be annotated stale / an unreadable compare that says CANNOT READ instead of zero /
+# a MUTANT with the staleness clause removed, which proves the stale arm is load-bearing / the
+# MIRROR copy under .claude/skills/orchestrate-tasks/helpers/ being byte-identical to this one)
+# against a stub `gh` on PATH,
 # from a cwd that is NOT a git repo, and asserts for each that `| tail -1` reads the verdict or
 # the refusal — never an intermediate line — that no refusal contains the string "0/4", and
 # that an HONEST 0/4 (four required contexts present, all failed) still verdicts at exit 0.
@@ -38,6 +48,19 @@ _selftest_body() {
 #!/usr/bin/env bash
 # Stub gh. GH_STUB_BREAK names the ONE read that fails; everything else answers healthily,
 # so a refusal proves specificity, not a blanket refusal.
+# RAW API SHAPE. The compare endpoint answers a JSON OBJECT, so this stub emits that object and
+# then applies `--jq` to it exactly as real gh does. The arms therefore exercise THIS SCRIPT'S
+# OWN projection of behind_by/ahead_by; a stub that handed back a pre-chewed number would leave
+# the projection — the part that can be wrong — unmeasured.
+_gh_stub_compare() {
+  local j f="" nx=0 x
+  j="{\"status\":\"behind\",\"ahead_by\":${GH_STUB_AHEAD:-1},\"behind_by\":${GH_STUB_BEHIND:-0},\"total_commits\":${GH_STUB_AHEAD:-1}}"
+  for x in "$@"; do
+    [ "$nx" = 1 ] && { f="$x"; break; }
+    [ "$x" = "--jq" ] && nx=1
+  done
+  if [ -n "$f" ]; then printf '%s\n' "$j" | jq -r "$f"; else printf '%s\n' "$j"; fi
+}
 case "$1 $2" in
   "repo view"*) [ "${GH_STUB_BREAK:-}" = repo ] && exit 1; echo "acme/widget"; exit 0;;
   "pr view"*)   [ "${GH_STUB_BREAK:-}" = sha ]  && exit 1; echo "aaaaaaaaaa11112222333344445555666677778888"; exit 0;;
@@ -52,15 +75,23 @@ if [ "$1" = api ]; then
                        # GH_STUB_ALLRED: the four required contexts EXIST on this head and every
                        # one concluded failure — a real, measured 0/4, not a failed read.
                        c=success; [ "${GH_STUB_ALLRED:-}" = 1 ] && c=failure
+                       # 5th column = .completed_at, the field the verdict-age read projects.
+                       k="${GH_STUB_COMPLETED:-2026-01-01T00:00:00Z}"
                        printf '%s\n' \
-                         "Cloud gate	completed	$c	2026-01-01T00:00:00Z" \
-                         "Console gate	completed	$c	2026-01-01T00:00:00Z" \
-                         "Elixir gate	completed	$c	2026-01-01T00:00:00Z" \
-                         "PR references an active task	completed	$c	2026-01-01T00:00:00Z"
+                         "Cloud gate	completed	$c	2026-01-01T00:00:00Z	$k" \
+                         "Console gate	completed	$c	2026-01-01T00:00:00Z	$k" \
+                         "Elixir gate	completed	$c	2026-01-01T00:00:00Z	$k" \
+                         "PR references an active task	completed	$c	2026-01-01T00:00:00Z	$k"
                        exit 0;;
       */actions/runs*) echo 0; exit 0;;
+      */compare/*)     [ "${GH_STUB_BREAK:-}" = compare ] && exit 1
+                       _gh_stub_compare "$@"; exit 0;;
       */pulls/*)       [ "${GH_STUB_BREAK:-}" = sha ] && exit 1
-                       case " $* " in *" .mergeable_state"*) echo clean;; *) echo "aaaaaaaaaa11112222333344445555666677778888";; esac
+                       case " $* " in
+                         *" .mergeable_state"*) echo clean;;
+                         *" .base.ref"*)        echo "${GH_STUB_BASE:-main}";;
+                         *) echo "aaaaaaaaaa11112222333344445555666677778888";;
+                       esac
                        exit 0;;
     esac
   done
@@ -111,6 +142,89 @@ STUB
   # broken read in the opposite direction.
   ALLRED=1 _arm "genuine 0/4"    "NOT YET: 0/4"    0 ""     42 acme/widget
   unset ALLRED
+  # ------------------------------- arms: VERDICT AGE + COMMITS BEHIND (2026-09-20) ----------
+  # The verdict is a SNAPSHOT; these arms pin that it now says how old a snapshot and how far the
+  # base moved under it, and — the load-bearing half — that it only cries STALE when BOTH the age
+  # AND the distance say so. The stub answers the compare endpoint with the RAW API object and
+  # applies --jq to it as gh does, so the projection under test is this script's own.
+  # completed_at is computed RELATIVE TO NOW, not pinned: a fixed timestamp makes "is this older
+  # than 60 minutes" answer the same from the day it is written until the end of time, i.e. it
+  # would stop measuring the comparison the moment it was committed.
+  _iso_ago() { # $1 = minutes ago; prints an ISO-8601 Z timestamp, GNU date then BSD date
+    date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null && return 0
+    date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null && return 0
+    return 1
+  }
+  _age_arm() { # label  minutes-ago  behind_by  GH_STUB_BREAK  must-contain  must-NOT-contain
+    local lbl="$1" mins="$2" beh="$3" brk="$4" must="$5" mustnot="$6" o r l comp
+    if [ "$mins" = "-" ]; then comp="2026-01-01T00:00:00Z"; else
+      comp=$(_iso_ago "$mins") || { printf 'FAIL %-20s date(1) could not build a timestamp %s minutes ago — vacuous arm\n' "$lbl" "$mins"; fails=$((fails+1)); return; }
+    fi
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="$brk" \
+         GH_STUB_COMPLETED="$comp" GH_STUB_BEHIND="$beh" GH_STUB_AHEAD=2 \
+         bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" != 0 ] || case "$l" in MERGEABLE:*) false;; *) true;; esac; then
+      printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want a MERGEABLE verdict — the leading token must survive every annotation)\n' "$lbl" "$r" "$l"; fails=$((fails+1)); return
+    fi
+    if case "$l" in *"$must"*) false;; *) true;; esac; then
+      printf 'FAIL %-20s tail -1: %s (does NOT contain: %s)\n' "$lbl" "$l" "$must"; fails=$((fails+1)); return
+    fi
+    if [ -n "$mustnot" ] && case "$l" in *"$mustnot"*) true;; *) false;; esac; then
+      printf 'FAIL %-20s tail -1: %s (must NOT contain: %s)\n' "$lbl" "$l" "$mustnot"; fails=$((fails+1)); return
+    fi
+    printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
+  }
+  # STALE: 120 min old AND 5 commits behind. Exact wording, because pr-watch.sh and bp-merge.sh
+  # read the tail and a lead reads the words.
+  _age_arm "stale verdict"  120 5 "" "commits behind - update-branch before merging)" ""
+  # FRESH: 5 min old but STILL 5 behind — NOT stale. Without this arm, an annotation that fired
+  # on "behind" alone would look correct: every merge candidate in this repo is behind something.
+  _age_arm "fresh not stale"  5 5 "" "commit(s) behind main]" "STALE VERDICT"
+  # UP TO DATE: 120 min old but 0 behind — NOT stale. The other half of the AND.
+  _age_arm "in-sync not stale" 120 0 "" "0 commit(s) behind main]" "STALE VERDICT"
+  # A FAILED COMPARE IS NOT ZERO. The whole point of the block: an unreadable compare must not
+  # render as "0 commits behind", which reads as "nothing moved, go ahead".
+  # The must-NOT needle is the PLAIN annotation's own shape, " commit(s) behind ". Do NOT use the
+  # literal "0 commits behind" here: the honest refusal deliberately contains the words "not 0
+  # commits behind", so that needle reds the very sentence it is meant to protect (measured).
+  _age_arm "compare unreadable" 120 5 compare "CANNOT READ" " commit(s) behind "
+  # ...and the indented detail line must say so too, in its own words.
+  out=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK=compare \
+         GH_STUB_COMPLETED="$(_iso_ago 120)" GH_STUB_BEHIND=5 bash "$SELF" 42 acme/widget 2>/dev/null )
+  if printf '%s\n' "$out" | grep -qE '^  VERDICT AGE: CANNOT READ'; then
+    printf 'PASS %-20s the detail line refuses too, above the verdict\n' "cannot-read detail"
+  else
+    printf 'FAIL %-20s no "  VERDICT AGE: CANNOT READ" line in the output\n' "cannot-read detail"; fails=$((fails+1))
+  fi
+  # ------------------------------- THE MUTATION CONTROL for the stale arm ----------------
+  # "stale verdict" above asserts a string is present. That is only worth something if a build
+  # WITHOUT the clause fails it — otherwise it is an assertion with no subject. This arm removes
+  # the clause from a COPY of this very file and proves the stale fixture then produces a
+  # MERGEABLE line with no STALE VERDICT in it. It also refuses if the mutation changed nothing
+  # (a stale probe) or broke the script outright (a mutant that cannot verdict proves nothing).
+  _mutation_arm() {
+    local lbl="mutation reds stale" m o r l comp
+    m="$d/mutant-pr-required.sh"
+    sed 's/^    STALE_ANN=" (STALE VERDICT:.*$/    STALE_ANN=""/' "$SELF" > "$m" 2>/dev/null
+    if [ ! -s "$m" ] || cmp -s "$m" "$SELF"; then
+      printf 'FAIL %-20s the mutation changed NOTHING — this control measures nothing; the sed probe is stale\n' "$lbl"; fails=$((fails+1)); return
+    fi
+    comp=$(_iso_ago 120) || { printf 'FAIL %-20s date(1) unusable — vacuous arm\n' "$lbl"; fails=$((fails+1)); return; }
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="" \
+         GH_STUB_COMPLETED="$comp" GH_STUB_BEHIND=5 GH_STUB_AHEAD=2 \
+         bash "$m" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    case "$l" in
+      *"STALE VERDICT"*)
+        printf 'FAIL %-20s the mutant STILL printed STALE VERDICT — the stale arm passes with the clause gone, so it is not load-bearing\n' "$lbl"; fails=$((fails+1));;
+      MERGEABLE:*)
+        printf 'PASS %-20s clause removed -> stale arm would red | mutant tail: %s\n' "$lbl" "$l";;
+      *)
+        printf 'FAIL %-20s mutant produced no MERGEABLE verdict (exit=%s, tail: %s) — it broke the script, so it says nothing about the clause\n' "$lbl" "$r" "$l"; fails=$((fails+1));;
+    esac
+  }
+  _mutation_arm
   # ---------------------------------------------- arms 8-9: THE STALE-HEAD GUARD, BOTH PATHS ----
   # The v3 guard only runs when `git fetch origin <branch>` SUCCEEDS, so these two arms need a
   # REAL branch: a bare repo with a pushed branch, and a cwd repo whose origin is that bare repo.
@@ -124,7 +238,18 @@ STUB
   # turning every read into a refusal.
   cat > "$d/bin2/gh" <<'STUB2'
 #!/usr/bin/env bash
-# Stub gh for the stale-head arms. Every call is appended to $GH_STUB_LOG, so an arm can PROVE
+# Stub gh for the stale-head arms. It answers the compare endpoint with the RAW API object and
+# applies --jq to it the way gh does (see _gh_stub_compare in the first stub).
+_gh_stub_compare() {
+  local j f="" nx=0 x
+  j="{\"status\":\"behind\",\"ahead_by\":${GH_STUB_AHEAD:-1},\"behind_by\":${GH_STUB_BEHIND:-0},\"total_commits\":${GH_STUB_AHEAD:-1}}"
+  for x in "$@"; do
+    [ "$nx" = 1 ] && { f="$x"; break; }
+    [ "$x" = "--jq" ] && nx=1
+  done
+  if [ -n "$f" ]; then printf '%s\n' "$j" | jq -r "$f"; else printf '%s\n' "$j"; fi
+}
+# Original note: Every call is appended to $GH_STUB_LOG, so an arm can PROVE
 # the stub was actually reached (a fixture that never reaches the code under test is a green with
 # no subject). The .head.sha answers come from a FILE-BACKED counter: the script runs each read
 # inside its own $( ) subshell, so an in-shell counter is always zero and would hand back a
@@ -134,6 +259,8 @@ STUB
 if [ "${1:-} ${2:-}" = "pr view" ]; then printf '%s\n' "${GH_STUB_GQL_SHA:-}"; exit 0; fi
 if [ "${1:-}" = api ]; then
   case " $* " in
+    */compare/*)    _gh_stub_compare "$@"; exit 0;;
+    *" .base.ref"*) printf '%s\n' "${GH_STUB_BASE:-main}"; exit 0;;
     *" .head.ref"*) printf '%s\n' "${GH_STUB_BRANCH:-}"; exit 0;;
     *" .head.sha"*)
       n=0; [ -s "${GH_STUB_CTR:-}" ] && n=$(cat "$GH_STUB_CTR")
@@ -149,10 +276,10 @@ if [ "${1:-}" = api ]; then
       exit 1;;
     *mergeable_state*) echo clean; exit 0;;
     */check-runs*) printf '%s\n' \
-        "Cloud gate	completed	success	2026-01-01T00:00:00Z" \
-        "Console gate	completed	success	2026-01-01T00:00:00Z" \
-        "Elixir gate	completed	success	2026-01-01T00:00:00Z" \
-        "PR references an active task	completed	success	2026-01-01T00:00:00Z"
+        "Cloud gate	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z" \
+        "Console gate	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z" \
+        "Elixir gate	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z" \
+        "PR references an active task	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z"
       exit 0;;
   esac
 fi
@@ -235,10 +362,15 @@ STUB2
            GH_STUB_GQL_SHA=bbbbbbbbbb11112222333344445555666677778888 \
            GH_STUB_RESTSHAS="$REALSHA" bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
       l=$(printf '%s\n' "$o" | tail -1)
-      if [ "$r" = 0 ] && [ "$l" = "$want" ]; then
+      # PREFIX, not equality, since 2026-09-20: the verdict line now carries a verdict-age
+      # annotation whose minute count is wall-clock derived. The sha assertion is UNWEAKENED —
+      # "$want" ends in the full 10-char sha prefix, and bbbbbbbbbb cannot match it — and the
+      # second check pins the annotation's own content, so nothing here got looser.
+      if [ "$r" = 0 ] && case "$l" in "$want"*) true;; *) false;; esac \
+         && case "$l" in *"0 commit(s) behind main]"*) true;; *) false;; esac; then
         printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
       else
-        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want exactly: %s — a refusal here means self-heal fell through; the sha bbbbbbbbbb means it adopted the STALE value and is describing a commit that is not the branch)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
+        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want prefix: %s plus a "0 commit(s) behind main]" annotation — a refusal here means self-heal fell through; the sha bbbbbbbbbb means it adopted the STALE value and is describing a commit that is not the branch)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
       fi
       if ! grep -q '\.head\.ref' "$log" || ! grep -q '\.head\.sha' "$log"; then
         printf 'FAIL %-20s self-heal arm never ENTERED the guard (no .head.ref / .head.sha re-read logged) — vacuous arm, its verdict measured nothing\n' "$lbl"; fails=$((fails+1))
@@ -329,10 +461,11 @@ STUB2
            GH_STUB_GQL_SHA="$REALSHA" GH_STUB_RESTSHAS="$REALSHA" \
            bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
       l=$(printf '%s\n' "$o" | tail -1)
-      if [ "$r" = 0 ] && [ "$l" = "$want" ]; then
+      if [ "$r" = 0 ] && case "$l" in "$want"*) true;; *) false;; esac \
+         && case "$l" in *"0 commit(s) behind main]"*) true;; *) false;; esac; then
         printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
       else
-        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want exactly: %s — a STALE-PR-OBJECT here is the FALSE refusal a plain `git fetch origin <branch>` produces when no default refspec creates the tracking ref)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
+        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want prefix: %s plus a "0 commit(s) behind main]" annotation — a STALE-PR-OBJECT here is the FALSE refusal a plain `git fetch origin <branch>` produces when no default refspec creates the tracking ref)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
       fi
       ref=$(git -C "$d/cwdnr" rev-parse refs/remotes/origin/stale-branch 2>/dev/null || true)
       if [ "$ref" != "$REALSHA" ]; then
@@ -379,10 +512,11 @@ STUB2
            GH_STUB_RESTSHAS="$REALSHA" bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
       l=$(printf '%s\n' "$o" | tail -1)
       post=$(git -C "$d/cwdff" rev-parse refs/remotes/origin/stale-branch 2>/dev/null || true)
-      if [ "$r" = 0 ] && [ "$l" = "$want" ]; then
+      if [ "$r" = 0 ] && case "$l" in "$want"*) true;; *) false;; esac \
+         && case "$l" in *"0 commit(s) behind main]"*) true;; *) false;; esac; then
         printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
       else
-        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want exactly: %s — the stale sha bbbbbbbbbb means the non-forced fetch exited 1 and the guard was SKIPPED, failing OPEN)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
+        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want prefix: %s plus a "0 commit(s) behind main]" annotation — the stale sha bbbbbbbbbb means the non-forced fetch exited 1 and the guard was SKIPPED, failing OPEN)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
       fi
       if [ "$post" != "$REALSHA" ]; then
         printf 'FAIL %-20s tracking ref did not move across the non-ff update: [%s] -> [%s], want %s — the refspec is missing its leading +\n' "$lbl" "$pre" "$post" "$REALSHA"; fails=$((fails+1))
@@ -392,6 +526,33 @@ STUB2
   else
     printf 'FAIL %-20s could not build the bare-repo/branch fixture — arms 8-9 did not run\n' "stale fixture"; fails=$((fails+1))
   fi
+  # ----------------------------- ARM: THE MIRROR. TWO copies of this file live in this repo ----
+  # scripts/pr-required.sh is CANONICAL — vendored 2026-09-16 (#18469) and the copy merge-check.sh
+  # resolves. .claude/skills/orchestrate-tasks/helpers/pr-required.sh is a MIRROR: pr-watch.sh and
+  # merge-sweep.sh each resolve "pr-required.sh beside this file", so THEY run the mirror. Nothing
+  # compared the two, and the mirror silently lagged from 2026-09-16 to 2026-09-20 — 187 lines
+  # against 543, i.e. it had no stale-head guard AT ALL — so the campaign's own watchers were
+  # running a materially different tool from the one the merge gate ran. Two copies diverge in
+  # BOTH directions the moment nothing measures them. This arm is that measurement.
+  # When this copy is NOT inside a checkout holding both files (the arms run copies out of a temp
+  # dir; leads run a scratchpad copy) it prints NOTE, not PASS: the tally counts only PASS/FAIL
+  # lines, so an un-run comparison cannot inflate the score into a green that measured nothing.
+  _mirror_arm() {
+    local lbl="mirror in sync" top a b
+    top=$(git -C "$SELFDIR" rev-parse --show-toplevel 2>/dev/null || true)
+    a="$top/scripts/pr-required.sh"
+    b="$top/.claude/skills/orchestrate-tasks/helpers/pr-required.sh"
+    if [ -z "$top" ] || [ ! -f "$a" ] || [ ! -f "$b" ]; then
+      printf 'NOTE %-20s NOT RUN: this copy is not inside a checkout holding both copies (toplevel: %s) — the mirror was NOT compared\n' "$lbl" "${top:-none}"
+      return
+    fi
+    if cmp -s "$a" "$b"; then
+      printf 'PASS %-20s the two repo copies are byte-identical\n' "$lbl"
+    else
+      printf 'FAIL %-20s scripts/pr-required.sh and .claude/skills/orchestrate-tasks/helpers/pr-required.sh DIFFER — merge-check.sh and the watchers are running different tools. Re-sync with: cp scripts/pr-required.sh .claude/skills/orchestrate-tasks/helpers/pr-required.sh\n' "$lbl"; fails=$((fails+1))
+    fi
+  }
+  _mirror_arm
   rm -rf "$d"
   return "$fails"
 }
@@ -408,7 +569,7 @@ selftest() {
   total=$(printf '%s\n' "$out" | grep -cE '^(PASS|FAIL) ')
   passed=$(printf '%s\n' "$out" | grep -cE '^PASS ')
   failed=$(printf '%s\n' "$out" | grep -cE '^FAIL ')
-  if [ "$total" -lt 8 ]; then
+  if [ "$total" -lt 14 ]; then
     echo "SELFTEST: CANNOT READ — only $total arm line(s) emitted; the body exited early and this tally measures nothing"
     return 1
   fi
@@ -509,7 +670,7 @@ fi
 # Read mergeable_state over REST (one call) so the LAST LINE never says MERGEABLE for a conflicting branch.
 MSTATE=$(gh api "repos/$REPO/pulls/$PR" --jq '.mergeable_state // "-"' 2>/dev/null || echo "-")
 if ! RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
-  --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.started_at // "-")"' 2>/dev/null); then
+  --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.started_at // "-")\t\(.completed_at // "-")"' 2>/dev/null); then
   echo "CANNOT READ: check-runs for $REPO@${SHA:0:10} could not be fetched — this is NOT a verdict, and NOT a count of zero green."
   exit 3
 fi
@@ -518,6 +679,68 @@ fi
 if [ -z "$RUNS" ]; then
   echo "CANNOT READ: $REPO@${SHA:0:10} has NO check runs at all — CI has not started, or the read came back empty. This is NOT a verdict, and NOT a count of zero green."
   exit 3
+fi
+
+# ------------- HOW OLD IS THIS VERDICT, AND HOW FAR HAS THE BASE MOVED UNDER IT? (2026-09-20) --
+# A 4/4 is a SNAPSHOT of the check runs on ONE head. It says nothing about WHEN those runs
+# concluded or how many commits landed on the base underneath them, and "4/4 that is a day old on
+# a head five commits behind main" is exactly the shape that merges something nobody's CI ever
+# evaluated (measured on #19458 and #19505, both 5 behind). Every lead re-derived both numbers by
+# hand before every merge; the instrument that produced the verdict is where they belong.
+# BOTH ARE READ FROM THE API — check-runs `.completed_at`, and the compare endpoint's
+# `.behind_by` — never from a local checkout, whose refs every worktree in this repo shares and
+# which is routinely behind the branch it would be asked about.
+# A FAILED READ IS NOT ZERO. Either half being unreadable prints CANNOT READ and suppresses the
+# staleness test entirely, because "0 commits behind" is precisely the reassuring lie this block
+# exists to stop: it would read as "freshly verified, nothing has moved".
+STALE_MIN="${PR_REQUIRED_STALE_MIN:-60}"
+_epoch_utc() { # $1 = ISO-8601 Z timestamp; prints epoch seconds on stdout, or nothing at exit 1
+  local e
+  e=$(date -u -d "$1" +%s 2>/dev/null) && [ -n "$e" ] && { printf '%s\n' "$e"; return 0; }
+  e=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null) && [ -n "$e" ] && { printf '%s\n' "$e"; return 0; }
+  return 1
+}
+AGE_MIN=""; AGE_WHY=""; BEHIND=""; AHEAD=""; BEHIND_WHY=""; BASEREF=""
+PLAIN_ANN=""; STALE_ANN=""
+# The NEWEST completed_at among the FOUR REQUIRED contexts — not among all check runs, because an
+# advisory job re-run five minutes ago would otherwise make a day-old required set look fresh.
+NEWEST=$(printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | awk -F'\t' '$5!="-" && $5!=""{print $5}' | sort -r | head -1)
+if [ -z "$NEWEST" ]; then
+  AGE_WHY="no required check run on this head carries a completed_at (still running, or the field was absent)"
+else
+  _T_NEW=$(_epoch_utc "$NEWEST" || true)
+  _T_NOW=$(date -u +%s 2>/dev/null || true)
+  if [ -n "${_T_NEW:-}" ] && [ -n "${_T_NOW:-}" ]; then
+    AGE_MIN=$(( (_T_NOW - _T_NEW) / 60 ))
+  else
+    AGE_WHY="completed_at [$NEWEST] could not be turned into epoch seconds by this host's date(1)"
+  fi
+fi
+BASEREF=$(gh api "repos/$REPO/pulls/$PR" --jq .base.ref 2>/dev/null || true)
+if [ -z "$BASEREF" ]; then
+  BEHIND_WHY="the PR's base ref could not be read over REST"
+else
+  # compare/<base>...<head>: behind_by = commits on the BASE that this head does not have, which
+  # is the number every lead was computing by hand with merge-base + rev-list --count.
+  _CMP=$(gh api "repos/$REPO/compare/$BASEREF...$SHA?per_page=1" \
+           --jq '[(.behind_by|tostring),(.ahead_by|tostring)]|join(" ")' 2>/dev/null || true)
+  case "$_CMP" in
+    [0-9]*" "[0-9]*) BEHIND="${_CMP%% *}"; AHEAD="${_CMP##* }";;
+    *) BEHIND_WHY="compare $BASEREF...${SHA:0:10} returned no usable behind_by/ahead_by";;
+  esac
+fi
+if [ -n "$AGE_MIN" ] && [ -n "$BEHIND" ]; then
+  echo "  VERDICT AGE (read from the API): newest required completed_at=$NEWEST => $AGE_MIN min old; compare $BASEREF...${SHA:0:10} behind_by=$BEHIND ahead_by=$AHEAD (threshold PR_REQUIRED_STALE_MIN=$STALE_MIN)"
+  PLAIN_ANN=" [verdict $AGE_MIN min old, $BEHIND commit(s) behind $BASEREF]"
+  if [ "$BEHIND" -ge 1 ] && [ "$AGE_MIN" -gt "$STALE_MIN" ]; then
+    STALE_ANN=" (STALE VERDICT: $AGE_MIN min old, $BEHIND commits behind - update-branch before merging)"
+  fi
+else
+  _AGE_CR=""
+  [ -z "$AGE_MIN" ] && _AGE_CR="age: ${AGE_WHY:-unknown}"
+  [ -z "$BEHIND" ] && _AGE_CR="${_AGE_CR:+$_AGE_CR; }commits behind: ${BEHIND_WHY:-unknown}"
+  echo "  VERDICT AGE: CANNOT READ — $_AGE_CR. This is NOT '0 min old' and NOT '0 commits behind'; the staleness test did not run."
+  PLAIN_ANN=" [verdict age/commits-behind: CANNOT READ — not 0 min old, not 0 commits behind]"
 fi
 
 # EARLY RED, printed BEFORE the verdict: the aggregate "Elixir gate" context stays QUEUED for
@@ -540,4 +763,4 @@ if [ -n "$ABSENT" ]; then
   else echo "  ABSENT required context (no check run on this head and nothing running — re-fire with: gh api -X PUT repos/$REPO/pulls/$PR/update-branch): ${ABSENT%; }"; fi
 fi
 printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | sort -t$'\t' -k1,1 -k4,4r | awk -F'\t' '!seen[$1]++' \
-  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" -v absent="$ABSENT" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge\n",substr(sha,1,10); else if(ok<4 && absent!="") printf "NOT YET: %d/4 required green on %s (%d ABSENT — re-fire, do not debug)\n",ok,substr(sha,1,10),4-n; else printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
+  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" -v absent="$ABSENT" -v ann="$PLAIN_ANN" -v stale="$STALE_ANN" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ a=(ok==4 && stale!="")?stale:ann; if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge%s\n",substr(sha,1,10),ann; else if(ok<4 && absent!="") printf "NOT YET: %d/4 required green on %s (%d ABSENT — re-fire, do not debug)%s\n",ok,substr(sha,1,10),4-n,ann; else printf "%s: %d/4 required green on %s%s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10),a}'

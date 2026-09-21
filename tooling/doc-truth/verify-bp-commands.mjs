@@ -419,19 +419,22 @@ function selftest() {
   // MUTATION on a COPY of internal/cli — the arm that fires on REAL drift: a
   // verb retired in the table while a doc still prints it. The tree is copied,
   // not edited, so nothing here can touch the working tree.
-  const runProbe = (printed, edit) => {
+  const runProbe = (printed, edit, editFile = "internal/cli/site_verb_matrix.go", opts = {}) => {
     const tmp = mkdtempSync(join(tmpdir(), "bp-verb-table-"));
     try {
       cpSync(join(REPO_ROOT, "internal/cli"), join(tmp, "internal/cli"), { recursive: true });
       let changed = true;
       if (edit) {
-        const f = join(tmp, "internal/cli/site_verb_matrix.go");
+        const f = join(tmp, editFile);
         const before = readFileSync(f, "utf8");
         const after = edit(before);
         changed = after !== before;
         if (changed) writeFileSync(f, after);
       }
       writeFileSync(join(tmp, "probe.md"), "```sh\n" + printed + "\n```\n");
+      if (opts.rawLoad) {
+        return { changed, sources: loadBpSources({ root: tmp, offline: true }) };
+      }
       return { changed, report: verifyDocs(["probe.md"], { root: tmp, offline: true }) };
     } finally {
       rmSync(tmp, { recursive: true, force: true });
@@ -469,6 +472,90 @@ function selftest() {
     if (!changed) return "the scope flip did not apply — this check would pass vacuously";
     return (report.totals.unresolved === 0) ||
       `still UNRESOLVED with the scope widened: ${report.unresolved.map((x) => x.reasons.join("|")).join(" ")}`;
+  });
+
+  // ── [D3] the NOUN-QUALIFIED built-in registry ────────────────────────────
+  //
+  // `bp task create` is dispatched from nounBuiltins and exists in NO manifest.
+  // Before D3 the verifier scored three TRUE docs/cli/error-exit-table.md lines
+  // UNRESOLVED. The arms below prove the pair resolves, prove it resolves ONLY
+  // because of the registry, and prove the registry read REFUSES rather than
+  // answering "no pairs" when it comes back empty.
+  const NB = "internal/cli/noun_builtins.go";
+
+  check("D3 resolves `bp task create --publish` (registry-only, no manifest row)", () => {
+    const r = verdict("bp task create --publish");
+    const fromRegistry = r.authority.some((a) => /^D create → internal\/cli\/noun_builtins\.go:\d+$/.test(a));
+    return (r.verdict === PROVEN && fromRegistry) ||
+      `${r.verdict} via ${r.via.join("+")} — authority: ${r.authority.join(" ; ")}`;
+  });
+  check("D3 names the built-in's own leaf, so [C]/[E] can still adjudicate its flags", () => {
+    // Without the leaf the pair parses and the FLAG degrades to UNPROVEN — a
+    // softer answer that is not a pass and hides that --publish is real.
+    const r = verdict("bp task create --publish");
+    return (r.unproven.length === 0) ||
+      `flags fell to UNPROVEN: ${r.unproven.join("|")}`;
+  });
+  check("D3 does NOT donate a bare verb: `bp doc create` is judged by the manifest, `bp task frontier` by the pair", () => {
+    // The pair is the dispatch token. `frontier` is registered under `task`
+    // only; a noun that does not carry it must not inherit it.
+    const good = verdict("bp task frontier");
+    const bad = verdict("bp media frontier");
+    return (good.verdict === PROVEN && bad.verdict === UNRESOLVED) ||
+      `task frontier=${good.verdict} media frontier=${bad.verdict} — the pair leaked into another noun`;
+  });
+  check("CONTROL: the D3 probe doc GREENs against the UNMUTATED copy", () => {
+    const { report } = runProbe("bp task create --publish", null, NB);
+    return (report.totals.commands === 1 && report.totals.unresolved === 0) ||
+      `commands=${report.totals.commands} unresolved=${report.totals.unresolved} — ` +
+      "the D3 mutations below would be measuring a broken harness";
+  });
+  check("MUTATION: delete the `task create` registry row and the doc printing it REDs", () => {
+    const { changed, report } = runProbe("bp task create --publish",
+      (src) => src.replace(/\n\t\{\n\t\tNoun:\s+"task",\n\t\tVerb:\s+"create",[\s\S]*?\n\t\},/, ""), NB);
+    if (!changed) return "the row-drop did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} of ${report.totals.commands} — ` +
+      "`task create` resolves from something other than the registry, so D3 is not what greens it";
+  });
+  check("POSITIVE CONTROL: an EMPTY registry REFUSES the load — it never answers `no pairs`", () => {
+    // An absence claim needs a control. If the registry read could come back
+    // empty and still report a clean load, every `<noun> <verb>` built-in would
+    // silently go back to being invisible and this gate would RED true lines
+    // while looking healthy. The refusal is keyed on the SHAPE, not a filename.
+    const { changed, sources } = runProbe("bp task create",
+      (src) => src.replace(/\bNoun:/g, "Group_RENAMED_AWAY:"), NB, { rawLoad: true });
+    if (!changed) return "the registry blanking did not apply — this check would pass vacuously";
+    return (sources.ok === false && /noun-qualified verb registry/.test(sources.errors.join(" "))) ||
+      `expected a REFUSAL, got ok=${sources.ok} errors=${sources.errors.join("|")}`;
+  });
+
+  // ── [D] `!=` intercepts are dispatch too ─────────────────────────────────
+  const MK = "internal/cli/make_cmd.go";
+
+  check("D reads a `!=` sub-noun guard: `bp make schema <name>`", () => {
+    const r = verdict("bp make schema <name>");
+    const fromMake = r.authority.some((a) => /^D schema → internal\/cli\/make_cmd\.go:\d+$/.test(a));
+    return (r.verdict === PROVEN && fromMake) ||
+      `${r.verdict} — authority: ${r.authority.join(" ; ")}`;
+  });
+  check("CONTROL: the `!=` probe doc GREENs against the UNMUTATED copy", () => {
+    const { report } = runProbe("bp make schema post", null, MK);
+    return (report.totals.commands === 1 && report.totals.unresolved === 0) ||
+      `commands=${report.totals.commands} unresolved=${report.totals.unresolved}`;
+  });
+  check("MUTATION: rename the token in the `!=` guard and `bp make schema` REDs", () => {
+    const { changed, report } = runProbe("bp make schema post",
+      (src) => src.replace(/args\[0\] != "schema"/g, 'args[0] != "blueprint"'), MK);
+    if (!changed) return "the guard rename did not apply — this check would pass vacuously";
+    return (report.totals.unresolved === 1) ||
+      `expected 1 UNRESOLVED, got ${report.totals.unresolved} — \`schema\` resolves from something ` +
+      "other than the guard, so the `!=` rule is not what greens it";
+  });
+  check("`!=` does not make an UNDECLARED sub-noun resolvable", () => {
+    const r = verdict("bp make casserole");
+    return (r.verdict === UNRESOLVED) ||
+      `${r.verdict} — reading \`!=\` turned the make leaf into a wildcard`;
   });
 
   // the templates/** corpus, on the real files: E is what closes the UNPROVEN
