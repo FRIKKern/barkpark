@@ -15,6 +15,11 @@
 #      not 0 (pass), not 1 (mix's own failure), and above all NOT 2, which is
 #      ExUnit's "tests failed" status. Mutation-proved by reverting the
 #      constant to 2. See task-620ea822de73bf5e.
+#   3b. LINE ADDRESSES — a `file:LINE` whose line resolves to no test must be
+#      refused, and the refusal must SAY WHICH of the two cases it is: an
+#      address that went STALE (it named a test at a git revision and an edit
+#      moved it) or one that NEVER NAMED A TEST. Those need a git-backed
+#      fixture, so this part builds a second, committed fixture project.
 #   4. MUTATION proof  — each guard is neutralised by its `# MUT:` anchor in a
 #      scratch copy, and the case that guard owns must STOP refusing. A guard
 #      whose removal changes nothing was never the detector.
@@ -57,6 +62,36 @@ printf 'defmodule RealTest do\nend\n' > "$PROJ/test/real/alpha_test.exs"
 printf 'defmodule Real2Test do\nend\n' > "$PROJ/test/real/beta_test.exs"
 printf 'defmodule Helper do\nend\n'    > "$PROJ/test/support/helper.exs"
 
+# A file shaped like the incident (task-11a8c96b5b1d7156): a helper ABOVE the
+# tests, so every line in the helper is a line address that resolves to nothing.
+# Line numbers are load-bearing — the cases below address them by number.
+cat > "$PROJ/test/real/lines_test.exs" <<'FIXTURE'
+defmodule LinesTest do
+  use ExUnit.Case, async: true
+
+  defp settle!(x) do
+    x
+  end
+
+  describe "group" do
+    test "alpha derives op latency" do
+      assert settle!(1) == 1
+    end
+  end
+end
+FIXTURE
+
+# Tests produced by a project-local macro: the scan recognises NO declaration
+# here, and the guard must therefore leave the file entirely alone. This is the
+# fixture that proves the guard is one-directional rather than merely lucky.
+cat > "$PROJ/test/real/macro_test.exs" <<'FIXTURE'
+defmodule MacroTest do
+  use ExUnit.Case, async: true
+  import Fixture.TestMacros
+  scenario "generated", %{a: 1}
+end
+FIXTURE
+
 # The fixture must actually be in the state each case needs; a setup that
 # silently died turns every refusal case into a vacuous green.
 for must in "$PROJ/mix.exs" "$PROJ/test/real/alpha_test.exs" "$PROJ/test/support/helper.exs"; do
@@ -66,11 +101,30 @@ done
   echo "mix-test-strict.test: CANNOT MEASURE — fixture test/support unexpectedly holds a *_test.exs" >&2; exit 2; }
 [ ! -e "$PROJ/test/real/gone_test.exs" ] || {
   echo "mix-test-strict.test: CANNOT MEASURE — fixture 'missing' path exists" >&2; exit 2; }
+# The line fixture's numbers ARE the assertion; if the heredoc ever drifts, every
+# line case below silently measures a different file.
+[ "$(sed -n '4p' "$PROJ/test/real/lines_test.exs")" = "  defp settle!(x) do" ] || {
+  echo "mix-test-strict.test: CANNOT MEASURE — lines_test.exs line 4 is not the helper" >&2; exit 2; }
+[ "$(sed -n '8p' "$PROJ/test/real/lines_test.exs")" = '  describe "group" do' ] || {
+  echo "mix-test-strict.test: CANNOT MEASURE — lines_test.exs line 8 is not the describe" >&2; exit 2; }
+[ "$(sed -n '9p' "$PROJ/test/real/lines_test.exs")" = '    test "alpha derives op latency" do' ] || {
+  echo "mix-test-strict.test: CANNOT MEASURE — lines_test.exs line 9 is not the test" >&2; exit 2; }
+grep -qE '^[[:space:]]*(test|describe|property|doctest)([[:space:]]|\()' "$PROJ/test/real/macro_test.exs" && {
+  echo "mix-test-strict.test: CANNOT MEASURE — macro fixture carries a recognisable declaration" >&2; exit 2; }
+command -v git >/dev/null 2>&1 || {
+  echo "mix-test-strict.test: CANNOT MEASURE — no git; the STALE/NEVER cases cannot be built" >&2; exit 2; }
 
 # run <script> <args...> -> sets RC and OUT (stdout+stderr, read to EOF).
 run() {
   local script="$1"; shift
   OUT="$(cd "$PROJ" && BP_MIX_TEST_STRICT_DRY_RUN=1 bash "$script" "$@" 2>&1)"
+  RC=$?
+}
+
+# Same, but from an arbitrary project dir — the git-backed fixture is not $PROJ.
+run_in() {
+  local dir="$1" script="$2"; shift 2
+  OUT="$(cd "$dir" && BP_MIX_TEST_STRICT_DRY_RUN=1 bash "$script" "$@" 2>&1)"
   RC=$?
 }
 
@@ -124,12 +178,108 @@ case "$OUT" in
   *) bad "second offender was not reported alongside the first" ;;
 esac
 
+echo "LINE ADDRESSES (a line that resolves to no test)"
+# THE REPRODUCTION THIS PART EXISTS FOR (task-11a8c96b5b1d7156): ExUnit runs the
+# test declared closest AT OR BEFORE the address, so an address above every
+# declaration selects nothing and `mix test` exits 0 on "0 tests, 0 failures".
+expect_refusal "a :LINE inside a helper ABOVE the first test" \
+  "line address resolves to no test: test/real/lines_test.exs:5" \
+  test/real/lines_test.exs:5
+expect_refusal "…and it says where the first declaration actually is" \
+  "above the first test declaration in this file (line 9)" \
+  test/real/lines_test.exs:5
+expect_refusal "a repeatable suffix is checked PER LINE, not just the last" \
+  "line address resolves to no test: test/real/lines_test.exs:9:5" \
+  test/real/lines_test.exs:9:5
+
+# --- git-backed fixture: only a readable revision can tell the two cases apart.
+GPROJ="$TMP/gproj"
+mkdir -p "$GPROJ/test"
+cp "$PROJ/mix.exs" "$GPROJ/mix.exs"
+# Committed FIRST without the helper: the test sits on line 5 in HEAD.
+cat > "$GPROJ/test/lines_test.exs" <<'FIXTURE'
+defmodule LinesTest do
+  use ExUnit.Case, async: true
+
+  describe "group" do
+    test "alpha derives op latency" do
+      assert 1 == 1
+    end
+  end
+end
+FIXTURE
+( cd "$GPROJ" && git init -q . && git add -A \
+  && git -c user.email=h@t -c user.name=harness commit -qm base ) >/dev/null 2>&1 || {
+  echo "mix-test-strict.test: CANNOT MEASURE — could not build the git fixture" >&2; exit 2; }
+[ "$(cd "$GPROJ" && git show HEAD:test/lines_test.exs | sed -n '5p')" = '    test "alpha derives op latency" do' ] || {
+  echo "mix-test-strict.test: CANNOT MEASURE — git fixture HEAD does not hold the test on line 5" >&2; exit 2; }
+# NOW the edit that moves it: a helper inserted above, exactly the incident.
+cat > "$GPROJ/test/lines_test.exs" <<'FIXTURE'
+defmodule LinesTest do
+  use ExUnit.Case, async: true
+
+  defp settle!(x) do
+    x
+  end
+
+  describe "group" do
+    test "alpha derives op latency" do
+      assert settle!(1) == 1
+    end
+  end
+end
+FIXTURE
+
+run_in "$GPROJ" "$SUBJECT" test/lines_test.exs:5
+if [ "$RC" -ne "$REFUSE_EXIT" ]; then
+  bad "stale address — expected exit $REFUSE_EXIT, got $RC"
+else
+  case "$OUT" in
+    *"STALE ADDRESS"*) ok "an address an edit MOVED is called STALE ADDRESS (exit $RC)" ;;
+    *) bad "stale address refused but was not classified STALE"; printf '%s\n' "$OUT" ;;
+  esac
+  case "$OUT" in
+    *"Re-address at :9"*) ok "…and it names the line the test sits on NOW (:9)" ;;
+    *) bad "STALE refusal did not tell the operator where to re-address"; printf '%s\n' "$OUT" ;;
+  esac
+  case "$OUT" in
+    *"alpha derives op latency"*) ok "…and names the test that moved" ;;
+    *) bad "STALE refusal did not name the test" ;;
+  esac
+fi
+
+run_in "$GPROJ" "$SUBJECT" test/lines_test.exs:2
+if [ "$RC" -ne "$REFUSE_EXIT" ]; then
+  bad "never-named address — expected exit $REFUSE_EXIT, got $RC"
+else
+  case "$OUT" in
+    *"NEVER NAMED A TEST"*) ok "an address that resolved at no revision is called NEVER NAMED A TEST" ;;
+    *) bad "never-named address refused but was not classified"; printf '%s\n' "$OUT" ;;
+  esac
+  case "$OUT" in
+    *"STALE ADDRESS"*) bad "the two cases are NOT distinguished — a never-named address read as STALE" ;;
+    *) ok "…and it is NOT reported as STALE: the two cases are distinguished" ;;
+  esac
+fi
+
 echo "PASS-THROUGH (argv forwarded unchanged)"
 expect_pass "a single real test file" "test/real/alpha_test.exs" test/real/alpha_test.exs
 expect_pass "two real test files" "test/real/alpha_test.exs test/real/beta_test.exs" \
   test/real/alpha_test.exs test/real/beta_test.exs
 expect_pass "a directory that does hold tests" "test/real" test/real
 expect_pass "a :LINE-addressed real file" "test/real/alpha_test.exs:7" test/real/alpha_test.exs:7
+expect_pass "a :LINE that IS a test declaration" \
+  "test/real/lines_test.exs:9" test/real/lines_test.exs:9
+expect_pass "a :LINE INSIDE a test body (ExUnit walks back to the declaration)" \
+  "test/real/lines_test.exs:10" test/real/lines_test.exs:10
+expect_pass "a :LINE that is a describe line" \
+  "test/real/lines_test.exs:8" test/real/lines_test.exs:8
+expect_pass "a :LINE BELOW every declaration" \
+  "test/real/lines_test.exs:13" test/real/lines_test.exs:13
+# ONE-DIRECTIONAL: no declaration is recognisable here, so the guard must stay
+# silent rather than red a run that may well have a subject.
+expect_pass "a :LINE in a file whose tests come from a macro is left alone" \
+  "test/real/macro_test.exs:1" test/real/macro_test.exs:1
 expect_pass "a value-taking flag's value is not existence-checked" \
   "--only boot test/real/alpha_test.exs" --only boot test/real/alpha_test.exs
 expect_pass "--flag=value form" "--seed=0 test/real/alpha_test.exs" --seed=0 test/real/alpha_test.exs
@@ -199,6 +349,7 @@ mutate() { # anchor -> scratch copy with that guard's test inverted to always-fa
     exists-guard)  sed 's|if \[ ! -e "$path" \]; then|if false; then|' "$SUBJECT" > "$out" ;;
     matches-guard) sed 's|if \[ -d "$path" \]; then|if false; then|; s|\*_test.exs) : ;;|*) : ;;|' "$SUBJECT" > "$out" ;;
     project-guard) sed 's|if \[ ! -f "mix.exs" \]; then|if false; then|' "$SUBJECT" > "$out" ;;
+    line-guard)    sed 's|for ln in $(line_suffixes "$spec"); do|for ln in $(false); do|' "$SUBJECT" > "$out" ;;
   esac
   bash -n "$out" || return 1
   printf '%s' "$out"
@@ -220,6 +371,18 @@ else bad "matches-guard neutralised but test/support still refused (exit $RC)"; 
 run "$mutant" test/support/helper.exs
 if [ "$RC" -eq 0 ]; then ok "matches-guard neutralised -> a non-test .exs greens again"
 else bad "matches-guard neutralised but helper.exs still refused (exit $RC)"; fi
+
+mutant="$(mutate line-guard)" || { echo "CANNOT MEASURE — line-guard mutant does not parse" >&2; exit 2; }
+if grep -q 'for ln in \$(false); do' "$mutant"; then
+  run "$mutant" test/real/lines_test.exs:5
+  if [ "$RC" -eq 0 ]; then ok "line-guard neutralised -> the zero-test line address GREENS again (exit 0): it is the detector"
+  else bad "line-guard neutralised but test/real/lines_test.exs:5 still refused (exit $RC)"; fi
+  run "$mutant" test/real/lines_test.exs:9
+  if [ "$RC" -eq 0 ]; then ok "…and the valid line address is unaffected either way"
+  else bad "line-guard mutant broke the VALID line address (exit $RC)"; fi
+else
+  bad "CANNOT MEASURE — line-guard mutation did not change the file"
+fi
 
 mutant="$(mutate project-guard)" || { echo "CANNOT MEASURE — project-guard mutant does not parse" >&2; exit 2; }
 OUT="$(cd "$TMP" && BP_MIX_TEST_STRICT_DRY_RUN=1 bash "$mutant" 2>&1)"; RC=$?
