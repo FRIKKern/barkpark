@@ -161,8 +161,47 @@ const server = http.createServer((req, res) => {
       return res.end("not found");
     }
     const mime = MIME[path.extname(abs).toLowerCase()] || "application/octet-stream";
-    res.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-store" });
-    fs.createReadStream(abs).pipe(res);
+    // ONE REQUEST USED TO BE ABLE TO KILL THE WHOLE SERVER, SILENTLY
+    // (gr-blk-accent-scenario-sweep, criterion 4 — the "serve.mjs died mid-sweep
+    // with nothing logged" observation). `fs.createReadStream(abs).pipe(res)`
+    // registered NO `error` listener on the stream, so any post-stat open
+    // failure emitted an unhandled 'error' event, which in Node is an UNCAUGHT
+    // EXCEPTION and takes the process down. Every consumer spawns this file
+    // with its stdout ignored, so the stack lands wherever stderr is (or is
+    // not) read: the observed shape is a server that "simply vanished".
+    //
+    // DRIVEN, not reasoned (on this file's own bytes, port 4294): a 1-byte file
+    // chmod 000 under the root passes fs.stat (it IS a file) and then fails at
+    // open. curl got `http=000`, the process was DEAD one second later, and its
+    // stderr held `Unhandled 'error' event … EACCES: permission denied, open`.
+    // TOCTOU is the general case — stat says file, open says otherwise (EACCES,
+    // ENOENT after a concurrent delete, EMFILE under fd pressure) — and every
+    // instance of it killed the server for every OTHER in-flight request too.
+    // Re-run the control by hand:
+    //   printf x > cloud/priv/static/__preview__/fixtures/.probe && chmod 000 …
+    //   node cloud/priv/static/__preview__/serve.mjs --port 4294 &
+    //   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4294/__preview__/fixtures/.probe
+    //
+    // WHAT THIS DOES NOT CLAIM. It does not reproduce the filed "~50-60
+    // sequential Playwright loads" trigger: 1380 sequential cells in one
+    // overflow-guard accent sweep plus 200 deliberately mid-body-aborted loads
+    // left this server alive with a flat ~100-118MB RSS. It removes the one
+    // unhandled-error path a read of this file can prove, and turns a
+    // whole-process death into a 500 on the one request that caused it.
+    // The 200 is written on `open`, NEVER before it: a writeHead that has
+    // already gone out leaves the error path with no status left to send, so
+    // the "500" below would be an unreachable branch dressed up as a remedy.
+    const body = fs.createReadStream(abs);
+    body.on("error", (e) => {
+      process.stderr.write("!! serve.mjs: read failed for " + urlPath + " (" + ((e && e.code) || e) + ") — 500 on this request; the server stays up.\n");
+      if (!res.headersSent) res.writeHead(500, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      res.end("read failed");
+    });
+    body.once("open", () => {
+      res.writeHead(200, { "Content-Type": mime, "Cache-Control": "no-store" });
+      body.pipe(res);
+    });
+    res.on("close", () => body.destroy());
   });
 });
 

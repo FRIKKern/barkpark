@@ -12534,8 +12534,15 @@ test("S11b: JS never invents a reason — a false verb with no gap and no defaul
 test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled reason, and danger decommission", () => {
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "hetzner", host: "h", name: "web" });
   const html = hooks.lifecycleActionRowHtml(m);
-  assert.match(html, /inst-life-pill bp-inst--live/); // S4 token consumed on the pill
-  assert.match(html, /Live/);
+  // cch-r21l: the lifecycle chip is a statusMeta pill now — `.inst-life-pill` was a
+  // second grammar for the state the fleet row already paints, and is retired. The
+  // pin is the WHOLE chip, so the absorption cannot be half-reverted: the family,
+  // the ROLE the state maps to (live -> ok, read off `.bp-inst--live { var(--ok) }`),
+  // the S4 token still riding as the identity class, and the shared dot/label parts.
+  assert.match(html, /<span class="status-pill status-pill--ok bp-inst--live">/);
+  assert.match(html, /<span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Live<\/span>/);
+  assert.ok(!/inst-life-pill|inst-life-dot|inst-life-label/.test(html),
+    "the retired .inst-life-pill chip family must not be emitted — one state grammar");
   assert.match(html, /bp cloud instance archive web/); // CLI affordance verbatim
   assert.match(html, /via the bp CLI/);
   assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // server-owned reason, escaped as the SPA escapes it
