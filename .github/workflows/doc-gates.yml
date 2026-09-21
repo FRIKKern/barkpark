@@ -2012,11 +2012,66 @@ jobs:
           echo "selftest exit=$st_rc  gate exit=$gate_rc"
           if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
+      # P7 — the bp-command doc verifier over docs/cli/**, the corpus it was
+      # WRITTEN for (wbt-jwt-bl-wire-p7-doc-gates). It has been CI-wired since
+      # #18555 in search-template-gates.yml, but only `--offline` over
+      # templates/** — so the four canonical CLI docs, the ones whose printed
+      # `bp …` lines a reader copies, were adjudicated by nothing.
+      #
+      # NOT `--offline`, and that is not a preference: verify-bp-commands.mjs
+      # REFUSES the flag outside templates/** (offlineAllowed(), the
+      # "--offline is refused outside templates/**" law in its own selftest).
+      # `--offline` DECLARES source [A] — docs/cli/fixtures/full-manifest.json,
+      # the server-declared noun/verb tree — ABSENT rather than pretending it is
+      # present (bp-cli-sources.mjs loadBpSources: `if (offline)` drops A and
+      # labels it "(declared absent)"). Running WITHOUT it here therefore means
+      # exactly one thing: source A is loaded from the committed fixture. It is
+      # a file in the tree, not a network fetch — this step makes no request and
+      # needs no token, so the verdict stays a function of the commit.
+      #
+      # THE FILE-COUNT FLOOR IS THE POINT. `docs/cli/*.md` is a shell glob, and
+      # a glob that matches nothing does not error — bash hands the loop the
+      # LITERAL string, and the verifier would exit 2 "target not found", or,
+      # after a rename that empties the directory, a zero-target run would have
+      # nothing to disagree with. Either way a gate that checks no file reports
+      # the same green as a gate that checked every file and liked them. So the
+      # count is asserted BEFORE the verifier runs, printed either way, and the
+      # floor is 3 because docs/cli/ holds exactly three .md files today
+      # (HANDBOOK.md, error-exit-table.md, m0-decisions.md). Adding a fourth is
+      # free; removing one must come here and say so.
+      #
+      # --selftest FIRST (distrust vacuous green), as the templates copy does:
+      # its arms are this resolver's MUTATION half — drop a verb from
+      # internal/cli's dispatch and a doc still printing it must RED.
+      - name: bp-command doc parse over docs/cli (fails this job)
+        id: s43
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          set -- docs/cli/*.md
+          # An unmatched glob comes back as its own literal, never as zero args.
+          if [ "$#" -eq 1 ] && [ ! -e "$1" ]; then set --; fi
+          echo "docs/cli/*.md matched $# file(s): $*"
+          if [ "$#" -lt 3 ]; then
+            echo "FLOOR FAIL: docs/cli/*.md matched $# file(s), floor is 3. A glob that expands to nothing FAILS here; it must never read as a pass."
+            exit 1
+          fi
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs.
+          # Capture both statuses, run BOTH, adjudicate after. Never piped — a
+          # gate piped through tail or grep -q reports the PIPE's exit code.
+          st_rc=0; node tooling/doc-truth/verify-bp-commands.mjs --selftest || st_rc=$?
+          gate_rc=0; node tooling/doc-truth/verify-bp-commands.mjs "$@" || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\", \"s40\": \"Doc drift self-test (tripwire)\", \"s41\": \"Doc drift \u2014 links, routes, placeholders, runnable examples (fails this job)\", \"s42\": \"Charter adoption census (fails this job)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\", \"s40\": \"Doc drift self-test (tripwire)\", \"s41\": \"Doc drift \u2014 links, routes, placeholders, runnable examples (fails this job)\", \"s42\": \"Charter adoption census (fails this job)\", \"s43\": \"bp-command doc parse over docs/cli (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}

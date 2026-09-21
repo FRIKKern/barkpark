@@ -60,7 +60,13 @@ defmodule BarkparkWeb.Studio.LocalizedClearTest do
     raw = "loc-clear-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      Barkpark.Auth.create_token(raw, "loc-clear", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        raw,
+        "loc-clear",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     build_conn() |> Plug.Test.init_test_session(%{"api_token" => raw})
   end
