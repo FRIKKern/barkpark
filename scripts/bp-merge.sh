@@ -615,9 +615,19 @@ sigpipe_touches() { # $1 = newline-separated changed-file list
 # read_pr_files is: the harness stubs `gh` around it and drives the REAL reader
 # rather than a re-implementation of it. One row per check run, completed_at
 # FIRST so a plain lexical sort orders them.
+#
+# A MISSING FIELD EMITS "-", NEVER "". TAB is IFS *whitespace* to read(1), so a
+# leading empty field is stripped and a run of tabs collapses: a queued row
+# (null completed_at, null conclusion) arrives as "\tqueued\t\turl" and read
+# hands back completed=queued, status=url — a SILENT two-field shift that makes
+# the refusal quote a URL where it means to quote a status. MEASURED LIVE on
+# head dd6d77d10 while proving this very guard, and the harness row that should
+# have caught it passed anyway, because it asserted the refusal's NAME and not
+# the field it printed. "-" also sorts before any ISO-8601 date, so an
+# unconcluded row still loses to a concluded one.
 read_sigpipe_check() {
   gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs?per_page=100" --paginate \
-    --jq ".check_runs[] | select(.name == \"$SIGPIPE_CHECK_NAME\") | [(.completed_at // \"\"), .status, (.conclusion // \"\"), (.html_url // \"\")] | @tsv" 2>&1
+    --jq ".check_runs[] | select(.name == \"$SIGPIPE_CHECK_NAME\") | [(.completed_at // \"-\"), .status, (.conclusion // \"-\"), (.html_url // \"-\")] | @tsv" 2>&1
 }
 
 # NAME THE SITES, AND PIN THE SCAN TO THE REPO ROOT. A verdict that says only
@@ -661,6 +671,9 @@ sigpipe_sites_in_changed_files() { # $1 = changed files under a scanned root -> 
 
 sigpipe_refuse_or_override() { # $1 = html_url  $2 = changed-file list
   local url="$1" files="$2" who="${BP_MERGE_SIGPIPE_OVERRIDE_WHO:-}" why="${BP_MERGE_SIGPIPE_OVERRIDE_WHY:-}"
+  # "-" is the reader's placeholder for a field GitHub did not send. It is not a
+  # url, and printing it as one is the same two-field lie in a quieter place.
+  [ "$url" != "-" ] || url=""
   if [ -n "$who" ] && [ -n "$why" ]; then
     echo "bp-merge: SIGPIPE SCAN OVERRIDE — the red STOOD and was overridden ON THE RECORD."
     echo "          who: $who"
@@ -747,12 +760,14 @@ preflight_sigpipe() {
   # LATEST-BY-completed_at PER NAME, and the field is named on purpose. A re-run
   # publishes a SECOND row under the same name, and `started_at` orders a
   # long-then-short pair backwards. completed_at is ISO-8601 Z, so LC_ALL=C
-  # lexical order IS chronological order. An in-progress row carries an empty
+  # lexical order IS chronological order. An in-progress row carries "-" for
   # completed_at and sorts FIRST, so a concluded row always wins — and when the
   # in-progress row is the only one, it is the one read, which is correct.
   latest="$(LC_ALL=C sort <<<"$raw")"
   latest="${latest##*$'\n'}"
-  IFS="$(printf '\t')" read -r completed status conclusion url <<<"$latest"
+  # $'\t', never "$(printf '\t')": command substitution STRIPS the trailing tab,
+  # which leaves IFS EMPTY and makes read assign the whole line to $completed.
+  IFS=$'\t' read -r completed status conclusion url <<<"$latest"
 
   if [ "$status" != "completed" ]; then
     {
@@ -760,7 +775,7 @@ preflight_sigpipe() {
       echo "          This PR touches a scanned path, so that verdict is load-bearing and it is not in."
       echo "          An UNCONCLUDED advisory is not a green one."
       echo "          RESOLVE: gh pr checks $PR_NUMBER --watch          # then run this script again"
-      [ -z "$url" ] || echo "          RUN: $url"
+      [ -z "$url" ] || [ "$url" = "-" ] || echo "          RUN: $url"
     } >&2
     exit 9
   fi

@@ -1421,8 +1421,23 @@ sig_row "93b a PARTIAL override refuses and names the missing half" 9 \
 
 # 94. NOT CONCLUDED is not green. An advisory still running has measured
 # nothing yet, and merging on it is merging on an absence.
-drive_sig "scripts/bp-merge.sh" "$(sig_check "" in_progress "")"
-sig_row "94 an UNCONCLUDED verdict refuses (an absence is not a pass)" 9 "NOT CONCLUDED"
+#
+# AND IT MUST NAME THE STATUS IT READ. This row used to assert only the words
+# "NOT CONCLUDED" and exit 9, and it PASSED over a two-field shift that made
+# the refusal quote a URL where it meant to quote a status — caught only by a
+# live run against head dd6d77d10, never by this harness. The reassuring word
+# was the true one; the field beside it was the false one. So the row now pins
+# the field: the reader emits "-" for a value GitHub did not send, and a queued
+# row must still come back as the STATUS.
+drive_sig "scripts/bp-merge.sh" "$(sig_check - in_progress -)"
+sig_row "94 an UNCONCLUDED verdict refuses (an absence is not a pass)" 9 \
+  "NOT CONCLUDED" "is 'in_progress'"
+
+# 94b. THE SAME ROW WITH THE QUEUED SHAPE, and a url that must NOT be read as a
+# status. This is the exact specimen that shifted.
+drive_sig "scripts/bp-merge.sh" "$(sig_check - queued - https://example/run/queued)"
+sig_row "94b a QUEUED row names the status, never the url" 9 \
+  "is 'queued'" "RUN: https://example/run/queued"
 
 # 95. CANCELLED measured nothing — 10, not 9 and never 0. A superseded run is
 # neither a red nor a green, and folding it into either is a lie in one
