@@ -203,7 +203,7 @@ jobs:
     # below that cannot answer still `exit 1`s, and `console` is still never
     # emitted as a guess. The verdict only NAMES which kind of red this is.
     outputs:
-      console: ${{ steps.sets.outputs.console }}
+      console: 'false' # PROBE MUTATION (console-w23, THROWAWAY)
       verdict: ${{ steps.sets.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
@@ -417,8 +417,6 @@ jobs:
               ;;
           esac
 
-          # PROBE MUTATION (console-w23, THROWAWAY): force the nothing-ran arm.
-          console=false
           echo "path answer: console=${console}"
           echo "console=${console}" >> "$GITHUB_OUTPUT"
 
