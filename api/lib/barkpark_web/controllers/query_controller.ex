@@ -28,19 +28,91 @@ defmodule BarkparkWeb.QueryController do
   @counts_perspectives ["published"]
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
-    cond do
-      not (preview?(conn) or authed?(conn) or
-               Content.schema_public?(type, dataset, scope_opts(conn))) ->
+    # THE AUTH-PATH READ IS ITS OWN REGION (task-66ec6750399f649f). The
+    # `schema_public?/3` leg of the gate below is a Repo read that sat OUTSIDE
+    # `query_index/4`'s rescue region — see `public_gate/5`. Its three answers
+    # are kept SEPARATE from each other on purpose: `false` is an authorization
+    # verdict, `{:error, …}` is a storage refusal, and they must never collapse.
+    case public_gate(
+           :index_auth,
+           "index/2 (dataset=#{inspect(dataset)} type=#{inspect(type)})",
+           conn,
+           type,
+           dataset
+         ) do
+      # The storage refusal answers from the SAME position in the ordering the
+      # raise used to leave from: after nothing, before the perspective check.
+      {:error, _} = fault ->
+        fault
+
+      false ->
         {:error, :not_found}
 
-      # An unsupported ?perspective is a 400, not a silent downgrade — the
-      # existence-hiding 404 above comes FIRST so the refusal can never become
-      # an existence probe, exactly the ordering counts/2 uses.
-      bad = unsupported_read_perspective(params) ->
-        refuse_read_perspective(conn, bad)
-
       true ->
-        query_index(conn, dataset, type, params)
+        cond do
+          # An unsupported ?perspective is a 400, not a silent downgrade — the
+          # existence-hiding 404 above comes FIRST so the refusal can never become
+          # an existence probe, exactly the ordering counts/2 uses.
+          bad = unsupported_read_perspective(params) ->
+            refuse_read_perspective(conn, bad)
+
+          true ->
+            query_index(conn, dataset, type, params)
+        end
+    end
+  end
+
+  # ─── THE AUTH-PATH READ, OUTSIDE BOTH REGIONS (task-66ec6750399f649f) ───
+  #
+  # THE GAP A RESCUE-SHAPED AUDIT CANNOT SEE. `index/2` and `show/2` each have
+  # a rescue region — `query_index/4` and `show_doc/5` — so both pass the
+  # predicate "does this action have a rescue?", which is the predicate the two
+  # previous rounds of this work used. But the gate they consult FIRST,
+  # `Content.schema_public?/3` (→ `Content.Schema.get_schema/3` → `Repo`), is
+  # evaluated in the action body, OUTSIDE its own region. A checkout refused at
+  # that one call rendered an opaque, non-retryable 500 on the two doors
+  # everyone believed were covered.
+  #
+  # WHY THIS IS A RESTRUCTURE AND NOT A WRAP. The call sat inside a `cond`
+  # whose CLAUSE ORDERING implements existence-hiding: the 404 arm must be
+  # decided BEFORE the `?perspective` 400, or the refusal becomes an existence
+  # probe (pinned by `query_controller_perspective_test.exs` "an ANONYMOUS
+  # caller on a private type gets 404, not the 400" and the sibling arm in
+  # `read_perspective_strict_test.exs`). You cannot hoist the call above the
+  # cond without either evaluating it for callers who never needed it, or
+  # moving the decision. So the SHORT-CIRCUIT is preserved literally — the
+  # Repo read still happens only when the caller is neither preview nor
+  # token-authed, exactly as `preview?(conn) or authed?(conn) or
+  # schema_public?(…)` did — and only its RESULT is widened from a boolean to
+  # three values.
+  #
+  # NO FAIL-OPEN, AND HERE THAT IS SHARPER THAN AT A LIST DOOR. The other
+  # doors' trap is an empty page; this one's is an AUTHORIZATION VERDICT. A
+  # rescue that recovered into `false` would render a refused checkout as
+  # "this type is not public" — a permanent 404, manufactured out of a
+  # transient fault, on a type that may well be public. The callers below
+  # match `true` and `false` EXPLICITLY and never `_`, so a fault value can
+  # never take the open branch by falling through, and this helper returns the
+  # `{:error, …}` tuple unchanged rather than folding it into a boolean.
+  #
+  # NARROW: `read_region/3` is reused verbatim (not a third spelling of the
+  # same refusal), so this arm matches `DBConnection.ConnectionError` and
+  # nothing wider, and answers the same 503
+  # `storage_unavailable`/`connection_unavailable` as the other seven doors.
+  #
+  # BLAST RADIUS. The `:index_auth` and `:doc_show_auth` seams are this
+  # helper's only sites; `backlinks/2`, `related/2`, `counts/2`,
+  # `tag_browse/2` and `tag_docs/2` gate on `preview?/1` + `authed?/1` alone,
+  # which read `conn.assigns` and reach no storage at all — derived by reading
+  # every module-level `def` in this file and classifying its storage reads,
+  # not by trusting the lists in the comments above.
+  @spec public_gate(atom(), String.t(), Plug.Conn.t(), String.t(), String.t()) ::
+          boolean() | {:error, {:connection_unavailable, :read, String.t()}}
+  defp public_gate(site, where, conn, type, dataset) do
+    if preview?(conn) or authed?(conn) do
+      true
+    else
+      read_region(site, where, fn -> Content.schema_public?(type, dataset, scope_opts(conn)) end)
     end
   end
 
@@ -151,6 +223,15 @@ defmodule BarkparkWeb.QueryController do
   # their regions), and `backlinks/2`, `related/2`, `counts/2`, `tag_browse/2`
   # and `tag_docs/2` — FIVE, not the three the filing named. `tag_browse/2` and
   # `tag_docs/2` post-date the comments above and were never on anyone's list.
+  #
+  # AND THE DOOR-SHAPED DERIVATION WAS ITSELF TOO COARSE, which is the lesson
+  # this helper now carries: `index/2` and `show/2` were classified "already
+  # inside their regions" on the strength of the action HAVING a region, while
+  # their `Content.schema_public?/3` auth read sat outside it. The unit is a
+  # storage READ, not an action. `public_gate/5` (task-66ec6750399f649f) routes
+  # those two reads through this same helper, so `read_region/3` now has SEVEN
+  # sites: `:backlinks`, `:related`, `:counts`, `:tag_browse`, `:tag_docs`,
+  # `:index_auth` and `:doc_show_auth`.
   #
   # ONE REGION HELPER, BECAUSE THE ARGUMENT IS IDENTICAL AT ALL FIVE. Each door
   # is a single storage region — `Content.Graph.reverse_referencers/2`,
@@ -588,28 +669,46 @@ defmodule BarkparkWeb.QueryController do
   end
 
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    cond do
-      # NO anonymous caller may fetch a draft by id — neither a read-only
-      # public share nor a plain tokenless read of a public schema (publish is
-      # the act of making content public; a `drafts.` id is unpublished by
-      # definition). Rejected as not-found BEFORE any get_document call — the
-      # same 404 path the controller already returns for a missing doc. An
-      # `:edit` share and any token/preview caller pass through unchanged.
-      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
-        {:error, :not_found}
+    # NO anonymous caller may fetch a draft by id — neither a read-only
+    # public share nor a plain tokenless read of a public schema (publish is
+    # the act of making content public; a `drafts.` id is unpublished by
+    # definition). Rejected as not-found BEFORE any get_document call — the
+    # same 404 path the controller already returns for a missing doc. An
+    # `:edit` share and any token/preview caller pass through unchanged.
+    #
+    # STILL FIRST. This clause reads `conn.assigns` and the id string only, so
+    # it reaches no storage and cannot fault; keeping it ahead of the auth gate
+    # preserves the original cond's first-clause-wins ordering exactly.
+    if AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") do
+      {:error, :not_found}
+    else
+      # See `public_gate/5` (task-66ec6750399f649f): the `schema_public?/3` leg
+      # of this gate is a Repo read that sat outside `show_doc/5`'s region.
+      case public_gate(
+             :doc_show_auth,
+             "show/2 (dataset=#{inspect(dataset)} type=#{inspect(type)} doc_id=#{inspect(doc_id)})",
+             conn,
+             type,
+             dataset
+           ) do
+        {:error, _} = fault ->
+          fault
 
-      not (preview?(conn) or authed?(conn) or
-               Content.schema_public?(type, dataset, scope_opts(conn))) ->
-        {:error, :not_found}
+        false ->
+          {:error, :not_found}
 
-      # AFTER the two existence-hiding 404s above, never before — otherwise the
-      # refusal answers "this document exists but your perspective is wrong" to
-      # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
-      bad = unsupported_read_perspective(params) ->
-        refuse_read_perspective(conn, bad)
+        true ->
+          cond do
+            # AFTER the two existence-hiding 404s above, never before — otherwise the
+            # refusal answers "this document exists but your perspective is wrong" to
+            # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
+            bad = unsupported_read_perspective(params) ->
+              refuse_read_perspective(conn, bad)
 
-      true ->
-        show_doc(conn, dataset, type, doc_id, params)
+            true ->
+              show_doc(conn, dataset, type, doc_id, params)
+          end
+      end
     end
   end
 
