@@ -507,43 +507,6 @@ defmodule BarkparkWeb.TasksController.Params do
     |> prune_nils()
   end
 
-  # The board card's stand-in for the deleted `content` echo — see the
-  # `content_digest` block in the `:board` header above for what each key is
-  # for and why the set is exactly this size.
-  #
-  # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
-  # reader derives all four of these from the source rather than from a
-  # summary; adding the digest there would be a SECOND copy of the same facts
-  # on the one card that does not need it, and two copies of a fact are two
-  # things to drift.
-  defp put_content_digest(map, content) do
-    digest =
-      %{
-        has_description: present_text?(Map.get(content, "description")),
-        has_dependencies: present_list?(Map.get(content, "dependencies")),
-        has_paper:
-          present_text?(Map.get(content, "design_doc")) or
-            present_list?(Map.get(content, "papers"))
-      }
-      |> put_criteria_marks(content)
-
-    Map.put(map, :content_digest, digest)
-  end
-
-  # Same omission law as put_criteria_progress/2: no criteria, no key.
-  defp put_criteria_marks(digest, content) do
-    case Criteria.marks(content) do
-      marks when is_binary(marks) and marks != "" -> Map.put(digest, :criteria_marks, marks)
-      _ -> digest
-    end
-  end
-
-  defp present_text?(v) when is_binary(v), do: String.trim(v) != ""
-  defp present_text?(_), do: false
-
-  defp present_list?(v) when is_list(v), do: v != []
-  defp present_list?(_), do: false
-
   # LABELS ON THE BRIEF CARD (task-14eac58b39fd3692), additive and pruned.
   #
   # The brief card is a deliberate payload diet, so a new key needs a reason
@@ -701,8 +664,71 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # Cut (g)/(h): keep the key only when the value differs from the steady
   # state the reader already assumes; nil stays nil for prune_nils/1.
+  # ── THE BRIEF REGION ENDS AT THE `put_unless/4` PAIR BELOW ───────────
+  #
+  # `tasks_controller_test.exs` does NOT hand-type the content keys the brief
+  # card reads — it DERIVES them by reading THIS FILE: from the `:brief`
+  # clause head of `render_doc/2` down to the first `put_unless/4` clause
+  # below, scanning that region for `content` reads. Every key it finds must
+  # be populated by the brief byte tripwire's fixture, or the run reds BY NAME
+  # so a card cannot start reading prose the tripwire never weighs.
+  #
+  # TWO CONSEQUENCES FOR ANYONE EDITING THIS FILE, both measured rather than
+  # theorised (PR #19825):
+  #
+  #   1. A private helper's POSITION here is SEMANTIC. `put_content_digest/2`
+  #      — the BOARD card's digest, which the brief card never calls — was
+  #      parked under the `:board` clause, then moved down to stop it splitting
+  #      `render_doc/2`'s clauses, and landed INSIDE the region. The guard
+  #      correctly reported four content keys the brief fixture never
+  #      populates. The card's output never changed; its SOURCE POSITION did.
+  #      A content reader that is not the brief card's goes BELOW this line.
+  #   2. Do not quote the region's end anchor verbatim in a comment above it.
+  #      The derivation takes lines until one CONTAINS that text, and a comment
+  #      quoting it ends the region early — silently shrinking the derived key
+  #      set, which is the vacuous-pass failure the derivation exists to end.
+  #      (Its non-vacuity floor would catch a large truncation; a small one is
+  #      exactly the kind that would not announce itself.)
+  #
   defp put_unless(map, _key, steady, steady), do: map
   defp put_unless(map, key, value, _steady), do: Map.put(map, key, value)
+
+  # The board card's stand-in for the deleted `content` echo — see the
+  # `content_digest` block in the `:board` header above for what each key is
+  # for and why the set is exactly this size.
+  #
+  # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
+  # reader derives all four of these from the source rather than from a
+  # summary; adding the digest there would be a SECOND copy of the same facts
+  # on the one card that does not need it, and two copies of a fact are two
+  # things to drift.
+  defp put_content_digest(map, content) do
+    digest =
+      %{
+        has_description: present_text?(Map.get(content, "description")),
+        has_dependencies: present_list?(Map.get(content, "dependencies")),
+        has_paper:
+          present_text?(Map.get(content, "design_doc")) or
+            present_list?(Map.get(content, "papers"))
+      }
+      |> put_criteria_marks(content)
+
+    Map.put(map, :content_digest, digest)
+  end
+
+  # Same omission law as put_criteria_progress/2: no criteria, no key.
+  defp put_criteria_marks(digest, content) do
+    case Criteria.marks(content) do
+      marks when is_binary(marks) and marks != "" -> Map.put(digest, :criteria_marks, marks)
+      _ -> digest
+    end
+  end
+
+  defp present_text?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present_text?(_), do: false
+
+  defp present_list?(v) when is_list(v), do: v != []
+  defp present_list?(_), do: false
 
   # Cut (a): a nil value IS absence — drop the key instead of shipping
   # `"assignee":null` fifty times per page.
