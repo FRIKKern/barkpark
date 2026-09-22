@@ -86,4 +86,15 @@ for(const mutation of ['split','reorder','delete']){
   console.log('PASS checklist conversion, incremental acknowledgement and reload retain exact identity');
  }finally{canvas.remove();}
 }
+{
+ const canvas=document.createElement('bp-paper-canvas');canvas.blocks=[...structuredClone(seed),{id:'empty',type:'paragraph',content:[]}];canvas.acknowledgedSaves=true;document.body.append(canvas);
+ try{
+  const e=canvas._editor,before=canvas.recoverySnapshot().blocks;e.commands.setTextSelection(e.state.doc.content.size-1);
+  const paste=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(paste,'clipboardData',{value:{types:['text/html','text/plain'],files:[],getData:type=>type==='text/html'?'<ul><li>html one</li><li>html two</li></ul>':type==='text/plain'?'a b':''}});e.view.dom.dispatchEvent(paste);
+  assert.equal(e.state.doc.lastChild.type.name,'bulletList');canvas.flushPendingChanges();const batch=canvas._inflightOps;assert.ok(batch);canvas.acknowledgeOps(batch.seq,true);const saved=structuredClone(canvas.blocks);canvas.applyServerBlocks(saved);
+  assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.equal(e.commands.undo(),true);assert.deepEqual(canvas.recoverySnapshot().blocks,before,'acknowledged HTML paste must undo to the exact original empty paragraph');
+  e.commands.redo();assert.deepEqual(canvas.recoverySnapshot().blocks,saved,'Redo restores the acknowledged HTML list and identity');
+  console.log('PASS acknowledged HTML list paste preserves complete Undo/Redo history');
+ }finally{canvas.remove();}
+}
 window.close();
