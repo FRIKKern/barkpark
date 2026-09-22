@@ -923,7 +923,12 @@ unresolvable_sites() {
     expr="${ln#*:}"
     ln="${ln%%:*}"
     # the operand: the identifier the path expression leans on.
-    operand="$(printf '%s\n' "$expr" | grep -Eo 'Path\.(expand|absname)\([[:space:]]*[a-z_][A-Za-z0-9_]*|<>[[:space:]]*[a-z_@][A-Za-z0-9_]*' | head -1)"
+    # NO TRUNCATING READER. `head` closes the pipe at N, so the upstream grep
+    # dies of SIGPIPE and this substitution yields 141 under pipefail -- no
+    # buffer overrun needed. scripts/pipefail-sigpipe-scan.sh rates a head
+    # reader HIGH unless the producer is provably bounded, and "$expr" is not.
+    # `grep -m1` stops in the PRODUCER, so there is no reader to close it.
+    operand="$(printf '%s\n' "$expr" | grep -m1 -Eo 'Path\.(expand|absname)\([[:space:]]*[a-z_][A-Za-z0-9_]*|<>[[:space:]]*[a-z_@][A-Za-z0-9_]*')"
     operand="${operand##*[ (>]}"
     [ -n "$operand" ] || continue
     backing=NONE
