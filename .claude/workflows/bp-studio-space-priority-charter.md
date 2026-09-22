@@ -3174,3 +3174,61 @@ to avoid a collision.*
 - **KNOWN GAP, recorded rather than quietly closed.** D210's wave table at `:1395` still names the deleted
   control. Those are dated records of runs that already happened and are left standing: rewriting history to
   match today's code would destroy the evidence that the runs occurred.
+
+## spd-b30 amendment (THE BROWSER AXIS IS SAID OUT LOUD, 2026-09-22) — D273
+
+*Numbered D273, following D272. This records a boundary that now exists as a committed
+artifact; it does not authorise new coverage.*
+
+- **D273 — EVERY MATRIX THIS EPIC PUBLISHES IS CHROMIUM-ON-macOS AND NOW SAYS SO AT THE
+  MATRIX, NOT IN PROSE.** `COVERAGE_BOUNDARY` in `scripts/studio-desk-measure.mjs` is one
+  object with two renderings — `run.coverage_boundary` in every run, and the table footer
+  under every matrix — recording platform, engine, document, path, surface, scrollbar and
+  motion in one place. `scripts/studio-desk-coverage-boundary.test.mjs` asserts it rides in
+  the run, drops no axis, and that its motion ruling still matches the committed probe. A
+  boundary stated somewhere else is a boundary nobody reads, which is why it lives where the
+  numbers do.
+
+- **THE BROWSER AXIS IS 1 OF 3 AND NO STUDIO ROW HAD SAID IT OUT LOUD.** D83 already
+  qualified the px figures as "headless Chromium on macOS"; D41 already kept a carve-out as
+  cross-engine insurance and said plainly that "no ExUnit test can ever see it". Both were
+  right and neither was a coverage claim. What was missing was a machine-readable statement
+  that the engine axis is UNMEASURED rather than merely unmentioned — and a guard that
+  refuses to let it be softened. A test now refuses any rewording into "other engines should
+  agree".
+
+- **THE HONEST BRANCH WAS TAKEN THREE TIMES OF FIVE, AND THAT IS THE PRECEDENT.** spd-b30's
+  criteria each offered "measure it OR name it explicitly". Uncovered surfaces are NAMED,
+  because `.bp-paper-surface` does not exist on a sheet, ticket or quiz editor and the
+  instrument asserts selector match counts before trusting a number — it would have refused
+  rather than reported a confident zero. Chromium-only is NAMED, because the playwright cache
+  holds `chromium-1217` and nothing else. The classic-scrollbar shift is an ANALYTIC BOUND,
+  because no such host exists in this epic. **Each refusal is recorded as a refusal.** An
+  explicit "this says nothing about other engines" is worth more than a second engine
+  measured badly.
+
+- **THE BOUND CARRIES ITS OWN POSITIVE CONTROL.** `scripts/studio-desk-scrollbar-bound.mjs`
+  refuses to publish unless its model first reproduces all 54 rows of the committed matrix at
+  the width that matrix was measured at, and a deliberately wrong model is pushed through the
+  same guard and must be refused. The 764 → 779px reachability shift is EXACT, not
+  approximate, and it names TWO cells rather than one: `1024/user-opened` sits on the same
+  720.0px knife edge. The floor-binding set changes 6 → 5.
+
+- **MOTION IS REAL, AND NOT WHERE THE MATRIX LOOKS.** `.pane-column` — the pane that sets the
+  reading column's width — carries a live transition, reduced-motion-guarded. The MEASURED
+  elements have none, in both emulated regimes, with non-zero match counts. So the matrix is
+  motion-regime-independent BY MEASUREMENT rather than by assumption. The stylesheet had
+  asserted, present tense, directly above the declaration that falsifies it, that
+  `transitionDuration` was 0s on every desk element; that comment is corrected and dated.
+
+- **SCOPE, stated so nobody re-derives it the hard way.** `scripts/studio-desk-measure.mjs`
+  cannot run from an agent session at all: it reads provenance over `ssh` (D47) and exits with
+  `Permission denied (publickey,password)`. No new 54-row matrix is takeable here, and the
+  boundary artifact says so.
+
+- **WHAT THIS DOES NOT DO.** It does not touch **D168**, which lives in the cloud-console
+  charter and was corrected there by **D904** — measured in Firefox 156 over WebDriver BiDi by
+  the console lane, which found that Gecko drops `animation-timeline` but KEEPS the animation,
+  so the `@supports` fallback is inert in the engine it targets. That correction is console's
+  and is already written. `spd-b36-cross-browser-surface-measure-coverage` is **cancelled** and
+  folded into spd-b30; its slug stays resolvable as a provenance record and points here.
