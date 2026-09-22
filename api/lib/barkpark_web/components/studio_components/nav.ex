@@ -737,8 +737,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   def plugin_tab_active?(_tab, _current_path), do: false
 
   @doc """
-  Studio topbar wrapper. Emits the canonical `<div class="studio-bar">`
-  shell and renders three slots in order: `:brand` (single, optional),
+  Studio topbar wrapper. Emits the canonical `.studio-bar` shell — as
+  `<div class="studio-bar" id="studio-bar" phx-hook="PressAnswer">`, see below —
+  and renders three slots in order: `:brand` (single, optional),
   `:tabs` (single, optional), `:actions` (multi, optional).
 
   Each slot is rendered verbatim — slot content is responsible for its
@@ -749,6 +750,22 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   Callers use `:if=` on each slot invocation to gate rendering — e.g.
   `<:actions :if={assigns[:api_token]}>…</:actions>`. This avoids
   empty-wrapper leak when the gate is false.
+
+  ## Why this element carries `phx-hook="PressAnswer"`
+
+  This bar is the ONE piece of Studio chrome every Studio route renders inside
+  its LiveView root, so it is where the press answer (`#bp-press-answer`,
+  spd-w19 / charter D263) mounts. The hook used to ride `#studio-panes` via
+  `WidthBucket`, and `#studio-panes` is rendered by StudioLive's desk alone —
+  so on `…/studio/media` and `…/studio/api-tester`, which are their own
+  LiveViews, nothing installed the listener while the region and this whole bar
+  were served in full. Measured on deployed guerrilla (served `e02e4296d`) by
+  enumerating `phx-hook` on the authenticated served bodies: the desk reports
+  four hooks including `WidthBucket#studio-panes`, media and api-tester report
+  `ThemeToggle#studio-theme-toggle` and nothing else, and all three serve
+  exactly one `.studio-bar` with 10 `.studio-tab` anchors in it.
+
+  The `id` is required because LiveView refuses a `phx-hook` without one.
   """
   slot :brand
   slot :tabs
@@ -756,7 +773,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   def studio_topbar(assigns) do
     ~H"""
-    <div class="studio-bar">
+    <div class="studio-bar" id="studio-bar" phx-hook="PressAnswer">
       <%= render_slot(@brand) %>
       <%= render_slot(@tabs) %>
       <%= for a <- @actions do %><%= render_slot(a) %><% end %>
