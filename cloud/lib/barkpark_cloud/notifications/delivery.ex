@@ -61,6 +61,27 @@ defmodule BarkparkCloud.Notifications.Delivery do
 
   When a receipt source does arrive, `"delivered"` becomes a real fourth word
   and `status_meaning/1` is where its sentence goes.
+
+  ## `unconfirmed` — the response was LOST, not refused (ccpca-bl)
+
+  The rule above cuts BOTH ways, and the chat path was breaking it in the other
+  direction. `Notifications.post_chat/6` stamped `"failed"` on its transport-error
+  arm, including the case where the request was written and no response ever came
+  back. `"failed"` is a claim about what the RECEIVER did, and that arm measured
+  nothing about the receiver: with `ChatNotificationWorker`'s `max_attempts: 4`
+  the message may have been processed once, or four times, and the row said it
+  was never delivered.
+
+  `unconfirmed` is the word for exactly that. It is not the `"delivered"` the
+  moduledoc refuses — it is the OPPOSITE move, a word that claims LESS than
+  `failed` rather than more, and it needs no new evidence source because ignorance
+  is what we actually have. `failed` keeps its meaning for every arm that DID read
+  a verdict off the wire: a 4xx/5xx status, a DNS failure, a refused connection, a
+  TLS failure, a connect-phase timeout. Narrow on purpose — see
+  the private `response_lost?` predicate in `Notifications`, which names its one member.
+
+  No historical row is rewritten. It costs no migration for the same reason
+  `suppressed` did not: the column is `character varying(255)` with no CHECK.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -70,7 +91,7 @@ defmodule BarkparkCloud.Notifications.Delivery do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(pending sent failed suppressed)
+  @statuses ~w(pending sent failed suppressed unconfirmed)
   @kinds ~w(alert transactional)
   # notifications-chat widened this beyond email to the chat egress channels.
   @channels ~w(email discord slack telegram pushover webhook)
@@ -143,7 +164,10 @@ defmodule BarkparkCloud.Notifications.Delivery do
       "Accepted by the mail transport — NOT confirmed delivered to the recipient. " <>
         "Barkpark has no delivery receipt for email; check the relay log for the actual outcome.",
     "failed" => "The transport rejected or could not complete the send; see the reason.",
-    "suppressed" => "Barkpark decided not to send this one; see the reason."
+    "suppressed" => "Barkpark decided not to send this one; see the reason.",
+    "unconfirmed" =>
+      "Barkpark sent this and never got a response — it may have arrived, possibly " <>
+        "more than once (the send is retried). Nobody refused it; we simply do not know."
   }
 
   @doc """

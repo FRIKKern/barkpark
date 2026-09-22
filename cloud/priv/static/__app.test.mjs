@@ -20950,11 +20950,11 @@ test("W32-S2 the delivery status vocabulary is pinned by EQUALITY, so drift in E
   // grows a status the console cannot render AND when the console invents one
   // the server would reject. Equality is the only shape that loses both ways.
   assert.deepEqual([...hooks.notifDeliveryStatusValues].sort(),
-    ["failed", "pending", "sent", "suppressed"],
+    ["failed", "pending", "sent", "suppressed", "unconfirmed"],
     "the filter axis must be EXACTLY the server's Delivery.@statuses — no more, no less");
   // Chip order is a reading order, not the contract; the labels are, because a
   // chip whose word differs from the pill's reads as a different concept.
-  assert.deepEqual([...hooks.notifDeliveryStatusValues], ["sent", "failed", "pending", "suppressed"]);
+  assert.deepEqual([...hooks.notifDeliveryStatusValues], ["sent", "failed", "pending", "suppressed", "unconfirmed"]);
 });
 
 test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error", () => {

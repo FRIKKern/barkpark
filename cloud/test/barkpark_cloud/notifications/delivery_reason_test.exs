@@ -453,20 +453,27 @@ defmodule BarkparkCloud.Notifications.DeliveryReasonTest do
            [
              {:to_address, {host, String.to_integer(@sentinel_port)}},
              {:inet, [:inet], :nxdomain}
-           ]}}, :dns_failure},
+           ]}}, :dns_failure, "failed"},
         {{:error,
           {:failed_connect, [{:to_address, {host, 443}}, {:inet, [:inet], :econnrefused}]}},
-         :connection_refused},
-        {{:error, :timeout}, :timeout}
+         :connection_refused, "failed"},
+        # ccpca-bl: a bare `:timeout` is the REQUEST timeout — the request was
+        # written and nothing answered — so the row is `unconfirmed`, not
+        # `failed`. This census is about the LAST_ERROR never naming the host,
+        # and that property is unchanged; only the status word moved. The two
+        # `:failed_connect` rows above stay `failed` and are the control: they
+        # are connect-phase, so nothing was ever delivered.
+        {{:error, :timeout}, :timeout, "unconfirmed"}
       ]
 
-      for {response, expected} <- failures do
+      for {response, expected, expected_status} <- failures do
         Repo.delete_all(Delivery)
         Application.put_env(:barkpark_cloud, :__delivery_reason_census_http__, response)
 
         assert {:error, _} = Notifications.deliver_chat(team.id, "discord", "test", %{})
 
-        assert [%Delivery{status: "failed", channel: "discord"} = d] = Repo.all(Delivery)
+        assert [%Delivery{channel: "discord"} = d] = Repo.all(Delivery)
+        assert d.status == expected_status, "wrong status word for #{inspect(response)}"
 
         for sentinel <- @sentinels do
           refute d.last_error =~ sentinel,

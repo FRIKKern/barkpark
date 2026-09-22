@@ -4912,6 +4912,10 @@
   function notifDeliveryTone(d) {
     d = d || {};
     if (String(d.status || "").toLowerCase() === "suppressed") return "muted";
+    // ccpca-bl: a lost response is not a verdict, so it is not "danger". It is
+    // checked BEFORE http_status for the same reason `suppressed` is: neither
+    // row got a status line off the wire.
+    if (String(d.status || "").toLowerCase() === "unconfirmed") return "info";
     if (d.http_status != null) {
       var code = Number(d.http_status);
       if (code >= 200 && code < 300) return "ok";
@@ -4930,6 +4934,10 @@
   function notifDeliveryStatusLabel(d) {
     d = d || {};
     if (String(d.status || "").toLowerCase() === "suppressed") return "Withheld";
+    // ccpca-bl: WITHOUT this clause the catch-all below renders an unconfirmed
+    // row as "Pending", which is a different and wrong claim — pending means we
+    // have not sent yet, unconfirmed means we sent and heard nothing.
+    if (String(d.status || "").toLowerCase() === "unconfirmed") return "Unconfirmed";
     if (d.http_status != null) {
       var n = Number(d.http_status);
       return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
@@ -5366,7 +5374,8 @@
     { value: "sent", label: "Sent" },
     { value: "failed", label: "Failed" },
     { value: "pending", label: "Pending" },
-    { value: "suppressed", label: "Withheld" }
+    { value: "suppressed", label: "Withheld" },
+    { value: "unconfirmed", label: "Unconfirmed" }
   ];
   var notifDeliveryFilter = { channel: null, status: null, event: null };
   var notifDeliveryRows = null; // the accumulated FILTERED page list

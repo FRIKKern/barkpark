@@ -27,7 +27,25 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorker do
   # backoff is consulted for the next try.
   @backoff_seconds [1, 5, 30]
 
+  # `delivery_id` is read OUT of the args and never minted here. Oban re-runs a
+  # retried job with the SAME args row, so reading it here is what makes one id
+  # span all four attempts; minting it here would mint one per attempt and
+  # dedupe nothing. `args` from before this field existed have no key — the
+  # match falls through to the second clause and delivers with `nil`, exactly as
+  # it did before, rather than manufacturing a fresh per-attempt value.
   @impl Oban.Worker
+  def perform(%Oban.Job{
+        args: %{
+          "team_id" => team_id,
+          "channel_type" => type,
+          "event" => event,
+          "payload" => payload,
+          "delivery_id" => delivery_id
+        }
+      }) do
+    Notifications.deliver_chat(team_id, type, event, payload, delivery_id)
+  end
+
   def perform(%Oban.Job{
         args: %{
           "team_id" => team_id,
@@ -36,7 +54,7 @@ defmodule BarkparkCloud.Workers.ChatNotificationWorker do
           "payload" => payload
         }
       }) do
-    Notifications.deliver_chat(team_id, type, event, payload)
+    Notifications.deliver_chat(team_id, type, event, payload, nil)
   end
 
   @impl Oban.Worker

@@ -223,6 +223,9 @@ defmodule BarkparkCloud.Notifications.EventVocabularyCensusTest do
       {:no_vocabulary, "publish-wait alert; dispatches through Notifications"},
     "channels/discord.ex" =>
       {:no_vocabulary, "envelope shaper — takes {title, body, severity}, never the event name"},
+    "channels/idempotency.ex" =>
+      {:no_vocabulary,
+       "ccpca-bl: mints the per-delivery id and writes its headers — names no event"},
     "channels/pushover.ex" => {:no_vocabulary, "envelope shaper"},
     "channels/slack.ex" => {:no_vocabulary, "envelope shaper"},
     "channels/telegram.ex" => {:no_vocabulary, "envelope shaper"},

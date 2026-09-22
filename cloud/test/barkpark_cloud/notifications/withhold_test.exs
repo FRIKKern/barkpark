@@ -478,8 +478,11 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   ##    server would reject. The counterpart pin is in
   ##    `cloud/priv/static/__app.test.mjs` ("pinned by EQUALITY").
 
-  test "the delivery status vocabulary is EXACTLY these four words" do
-    assert Delivery.statuses() == ~w(pending sent failed suppressed)
+  # ccpca-bl added the FIFTH word, `unconfirmed`, and this pin is exactly why
+  # that was not a one-line change: it reds in both trees at once, and the
+  # console counterpart had to move in the same PR.
+  test "the delivery status vocabulary is EXACTLY these five words" do
+    assert Delivery.statuses() == ~w(pending sent failed suppressed unconfirmed)
   end
 
   test "a suppressed row inserts, reads back team-scoped, and answers ?status=suppressed" do
