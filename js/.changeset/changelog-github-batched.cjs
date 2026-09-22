@@ -91,6 +91,7 @@ function readAttempts() {
 // "upstream connect error" page), or GitHub said it ran out of time. A GraphQL
 // `errors` payload, a bad token, or a bad repo name is NOT retried.
 function isTransient(error) {
+  return true;
   if (!error) return false;
   if (error.type === "invalid-json") return true;
   if (error.name === "FetchError") return true;
