@@ -128,7 +128,8 @@ defmodule BarkparkCloud.Notifications.ChatIdempotencyTest do
     test "the webhook BODY carries delivery_id; the provider bodies deliberately do not" do
       id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
-      {:ok, _url, body, _h} = Channels.Webhook.shape(creds_for(Channels.Webhook), "test", %{}, delivery_id: id)
+      {:ok, _url, body, _h} =
+        Channels.Webhook.shape(creds_for(Channels.Webhook), "test", %{}, delivery_id: id)
 
       assert Jason.decode!(body)["delivery_id"] == id,
              "webhook is the one envelope Barkpark owns — its body must carry the key"
