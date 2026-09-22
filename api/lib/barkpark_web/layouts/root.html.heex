@@ -6265,6 +6265,39 @@
     // control is blocked from the keyboard too, and a control that is NOT
     // in-flight matches nothing here and is untouched.
     //
+    // THE KEY IS THE REF, NOT THE TINT (task-b1254cbd3115c3e2). The first
+    // shape of this guard asked only `closest(".phx-click-loading,
+    // .phx-submit-loading")`, and that class is CONDITIONAL. In
+    // phoenix_live_view.js, `putRef` stamps `data-phx-ref-src` on every element
+    // it is given BEFORE it decides anything else, and reaches
+    // `classList.add("phx-<type>-loading")` only on the `loading` branch:
+    //
+    //     if(a.setAttribute(N,this.refSrc()),   // N = "data-phx-ref-src"
+    //        h&&a.setAttribute(ve,r), l&&a.setAttribute(C,r),
+    //        !h||…)continue;                    // ← not loading: LEAVE NOW
+    //     …
+    //     a.classList.add(`phx-${i}-loading`);  // ← only reached when loading
+    //
+    // and `pushLinkPatch` is the one caller whose loading flag can be false:
+    // `o=e.isTrusted&&e.type!=="popstate"`. An UNTRUSTED click therefore puts
+    // the element in flight with NO class at all — and this repo produces
+    // untrusted clicks itself, in BP-PREJOIN-QUEUE's `el.click()` replay. The
+    // class implies the ref; the ref does not imply the class, so the ref is
+    // the unconditional key and the class is a symptom.
+    //
+    // WHY IT IS SCOPED TO THE ACTIVATION TARGET rather than a bare
+    // `[data-phx-ref-src]`. `#studio-panes` carries a ref of its own whenever
+    // the WidthBucket hook pushes (the `pane_layout id="studio-panes"` in
+    // studio_live/components.ex) — measured on the
+    // fixture: `data-phx-ref-src="phx-main"` on the CONTAINER. A bare
+    // attribute selector would then make `closest()` succeed for every press
+    // anywhere on the desk and blanket-block it. So the second arm asks
+    // LiveView's own question — the closest `[phx-click]`/`[data-phx-link]`
+    // ancestor, which is the element bindClick and bindNav would activate —
+    // and blocks only when THAT element holds the ref. Both arms and the
+    // container mutation are measured by
+    // `scripts/studio-lockonly-ref-control.mjs --self-test`.
+    //
     // THE WORDS. When the blocked control is on a surface the press answer
     // covers, the region says the same sentence the press-answer hook's discard
     // branch says (D263), because this listener runs BEFORE that hook and would
@@ -6281,6 +6314,10 @@
       var t = ev.target;
       if (!t || !t.closest) return;
       var blocked = t.closest(".phx-click-loading, .phx-submit-loading");
+      if (!blocked) {
+        var activated = t.closest("[phx-click], [data-phx-link]");
+        if (activated && activated.hasAttribute("data-phx-ref-src")) blocked = activated;
+      }
       if (!blocked) return;
       ev.preventDefault();
       ev.stopImmediatePropagation();
