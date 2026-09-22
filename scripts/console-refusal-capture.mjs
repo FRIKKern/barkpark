@@ -221,6 +221,18 @@ export const CONFORMING = [
     name: "PIN RACE",
     sample: "!! PIN RACE (exit 2): REFUSED TO MEASURE — no Chrome/Chromium found.",
   },
+  // accent-role-separation.mjs is the `run:` step of the `accent-role-separation`
+  // job (console-harness.yml, `node cloud/priv/static/__preview__/accent-role-separation.mjs`)
+  // and arrived with #19654 — AFTER #19643 registered adjacency-guard.mjs, which is
+  // why the DERIVED fence test went red again on a tree where the previous fix was
+  // intact and still passing. It refuses under ONE name, through four paths: the
+  // missing global WebSocket, the two no-Chrome paths, and the `refuse()` funnel
+  // that every measurement refusal goes through. All four already speak the shape.
+  {
+    file: "cloud/priv/static/__preview__/accent-role-separation.mjs",
+    name: "ACCENT ROLE SEPARATION",
+    sample: "!! ACCENT ROLE SEPARATION (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
 ];
 
 // Files in the fence that exit 2 and publish NO capturable refusal, each with the
