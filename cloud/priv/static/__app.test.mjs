@@ -8049,9 +8049,96 @@ test("webhookCardHtml reflects active state (Active pill + Disable) and carries 
   assert.match(html, /data-wh-rotate/);
   assert.match(html, /data-wh-deliveries/);
   assert.match(html, /data-wh-delete/);
-  for (const verb of ["show", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
+  for (const verb of ["show", "edit", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
     assert.match(html, new RegExp("bp cloud webhook " + verb + " abc"));
   }
+});
+
+// ── the chip-completeness PREDICATE over the action bar ─────────────────────
+//
+// The loop above is an ENUMERATION: a snapshot of the verbs that had chips the
+// day it was written. It passes unchanged the moment a seventh action button is
+// added with no CLI twin — which is exactly how the `Send test` button shipped
+// chipless and stayed that way. What follows is the RULE instead: the expected
+// set is DERIVED from the buttons webhookCardHtml actually renders inside
+// .wh-actions, so a new action reds this test by itself, without anyone
+// remembering to come back and extend a list.
+//
+// WH_ACTION_VERB is the only hand-written thing here, and it is a TRANSLATION
+// (the DOM hook's spelling → the CLI verb's spelling), not a scope list: an
+// action missing from it is a FAILURE, never a skip. Every verb below is one
+// internal/cli/cloud_webhook_cmd.go dispatches (`case "edit", "update":`,
+// `case "rm", "delete", "del":`, `case "test-send", "test":`, …).
+const WH_ACTION_VERB = {
+  edit: "edit",
+  toggle: "toggle",
+  rotate: "rotate",
+  test: "test-send",
+  deliveries: "deliveries",
+  delete: "rm",
+};
+
+// Pure: every reason the given action bar is not chip-complete against the given
+// .wh-cli row. Empty = complete. Applied to the REAL card below, and to two
+// synthetic bars as CONTROLS so the emptiness above is known to mean something.
+function whChipGaps(actionsHtml, cliHtml, instance) {
+  const gaps = [];
+  for (const m of actionsHtml.matchAll(/<button\b[^>]*\sdata-wh-([a-z]+(?:-[a-z]+)*)[\s>]/g)) {
+    const action = m[1];
+    const verb = WH_ACTION_VERB[action];
+    if (!verb) {
+      gaps.push("data-wh-" + action + ": the action bar renders this button and no CLI verb is mapped for it — " +
+        "give it a chip in the .wh-cli row and a WH_ACTION_VERB entry (or, if `bp cloud webhook` genuinely " +
+        "cannot do it, say so here deliberately rather than deleting this arm)");
+      continue;
+    }
+    if (!cliHtml.includes('data-copy="bp cloud webhook ' + verb + " " + instance + '"')) {
+      gaps.push("data-wh-" + action + ": .wh-cli carries no copyable `bp cloud webhook " + verb + "` chip");
+    }
+  }
+  return gaps;
+}
+
+const whSection = (html, cls) => html.split('<div class="' + cls + '">')[1].split("</div>")[0];
+
+test("webhookCardHtml: EVERY button in .wh-actions has a copyable CLI twin in .wh-cli — a predicate over the rendered bar, not a hand-listed set", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", name: "Prod hook", url: "https://x/h", active: true }, "abc", "production");
+  const actions = whSection(html, "wh-actions");
+  const cli = whSection(html, "wh-cli");
+
+  // Precondition: the bar was actually PARSED. Without this a regex that matched
+  // nothing would report "0 gaps" and this whole test would be vacuous.
+  const parsed = [...actions.matchAll(/<button\b[^>]*\sdata-wh-([a-z]+(?:-[a-z]+)*)[\s>]/g)].map((m) => m[1]);
+  assert.ok(parsed.length >= 6,
+    "precondition: only parsed " + parsed.length + " action button(s) out of the bar: " + actions);
+  assert.ok(parsed.includes("test"), "precondition: the Send test button is not in the parsed bar: " + parsed);
+
+  assert.deepEqual(whChipGaps(actions, cli, "abc"), [],
+    "the webhook card's action bar is not chip-complete");
+
+  // CONTROL A — a SEVENTH action with no mapping reds. This is the case the
+  // enumeration above cannot see, proven mechanically instead of by memory.
+  const withNewAction = actions +
+    '<button class="btn btn-sm" type="button" data-wh-nonesuch>Nonesuch</button>';
+  const gapsA = whChipGaps(withNewAction, cli, "abc");
+  assert.equal(gapsA.length, 1, "an unmapped action must produce exactly one gap: " + gapsA);
+  assert.match(gapsA[0], /data-wh-nonesuch/);
+
+  // CONTROL B — a MAPPED action whose chip is missing from the row reds too, so
+  // the predicate is measuring the .wh-cli row and not just the map's key set.
+  const cliWithoutTestSend = cli.split("bp cloud webhook test-send abc").join("bp cloud webhook XX abc");
+  assert.notEqual(cliWithoutTestSend, cli, "control B did not actually remove the test-send chip");
+  const gapsB = whChipGaps(actions, cliWithoutTestSend, "abc");
+  assert.equal(gapsB.length, 1, "removing one chip must produce exactly one gap: " + gapsB);
+  assert.match(gapsB[0], /data-wh-test: .*test-send/);
+
+  // Off-default dataset: the derived set holds there too — every chip carries
+  // the `--dataset <ds>` suffix, so a staging card copies staging commands.
+  const staging = hooks.webhookCardHtml({ id: "wh1", url: "https://x/h", active: true }, "abc", "staging");
+  assert.deepEqual(
+    whChipGaps(whSection(staging, "wh-actions"), whSection(staging, "wh-cli"), "abc --dataset staging"), [],
+    "the staging card's action bar is not chip-complete for the off-default dataset");
 });
 
 // The `Send test` button's copy-as-CLI twin. This is the pair the card used to

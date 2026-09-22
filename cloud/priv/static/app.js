@@ -14588,6 +14588,12 @@
       : '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>") +
       '<div class="wh-cli">' +
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
+        // The Edit button's twin. `bp cloud webhook edit <instance> <webhook-id>
+        // [--name/--url/--events/--types]` is a real dispatched verb
+        // (internal/cli/cloud_webhook_cmd.go, `case "edit", "update":`), so the
+        // chip is truthful; the operator appends the id and the field(s), the
+        // same way every chip here leaves the id to the paste site.
+        cliChipHtml(webhookCliChip("edit", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
         cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
         // The twin of the `Send test` button above. The verb spelling is the
