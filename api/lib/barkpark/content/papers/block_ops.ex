@@ -3684,11 +3684,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   ## Descent
 
-  `"blocks"` and `"children"` — the same two container keys
-  `normalize_render_shapes/1` and `render_shape_errors/2` descend, so the three
-  walkers agree on what a nested block list is. A nested non-map is not itself a
-  crash (the compose bridge renders it as `""`), but it is silent content LOSS
-  behind a 200, so it is refused at the same door.
+  This walk, `normalize_render_shapes/1` and `render_shape_errors/2` all descend
+  through ONE owner — `reduce_child_block_lists/4` — so the three agree on what
+  a nested block list is BY CONSTRUCTION rather than by three hand-kept key
+  lists. That owner reaches:
+
+    * `"blocks"` and `"children"` on any block (the generic arm), and
+    * the container bodies whose block list is NOT under either key:
+      `steps[].blocks|children` (a step ROW is not a block — its body is two
+      levels down), `tabs[].blocks`, and each `columns[]` entry, which IS a
+      block list rather than a block.
+
+  Before #11621 only the first line was descended, so nothing inside
+  `steps`/`tabs`/`columns` was normalized or error-walked by ANY arm. Still not
+  descended: `figure`'s single `"child"` map, which is not a list.
+
+  A nested non-map is not itself a crash (the compose bridge renders it as
+  `""`), but it is silent content LOSS behind a 200, so it is refused at the
+  same door.
 
   Returns `:ok`, or `{:error, {:malformed_blocks, %{"blocks" => [path, …]}}}`,
   which `Barkpark.Content.Errors` renders as a 400 `malformed` envelope.
@@ -3714,15 +3727,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
     |> Enum.with_index()
     |> Enum.flat_map(fn
       {block, index} when is_map(block) ->
-        Enum.flat_map(["blocks", "children"], fn key ->
-          case Map.get(block, key) do
-            children when is_list(children) ->
-              block_element_errors(children, "#{path}[#{index}].#{key}")
+        {_block, errors} =
+          reduce_child_block_lists(block, "#{path}[#{index}]", [], fn children, child_path, acc ->
+            {children, acc ++ block_element_errors(children, child_path)}
+          end)
 
-            _ ->
-              []
-          end
-        end)
+        errors
 
       {_block, index} ->
         ["#{path}[#{index}] must be an object"]
@@ -3888,12 +3898,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp render_block_errors(block, path) do
-    Enum.flat_map(["blocks", "children"], fn key ->
-      case Map.get(block, key) do
-        children when is_list(children) -> render_shape_errors(children, "#{path}.#{key}")
-        _ -> []
-      end
-    end)
+    {_block, errors} =
+      reduce_child_block_lists(block, path, [], fn children, child_path, acc ->
+        {children, acc ++ render_shape_errors(children, child_path)}
+      end)
+
+    errors
   end
 
   defp render_table_row_errors(%{"cells" => cells}, path) when is_list(cells),
@@ -3943,6 +3953,125 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp valid_record_table?(_block, _rows), do: false
+
+  # ── the ONE owner of "where a block keeps nested block lists" ──────────────
+  #
+  # Every walk in this module that descends into a block's children routes
+  # through here — `normalize_render_block/1` (WRITE), `block_element_errors/2`
+  # and `render_block_errors/2` (READ) — so the three walkers agree on what a
+  # nested block list is BY CONSTRUCTION, not by three hand-kept key lists that
+  # drift the day one of them grows.
+  #
+  # It is TYPE-KEYED, not a generic reduce over a key set, because the container
+  # shapes genuinely differ and a generic reduce reaches NONE of them:
+  #
+  #   * `steps` holds ROWS (`%{"title" => …, "blocks" => […]}`) — the block list
+  #     is TWO levels down, and a row is not a block (`PortableDoc.BlockIds`
+  #     says so in as many words and projects the row's selected body only).
+  #   * `tabs` holds `%{"label" => …, "blocks" => […]}` rows — same two levels.
+  #   * `columns` holds a list of LISTS: each column IS a block list
+  #     (`Compose.compose_block/2` calls `render_blocks(List.wrap(col), …)`), so
+  #     a reduce treating `columns` as a block list hands a LIST to the
+  #     map-guarded normalizer clause, which returns it untouched.
+  #
+  # `EpicQuality.nested_keys/0` is deliberately NOT reused. That set is the
+  # authoring wall's MAP CENSUS (every map anywhere), not a statement about
+  # where block LISTS live. Swapping this owner for a generic reduce over it
+  # reds 7 tests in `ContainerDescentTest`: `columns` is reached by none of the
+  # three walkers, an opaque `%{"columns" => [...]}` body is coerced instead of
+  # left alone, and a steps row carrying both `children` and `blocks` has the
+  # hidden `blocks` alias rewritten — the rewrite `PortableDoc.BlockIds`
+  # refuses by name. It also carries `panels`, a key no block type here emits.
+  #
+  # STILL NOT DESCENDED, on purpose: `figure`'s single `"child"` map (not a
+  # list) and `expandable`'s alias body, which the generic `blocks`/`children`
+  # arm below already reaches for every shape that stores one.
+  defp reduce_child_block_lists(%{"type" => "steps", "steps" => rows} = block, path, acc, fun)
+       when is_list(rows) do
+    {rows, acc} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce(acc, fn {row, index}, acc ->
+        reduce_visible_body(row, "#{path}.steps[#{index}]", acc, fun)
+      end)
+
+    {Map.put(block, "steps", rows), acc}
+  end
+
+  defp reduce_child_block_lists(%{"type" => "tabs", "tabs" => rows} = block, path, acc, fun)
+       when is_list(rows) do
+    {rows, acc} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce(acc, fn
+        {row, index}, acc when is_map(row) ->
+          case Map.get(row, "blocks") do
+            children when is_list(children) ->
+              {children, acc} = fun.(children, "#{path}.tabs[#{index}].blocks", acc)
+              {Map.put(row, "blocks", children), acc}
+
+            _opaque ->
+              {row, acc}
+          end
+
+        {row, _index}, acc ->
+          {row, acc}
+      end)
+
+    {Map.put(block, "tabs", rows), acc}
+  end
+
+  defp reduce_child_block_lists(
+         %{"type" => "columns", "columns" => columns} = block,
+         path,
+         acc,
+         fun
+       )
+       when is_list(columns) do
+    {columns, acc} =
+      columns
+      |> Enum.with_index()
+      |> Enum.map_reduce(acc, fn
+        {column, index}, acc when is_list(column) ->
+          fun.(column, "#{path}.columns[#{index}]", acc)
+
+        {column, _index}, acc ->
+          {column, acc}
+      end)
+
+    {Map.put(block, "columns", columns), acc}
+  end
+
+  defp reduce_child_block_lists(block, path, acc, fun) when is_map(block) do
+    Enum.reduce(["blocks", "children"], {block, acc}, fn key, {block, acc} ->
+      case Map.get(block, key) do
+        children when is_list(children) ->
+          {children, acc} = fun.(children, "#{path}.#{key}", acc)
+          {Map.put(block, key, children), acc}
+
+        _ ->
+          {block, acc}
+      end
+    end)
+  end
+
+  defp reduce_child_block_lists(block, _path, acc, _fun), do: {block, acc}
+
+  # A steps ROW keeps its body under the SAME `children`-then-`blocks` alias
+  # discipline every other container here uses (`visible_body_key/1`), so a row
+  # carrying both never has the hidden compatibility alias rewritten.
+  defp reduce_visible_body(container, path, acc, fun) when is_map(container) do
+    case visible_body_key(container) do
+      nil ->
+        {container, acc}
+
+      key ->
+        {children, acc} = fun.(Map.fetch!(container, key), "#{path}.#{key}", acc)
+        {Map.put(container, key, children), acc}
+    end
+  end
+
+  defp reduce_visible_body(container, _path, acc, _fun), do: {container, acc}
 
   defp normalize_render_block(%{"type" => type} = block)
        when type in [
@@ -4020,15 +4149,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_render_block(block) when is_map(block) do
-    Enum.reduce(["blocks", "children"], block, fn key, normalized ->
-      case Map.get(normalized, key) do
-        children when is_list(children) ->
-          Map.put(normalized, key, normalize_render_shapes(children))
+    {normalized, _acc} =
+      reduce_child_block_lists(block, "", nil, fn children, _child_path, acc ->
+        {normalize_render_shapes(children), acc}
+      end)
 
-        _ ->
-          normalized
-      end
-    end)
+    normalized
   end
 
   defp normalize_render_block(block), do: block
