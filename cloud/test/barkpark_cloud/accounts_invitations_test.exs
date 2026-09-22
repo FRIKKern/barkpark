@@ -694,4 +694,145 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
              ) == 0
     end
   end
+
+  # The read is `Repo.get_by(TeamInvitation, id: inv_id, team_id: tid)`. The
+  # `id:` half is exercised by every caller; the `team_id:` half had NO
+  # behavioural coverage (the only `revoke_invitation` mention under
+  # cloud/test was a vocabulary-census entry), so deleting it left the whole
+  # cloud suite green. These tests are that half.
+  #
+  # THE TWO FIXTURES, field for field. Both invitations are minted by
+  # `invite_member/4` from the SAME literal email and role, by the SAME
+  # inviter user (`alice`, made owner of BOTH teams on purpose so
+  # `invited_by_id` is not free either):
+  #
+  #   field          happy-path (team_a)      cross-team (team_b)
+  #   email          "twin@example.com"       "twin@example.com"     same
+  #   role           "member"                 "member"               same
+  #   invited_by_id  alice.id                 alice.id               same
+  #   accepted_at    nil                      nil                    same
+  #   team_id        team_a.id                team_b.id              THE VARIABLE
+  #   id             uuid A                   uuid B                 FORCED: @primary_key
+  #                                                                  {:id, :binary_id,
+  #                                                                  autogenerate: true}
+  #   token_hash     sha256(raw A)            sha256(raw B)          FORCED:
+  #                                                                  invite_member/4 mints a
+  #                                                                  fresh `generate_token()`
+  #                                                                  per row and stores only
+  #                                                                  its hash
+  #   expires_at     now_A + 7d               now_B + 7d             FORCED: derived from
+  #                                                                  DateTime.utc_now() at
+  #                                                                  mint time; differs by
+  #                                                                  microseconds
+  #   inserted_at/   two clock reads          two clock reads        FORCED: timestamps()
+  #   updated_at
+  #
+  # Nothing else differs. Note the email being IDENTICAL is legal: the partial
+  # UNIQUE index on (team_id, email) WHERE accepted_at IS NULL is per-team, so
+  # the same address may hold one live invite in each team — which is exactly
+  # the collision the fence has to survive.
+  defp twin_invitations do
+    alice = user_fixture()
+    team_a = team_fixture()
+    team_b = team_fixture()
+    {:ok, _} = Accounts.add_member(team_a, alice, "owner")
+    {:ok, _} = Accounts.add_member(team_b, alice, "owner")
+
+    {:ok, %{invitation: inv_a}} =
+      Accounts.invite_member(team_a, "twin@example.com", "member", alice)
+
+    {:ok, %{invitation: inv_b}} =
+      Accounts.invite_member(team_b, "twin@example.com", "member", alice)
+
+    %{team_a: team_a, team_b: team_b, inv_a: inv_a, inv_b: inv_b}
+  end
+
+  describe "revoke_invitation/2 — the team_id fence" do
+    test "the twins differ ONLY in team_id (plus the identity/secret/clock fields forced by the schema)" do
+      %{inv_a: a, inv_b: b, team_a: team_a, team_b: team_b} = twin_invitations()
+
+      # The free fields are equal...
+      assert a.email == b.email
+      assert a.role == b.role
+      assert a.invited_by_id == b.invited_by_id
+      assert a.accepted_at == nil and b.accepted_at == nil
+
+      # ...the variable under test is not...
+      assert a.team_id == team_a.id
+      assert b.team_id == team_b.id
+      refute a.team_id == b.team_id
+
+      # ...and every REMAINING difference is one the schema forces, named with
+      # the constraint that forces it. Anything not in this list is equal above.
+      forced = [:id, :token_hash, :expires_at, :inserted_at, :updated_at, :team_id]
+
+      differing =
+        for f <- [
+              :id,
+              :email,
+              :role,
+              :token_hash,
+              :expires_at,
+              :accepted_at,
+              :team_id,
+              :invited_by_id,
+              :inserted_at,
+              :updated_at
+            ],
+            Map.get(a, f) != Map.get(b, f),
+            do: f
+
+      # Subset, not equality: two clock reads CAN land on the same microsecond,
+      # so a forced field is allowed to come out equal. What may never happen is
+      # a difference this list does not name.
+      assert differing -- forced == []
+      assert :team_id in differing
+    end
+
+    # [0] has TWO halves — the RETURN VALUE and the ROW SURVIVING. They are two
+    # tests on purpose: ExUnit stops a test at its first failing assertion, so a
+    # single test leading with the return value would leave the destructive half
+    # (the half that matters) unproved under the mutation. Each test below leads
+    # with its own claim, so each reds on its own.
+    test "[0a] a cross-team invitation id RETURNS exactly what an unknown id returns" do
+      %{team_a: team_a, inv_b: inv_b} = twin_invitations()
+
+      assert {:error, :not_found} = Accounts.revoke_invitation(team_a, inv_b.id)
+
+      # Byte-for-byte identical to a NEVER-EXISTED id: the refusal leaks nothing
+      # about whether the id is real.
+      unknown = Ecto.UUID.generate()
+
+      assert Accounts.revoke_invitation(team_a, inv_b.id) ==
+               Accounts.revoke_invitation(team_a, unknown)
+    end
+
+    test "[0b] the other team's invitation row SURVIVES the call (re-read from the database)" do
+      %{team_a: team_a, inv_a: inv_a, inv_b: inv_b} = twin_invitations()
+
+      _ = Accounts.revoke_invitation(team_a, inv_b.id)
+
+      # The re-read is the assertion — NOT the return value. A refusal that still
+      # deleted the row would pass [0a] and be the whole bug. This is the FIRST
+      # assertion in this test so the mutation reds it directly.
+      assert %TeamInvitation{team_id: still_b} = Repo.get(TeamInvitation, inv_b.id)
+      assert still_b == inv_b.team_id
+
+      # team_a's own pending list never grew or shrank either.
+      assert [%TeamInvitation{id: only_live}] = Accounts.list_invitations(team_a)
+      assert only_live == inv_a.id
+    end
+
+    test "HAPPY-PATH CONTROL — the same call with the id's OWN team revokes it" do
+      %{team_a: team_a, inv_a: inv_a, inv_b: inv_b} = twin_invitations()
+
+      assert {:ok, %TeamInvitation{id: revoked_id}} = Accounts.revoke_invitation(team_a, inv_a.id)
+      assert revoked_id == inv_a.id
+      assert Repo.get(TeamInvitation, inv_a.id) == nil
+
+      # So the not_found in [0a] is the FENCE refusing, not revoke_invitation/2
+      # being dead — and the twin in team B is untouched by the control.
+      assert %TeamInvitation{} = Repo.get(TeamInvitation, inv_b.id)
+    end
+  end
 end
