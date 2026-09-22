@@ -56,10 +56,17 @@
 #       deploy-relevant commit reachable from `--tip` is absent from `--served`.
 #
 #   adjudicate --stranded true|false [--unchecked true|false]
-#              [--in-flight-source ok|unknown]   # stdin: "run_id sha status" lines
+#              [--in-flight-source ok|unknown]
+#              [--instance-result success|failure|cancelled|skipped]
+#              [--instance-state converged|stranded|unchecked|absent]
+#              [--instance-served SHA] [--instance-tip SHA]
+#                                                # stdin: "run_id sha status" lines
 #       Turns the per-leg findings into the JOB'S CONCLUSION. Exits 1 — the run
-#       goes red — only for "stranded and no deploy is in flight". See the block
-#       above the mode for why an in-flight deploy is a delay and not a waiver.
+#       goes red — for "stranded and no deploy is in flight", and, since
+#       task-c5955c660c7b9e55, for THIS run's own instance leg having concluded
+#       FAILURE while the box is still behind (or unreadable) afterwards. See
+#       the block above the mode for why an in-flight deploy is a delay and not
+#       a waiver, and why a failed ATTEMPT is exempt from that delay.
 #
 #   --selftest
 #       Hermetic. Builds real git repos in mktemp, reproduces the 2026-07-19
@@ -615,6 +622,7 @@ RANGE_EOF
 # exit code is withheld. That is the same law as this file's rc=2.
 mode_adjudicate() {
   local stranded="" label="production" source="ok" unchecked="false"
+  local inst_result="" inst_state="absent" inst_served="" inst_tip=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -622,6 +630,10 @@ mode_adjudicate() {
       --unchecked)        unchecked="${2:-}"; shift 2 ;;
       --in-flight-source) source="${2:-}"; shift 2 ;;
       --label)            label="${2:-}"; shift 2 ;;
+      --instance-result)  inst_result="${2:-}"; shift 2 ;;
+      --instance-state)   inst_state="${2:-}"; shift 2 ;;
+      --instance-served)  inst_served="${2:-}"; shift 2 ;;
+      --instance-tip)     inst_tip="${2:-}"; shift 2 ;;
       *) warn "HARNESS-UNAVAILABLE: unknown argument '$1'"; return 2 ;;
     esac
   done
@@ -637,6 +649,17 @@ mode_adjudicate() {
   esac
   case "$source" in ok|unknown) : ;; *)
     warn "HARNESS-UNAVAILABLE: --in-flight-source must be 'ok' or 'unknown' (got '$source')"; return 2 ;;
+  esac
+  # An unrecognised leg result is a HARNESS fault, never "probably fine". The
+  # empty string is the ONLY permitted silence and it means "the caller did not
+  # wire this leg" — every wired caller passes one of the four Actions results.
+  case "$inst_result" in ''|success|failure|cancelled|skipped) : ;; *)
+    warn "HARNESS-UNAVAILABLE: --instance-result must be one of success|failure|cancelled|skipped (got '$inst_result')"
+    return 2 ;;
+  esac
+  case "$inst_state" in converged|stranded|unchecked|absent) : ;; *)
+    warn "HARNESS-UNAVAILABLE: --instance-state must be one of converged|stranded|unchecked|absent (got '$inst_state')"
+    return 2 ;;
   esac
 
   # stdin is optional and routinely empty — that is the "nothing is coming"
@@ -665,6 +688,83 @@ mode_adjudicate() {
   say "  stranded:          $stranded"
   say "  unchecked legs:    $unchecked"
   say "  deploys in flight: $flight"
+  say "  instance leg:      result=${inst_result:-<not wired>} state=${inst_state}"
+
+  # ── THIS RUN'S OWN INSTANCE LEG: TRIED AND DID NOT MOVE ────────────────────
+  #
+  # task-c5955c660c7b9e55. Everything below this block answers "is the PICTURE
+  # still moving". That question is the right one for a box that is merely
+  # behind, and it is the WRONG one for the shape that produced three
+  # consecutive vacuous greens on 2026-09-22 (runs 35722816309 / 35720835901 /
+  # 35718876385): the `instance` JOB concluded FAILURE, the box kept serving
+  # e02e4296d, and this job concluded SUCCESS every time — because sibling
+  # deploy runs were queued, and the in-flight suppression below has no expiry.
+  # During that window 11 of 12 runs timed out at exit 15, so each failing run
+  # was suppressed by the presence of its equally-failing siblings. A check
+  # whose NAME promises production is current was green for hours while
+  # production was frozen.
+  #
+  # THE PREDICATE, and it is the whole of this row. Two cases have to be told
+  # apart, and only one of them is a defect:
+  #
+  #   TRIED AND DID NOT MOVE   `instance` concluded FAILURE on THIS run and the
+  #                            box is still behind. The deploy was attempted,
+  #                            against this box, and it did not land. No sibling
+  #                            run explains that: another run being queued says
+  #                            nothing about whether THIS run's own attempt
+  #                            worked. -> RED, naming both shas.
+  #
+  #   NEVER GOING TO MOVE IT   `instance` was SKIPPED (the path filter found
+  #                            nothing deploy-relevant for this host), CANCELLED
+  #                            (superseded), or SUCCEEDED (it did its job — a
+  #                            box still behind after that is the ordinary
+  #                            already-covered / in-flight picture). None of
+  #                            these is an attempt that failed, so none of them
+  #                            reds here and the existing rules decide.
+  #
+  # So the discriminator is the instance leg's OWN conclusion on THIS run, not
+  # a comparison of the served sha against the run's head. A superseded,
+  # already-covered or no-op run never reaches this block.
+  #
+  # WHY IT REDS RATHER THAN SKIPS, which the row names as the other wrong fix.
+  # Making the job `needs: instance` and skipping otherwise trades a false green
+  # for a silent one: a SKIPPED liveness check reads as "not applicable" and
+  # vanishes from the one surface meant to tell an operator production is stale.
+  # So when the leg failed and the box could not be READ at all, that is CANNOT
+  # READ and it reds by that name — an unreadable box after a failed deploy is
+  # the least safe moment to assume anything.
+  if [ "$inst_result" = "failure" ]; then
+    case "$inst_state" in
+      stranded)
+        say ""
+        say "VERDICT: THE INSTANCE JOB TRIED AND THE SHA DID NOT MOVE. The \`instance\` leg of THIS"
+        say "run concluded FAILURE, and the content instance is still behind afterwards."
+        say "  served (content instance): ${inst_served:-<unread>}"
+        say "  main snapshot (owed):      ${inst_tip:-<unread>}"
+        say "No other run explains this: a sibling deploy being queued says nothing about whether"
+        say "THIS run's own attempt landed. In-flight suppression does NOT apply to a failed attempt."
+        say ""
+        say "REPAIR: Actions -> Deploy (production) -> Run workflow, against main, targets: both."
+        return 1
+        ;;
+      unchecked|absent)
+        say ""
+        say "VERDICT: CANNOT READ. The \`instance\` leg of THIS run concluded FAILURE and the content"
+        say "instance did not say what it serves (state=${inst_state}), so whether the sha moved is"
+        say "UNKNOWN at the exact moment it is least safe to assume it did."
+        say "  served (content instance): ${inst_served:-<unread>}"
+        say "  main snapshot (owed):      ${inst_tip:-<unread>}"
+        say "This FAILS rather than skipping: a skipped liveness check reads as 'not applicable' and"
+        say "disappears from the one surface meant to tell an operator that production is stale."
+        return 1
+        ;;
+      converged)
+        say ""
+        say "The instance leg FAILED but the box is converged anyway — something else carried the"
+        say "commit. Not this row's defect; the ordinary rules below decide."
+        ;;
+    esac
+  fi
 
   if [ "$stranded" != "true" ]; then
     if [ "$unchecked" = "true" ]; then
@@ -1141,6 +1241,9 @@ main() {
       say "       deploy-convergence-check.sh converged --served SHA --tip SHA [--target cp|instance]"
       say "                                             [--owed-before ISO|--grace-seconds N] [--label L]"
       say "       deploy-convergence-check.sh adjudicate --stranded true|false [--unchecked true|false]"
+      say "                                             [--instance-result success|failure|cancelled|skipped]"
+      say "                                             [--instance-state converged|stranded|unchecked|absent]"
+      say "                                             [--instance-served SHA] [--instance-tip SHA]"
       say "                                             [--in-flight-source ok|unknown]   # stdin: 'run_id sha status'"
       say "       deploy-convergence-check.sh filters [DEPLOY_YML]   # what it derives, and refuse if nothing"
       say "       deploy-convergence-check.sh --selftest"
