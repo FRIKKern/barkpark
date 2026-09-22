@@ -430,6 +430,7 @@ js/packages/react/src/client.ts
 docs/api/error-codes.md
 docs/openapi.json
 internal/chat/testdata/**
+internal/cli/testdata/**
 internal/cli/tasks_history_events.go
 internal/cli/tasks_history_events_test.go
 internal/pdrender/testdata/**
