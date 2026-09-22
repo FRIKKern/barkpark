@@ -2730,7 +2730,7 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # MISSING ACK_EX on run 35553647416 (head 99b11ec52), in this order, with
         # these two lines to paste.
         --expect-unrendered "Dispatch (scrim paths)"
-        --expect-unrendered "Studio scrim threshold control"
+        --expect-unrendered "Studio scrim abolition check"
         # deploy-prod-microblock-staleness.yml jobs `prod-microblock-selftest` (:66),
         # `prod-microblock-read` (:124) and `prod-microblock-report-scheduled-failure`
         # (:150). The workflow landed AFTER both `generated_from_shas`, so the frozen
