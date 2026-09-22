@@ -73,8 +73,12 @@ defmodule BarkparkWeb.SiteDeployController do
       admin to set an env var they already set would be actively wrong.
     * **500** #{@artifact_500_list} — the #{length(@artifact_500_codes)}
       extractor codes that are NOT a verdict about the caller's bytes. The
-      artifact validated; THIS BOX could not put it on disk (ENOSPC, EACCES, a
-      failed rename). They rendered as 400s until ssw11 — telling a caller
+      artifact validated (or never got the chance to be judged); THIS BOX could
+      not put it on disk (ENOSPC, EACCES, a failed rename) or could not get the
+      memory to inflate it at all (`E_EXTRACT_EXHAUSTED`, raised when zlib
+      answers `:enomem`/`:system_limit` mid-stream — the one code here that can
+      fire BEFORE the archive has been fully validated, which is precisely why
+      it must not be reported as a verdict on the archive). They rendered as 400s until ssw11 — telling a caller
       "your tarball is bad" while the disk was full, which is exactly the
       answer that makes a correct client stop retrying and start repacking
       bytes that were never the problem. WHO RETRIES: nobody automatically
