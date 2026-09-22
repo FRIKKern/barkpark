@@ -503,4 +503,32 @@
 # site(s) could land here and this gate would still say green."
 #
 # Filed under task-195cfabc13d7e9a3.
-86
+#
+# ── 2026-09-22: 86 -> 85, BANKED DOWN (again not the forbidden raise) ────────
+# MEASURED on origin/main fb7fe91dc05ff5fc137e5fe06eb1db85a9b37077 by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt
+#     -> pipefail-sigpipe-scan: 85 finding(s) - high 85 - medium 0 - low 0 - over 472 file(s)
+#
+# WHAT MOVED: #19824 (ca079dae2) removed the last `| head -1` reader from
+# scripts/elixir-path-escape-check.sh:926 and did NOT bank the number, leaving
+# slack 1 against a documented bound of 2. A per-file site diff between
+# ca079dae2~1 and ca079dae2 shows -1 on that one file and nothing else.
+#
+# I LEFT THAT SLACK AND AN AUDITOR CAUGHT IT. The ratchet exits 0 at slack 1, so
+# nothing red and nothing asked; a ratchet's LOOSE direction is silent by
+# construction. Two more removals would have reached the refusal with no one
+# having decided anything.
+#
+# PROVENANCE CHECK RUN FIRST, because a LOOSE ratchet and a STALE CHECKOUT look
+# identical (this file records a 107-against-108 read taken 38 commits behind):
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main
+#     -> sha fb7fe91dc05ff5fc137e5fe06eb1db85a9b37077, scan 85, baseline 86,
+#        "RATCHET LOOSE ON origin/main - 85 finding(s), baseline still says 86
+#         (slack 1, bound 2)"
+#
+# So the 85 is origin/main's own number, not this checkout's.
+#
+# Filed under task-2f62b64c32be3780.
+85
