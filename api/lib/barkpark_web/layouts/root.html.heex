@@ -5245,8 +5245,51 @@
       // checkboxes, pane header actions, the collapsed strip — AND the Studio
       // chrome bar `.studio-bar`, which is where the top-bar actions and the
       // studio-tab strip (`.studio-bar-tabs`, a child of `.studio-bar`) live.
-      // Same region, same words, same honesty rule, and NO second live region:
-      // two aria-live nodes race and the announcement order becomes undefined.
+      // Same region, same words, same honesty rule, and NO second EMPTY live
+      // region.
+      //
+      // THAT WORDING IS NARROWER THAN IT USED TO BE, and the narrowing is a
+      // measurement, not a softening. It used to read "NO second live region:
+      // two aria-live nodes race" — and the served body already carries a
+      // second one whenever a Phoenix flash is set. Measured on a real
+      // post-login redirect body (POST /login -> follow): the aria-live census
+      // is 2 and the status/alert/log role census is 2, the second node being
+      // the flash-info banner from
+      // `BarkparkWeb.StudioComponents.Nav.studio_flash/1`
+      // (components/studio_components/nav.ex), markup that predates this hook.
+      // A clean authenticated desk serves 1 and 1, which is what makes the 2
+      // and 2 mean something. (This comment deliberately SPELLS those
+      // attributes out in prose rather than in attribute form: the census in
+      // `press_answer_region_guard_test.exs` is a regex over the whole served
+      // body, this script is served inline, and an attribute-shaped mention
+      // here is counted as a live region. That is not the census being wrong —
+      // it is the served body really containing the string.)
+      //
+      // THEY DO NOT RACE, and three measured facts are why:
+      //   1. The flash node ships PRE-POPULATED in the initial response body
+      //      ("Signed in."). A live region announces CHANGES made after it is
+      //      registered; content present at parse time is not announced. This
+      //      region ships EMPTY, so at load exactly one announcer is armed.
+      //   2. The two nodes sit in DISJOINT subtrees. The flash is inside the
+      //      patchable LiveView tree (studio.html.heex / app.html.heex render
+      //      it, and `render(view)` contains it); this node is a sibling of
+      //      `{@inner_content}` and does NOT appear in `render(view)` at all,
+      //      so morphdom can never touch it and neither write reaches the
+      //      other node.
+      //   3. Their writes cannot land in the same tick. This region is written
+      //      SYNCHRONOUSLY in the delegated click handler; the flash only
+      //      changes when a LiveView `put_flash` diff arrives over the socket,
+      //      a full server round trip later. Two POLITE regions changing in
+      //      different ticks QUEUE; they do not interleave and neither is
+      //      dropped.
+      // The one preemption that remains is the flash-error banner (an alert
+      // role, assertive politeness) interrupting a polite answer, and that is
+      // the DESIGNED semantics of assertive: the error is the better answer to
+      // the press.
+      //
+      // So the invariant this hook actually depends on — and the one
+      // `press_answer_region_guard_test.exs` now asserts in BOTH the clean and
+      // the flash state — is ONE EMPTY live region, not one live region.
       //
       // THE TAB STRIP IS NOT A phx-click SURFACE, and that corrects the premise
       // this slice was filed on. Read off the served authenticated desk
