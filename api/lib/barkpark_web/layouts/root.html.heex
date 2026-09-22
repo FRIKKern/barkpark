@@ -1586,24 +1586,30 @@
            so — 0.18 read as a panel that mysteriously floats. */
         box-shadow: -16px 0 48px hsl(var(--bp-shadow-hsl) / 0.28);
       }
-      /* The scrim. It is the missing half of "this thing is ON TOP": without
-         it the document underneath still reads as live, editable surface.
-         ABSOLUTE, never fixed — the overlay is anchored to .editor-panel's
-         `position: relative`, so a fixed scrim would dim the whole viewport
-         (sidebar, topbar and neighbouring panes included) instead of the
-         document it covers. It also renders zero times outside this width,
-         because the :has() only matches while the sidebar is overlaid.
-         `pointer-events: none` is deliberate: CSS cannot carry a phx-click,
-         so a click-catching scrim would be a dead zone that swallows edits.
-         Tap-to-dismiss is spd-b12's job, in the .ex half. */
-      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: 4;
-        background: hsl(var(--bp-scrim-hsl) / 0.55);
-        pointer-events: none;
-      }
+      /* NO SCRIM — the overlay does NOT dim the document underneath (D127).
+         This block used to generate one here, at 55% black:
+         `.editor-with-preview:has(.bp-doc-sidebar.is-open)::after`, so that
+         an inspector sitting OVER the prose would read as on top. Four
+         later rules then cancelled it one bucket at a time — the b29 guard
+         (below wide, never asked for), D170 (wide, unconditional), D155
+         (narrow/phone, user-opened) and D175/D187 (standard, user-opened) —
+         and between them they covered every shipped bucket x user-opened
+         cell. Measured before removal, with all five rules in place: `none`
+         at 861px AND at 860px in 8 of 8 cells. The generator painted nowhere.
+
+         SO THE RULING IS NOW EXPRESSED BY ABSENCE, not by one unreachable
+         rule propped up by four cancellations. D127's finding is that a 55%
+         wash over live prose is INDETERMINACY — a half-suspended read that is
+         neither a clean mode nor a viable dock — and every bucket has since
+         agreed. A panel that covers the pane says it is on top by being the
+         only thing there; a panel that does not cover it is not on top.
+
+         DO NOT RE-ADD ONE HERE. `scripts/studio-scrim-abolition-check.mjs`
+         reds if any rule in this sheet attaches a generated box to
+         `.editor-with-preview`, in either direction — a new generator and a
+         new `content: none` cancellation are both the shape this family grew
+         out of. `inspector_summoned_destination_test.exs` is the ExUnit half
+         of the same predicate. */
       /* Inspector label/value rows crowd once the panel can sit over
          arbitrary content — let them wrap instead of colliding. */
       .bp-doc-field { flex-wrap: wrap; }
@@ -2325,55 +2331,6 @@
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
       display: none;
     }
-    /* The scrim guard. The overlay scrim keys on `:has(.bp-doc-sidebar.is-open)`
-       and is otherwise correct — but `.is-open` is now true for a panel that
-       paints as a strip, so without this the desk would dim the document under
-       an inspector nobody can see. Suppressed, not rewritten: the scrim must
-       still render for a wide-bucket pane narrow enough to overlay, and for
-       any panel the user actually opened, so the condition being subtracted is
-       exactly "below wide AND never asked for". */
-    html:not([data-width-bucket="wide"])
-      .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
-      content: none;
-    }
-    /* …AND THE WIDE SCRIM IS ABOLISHED TOO (charter D170). The guard above
-       carves `wide` out because a wide pane squeezed under 860px was assumed to
-       overlay a document that stays visible beside it — the one state where
-       dimming reads as an honest signal. Wave-11 measured that assumption and
-       it does not hold: the state is REACHABLE BY ARITHMETIC AND UNREACHABLE IN
-       FACT.
-
-       THE PAPER-ROUTING INVARIANT IS WHAT CARRIES IT. A document that has an
-       inspector at all is a paper, and papers route to a fixed two-pane shell —
-       a 44px yielded rail plus a 260px list column — so `.editor-panel` is
-       `vw - 304` at every wide viewport. The narrowest wide viewport is 1280,
-       giving panel = 976; the `@container panel (max-width: 860px)` generator
-       needs 860. Measured on the deployed sheet: 976 at 1280 and 1136 at 1440,
-       both clear of the threshold by more than 100px. The two shapes that could
-       breach 860 do not apply — deeper drills carry no inspector at all, and
-       the 360px `.bp-secondary-pane` that would eat the difference is
-       unreachable from the paper editor. So the wide scrim never painted for a
-       real desk; keeping the carve-out only preserved a rule nobody could
-       reach, over a document nobody could see dimmed.
-
-       WHAT THIS COSTS D153. The `wide` row used to be this sheet's POSITIVE
-       CONTROL — the proof that the scrim generator is live code rather than a
-       rule the suppressions had quietly killed everywhere. It cannot be that
-       any more, and the honest replacement is NOT this rule but the
-       FORCED-CONTAINER CONTROL: force `.editor-panel` to 861px and the computed
-       `::after` content is `none`, force it to 860px and it is `""`, verified at
-       both 1280 and 1440. That control exercises the generator's own threshold
-       instead of asserting a bucket keeps a scrim it never rendered — and it
-       still fails loudly if the generator is ever deleted.
-
-       Unconditional at `wide`, deliberately: `[data-user-opened]` is not
-       qualified here because the arithmetic above is indifferent to it. Both a
-       server-defaulted and a user-summoned inspector sit in the same [44,260]
-       shell, so neither can bring the pane under 860. */
-    html[data-width-bucket="wide"]
-      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
-      content: none;
-    }
 
     /* ── The summoned destination (charter D155; D113 arithmetic, D127 Part 2) ──
        At `narrow` and `phone` the user-opened inspector stops being a panel
@@ -2392,18 +2349,20 @@
        box dims the prose rather than hiding it, so the reader is left in a
        half-suspended read that is neither a clean mode nor a viable dock. A
        panel that covers the pane completely needs no scrim to say it is on
-       top — it says so by being the only thing there. The scrim is therefore
-       switched OFF for this state (below), not lightened: nowhere does this
-       desk end up with prose at 55% black under a panel.
+       top — it says so by being the only thing there. This state therefore
+       ships with NO scrim rule at all: not a lightened one, and no longer a
+       `content: none` cancelling a generator elsewhere in the sheet, because
+       the generator is gone too. See the NO SCRIM note in the
+       `@container panel (max-width: 860px)` block above.
 
        WHY THIS IS A NEW SELECTOR AND NOT AN EDIT (D91/b29). The bucket-aware
-       default above carries `:not([data-user-opened])` on both its geometry
-       rule and its scrim guard, so neither of them fires for the state below —
-       the panel the user explicitly asked for is exactly what they carve out.
-       This rule is the other half of that carve-out, finally saying what the
-       asked-for panel DOES below `wide`, and `data-user-opened` is already
-       server-stamped from the `sidebar_user_opened` assign (components.ex), so
-       the signal it keys on is in the DOM at first paint.
+       default above carries `:not([data-user-opened])` on its geometry rule,
+       so it does not fire for the state below — the panel the user explicitly
+       asked for is exactly what it carves out. This rule is the other half of
+       that carve-out, finally saying what the asked-for panel DOES below
+       `wide`, and `data-user-opened` is already server-stamped from the
+       `sidebar_user_opened` assign (components.ex), so the signal it keys on
+       is in the DOM at first paint.
 
        WHY IT DECLARES ITS OWN GEOMETRY rather than leaning on the
        `@container panel (max-width: 860px)` overlay block above: that block is
@@ -2435,54 +2394,6 @@
          shadow onto, and nothing sits beside the border. */
       border-left: 0;
       box-shadow: none;
-    }
-    /* Dimming abolished for the summoned state. The overlay scrim is a
-       `::after` on `.editor-with-preview` keyed on `:has(.bp-doc-sidebar.is-open)`,
-       and `.is-open` is true here — so without this the desk would dim a
-       document that is already completely covered, which is both pointless and
-       the half-suspended read D127 ruled a defect. `content: none` is the same
-       suppression idiom as the b29 scrim guard directly above (a `::after` with
-       no `content` generates no box at all — this is zero rendered scrims, not
-       a transparent one). Specificity (0,5,1) over the container rule's (0,3,1)
-       and later in source order, so it wins on both counts. */
-    html[data-width-bucket="narrow"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after,
-    html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
-      content: none;
-    }
-    /* THE STANDARD BUCKET IS RULED, NOT LEFT TO ARITHMETIC (charter D175/D187;
-       D127 harden). A clean standard desk never brings the pane under the
-       860px generator — panel = vw − 44, which crosses 860 only at
-       viewport ≤ 904, inside `narrow` — but the COMPOUND state is real and
-       was executed on the deployed build: a 360px `.bp-secondary-pane` opened
-       on a task survives navigation into a paper (`Scope.select/2` is
-       push_patch, so `secondary_doc` rides along), and at standard/1024 the
-       pane is 620 = 1024 − 44 − 360 exactly. The generator matched and
-       PAINTED — mean luminance over the reading column 240.493 → 175.104
-       (Δ 65.389) — the exact half-suspended read D127 ruled a defect, with
-       the inspector genuinely docked beside the prose it dims. No suppressor
-       covered standard + `[data-user-opened]`: the b29 guard excludes
-       user-opened, the narrow/phone rule above is bucket-scoped away, and
-       D170's is wide-only. This rule closes that gap.
-
-       BOTH HALVES SHIP, DELIBERATELY (D175/D199). The behavioural half clears
-       `secondary_doc` on primary-document navigation; this suppressor is the
-       CSS half, and neither stands down because the other exists. Resting an
-       abolition on a routing invariant alone is precisely the mistake D170
-       already made once: its supporting arithmetic — panel = vw − 304 at
-       every wide viewport — is FALSIFIED the moment a 360px secondary pane
-       is open. Wide stays safe today only because D170's kill switch above
-       is UNCONDITIONAL — specificity (0,4,2) over the generator's (0,3,1) —
-       not because the geometry holds. An invariant can break; the
-       suppressor cannot.
-
-       Same idiom as the narrow/phone sibling directly above: `content: none`
-       on the `::after` generates no box at all — zero rendered scrims, not a
-       transparent one. Specificity (0,5,1) over the generator's (0,3,1) and
-       later in source order, so it wins on both counts; and it sits OUTSIDE
-       the 860px @container on purpose, unbounded by pane width, so no future
-       pane composition can slip back under the threshold and re-dim. */
-    html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
-      content: none;
     }
 
     /* ── THE STANDARD-BUCKET DOCK IS 260px, AND WIDE IS NOT TOUCHED ──────────
@@ -4200,16 +4111,23 @@
        phx-click element inside #studio-panes — Structure rows, doc rows, pane
        header actions — not just the two row components.
 
+       spd-w19-press-answer-outside-panes widens the SAME rule to `.studio-bar`,
+       the chrome bar that holds the top-bar actions and (as `.studio-bar-tabs`)
+       the studio-tab strip. One rule, two roots: the eye gets the same moving
+       bar wherever the press landed, and there is still exactly one vocabulary.
+
        A MOVING bar, not another static tint: the complaint the parent row
        exists to answer is that a still grey wash reads as a dead control, and
        motion is the thing that says "this is working" without words. It rides
        ::after pinned to the row's bottom edge so it cannot shift layout, and it
        is additive — `.phx-click-loading{opacity:.6}` above is untouched. */
-    #studio-panes [aria-busy="true"] {
+    #studio-panes [aria-busy="true"],
+    .studio-bar [aria-busy="true"] {
       position: relative;
       border-left-color: var(--primary);
     }
-    #studio-panes [aria-busy="true"]::after {
+    #studio-panes [aria-busy="true"]::after,
+    .studio-bar [aria-busy="true"]::after {
       content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
       background: var(--primary); border-radius: 2px;
       transform-origin: left center; pointer-events: none;
@@ -4224,7 +4142,8 @@
        accent rule under the pressed row. Never `animation: none` alone, which
        would leave scaleX(0) and hide the bar outright. */
     @media (prefers-reduced-motion: reduce) {
-      #studio-panes [aria-busy="true"]::after {
+      #studio-panes [aria-busy="true"]::after,
+      .studio-bar [aria-busy="true"]::after {
         animation: none; transform: scaleX(1); opacity: 1;
       }
     }
@@ -5321,10 +5240,23 @@
       // bindClick's early return (live_socket.js:857-859), which is the drop
       // mechanism that alone reproduces the owner's "the buttons do nothing".
       //
-      // COVERAGE: anything with a `phx-click` inside #studio-panes — Structure
-      // rows, document rows, row checkboxes, pane header actions, the collapsed
-      // strip. The studio-tab strip and the top bar sit OUTSIDE this container
-      // and are NOT covered by this slice.
+      // COVERAGE (widened by spd-w19-press-answer-outside-panes): anything with
+      // a `phx-click` inside #studio-panes — Structure rows, document rows, row
+      // checkboxes, pane header actions, the collapsed strip — AND the Studio
+      // chrome bar `.studio-bar`, which is where the top-bar actions and the
+      // studio-tab strip (`.studio-bar-tabs`, a child of `.studio-bar`) live.
+      // Same region, same words, same honesty rule, and NO second live region:
+      // two aria-live nodes race and the announcement order becomes undefined.
+      //
+      // THE TAB STRIP IS NOT A phx-click SURFACE, and that corrects the premise
+      // this slice was filed on. Read off the served authenticated desk
+      // (guerrilla f23cd4f88): every `.studio-tab` is a plain `<a href>`
+      // (the `<a href={tab.path}>` arm of `Nav.studio_tabs/1`) and the strip puts
+      // ZERO phx-click attributes on the
+      // page — so it never got the `.phx-click-loading{opacity:.6}` tint
+      // either. It got NOTHING. A full-document navigation is still a press
+      // that deserves an answer, so it gets one, through `_paOnChromeAnchor`
+      // below and in a shape that cannot arm the socket watchdog.
       _PA_PROBE: 16,     // ms — is the ref stamped yet? (measured at dt≈1ms)
       _PA_POLL: 100,     // ms — has the ref dropped / the row detached?
       _PA_WITNESS_GRACE: 750, // ms — allow a stable selection control's reply rerender
@@ -5332,6 +5264,18 @@
       _PA_FADE: 6000,    // ms — how long a settled answer stays readable
 
       _paRegion() { return document.getElementById("bp-press-answer"); },
+
+      // The two surfaces this hook answers for, nearest-first: the pane row it
+      // is mounted on, and the Studio chrome bar. A pane press resolves to
+      // `#studio-panes`, which IS `this.el`, so every witness below is computed
+      // over exactly the scope it was computed over before this slice and no
+      // shipped row behaviour moves. A chrome press resolves to `.studio-bar`.
+      // Anything else — the Papers editor, a modal, a plugin surface — resolves
+      // to null and is left alone: this hook answers for the desk it can see.
+      _paScopeFor(el) {
+        if (!el || !el.closest) return null;
+        return el.closest("#studio-panes") || el.closest(".studio-bar");
+      },
 
       _paSay(text) {
         var el = this._paRegion();
@@ -5357,8 +5301,12 @@
       // that license a success word (D263: #item-rest ANSWERS in 1944ms and
       // changes nothing — a ref-drop clear that said "Opened." would announce a
       // success for a dead row, i.e. trade the old silence for a new lie).
-      _paCurrentSig() {
-        var nodes = this.el.querySelectorAll("[aria-current]"), out = [], i, n;
+      // `root` is the press's own surface (`_paScopeFor`). It is NOT widened to
+      // `document`: the tab strip's `aria-current="page"` never moves without a
+      // full navigation, so a document-wide signature would add no witness and
+      // would let an unrelated surface certify a press it had nothing to do with.
+      _paCurrentSig(root) {
+        var nodes = (root || this.el).querySelectorAll("[aria-current]"), out = [], i, n;
         for (i = 0; i < nodes.length; i++) {
           n = nodes[i];
           out.push(String(n.id || n.getAttribute("aria-label") || (n.textContent || "").trim()).slice(0, 40));
@@ -5388,9 +5336,10 @@
         };
       },
 
-      _paPressedChanged(witness) {
+      _paPressedChanged(witness, root) {
         if (!witness || !witness.el) return false;
-        var el = this.el.contains(witness.el) ? witness.el : null;
+        var scope = root || this.el;
+        var el = scope.contains(witness.el) ? witness.el : null;
 
         // LiveView may replace the clicked node while applying the reply. In
         // that case reacquire ONLY its stable exact identity — never text,
@@ -5398,7 +5347,7 @@
         // ambiguous identity fails closed, so an unrelated toggle cannot
         // certify this action.
         if (!el && (witness.id || witness.testId)) {
-          var nodes = this.el.querySelectorAll("[aria-pressed]"), match = null, i, n;
+          var nodes = scope.querySelectorAll("[aria-pressed]"), match = null, i, n;
           for (i = 0; i < nodes.length; i++) {
             n = nodes[i];
             if (witness.id && n.id !== witness.id) continue;
@@ -5453,8 +5402,8 @@
       // success this hook is allowed to name.
       _paSettleWord(p) {
         if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
-        if (this._paCurrentSig() !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
-        if (this._paPressedChanged(p.pressed)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (this._paCurrentSig(p.root) !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (this._paPressedChanged(p.pressed, p.root)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
         return null;
       },
 
@@ -5498,12 +5447,52 @@
         );
       },
 
+      // A CHROME ANCHOR IS A NAVIGATION, NOT A SOCKET PRESS, and the difference
+      // is load-bearing. There is no ref to watch, no settle and no ceiling, so
+      // this shape must never arm the watchdog: doing so would announce "that
+      // press did not reach the server" about a navigation that is working
+      // perfectly, which is a worse lie than the silence it replaces. It says
+      // its word and releases in the same task — the words are on screen before
+      // the browser tears the page down.
+      _paOnChromeAnchor(ev, t) {
+        // Something already claimed this press (a JS command, a menu, a hook).
+        if (ev.defaultPrevented) return;
+        // A modified click opens a BACKGROUND tab. This page changes nothing,
+        // and "opened in a new tab" is a claim no witness on this page supports.
+        if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button) return;
+        var a = t.closest("a[href]");
+        if (!a || !this._paScopeFor(a)) return;
+        if (a.target && a.target !== "_self") return;
+        if (a.hasAttribute("download")) return;
+        var href = a.getAttribute("href") || "";
+        // A bare fragment scrolls; a javascript: url is not a navigation.
+        if (!href || href.charAt(0) === "#" || /^javascript:/i.test(href)) return;
+        var to;
+        try { to = new URL(a.href, location.href); } catch (e) { return; }
+        if (to.protocol !== "http:" && to.protocol !== "https:") return;
+        var name = this._paName(a);
+        // THE HONESTY RULE, ANCHOR SHAPE. The ACTIVE tab's href IS the page you
+        // are already on: the press answers, the browser re-fetches, and the
+        // desk is the same desk. It gets the same NEUTRAL clear a witness-less
+        // socket press gets. "Opening “Structure”" would name a move that does
+        // not happen — exactly the trade D263 refuses, silence for a lie.
+        if (to.href === location.href) { this._paRelease("Done."); return; }
+        // Present tense on purpose: the navigation is IN FLIGHT. "Opened" is
+        // reserved for a URL that has already moved.
+        this._paRelease(name ? "Opening “" + name + "”…" : "Opening…");
+      },
+
       _paOnPress(ev) {
         var t = ev.target;
         if (!t || !t.closest) return;
         var el = t.closest("[phx-click]");
         if (this._paNativeDisclosureOnly(t, el)) return;
-        if (!el || !this.el.contains(el)) return;
+        if (!el) { this._paOnChromeAnchor(ev, t); return; }
+        var root = this._paScopeFor(el);
+        // A phx-click OUT of scope is not handed to the anchor branch: an
+        // ancestor <a> would then be announced for a press the hook already
+        // decided it does not answer for.
+        if (!root) return;
         var spec = el.getAttribute("phx-click") || "";
         // A pure client-side JS command list never reaches the server and never
         // gets a ref, so there is nothing to wait for and saying "working"
@@ -5522,9 +5511,10 @@
 
         var p = {
           el: el,
+          root: root,
           name: this._paName(el),
           url: location.href,
-          sig: this._paCurrentSig(),
+          sig: this._paCurrentSig(root),
           pressed: this._paPressedWitness(el),
         };
         // Newest press owns the region; the previous one's timers die with it.
@@ -5615,10 +5605,20 @@
         this._paProbe = 0;
         this._paCeil = 0;
         this._paFadeT = 0;
-        // Bubble phase on this container — never capture, and never on window:
-        // running before LiveView's window listener is the whole mechanism.
+        // BUBBLE PHASE ON DOCUMENT — never capture, and never on window.
+        // Running before LiveView's click listener is the whole mechanism, and
+        // it survives the move off this container: LiveView binds on `window`
+        // in the bubble phase (`LiveSocket#bindClicks` in live_socket.js), and
+        // `window` is the
+        // LAST bubble target, strictly after `document`. So `data-phx-ref-src`
+        // read at click time is still the exact discriminator for "this press
+        // is about to be DISCARDED". It is `document` rather than `this.el`
+        // because `.studio-bar` is a SIBLING of `#studio-panes`, not a
+        // descendant, so a container listener can never see a chrome press;
+        // scope is enforced by `_paScopeFor`, not by where the listener sits —
+        // the same choice, for the same reason, as the in-flight guard below.
         this._paOnClick = (ev) => this._paOnPress(ev);
-        this.el.addEventListener("click", this._paOnClick);
+        document.addEventListener("click", this._paOnClick);
         // A navigation away must not leave a pending announcement behind.
         this._paOnPageHide = () => this._paRelease("");
         window.addEventListener("pagehide", this._paOnPageHide);
@@ -5626,7 +5626,7 @@
       destroyed() {
         window.removeEventListener("resize", this._onResize);
         if (this._raf) window.cancelAnimationFrame(this._raf);
-        this.el.removeEventListener("click", this._paOnClick);
+        document.removeEventListener("click", this._paOnClick);
         window.removeEventListener("pagehide", this._paOnPageHide);
         this._paRelease("");
       }
@@ -6172,12 +6172,16 @@
     // control is blocked from the keyboard too, and a control that is NOT
     // in-flight matches nothing here and is untouched.
     //
-    // THE WORDS. When the blocked control is inside #studio-panes the
-    // press-answer region says the same sentence the press-answer hook's
-    // discard branch says (D263), because this listener now runs BEFORE that
-    // hook and would otherwise have turned a named drop back into silence.
-    // Outside the desk this guard is silent — the press-answer slice covers
-    // #studio-panes only, and a guard is not the place to widen it.
+    // THE WORDS. When the blocked control is on a surface the press answer
+    // covers, the region says the same sentence the press-answer hook's discard
+    // branch says (D263), because this listener runs BEFORE that hook and would
+    // otherwise have turned a named drop back into silence. The scope is the
+    // hook's own (`_paScopeFor`: `#studio-panes` or `.studio-bar`) and it is
+    // kept in step with it deliberately — spd-w19-press-answer-outside-panes
+    // widened the hook to the chrome, and leaving this guard on the pane row
+    // would have re-silenced every chrome press the guard swallows. Beyond
+    // those two surfaces it stays silent: a guard is not the place to widen
+    // coverage the hook has not taken.
     //
     // BP-INFLIGHT-GUARD-BEGIN
     document.addEventListener("click", function (ev) {
@@ -6187,9 +6191,8 @@
       if (!blocked) return;
       ev.preventDefault();
       ev.stopImmediatePropagation();
-      var desk = document.getElementById("studio-panes");
       var region = document.getElementById("bp-press-answer");
-      if (!desk || !region || !desk.contains(blocked)) return;
+      if (!region || !blocked.closest("#studio-panes, .studio-bar")) return;
       var say = "Still working on your last press — that one was not sent.";
       if (region.textContent !== say) region.textContent = say;
     }, true);

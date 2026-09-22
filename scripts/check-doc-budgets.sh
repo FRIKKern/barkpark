@@ -316,10 +316,48 @@ if [ "$MODE" = selftest ]; then
 
   fail_selftest() { echo "check-doc-budgets --selftest: FAILED — $*"; exit 1; }
 
+  # THE ARM COUNT IS DERIVED FROM THE ARMS THAT ACTUALLY RAN.
+  #
+  # The PASS label used to carry a HAND-TYPED count ("PASS (32 arms: …)") next
+  # to a hand-typed list of arm names. Nothing computed either, and nothing
+  # compared them, so the two drifted independently: at the merge base of
+  # #19663 the label read 25 while the list named 23, and that PR's commit
+  # message said 27 — three numbers for one quantity. Worse than untidy: a
+  # count printed beside a PASS is what a reader uses to judge whether the
+  # green measured anything, and a number nothing computes CANNOT FALL when an
+  # arm is deleted. A rebase that silently drops an assertion prints the same
+  # confident label.
+  #
+  # RECONCILED ON THE RECORD. At 336d0ebd1 (origin/main, 2026-09-22) the label
+  # read 32 while the list beside it named only 31: the caps-literal-pin arm
+  # (j0, "CAPS_ROWS_EXPECTED agrees with the committed table") had no name in
+  # it. 32 was the RIGHT number — 32 arms really do run — and the list was the
+  # wrong one, which is the opposite of what the #19663 measurement suggested,
+  # where the label (25) overcounted the list (23). Every figure in that
+  # history — 25, 23, 27, 32, 31 — was hand-written, so which of any pair was
+  # right was luck. The derived count and the derived list settle it: the run
+  # below prints 32 and names 32, from one source.
+  #
+  # Now every arm opens with `arm "<name>"`. The count is the number of those
+  # calls the run REACHED — delete an arm and the label reads N-1 by itself —
+  # and the name list is accumulated from the same calls, so the two can never
+  # disagree again: they are one quantity with one source.
+  SELFTEST_ARM_COUNT=0
+  SELFTEST_ARM_NAMES=""
+  arm() {
+    SELFTEST_ARM_COUNT=$((SELFTEST_ARM_COUNT + 1))
+    if [ -z "$SELFTEST_ARM_NAMES" ]; then
+      SELFTEST_ARM_NAMES="$1"
+    else
+      SELFTEST_ARM_NAMES="$SELFTEST_ARM_NAMES, $1"
+    fi
+  }
+
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
   bash "$SELF" --regen-onramp-golden >/dev/null
 
   # (0) pristine, pinned tree passes
+  arm "pristine"
   bash "$SELF" --span-only >/dev/null 2>&1 || fail_selftest "a pristine pinned tree did not pass"
 
   # (a)/(b) plant sizing. The plant used to be a FIXED 126B (one blank + two note
@@ -356,6 +394,7 @@ if [ "$MODE" = selftest ]; then
 
   # (a) a plausible note line INSIDE the span, no marker moved → must RED, and
   #     must red on the GOLDEN MISMATCH, not incidentally on the span cap.
+  arm "in-span plant"
   awk -v line="$plant_line" '{ print }
        $0 == "<!-- barkpark:onramp:begin -->" && !planted {
          print line;
@@ -370,10 +409,12 @@ if [ "$MODE" = selftest ]; then
   esac
 
   # (b) the SAME plant, legitimately re-pinned → must PASS (the reviewed path)
+  arm "re-pin"
   bash "$SELF" --regen-onramp-golden >/dev/null
   bash "$SELF" --span-only >/dev/null 2>&1 || fail_selftest "a re-pinned (regenerated golden) span did NOT pass"
 
   # (c) the end marker relocated to EOF, swallowing the rest of the doc → RED
+  arm "marker relocation"
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
   bash "$SELF" --regen-onramp-golden >/dev/null
   grep -v -x -- '<!-- barkpark:onramp:end -->' "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
@@ -385,6 +426,7 @@ if [ "$MODE" = selftest ]; then
   # (d) span padded past the span cap AND the golden regenerated → still RED.
   #     This is the bound on the golden-as-laundering-channel: re-pinning blesses
   #     content, never unbounded SIZE.
+  arm "span cap"
   awk '{ print }
        $0 == "<!-- barkpark:onramp:begin -->" && !planted {
          for (i = 0; i < 40; i++)
@@ -397,6 +439,7 @@ if [ "$MODE" = selftest ]; then
   fi
 
   # (e) the golden deleted → RED (the pin cannot be disarmed by removing it)
+  arm "missing golden"
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
   bash "$SELF" --regen-onramp-golden >/dev/null
   rm -f "$DOC_BUDGETS_ONRAMP_GOLDEN"
@@ -406,6 +449,7 @@ if [ "$MODE" = selftest ]; then
   bash "$SELF" --regen-onramp-golden >/dev/null
 
   # (f) both markers removed → RED (pair check, unchanged behaviour)
+  arm "no markers"
   grep -v -x -e '<!-- barkpark:onramp:begin -->' -e '<!-- barkpark:onramp:end -->' \
     "$PRISTINE" > "$DOC_BUDGETS_ONRAMP_DOC"
   if bash "$SELF" --span-only >/dev/null 2>&1; then
@@ -413,6 +457,7 @@ if [ "$MODE" = selftest ]; then
   fi
 
   # (g) an unknown argument exits 2, not 0
+  arm "bad arg"
   rc=0
   bash "$SELF" --zzz-nonsense >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq 2 ] || fail_selftest "an unknown argument exited $rc, expected 2"
@@ -421,6 +466,7 @@ if [ "$MODE" = selftest ]; then
   #     span cap raised through the environment: the clamp must pull it back to
   #     the committed default and the gate must still RED. Without the clamp one
   #     `env:` line blesses an onramp span of any size.
+  arm "span-cap clamp both directions"
   awk '{ print }
        $0 == "<!-- barkpark:onramp:begin -->" && !planted {
          for (i = 0; i < 40; i++)
@@ -468,6 +514,7 @@ if [ "$MODE" = selftest ]; then
   #     green (or lose the card-count line) while the control stayed red, and
   #     this arm reds on the DIFFERENCE. Statuses are captured with `|| rc=$?`
   #     because this script runs under `set -e` too.
+  arm "retired env var inert"
   env_rc=0
   DOC_BUDGETS_SPAN_ONLY=1 bash "$SELF" >"$TMP/env-run.out" 2>&1 || env_rc=$?
   ctl_rc=0
@@ -551,6 +598,7 @@ if [ "$MODE" = selftest ]; then
 
   # jc: THE CONTROL — the unmutated copy must be GREEN on the planted root, or
   #     no exit code below is attributable to its mutation.
+  arm "caps green control"
   cp "$SELF" "$caps_probe"
   set +e
   caps_out="$(bash "$caps_probe" 2>&1)"
@@ -563,12 +611,14 @@ if [ "$MODE" = selftest ]; then
   #     every assertion below is about a number nobody maintains.
   # `grep -c` exits 1 on a count of ZERO, and under `set -e` that would kill the
   # harness before it could report — while zero is precisely what arm j1 plants.
+  arm "caps literal pin"
   rows_in_table=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$SELF" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
   expected_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
   [ "$rows_in_table" = "$expected_literal" ] \
     || fail_selftest "CAPS_ROWS_EXPECTED=$expected_literal but the table holds $rows_in_table row(s)"
 
   # j1: blind the table -> the gate must RED, and name the row-count mismatch.
+  arm "caps-table dark"
   awk 'BEGIN { drop = 0 }
        /^done <<.CAPS.$/ { print; drop = 1; next }
        /^CAPS$/          { print; drop = 0; next }
@@ -589,6 +639,7 @@ if [ "$MODE" = selftest ]; then
 
   # j2: a row ADDED without bumping the literal must RED too — the ratchet has
   #     to bite in both directions or it is a one-way rubber stamp.
+  arm "caps-table unpinned row"
   awk -v add="docs/INDEX.md 1200" '
        { print }
        /^done <<.CAPS.$/ && !done_add { print add; done_add = 1 }' "$SELF" > "$caps_probe"
@@ -612,6 +663,7 @@ if [ "$MODE" = selftest ]; then
   #     file sailed through. Shrink the FIRST table row's cap to 1 byte (row
   #     count unchanged, file present at 2 bytes) so the ONLY red is the
   #     over-cap arm.
+  arm "over-cap file"
   awk 'BEGIN { intab = 0; done_shrink = 0 }
        /^done <<.CAPS.$/ { print; intab = 1; next }
        /^CAPS$/          { intab = 0; print; next }
@@ -633,6 +685,7 @@ if [ "$MODE" = selftest ]; then
   # j4: a MISSING capped file must RED through check_cap's missing-file arm.
   #     Swap the FIRST row's path for one that does not exist (row count
   #     unchanged) so the ONLY red is the missing-file arm.
+  arm "missing capped file"
   awk 'BEGIN { intab = 0; done_swap = 0 }
        /^done <<.CAPS.$/ { print; intab = 1; next }
        /^CAPS$/          { intab = 0; print; next }
@@ -655,6 +708,7 @@ if [ "$MODE" = selftest ]; then
   # k0: the freeze literal agrees with the committed freeze table. Same reason
   #     as j0 — if these drift, every assertion below is about a number nobody
   #     maintains.
+  arm "freeze literal pin"
   freeze_rows_in_table=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
   freeze_expected_literal=$(grep -E '^FREEZE_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
   [ "$freeze_rows_in_table" = "$freeze_expected_literal" ] \
@@ -669,6 +723,7 @@ if [ "$MODE" = selftest ]; then
   #     reds first, and this arm passes on someone else's refusal: measured —
   #     with the floor's FAIL=1 replaced by FAIL=0 the selftest still printed
   #     PASS. An arm has to red for its OWN reason or it certifies nothing.
+  arm "DISCOVERY DARK"
   sed -e "s|^      find docs -name '\*\.md' -not -path 'docs/cli/fixtures/\*'$|      true|" \
       -e "s|^      find scripts -maxdepth 1 -name '\*\.md'$|      true|" \
       -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=0|" \
@@ -695,6 +750,7 @@ if [ "$MODE" = selftest ]; then
   # k2: a doc OVER its own header budget must RED, naming the header. Planted
   #     as a FIXTURE (not a script mutation) because that is the real shape:
   #     someone grows a doc whose header nobody was reading.
+  arm "over-header doc"
   cp "$SELF" "$caps_probe"
   printf '%s\n' "<!-- doc-tier: agent | canonical-for: overbudget-fixture | budget: 1tok -->" \
     > "$caps_root/docs/discovery-overbudget-fixture.md"
@@ -713,6 +769,7 @@ if [ "$MODE" = selftest ]; then
   # k3: a FROZEN doc that GROWS must RED. Shrink the first freeze row's number
   #     to 1 (row count unchanged, file present) so the only red is the freeze
   #     ratchet. Without this arm the freeze table is a blank cheque.
+  arm "grown frozen doc"
   awk 'BEGIN { intab = 0; done_shrink = 0 }
        /^done <<.FREEZE.$/ { print; intab = 1; next }
        /^FREEZE$/          { intab = 0; print; next }
@@ -734,6 +791,7 @@ if [ "$MODE" = selftest ]; then
   # k4: a frozen doc that has come back UNDER its header must RED too, telling
   #     the author to DELETE the row. Without this the freeze list only ever
   #     grows, and a paid debt keeps buying slack forever.
+  arm "paid frozen doc"
   cp "$SELF" "$caps_probe"
   selftest_first_frozen=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | sed -n 1p | cut -d' ' -f1)
   printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-paid | budget: 1000tok -->" \
@@ -754,6 +812,7 @@ if [ "$MODE" = selftest ]; then
   # k5: a freeze row naming a doc discovery never reaches must RED. That row is
   #     a number that can no longer fail — the exact shape this whole arm exists
   #     to refuse, reappearing inside its own remedy.
+  arm "stale freeze row"
   awk 'BEGIN { intab = 0; done_swap = 0 }
        /^done <<.FREEZE.$/ { print; intab = 1; next }
        /^FREEZE$/          { intab = 0; print; next }
@@ -791,6 +850,7 @@ if [ "$MODE" = selftest ]; then
   #     row appearing without review, so that is the direction pinned here.
   #     The added row DUPLICATES the first one, so lookup (first match wins) is
   #     unchanged and the row count is the ONLY thing that differs.
+  arm "unpinned freeze row"
   selftest_dup_freeze=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | sed -n 1p)
   awk -v add="$selftest_dup_freeze" '
        { print }
@@ -812,6 +872,7 @@ if [ "$MODE" = selftest ]; then
   #     an unbound variable in setup, before a single arm runs — must not exit 0.
   #     Injected immediately after the trap, so the probe dies having proven
   #     nothing; the only acceptable answer is a non-zero exit.
+  arm "harness aborts non-zero"
   awk '{ print }
        /^  export DOC_BUDGETS_SELFTEST_ACTIVE=1$/ && !done_inject { print "  : \"$dw_unbound_planted_by_selftest\""; done_inject = 1 }' \
       "$SELF" > "$caps_probe"
@@ -841,6 +902,7 @@ if [ "$MODE" = selftest ]; then
   #     count is the only thing standing between one argued exception and a
   #     drawer of them. The added row DUPLICATES the existing one, so lookup is
   #     unchanged and the count is the ONLY difference.
+  arm "unpinned exemption row"
   ao_expected_literal=$(grep -E '^APPEND_ONLY_ROWS_EXPECTED=[0-9]+$' "$SELF" | sed -n 1p | cut -d= -f2)
   ao_dup_row=$(sed -n "/^done <<.APPEND_ONLY.$/,/^APPEND_ONLY$/p" "$SELF" | grep -E '^[A-Za-z].*\.md$' | sed -n 1p)
   awk -v add="$ao_dup_row" '
@@ -871,6 +933,7 @@ if [ "$MODE" = selftest ]; then
   #     exit is attributable), must reach the union floor (so the arm under test
   #     actually ran), and must NOT reach the card count (so the mode really is
   #     narrow and a later reader is not misled about what this lane covers).
+  arm "discovery-only control+scope"
   cp "$SELF" "$caps_probe"
   set +e
   caps_out="$(bash "$caps_probe" --discovery-only 2>&1)"
@@ -899,6 +962,7 @@ if [ "$MODE" = selftest ]; then
   #     full run; that says nothing about the mode the required lane actually
   #     invokes. Same mutation, same assertion, different entry point — which is
   #     the whole reason this arm is not a duplicate of k1.
+  arm "discovery-only DARK"
   sed -e "s|^      find docs -name '\*\.md' -not -path 'docs/cli/fixtures/\*'$|      true|" \
       -e "s|^      find scripts -maxdepth 1 -name '\*\.md'$|      true|" \
       -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=0|" \
@@ -924,6 +988,7 @@ if [ "$MODE" = selftest ]; then
   #     pushed over its own header must RED in --discovery-only, NAMING the doc
   #     and its header. Without this arm the required lane is a green with no
   #     subject: the assertion is fine and the code path never arrives.
+  arm "discovery-only over-header doc"
   cp "$SELF" "$caps_probe"
   printf '%s\n' "<!-- doc-tier: agent | canonical-for: mode-overbudget-fixture | budget: 1tok -->" \
     > "$caps_root/docs/discovery-mode-overbudget-fixture.md"
@@ -943,6 +1008,7 @@ if [ "$MODE" = selftest ]; then
   #     applies twice as hard here: as an env var, one `env:` line far from the
   #     step could narrow the required lane to nothing. An unknown argument must
   #     still be usage (2), and the env-var spelling must be INERT.
+  arm "discovery-only env var inert"
   cp "$SELF" "$caps_probe"
   set +e
   caps_out="$(DOC_BUDGETS_DISCOVERY_ONLY=1 bash "$caps_probe" 2>&1)"
@@ -961,6 +1027,7 @@ if [ "$MODE" = selftest ]; then
   #     matching digit passed. Bump the literal past the ceiling (leaving the
   #     ceiling alone, which is exactly the shape of that edit) and the gate must
   #     refuse by name.
+  arm "freeze ceiling"
   awk -v add="$selftest_dup_freeze" '
        { print }
        /^done <<.FREEZE.$/ && !done_add { print add; done_add = 1 }' "$SELF" \
@@ -993,6 +1060,7 @@ if [ "$MODE" = selftest ]; then
   # k9: CONTROL — the unmutated copy on the planted green root must stay green,
   #     must NOT print the refusal, and must REACH the verdict the refusal sits
   #     in front of. If the identity spoke here it would be a permanent red.
+  arm "discovery count identity silent on an intact walk"
   cp "$SELF" "$caps_probe"
   set +e
   caps_out="$(bash "$caps_probe" 2>&1)"
@@ -1014,6 +1082,7 @@ if [ "$MODE" = selftest ]; then
   #     iteration, so the walk stops at 1 of N with nothing else wrong: the
   #     exact latent shape this identity exists to catch. The refusal must fire,
   #     name BOTH numbers, and exit non-zero.
+  arm "discovery count identity REFUSES a walk truncated by a stdin-draining child"
   awk '{ print }
        /^    DISCOVERY_ROWS_WALKED=\$\(\(DISCOVERY_ROWS_WALKED \+ 1\)\)$/ && !done_drain { print "    cat >/dev/null"; done_drain = 1 }' \
       "$SELF" > "$caps_probe"
@@ -1040,18 +1109,25 @@ if [ "$MODE" = selftest ]; then
   esac
 
   SELFTEST_COMPLETED=1
-  echo "check-doc-budgets --selftest: PASS (32 arms: pristine, in-span plant," \
-       "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
-       "span-cap clamp both directions, retired env var inert, caps green control," \
-       "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
-       "file, freeze literal pin, DISCOVERY DARK, over-header doc, grown frozen" \
-       "doc, paid frozen doc, stale freeze row, unpinned freeze row, harness" \
-       "aborts non-zero, unpinned exemption row, discovery-only control+scope," \
-       "discovery-only DARK, discovery-only over-header doc, discovery-only env" \
-       "var inert, freeze ceiling, discovery count identity silent on an intact" \
-       "walk, discovery count identity REFUSES a walk truncated by a" \
-       "stdin-draining child — every" \
-       "probe arm asserts the EXIT CODE and its own message)"
+
+  # PLANT CHECK — zero is a REFUSAL, never a clean run. A derived count whose
+  # source stops producing (an `arm` helper renamed away, the whole arm block
+  # skipped by an early branch) would otherwise print "PASS (0 arms)" and read
+  # as green: the "0 tests, 0 failures" shape this repo has already shipped.
+  [ "${SELFTEST_ARM_COUNT:-0}" -gt 0 ] \
+    || fail_selftest "the selftest reached ZERO arms — the derived arm count has lost its source, so this run measured nothing. A count of 0 is a refusal, not a pass"
+
+  # And the printed LIST must hold exactly that many entries. The two come from
+  # the same calls, so this can only fire when an arm NAME itself contains a
+  # comma — which would inflate the reader's list against the real count.
+  selftest_named_arms=$(printf '%s' "$SELFTEST_ARM_NAMES" | awk -F', ' '{ print NF }')
+  [ "$selftest_named_arms" -eq "$SELFTEST_ARM_COUNT" ] \
+    || fail_selftest "the label would print $SELFTEST_ARM_COUNT arms beside a list of $selftest_named_arms name(s) — an arm name contains a comma, so the printed list no longer counts the arms"
+
+  echo "check-doc-budgets --selftest: PASS ($SELFTEST_ARM_COUNT arms:" \
+       "$SELFTEST_ARM_NAMES — every probe arm asserts the EXIT CODE and its own" \
+       "message; the count and the names are both DERIVED from the arm() calls" \
+       "this run reached, so deleting an arm prints N-1)"
   exit 0
 fi
 
