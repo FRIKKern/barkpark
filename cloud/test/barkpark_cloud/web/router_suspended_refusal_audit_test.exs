@@ -323,7 +323,6 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
     end
   end
 
-
   ## The tenancy guard ON the suspended arm — the clause nothing reached
 
   describe "TENANCY on the suspended arm — a FOREIGN suspended box is an unknown id" do
