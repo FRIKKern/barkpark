@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Notifications.Channels.Webhook do
   credential carrying a `"url"`, so Slack and Discord are covered too. The check
   here is kept as belt-and-braces for this shaper's own contract.
   """
+  alias BarkparkCloud.Notifications.Channels.Idempotency
   alias BarkparkCloud.Notifications.{Render, SafeUrl}
 
   @spec shape(map(), String.t(), map(), keyword()) ::
@@ -26,17 +27,28 @@ defmodule BarkparkCloud.Notifications.Channels.Webhook do
       :ok ->
         {title, body, _severity} = Render.render(event, payload)
 
+        delivery_id = Idempotency.from_opts(opts)
+
         json =
           Jason.encode!(%{
             event: event,
             team_id: Keyword.get(opts, :team_id),
+            # The dedupe key. STABLE across all four attempts of one
+            # notification, unlike `timestamp` below, which is re-read per
+            # attempt and is a send TIME, not an identity. nil only for a job
+            # enqueued before this field existed and still retrying.
+            delivery_id: delivery_id,
             title: title,
             message: body,
             payload: payload,
             timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
           })
 
-        {:ok, url, json, [{"content-type", "application/json"}]}
+        headers =
+          [{"content-type", "application/json"}]
+          |> Idempotency.put_headers(delivery_id)
+
+        {:ok, url, json, headers}
 
       {:error, _} = err ->
         err

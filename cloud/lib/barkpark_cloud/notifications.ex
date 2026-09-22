@@ -2359,10 +2359,25 @@ defmodule BarkparkCloud.Notifications do
   failure that must NOT retry (4xx, bad credentials, SSRF block, missing channel),
   or `{:error, reason}` on a retryable failure (5xx / transport) so Oban re-drives
   with the worker's fixed backoff. A gone channel is a terminal no-op.
+
+  `delivery_id` is the STABLE per-notification idempotency key minted at
+  ENQUEUE (`enqueue_channel/4`) and carried in the job args, so every one of the
+  worker's four attempts presents the same value. `deliver_chat/4` keeps the old
+  shape and passes `nil` — a job enqueued before the id existed, and every caller
+  that has no notification identity to offer, rather than a fresh id per call,
+  which would be per-attempt and would dedupe nothing.
   """
   @spec deliver_chat(binary(), String.t(), String.t(), map()) ::
           :ok | {:cancel, term()} | {:error, term()}
-  def deliver_chat(team_id, type, event, payload) do
+  def deliver_chat(team_id, type, event, payload),
+    do: deliver_chat(team_id, type, event, payload, nil)
+
+  @doc """
+  `deliver_chat/4` carrying the enqueue-time delivery id. See `Channels.Idempotency`.
+  """
+  @spec deliver_chat(binary(), String.t(), String.t(), map(), String.t() | nil) ::
+          :ok | {:cancel, term()} | {:error, term()}
+  def deliver_chat(team_id, type, event, payload, delivery_id) do
     settings = get_or_create_settings(team_id)
 
     case Enum.find(settings.channels || [], &(&1.type == type and &1.enabled)) do
@@ -2377,14 +2392,16 @@ defmodule BarkparkCloud.Notifications do
         {:cancel, :channel_gone}
 
       %ChannelConfig{} = cfg ->
-        do_deliver_chat(team_id, cfg, event, payload)
+        do_deliver_chat(team_id, cfg, event, payload, delivery_id)
     end
   end
 
-  defp do_deliver_chat(team_id, %ChannelConfig{type: type} = cfg, event, payload) do
+  defp do_deliver_chat(team_id, %ChannelConfig{type: type} = cfg, event, payload, delivery_id) do
+    opts = [team_id: team_id, delivery_id: delivery_id]
+
     with {:ok, creds} <- reveal_credentials(cfg),
          :ok <- check_credential_url(creds),
-         {:ok, url, body, headers} <- shape(type, creds, event, payload, team_id: team_id) do
+         {:ok, url, body, headers} <- shape(type, creds, event, payload, opts) do
       post_chat(team_id, type, event, url, body, headers)
     else
       {:error, reason} ->
@@ -2406,10 +2423,10 @@ defmodule BarkparkCloud.Notifications do
   # `do_deliver_chat/4` before a shaper runs.
   defp shape(type, creds, event, payload, opts) do
     case type do
-      "discord" -> Channels.Discord.shape(creds, event, payload)
-      "slack" -> Channels.Slack.shape(creds, event, payload)
-      "telegram" -> Channels.Telegram.shape(creds, event, payload)
-      "pushover" -> Channels.Pushover.shape(creds, event, payload)
+      "discord" -> Channels.Discord.shape(creds, event, payload, opts)
+      "slack" -> Channels.Slack.shape(creds, event, payload, opts)
+      "telegram" -> Channels.Telegram.shape(creds, event, payload, opts)
+      "pushover" -> Channels.Pushover.shape(creds, event, payload, opts)
       "webhook" -> Channels.Webhook.shape(creds, event, payload, opts)
       other -> {:error, {:unknown_channel, other}}
     end
@@ -2432,11 +2449,47 @@ defmodule BarkparkCloud.Notifications do
         log_chat_delivery(team_id, type, event, "failed", status, {:http_status, status})
         {:error, {:http_status, status}}
 
+      # THE ACCEPTED-BUT-RESPONSE-LOST ARM. Every other branch here read a
+      # STATUS LINE off the wire, so it knows what the receiver did. This one
+      # did not, and it used to stamp `"failed"` — a claim about the RECEIVER
+      # that nothing measured. When the request timed out after the bytes went
+      # out, the message may have been processed once, or (with `max_attempts:
+      # 4`) several times, and the team's delivery log said it was never
+      # delivered at all.
+      #
+      # `"unconfirmed"` is not a stronger word than `"failed"`; it is a WEAKER
+      # one, and that is the whole point. `Delivery`'s moduledoc refuses a
+      # `"delivered"` status because there is no receipt source to back it —
+      # the same rule forbids `"failed"` here, because there is no receipt
+      # source to REFUTE delivery either. The honest row says we do not know.
+      #
+      # The RETURN is unchanged: still `{:error, reason}`, so Oban still
+      # re-drives. Only the receipt got more accurate.
       {:error, reason} ->
-        log_chat_delivery(team_id, type, event, "failed", nil, reason)
+        log_chat_delivery(team_id, type, event, transport_failure_status(reason), nil, reason)
         {:error, reason}
     end
   end
+
+  # DELIBERATELY NARROW, and it names its one member. `:timeout` is `:httpc`'s
+  # REQUEST timeout: the connection was established and the request written, and
+  # no response came back — the receiver's verdict is genuinely unknown.
+  #
+  # `{:failed_connect, _}` is excluded ON PURPOSE even when its inner posix is
+  # `:etimedout`: that tuple is raised in the CONNECT phase, before a single
+  # request byte is written, so nothing was delivered and `"failed"` is the
+  # accurate word. Same for `:nxdomain`, `:econnrefused`, `:ehostunreach` and the
+  # TLS failures — every one of them is a verdict that the request never left.
+  defp transport_failure_status(reason) do
+    if response_lost?(reason), do: "unconfirmed", else: "failed"
+  end
+
+  # The connect-phase tuple short-circuits BEFORE the generic unwrap, so its
+  # `:etimedout` inner term can never reach the `:timeout` class below.
+  defp response_lost?({:failed_connect, info}) when is_list(info), do: false
+  defp response_lost?({:http_client, inner}), do: response_lost?(inner)
+  defp response_lost?({:error, inner}), do: response_lost?(inner)
+  defp response_lost?(reason), do: DeliveryReason.classify(reason) == :timeout
 
   # Decrypt a channel's sealed credentials on demand — never a stored plaintext.
   defp reveal_credentials(%ChannelConfig{credentials_encrypted: ct})
@@ -2500,8 +2553,20 @@ defmodule BarkparkCloud.Notifications do
   # insert. It used to end `|> Oban.insert()` inside a bare `for` with the result
   # dropped on the floor, which made a failed insert indistinguishable from a
   # delivered notification at every level above it.
+  #
+  # THE MINT POINT for the delivery id. It lives HERE and nowhere else: Oban
+  # re-runs a retried job with the SAME args, so all four attempts of one
+  # notification present one id. Minting it in the worker or in a shaper would
+  # produce a per-ATTEMPT value, which is precisely the thing a dedupe key must
+  # not be. See `Channels.Idempotency`.
   defp enqueue_channel(team_id, %ChannelConfig{type: type}, event, payload) do
-    %{team_id: team_id, channel_type: type, event: event, payload: json_safe(payload)}
+    %{
+      team_id: team_id,
+      channel_type: type,
+      event: event,
+      payload: json_safe(payload),
+      delivery_id: Channels.Idempotency.mint()
+    }
     |> ChatNotificationWorker.new()
     |> insert_job()
     |> case do
