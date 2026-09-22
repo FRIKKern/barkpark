@@ -5298,9 +5298,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # acting principal's. It deliberately does NOT narrow to that workspace
   # wholesale — a NULL `owner_workspace_id` is a legacy / pre-tenancy row and
   # stays reachable, which is what the admin sidebar has always shown. Note that
-  # `Auth.create_token/5` defaults an omitted workspace to the Default
-  # workspace, so almost every token IS bound; narrowing on the binding alone
-  # would have made every legacy row unmanageable.
+  # almost every token IS bound — the HTTP mints resolve a workspace upstream
+  # (`AssignDefaultScope`), and every token minted before
+  # task-e0e6454b8b2045ae inherited one from `Auth.create_token/5`'s own
+  # Default fallback, which that task removed — so narrowing on the binding
+  # alone would have made every legacy row unmanageable.
   #
   # ONE BINDING PER MOUNT, SHARED WITH THE LOAD SEAM (task-787766c0cf6604f1).
   # This used to ask `principal_permits_owner?/2` on BOTH mounts, i.e. the acting
@@ -5376,9 +5378,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `owner_workspace_id == ^ws` equality (documented in `studio_chat.ex`, with
   # `StudioChat.scope_match?/2` as its term twin), so a NULL owner never matches
   # and every pre-tenancy session would VANISH the moment these loaders stopped
-  # saying `:global`. `Auth.create_token/5` defaults an omitted workspace to the
-  # seeded Default, so nearly every token IS bound and that vanishing would be
-  # the common case, not the edge. The store has no "mine-or-unowned" scope to
+  # saying `:global`. Nearly every token IS bound — the HTTP mints resolve a
+  # workspace upstream, and rows minted before task-e0e6454b8b2045ae inherited
+  # one from `Auth.create_token/5`'s since-removed Default fallback — so that
+  # vanishing would be the common case, not the edge. The store has no "mine-or-unowned" scope to
   # ask for, so the clamp is made HERE.
   defp owner_in_tenancy?(socket, owner) do
     case read_workspace_id(socket) do
