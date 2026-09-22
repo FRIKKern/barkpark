@@ -26,8 +26,9 @@ import (
 //     exercised `doc.patch --file --dry-run` at all.
 //
 // WHAT SIZE DOES AND DOES NOT BUY — read off run.go, not assumed. There is NO
-// size-dependent branch anywhere in the client: buildBody's --file arm is a
-// plain os.ReadFile + json.Unmarshal (run.go ~2272-2316) and nothing downstream
+// size-dependent branch anywhere in the client: the --file arm is a plain
+// os.ReadFile + json.Unmarshal (internal/cli/run.go:assembleBody, which
+// buildBody reaches through buildBodyWithStdinOwnership) and nothing downstream
 // reads len(body). So a multi-kilobyte fixture does not unlock a different
 // BRANCH, and any comment claiming it does would be false. What it buys is
 // measurable and is what these arms assert:

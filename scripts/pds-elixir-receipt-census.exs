@@ -2179,7 +2179,7 @@ defmodule PDS.Census do
     #
     #   :131 inbound_failed — UNJUDGED, SAME COST, VERIFIED SEPARATELY.
     #     `InboundEvents.detach/6` maps `Link.put/4`'s `{:error, reason}` here, and
-    #     `Link.put/4` (plugins/github/link.ex:122-151) ends in
+    #     `Link.put/4` (plugins/github/link.ex:Link.put/4) ends in
     #     `Content.upsert_document/4` with NO `if_rev`, so there is no fence to
     #     lose either; the `{:error, :not_found}` race it DOES have is already the
     #     2xx `:ignored` arm, not this one.
