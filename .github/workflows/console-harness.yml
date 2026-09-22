@@ -417,6 +417,8 @@ jobs:
               ;;
           esac
 
+          # PROBE MUTATION (console-w23, THROWAWAY): force the nothing-ran arm.
+          console=false
           echo "path answer: console=${console}"
           echo "console=${console}" >> "$GITHUB_OUTPUT"
 
@@ -3370,6 +3372,18 @@ jobs:
           # ONE notice, never one per job — GitHub caps annotations at 10 per
           # level per step and truncates the rest silently.
           if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=PROBE competing notice 01::annotation-budget filler 01"
+            echo "::notice title=PROBE competing notice 02::annotation-budget filler 02"
+            echo "::notice title=PROBE competing notice 03::annotation-budget filler 03"
+            echo "::notice title=PROBE competing notice 04::annotation-budget filler 04"
+            echo "::notice title=PROBE competing notice 05::annotation-budget filler 05"
+            echo "::notice title=PROBE competing notice 06::annotation-budget filler 06"
+            echo "::notice title=PROBE competing notice 07::annotation-budget filler 07"
+            echo "::notice title=PROBE competing notice 08::annotation-budget filler 08"
+            echo "::notice title=PROBE competing notice 09::annotation-budget filler 09"
+            echo "::notice title=PROBE competing notice 10::annotation-budget filler 10"
+            echo "::notice title=PROBE competing notice 11::annotation-budget filler 11"
+            echo "::notice title=PROBE competing notice 12::annotation-budget filler 12"
             echo "::notice title=Console gate: green — nothing ran::NOTHING CONSOLE RAN on this head.%0AConsole gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Console job executed', never as 'the Console harness passed'."
             # ── THE SECOND CHANNEL (see this job's `outputs:` note) ─────────
             # The line above is an ANNOTATION, and annotations are rationed:
