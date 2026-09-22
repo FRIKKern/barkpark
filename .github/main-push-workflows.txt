@@ -55,6 +55,7 @@
 .github/workflows/stale-verdict-watch.yml	ALWAYS
 .github/workflows/studio-instrument-selftests.yml	CONDITIONAL
 .github/workflows/studio-journey-smoke.yml	CONDITIONAL
+.github/workflows/studio-scrim-threshold.yml	ALWAYS
 .github/workflows/task-lease-renew.yml	ALWAYS
 .github/workflows/taskboard-drive.yml	CONDITIONAL
 .github/workflows/twoslash.yml	CONDITIONAL
