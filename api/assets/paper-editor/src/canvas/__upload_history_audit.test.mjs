@@ -1,5 +1,5 @@
-// Unsupported rich clipboard content must not delete the selected human text.
-// Run: node src/canvas/__rich_clipboard_preservation.test.mjs
+// Settled host uploads survive native image history without replaying requests.
+// Run: node src/canvas/__upload_history_audit.test.mjs
 import assert from "node:assert/strict";
 import { closeHistory } from "@tiptap/pm/history";
 import { JSDOM } from "jsdom";
