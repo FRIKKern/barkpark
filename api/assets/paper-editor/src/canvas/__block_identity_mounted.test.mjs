@@ -79,7 +79,7 @@ for(const mutation of ['split','reorder','delete']){
   canvas.applyServerBlocks(saved);assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.deepEqual(saved[1],seed[1]);
   e.view.dispatch(closeHistory(e.state.tr));canvas.querySelector('input[type="checkbox"]').click();canvas.flushPendingChanges();
   const checked=canvas._inflightOps;assert.ok(checked);assert.equal(checked.afterBlocks[0].id,listId);assert.equal(checked.afterBlocks[0].items[0].checked,true);canvas.acknowledgeOps(checked.seq,true);
-  e.commands.undo();canvas.flushPendingChanges();const undo=canvas._inflightOps;assert.ok(undo);canvas.acknowledgeOps(undo.seq,true);assert.deepEqual(canvas.blocks,saved,'checkbox Undo preserves all content and identities');
+  e.commands.undo();await new Promise(resolve=>setTimeout(resolve,0));canvas.flushPendingChanges();const undo=canvas._inflightOps;assert.ok(undo);canvas.acknowledgeOps(undo.seq,true);assert.deepEqual(canvas.blocks,saved,'checkbox Undo preserves all content and identities');
   e.commands.redo();canvas.flushPendingChanges();const redo=canvas._inflightOps;assert.ok(redo);canvas.acknowledgeOps(redo.seq,true);assert.deepEqual(canvas.blocks,checked.afterBlocks);
   const reopened=document.createElement('bp-paper-canvas');reopened.blocks=saved;document.body.append(reopened);
   try{assert.deepEqual(reopened.recoverySnapshot().blocks,saved,'reloaded checklist retains its stored ID');}finally{reopened.remove();}
@@ -92,7 +92,7 @@ for(const mutation of ['split','reorder','delete']){
   const e=canvas._editor,before=canvas.recoverySnapshot().blocks;e.commands.setTextSelection(e.state.doc.content.size-1);
   const paste=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(paste,'clipboardData',{value:{types:['text/html','text/plain'],files:[],getData:type=>type==='text/html'?'<ul><li>html one</li><li>html two</li></ul>':type==='text/plain'?'a b':''}});e.view.dom.dispatchEvent(paste);
   assert.equal(e.state.doc.lastChild.type.name,'bulletList');canvas.flushPendingChanges();const batch=canvas._inflightOps;assert.ok(batch);canvas.acknowledgeOps(batch.seq,true);const saved=structuredClone(canvas.blocks);canvas.applyServerBlocks(saved);
-  assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.equal(e.commands.undo(),true);assert.deepEqual(canvas.recoverySnapshot().blocks,before,'acknowledged HTML paste must undo to the exact original empty paragraph');
+  assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.equal(e.commands.undo(),true);await new Promise(resolve=>setTimeout(resolve,0));assert.deepEqual(canvas.recoverySnapshot().blocks,before,'acknowledged HTML paste must undo to the exact original empty paragraph');
   e.commands.redo();assert.deepEqual(canvas.recoverySnapshot().blocks,saved,'Redo restores the acknowledged HTML list and identity');
   console.log('PASS acknowledged HTML list paste preserves complete Undo/Redo history');
  }finally{canvas.remove();}
