@@ -223,4 +223,77 @@ defmodule BarkparkCloud.Notifications.OwnerOnlyRemedyTest do
       end
     end
   end
+
+  ## ── The audience FENCE (task-a342dccd023211d5) ───────────────────────────
+
+  describe "the audience is exactly list_team_member_emails/1, with no role predicate" do
+    # `dispatch_event/3` performs TWO membership reads: `team_member_emails/1`
+    # (the audience, `Accounts.list_team_member_emails/1` — no role predicate)
+    # and `team_member_roles/1` (`Accounts.list_team_members/1` — the recipient's
+    # role, for the copy). task-a342dccd023211d5 asked whether to collapse them
+    # into the one query that already returns both. It was measured and LEFT
+    # ALONE: the membership reads are a CONSTANT 2 queries at every team size,
+    # while the fan-out writes one `notification_deliveries` row per member and
+    # sends each mail synchronously — so the saving is one query out of 3+N, and
+    # its share only SHRINKS as the audience grows.
+    #
+    # The reason not to collapse is not the cost, it is the SHAPE: collapsing
+    # moves the audience onto a query that DOES select role, which is where a
+    # role predicate can later be added without looking like a change to who is
+    # told. Until now the only thing holding that invariant was the diff — that
+    # `list_team_member_emails/1` is byte-identical to origin/main. A diff cannot
+    # fail. This block is the mechanical form of the same claim, so the invariant
+    # survives a future collapse instead of depending on nobody attempting one.
+
+    setup do
+      n = System.unique_integer([:positive])
+      {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+
+      emails =
+        for role <- ["owner", "admin", "member"] do
+          {:ok, user} =
+            Accounts.register_user(%{
+              email: "#{role}-#{n}@example.com",
+              password: "correct horse staple"
+            })
+
+          {:ok, _} = Accounts.add_member(team, user, role)
+          user.email
+        end
+
+      # PRECONDITION, asserted rather than assumed: three DISTINCT roles, only
+      # one of them an owner. A uniform-role fixture would let every assertion
+      # below pass while a role filter was in place, which is the exact defect
+      # this block exists to catch.
+      roles = team |> Accounts.list_team_members() |> Enum.map(& &1.role) |> Enum.sort()
+      assert roles == ["admin", "member", "owner"]
+
+      %{team: team, emails: Enum.sort(emails)}
+    end
+
+    for event <- [:subscription_past_due, :trial_expiring] do
+      test "#{event}: all three roles are mailed, and the set IS the role-free query", ctx do
+        event = unquote(event)
+        :ok = Notifications.dispatch_event(ctx.team, event, %{name: "acme", days: 3})
+
+        recipients =
+          Repo.all(
+            from(d in Delivery,
+              where: d.team_id == ^ctx.team.id and d.event == ^Atom.to_string(event),
+              select: d.recipient
+            )
+          )
+          |> Enum.sort()
+
+        # The two NON-OWNERS are mailed, not just the owner who can act.
+        assert recipients == ctx.emails
+
+        # And the set is not merely "all three" by coincidence of this fixture —
+        # it is pinned to the output of the query that HAS no role predicate. If
+        # a future change derives the audience from the role-bearing read and
+        # narrows it, these two sides diverge and this test reds by name.
+        assert recipients == Enum.sort(Accounts.list_team_member_emails(ctx.team))
+      end
+    end
+  end
 end
