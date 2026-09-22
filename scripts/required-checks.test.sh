@@ -2417,6 +2417,23 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Sobelow baseline rows still hash to their own fingerprint (blocking)"
         --expect-unrendered "Test (Elixir 1.18.1 / OTP 27.0)"
         --expect-unrendered "Validation perf bench (median-of-5, alarm >100ms) (27.0, 1.18.1)"
+        # ── console-harness.yml `console-gate-subject`, 2026-09-22 ──────────
+        # THREE rows for ONE job, and the count is the mechanism, not a waiver.
+        # Its `name:` is a single expression over `Console gate`'s result and
+        # `nothing_ran` output, because a check run's NAME is the one field
+        # GitHub does not ration. The job declares its finite leg set
+        # (`# required-checks: matrix-name-legs
+        # .github/console-gate-subject-names.json .[]`), so the generator
+        # resolves the template into exactly these three LITERALS instead of the
+        # `^.+$` catch-all that claimed every other workflow's rendered name from
+        # 7b991dec9 until the fix. The frozen pair predates the job by six weeks
+        # and can render none of them; EXACTLY ONE renders per live head.
+        # Re-derive, never retype: `jq -r '.[]' .github/console-gate-subject-names.json`
+        # — and scripts/console-gate-subject-names-check.sh reds the REQUIRED
+        # `Elixir gate` if that file and the expression ever disagree.
+        --expect-unrendered "Console gate subject: the Console gate is NOT GREEN — read it, not this"
+        --expect-unrendered "Console gate subject: NOTHING CONSOLE RAN — that green is NOT APPLICABLE to this diff"
+        --expect-unrendered "Console gate subject: the console harness RAN and measured this head"
         # ── THE CENSUS PASS, 2026-09-06 (task-dda2cf022ee57420) ──────────────
         # 68 exclusion rows landed in one commit, giving a written status to every
         # check-run name rendered on the last 10 merged PR heads. NONE of them can
