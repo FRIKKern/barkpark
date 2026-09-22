@@ -736,7 +736,7 @@ gate scripts themselves and to the workflow file.
 ### The doc-gates roster (it is not two scripts)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **29 steps labelled `(fails this job)`** plus the
+undersells it: it runs **30 steps labelled `(fails this job)`** plus the
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -805,6 +805,7 @@ so its verdict is unaffected.) In workflow order:
 | 27 | Doc drift — links, routes, placeholders, runnable examples | `scripts/doc-drift-check.sh` (+ its `(tripwire)` self-test step; diff-scoped, landed by #18707 — see *When your PR touches a doc* below) |
 | 28 | Charter-corpus marker hygiene | `scripts/charter-corpus-hygiene-check.sh` (`--selftest`, then the check) over the `.claude/workflows/*-charter.md` corpus |
 | 29 | Charter adoption census | `deploy/charter-adoption-check.sh` (`--selftest`, then the check; the deploy-reliability charter's declared adoption set vs the set derived from `.github/workflows/`, red in both directions — D620) |
+| 30 | bp-command doc parse over docs/cli | `node tooling/doc-truth/verify-bp-commands.mjs` (`--selftest`, then the gate over `docs/cli/*.md`; the step carries its own glob FLOOR of 3 files, so a glob that expands to nothing FAILS and can never read as a pass) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
