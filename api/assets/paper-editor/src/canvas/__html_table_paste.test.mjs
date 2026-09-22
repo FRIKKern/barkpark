@@ -70,5 +70,10 @@ try {
    c._editor.view.input.shiftKey=true;paste(c,html,'Nested text retained');c._editor.view.input.shiftKey=false;assert.ok(c._editor.state.doc.textContent.includes('Nested text retained'),'explicit plain-text fallback works');
   });
  }
+ test('paste recovery notice dismisses without changing the draft',(c)=>{
+  const before=c.recoverySnapshot().blocks;const html='<table><tr><td><ul><li>Nested</li></ul></td></tr></table>';
+  paste(c,html);assert.ok(c.querySelector('[data-bp-paste-notice]'));document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(c.querySelector('[data-bp-paste-notice]'),null);assert.equal(c._pasteNoticeDismiss,null);assert.deepEqual(c.recoverySnapshot().blocks,before);
+  paste(c,html);c.remove();assert.equal(c._pasteNoticeDismiss,null,'disconnect releases document listeners');
+ });
  console.log(`${passed} HTML table paste cases passed`);
 } finally {dom.window.close();}

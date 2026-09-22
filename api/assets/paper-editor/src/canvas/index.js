@@ -1184,6 +1184,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._clearHTMLPasteNotice();
     // LiveView may move this keyed canvas between responsive Studio columns.
     // Custom-element reactions report that connected-to-connected reparent as a
     // disconnect followed synchronously by a reconnect. Defer destructive
@@ -2093,7 +2094,7 @@ class BpPaperCanvas extends HTMLElement {
     const insideTable = [...Array(view.state.selection.$from.depth).keys()]
       .some((depth) => view.state.selection.$from.node(depth + 1).type.name === "bpTable");
     if (plan.blocked || insideTable) {
-      this._showFigureConstraint(`${plan.blocked || "A table cannot be nested inside another table."} Nothing was pasted. Paste as plain text with Ctrl+Shift+V, or copy the cell text instead.`);
+      this._showHTMLPasteNotice(`${plan.blocked || "A table cannot be nested inside another table."} Nothing was pasted. Paste as plain text with Ctrl+Shift+V, or copy the cell text instead.`);
       return true;
     }
     const parsed = PMDOMParser.fromSchema(view.state.schema).parse(plan.dom);
@@ -2127,6 +2128,40 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  _showHTMLPasteNotice(message) {
+    this._clearHTMLPasteNotice();
+    const notice = this.ownerDocument.createElement("div");
+    notice.dataset.bpPasteNotice = "";
+    notice.setAttribute("role", "status");
+    notice.textContent = message;
+    this.appendChild(notice);
+    const viewport = this.ownerDocument.defaultView;
+    const bounds = this.getBoundingClientRect();
+    const left = Math.max(8, bounds.left + 8);
+    const right = Math.min(viewport.innerWidth - 8, bounds.right - 8);
+    notice.style.width = `${Math.max(80, Math.min(420, right - left))}px`;
+    notice.style.left = `${left}px`;
+    const caret = this._caretRect();
+    const height = notice.getBoundingClientRect().height;
+    const below = caret.bottom + 8;
+    notice.style.top = `${Math.max(8, below + height <= viewport.innerHeight - 8 ? below : caret.top - height - 8)}px`;
+    // A fixed notice does not push the document. Dismiss when its anchor moves
+    // or the person resumes work; no timeout can hide the recovery guidance.
+    this._pasteNoticeDismiss = (event) => {
+      if (event.type !== "keydown" || event.key === "Escape") this._clearHTMLPasteNotice();
+    };
+    for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.addEventListener(name, this._pasteNoticeDismiss, true);
+    viewport.addEventListener("resize", this._pasteNoticeDismiss);
+  }
+
+  _clearHTMLPasteNotice() {
+    this.querySelector("[data-bp-paste-notice]")?.remove();
+    if (!this._pasteNoticeDismiss) return;
+    for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.removeEventListener(name, this._pasteNoticeDismiss, true);
+    this.ownerDocument.defaultView?.removeEventListener("resize", this._pasteNoticeDismiss);
+    this._pasteNoticeDismiss = null;
+  }
+
   _showFigureConstraint(message = "A Figure keeps one content block. Enter cannot split or remove it.") {
     let notice = this.querySelector("[data-bp-figure-constraint]");
     if (!notice) {
@@ -2140,6 +2175,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _clearFigureConstraint() {
+    this._clearHTMLPasteNotice();
     this.querySelector("[data-bp-figure-constraint]")?.remove();
   }
 

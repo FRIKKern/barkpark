@@ -1526,7 +1526,7 @@ textarea.bp-canvas-island__input { resize: vertical; }
 }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
-/* Header and row-header cells are editable text too: preserve stored newlines. */
+/* Table cells are editable text too: preserve stored newlines. */
 bp-paper-canvas .ProseMirror :is(.bp-table__th, .bp-table__td) { white-space: pre-wrap; }
 
 [data-bp-text-boundary] {
@@ -1634,3 +1634,12 @@ bp-paper-canvas { position: relative; display: block; }
 /* The highlight mark inside the canvas; the reader's paper-surface.css carries the same rule (mirrored above). */
 bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn-hsl) / 0.35); color: inherit; padding: 0 0.12em; border-radius: 2px; box-decoration-break: clone; }
 
+
+/* Clipboard recovery stays beside the caret without changing document geometry. */
+[data-bp-paste-notice] {
+  position: fixed; z-index: 10001; box-sizing: border-box;
+  padding: 10px 12px; border: 1px solid var(--paper-rule, #aaa);
+  border-radius: 8px; background: var(--paper-bg, Canvas); color: var(--paper-ink, CanvasText);
+  box-shadow: 0 4px 18px #0002; font: 13px/1.45 var(--paper-font-ui, system-ui, sans-serif);
+  white-space: normal; overflow-wrap: anywhere; pointer-events: none;
+}
