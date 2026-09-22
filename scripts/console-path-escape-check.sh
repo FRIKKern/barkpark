@@ -233,6 +233,56 @@ set -euo pipefail
 # is ONE EXACT FILE for the reason cch-w30-bl-artifacts-paths-ungated gives: a
 # tree-wide `internal/cli/**` would bill every unrelated CLI PR for a console
 # harness run, which is the smell, not the remedy.
+# `cloud/priv/static/__fixtures__/**` RIDES `cloud/priv/static/**` ON PURPOSE, AND
+# IT STAYS THERE (task-9cbf50523873c126, decided 2026-09-22). The question asked
+# was whether a fixture-only commit should be cheaper: `--match console` answers
+# `true` for `cloud/priv/static/__fixtures__/attention_order.json`, so an eleven-
+# file golden directory that looks like inert test data bills the full, REQUIRED
+# Console gate. The answer is that it must, because those goldens are INPUTS to
+# console assertions, not outputs of them.
+#
+# MEASURED 2026-09-22 on origin/main 7b991dec9, the whole decision in one control:
+# swap the `rank` of `suspended` (3) and `degraded` (4) in
+# cloud/priv/static/__fixtures__/attention_order.json — two integers, no code —
+# and `node --test cloud/priv/static/__app.test.mjs` goes from
+# `# pass 1519 / # fail 1` to `# pass 1518 / # fail 2`, the new red being
+# `D32: the SPA ladder is attention_order.json ORDER, derived on both sides`.
+# (The constant 1 is a local-only environment red — __node-version pins 20, the
+# measuring box ran v22 — and is identical on both arms, so it cancels.)
+# That test is DERIVED ON BOTH SIDES by construction: neither the SPA order nor
+# the fixture order is typed out in the harness, so the ONLY way the assertion
+# can change is a fixture edit or an app.js edit. Move the fixtures to a cheaper
+# dispatch set and that red becomes unreachable on the PR that causes it.
+#
+# THE READS, BY FILE AND LINE, so the next reader does not have to re-derive them:
+# cloud/priv/static/__app.test.mjs readFileSync's the directory at :4632
+# (event_types.json), :5097 and :5785 (attention_order.json), :9103
+# (verify_probes.json), :10826 (usage_meters.json), :11856 (provider_catalog.json),
+# :12198 (providers_capabilities.json) and :13285 (domain-status.json); its
+# :10740/:10746 pair asserts on the `/__fixtures__/` route table in
+# cloud/priv/static/__preview__/serve.mjs:57-59; and
+# cloud/priv/static/__preview__/group-view-scenarios.mjs:47 joins
+# `../__fixtures__/fleet_group_roster.json` and DIES (:88) when the catalogue
+# gains a state the fixture does not carry. Nine of the eleven committed
+# fixtures are read by a console instrument directly. The other two —
+# hetzner_overview.json and platform_deliveries.json — are the same shape one
+# fence over: cloud/test/barkpark_cloud/web/hetzner_proxy_test.exs:489 and
+# cloud/test/barkpark_cloud/platform_delivery_fixture_reachability_test.exs:44
+# read them, and the FIRST of those is itself declared in this set via
+# `cloud/test/barkpark_cloud/web/**`.
+#
+# AND NOTHING CHEAPER CAN CATCH IT. .github/workflows/go-tests.yml:182 does
+# declare `cloud/priv/static/__fixtures__/**`, so the Go side re-runs — but
+# go-tests publishes no context in `.github/required-checks.json`, whose required
+# set is exactly Cloud gate / Console gate / Elixir gate / PR references an
+# active task. Of those, only the Console gate runs __app.test.mjs. Demote the
+# fixtures here and the only BLOCKING watcher of a fixture edit is gone, which is
+# the green-by-construction shape this whole file exists to refuse.
+#
+# THE COST IS THE POINT, not a side effect: an eleven-file directory of
+# cross-language goldens is exactly where a one-integer edit silently changes
+# what three runtimes believe. Re-open this only with a control that shows a
+# fixture edit reaching a required red by some OTHER door.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
