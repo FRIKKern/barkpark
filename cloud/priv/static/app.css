@@ -1845,11 +1845,15 @@ select.form-input {
 /* cch-w24-bl-word-break-alias-remaining-seven — KEPT, and the filing's stated
    reason ("min-width: 0 is present, so the escape is here") is MEASURABLY WRONG:
    delete the break declaration and the page drags to 668 against a 320 viewport
-   WITH that `min-width: 0` still in place. What is true is that no fixture makes
-   this site heterogeneous. At 320 on `failed` with a 78-char legal-maximum host
-   in the value, `word-break: break-word`, `overflow-wrap: break-word` and
-   `overflow-wrap: anywhere` are all box 230.2 in a 254px parent, 4 line boxes,
-   108px, page 320/320 — identical to the decimal. Converting would be a rename
+   WITH that `min-width: 0` still in place (and the element itself to 562/180).
+   What is true is that no fixture makes this site heterogeneous. At 320 on
+   `failed` with a 78-char legal-maximum host in the value, `word-break:
+   break-word`, `overflow-wrap: break-word` and `overflow-wrap: anywhere` are all
+   230/230, 144px tall, page 320/320 — identical to the decimal. RE-EARNED
+   2026-09-22 by driving all four again (task-10dad6bad6aea4cb): the guard's walk
+   had been splitting text nodes on the letter `s` rather than on whitespace, so
+   the older "230.2 in a 254px parent, 4 line boxes, 108px" was measured with the
+   cruel host CONCATENATED onto the rest of a word instead of replacing one. Converting would be a rename
    no fixture could have refused; the containment IS asserted (deleting it reds)
    by overflow-guard.mjs W24-word-break-alias-population. */
 .rail-row .v { font-size: 12px; font-weight: 500; font-family: var(--mono); text-align: right; word-break: break-word; min-width: 0; }
@@ -2252,12 +2256,14 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   /* cch-w24-bl-word-break-alias-remaining-seven — KEPT. Driven at 320 on
      `deploy-detail-cruel` with a 78-char legal-maximum host inside the caption:
      `word-break: break-word`, `overflow-wrap: break-word` and `overflow-wrap:
-     anywhere` all measure box 155.05 in a 155.05px parent, 4 line boxes, 108px,
-     page 320/320 — the `-webkit-line-clamp` + `overflow: hidden` below make this
-     box its own bound, so nothing consults min-content and no fixture can tell
-     the three apart. Deleting the declaration DOES separate them (scrollWidth
-     588 against 155), which is the containment W24-word-break-alias-population
-     asserts. The vertical story is the next comment's, and is a different
+     anywhere` all measure 155/155, 108px tall, page 320/320 — the
+     `-webkit-line-clamp` + `overflow: hidden` below make this box its own bound,
+     so nothing consults min-content and no fixture can tell the three apart.
+     Deleting the declaration DOES separate them (scrollWidth 514 against 155),
+     which is the containment W24-word-break-alias-population asserts. RE-EARNED
+     2026-09-22 (task-10dad6bad6aea4cb) after that guard's walk was corrected to
+     split on whitespace rather than on the letter `s`; the deletion figure was
+     588 under the old concatenating walk. The vertical story is the next comment's, and is a different
      defect. */
   word-break: break-word;
   /* cch-deploy-detail-render-has-no-cap — THE ONLY BOUND THIS CAPTION HAS.
@@ -3437,11 +3443,14 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      FALSE of the instance rail, where `failedSteps` carries two `status:
      "progress"` entries and the `failed` scenario paints them. Driven there at
      320 with a 78-char legal-maximum host in the probe text, all three values
-     measure box 250 in a 250px parent, 3 line boxes, 54.6px, page 320/320: the
-     instance rail is a fixed track, so nothing consults min-content and the
-     choice is unobservable. Deleting the declaration is NOT unobservable — 630
-     against a 250px box and the page to 665/320 — and that is what
-     overflow-guard.mjs W24-word-break-alias-population asserts. */
+     measure 250/250, 72.8px tall, page 320/320: the instance rail is a fixed
+     track, so nothing consults min-content and the choice is unobservable.
+     Deleting the declaration is NOT unobservable — 622 against a 250px box and
+     the page to 657/320 — and that is what overflow-guard.mjs
+     W24-word-break-alias-population asserts. RE-EARNED 2026-09-22
+     (task-10dad6bad6aea4cb) after that guard's walk was corrected to split on
+     whitespace rather than on the letter `s`; 3 line boxes / 54.6px / 630 /
+     665 were the old concatenating walk's numbers. */
   word-break: break-word;
 }
 .new-step-probe::before {
@@ -3699,10 +3708,14 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    (#instance/…b2), a 78-char host — a 63-octet DNS label, the legal maximum —
    substituted into the console TEXT nodes only (never the timestamp column,
    which is `flex: 0 0 auto` and would manufacture the spill):
-     word-break: break-word (was)  224/224, 5 line boxes, 120.8px, page 320/320
-     overflow-wrap: anywhere       224/224, 5 line boxes, 120.8px, page 320/320
-     overflow-wrap: break-word     scrollWidth 735 against clientWidth 224
-     no break declaration at all   scrollWidth 735 against clientWidth 224
+     word-break: break-word (was)  224/224, 141px, page 320/320
+     overflow-wrap: anywhere       224/224, 141px, page 320/320
+     overflow-wrap: break-word     scrollWidth 681 against clientWidth 224
+     no break declaration at all   scrollWidth 681 against clientWidth 224
+   RE-EARNED 2026-09-22 (task-10dad6bad6aea4cb): the guard's walk had been
+   splitting text nodes on the letter `s`, not on whitespace, so it concatenated
+   the cruel host onto the rest of a word instead of replacing a whole token.
+   `5 line boxes, 120.8px` and `735` were that walk's numbers.
    `anywhere` is the alias's own min-content lowering under the name D299 rules;
    `break-word` preserves min-content and `.bp-console-text` (`flex: 1 1 auto`,
    no `min-width` escape) then floors at the token. A console line IS a machine
@@ -4907,12 +4920,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      this span is `flex-basis: 100%` inside a wrapping `.wh-del-row` whose
      `.wh-del-card` ancestor carries `overflow: hidden`. Measured at 320 on
      `webhooks-autodisabled` with a 78-char legal-maximum host substituted in:
-       word-break: break-word (was)  box 220 in a 248px parent, 3 lines, 54px
-       overflow-wrap: anywhere       box 220 in a 248px parent, 3 lines, 54px
-       overflow-wrap: break-word     box 561.61 in that same 248px parent —
-                                     562/562, so 313px of the error a person
-                                     needs is clipped away by the card
-       no break declaration at all   box 561.61, identical clip
+       word-break: break-word (was)  box 220 in a 248px parent, 90px tall
+       overflow-wrap: anywhere       box 220 in a 248px parent, 90px tall
+       overflow-wrap: break-word     box 561.59 in that same 248px parent —
+                                     562/562, and the card clips everything
+                                     past its 248px, which is most of an error
+                                     a person needs whole
+       no break declaration at all   box 561.59, identical clip
+     RE-EARNED 2026-09-22 (task-10dad6bad6aea4cb) after the guard's walk was
+     corrected to split on whitespace rather than on the letter `s`; `3 lines,
+     54px` and `561.61` were the old concatenating walk's numbers.
      Page stayed 320/320 in all four: the card eats the overflow instead of the
      page, which is exactly why no page-level instrument could ever have seen
      this. Guard: overflow-guard.mjs W24-word-break-alias-population. */
@@ -5145,11 +5162,13 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   /* cch-w24-bl-word-break-alias-remaining-seven — KEPT. `overflow-x: auto` makes
      this <pre> a scroll container, whose automatic minimum size is already 0, so
      the alias's min-content lowering is consulted by nothing: at 320 with a
-     78-char legal-maximum host in the payload, all three values measure box 262
-     in a 288px parent, 3 line boxes, page 320/320 — on `activity` (110px tall)
-     and on `timeline` (182px) alike. Deleting it is what a person would feel:
-     scrollWidth 618 (activity) / 704 (timeline) against a 262px box, i.e. the
-     raw payload becomes a sideways scroll on a phone. That containment is
+     78-char legal-maximum host in the payload, all three values measure 262/262,
+     page 320/320 — on `activity` and on `timeline` alike (182px tall on both).
+     Deleting it is what a person would feel: scrollWidth 582 against a 262px box
+     on either, i.e. the raw payload becomes a sideways scroll on a phone.
+     RE-EARNED 2026-09-22 (task-10dad6bad6aea4cb) after that guard's walk was
+     corrected to split on whitespace rather than on the letter `s`; 3 line boxes
+     / 110px / 618 / 704 were the old concatenating walk's numbers. That containment is
      asserted by overflow-guard.mjs W24-word-break-alias-population. */
   word-break: break-word;
 }

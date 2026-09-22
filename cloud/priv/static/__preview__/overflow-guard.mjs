@@ -14553,6 +14553,23 @@ async function main() {
       const wbProbe = (sel) =>
         `(function(){` +
         `var SEL=${JSON.stringify(sel)};var CR=${JSON.stringify(CRUEL)};` +
+        // THE SPLIT IS A WHITESPACE CLASS, AND THIS IS A TEMPLATE LITERAL.
+        // `\s` written with ONE backslash inside a template literal is just
+        // `s` by the time the browser parses it: the walk shipped `/(s+)/`
+        // and `/^s+$/` and split every text node on runs of the LETTER s,
+        // concatenating the cruel host onto the remaining letters of a word
+        // instead of replacing a whole token. The stress still landed, so no
+        // assertion here ever lied about a pass — but `Ns` and the ok-line's
+        // substitution count were counting something other than what they
+        // said. The regexes are named here and READ BACK OUT of the page
+        // below as `RXS.source`/`RXW.source` — the WALK'S OWN objects, not a
+        // second literal spelled the same way. That distinction is measured,
+        // not stylistic: with the reporting literal correct and RXS alone
+        // regressed to one backslash, this leg ran GREEN while splitting on
+        // `s`. A check whose expected value comes from a literal BESIDE the
+        // guarded one guards nothing. The regexes are declared once, beside
+        // SEL/CR, and the same objects are both used and reported.
+        `var RXS=/(\\s+)/,RXW=/^\\s+$/;` +
         `var ns=[].slice.call(document.querySelectorAll('section.view:not([hidden]) '+SEL))` +
         `  .filter(function(e){return e.getClientRects().length;});` +
         `var d=document.documentElement;` +
@@ -14586,8 +14603,8 @@ async function main() {
         // in this leg rather than left as a comment.
         `  while((n=w.nextNode())){var t=n.nodeValue||'';if(!t.trim()) continue;` +
         `    if(n.parentElement&&n.parentElement.closest('.bp-console-ts,.deploy-console-ts')) continue;` +
-        `    var toks=t.split(/(\s+)/);var bi=-1,bl=0;` +
-        `    toks.forEach(function(x,i){if(!/^\s+$/.test(x)&&x.length>bl){bl=x.length;bi=i;}});` +
+        `    var toks=t.split(RXS);var bi=-1,bl=0;` +
+        `    toks.forEach(function(x,i){if(!RXW.test(x)&&x.length>bl){bl=x.length;bi=i;}});` +
         `    if(bi<0) continue;` +
         `    saved.push([n,t]);toks[bi]=CR;n.nodeValue=toks.join('');hit++;}});` +
         `void d.offsetWidth;` +
@@ -14597,7 +14614,7 @@ async function main() {
         `    sw:e.scrollWidth,cw:e.clientWidth,w:+r.width.toFixed(2),` +
         `    pw:pr?+pr.width.toFixed(2):-1,psw2:pe?pe.scrollWidth:-1,pcw2:pe?pe.clientWidth:-1,` +
         `    h:+r.height.toFixed(1)};});` +
-        `var out={n:ns.length,hit:hit,rows:rows,psw:d.scrollWidth,pcw:d.clientWidth,` +
+        `var out={n:ns.length,hit:hit,rxs:RXS.source,rxw:RXW.source,rows:rows,psw:d.scrollWidth,pcw:d.clientWidth,` +
         `  wb:cs0.wordBreak,ow:cs0.overflowWrap,tsn:tss.length,tsbad:tsbad.slice(0,3)};` +
         `saved.forEach(function(x){x[0].nodeValue=x[1];});void d.offsetWidth;` +
         `return out;})()`;
@@ -14651,6 +14668,14 @@ async function main() {
               }
               if (!m.hit) {
                 fail(D, `${c.scen}/${theme}@${width} ${sel}: the cruel host replaced nothing — every text node was empty or whitespace, so the stress measured no string at all`);
+              }
+              // THE WALK'S OWN SPLIT, READ BACK OUT OF THE PAGE. Not a source
+              // grep: the defect this catches is an ESCAPE that only exists
+              // between this file's bytes and the browser's parser, and a
+              // source regex over a template literal is exactly the instrument
+              // that cannot see it. `.source` is what the page evaluated.
+              if (m.rxs !== "(\\s+)" || m.rxw !== "^\\s+$") {
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: the walk's split reached the browser as /${m.rxs}/ with separator /${m.rxw}/, not a whitespace class — every \`Ns\` and the substitution count below are then counting tokens of something other than words, and this leg's stated mechanism is not its actual one`);
               }
               elsSeen += m.n;
               subs += m.hit;
@@ -14706,7 +14731,9 @@ async function main() {
           `${cells} / ${cells} cells clean across ${CASES.length} scenarios and ${WB_WIDTHS.join("/")} in both ` +
           `themes: ${elsSeen} painted element(s) walked, ${subs} text node(s) actually carried the ` +
           `${CRUEL.length}-char host (counted, not assumed — a substitution that hit nothing is a FAILURE above, ` +
-          `not a pass), ${spills} box spill(s), ${pageOver} page(s) scrolling sideways`,
+          `not a pass, and the walk's split is READ BACK out of the page as /(\\s+)/ at every cell rather than ` +
+          `trusted to have survived this file's template literals), ${spills} box spill(s), ${pageOver} page(s) ` +
+          `scrolling sideways`,
         );
         okLine(
           `THE CASCADE HALF: ${CONVERTED.size} converted site(s) — ${[...CONVERTED].join(", ")} — asserted to ` +
@@ -14717,11 +14744,14 @@ async function main() {
         );
         okLine(
           `THE GEOMETRY HALF, which is what the cheap remedy loses: \`overflow-wrap: break-word\` preserves ` +
-          `min-content, and at the three converted sites that measured 735/224 (.bp-console-line), 658/230 and ` +
-          `583/230 (.deploy-console-line) and a 561.61px box in a 248px clipping parent (.wh-del-err). A bare ` +
+          `min-content, and at the three converted sites that measured 681/224 (.bp-console-line), 629/230 and ` +
+          `562/230 (.deploy-console-line) and a 561.59px box in a 248px clipping parent (.wh-del-err). A bare ` +
           `deletion lands the same way AND, at the four sites this row did NOT convert, drives the page to ` +
-          `668/320 (.rail-row .v) and 665/320 (.new-step-probe) — so the written reason at each of those four ` +
-          `declarations is falsifiable here rather than decorative`,
+          `668/320 (.rail-row .v) and 657/320 (.new-step-probe) — so the written reason at each of those four ` +
+          `declarations is falsifiable here rather than decorative. EVERY NUMBER IN THIS SENTENCE WAS RE-EARNED ` +
+          `by driving those mutations again after the walk's split was corrected from \`/(s+)/\` to \`/(\\s+)/\`: ` +
+          `the cruel host now REPLACES a whole token instead of being concatenated onto the rest of a word, and ` +
+          `735/658/583/561.61/665 were that concatenation's numbers, not this leg's`,
         );
         okLine(
           `THE TIMESTAMP COLUMN'S CEILING, MEASURED: ${tsSeen} painted \`.bp-console-ts\`/\`.deploy-console-ts\` read across ` +
