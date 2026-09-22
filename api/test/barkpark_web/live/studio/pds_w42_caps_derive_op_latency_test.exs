@@ -37,6 +37,15 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
   decision: the marginal cost this row was filed to price is ONE derive, and on
   the EVENT route the second derive is the pre-existing gate, not this fix.
 
+  AND THE COMPONENT-ROUTE PIN BELOW READS 2, WHICH IS NOT A CONTRADICTION —
+  it is the trap. "1 per op" is the per-OP rate above; the pin is a WINDOW
+  total, and the component-route window below holds TWO `render_hook/3` calls,
+  hence two ops, hence two gates. Read as a duplicate inside one op it produced
+  task-c6e13ed8b2729bb4, a proposal to delete one of the two. The per-op
+  decomposition that refutes it — each hook measured alone — is
+  `pds_w42_component_route_op_decomposition_test.exs`, which also pins that the
+  first of those two ops is a write seam a denied principal reaches ALONE.
+
   ## THE PRICE, and why no millisecond is asserted (PDS-D633 / PDS-D656)
 
   `:erlang.statistics(:runtime)` is VM-GLOBAL: blind to port children, blind to
@@ -85,6 +94,28 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
   # editor enters the write seam twice per field commit (`inner-change`, then
   # `inner-flush`), and it has no socket gate at all — that blindness is the
   # bypass `pds_w42_paper_op_principal_gate_test.exs` was filed to close.
+  #
+  # `@write_denied_per_component_op` STAYS AT 2 — task-c6e13ed8b2729bb4, which
+  # was filed to take it to 1. RE-MEASURED on origin/main at 170e1af81 by this
+  # very file (`derives per COMPONENT-route paper op: 2`, 3 tests / 0 failures)
+  # and then DECOMPOSED, because a count taken over a window says nothing about
+  # what is inside it. This window spans TWO `render_hook/3` calls, and
+  # `pds_w42_component_route_op_decomposition_test.exs` runs them ONE AT A TIME:
+  # a lone `inner-change` prices at 1 derive / 1 `write_denied?`, and so does a
+  # lone `inner-flush`. So the 2 is 1 + 1 ACROSS TWO OPS — each op's own gate on
+  # its own trip to `Content.apply_paper_block_op/4` — and NOT a duplicate
+  # inside one. THERE IS NOTHING TO COLLAPSE, and the measured saving from
+  # collapsing is 0%, not the ~50% the filing predicted.
+  #
+  # The filing named the disqualifying check itself: "verify by run that
+  # inner-change is not itself a write seam a denied principal could reach
+  # independently". It is. A lone `inner-change` — what every keystroke in a
+  # composite field emits, `phx-change="inner-change"` on the form — moves the
+  # store on its own, and a write-denied principal is refused AT THAT ENTRY with
+  # no flush involved. Both directions are pinned in the decomposition file.
+  # Deleting either gate is a real bypass: with the first removed, `ESCALATED`
+  # lands for a read-only token; with the second removed, a token downgraded
+  # BETWEEN the two ops still writes on the flush.
   @derives_per_component_op 2
   @derives_per_event_op 2
   @write_denied_per_component_op 2
@@ -342,7 +373,7 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
   # ── 1. HOW MANY derives does one op cost? ───────────────────────────────────
 
   describe "derive/1 calls per paper write op, counted by trace on the live socket" do
-    test "the component route (handle_info → paper_pane_op/2) costs exactly one derive",
+    test "the component route (handle_info → paper_pane_op/2) costs two derives: one per op, and this window holds two ops",
          %{conn: conn} do
       System.put_env("BARKPARK_PAPER_CANVAS", "0")
       slug = "pds-w42-lat-component"
