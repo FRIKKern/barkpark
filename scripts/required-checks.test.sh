@@ -2843,6 +2843,40 @@ section "14b. EXCLUSION LOSS — the DECISION LEDGER gets the same pair: the mer
 # any future edit to `.exclusions` and cannot go vacuous when a real row's
 # renderability changes. The row names a job no workflow publishes, which is the
 # strongest form of "cannot render": no sampling window anywhere can restore it.
+# ── THE SYNTHETIC AGGREGATOR — §14b/§15/§17's shared specimen ────────────────
+#
+# WHY IT EXISTS (task-53b3a3691f4d608d). §15 and §17 proved the S5→S6 leaf
+# demotion and the S7 hold on `Security gate` and its three REAL `needs:`
+# leaves, and one clause of §14b read the same name. That made
+# .github/workflows/security.yml's `on:` block load-bearing for properties that
+# have nothing to do with security scanning: dropping its `pull_request`
+# trigger — a correct, separately-tracked cost reduction, since sobelow's
+# subject is the whole application AST and mix_audit's is an advisory database
+# fetched at run time, neither of them the diff — reclassifies every one of its
+# contexts to "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD" and DELETES those
+# sections' premise. Measured before this block existed: clean tree 375
+# passed / 1 failed; with only that trigger removed, ELEVEN further assertions
+# named `Security gate` or its leaves.
+#
+# RE-POINTING AT ANOTHER LIVE WORKFLOW IS NOT THE FIX — it reproduces the defect
+# one workflow over, because a fixture anchored on a real workflow is a fixture
+# any future venue edit breaks. So the aggregator is SYNTHETIC, for the same
+# reason §14b's two seed rows and §16's `Probe gate` already are: a three-job
+# workflow that exists only in the copied tree below, whose check runs are
+# written into a DERIVED fixture pair. No `on:` edit anywhere under
+# .github/workflows can move it, in either direction.
+#
+# WHAT THIS DOES NOT CLAIM, and the claim it deliberately hands off. That the
+# REAL `Security gate` is held OUT is still asserted — by the committed spec's
+# own exclusion row, and by §24, which holds the generator's hand-maintained S7
+# constants byte-identical to the rows a regeneration would overwrite. What
+# moved here is the STAGE MECHANISM (S5→S6, and S7 outliving a green fixture),
+# which is the only thing §15 and §17 ever measured. A section that proves a
+# mechanism must not be the section that pins a workflow's venue.
+SYNAGG="Synthetic aggregator gate (blocking)"
+SYNL1="Synthetic aggregator leaf one (blocking)"
+SYNL2="Synthetic aggregator leaf two (blocking)"
+
 SEEDX="$TMP/seeded-base.json"
 SEEDNAME="Ghost ceiling (blocking) — no workflow publishes this name"
 # THE SECOND SEED IS SYNTHETIC FOR THE SAME REASON (hg: §14b was half-synthetic).
@@ -2855,10 +2889,17 @@ SEEDNAME="Ghost ceiling (blocking) — no workflow publishes this name"
 # any trigger edit to any real workflow — exactly the principle already stated
 # for the ghost seed.
 PRSEEDNAME="Seeded PR-only ceiling (blocking) — published against merge refs only"
-jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" \
+# THE THIRD SEED carries an S7-SHAPED reason for the synthetic aggregator, so
+# the "both sides carry a row, the DERIVED reason wins" clause below has a
+# specimen of its own. It used to read `Security gate` — committed S7, derived
+# S5 off the frozen pair — which is exactly the live-workflow anchor this wave
+# is deleting: an S4 reclassification changes the derived half and reds a clause
+# whose subject is the UNION, not security.yml.
+jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" --arg ag "$SYNAGG" \
    '.exclusions += [
       {context: $c,  reason: "SEEDED BY THE TEST SUITE: a hand-added decision row whose name no workflow publishes, so no sample can ever re-derive it"},
-      {context: $pr, reason: "SEEDED BY THE TEST SUITE: a decision row whose job exists only in a synthetic pull_request-only workflow, so it can never render on a branch head"}
+      {context: $pr, reason: "SEEDED BY THE TEST SUITE: a decision row whose job exists only in a synthetic pull_request-only workflow, so it can never render on a branch head"},
+      {context: $ag, reason: "S7 EXCLUDED BY DECISION: SEEDED BY THE TEST SUITE — a committed hold on the synthetic aggregator, so the union below has one context whose BASE reason and DERIVED reason disagree"}
     ]' \
    "$SPEC" > "$SEEDX"
 # The synthetic workflows dir: every real workflow, plus ONE pull_request-only
@@ -2903,7 +2944,82 @@ jobs:
     steps:
       - run: "true"
 EOF
-SEEDARGS=(--workflows "$SEEDWF" --fixture-dir "$FIXP"
+# THE SYNTHETIC AGGREGATOR ITSELF, into the SAME copied tree. Three jobs: two
+# leaves and an aggregator that `needs:` both. It carries a `push:` arm as well
+# as an unfiltered `pull_request:` one so that NO exclusion stage ahead of S5
+# claims it first — S4's paths arm, S4's absolute arm and S8 all key on the
+# `on:` block, and any of them firing would hide the stage under test.
+cat >"$SEEDWF/zz-synthetic-aggregator.yml" <<EOF
+name: zz-synthetic-aggregator
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  synthetic-leaf-one:
+    name: "$SYNL1"
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  synthetic-leaf-two:
+    name: "$SYNL2"
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  synthetic-aggregator:
+    name: "$SYNAGG"
+    needs: [synthetic-leaf-one, synthetic-leaf-two]
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+EOF
+# …and the FIXTURE PAIR it renders on, DERIVED from the frozen pair rather than
+# committed, for the reason §17 already wrote down: a derived fixture cannot
+# drift out of agreement with the pair every other section asserts over. Two
+# variants, differing in ONE field — the aggregator's conclusion — because that
+# one field is the whole difference between the S5 premise (§15) and the S7
+# premise (§17). The leaves are green in both: a red leaf would be excluded on
+# its own account and the demotion would prove nothing.
+#
+# The name must appear on BOTH heads or it never reaches the selection at all:
+# stage 2 iterates the INTERSECTION of the sampled windows.
+SYNFIX_RED="$TMP/synth-fixtures-red"
+SYNFIX_GREEN="$TMP/synth-fixtures-green"
+for _syn in "$SYNFIX_RED|failure" "$SYNFIX_GREEN|success"; do
+  _syndir="${_syn%%|*}"; _synconc="${_syn##*|}"
+  mkdir -p "$_syndir"
+  cp "$FIXP/main-shas.txt" "$_syndir/"
+  for _synf in "$FIXP"/checkruns-*.json; do
+    jq --arg a "$SYNAGG" --arg l1 "$SYNL1" --arg l2 "$SYNL2" --arg c "$_synconc" \
+      '.check_runs += [
+         {app:{id:15368}, conclusion:$c,        name:$a,  status:"completed", started_at:"2026-07-31T01:00:00Z"},
+         {app:{id:15368}, conclusion:"success", name:$l1, status:"completed", started_at:"2026-07-31T01:00:00Z"},
+         {app:{id:15368}, conclusion:"success", name:$l2, status:"completed", started_at:"2026-07-31T01:00:00Z"}
+       ]' "$_synf" > "$_syndir/$(basename "$_synf")"
+  done
+done
+# NON-VACUITY OF THE FIXTURE BUILD ITSELF, asserted before any section reads it:
+# a `jq` that errored, a `cp` that did not land or a name that reached only one
+# of the two heads all produce a fixture pair that silently proves nothing.
+SYNFIX_OK=1
+for _syndir in "$SYNFIX_RED" "$SYNFIX_GREEN"; do
+  for _synf in "$_syndir"/checkruns-*.json; do
+    jq -e --arg a "$SYNAGG" --arg l1 "$SYNL1" --arg l2 "$SYNL2" \
+      '[.check_runs[].name] as $n
+       | ($n | index($a)) and ($n | index($l1)) and ($n | index($l2))' "$_synf" >/dev/null 2>&1 \
+      || SYNFIX_OK=0
+  done
+done
+SYNFIX_RED_CONC="$(jq -r --arg a "$SYNAGG" 'first(.check_runs[] | select(.name == $a) | .conclusion)' "$SYNFIX_RED/checkruns-e34031104.json" 2>/dev/null)"
+SYNFIX_GREEN_CONC="$(jq -r --arg a "$SYNAGG" 'first(.check_runs[] | select(.name == $a) | .conclusion)' "$SYNFIX_GREEN/checkruns-e34031104.json" 2>/dev/null)"
+if [ "$SYNFIX_OK" = "1" ] && [ "$SYNFIX_RED_CONC" = "failure" ] && [ "$SYNFIX_GREEN_CONC" = "success" ] \
+   && grep -qF "$SYNAGG" "$SEEDWF/zz-synthetic-aggregator.yml"; then
+  ok "the synthetic aggregator is PLANTED and rendered on BOTH frozen heads in both variants (red conclusion '$SYNFIX_RED_CONC', green '$SYNFIX_GREEN_CONC') — §15 and §17 below are not reading an empty fixture"
+else
+  bad "the synthetic aggregator fixture did not build (all-names-on-both-heads=$SYNFIX_OK, red='$SYNFIX_RED_CONC', green='$SYNFIX_GREEN_CONC') — every clause keyed on it below would be vacuous"
+fi
+
+SEEDARGS=(--workflows "$SEEDWF" --fixture-dir "$SYNFIX_RED"
           --merge-base "$SEEDX" --sha e34031104 --sha f69cfb1f6)
 
 X14_OUT="$(bash "$GEN" "${SEEDARGS[@]}" --expect-unrendered "Elixir gate" \
@@ -2951,15 +3067,19 @@ else
   fail_emit "$(why_emit "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 # The union must not FREEZE a row's grounds: where this run restated a reason,
-# the DERIVED one wins. `Security gate` is committed as an S7 decision and the
-# frozen pair reads it red on main, so the emitted reason must be the S5 one.
-if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+# the DERIVED one wins. The specimen is the SYNTHETIC aggregator — seeded above
+# with an S7-shaped base reason, and read RED on main by the derived fixture
+# pair, so the emitted reason must be the S5 one. It read `Security gate` until
+# task-53b3a3691f4d608d: a live workflow whose venue another wave is entitled to
+# change, and whose S4 reclassification would have reddened a clause whose
+# subject is the union.
+if jq -e --arg a "$SYNAGG" '[.exclusions[] | select(.context == $a) | .reason]
           | any(startswith("S5 RED ON MAIN"))' "$TMP/seeded-spec.json" >/dev/null 2>&1 \
-   && jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+   && jq -e --arg a "$SYNAGG" '[.exclusions[] | select(.context == $a) | .reason]
              | any(startswith("S7 EXCLUDED BY DECISION"))' "$SEEDX" >/dev/null 2>&1; then
-  ok "…and where BOTH sides carry a row the DERIVED reason wins ('Security gate': S7 committed → S5 emitted)"
+  ok "…and where BOTH sides carry a row the DERIVED reason wins ('$SYNAGG': S7 committed → S5 emitted)"
 else
-  fail_emit "$(why_emit "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the base reason survived the derivation: $(jq -c --arg a "$SYNAGG" '[.exclusions[] | select(.context == $a) | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 
 # MUTATION (i): the UNION is load-bearing. Drop the base out of it — the exact
@@ -3331,15 +3451,26 @@ fi
 
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
 
-S6_OUT="$(bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
-if grep -q "exclude  Security gate  — S5 RED ON MAIN" <<<"$S6_OUT"; then
+# THE FIXTURE IS THE SYNTHETIC AGGREGATOR BUILT IN §14b, not `Security gate` and
+# its three real leaves. The property under test is a RELATION between stages —
+# a name excluded by S5 must take its `needs:` upstreams DOWN through S6 rather
+# than leave them to sail into the spec — and nothing in it is about security
+# scanning. Keyed to a live workflow, this section made .github/workflows/
+# security.yml's `on:` block a load-bearing input to a stage-relation proof:
+# removing its `pull_request` trigger reclassifies the aggregator to S4, the
+# `exclude … S5 RED ON MAIN` line never appears, and all four clauses below red
+# with a message naming neither the workflow nor the edit. See the header over
+# SYNAGG in §14b for the full ground.
+SYNARGS_RED=(--workflows "$SEEDWF" --fixture-dir "$SYNFIX_RED"
+             --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
+S6_OUT="$(bash "$GEN" "${SYNARGS_RED[@]}" "${ACK[@]}" --explain 2>&1 || true)"
+if grep -qF "exclude  $SYNAGG  — S5 RED ON MAIN" <<<"$S6_OUT"; then
   ok "the aggregator itself is excluded S5 RED ON MAIN (the precondition the demotion hangs off)"
 else
-  bad "'Security gate' was not excluded as S5 RED ON MAIN — section 15's premise is gone"
+  bad "'$SYNAGG' was not excluded as S5 RED ON MAIN — section 15's premise is gone: $(grep -F "$SYNAGG" <<<"$S6_OUT" | head -1)"
 fi
-for leaf in "Dispatch (security paths)" "Security gate shape ratchet" \
-            "Sobelow baseline does not swallow its own inline waivers (blocking)"; do
-  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR (Security gate)" <<<"$S6_OUT"; then
+for leaf in "$SYNL1" "$SYNL2"; do
+  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($SYNAGG)" <<<"$S6_OUT"; then
     ok "S6 demotes '$leaf', naming the aggregator that took it down"
   else
     bad "S6 did not demote '$leaf': $(grep -F "$leaf" <<<"$S6_OUT" | head -1)"
@@ -3351,8 +3482,8 @@ done
 # leaves are subsumed by nothing and sail straight into the spec.
 NOS6="$TMP/gen-nos6.sh"
 sed 's/^  if \[ -n "\$demoted" \]; then$/  if false; then # S6 REMOVED/' "$GEN" > "$NOS6"
-if grep -q 'S6 REMOVED' "$NOS6"; then
-  ok "the S6 mutation applies: a copy of the generator skips the demotion pass"
+if grep -q 'S6 REMOVED' "$NOS6" && ! grep -q '^  if \[ -n "\$demoted" \]; then$' "$NOS6"; then
+  ok "the S6 mutation applies: a copy of the generator skips the demotion pass, and the original guard line is GONE from the copy"
 else
   bad "the S6 mutation did not apply — the pass's guard moved, so the proof below is vacuous"
 fi
@@ -3361,20 +3492,29 @@ fi
 # as a contradiction. Acknowledging it is what lets the assertion below read the
 # emit — and it is also the shape of the accident: the flags name exactly the
 # three contexts a missing demotion pass would have registered.
+# No `--expect-promoted` is needed any more: the synthetic leaves are names the
+# COMMITTED spec has never carried on either list, so the mutant promoting them
+# is a plain addition rather than the required/excluded contradiction §14b
+# refuses. The acknowledgement flags went with the live fixture.
 emit_spec "$TMP/nos6-spec.json" \
-  bash "$NOS6" "${FIXARGS[@]}" "${ACK[@]}" \
-  --expect-promoted "Dispatch (security paths)" \
-  --expect-promoted "Security gate shape ratchet" \
-  --expect-promoted "Sobelow baseline does not swallow its own inline waivers (blocking)" \
+  bash "$NOS6" "${SYNARGS_RED[@]}" "${ACK[@]}" \
   --out "$TMP/nos6-spec.json" || true
-if jq -e '[.protection.required_status_checks.checks[].context] as $c
-          | ($c | index("Dispatch (security paths)"))
-            and ($c | index("Security gate shape ratchet"))
-            and ($c | index("Sobelow baseline does not swallow its own inline waivers (blocking)"))' \
+if jq -e --arg l1 "$SYNL1" --arg l2 "$SYNL2" \
+     '[.protection.required_status_checks.checks[].context] as $c
+      | ($c | index($l1)) and ($c | index($l2))' \
      "$TMP/nos6-spec.json" >/dev/null 2>&1; then
-  ok "…and without S6 the identical fixture PROMOTES all three security leaves into the spec (mutation-proven able to fail)"
+  ok "…and without S6 the identical fixture PROMOTES both synthetic leaves into the spec (mutation-proven able to fail)"
 else
   fail_emit "$(why_emit "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)")"
+fi
+# …and the aggregator itself stays OUT of that mutant spec. Without this the
+# clause above is satisfied by a run that simply required everything, which is
+# the opposite of the inversion S6 exists to prevent.
+if jq -e --arg a "$SYNAGG" '[.protection.required_status_checks.checks[].context] | index($a) | not' \
+     "$TMP/nos6-spec.json" >/dev/null 2>&1; then
+  ok "…while the EXCLUDED aggregator is still absent from it — the mutant re-implements the aggregator at leaf granularity, which is precisely the inversion S6 prevents"
+else
+  fail_emit "$(why_emit "the un-demoted spec required the aggregator too, so the promotion above is not the S6 inversion")"
 fi
 
 section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is already stuck is not a casualty of the flip"
@@ -3632,7 +3772,7 @@ else
   bad "the identity mutation did not reproduce the vacuous green (applied=$(grep -c 'IDENTITY REFUSAL REMOVED' "$NOID"), exit $NI_RC): $(tail -2 <<<"$NI_OUT")"
 fi
 
-section "17. S7 holds \`Security gate\` OUT once it goes GREEN — the stage that held it is gone, the hold is not"
+section "17. S7 HOLDS AN AGGREGATOR OUT ONCE IT GOES GREEN — the stage that held it is gone, the hold is not"
 
 # WHY THIS SECTION EXISTS, and it is not hypothetical (wave 11 REVIEW).
 # `Security gate` was held out of the flip by S5 RED ON MAIN. Between the build
@@ -3640,69 +3780,96 @@ section "17. S7 holds \`Security gate\` OUT once it goes GREEN — the stage tha
 # name went green on main — so the mechanical ground evaporated and re-running
 # the generator against the post-bump window KEPT it, i.e. the next person to
 # follow the file's own instruction ("regenerate immediately before any flip")
-# would have silently registered it. That is forbidden: its sole blocking
-# upstream is mix-audit, which reads a LIVE advisory database, so a CVE
-# published tomorrow reds it on every open PR with no change to this repo.
+# would have silently registered it. The stage that answers that is S7: a
+# hand-maintained hold that outlives the mechanical ground which produced it.
 #
-# The fixture is DERIVED, not committed: the frozen pair with `Security gate`'s
-# conclusion flipped to success everywhere. Deriving it means it cannot drift
-# out of agreement with the pair §15 asserts over, and it states the premise
-# (green on main) as data rather than as prose.
-S7F="$TMP/postbump-fixtures"
-mkdir -p "$S7F"
-cp "$FIXP/main-shas.txt" "$S7F/"
-for f in "$FIXP"/checkruns-*.json; do
-  jq '.check_runs |= map(if .name == "Security gate" then .conclusion = "success" else . end)' \
-    "$f" > "$S7F/$(basename "$f")"
-done
-S7ARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$S7F"
+# THE SPECIMEN IS SYNTHETIC (task-53b3a3691f4d608d). This section used to prove
+# the property ON `Security gate` and its three real leaves, which made
+# security.yml's `on:` block a load-bearing input: drop its `pull_request`
+# trigger and every context reclassifies to S4, S7 is never reached, and six
+# clauses here red with a message about neither. The specimen is now the
+# synthetic aggregator built in §14b, on the GREEN half of its derived fixture
+# pair — one field different from §15's, which is the whole difference between
+# the S5 premise and this one.
+#
+# A SYNTHETIC NAME CANNOT BE IN A HAND-MAINTAINED LIST, so the subject is a copy
+# of the generator with the synthetic aggregator APPENDED to both S7 arrays.
+# That is an AUGMENTATION, not a weakening: the stage, the ordering and the
+# reason plumbing under test are the shipped ones, and the mutation below is the
+# UN-augmented generator — the real file, unchanged — which promotes the name.
+# The integrity of the REAL entries is not this section's job and never was:
+# §24 holds each shipped S7 constant byte-identical to the committed row a
+# regeneration would overwrite, and the committed spec carries `Security gate`'s
+# hold itself. Insertion is at the array HEAD, on the `=(` line, so it is keyed
+# to the array's SHAPE rather than to whichever name happens to be last — and
+# both arrays get exactly one line, because an off-by-one there pairs every
+# later name with the wrong reason (§24's ARITY clause).
+S7GEN="$TMP/gen-s7-synthetic.sh"
+S7REASON="S7 EXCLUDED BY DECISION: SEEDED BY THE TEST SUITE — a synthetic hold on a synthetic aggregator, so this stage is proven without pinning any real workflow's venue."
+awk -v agg="$SYNAGG" -v rsn="$S7REASON" '
+  { print }
+  /^EXCLUDED_BY_DECISION_NAMES=\($/   { printf "  \"%s\"\n", agg }
+  /^EXCLUDED_BY_DECISION_REASONS=\($/ { printf "  \"%s\"\n", rsn }
+' "$GEN" > "$S7GEN"
+S7GEN_N="$(grep -cxF "  \"$SYNAGG\"" "$S7GEN" || true)"
+S7GEN_R="$(grep -cxF "  \"$S7REASON\"" "$S7GEN" || true)"
+if [ "$S7GEN_N" = "1" ] && [ "$S7GEN_R" = "1" ] && bash -n "$S7GEN" 2>/dev/null; then
+  ok "the S7 augmentation applies: a copy of the generator carries the synthetic aggregator in BOTH decision arrays, one line each, and still parses"
+else
+  bad "the S7 augmentation did not apply (name lines=$S7GEN_N, reason lines=$S7GEN_R) — every clause below would be reading the shipped generator"
+fi
+
+S7ARGS=(--workflows "$SEEDWF" --fixture-dir "$SYNFIX_GREEN"
         --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
 
-S7_OUT="$(bash "$GEN" "${S7ARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
-if ! grep -q "exclude  Security gate  — S5 RED ON MAIN" <<<"$S7_OUT"; then
-  ok "the derived fixture really is post-bump: S5 no longer fires on 'Security gate'"
+S7_OUT="$(bash "$S7GEN" "${S7ARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
+if ! grep -qF "exclude  $SYNAGG  — S5 RED ON MAIN" <<<"$S7_OUT"; then
+  ok "the green half of the fixture pair really is green: S5 no longer fires on the aggregator"
 else
-  bad "the derived fixture still reads RED on main — the flip did not apply, so this section is vacuous"
+  bad "the green fixture still reads RED on main — the variants did not differ, so this section is vacuous"
 fi
-if grep -q "exclude  Security gate  — S7 EXCLUDED BY DECISION" <<<"$S7_OUT"; then
-  ok "…and S7 holds it out anyway, on a stated forward-looking ground"
+if grep -qF "exclude  $SYNAGG  — S7 EXCLUDED BY DECISION" <<<"$S7_OUT"; then
+  ok "…and S7 holds it out anyway, on a stated ground, with no mechanical stage left to do it"
 else
-  bad "'Security gate' was not held by S7 on a green fixture: $(grep -F 'Security gate  —' <<<"$S7_OUT" | head -1)"
+  bad "the aggregator was not held by S7 on a green fixture: $(grep -F "$SYNAGG  —" <<<"$S7_OUT" | head -1)"
 fi
 # S6 must key on the EXCLUSION, not on the stage that produced it: with the hold
-# moved from S5 to S7 the three leaves must still go down, not up.
-for leaf in "Dispatch (security paths)" "Security gate shape ratchet" \
-            "Sobelow baseline does not swallow its own inline waivers (blocking)"; do
-  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR (Security gate)" <<<"$S7_OUT"; then
+# moved from S5 to S7 the leaves must still go down, not up.
+for leaf in "$SYNL1" "$SYNL2"; do
+  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($SYNAGG)" <<<"$S7_OUT"; then
     ok "S6 still demotes '$leaf' under an S7 hold — the demotion keys on the exclusion, not on S5"
   else
     bad "S6 did not demote '$leaf' under S7: $(grep -F "$leaf" <<<"$S7_OUT" | head -1)"
   fi
 done
 
-# MUTATION: drop the S7 entry and the SAME green fixture must PROMOTE the name
-# into required protection — which is precisely what a live regeneration did
-# before this hold existed.
-NOS7="$TMP/gen-nos7.sh"
-sed 's/^  "Security gate"$//' "$GEN" > "$NOS7"
-if ! grep -q '^  "Security gate"$' "$NOS7"; then
-  ok "the S7 mutation applies: a copy of the generator no longer names 'Security gate' in its decision list"
-else
-  bad "the S7 mutation did not apply — the entry moved, so the proof below is vacuous"
-fi
-# `--expect-promoted "Security gate"` for the same reason as §15's three leaves:
-# the mutant registers a name the committed spec holds OUT, and §14b refuses that
-# contradiction rather than emitting one context on both lists.
+# MUTATION: run the SHIPPED generator — the one with no entry for this name — on
+# the identical green fixture, and it must PROMOTE the aggregator into required
+# protection. That is precisely what a live regeneration did to `Security gate`
+# before its hold existed, and it is the whole reason S7 is a stage rather than
+# a comment. The mutant here is the unmodified file, so the clause cannot go
+# vacuous by a sed that failed to match.
 emit_spec "$TMP/nos7-spec.json" \
-  bash "$NOS7" "${S7ARGS[@]}" "${ACK[@]}" --expect-promoted "Security gate" \
+  bash "$GEN" "${S7ARGS[@]}" "${ACK[@]}" \
   --out "$TMP/nos7-spec.json" || true
-if jq -e '[.protection.required_status_checks.checks[].context] | index("Security gate")' \
+if jq -e --arg a "$SYNAGG" '[.protection.required_status_checks.checks[].context] | index($a)' \
      "$TMP/nos7-spec.json" >/dev/null 2>&1; then
-  ok "…and without it the identical green fixture REGISTERS 'Security gate' (mutation-proven able to fail)"
+  ok "…and without the hold the identical green fixture REGISTERS the aggregator (mutation-proven able to fail)"
 else
   fail_emit "$(why_emit "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)")"
 fi
 
+# THE REAL HOLD, read where it now lives: the committed file. These two clauses
+# are the whole of this section's remaining claim about `Security gate`, and
+# neither one runs the generator or reads a workflow, so no venue edit can move
+# them. §24 supplies the other half — that the generator's constant for it is
+# byte-identical to this row.
+if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+          | any(startswith("S7 EXCLUDED BY DECISION"))' "$SPEC" >/dev/null 2>&1; then
+  ok "the committed spec still holds 'Security gate' out BY DECISION — the hold survives this section going synthetic"
+else
+  bad "the committed spec no longer carries an S7 hold for 'Security gate': $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$SPEC")"
+fi
 # The committed file must not still be teaching the evaporated ground.
 if ! jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
             | any(startswith("S5 RED ON MAIN"))' "$SPEC" >/dev/null 2>&1; then
