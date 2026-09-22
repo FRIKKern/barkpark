@@ -1,25 +1,41 @@
-# Studio scrim threshold — the forced-container control and the tie that keeps
-# its fixture honest.
+# Studio scrim abolition — the Studio inspector overlay does not dim the
+# document it covers, and this workflow is what keeps that true.
 #
-# WHY THIS FILE EXISTS (task scrim-control-uncied-and-fixture-drift):
-# scripts/studio-scrim-threshold-control.mjs was green, could fail, and NOTHING
-# RAN IT — no workflow, no make target, no gate. An instrument nobody invokes
-# rots exactly as quietly as the prose it replaced.
+# WHAT IT RUNS, and it is one command with no browser:
 #
-# And it had already rotted. scripts/fixtures/studio-scrim-threshold.html copies
-# the scrim cascade out of api/lib/barkpark_web/layouts/root.html.heex, and the
-# copy had no tie back: a FIFTH rule (charter D175/D187) landed in the source and
-# the fixture never grew it, so the control printed a confident matrix for a
-# cascade the product no longer runs. Two commands, in this order:
+#   node scripts/studio-scrim-abolition-check.mjs --self-test
 #
-#   1. node scripts/studio-scrim-drift-check.mjs --self-test
-#      Extracts the scrim rules from root.html.heex BY SELECTOR and diffs them
-#      against the fixture. It is a PRECONDITION, not a sibling: a matrix taken
-#      against a drifted fixture measures nothing, so this runs FIRST and reds
-#      the job before a browser is ever downloaded.
-#   2. node scripts/studio-scrim-threshold-control.mjs --self-test
-#      Forces .editor-panel across the 860px container threshold and reads
-#      ::after content in all four width buckets x user-opened.
+# The check parses api/lib/barkpark_web/layouts/root.html.heex and reds if ANY
+# style rule attaches a `::after`/`::before` to `.editor-with-preview`. The
+# `--self-test` half plants four scrim shapes and asserts each is caught, two
+# near-misses and asserts each is ignored, and three unreadable sheets and
+# asserts each is REFUSED rather than passed — because for an absence
+# assertion "found nothing" is the PASS, so a broken parser passes for free.
+#
+# ── WHAT THIS REPLACED (task scrim-control-uncied-and-fixture-drift, then
+#    the retirement that followed it) ─────────────────────────────────────────
+# Until 2026-09-22 this job ran two commands against a five-rule scrim cascade:
+# a drift check tying scripts/fixtures/studio-scrim-threshold.html back to
+# root.html.heex BY SELECTOR, and then a playwright control that forced
+# .editor-panel across the 860px container threshold and read `::after` content
+# in all four width buckets x user-opened.
+#
+# That control is what MEASURED the retirement: with the whole family present
+# it read `none` at 861px AND at 860px in 8 cells of 8. The generator painted
+# nowhere — four suppressors (b29, D170, D155, D175/D187) had covered every
+# shipped cell between them — so the generator and all four cancellations were
+# deleted together and D127's ruling is now expressed by absence.
+#
+# THE APPARATUS RETIRED WITH ITS SUBJECT, and the reason is worth keeping: its
+# ability to fail was PARASITIC ON THE DEAD GENERATOR. The self-test had to
+# delete a suppressor first so the generator had a cell to itself and the probe
+# had a scrim to see. With the generator gone that arm cannot fire, and the
+# instrument would have gone quietly vacuous while still printing a confident
+# eight-row table. A guard that can only ever read `none` is not a guard.
+#
+# The replacement is cheaper and reaches further: no browser, no fixture, no
+# copy to drift, and it refuses shapes the matrix could not express — a scrim
+# written without `:has()`, on `::before`, or under a class nobody anticipated.
 #
 # ── THE VENUE IS THIS JOB, NOT THIS FILE ─────────────────────────────────────
 # There is deliberately NO `on: paths:` key. A paths-filtered workflow emits no
@@ -31,31 +47,11 @@
 # shell-harnesses.yml's dispatcher: it never emits a silent false — an
 # unresolvable base dispatches TRUE.
 #
-# ── THE BROWSER COST, NAMED AND ACCEPTED ─────────────────────────────────────
-# The control needs Chromium; the drift check needs nothing at all. So the cost
-# is paid only on the PRs that touch the scrim, and only after the free check
-# has passed.
-#
-#   * REUSED, not new: the install recipe and the cache key are paper-rig.yml's
-#     verbatim (`npm install --global playwright@1.59.1` +
-#     `npx playwright install --with-deps chromium`, cache
-#     `~/.cache/ms-playwright` keyed `${{ runner.os }}-playwright-1.59.1`).
-#     Sharing that exact key means a warm actions/cache entry produced by
-#     paper-rig.yml is restored here, so the chromium DOWNLOAD is usually not
-#     repeated — only `--with-deps`' apt step is.
-#   * MEASURED, not estimated — run 35553223348 (head 12120679a, PR #19673,
-#     2026-09-21). `Cache hit for: Linux-playwright-1.59.1`, ~253 MB restored in
-#     2.0s, so the key really is shared and chromium really was not downloaded.
-#     Wall clock: `Dispatch (scrim paths)` 02:10:43 -> 02:11:10 (27s) and
-#     `Studio scrim threshold control` 02:14:33 -> 02:15:10 (37s) = ~2
-#     ubuntu-latest minutes billed for the pair, warm. A cold cache adds the
-#     chromium download and the `--with-deps` apt step on top of that; the
-#     budget is timeout-minutes: 12.
-#   * AND ZERO on every PR that does not touch the five paths in the dispatcher
-#     — the dispatch job is the only thing that runs. That is the price of the
-#     only instrument in the repo that can read this cascade without ssh and a
-#     deployed build, and it is accepted.
-name: Studio scrim threshold
+# ── THE COST ─────────────────────────────────────────────────────────────────
+# Node 22 and nothing else. The playwright install, the ~253 MB chromium cache
+# shared with paper-rig.yml and the 12-minute budget all went with the control;
+# what is left is a checkout, a setup-node and one dependency-free script.
+name: Studio scrim abolition
 
 on:
   pull_request:
@@ -69,7 +65,7 @@ concurrency:
   # One group per PUSH SHA on main, per REF everywhere else — the shape every
   # main-triggered workflow in this repo carries, and the one
   # scripts/main-run-concurrency-check.sh keys on.
-  group: studio-scrim-threshold-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  group: studio-scrim-abolition-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -132,9 +128,7 @@ jobs:
           while IFS= read -r f; do
             case "$f" in
               api/lib/barkpark_web/layouts/root.html.heex) verdict=true ;;
-              scripts/studio-scrim-threshold-control.mjs) verdict=true ;;
-              scripts/studio-scrim-drift-check.mjs) verdict=true ;;
-              scripts/fixtures/*) verdict=true ;;
+              scripts/studio-scrim-abolition-check.mjs) verdict=true ;;
               .github/workflows/studio-scrim-threshold.yml) verdict=true ;;
             esac
           done <<EOF
@@ -146,42 +140,23 @@ jobs:
   scrim:
     needs: changes
     if: needs.changes.outputs.scrim == 'true'
-    name: Studio scrim threshold control
+    name: Studio scrim abolition check
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          # 22: both scripts are ESM and the control uses node:fs/node:os only.
+          # 22: the script is ESM and uses node:fs / node:path / node:url only.
           node-version: "22"
 
-      # THE FREE GATE, FIRST. It has no dependencies at all — no playwright, no
-      # browser, no network — so a drifted fixture reds this job in seconds
-      # rather than after a chromium download. Order is the point: the control's
-      # readings are worthless if this one fails.
-      - name: Fixture drift check (no browser)
-        run: node scripts/studio-scrim-drift-check.mjs --self-test
-
-      # paper-rig.yml's key, verbatim, so a warm entry it produced is restored
-      # here instead of re-downloading chromium. See THE BROWSER COST above.
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-1.59.1
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-
-      - name: Install Playwright + chromium
-        run: |
-          set -eu
-          npm install --global playwright@1.59.1
-          npx playwright install --with-deps chromium
-          echo "BP_PLAYWRIGHT_FROM=$(npm root -g)/playwright/package.json" >>"$GITHUB_ENV"
-
       # THE GATE. Not piped to anything: a gate piped to `tail` reports tail's
-      # exit code.
-      - name: Forced-container scrim control
-        run: node scripts/studio-scrim-threshold-control.mjs --self-test
+      # exit code, and under load pipefail + SIGPIPE returns 141 and lies.
+      #
+      # --self-test, never the bare verdict. The bare run's pass condition is
+      # "found no scrim", which a parser that stopped parsing satisfies
+      # perfectly. The self-test arms are what make a green mean the check is
+      # still able to go red.
+      - name: Scrim abolition check (no browser)
+        run: node scripts/studio-scrim-abolition-check.mjs --self-test
