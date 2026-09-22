@@ -11453,6 +11453,228 @@
     "</section>";
   }
 
+  // ── The GROUP VIEW (PDF-D11: the 7-state catalogue) ────────────────────────
+  // A dedicated surface for ONE main plus its supports: a per-support row with
+  // status, capacity (both stored shapes) and the age of its last beat, under a
+  // single GROUP state drawn from PDF-D11's catalogue —
+  //   empty / roster-conflict / blocked / offline / provisioning / cap-hit / working.
+  //
+  // THE ONE SOURCE OF TRUTH FOR "ONLINE" IS `presenceChip`, AND THIS SURFACE
+  // ADDS NO SECOND ONE. Staleness is computed SERVER-SIDE (Barkpark.Tasks.Fleet
+  // `roster/2`: "a row whose `last_seen` is missing, unparsable, or older than
+  // its OWN `ttl_s` reads `offline`"), so the roster's `status` IS the
+  // staleness-derived status and the console's only job is to render it. The
+  // beat age below is rendered as an OBSERVATION for the operator — it is never
+  // read by any predicate here, because a console that re-derived offline from
+  // `last_seen` would be a second authority disagreeing with the server the
+  // moment the two clocks drift, and would silently overrule a `ttl_s` the box
+  // itself declared. `groupViewState` reaches `chip.online` and nothing else.
+  //
+  // WHAT THIS SURFACE DOES NOT DO YET: order history (named in the backlog row's
+  // prose, in neither acceptance criterion) is absent, and so is any route — no
+  // hash lands here yet. `groupViewHtml` is a pure renderer, node-pinned through
+  // `__bpTestHook` and driven by one preview scenario per state
+  // (`__preview__/group-view-scenarios.mjs`); mounting it on a route is the
+  // next slice.
+
+  // THE catalogue, in PRECEDENCE order — the first predicate that holds names
+  // the group's state. This array is the ONE enumeration: the render, the copy
+  // table and the preview scenarios are all keyed off it, so an eighth state
+  // cannot be added in one place and forgotten in another (the pins walk this
+  // list and refuse a state with no painted class, no copy, or no scenario).
+  // THE TOKEN IS `roster-conflict`, NOT `conflict`, AND THAT IS FORCED.
+  // console_reader_census_test.exs's Side B "counts a slug quoted ANYWHERE in
+  // app.js as read" — its own moduledoc names this as the false-read it cannot
+  // see. `conflict` is a CLASSIFIED wire code (seven `/v1/internal/*`
+  // provisioner settle routes whose 409 no console reader consumes), so
+  // spelling this state `conflict` made the census's rot arm report a reader
+  // that does not exist, and clearing it that way would have meant deleting
+  // seven TRUE rows on a string coincidence. The longer token is also the more
+  // accurate one: this is a roster identity collision, never an HTTP 409.
+  var GROUP_VIEW_STATES = ["empty", "roster-conflict", "blocked", "offline", "provisioning", "cap-hit", "working"];
+
+  // Milliseconds since a roster row's `last_seen`, or null when there is no
+  // parsable stamp. Total over junk. PURE — and deliberately NOT consulted by
+  // `groupViewState`: see the header. Negative ages (a box's clock ahead of the
+  // browser's) clamp to 0 rather than rendering "in 4s".
+  function rosterBeatAgeMs(row, now) {
+    var seen = row && row.last_seen;
+    if (typeof seen !== "string" || !seen) return null;
+    var t = Date.parse(seen);
+    if (isNaN(t)) return null;
+    var n = (typeof now === "number") ? now : Date.now();
+    return n - t < 0 ? 0 : n - t;
+  }
+
+  // The operator-facing staleness sentence for one row. Says the SERVER's own
+  // budget (`ttl_s`) beside the age so the two can be compared by eye — which is
+  // the whole reason to show an age the console refuses to act on. PURE.
+  function rosterStalenessText(row, now) {
+    var age = rosterBeatAgeMs(row, now);
+    if (age == null) return "No beat recorded";
+    var s = Math.floor(age / 1000);
+    var text = s < 60 ? s + "s ago" : (s < 3600 ? Math.floor(s / 60) + "m ago" : Math.floor(s / 3600) + "h ago");
+    var ttl = row && row.ttl_s;
+    return typeof ttl === "number" ? "Beat " + text + " (budget " + ttl + "s)" : "Beat " + text;
+  }
+
+  // Free slots off the VALIDATED capacity object (PDF-D34). The legacy free-text
+  // shape carries no number, so it answers null — "unknown", never 0, because a
+  // fabricated 0 would make a legacy box read as cap-hit. PURE.
+  function rosterSlotsFree(capacity) {
+    if (!capacity || typeof capacity !== "object") return null;
+    return typeof capacity.slots_free === "number" ? capacity.slots_free : null;
+  }
+
+  // One support's cells, folded from the TWO planes it actually has: the fleet
+  // payload (lifecycle) and the roster read (everything live). `chip` is the
+  // shipped `presenceChip` — this function makes no online decision of its own.
+  // PURE.
+  function groupSupportCell(support, rosterDocs, now) {
+    var s = support || {};
+    var row = rosterRowFor(rosterDocs, s);
+    var chip = presenceChip(row);
+    return {
+      id: s.id,
+      name: s.name,
+      live: instanceLifecycle(s).live,
+      failed: instanceLifecycle(s).failed,
+      worker: row && row.worker != null ? String(row.worker) : null,
+      chip: chip,
+      online: chip.online,
+      capacityText: rosterCapacityText(row && row.capacity),
+      slotsFree: rosterSlotsFree(row && row.capacity),
+      stalenessText: rosterStalenessText(row, now),
+      task: (row && row.task && row.task.title) ? String(row.task.title) : null,
+      row: row,
+    };
+  }
+
+  function groupSupportCells(supports, rosterDocs, now) {
+    now = (typeof now === "number") ? now : Date.now();
+    return (supports || []).map(function (s) { return groupSupportCell(s, rosterDocs, now); });
+  }
+
+  // TWO supports resolving to the SAME roster row is the conflict this surface
+  // names: the roster registers a listener under one worker identity, so a
+  // collision means neither box's status nor capacity is attributable and every
+  // verdict below would be assigned to an arbitrary one of them. Detected
+  // purely from the matched rows — no second read. PURE.
+  function groupRosterConflicts(cells) {
+    var seen = {};
+    var dupes = [];
+    (cells || []).forEach(function (c) {
+      if (!c || c.worker == null) return;
+      if (seen[c.worker]) { if (dupes.indexOf(c.worker) === -1) dupes.push(c.worker); }
+      else seen[c.worker] = true;
+    });
+    return dupes;
+  }
+
+  // THE STATE. First predicate in `GROUP_VIEW_STATES` order that holds. Every
+  // reach for liveness goes through `cell.online`, which is `presenceChip`'s
+  // answer and nothing else. Total: the last rung has no predicate. PURE.
+  function groupViewState(cells) {
+    cells = cells || [];
+    if (!cells.length) return "empty";
+    if (groupRosterConflicts(cells).length) return "roster-conflict";
+    var blocked = cells.filter(function (c) { return c.chip.state === "blocked"; });
+    if (blocked.length) return "blocked";
+    var liveCells = cells.filter(function (c) { return c.live; });
+    var onlineCells = liveCells.filter(function (c) { return c.online; });
+    if (liveCells.length && !onlineCells.length) return "offline";
+    if (!liveCells.length) return "provisioning";
+    var atCap = onlineCells.filter(function (c) { return c.slotsFree === 0; });
+    if (atCap.length === onlineCells.length) return "cap-hit";
+    return "working";
+  }
+
+  // The copy for each catalogue state. Keyed by the same strings
+  // `GROUP_VIEW_STATES` holds; a state with no entry is a pinned refusal, not a
+  // silent blank. PURE.
+  var GROUP_VIEW_STATE_COPY = {
+    "empty": { label: "No supports", detail: "This server has no support boxes yet." },
+    "roster-conflict": { label: "Roster conflict", detail: "Two supports registered under the same worker name — status and capacity can't be attributed until one is renamed." },
+    "blocked": { label: "Blocked", detail: "A support is blocked and needs attention before it takes more work." },
+    "offline": { label: "Offline", detail: "No live support is beating — orders filed now would sit unclaimed." },
+    "provisioning": { label: "Provisioning", detail: "Supports are still coming up." },
+    "cap-hit": { label: "At capacity", detail: "Every online support reports zero free slots — new orders will queue." },
+    "working": { label: "Working", detail: "Supports are online and taking work." },
+  };
+
+  function groupViewStateCopy(state) {
+    return GROUP_VIEW_STATE_COPY[state] || { label: "Unknown", detail: "" };
+  }
+
+  // Full static class literals per branch (__css_check E2/E3 — a composed
+  // modifier is refused by the checker, so the seven arms are written out
+  // rather than built from `state`. That is the CONSTRAINT, not a preference:
+  // the pins below walk GROUP_VIEW_STATES and assert each one reaches a branch
+  // carrying its own token, so a state added to the catalogue without a branch
+  // here reds by name instead of falling silently through the else.)
+  function groupStateBadgeHtml(state) {
+    var copy = groupViewStateCopy(state);
+    var label = esc(copy.label);
+    if (state === "empty") return '<span class="group-state group-state--empty">' + label + "</span>";
+    if (state === "roster-conflict") return '<span class="group-state group-state--roster-conflict">' + label + "</span>";
+    if (state === "blocked") return '<span class="group-state group-state--blocked">' + label + "</span>";
+    if (state === "offline") return '<span class="group-state group-state--offline">' + label + "</span>";
+    if (state === "provisioning") return '<span class="group-state group-state--provisioning">' + label + "</span>";
+    if (state === "cap-hit") return '<span class="group-state group-state--cap-hit">' + label + "</span>";
+    if (state === "working") return '<span class="group-state group-state--working">' + label + "</span>";
+    return '<span class="group-state group-state--unknown">' + label + "</span>";
+  }
+
+  // One support's row on the group surface. The status cell is the SHIPPED
+  // `presenceChipHtml` — the group view paints no chip of its own, so a change
+  // to the presence vocabulary reaches both surfaces at once. PURE.
+  function groupSupportRowHtml(cell) {
+    var c = cell || {};
+    var cap = c.capacityText ? esc(c.capacityText) : "&mdash;";
+    var task = c.task ? esc(c.task) : "&mdash;";
+    return '<div class="group-row" data-group-support="' + esc(c.id) + '">' +
+      '<a class="group-cell group-cell--name" href="#instance/' + esc(c.id) + '">' + esc(c.name) + "</a>" +
+      '<span class="group-cell group-cell--status">' + presenceChipHtml(c.row) + "</span>" +
+      '<span class="group-cell group-cell--cap">' + cap + "</span>" +
+      '<span class="group-cell group-cell--beat">' + esc(c.stalenessText) + "</span>" +
+      '<span class="group-cell group-cell--task">' + task + "</span>" +
+    "</div>";
+  }
+
+  // The surface. `rosterDocs` is the app-token-direct roster read's `documents`
+  // (null = the read itself never landed — the cells then carry presenceChip's
+  // honest "no heartbeat yet" rather than a fabricated Offline). PURE.
+  function groupViewHtml(main, supports, rosterDocs, now) {
+    var bp = main || {};
+    var cells = groupSupportCells(supports, rosterDocs, now);
+    var state = groupViewState(cells);
+    var copy = groupViewStateCopy(state);
+    var body;
+    if (state === "empty") {
+      body = '<p class="group-empty">' + esc(copy.detail) + "</p>";
+    } else {
+      body =
+        '<div class="group-table" role="table" aria-label="Support servers in this group">' +
+          '<div class="group-row group-row--head" role="row">' +
+            '<span class="group-cell group-cell--name">Support</span>' +
+            '<span class="group-cell group-cell--status">Status</span>' +
+            '<span class="group-cell group-cell--cap">Capacity</span>' +
+            '<span class="group-cell group-cell--beat">Last beat</span>' +
+            '<span class="group-cell group-cell--task">Current task</span>' +
+          "</div>" +
+          cells.map(groupSupportRowHtml).join("") +
+        "</div>";
+    }
+    return '<section class="card group-view" data-group-state="' + esc(state) + '">' +
+      '<div class="group-head">' +
+        '<h2 class="group-title">' + esc(bp.name || "Group") + "</h2>" +
+        groupStateBadgeHtml(state) +
+      "</div>" +
+      '<p class="group-detail">' + esc(copy.detail) + "</p>" +
+      body +
+    "</section>";
+  }
+
   // ── Add-support flow (PDF-D83: the CP provisions server-side) ───────────────
   // The pure state machine (launchFlowReducer shape, container-agnostic):
   //   name --submit--> submitting --202/201--> submitted
@@ -31002,6 +31224,15 @@
       supportKeyCommand: supportKeyCommand, supportKeyStepHtml: supportKeyStepHtml,
       agentKeyShapeValid: agentKeyShapeValid, agentKeyStatusCopy: agentKeyStatusCopy,
       fleetNest: fleetNest, fleetNestedRowsHtml: fleetNestedRowsHtml,
+      // PDF-D11 group view (pdf-bl-fleet-group-view): the 7-state catalogue,
+      // its derivation and its pure renderer. `groupViewState` is the ONLY
+      // state decision and it reaches liveness through presenceChip alone.
+      GROUP_VIEW_STATES: GROUP_VIEW_STATES, groupViewState: groupViewState,
+      groupViewStateCopy: groupViewStateCopy, groupStateBadgeHtml: groupStateBadgeHtml,
+      groupSupportCell: groupSupportCell, groupSupportCells: groupSupportCells,
+      groupRosterConflicts: groupRosterConflicts, groupSupportRowHtml: groupSupportRowHtml,
+      groupViewHtml: groupViewHtml, rosterBeatAgeMs: rosterBeatAgeMs,
+      rosterStalenessText: rosterStalenessText, rosterSlotsFree: rosterSlotsFree,
       // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc
       // builder + tag-seed contingency, the eligibility gate, the watch
       // reducer/rows/panel, and the browser-direct URL join. DOM mounts

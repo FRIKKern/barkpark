@@ -714,7 +714,29 @@
 # and that control is what says the +2 is this diff and not a resolver difference. The
 # multiset diff of the two head lists is exactly [.detail-head--inst .detail-head-main,
 # .detail-head--inst .detail-actions] ADDED and NOTHING removed.
-1331
+#
+# Re-measured 2026-09-22 (pdf-bl-fleet-group-view, the PDF-D11 group surface):
+# 1331 -> 1357, +26 authored rule heads, ZERO removed. All 26 are the `.group-*`
+# block appended at the tail of app.css: .group-view / -head / -title / -detail /
+# -empty, the .group-state badge plus its EIGHT static state modifiers (empty,
+# roster-conflict, blocked, offline, provisioning, cap-hit, working and the unreachable-
+# today `unknown` else arm, which __css_check E2 requires painted because app.js
+# emits its literal), .group-table / .group-row / .group-row--head / .group-cell
+# and its five column modifiers incl. .group-cell--name:hover, and the two
+# re-declarations inside the `max-width: 899px` block.
+# NOT arithmetic. 1357 is the return of cssom-parity.mjs's own exported
+# `authoredHeads(app.css).length` run on this branch; the SAME call on
+# origin/main's app.css returned 1331, matching the baseline it replaces, and
+# that control is what says the +26 is this diff and not a resolver difference.
+# A head-by-head multiset diff against origin/main lists exactly those 26 as
+# ADDED and ZERO as REMOVED.
+# The instrument reported the mismatch with MISSES 0, which is the distinction
+# its own failure text tells you to confirm before bumping: an unrecorded ADD,
+# not a parity defect. MISSES is not re-measured here (it needs a browser) and
+# nothing in this diff adds a construct the CSSOM parses differently from the
+# authored text — every added head is a plain class selector, one of them with a
+# :hover pseudo-class, two of them inside an existing-shape media block.
+1357
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
