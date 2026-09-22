@@ -85,10 +85,17 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 // successive re-lists from one board can walk only the changed prefix
 // (corpus.go). One cache per fetcher — never a package global — so two boards,
 // or two tests, can never seed each other's corpus.
-func newSnapshotFetcher() func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+//
+// cacheDir/cacheKey address the PERSISTED base (corpus_persist.go): the same bp
+// config dir and scope key the first-paint snapshot cache uses. They are passed
+// in rather than resolved here so a test can point the whole seam at a
+// t.TempDir(), and an empty cacheDir disables persistence entirely — which is
+// what a board with no resolvable config dir gets, and it is byte-identical to
+// the pre-persistence behaviour.
+func newSnapshotFetcher(cacheDir, cacheKey string) func(*apiclient.Client) (Snapshot, DetailIndex, error) {
 	// live:true — this cache outlives one fetch, which is what licenses the brief
 	// prime projection and the rolling event tail (corpus.go primeView).
-	cc := &corpusCache{live: true}
+	cc := &corpusCache{live: true, persistDir: cacheDir, persistKey: cacheKey}
 	return func(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		return fetchSnapshotWith(c, cc)
 	}
