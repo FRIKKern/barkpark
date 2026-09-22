@@ -132,6 +132,22 @@
 #     not parse — so NOTHING was measured about a label hold. Same doctrine as
 #     6: an unread label is not an absent hold, and a merge path that fails
 #     OPEN on a hold is strictly worse than no hold at all.
+#   9 SIGPIPE SCAN RED: this PR touches a path scripts/pipefail-sigpipe-scan.sh
+#     reads, and that scan concluded FAILURE on this head — or is not concluded
+#     yet, or was overridden with only half the record. A DIFFERENT CLAIM FROM 1
+#     and from 3, and deliberately a different code: the scan is ADVISORY on
+#     GitHub and publishes no required context, so the PR can read 4/4 green
+#     while carrying the defect, which is exactly how #19748, #19772 and #19794
+#     merged. The door is two variables, BOTH required, printed on the record:
+#     BP_MERGE_SIGPIPE_OVERRIDE_WHO and BP_MERGE_SIGPIPE_OVERRIDE_WHY. It exists
+#     because the ratchet is a WHOLE-TREE count, so an inherited red would
+#     otherwise freeze every PR touching the scanned surface including its own
+#     fix. The ordinary path is not the door: repair the site with ,
+#     or bank the number in scripts/pipefail-sigpipe-baseline.txt.
+#  10 SIGPIPE SCAN CANNOT READ: the scan's verdict, the scanner's target roots,
+#     or this PR's file list could not be read — so NOTHING was measured about
+#     this class. Same doctrine as 6 and 8: an absent verdict is not a clean
+#     one, and exit 10 has no override door.
 #
 # USAGE
 #   scripts/bp-merge.sh              # no arguments; the PR is derived from HEAD
@@ -476,6 +492,292 @@ preflight_mergeable() {
       exit 1 ;;
     *)
       echo "bp-merge: pre-flight ok — mergeable_state: $state (not a conflict)." ;;
+  esac
+}
+
+# ── pre-flight 0c: THE pipefail SIGPIPE SCAN'S ADVISORY VERDICT ──────────────
+#
+# THE DECISION THIS BLOCK IS (task-2f62b64c32be3780 c1, ruled 2026-09-22).
+#
+# Three regressions of one class shipped from one lane in one session — #19748,
+# #19772, #19794 — each adding a `| head -1` under `set -o pipefail` to a file
+# the scanner reads, each taking the HIGH ratchet up one, each reddening main
+# AFTER the merge. The row offered two remedies: (a) give the scan a
+# paths-scoped `pull_request` arm, or (b) make the merge path run it.
+#
+# (a) IS ALREADY SHIPPED AND IT ALREADY FIRED. .github/workflows/
+# pipefail-sigpipe-scan.yml has carried a `pull_request:` arm since 2026-09-17
+# (task-4f360efc26a428f5), with the filter on the JOB so a non-touching PR
+# SKIPS rather than goes absent. MEASURED on the three merged heads themselves,
+# not recalled — each check run read back from the API by head sha:
+#
+#   #19748  b02717b971263d5128babf6493a7ac4059e21db3  check-run 106573421833
+#           conclusion failure, completed 00:42:41Z, MERGED 00:47:44Z
+#           "RATCHET BROKEN — 90 finding(s) at --min-confidence high, baseline is 89."
+#   #19772  10015890f31c7ee9f41d3ae77612ab37ed27238c  check-run 106620990819
+#           conclusion failure, completed 04:59:46Z, MERGED 06:57:34Z
+#           "RATCHET BROKEN — 90 finding(s) at --min-confidence high, baseline is 89."
+#   #19794  7104b1cb0fff69172229beada49c2a4f1aceeb2b  check-run 106663342734
+#           conclusion failure, completed 08:00:56Z, MERGED 08:40:41Z
+#           "RATCHET BROKEN — 87 finding(s) at --min-confidence high, baseline is 86."
+#
+# So the gate RAN on every one of them, on the exact head that merged, named
+# the exact defect, and concluded FAILURE minutes to hours BEFORE the merge.
+# Shipping (a) again is a no-op, and the honest diagnosis is NOT "the gate does
+# not run on the PR". It is that A RED WITH NO CONSEQUENCE AT THE MERGE
+# DECISION IS NOT A GATE. The merger read the required four, saw 4/4, and
+# merged; this workflow is advisory and publishes no required context, so
+# nothing in the merge decision ever consulted the verdict that already existed.
+#
+# WHY NOT WIDEN THE REQUIRED SET. Because the `scan` job SKIPS on a PR that
+# touches none of its roots, and because the required set is GENERATED from
+# sampled heads under a floor and a sampling rule. This is the same argument
+# the MAIN-RED HOLD block below records, ruled 2026-09-13 and rejected twice:
+# an advisory workflow that cannot safely become required is enforced AT THE
+# HELPER LAYER, because this script is the only live `gh pr merge` call in the
+# repository and `allow_auto_merge` is FALSE (read from the live repo
+# 2026-09-22: `gh api repos/{owner}/{repo} --jq .allow_auto_merge` -> false).
+#
+# WHY THIS IS NOT THE PRE-PUSH HOOK THE ROW RIGHTLY REJECTED. A hook is
+# per-checkout and must be INSTALLED, and a fleet that works in fresh worktrees
+# would run half of them unhooked. This file is COMMITTED: every worktree cut
+# from main already carries it, there is nothing to install, and nothing for a
+# merger to remember.
+#
+# COST, WEIGHED BY NAME AGAINST task-dee226be3107a98b — the check-run-volume
+# row, whose bar is under 20 check runs per PR push and "a PR runs only what can
+# block it plus what finishes under 60s". This block adds ZERO check runs, ZERO
+# workflows, ZERO CI minutes and ZERO new checkouts. It is one `gh api` read of
+# a head this script already reads, plus (only on the refusal path) one local
+# scanner run. It is strictly cheaper than either remedy the row offered, and it
+# is the only one of the three that costs task-dee226be3107a98b nothing at all.
+#
+# IT FAILS CLOSED, on the hold block's doctrine: a verdict that could not be
+# read is a REFUSAL (exit 10), never a skip. An absent verdict is not a clean
+# one.
+#
+# THE RESIDUAL GAP, STATED RATHER THAN GLOSSED: a merge performed with the
+# GitHub web button bypasses this, exactly as it bypasses both holds below.
+# That is a standing property of the whole helper layer, not a new one, and it
+# is why this block is ADDITIVE to (a) rather than a replacement for it — the
+# PR's own red stays on the PR for anyone who merges another way.
+SIGPIPE_SCRIPT="$REPO_ROOT/scripts/pipefail-sigpipe-scan.sh"
+SIGPIPE_BASELINE="$REPO_ROOT/scripts/pipefail-sigpipe-baseline.txt"
+SIGPIPE_CHECK_NAME='pipefail SIGPIPE scan'
+SIGPIPE_MATCHED=""
+
+# The distinct CANNOT READ line, on the hold's rule: never byte-identical to
+# the ok line and never to the refusal, so no caller can confuse "the scan is
+# clean" with "I could not look".
+sigpipe_cannot_read() { # $1 = what could not be read
+  echo "bp-merge: SIGPIPE SCAN CANNOT READ — $1" >&2
+  echo "          NOTHING is known about whether this head adds a pipefail/SIGPIPE site." >&2
+  echo "          This refusal carries no claim that the scan is red, and none that it is green." >&2
+  echo "          An unreadable advisory verdict is a REFUSAL, never a skip: a merge path that" >&2
+  echo "          fails OPEN on a verdict teaches everyone the verdict is real while merging" >&2
+  echo "          through it whenever the read breaks. Fix the read and re-run." >&2
+  echo "          Check judged: '$SIGPIPE_CHECK_NAME' on ${HEAD_SHA:-<no sha>}" >&2
+  exit 10
+}
+
+# THE SCANNER'S ROOTS ARE DERIVED FROM THE SCANNER, never re-enumerated here.
+# An enumeration is a snapshot; a derivation is a rule. The day someone adds a
+# fourth root to pipefail-sigpipe-scan.sh, this block follows it for free — and
+# a second hand-kept copy of `scripts/ .github/ deploy/` would not.
+#
+# `grep -m1`, never `grep | head -1`: this block is itself scanned by the gate
+# it wires, and a guard that hosts the defect it hunts has lost the argument.
+sigpipe_roots() {
+  local line
+  line="$(grep -m1 -F 'targets=("$ROOT/' "$SIGPIPE_SCRIPT" 2>/dev/null)" || return 1
+  [ -n "$line" ] || return 1
+  printf '%s\n' "$line" | grep -oE '[$]ROOT/[A-Za-z0-9_.@-]+' | sed 's#^[$]ROOT/##'
+}
+
+# 0 = this PR touches a scanned root · 1 = it touches none · 2 = the roots could
+# not be derived, so the question was never answered (never folded into 1).
+sigpipe_touches() { # $1 = newline-separated changed-file list
+  local roots pat="" r
+  roots="$(sigpipe_roots)" || return 2
+  [ -n "$roots" ] || return 2
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    pat="$pat${pat:+|}$(sed 's/[.]/\\./g' <<<"$r")/"
+  done <<<"$roots"
+  [ -n "$pat" ] || return 2
+  # A here-string, never `printf … | grep -q` — same reason as the workflow's
+  # own filter, which this mirrors.
+  SIGPIPE_MATCHED="$(grep -E "^($pat)" <<<"$1" || true)"
+  [ -n "$SIGPIPE_MATCHED" ]
+}
+
+# IMPURE (it calls gh) and kept as its own one-line function for the same reason
+# read_pr_files is: the harness stubs `gh` around it and drives the REAL reader
+# rather than a re-implementation of it. One row per check run, completed_at
+# FIRST so a plain lexical sort orders them.
+read_sigpipe_check() {
+  gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs?per_page=100" --paginate \
+    --jq ".check_runs[] | select(.name == \"$SIGPIPE_CHECK_NAME\") | [(.completed_at // \"\"), .status, (.conclusion // \"\"), (.html_url // \"\")] | @tsv" 2>&1
+}
+
+# NAME THE SITES, AND PIN THE SCAN TO THE REPO ROOT. A verdict that says only
+# "the ratchet broke" sends the reader to a CI log; the file and the line are
+# one local run away, and bp-merge runs from the PR branch's own worktree by
+# protocol, so the tree under $REPO_ROOT IS the head being judged.
+#
+# PIPEFAIL_SCAN_ROOT IS SET EXPLICITLY AND THAT IS THE WHOLE POINT. The scanner
+# defaults ROOT to its own dirname/..; a copy invoked from outside the checkout
+# resolves ROOT to `/`, reads 0 sites and reports a clean tree. That vacuous
+# control fooled two agents on 2026-09-22 — one of them while building the very
+# fix this block exists to have caught. Pinning it is not belt-and-braces.
+#
+# IT SCANS ONLY THIS PR'S OWN CHANGED FILES, and that is a cost decision as
+# well as a correctness one. The ratchet is a whole-tree number, so a red can be
+# INHERITED from main, and printing 85 pre-existing sites would bury the one
+# line the author is answerable for. MEASURED on this tree 2026-09-22: the whole
+# corpus is 36.9s over 473 files; the scanner takes explicit targets, and one
+# file is 0.109s. So the refusal path costs a tenth of a second, not half a
+# minute. An empty result is therefore informative, not a failure, and the
+# refusal says which of the two it means.
+#
+# A DELETED file is skipped rather than passed to find(1), which would abort the
+# scan and turn a naming step into a crash on exactly the PR that removed a bad
+# reader.
+sigpipe_sites_in_changed_files() { # $1 = changed files under a scanned root -> finding lines, or nothing
+  local args=() f out
+  [ -f "$SIGPIPE_SCRIPT" ] || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ -f "$REPO_ROOT/$f" ] || continue
+    args+=("$REPO_ROOT/$f")
+  done <<<"$1"
+  [ "${#args[@]}" -gt 0 ] || return 0
+  out="$(PIPEFAIL_SCAN_ROOT="$REPO_ROOT" bash "$SIGPIPE_SCRIPT" --min-confidence high "${args[@]}" 2>/dev/null || true)"
+  [ -n "$out" ] || return 0
+  # Drop the scanner's own summary line and the blank around it; what is left is
+  # the finding lines and the offending source line under each.
+  grep -v -e '^pipefail-sigpipe-scan:' -e '^$' <<<"$out" || true
+}
+
+sigpipe_refuse_or_override() { # $1 = html_url  $2 = changed-file list
+  local url="$1" files="$2" who="${BP_MERGE_SIGPIPE_OVERRIDE_WHO:-}" why="${BP_MERGE_SIGPIPE_OVERRIDE_WHY:-}"
+  if [ -n "$who" ] && [ -n "$why" ]; then
+    echo "bp-merge: SIGPIPE SCAN OVERRIDE — the red STOOD and was overridden ON THE RECORD."
+    echo "          who: $who"
+    echo "          why: $why"
+    echo "          run: ${url:-<no run url>}"
+    echo "          This does not clear the red. It records who decided to merge through it."
+    return 0
+  fi
+  if [ -n "$who" ] || [ -n "$why" ]; then
+    {
+      echo "bp-merge: REFUSED — SIGPIPE SCAN OVERRIDE INCOMPLETE."
+      echo "          BOTH variables are required and exactly one was set:"
+      echo "            BP_MERGE_SIGPIPE_OVERRIDE_WHO  ${who:+set}${who:-MISSING}"
+      echo "            BP_MERGE_SIGPIPE_OVERRIDE_WHY  ${why:+set}${why:-MISSING}"
+      echo "          A partial override is not an override: the red stood."
+    } >&2
+    exit 9
+  fi
+  local sites
+  sites="$(sigpipe_sites_in_changed_files "$files")"
+  {
+    echo "bp-merge: REFUSED — SIGPIPE SCAN RED: '$SIGPIPE_CHECK_NAME' concluded FAILURE on $HEAD_SHA."
+    echo "          This PR touches a path the scanner reads, and the scan on THIS HEAD is red."
+    echo "          It is ADVISORY on GitHub, so it is not in the required four and the PR can read"
+    echo "          4/4 green while carrying this. That is exactly how #19748, #19772 and #19794"
+    echo "          merged with the defect on their own heads. The merge verb reads it; the"
+    echo "          required set does not."
+    echo "          RUN: ${url:-<no run url>}"
+    echo
+    if [ -n "$sites" ]; then
+      echo "          HIGH-confidence site(s) in files THIS PR changed — the file and the line:"
+      printf '%s\n' "$sites" | sed 's/^/            /'
+      echo
+      echo "          RESOLVE: replace the truncating reader with \`grep -m1\`. That removes the"
+      echo "          PIPE, not the truncation: the producer stops, nothing closes a downstream"
+      echo "          read, and there is no 141. Behaviour is byte-identical."
+    else
+      echo "          NO high-confidence site was found in the files this PR changed."
+      echo "          The ratchet is a WHOLE-TREE count, so this red may be INHERITED from main."
+      echo "          Check before you decide whose it is:"
+      echo "            bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main"
+      echo "          If main already carries it, this is not your red — record the override:"
+      echo "            BP_MERGE_SIGPIPE_OVERRIDE_WHO=... BP_MERGE_SIGPIPE_OVERRIDE_WHY=... scripts/bp-merge.sh"
+    fi
+    echo
+    echo "          REPRODUCE LOCALLY, PINNED TO THE REPO ROOT (an unpinned run reads / and"
+    echo "          reports a clean tree — a vacuous control that has already fooled two agents):"
+    echo "            PIPEFAIL_SCAN_ROOT=\"\$PWD\" bash scripts/pipefail-sigpipe-scan.sh \\"
+    echo "                --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt"
+  } >&2
+  exit 9
+}
+
+preflight_sigpipe() {
+  echo "bp-merge: pre-flight — '$SIGPIPE_CHECK_NAME' verdict on ${HEAD_SHA:-<no sha>}"
+  [ -f "$SIGPIPE_SCRIPT" ] \
+    || sigpipe_cannot_read "missing $SIGPIPE_SCRIPT — the scanner's own target roots cannot be derived, so 'does this PR touch a scanned path' is unanswerable"
+
+  local files rc=0
+  files="$(read_pr_files)" || rc=$?
+  [ "$rc" = "0" ] \
+    || sigpipe_cannot_read "gh could not list the changed files on PR #$PR_NUMBER (exit $rc): $files"
+  [ -n "$files" ] \
+    || sigpipe_cannot_read "PR #$PR_NUMBER lists ZERO changed files; an empty file list is a failed read, not a clean PR, and NOT APPLICABLE off zero paths asserts nothing"
+
+  SIGPIPE_MATCHED=""
+  rc=0
+  sigpipe_touches "$files" || rc=$?
+  case "$rc" in
+    0) : ;;
+    1) echo "bp-merge: sigpipe pre-flight ok — NOT APPLICABLE: this PR touches none of the scanner's roots."
+       return 0 ;;
+    *) sigpipe_cannot_read "could not derive the scanner's target roots from $SIGPIPE_SCRIPT (its \`targets=(\"\$ROOT/…\")\` line did not parse); the applicability question was never answered" ;;
+  esac
+
+  local raw latest completed status conclusion url
+  rc=0
+  raw="$(read_sigpipe_check)" || rc=$?
+  [ "$rc" = "0" ] \
+    || sigpipe_cannot_read "gh could not read the check runs on $HEAD_SHA (exit $rc): $raw"
+  [ -n "$raw" ] \
+    || sigpipe_cannot_read "no check run named '$SIGPIPE_CHECK_NAME' has rendered on $HEAD_SHA, and this PR DOES touch a scanned root. That workflow carries no workflow-level \`paths:\` filter, so on a touching head the name must render; an ABSENT verdict is not a clean one"
+
+  # LATEST-BY-completed_at PER NAME, and the field is named on purpose. A re-run
+  # publishes a SECOND row under the same name, and `started_at` orders a
+  # long-then-short pair backwards. completed_at is ISO-8601 Z, so LC_ALL=C
+  # lexical order IS chronological order. An in-progress row carries an empty
+  # completed_at and sorts FIRST, so a concluded row always wins — and when the
+  # in-progress row is the only one, it is the one read, which is correct.
+  latest="$(LC_ALL=C sort <<<"$raw")"
+  latest="${latest##*$'\n'}"
+  IFS="$(printf '\t')" read -r completed status conclusion url <<<"$latest"
+
+  if [ "$status" != "completed" ]; then
+    {
+      echo "bp-merge: REFUSED — SIGPIPE SCAN NOT CONCLUDED: '$SIGPIPE_CHECK_NAME' is '$status' on $HEAD_SHA."
+      echo "          This PR touches a scanned path, so that verdict is load-bearing and it is not in."
+      echo "          An UNCONCLUDED advisory is not a green one."
+      echo "          RESOLVE: gh pr checks $PR_NUMBER --watch          # then run this script again"
+      [ -z "$url" ] || echo "          RUN: $url"
+    } >&2
+    exit 9
+  fi
+
+  case "$conclusion" in
+    success|neutral|skipped)
+      echo "bp-merge: sigpipe pre-flight ok — '$SIGPIPE_CHECK_NAME' concluded $conclusion on $HEAD_SHA."
+      return 0 ;;
+    failure)
+      # SIGPIPE_MATCHED, not $files: only the changed paths under a scanned
+      # root can carry a finding, and handing find(1) the rest is work with a
+      # known-empty answer.
+      sigpipe_refuse_or_override "$url" "$SIGPIPE_MATCHED" ;;
+    cancelled|timed_out|stale|action_required)
+      sigpipe_cannot_read "'$SIGPIPE_CHECK_NAME' concluded '$conclusion' on $HEAD_SHA — a superseded or abandoned run MEASURED NOTHING, so this is not a green and not a red. Re-run it: gh pr checks $PR_NUMBER" ;;
+    *)
+      sigpipe_cannot_read "'$SIGPIPE_CHECK_NAME' concluded '$conclusion' on $HEAD_SHA, which is not a conclusion this block classifies; an unknown conclusion is never folded into a pass" ;;
   esac
 }
 
@@ -1112,6 +1414,7 @@ main() {
   resolve_pr
   preflight_label_hold
   preflight_hold
+  preflight_sigpipe
   preflight
   preflight_mergeable
   merge_loop
