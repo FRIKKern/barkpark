@@ -95,10 +95,12 @@
   },
   {
     "name": "task-8ba550b59141bccb",
-    "note": "THE TOLERANCE ARM. purpose-copy fails the one-pass expectation and MATCHES the server's legacy three-pass output. The only such row in the whole published population (1 of 9,119, measured 2026-09-17) and it is the row that REPORTED the one-pass/three-pass split. It must stay QUIET: a three-pass-faithful mirror is not a false record, and warning here would be the warning lying on exactly the row that provoked it.",
+    "note": "THE LEGACY-NORMALISATION ARM, and it was the TOLERANCE arm until task-b641646addba4bdf. purpose-copy fails the one-pass expectation and matches the server's OLD rescanning three-pass output: the only such row in the whole published population (1 of 9,119, measured 2026-09-17), and it is the row that REPORTED the one-pass/three-pass split. While the server rescanned it was a faithful mirror and had to stay QUIET. The server is single-pass now, so nothing writes this text any more and it is a stale record like any other — it must WARN, and this row is what reds if the tolerance is ever re-introduced.",
     "lifecycle_status": "open",
-    "want_warn": false,
-    "want_blocks": [],
+    "want_warn": true,
+    "want_blocks": [
+      "purpose-copy (mirrors `description`)"
+    ],
     "envelope": {
       "doc": {
         "doc_id": "task-8ba550b59141bccb",
