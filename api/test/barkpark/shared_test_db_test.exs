@@ -272,6 +272,7 @@ defmodule Barkpark.TestCaptureTest do
     assert is_integer(failures)
     assert is_integer(seed)
     assert TestCapture.describe(@real_capture) =~ ~r/\AUSABLE: \d+ tests, \d+ failures/
+    assert %{exit_cause: nil} = elem(TestCapture.read(@real_capture), 1)
   end
 
   test "THE MEASURED FAILURE MODE: the same capture with the seed line removed is UNUSABLE" do
@@ -324,6 +325,59 @@ defmodule Barkpark.TestCaptureTest do
              TestCapture.read("Running ExUnit with seed: 1, max_cases: 8\nCompiling 3 files\n")
 
     assert :no_summary_line in reasons
+  end
+
+  describe "a capture whose exit code is not its failure count" do
+    # MEASURED on run 35662807156 (PR #19715): `0 failures` and exit 1, with the
+    # cause printed 2,567 lines earlier. Two readers in one evening quoted the
+    # summary alone and drew the wrong conclusion from it.
+    test "a 0-failure summary carrying a NODE-GLOBAL LEAK banner refuses to be quoted alone" do
+      capture = """
+      Running ExUnit with seed: 343107, max_cases: 1
+
+      ================================================================
+      NODE-GLOBAL LEAK: :barkpark, :boot_mode left set by a MODULE
+      ================================================================
+
+        module:            Barkpark.Plugins.OnixEdit.Tasks.BokbasenListTest
+        value left behind: :one_shot
+
+      30 doctests, 22051 tests, 0 failures, 33 excluded
+      """
+
+      # The counts are REAL, so this is not `:unusable` — that would be the
+      # wrong verdict and would send a reader to re-run a run that measured fine.
+      assert {:ok, %{tests: 22_051, failures: 0, exit_cause: why}} = TestCapture.read(capture)
+      assert why =~ "NODE-GLOBAL LEAK"
+
+      line = TestCapture.describe(capture)
+      assert line =~ "THE EXIT CODE IS NOT THE FAILURE COUNT"
+      assert line =~ "22051 tests, 0 failures"
+    end
+
+    test "THE QUIET ARM: the same summary without the banner carries no exit cause" do
+      capture = """
+      Running ExUnit with seed: 343107, max_cases: 1
+
+      30 doctests, 22051 tests, 0 failures, 33 excluded
+      """
+
+      assert {:ok, %{tests: 22_051, failures: 0, exit_cause: nil}} = TestCapture.read(capture)
+      assert String.starts_with?(TestCapture.describe(capture), "USABLE: 22051 tests")
+    end
+
+    test "the EXIT-CAUSE line test_helper prints is recognised on its own" do
+      capture = """
+      Running ExUnit with seed: 1, max_cases: 1
+
+      3 tests, 0 failures
+
+      EXIT-CAUSE: this run exits NON-ZERO and its "N tests, M failures" line does NOT explain it.
+      """
+
+      assert {:ok, %{exit_cause: why}} = TestCapture.read(capture)
+      assert why =~ "EXIT-CAUSE"
+    end
   end
 
   test "a doctest-prefixed summary is still read correctly" do

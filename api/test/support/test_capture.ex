@@ -104,12 +104,32 @@ defmodule Barkpark.TestCapture do
            tests: String.to_integer(tests),
            failures: String.to_integer(failures),
            seed: String.to_integer(seed_value),
-           bodies: bodies
+           bodies: bodies,
+           exit_cause: exit_cause(text)
          }}
 
       reasons ->
         {:unusable, reasons}
     end
+  end
+
+  # A capture can be perfectly READABLE and still not explain its own exit code.
+  # `test_helper.exs` arms `System.at_exit(exit {:shutdown, 1})` on a leaked
+  # node-global, so a run prints `0 failures` and exits 1. That is not a garbled
+  # measurement — the counts are real — so it is not `:unusable`. It is a
+  # summary that must not be quoted ALONE, and `describe/1` refuses to quote it
+  # alone.
+  @exit_cause_markers [
+    {~r/^NODE-GLOBAL LEAK: :barkpark, :boot_mode/m,
+     "a NODE-GLOBAL LEAK banner (`:barkpark, :boot_mode`) — the run exits non-zero whatever the failure count says"},
+    {~r/^EXIT-CAUSE: /m,
+     "an EXIT-CAUSE line naming a non-zero exit the failure count does not explain"}
+  ]
+
+  defp exit_cause(text) do
+    Enum.find_value(@exit_cause_markers, fn {re, why} ->
+      if Regex.match?(re, text), do: why
+    end)
   end
 
   defp missing_bodies(nil, _bodies), do: nil
@@ -124,8 +144,12 @@ defmodule Barkpark.TestCapture do
   """
   def describe(text) do
     case read(text) do
-      {:ok, %{tests: t, failures: f, seed: s}} ->
+      {:ok, %{tests: t, failures: f, seed: s, exit_cause: nil}} ->
         "USABLE: #{t} tests, #{f} failures (seed #{s})"
+
+      {:ok, %{tests: t, failures: f, seed: s, exit_cause: why}} ->
+        "USABLE BUT THE EXIT CODE IS NOT THE FAILURE COUNT: #{t} tests, #{f} failures (seed #{s}) — " <>
+          "this capture also carries #{why}. Quote both or neither."
 
       {:unusable, reasons} ->
         "UNUSABLE: #{Enum.map_join(reasons, "; ", &reason_text/1)} — " <>

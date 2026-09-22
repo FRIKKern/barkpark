@@ -219,4 +219,55 @@ ALTER TABLE chat_bridge.connector_installs
 # reasoning, and what each probe is a rule about, is in the module.
 Barkpark.SharedTestDb.report!(Barkpark.Repo)
 
+# ── EXIT-CAUSE, printed LAST (task-71dd1eb49e334fbb) ──────────────────────
+#
+# MEASURED, 2026-09-21, run 35662807156 on PR #19715. The Elixir gate read:
+#
+#     30 doctests, 22051 tests, 0 failures, 33 excluded
+#     ##[error]Process completed with exit code 1.
+#
+# and a lead read those two lines as an unexplained exit and attributed it to
+# the PR. The explanation WAS in the log — `boot_mode_leak_formatter.ex`
+# printed the module and the value, and called
+# `System.at_exit(fn _ -> exit({:shutdown, 1}) end)` — but it printed it 2,567
+# lines EARLIER, and nobody reads upward from a summary that says zero
+# failures. The same misreading happened twice in one evening, to two readers,
+# on the same log.
+#
+# The last thing a run prints is the thing a reader believes. So when the
+# node-global key is dirty at exit, the LAST line of the capture says so, and
+# says explicitly that the failure count above does not explain the exit code.
+#
+# Print-only. It arms nothing and clears nothing; the exit code is still the
+# formatter's and the after_suite arm's to set. `System.at_exit/1` handlers run
+# in REGISTRATION order, and this file is loaded before any test, so this one
+# runs before the formatter's `exit({:shutdown, 1})` and its line lands.
+System.at_exit(fn status ->
+  leaked =
+    try do
+      Barkpark.BootModeSandbox.current()
+    rescue
+      _ -> :error
+    catch
+      _, _ -> :error
+    end
+
+  case leaked do
+    {:ok, mode} ->
+      IO.puts(:stderr, [
+        "\nEXIT-CAUSE: this run exits NON-ZERO and its \"N tests, M failures\" line does NOT explain it. ",
+        "`:barkpark, :boot_mode` was left set to ",
+        inspect(mode),
+        " (mix test's own status here was ",
+        inspect(status),
+        "). Search this capture UPWARD for `NODE-GLOBAL LEAK` — it names the module. ",
+        "A zero failure count is compatible with this exit: the ExUnit shuffle decides whether ",
+        "the modules that ASSERT the key run before or after the module that leaks it.\n"
+      ])
+
+    _ ->
+      :ok
+  end
+end)
+
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)
