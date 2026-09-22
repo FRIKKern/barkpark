@@ -951,8 +951,18 @@ fi
 #      `no` branch reds; a mutation arm that silently matches nothing is the
 #      same vacuous green this whole case exists to prevent. An enumeration is
 #      a snapshot of the roster; the rule is "whatever per-class row is there".
-mut_class="$(sed -n 's/^#[[:space:]]*census:[[:space:]]*\([A-Za-z][A-Za-z0-9._]*\)=.*/\1/p' "$WF" \
-  | grep -vx 'total' | head -1)"
+# NO TRUNCATING READER. The first draft of this ended `| grep -vx 'total' | head -1`,
+# and `head` never reads to EOF: it takes its N lines and CLOSES the pipe, so the
+# upstream `sed` dies of SIGPIPE and the command substitution yields 141 under
+# pipefail — no buffer overrun needed. scripts/pipefail-sigpipe-scan.sh rates a
+# head reader HIGH unless the producer is provably bounded, and this one is not:
+# the census table's length is whatever security.yml declares. That one line took
+# the high-confidence ratchet from its 89 baseline to 90 and reddened main.
+# The fix is the scanner's own preference 1, no pipe to truncate: `grep -v` reads
+# to EOF, and the shell takes the first line with a parameter expansion.
+mut_class_list="$(sed -n 's/^#[[:space:]]*census:[[:space:]]*\([A-Za-z][A-Za-z0-9._]*\)=.*/\1/p' "$WF" \
+  | grep -vx 'total' || true)"
+mut_class="${mut_class_list%%$'\n'*}"
 if [ -z "$mut_class" ]; then
   no "MUTANT per-class: the table declares no per-class row to mutate — nothing to prove"
 else
