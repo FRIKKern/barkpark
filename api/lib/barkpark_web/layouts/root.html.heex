@@ -5340,7 +5340,8 @@
       // THE TAB STRIP IS NOT A phx-click SURFACE, and that corrects the premise
       // this slice was filed on. Read off the served authenticated desk
       // (guerrilla f23cd4f88): every `.studio-tab` is a plain `<a href>`
-      // (nav.ex:456-464) and the strip puts ZERO phx-click attributes on the
+      // (the `<a href={tab.path}>` arm of `Nav.studio_tabs/1`) and the strip puts
+      // ZERO phx-click attributes on the
       // page — so it never got the `.phx-click-loading{opacity:.6}` tint
       // either. It got NOTHING. A full-document navigation is still a press
       // that deserves an answer, so it gets one, through `_paOnChromeAnchor`
@@ -5696,7 +5697,8 @@
         // BUBBLE PHASE ON DOCUMENT — never capture, and never on window.
         // Running before LiveView's click listener is the whole mechanism, and
         // it survives the move off this container: LiveView binds on `window`
-        // in the bubble phase (live_socket.js:830-833), and `window` is the
+        // in the bubble phase (`LiveSocket#bindClicks` in live_socket.js), and
+        // `window` is the
         // LAST bubble target, strictly after `document`. So `data-phx-ref-src`
         // read at click time is still the exact discriminator for "this press
         // is about to be DISCARDED". It is `document` rather than `this.el`
