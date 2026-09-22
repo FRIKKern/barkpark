@@ -193,6 +193,49 @@ def first_open_paren(line, mstart):
     return p if p != -1 else None
 
 
+def statements(lines, lo, hi):
+    """Yield (start, end) spans of whole STATEMENTS in lines[lo:hi].
+
+    A trigger's window must open after the END OF ITS STATEMENT, not after the
+    sub-expression that happens to carry the event name.  Two shapes in this
+    tree break a line-wise scan:
+
+        view                                   render_submit(
+        |> element(~s(... "tree_node_select" ...))   element(view, "form[phx-submit=send]"),
+        |> render_click()                           %{"message" => "hi"}
+                                               )
+
+    In the first the event name is on the `element(...)` line and the driving
+    `render_click()` is the NEXT pipeline segment; closing at `element(...)`
+    put the trigger's OWN render_click inside the barrier window and it counted
+    as a barrier for itself.  In the second the event name is on an ARGUMENT
+    line of the enclosing `render_submit(...)`.  Spanning the statement fixes
+    both."""
+    i = lo
+    while i < hi:
+        l = lines[i]
+        if not l.strip() or l.lstrip().startswith('#'):
+            i += 1; continue
+        po = first_open_paren(l, 0)
+        end = max(expr_end(lines, i, po) if po is not None else i, i)
+        # a pipeline continues while the next non-blank line starts with `|>`
+        while True:
+            j = end + 1
+            while j < hi and (not lines[j].strip() or lines[j].lstrip().startswith('#')):
+                j += 1
+            if j < hi and lines[j].lstrip().startswith('|>'):
+                po2 = first_open_paren(lines[j], 0)
+                nxt = expr_end(lines, j, po2) if po2 is not None else j
+                if nxt <= end:          # never let the span fail to advance
+                    end = j
+                    continue
+                end = nxt
+                continue
+            break
+        yield (i, end)
+        i = max(end + 1, i + 1)
+
+
 def scan_window(lines, lo, hi, rx_bar, rx_settle):
     """barrier hits in lines[lo:hi], skipping comment lines."""
     bars, settles = [], []
@@ -208,23 +251,14 @@ def scan_window(lines, lo, hi, rx_bar, rx_settle):
 
 
 def last_trigger_in(lines, idxs, rx_trig):
-    """(line_index, close_index) of the LAST triggering call expression among idxs."""
-    hit = None
-    for i in idxs:
-        l = lines[i]
-        if l.lstrip().startswith('#'):
-            continue
-        m = re.search(rx_trig, l)
-        if m:
-            hit = (i, m.start())
-    if hit is None:
+    """(start, end) of the LAST triggering STATEMENT among the lines in idxs."""
+    if not idxs:
         return None
-    i, ms = hit
-    # walk back to the start of the statement's call: the enqueueing call is the
-    # outermost render_*/element chain on that line
-    p = first_open_paren(lines[i], 0)
-    close = expr_end(lines, i, p) if p is not None else i
-    return (i, close)
+    hit = None
+    for a, b in statements(lines, idxs[0], idxs[-1] + 1):
+        if re.search(rx_trig, '\n'.join(lines[a:b + 1])):
+            hit = (a, b)
+    return hit
 
 
 SUPPORT_CACHE = {}
@@ -249,12 +283,50 @@ def support_index():
     b = helper_bodies(lines)
     t = body_text(b)
     c = calls_of(t)
+    trig = closure(b, ANYTRIG, t, calls=c)
+    bar = closure(b, BARRIER, t, calls=c)
     SUPPORT_CACHE.update(dict(lines=lines, bodies=b, txt=t, calls=c,
-                              trig=closure(b, ANYTRIG, t, calls=c),
-                              bar=closure(b, BARRIER, t, calls=c),
+                              trig=trig, bar=bar,
                               store=closure(b, STORE, t, calls=c),
                               settle=closure(b, SETTLE, t, calls=c)))
+    # W1 for support helpers, computed ONCE.  A support helper cannot call a
+    # helper defined in a test file, so support-only regexes are exact here --
+    # and recomputing this per test file made the run O(files x support
+    # helpers) and it stopped terminating in reasonable time.
+    SUPPORT_CACHE['w1'] = helper_tail_windows(
+        b, lines, with_helpers(ANYTRIG, trig), with_helpers(BARRIER, bar),
+        with_helpers(SETTLE, SUPPORT_CACHE['settle']))
     return SUPPORT_CACHE
+
+
+def tail_barriers(lines, lo, hi, rx_trig, rx_bar, rx_settle):
+    """Barriers after the LAST enqueueing statement in lines[lo:hi]."""
+    lt = last_trigger_in(lines, list(range(lo, hi)), rx_trig)
+    if lt is None:
+        return None
+    _, close = lt
+    bars, settles = scan_window(lines, close + 1, hi, rx_bar, rx_settle)
+    return dict(after_line=close + 1, barriers=bars, settles=settles)
+
+
+BLOCK_OPEN = re.compile(r'(\bfn\b[^\n]*->|\bdo\b)\s*$')
+
+
+def inline_block_window(lines, tline, tclose, rx_trig, rx_bar, rx_settle):
+    """W1 for an INLINE block -- `derives_during(view.pid, fn -> ... end)`.
+
+    The same rung as the named-helper one, wearing different clothes: the
+    trigger and a tail `render(view)` both live inside the anonymous function
+    passed to the trigger statement, so a window that opens where the STATEMENT
+    closes never sees the barrier.  Gated on an actual block opener (`fn ->` or
+    a trailing `do`) so that the continuation lines of a plain multi-line call
+    -- the `%{...}` map argument of `render_hook/3` -- are NOT treated as
+    statements; those are argument position and must not count."""
+    opener = next((i for i in range(tline, tclose + 1)
+                   if BLOCK_OPEN.search(lines[i].split('#')[0].rstrip())), None)
+    if opener is None or opener >= tclose:
+        return None
+    return tail_barriers(lines, opener + 1, tclose, rx_trig, rx_bar, rx_settle)
 
 
 def helper_tail_windows(bodies, lines, rx_trig, rx_bar, rx_settle):
@@ -269,12 +341,9 @@ def helper_tail_windows(bodies, lines, rx_trig, rx_bar, rx_settle):
     out = {}
     for n, b in bodies.items():
         idxs = [i for i, _ in b]
-        lt = last_trigger_in(lines, idxs, rx_trig)
-        if lt is None:
-            continue
-        _, close = lt
-        bars, settles = scan_window(lines, close + 1, idxs[-1] + 1, rx_bar, rx_settle)
-        out[n] = dict(after_line=close + 1, barriers=bars, settles=settles)
+        w = tail_barriers(lines, idxs[0], idxs[-1] + 1, rx_trig, rx_bar, rx_settle)
+        if w is not None:
+            out[n] = w
     return out
 
 
@@ -335,7 +404,7 @@ def analyse_file(path, rel):
     rx_store = with_helpers(STORE, h_store - h_bar)
     rx_settle = with_helpers(SETTLE, h_settle)
 
-    w1 = helper_tail_windows(sup['bodies'], sup['lines'], rx_trig, rx_bar, rx_settle)
+    w1 = dict(sup['w1'])
     w1.update(helper_tail_windows(bodies, lines, rx_trig, rx_bar, rx_settle))
 
     starts = [i for i, l in enumerate(lines) if re.match(r'\s*test[ (]', l)]
@@ -348,17 +417,9 @@ def analyse_file(path, rel):
             if l.strip() and (len(l) - len(l.lstrip())) <= ind and (BLOCK_RX.match(l) or DEF_RX.match(l)):
                 end = j; break
 
-        # EVERY trigger in the block, not just the last one.
-        trigs = []
-        i = a
-        while i < end:
-            l = lines[i]
-            if l.lstrip().startswith('#') or not re.search(rx_trig, l):
-                i += 1; continue
-            po = first_open_paren(l, 0)
-            close = expr_end(lines, i, po) if po is not None else i
-            trigs.append((i, close))
-            i = max(close + 1, i + 1)
+        # EVERY triggering STATEMENT in the block, not just the last one.
+        trigs = [(x, y) for x, y in statements(lines, a, end)
+                 if re.search(rx_trig, '\n'.join(lines[x:y + 1]))]
 
         for tline, tclose in trigs:
             expr = '\n'.join(lines[tline:tclose + 1])
@@ -389,6 +450,11 @@ def analyse_file(path, rel):
                     via.append(h)
                     w1_bars += w1[h]['barriers']
                     w1_settles += w1[h]['settles']
+            ib = inline_block_window(lines, tline, tclose, rx_trig, rx_bar, rx_settle)
+            if ib:
+                via.append('<inline block>')
+                w1_bars += ib['barriers']
+                w1_settles += ib['settles']
 
             hops = max(CHAINS[c]['hops'] for c in chains)
             nbar = len(w1_bars) + len(w2_bars)

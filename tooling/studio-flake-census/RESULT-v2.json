@@ -2,24 +2,24 @@
  "generated_from": "tooling/studio-flake-census/census.py (v2)",
  "supersedes": "campaign scratchpad studio-s29-a1/RESULT.json (v1) \u2014 REFUTED, see README.md",
  "files_scanned": 1921,
- "sites": 68,
+ "sites": 67,
  "by_verdict": {
-  "MASKED-BY-BARRIER": 58,
+  "MASKED-BY-BARRIER": 57,
   "RACING-ONE-HOP": 6,
   "RACING-MULTI-HOP": 1,
   "SETTLED-MULTI-HOP": 3
  },
  "by_hops": {
-  "1": 64,
+  "1": 63,
   "3": 4
  },
  "by_chain": {
   "CH-CHAT": 37,
-  "CH-PAPEROP": 27,
+  "CH-PAPEROP": 26,
   "CH-TREE": 4
  },
  "multi_hop_sites": 4,
- "one_hop_sites": 64,
+ "one_hop_sites": 63,
  "rows": [
   {
    "file": "api/test/barkpark_web/live/studio/chat_live_flat_default_scope_test.exs",
@@ -1423,52 +1423,24 @@
     "CH-PAPEROP"
    ],
    "hops": 1,
-   "trig_line": 361,
-   "trig": "render_hook(target, \"inner-change\", values)",
-   "trig_expr_closes": 361,
-   "trigger_helpers": [],
+   "trig_line": 360,
+   "trig": "derives_during(view.pid, fn ->",
+   "trig_expr_closes": 370,
+   "trigger_helpers": [
+    "<inline block>"
+   ],
    "assert_line": 374,
    "assert_src": "assert stored_value(slug) == %{\"amount\" => \"301\", \"currency\" => \"NOK\"}",
-   "w1_barriers": [],
-   "w2_barriers": [
-    [
-     363,
-     "render_hook("
-    ],
+   "w1_barriers": [
     [
      369,
      "render("
     ]
    ],
-   "settles": [],
-   "barrier_count": 2,
-   "masked_where": "TEST-BLOCK",
-   "verdict": "MASKED-BY-BARRIER"
-  },
-  {
-   "file": "api/test/barkpark_web/live/studio/pds_w42_caps_derive_op_latency_test.exs",
-   "line": 345,
-   "name": "test \"the component route (handle_info \u2192 paper_pane_op/2) costs exactly one derive\",",
-   "chains": [
-    "CH-PAPEROP"
-   ],
-   "hops": 1,
-   "trig_line": 363,
-   "trig": "render_hook(target, \"inner-flush\", %{",
-   "trig_expr_closes": 367,
-   "trigger_helpers": [],
-   "assert_line": 374,
-   "assert_src": "assert stored_value(slug) == %{\"amount\" => \"301\", \"currency\" => \"NOK\"}",
-   "w1_barriers": [],
-   "w2_barriers": [
-    [
-     369,
-     "render("
-    ]
-   ],
+   "w2_barriers": [],
    "settles": [],
    "barrier_count": 1,
-   "masked_where": "TEST-BLOCK",
+   "masked_where": "TRIGGER-HELPER",
    "verdict": "MASKED-BY-BARRIER"
   },
   {
@@ -1899,18 +1871,14 @@
     "CH-TREE"
    ],
    "hops": 3,
-   "trig_line": 282,
-   "trig": "~s([data-block-id=\"cl-tree\"] button[phx-click=\"tree_node_select\"][phx-value-code=\"FB\"])",
-   "trig_expr_closes": 282,
+   "trig_line": 280,
+   "trig": "view",
+   "trig_expr_closes": 284,
    "trigger_helpers": [],
    "assert_line": 290,
    "assert_src": "block =",
    "w1_barriers": [],
    "w2_barriers": [
-    [
-     284,
-     "render_click("
-    ],
     [
      286,
      "render("
@@ -1921,7 +1889,7 @@
     ]
    ],
    "settles": [],
-   "barrier_count": 3,
+   "barrier_count": 2,
    "masked_where": "TEST-BLOCK",
    "verdict": "RACING-MULTI-HOP"
   },
@@ -1954,9 +1922,9 @@
     "CH-CHAT"
    ],
    "hops": 1,
-   "trig_line": 2784,
-   "trig": "element(view, \"form[phx-submit=send]\"),",
-   "trig_expr_closes": 2784,
+   "trig_line": 2783,
+   "trig": "render_submit(",
+   "trig_expr_closes": 2786,
    "trigger_helpers": [],
    "assert_line": 2788,
    "assert_src": "sid = store_id(view)",

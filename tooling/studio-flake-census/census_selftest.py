@@ -55,6 +55,18 @@ def tree_block(tail):
             'end\n')
 
 
+def inline_fn(tail):
+    """`derives_during(view.pid, fn -> ... end)` -- the trigger AND the barrier
+    both inside the anonymous function passed to a probe."""
+    return ('defmodule ZzSyntheticInlineTest do\n  use BarkparkWeb.ConnCase\n\n'
+            '  test "synthetic" do\n'
+            '    n =\n      probe(view.pid, fn ->\n'
+            '        ' + TRIG_LINE + '\n' + tail +
+            '      end)\n\n' + READ + '    assert n == 1\n  end\n\n'
+            '  defp probe(_pid, fun), do: fun.()\n'
+            'end\n')
+
+
 CASES = [
     # id, source, expected verdict, what it measures
     ('C1a bare 1-hop, no barrier anywhere',
@@ -74,6 +86,13 @@ CASES = [
      block('    ' + ARGPOS + '\n' + READ), 'RACING-ONE-HOP'),
     ('C3b the same call with the barrier moved to TAIL position',
      block('    ' + ARGPOS + '\n    paper_rev(view)\n' + READ), 'MASKED-BY-BARRIER'),
+
+    ('C9a trigger inside an inline `fn ->` block, no tail barrier in it',
+     inline_fn(''), 'RACING-ONE-HOP'),
+    ('C9b same inline block + a tail render(view) INSIDE it  [the D2 rung in '
+     'different clothes: the barrier is inside the trigger STATEMENT, so a '
+     'window opening where the statement closes never sees it]',
+     inline_fn('        render(view)\n'), 'MASKED-BY-BARRIER'),
 
     ('C4a 3-hop CH-TREE with ONE barrier — one ping is not a drain',
      tree_block('    render(view)\n'), 'RACING-MULTI-HOP'),

@@ -30,10 +30,18 @@ where the trigger's call expression **closes**, not at its first line.
 
 Two windows, not one:
 
-    W1  inside the TRIGGER HELPER, from the close of its last enqueueing
-        expression to the end of the helper          <- the rung v1 lacked
-    W2  in the test block, from the close of the trigger expression to the
+    W1  inside the TRIGGER'S OWN BODY, from the close of its last enqueueing
+        statement to its end -- whether that body is a named helper
+        (`inner_change/2`) or an inline block (`derives_during(pid, fn -> ..
+        end)`)                                       <- the rung v1 lacked
+    W2  in the test block, from the close of the trigger STATEMENT to the
         assertion line
+
+"Statement", not "line". The event name can sit on an `element(...)` line
+whose pipeline continues `|> render_click()` on the next, or on an argument
+line of an enclosing `render_submit(...)`. A line-wise window put the
+trigger's OWN driving call inside it, where it counted as a barrier for
+itself.
 
 **How many barriers are enough is decided by the chain's HOP COUNT, not by the
 site.** One barrier is one ping; it orders only against messages already in the
@@ -99,25 +107,31 @@ Two further corrections v1's own correction note did not make:
 ## Current population
 
 1921 test files scanned (the fence is a rule — every `.exs` under `api/test` —
-not a hand-list; v1's 301-file fence was a snapshot). 68 sites in 13 files.
+not a hand-list; v1's 301-file fence was a snapshot). 67 sites in 13 files.
 
-    by hop count   1-hop: 64      3-hop (CH-TREE): 4
-    by verdict     MASKED-BY-BARRIER 58 | RACING-ONE-HOP 6
+    by hop count   1-hop: 63      3-hop (CH-TREE): 4
+    by verdict     MASKED-BY-BARRIER 57 | RACING-ONE-HOP 6
                    RACING-MULTI-HOP 1  | SETTLED-MULTI-HOP 3
-    by chain       CH-CHAT 37 | CH-PAPEROP 27 | CH-TREE 4 | CH-AUTOSAVE 0
+    by chain       CH-CHAT 37 | CH-PAPEROP 26 | CH-TREE 4 | CH-AUTOSAVE 0
 
-`CH-AUTOSAVE` is zero: no test drives `select-media` / `clear-image` /
-`upload-image` / `select-ref` / `clear-ref` and then reads the store under an
-assertion. That is an absence with a control — the same trigger vocabulary
-finds 27 CH-PAPEROP and 37 CH-CHAT sites in the same pass.
+`CH-AUTOSAVE` is zero, and the absence has a control. Its five event names
+appear exactly three times in all of `api/test`, and every one of them is a
+markup assertion, never a driven event:
+
+    field_inputs_test.exs:435       refute html =~ ~s(phx-click="clear-ref")
+    field_inputs_test.exs:505       refute html =~ ~s(phx-click="clear-image")
+    studio_live_editor_test.exs:275 refute html =~ ~s(phx-click="clear-image")
+
+So no test drives the autosave chain at all. (The same pass finds 26
+CH-PAPEROP and 37 CH-CHAT sites, so the machinery is not dead either.)
 
 ### Leads, ranked. UNMEASURED.
 
 | site (block → trigger) | chain | hops | verdict | barriers |
 |---|---|---|---|---|
-| `paper_editor/slash_menu_and_codelist_test.exs:256` → L282 | CH-TREE | 3 | `RACING-MULTI-HOP` | 3 |
+| `paper_editor/slash_menu_and_codelist_test.exs:256` → L280 | CH-TREE | 3 | `RACING-MULTI-HOP` | 2 |
 | `chat_live_test.exs:2684` → L2686 | CH-CHAT | 1 | `RACING-ONE-HOP` | 0 |
-| `chat_live_test.exs:2779` → L2784 | CH-CHAT | 1 | `RACING-ONE-HOP` | 0 |
+| `chat_live_test.exs:2779` → L2783 | CH-CHAT | 1 | `RACING-ONE-HOP` | 0 |
 | `chat_live_test.exs:6673` → L6675 | CH-CHAT | 1 | `RACING-ONE-HOP` | 0 |
 | `chat_live_test.exs:7512` → L7530 | CH-CHAT | 1 | `RACING-ONE-HOP` | 0 |
 | `chat_live_test.exs:8388` → L8392 | CH-CHAT | 1 | `RACING-ONE-HOP` | 0 |
@@ -130,16 +144,21 @@ that is exactly the reasoning that produced v1's two refuted leads.
 
 ## Controls
 
-`census_selftest.py` is 13 cases. Every predicate case is a **matched pair** —
+`census_selftest.py` is 15 cases. Every predicate case is a **matched pair** —
 a fixture and its minimal mutation — because a case that only asserts the
 expected verdict passes for a predicate that answers that verdict always.
 
-- C1a/b, C2a/b, C3a/b, C4a/b — the pairs for D1, D2, argument position, hop count
+- C1a/b, C2a/b, C3a/b, C4a/b, C9a/b — the pairs for D1, D2, argument
+  position, hop count, and the inline-block form of D2
 - C5 — determinism over two full runs. This was RED: `calls_of` memoised on
   `id(txt)`, per-file dicts are garbage-collected, CPython reuses the address,
   and two runs over an unchanged tree printed 58/6 then 53/11.
 - C6 — every enqueue site `chains.json` cites still enqueues
-- C7a/b — the two refuted sites, pinned by outcome
+- C7a/b — the two refuted sites, pinned by outcome. C7a went RED while this
+  was being written: the statement-spanning fix moved the derive-latency
+  site's window past its inline `fn -> … render(view) end`, and only the
+  fixture caught it. That is what a regression fixture is for.
+- C9a/b — the same D2 rung for an inline block
 - C8 — **no special-casing**: no fixture file or helper name appears in
   `census.py`'s decision path (comments excepted), with a control proving the
   scan can find a name that *is* there. An enumeration is a snapshot; a
