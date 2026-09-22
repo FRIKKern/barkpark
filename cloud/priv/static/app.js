@@ -11636,6 +11636,17 @@
   //     would mean inventing a distinction the payload does not carry. Giving
   //     the console a way to tell them apart is a SERVER change (a `dataset` on
   //     the row, or a per-support scope echo), not a console one.
+  //     WHERE THE TRIPWIRE FOR THIS BELONGS, and why it is not here: the pin
+  //     that proves it used to read `to_row/3` out of the api tree from
+  //     `__app.test.mjs`, and the console path-escape ratchet refused it —
+  //     correctly. That read would put a hot api file in CONSOLE_PATHS and bill
+  //     every PR touching fleet presence for a browser-heavy console run to
+  //     guard THIS COMMENT. The api half is checkable in one grep beside the
+  //     function itself (`grep -n "defp to_row" api/lib/barkpark/tasks/fleet.ex`
+  //     — eight string keys, no `dataset`); the CONSOLE half, which is the
+  //     operative one, is pinned in `__app.test.mjs` without leaving this tree:
+  //     a support that never beat and a support beating into another dataset
+  //     render the SAME BYTES here, so there is no distinction to classify.
   //
   // Roster rows whose `worker` matches no support in this group. PURE, and
   // deliberately NOT consulted by `groupViewState`.

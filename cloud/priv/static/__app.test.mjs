@@ -35688,25 +35688,44 @@ test("PDF-D11: a roster row matching no support is an OBSERVATION, never a state
   assert.ok(!hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now).includes("group-others"));
 });
 
-test("PDF-D11: a support whose dataset differs from the roster scope is ABSENT, not divergent — the payload carries no dataset to diverge", () => {
-  // The rule-out's premise, asserted against the SHIPPED SERVER rather than
-  // quoted: Barkpark.Tasks.Fleet.to_row/3 serializes eight keys and `dataset`
-  // is not among them, and load_listeners/2 filters on the queried dataset, so
-  // every row the console receives is in scope by construction.
-  const fleetEx = fs.readFileSync(new URL("../../../api/lib/barkpark/tasks/fleet.ex", import.meta.url), "utf8");
-  const row = fleetEx.slice(fleetEx.indexOf("defp to_row("), fleetEx.indexOf("defp presence_status("));
-  assert.ok(row.includes('"worker" =>') && row.includes('"ttl_s" =>'), "to_row/3 moved — re-read it before trusting this pin");
-  assert.ok(!row.includes('"dataset"'),
-    "the roster row now carries a dataset — the console CAN tell a divergent scope from an absent row, and the rule-out in app.js is stale");
-  assert.ok(fleetEx.includes("d.dataset == ^dataset"), "load_listeners/2 no longer scopes by dataset");
+test("PDF-D11: a support whose dataset differs from the roster scope is INDISTINGUISHABLE from one that never beat — same bytes, and that IS the rule-out", () => {
+  // THIS PIN DELIBERATELY DOES NOT READ api/lib/barkpark/tasks/fleet.ex.
+  // It did, to assert that `to_row/3` serializes no `dataset` key — and the
+  // console path-escape ratchet was right to refuse it: a console test reading
+  // api source puts that file in CONSOLE_PATHS, and every api PR touching fleet
+  // presence would then run the browser-heavy console harness to guard a
+  // comment in app.js. CONSOLE_PATHS' existing api entries are files the
+  // console SHIPS OR PAINTS (layouts, stylesheets); a file a console test
+  // merely cites is not that, and billing another fence for it is the smell
+  // that list's own header names. The server-side half of the rule-out lives in
+  // app.js as prose naming exactly where to check it, and a tripwire on
+  // `to_row/3` belongs BESIDE `to_row/3`.
+  //
+  // What the console CAN prove about itself is the operative half, and it is
+  // the stronger claim anyway: the two causes are the SAME BYTES here, so
+  // "classify a divergent dataset" is asking this surface to invent a
+  // distinction its input does not carry.
+  const support = { id: "sup-1", name: "muscle-1", slug: "muscle-1", fleet_role: "support", fleet_parent_id: "main-1" };
+  // Cause A: registered, never beat — the roster landed and holds nothing for it.
+  const neverBeat = hooks.presenceSlotHtml([], support);
+  // Cause B: beating into ANOTHER dataset — the roster landed, holds other
+  // workers' rows, and none of them is this box.
+  const elsewhere = hooks.presenceSlotHtml(
+    [{ worker: "someone-else", status: "working", capacity: "1 task", last_seen: "2026-07-24T11:59:59Z", ttl_s: 120, task: null }],
+    support);
+  assert.equal(neverBeat, elsewhere,
+    "the two causes render differently — then the console CAN tell them apart and the rule-out in app.js is wrong");
+  assert.match(neverBeat, /No heartbeat yet/);
+  assert.doesNotMatch(neverBeat, /fleet-presence--offline/, "an absent row must never be a fabricated Offline");
 
-  // What the console therefore sees: no row, which is presenceChip's honest
-  // unknown — the same answer as a support registered but never beat. That is
-  // the truth available to a reader that cannot tell the two apart.
-  const chip = hooks.presenceChip(hooks.rosterRowFor([], GV_SUPPORT_BP));
-  assert.equal(chip.state, "unknown");
-  assert.equal(chip.online, false);
-  assert.equal(chip.label, "No heartbeat yet");
+  // THE CONTROL, or the equality above is satisfied by any two identical
+  // strings: a support that IS on the roster renders something ELSE, so the
+  // match is a fact about the absent case and not about the renderer.
+  const present = hooks.presenceSlotHtml(
+    [{ worker: "muscle-1", status: "working", capacity: "1 task", last_seen: "2026-07-24T11:59:59Z", ttl_s: 120, task: null }],
+    support);
+  assert.notEqual(present, neverBeat);
+  assert.match(present, /fleet-presence--working/);
 });
 
 test("PDF-D11: rosterBeatAgeMs is total over junk and never renders a beat in the future", () => {
