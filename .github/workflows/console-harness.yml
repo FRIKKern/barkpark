@@ -3149,17 +3149,8 @@ jobs:
     if: always()
     needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, modal-oracle, adjacency-guard, path-escape]
     runs-on: ubuntu-latest
-    outputs:
-      # THE NOTHING-RAN FACT, PUBLISHED. Read by `console-gate-subject` below,
-      # which renders it as a check-run NAME — the one channel the annotation
-      # cap cannot truncate. It is written INSIDE the same
-      # `if [ "$dispatched" -eq 0 ]` branch that emits the notice, never
-      # re-derived from the dispatcher output, so the two channels cannot
-      # disagree about whether this green had a subject.
-      nothing_ran: ${{ steps.decide.outputs.nothing_ran }}
     steps:
       - name: Decide (fail-closed over every upstream result)
-        id: decide
         env:
           R_CHANGES: ${{ needs.changes.result }}
           R_UNIT: ${{ needs.console-unit.result }}
@@ -3413,88 +3404,8 @@ jobs:
           # level per step and truncates the rest silently.
           if [ "$dispatched" -eq 0 ]; then
             echo "::notice title=Console gate: green — nothing ran::NOTHING CONSOLE RAN on this head.%0AConsole gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Console job executed', never as 'the Console harness passed'."
-            # ── THE SECOND CHANNEL (see this job's `outputs:` note) ─────────
-            # The line above is an ANNOTATION, and annotations are rationed:
-            # GitHub keeps the first 10 per level per step and drops the rest
-            # WITHOUT SAYING SO. Ten notices added to this step by a future
-            # slice would delete the only thing separating an empty green from
-            # a measured one. This output leaves the step through a channel
-            # with no cap on it and is rendered, by the job below, as a
-            # check-run NAME.
-            # `:-/dev/null` because scripts/console-path-escape-check.test.sh
-            # case 9 executes this very body under `env -i`, where
-            # $GITHUB_OUTPUT does not exist; `set -u` would kill it otherwise
-            # and the aggregator's whole mutation suite would go vacuous.
-            echo "nothing_ran=1" >> "${GITHUB_OUTPUT:-/dev/null}"
-          else
-            echo "nothing_ran=0" >> "${GITHUB_OUTPUT:-/dev/null}"
           fi
           echo "Console gate: every upstream job either succeeded or was legitimately not dispatched."
-
-  console-gate-subject:
-    # ── THE SUBJECT OF THE GREEN, IN A FIELD THAT CANNOT BE TRUNCATED ────────
-    #
-    # MEASURED 2026-09-16 on PR #18693's head 22dc98ba7 (a docs-only diff, so
-    # the console harness dispatched nothing):
-    #     Console gate | success | title=null | summary=null | text=null | ann=1
-    # …and on PR #18686's head d16e2806c (a cloud/lib diff, harness ran):
-    #     Console gate | success | ann=0
-    # The check-run payload of an EMPTY green and a MEASURED green differ in
-    # exactly one bit: the presence of one annotation. That annotation is the
-    # `::notice::` emitted above, and annotations are RATIONED — GitHub keeps
-    # the first 10 per level per step and drops the rest without a word. Ten
-    # notices added to that step by a future slice delete the disclosure and
-    # leave the green behind, indistinguishable again.
-    #
-    # A CHECK RUN'S NAME IS NOT RATIONED. It is returned by the check-runs API
-    # itself (`check_runs[].name`), is the first thing rendered in the Checks
-    # list and in `gh pr checks`, and `jobs.<job_id>.name` accepts the `needs`
-    # context — so this job's PUBLISHED NAME is the verdict. Nothing any other
-    # step emits can crowd it out.
-    #
-    # NOT A SECOND COPY OF THE TALLY. `nothing_ran` is an output of the very
-    # `if [ "$dispatched" -eq 0 ]` branch that emits the notice, not a re-read
-    # of `needs.changes.outputs.console`; the two channels are one measurement
-    # rendered twice and cannot drift apart.
-    #
-    # THIS NAME MUST NEVER BECOME A REQUIRED CONTEXT. `Console gate` is the
-    # frozen name branch protection reads (D20); this one CHANGES between runs
-    # by design, which is precisely what a required context may not do.
-    # ONE LINE ON PURPOSE. A folded (`>-`) scalar preserves the newline of any
-    # more-indented continuation line, so a prettier multi-line version of this
-    # expression ships literal newlines inside the `${{ }}`. Do not re-wrap it.
-    name: "${{ needs.console-gate.result != 'success' && 'Console gate subject: the Console gate is NOT GREEN — read it, not this' || (needs.console-gate.outputs.nothing_ran == '1' && 'Console gate subject: NOTHING CONSOLE RAN — that green is NOT APPLICABLE to this diff' || 'Console gate subject: the console harness RAN and measured this head') }}"
-    if: always()
-    needs: [console-gate]
-    runs-on: ubuntu-latest
-    # A REPORTER, NEVER A GATE — and `continue-on-error` is how that is SAID in
-    # a way the shape ratchets can read. Downstream of the aggregator, so it can
-    # never be in its `needs:` set, and the ratchets (scripts/
-    # cloud-console-gate-shape.test.sh, scripts/console-path-escape-check.test.sh)
-    # correctly treat a blocking job the aggregator cannot judge as a hole. It is
-    # not one here, and the fix is not an exemption list: muting it makes the
-    # claim structurally true. Nothing `needs:` this job, so the laundered
-    # `result` that makes `continue-on-error` dangerous INSIDE an aggregated set
-    # is unreadable from anywhere. The artefact is this job's NAME, which a
-    # failing step cannot change.
-    continue-on-error: true
-    steps:
-      # No checkout: this job reads one upstream output and prints one sentence.
-      # The NAME above is the artefact; this step exists so the job has one.
-      - name: Say which kind of green this was
-        env:
-          NOTHING_RAN: ${{ needs.console-gate.outputs.nothing_ran }}
-          GATE_RESULT: ${{ needs.console-gate.result }}
-        run: |
-          set -euo pipefail
-          if [ "${GATE_RESULT}" != "success" ]; then
-            echo "Console gate result='${GATE_RESULT}' — this job reports on a GREEN only. Read the Console gate."
-          elif [ "${NOTHING_RAN}" = "1" ]; then
-            echo "NOTHING CONSOLE RAN on this head."
-            echo "The Console gate is green because this diff touched none of its declared path sets, NOT because anything was tested."
-          else
-            echo "The console harness was DISPATCHED on this head — the Console gate's green was measured, not assumed."
-          fi
 
   report-main-failure:
     # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
