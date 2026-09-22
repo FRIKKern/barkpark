@@ -2243,7 +2243,7 @@ if [ -n "$zero_idioms" ] && [ -n "${ELIXIR_PATH_ESCAPE_ROOT:-}" ]; then
   # the harness proves a door load-bearing by deleting it and watching the read
   # go quiet. So the proof steps aside there and SAYS it stepped aside: a check
   # that skips in silence is the fault this file is named after.
-  echo "elixir-path-escape-check: zero-census proof SKIPPED — ELIXIR_PATH_ESCAPE_ROOT is set, so this is a fixture scan, not a self-scan. The doors are proven by the run that scans this checkout (and by cases 7a-7c of the harness, which run a COPY of this script as its own checkout)."
+  echo "elixir-path-escape-check: zero-census proof SKIPPED — ELIXIR_PATH_ESCAPE_ROOT is set, so this is a fixture scan, not a self-scan. The doors are proven by the run that scans this checkout (and by cases 11a-11c of the harness, which run a COPY of this script as its own checkout)."
 elif [ -n "$zero_idioms" ]; then
   echo "elixir-path-escape-check: $(printf '%s\n' "$zero_idioms" | sed '/^$/d' | wc -l | tr -d ' ') idiom(s) resolved ZERO reads on this tree — proving each door on a synthetic case (a floor of 0 cannot)."
   while IFS= read -r prow; do

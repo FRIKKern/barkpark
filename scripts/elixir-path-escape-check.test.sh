@@ -2560,7 +2560,7 @@ gate_says "refusing a two-dot fallback" "  …and refuses the fallback that swee
 echo
 
 
-# ── case 7: a ZERO-CENSUS door must PROVE itself or the run refuses ─────────
+# ── case 11: a ZERO-CENSUS door must PROVE itself or the run refuses ─────────
 # The floor table cannot judge a zero population: `0 < 0` is false however
 # broken the door is, and twelve idioms sit at floor 0 AND population 0 on the
 # real tree. --check therefore proves each such door on a synthetic fixture
@@ -2570,7 +2570,7 @@ echo
 # COPIED into a fixture tree's own scripts/ directory and run from there, which
 # makes that tree its checkout without ELIXIR_PATH_ESCAPE_ROOT. That is also
 # what lets the mutation arms below delete a door for real.
-echo "case 7: a zero-census idiom proves its detector on a synthetic case, or the run refuses"
+echo "case 11: a zero-census idiom proves its detector on a synthetic case, or the run refuses"
 FX_PROVE="$TMPROOT/prove"
 make_fixture "$FX_PROVE"
 mkdir -p "$FX_PROVE/scripts"
@@ -2578,19 +2578,19 @@ cp "$SCRIPT" "$FX_PROVE/scripts/elixir-path-escape-check.sh"
 
 out="$(bash "$FX_PROVE/scripts/elixir-path-escape-check.sh" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -eq 0 ]; then
-  ok "case 7a: a self-scan of a clean fixture checkout is green"
+  ok "case 11a: a self-scan of a clean fixture checkout is green"
 else
-  no "case 7a: the clean fixture self-scan redded — every arm below would prove nothing: $out"
+  no "case 11a: the clean fixture self-scan redded — every arm below would prove nothing: $out"
 fi
 if has "$out" "detector PROVEN on a synthetic case"; then
-  ok "case 7a: the zero-census doors are PROVEN, not assumed"
+  ok "case 11a: the zero-census doors are PROVEN, not assumed"
 else
-  no "case 7a: no proof line — the zero-census arm never ran: $out"
+  no "case 11a: no proof line — the zero-census arm never ran: $out"
 fi
 if has "$out" "idiom lib-rootattr: 0 live read(s), detector PROVEN"; then
-  ok "case 7a: lib-rootattr — the one idiom with no arm anywhere in this harness — is proven"
+  ok "case 11a: lib-rootattr — the one idiom with no arm anywhere in this harness — is proven"
 else
-  no "case 7a: lib-rootattr is still unproven: $out"
+  no "case 11a: lib-rootattr is still unproven: $out"
 fi
 
 # --- 7b: a BLINDED door must be named, not counted -------------------------
@@ -2600,25 +2600,25 @@ MUT_PROVE="$FX_PROVE/scripts/elixir-path-escape-check.sh"
 cp "$SCRIPT" "$MUT_PROVE"
 perl -0pi -e "s/      case \"\\\$lit\" in\n        '~'\\*\\)/      case \"\\\$lit\" in\n        'ZZNEVERZZ'*)/" "$MUT_PROVE"
 if grep -q 'ZZNEVERZZ' "$MUT_PROVE"; then
-  ok "case 7b: the sigil-door mutation applied (the fixture really changed)"
+  ok "case 11b: the sigil-door mutation applied (the fixture really changed)"
 else
-  no "case 7b: the sigil-door mutation did NOT apply — this case would prove nothing"
+  no "case 11b: the sigil-door mutation did NOT apply — this case would prove nothing"
 fi
 out="$(bash "$MUT_PROVE" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  ok "case 7b: exit $rc (non-zero) with the sigil door blinded"
+  ok "case 11b: exit $rc (non-zero) with the sigil door blinded"
 else
-  no "case 7b: a blinded door still greened — the proof is inert: $out"
+  no "case 11b: a blinded door still greened — the proof is inert: $out"
 fi
 if has "$out" "idiom 'test-sigildir' resolved 0 reads on this tree AND did not fire on its own synthetic fixture"; then
-  ok "case 7b: names the blind door and says its zero was never coverage"
+  ok "case 11b: names the blind door and says its zero was never coverage"
 else
-  no "case 7b: did not name test-sigildir as BLIND: $out"
+  no "case 11b: did not name test-sigildir as BLIND: $out"
 fi
 if has "$out" "idiom test-rootpipe: 0 live read(s), detector PROVEN"; then
-  ok "case 7b: the OTHER zero-census doors still prove — the red is the sigil door, not a collapse"
+  ok "case 11b: the OTHER zero-census doors still prove — the red is the sigil door, not a collapse"
 else
-  no "case 7b: every door went dark at once, so this red says nothing about the sigil door: $out"
+  no "case 11b: every door went dark at once, so this red says nothing about the sigil door: $out"
 fi
 
 # --- 7c: a zero-census door with NO fixture must REFUSE --------------------
@@ -2627,30 +2627,30 @@ fi
 cp "$SCRIPT" "$MUT_PROVE"
 perl -ni -e 'print unless m{^test-rootexec\tapi/test}' "$MUT_PROVE"
 if grep -qE '^test-rootexec\tapi/test' "$MUT_PROVE"; then
-  no "case 7c: the fixture-removal mutation did NOT apply — this case would prove nothing"
+  no "case 11c: the fixture-removal mutation did NOT apply — this case would prove nothing"
 else
-  ok "case 7c: the fixture row for test-rootexec is gone (the mutation applied)"
+  ok "case 11c: the fixture row for test-rootexec is gone (the mutation applied)"
 fi
 out="$(bash "$MUT_PROVE" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  ok "case 7c: exit $rc (non-zero) for a zero-census idiom with no fixture"
+  ok "case 11c: exit $rc (non-zero) for a zero-census idiom with no fixture"
 else
-  no "case 7c: an unprovable door passed as coverage: $out"
+  no "case 11c: an unprovable door passed as coverage: $out"
 fi
 if has "$out" "idiom 'test-rootexec' resolved 0 reads and has NO entry in ELIXIR_ESCAPE_IDIOM_FIXTURE"; then
-  ok "case 7c: refuses by name rather than counting an unproven door"
+  ok "case 11c: refuses by name rather than counting an unproven door"
 else
-  no "case 7c: no NO-FIXTURE refusal: $out"
+  no "case 11c: no NO-FIXTURE refusal: $out"
 fi
 rm -rf "$FX_PROVE/scripts"
 echo
 
-# ── case 8: a read the scanner CANNOT resolve is said out loud ─────────────
+# ── case 12: a read the scanner CANNOT resolve is said out loud ─────────────
 # task-c605ea24bbe5066c's original shape: `Path.expand("../../../" <> rel,
 # __DIR__)` where `rel` is not bound to anything the doors can reach. The
 # census cannot see it, and before this arm the output was identical to a tree
 # with no such read: silence, then OK.
-echo "case 8: an unresolvable path expression is REPORTED, and refuses when nothing binds it"
+echo "case 12: an unresolvable path expression is REPORTED, and refuses when nothing binds it"
 FX_UNSEEN="$TMPROOT/unseen"
 make_fixture "$FX_UNSEEN"
 cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
@@ -2658,14 +2658,14 @@ cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
 EX
 out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_UNSEEN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  ok "case 8a: exit $rc (non-zero) on a read the scanner cannot resolve"
+  ok "case 12a: exit $rc (non-zero) on a read the scanner cannot resolve"
 else
-  no "case 8a: an unresolvable read passed as OK — the original defect: $out"
+  no "case 12a: an unresolvable read passed as OK — the original defect: $out"
 fi
 if has "$out" "CANNOT SEE this read: api/test/barkpark/unseen_test.exs"; then
-  ok "case 8a: names the file, the line and the operand it cannot resolve"
+  ok "case 12a: names the file, the line and the operand it cannot resolve"
 else
-  no "case 8a: no CANNOT SEE line — the arm is silent on its own subject: $out"
+  no "case 12a: no CANNOT SEE line — the arm is silent on its own subject: $out"
 fi
 
 # --- 8b: the SAME expression, bound to a literal list, must NOT refuse -----
@@ -2677,14 +2677,14 @@ cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
 EX
 out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_UNSEEN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -eq 0 ]; then
-  ok "case 8b: the same expression bound to a literal list is green"
+  ok "case 12b: the same expression bound to a literal list is green"
 else
-  no "case 8b: a read the doors DO resolve was refused — a false red: $out"
+  no "case 12b: a read the doors DO resolve was refused — a false red: $out"
 fi
 if has "$out" "cannot see directly: api/test/barkpark/unseen_test.exs"; then
-  ok "case 8b: still REPORTED as unresolvable-at-the-read-site, not silently counted"
+  ok "case 12b: still REPORTED as unresolvable-at-the-read-site, not silently counted"
 else
-  no "case 8b: green and silent — the honesty half is missing: $out"
+  no "case 12b: green and silent — the honesty half is missing: $out"
 fi
 rm -f "$FX_UNSEEN/api/test/barkpark/unseen_test.exs"
 echo
