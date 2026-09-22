@@ -4,6 +4,9 @@ import { JSDOM } from 'jsdom';
 import { closeHistory } from '@tiptap/pm/history';
 const dom = new JSDOM('<!doctype html><body></body>', {pretendToBeVisual:true,url:'http://localhost/'});
 const {window}=dom;
+// JSDOM has no layout; history scrollToSelection may query a DOM Range.
+window.Range.prototype.getClientRects=()=>[];
+window.Range.prototype.getBoundingClientRect=()=>({top:0,bottom:0,left:0,right:0,width:0,height:0});
 for(const name of ['customElements','CustomEvent','document','DOMParser','Element','Event','EventTarget','HTMLElement','KeyboardEvent','MutationObserver','Node','NodeFilter','Selection','Text'])globalThis[name]=window[name];
 globalThis.window=window;
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:window.navigator});
@@ -95,6 +98,22 @@ for(const mutation of ['split','reorder','delete']){
   assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.equal(e.commands.undo(),true);await new Promise(resolve=>setTimeout(resolve,0));assert.deepEqual(canvas.recoverySnapshot().blocks,before,'acknowledged HTML paste must undo to the exact original empty paragraph');
   e.commands.redo();assert.deepEqual(canvas.recoverySnapshot().blocks,saved,'Redo restores the acknowledged HTML list and identity');
   console.log('PASS acknowledged HTML list paste preserves complete Undo/Redo history');
+ }finally{canvas.remove();}
+}
+for(const echoTiming of ['before-undo','after-undo-before-flush','after-undo-ack']){
+ const initial=[{id:'task',type:'list',ordered:false,task:true,items:[{checked:false,content:[{type:'text',value:'Checklist intent'}]}]},seed[1]];
+ const canvas=document.createElement('bp-paper-canvas');canvas.blocks=structuredClone(initial);canvas.acknowledgedSaves=true;document.body.append(canvas);
+ try{
+  const e=canvas._editor;canvas.querySelector('input[type="checkbox"]').click();canvas.flushPendingChanges();const checked=canvas._inflightOps;assert.ok(checked);canvas.acknowledgeOps(checked.seq,true);
+  if(echoTiming==='before-undo')canvas.applyServerBlocks(checked.afterBlocks);
+  assert.equal(e.commands.undo(),true);await new Promise(resolve=>setTimeout(resolve,0));
+  if(echoTiming==='after-undo-before-flush')canvas.applyServerBlocks(checked.afterBlocks);
+  assert.deepEqual(canvas.recoverySnapshot().blocks,initial,'late fetch must not reapply checked value '+echoTiming);
+  canvas.flushPendingChanges();const undone=canvas._inflightOps;assert.ok(undone);canvas.acknowledgeOps(undone.seq,true);
+  if(echoTiming==='after-undo-ack')canvas.applyServerBlocks(checked.afterBlocks);
+  canvas.applyServerBlocks(undone.afterBlocks);assert.deepEqual(canvas.recoverySnapshot().blocks,initial);
+  assert.equal(e.commands.redo(),true);assert.deepEqual(canvas.recoverySnapshot().blocks,checked.afterBlocks);
+  console.log('PASS host acknowledgement and ordinary fetched echo '+echoTiming+' preserves checkbox history');
  }finally{canvas.remove();}
 }
 window.close();
