@@ -2414,21 +2414,41 @@ async function pressCensusRow(page, rec, deadline) {
 //  into a product FAIL is the exact fabrication this epic exists to stop.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-//  WHAT THIS LEG MEASURED ON ITS FIRST TWO RUNS — guerrilla, served ca4534461,
-//  2026-09-22T13:26Z, host load 4.62→4.84 (cold arm) and 4.87→4.65 (warm arm)
-//  on 10 cores. THE LATENCIES BELOW ARE NOT PUBLISHED AS THE FLOOR — the host
-//  was loaded and the leg refused, exactly as designed. They are quoted here
-//  ONLY to carry the two verdicts that survive a loaded host BY DIRECTION.
+//  WHAT THIS LEG MEASURED — FOUR RUNS, ALL AGAINST
+//  https://guerrilla.barkpark.cloud, each with its own PRE/POST served-commit
+//  stamp that MATCHED:
+//
+//    3431a82a0 (0.2.26.4036) 13:26Z cold · load 4.62→4.84 on 10 cores
+//    3431a82a0               13:28Z warm · load 4.87→4.65
+//    fe1ef0aaf (0.2.26.4041) 13:49Z cold · load 8.72→10.10
+//    fe1ef0aaf               13:51Z warm · load 8.54→9.32
+//
+//  THE LATENCIES BELOW ARE NOT PUBLISHED AS THE FLOOR — the host was loaded on
+//  all four and the leg refused every time, exactly as designed. They are
+//  quoted ONLY to carry the verdicts that survive a loaded host BY DIRECTION.
+//
+//  READ THE PROVENANCE STAMP, NOT A CURL YOU TYPED. The first write-up of these
+//  runs reported the served commit as `ca4534461` and the status as
+//  `operational` with no `codelists` component — and then reported BOTH as
+//  corrections to a brief that had said `3431a82a0` and `degraded (codelists)`.
+//  The brief was right. `ca4534461` is PROD's sha (89.167.28.206), read from a
+//  hand-typed curl at the micro-block IP, while every one of these runs drove
+//  guerrilla and stamped `3431a82a0` PRE and POST in its own `run.provenance`.
+//  Two "findings" that resolved to one cause: a number taken two commands from
+//  the source, reported over the instrument's own reading. The harness already
+//  had the answer in the file it wrote.
 // ─────────────────────────────────────────────────────────────────────────────
 //  THE ~5.06s GAP IS REFUTED, AND NOT AS A LOAD ARTEFACT. Measured
-//  readyState=complete → a dispatchable press: 0–1ms, 20 iterations out of 20,
-//  across both arms, at load 4.6–4.9. The prior observation was 5056–5067ms,
-//  28 times, with an ELEVEN MILLISECOND SPREAD.
+//  readyState=complete → a dispatchable press: 0–2ms, FORTY iterations out of
+//  forty, across both arms and BOTH SERVED BUILDS, at load 4.6 through 10.1.
+//  The prior observation was 5056–5067ms, 28 times, with an ELEVEN MILLISECOND
+//  SPREAD.
 //
 //  The refutation is load-proof because load is MONOTONE UPWARD on a wait: a
-//  gap that reads 1ms at load 4.9 cannot read 5056ms at load 2.0. A quiet host
-//  could only make it smaller, and it is already 1ms. So this verdict does not
-//  need the quiet window the FLOOR number needs.
+//  gap that reads 2ms at load 10.1 cannot read 5056ms at load 2.0. A quiet host
+//  could only make it smaller, and it is already 2ms. So this verdict does not
+//  need the quiet window the FLOOR number needs — and it now holds across a
+//  build boundary as well, which no single-commit reading could have shown.
 //
 //  AND THE THIRD READING IS THE RIGHT ONE. The row framed this as a binary — a
 //  real third failure mode, or a load artefact — and it is NEITHER. An 11ms
@@ -2441,14 +2461,14 @@ async function pressCensusRow(page, rec, deadline) {
 //  time (row:true at 851ms) and `[data-phx-main].className` was empty. There is
 //  no third failure mode here, and nothing queues.
 //
-//  THE EARLY-PRESS DROP DID NOT REPRODUCE ON ca4534461 AT ALL. 20/20 presses
-//  ANSWERED, every one of them wire=SENT — so on the currently served commit
-//  the socket has joined before the row is hit-testable, and `pushWithReply`
-//  never gets the chance to reject. Answer latency 455–761ms; press placed
-//  229–537ms into a cold load and 139–188ms into a warm one. This is 20/20 at a
-//  load of 4.6–4.9, and the same monotone argument applies to the RELIABILITY
-//  claim (a quiet host cannot answer fewer presses than a loaded one) — but NOT
-//  to the latency numbers, which stay unpublished.
+//  THE EARLY-PRESS DROP DID NOT REPRODUCE ON EITHER BUILD. 40/40 presses
+//  ANSWERED, every one of them wire=SENT — so on both served commits the socket
+//  has joined before the row is hit-testable, and `pushWithReply` never gets the
+//  chance to reject. Answer latency 455–1071ms; press placed 229–537ms (cold)
+//  and 139–270ms (warm) into the load. This is 40/40 at loads from 4.6 to 10.1,
+//  and the same monotone argument applies to the RELIABILITY claim (a quiet host
+//  cannot answer fewer presses than a loaded one) — but NOT to the latency
+//  numbers, which stay unpublished.
 //
 //  THE 11–48ms FAILING PRESS IS UNREACHABLE FROM HERE. The earliest press this
 //  leg can physically place is ~139ms (warm) / ~229ms (cold), because before
@@ -2458,7 +2478,7 @@ async function pressCensusRow(page, rec, deadline) {
 //
 //  THE REF-SRC NO-OP REPRODUCES, NATURALLY, ON THE DEPLOYED STUDIO. The probe
 //  caught `data-phx-ref-src` still on the element from the control press (arm
-//  source NATURAL, both runs), and the second press read NOT SENT against a
+//  source NATURAL, ALL FOUR runs, both builds), and the second press read NOT SENT against a
 //  same-run control that read SENT. Signature: wire NOT SENT · 0 exceptions ·
 //  the DOM deltas are the CONTROL press's answer landing late and are printed
 //  as context, never as the verdict.
@@ -2475,9 +2495,10 @@ const FLOOR_PRESS_CAP = Number(process.env.FLOOR_PRESS_CAP_MS || 15000); // a pr
 const FLOOR_READY_CAP = Number(process.env.FLOOR_READY_CAP_MS || 30000); // readyState + row
 
 // COLD AND EARLY PULL IN OPPOSITE DIRECTIONS, and that is a finding rather than
-// a knob. MEASURED against guerrilla (served ca4534461, 2026-09-22): with the
-// cache DISABLED the row is not hit-testable until 229–537ms, so the earliest
-// press this leg can physically place is ~230ms into the load. The presses that
+// a knob. MEASURED against guerrilla (served 3431a82a0 and fe1ef0aaf,
+// 2026-09-22, PRE/POST stamped and matched on every run): with the cache
+// DISABLED the row is not hit-testable until 229–537ms, so the earliest press
+// this leg can physically place is ~230ms into the load. The presses that
 // failed deterministically in the prior runs landed at 11–48ms — which is only
 // REACHABLE ON A WARM LOAD, where the desk's JS and CSS come out of the memory
 // cache and the row paints before the socket has any chance to join. So "press

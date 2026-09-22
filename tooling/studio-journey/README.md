@@ -319,6 +319,12 @@ earliest press is ~230ms in. `FLOOR_COLD=0` serves the desk warm and reaches
 ~140ms. The 11–48ms presses that failed deterministically in earlier runs are
 only reachable warm. Both arms are needed; neither subsumes the other.
 
+**Read `run.provenance`, not a curl you typed.** Every run stamps the served
+commit PRE and POST into the run object it writes. The first write-up of these
+runs reported the served commit from a hand-typed `curl` at the prod micro-block
+IP instead, called the difference a correction to the brief, and was wrong twice
+for one reason. The instrument had already written the answer to a file.
+
 ## Not a merge gate
 
 `.github/workflows/studio-journey-smoke.yml` runs the self-test on PRs and the
