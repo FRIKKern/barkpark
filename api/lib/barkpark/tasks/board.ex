@@ -62,8 +62,15 @@ defmodule Barkpark.Tasks.Board do
     * **Where it is derived.** At the projection boundary — `to_card/4` and
       `card_from_broadcast/3` — off the RAW `doc_id`, BEFORE
       `Content.published_id/1` strips the prefix off the card's own `doc_id`
-      field. Downstream of that point the spelling no longer exists, so no
-      painter can re-derive it; it must be carried.
+      field. Downstream of that point the spelling no longer exists ON `doc_id`,
+      so no painter can re-derive it; it must be carried.
+
+      READ THAT LAST SENTENCE NARROWLY. It is true of `doc_id` and false of
+      `parent_id`, which `to_card/4` deliberately keeps RAW so the operator sees
+      the value the document stores — a `drafts.` spelling therefore very much
+      does survive there. Every reader that uses `parent_id` as a KEY (bucket,
+      lane, chip, root test) must strip it through `parent_key/1` first; that
+      omission was task-56bc2039bae5010f and task-dee8b2c71e2282d9.
     * **What a reader does with it.** Paints a visible DRAFT marker on any card
       whose `draft` is true. The Studio board does this in
       `Plugins.Tasks.Web.BoardLive` (`data-role="draft"`); the TUI's twin lives
@@ -576,12 +583,34 @@ defmodule Barkpark.Tasks.Board do
   # `TasksController.Params.batch_child_counts/2` — in SQL; this is the same rule
   # in Elixir, over the already-loaded snapshot. Normalising here and not at
   # `to_card/4` keeps `parent_id` on the card as the value the document actually
-  # stores, which `facets/1` and `lanes/2` render to the operator.
+  # STORES, which the card still renders to the operator — the normalisation is
+  # the GROUPING/MATCHING key's, never the displayed field's.
+  #
+  # ONE RULE, ONE CALL, FIVE READERS (task-dee8b2c71e2282d9). `parent_key/1`
+  # below is that one call; #17952 left four more raw reads of `card.parent_id`
+  # behind because its criterion named `attach_subtasks/1` alone. They are
+  # `facets/1` (the goal chip menu), `card_matches?/2` (which MATCHES a card
+  # against a chosen goal chip — the chip menu's other half, named by nothing in
+  # the filing), `family_fold/1` (both the child index AND the is-this-a-root
+  # test) and `group_cards/2`'s `:goal` clause (the goal swimlane). Every one of
+  # them keyed on `drafts.<epic>` where the epic's card is at `<epic>`, so a
+  # drafts-parented child offered a SECOND goal chip, read as its own root, and
+  # sat in its own one-card swimlane.
+  # The one published-id rule, for every reader that treats `parent_id` as a KEY.
+  # It delegates to `Content.published_id/1` (@canonical capability:
+  # draft-published-id) rather than re-spelling the prefix strip, so the board
+  # can never drift from `Tasks.Query.maybe_filter_parent_id/2` and friends.
+  # `nil` passes through: a parentless card has no key, and `published_id/1`
+  # would raise on it.
+  defp parent_key(nil), do: nil
+  defp parent_key(parent_id) when is_binary(parent_id), do: Content.published_id(parent_id)
+  defp parent_key(other), do: other
+
   defp attach_subtasks(cards) do
     by_parent =
       cards
       |> Enum.filter(&is_binary(&1.parent_id))
-      |> Enum.group_by(&Content.published_id(&1.parent_id))
+      |> Enum.group_by(&parent_key(&1.parent_id))
 
     Enum.map(cards, fn card ->
       Map.put(card, :sub, sub_summary(Map.get(by_parent, card.doc_id, [])))
@@ -857,7 +886,9 @@ defmodule Barkpark.Tasks.Board do
   @doc """
   The DISTINCT, sorted facet values present in the board's `cards_by_id`. PURE.
 
-  So the chip menu offers ONLY facets that exist: goals from `parent_id`,
+  So the chip menu offers ONLY facets that exist: goals from `parent_id` — read
+  through `parent_key/1`, so a `drafts.<epic>` parent offers the SAME chip as a
+  plain one instead of a phantom second entry —
   priorities from `priority` (as strings, numeric-sorted), labels flattened from
   every card's label list, workers from `worker`. Nils/blanks are dropped.
   """
@@ -866,7 +897,7 @@ defmodule Barkpark.Tasks.Board do
     cards = Map.values(board.cards_by_id)
 
     %{
-      goals: cards |> Enum.map(& &1.parent_id) |> distinct_sorted(),
+      goals: cards |> Enum.map(&parent_key(&1.parent_id)) |> distinct_sorted(),
       priorities:
         cards |> Enum.map(&priority_string(&1.priority)) |> distinct_sorted_priorities(),
       labels: cards |> Enum.flat_map(& &1.labels) |> distinct_sorted(),
@@ -881,10 +912,14 @@ defmodule Barkpark.Tasks.Board do
   (or missing) facet is UNCONSTRAINED; the facets AND together; WITHIN a facet the
   card's value(s) need only intersect the requested set (so the label facet passes
   when the card's label set intersects the requested labels).
+
+  The `:goal` value is read through `parent_key/1` — the SAME normalisation
+  `facets/1` applies when it offers the chip. These two must agree: normalise one
+  without the other and the menu offers a goal that matches nothing.
   """
   @spec card_matches?(map(), map()) :: boolean()
   def card_matches?(card, filters) do
-    facet_match?(filters[:goal], [card.parent_id]) and
+    facet_match?(filters[:goal], [parent_key(card.parent_id)]) and
       facet_match?(filters[:priority], [priority_string(card.priority)]) and
       facet_match?(filters[:label], card.labels) and
       facet_match?(filters[:worker], [card.worker])
@@ -998,6 +1033,11 @@ defmodule Barkpark.Tasks.Board do
 
   # ── the family fold (wave 16) ───────────────────────────────────────────────
   #
+  # Both reads of `parent_id` here go through `parent_key/1`: `cards_by_id` is
+  # keyed by the PUBLISHED doc_id, so a raw `drafts.<epic>` parent matched no key
+  # and the child fell out as its own root — a second top-level card for work
+  # that belongs inside the epic's mini-tree.
+  #
   # ROOTS are cards whose parent is NOT on the board (nil parent_id or an
   # unknown/cancelled one — an orphan is its own root, never hidden). Each root
   # becomes one family card carrying `:family` — a depth-capped mini-tree of
@@ -1022,11 +1062,13 @@ defmodule Barkpark.Tasks.Board do
     index =
       cards
       |> Enum.filter(&is_binary(&1.parent_id))
-      |> Enum.group_by(& &1.parent_id)
+      |> Enum.group_by(&parent_key(&1.parent_id))
 
     family_cards =
       cards
-      |> Enum.reject(fn c -> is_binary(c.parent_id) and Map.has_key?(ids, c.parent_id) end)
+      |> Enum.reject(fn c ->
+        is_binary(c.parent_id) and Map.has_key?(ids, parent_key(c.parent_id))
+      end)
       |> Enum.map(fn root ->
         stats = family_stats(index, root.doc_id)
         {rows, more} = family_rows(index, root.doc_id)
@@ -1165,8 +1207,11 @@ defmodule Barkpark.Tasks.Board do
   # Single-valued grouping (goal/priority): every card lands in exactly one lane
   # (its value, or the nil none-lane). Multi-valued (label): a card appears in
   # each of its label lanes, or the none-lane when it has no labels.
+  # `:goal` groups on `parent_key/1`, not the raw parent — same rule as the goal
+  # facet, so a drafts-parented child shares its epic's swimlane instead of
+  # opening a one-card lane beside it.
   defp group_cards(cards, :goal),
-    do: cards |> Enum.group_by(fn c -> lane_key(c.parent_id) end) |> sort_lanes(:goal)
+    do: cards |> Enum.group_by(fn c -> lane_key(parent_key(c.parent_id)) end) |> sort_lanes(:goal)
 
   defp group_cards(cards, :priority),
     do:
