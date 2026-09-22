@@ -82,6 +82,115 @@ expect_rc "A11 --stranded 'maybe'                    -> REFUSE" 2 "$TMP/none"   
 expect_rc "A12 an unknown argument                   -> REFUSE" 2 "$TMP/none"     --stranded true --bogus x
 
 echo ""
+echo "PART C — task-c5955c660c7b9e55: THIS run's own instance leg"
+# ── THE DEFECT, AS A FIXTURE ────────────────────────────────────────────────
+# Runs 35722816309 / 35720835901 / 35718876385 (2026-09-22): the `instance` JOB
+# concluded FAILURE, guerrilla kept serving e02e4296d, sibling deploy runs were
+# queued, and this check concluded SUCCESS on all three. $TMP/running is exactly
+# that sibling. C1 is the row's red direction and C2..C5 its green ones, and
+# every one of them is asserted against the SAME in-flight fixture so the only
+# thing that varies is the field under test.
+#
+# THE DISCRIMINATOR is the instance leg's own conclusion on THIS run, never a
+# served-vs-head comparison. C3/C4/C5 are the three "never going to move it"
+# shapes — skipped (the path filter found nothing for this host), cancelled
+# (superseded), success (it did its job) — and none of them may red.
+expect_rc "C1 instance FAILED + box STRANDED, sibling queued   -> RED" 1 "$TMP/running" \
+  --stranded true --instance-result failure --instance-state stranded \
+  --instance-served e02e4296d --instance-tip 3be2babacc34c7127dcb7109c00e277b8a8ba0e8
+expect_rc "C2 instance FAILED but box CONVERGED                -> GREEN" 0 "$TMP/running" \
+  --stranded false --instance-result failure --instance-state converged
+expect_rc "C3 instance SKIPPED (nothing for this host)         -> GREEN" 0 "$TMP/running" \
+  --stranded true --instance-result skipped --instance-state stranded
+expect_rc "C4 instance CANCELLED (superseded)                  -> GREEN" 0 "$TMP/running" \
+  --stranded true --instance-result cancelled --instance-state stranded
+expect_rc "C5 instance SUCCEEDED, box behind, deploy in flight -> GREEN" 0 "$TMP/running" \
+  --stranded true --instance-result success --instance-state stranded
+# ── CANNOT READ FAILS, IT DOES NOT SKIP ────────────────────────────────────
+# A failed deploy plus an unreadable box is the least safe moment to assume the
+# sha moved. `absent` is the same finding reached another way: the caller never
+# managed to record a state at all.
+expect_rc "C6 instance FAILED + box UNREADABLE (CANNOT READ)   -> RED" 1 "$TMP/running" \
+  --stranded false --instance-result failure --instance-state unchecked
+expect_rc "C7 instance FAILED + no state recorded at all       -> RED" 1 "$TMP/running" \
+  --stranded false --instance-result failure --instance-state absent
+# The in-flight lookup FAILING must not rescue a failed attempt either: the
+# withheld-conclusion arm is about a box that is merely behind.
+expect_rc "C8 instance FAILED + STRANDED + lookup unknown      -> RED" 1 "$TMP/none" \
+  --stranded true --in-flight-source unknown --instance-result failure --instance-state stranded
+# An unrecognised value is a harness fault, never "probably fine".
+expect_rc "C9 --instance-result 'exploded'                     -> REFUSE" 2 "$TMP/none" \
+  --stranded true --instance-result exploded
+expect_rc "C10 --instance-state 'probably-ok'                  -> REFUSE" 2 "$TMP/none" \
+  --stranded true --instance-state probably-ok
+# Not wiring the leg at all must leave every pre-existing verdict untouched.
+expect_rc "C11 unwired leg behaves exactly as before           -> GREEN" 0 "$TMP/running" --stranded true
+
+# ── C12: THE RED NAMES BOTH SHAS ──────────────────────────────────────────
+# A red that does not say what the box serves and what it owes sends the
+# operator back to the log to re-derive it. Read from a captured file, never a
+# pipe: `bash x | grep -q` answers 141 under pipefail.
+c12="$TMP/c12.out"
+c12rc=0
+bash "$SUBJECT" adjudicate --stranded true --instance-result failure --instance-state stranded \
+  --instance-served e02e4296d --instance-tip 3be2babacc34c7127dcb7109c00e277b8a8ba0e8 \
+  < "$TMP/running" > "$c12" 2>&1 || c12rc=$?
+c12body="$(cat "$c12")"
+case "$c12body" in
+  *e02e4296d*3be2babacc34c7127dcb7109c00e277b8a8ba0e8*|*3be2babacc34c7127dcb7109c00e277b8a8ba0e8*e02e4296d*)
+    ok "C12 the red names BOTH shas (rc=$c12rc)" ;;
+  *) bad "C12 the red did not name both shas" ;;
+esac
+
+# ── C13, THE MUTATION: prove C1 can actually lose ──────────────────────────
+# A guard never shown failing is a guard nobody knows still works. Excise the
+# new arm from a COPY of the subject and re-run C1's exact invocation: it must
+# fall through to the in-flight suppression and go GREEN, which IS the defect.
+# The plant is VERIFIED — arm present in the subject, absent from the mutant —
+# before the verdict that rests on it is read.
+# THE MUTANT LIVES BESIDE THE SUBJECT, not in $TMP: the subject sources
+# scripts/lib/ relative to its OWN directory, so a copy anywhere else dies at
+# load with rc=1 — indistinguishable from the red this arm is trying to prove.
+# That near-miss is why C13a2 below exists.
+mutsub="$REPO_ROOT/scripts/.mutant-convergence-$$.sh"
+trap 'rm -rf "$TMP"; rm -f "$mutsub"' EXIT
+python3 - "$SUBJECT" "$mutsub" <<'PYMUT'
+import sys
+src = open(sys.argv[1]).read()
+start = src.index('  if [ "$inst_result" = "failure" ]; then')
+end   = src.index('  if [ "$stranded" != "true" ]; then', start)
+open(sys.argv[2], "w").write(src[:start] + src[end:])
+PYMUT
+mut_arm_before=$(grep -c 'inst_result" = "failure"' "$SUBJECT")
+mut_arm_after=$(grep -c 'inst_result" = "failure"' "$mutsub")
+mut_lines_gone=$(( $(wc -l < "$SUBJECT") - $(wc -l < "$mutsub") ))
+if [ "$mut_arm_before" -ge 1 ] && [ "$mut_arm_after" -eq 0 ] && [ "$mut_lines_gone" -gt 20 ]; then
+  ok "C13a PLANT VERIFIED: arm present in subject (${mut_arm_before}x), absent from mutant, ${mut_lines_gone} lines excised"
+  # C13a2 — THE PRECONDITION, not just the plant. A mutant that fails to LOAD
+  # also exits non-zero, and a non-zero from a dead script would read as "C13b
+  # passed" for a green it never measured. So first make the mutant answer a
+  # question whose correct answer is 0: not stranded, nothing coming.
+  crc=0
+  bash "$mutsub" adjudicate --stranded false < "$TMP/none" >/dev/null 2>&1 || crc=$?
+  if [ "$crc" -ne 0 ]; then
+    bad "C13a2 the mutant does not RUN (rc=$crc on a trivially-green input) — C13b would measure a load error, not a verdict"
+  else
+    ok "C13a2 the mutant loads and adjudicates normally (rc=0 on a trivially-green input)"
+  fi
+  mrc=0
+  bash "$mutsub" adjudicate --stranded true --instance-result failure --instance-state stranded \
+    --instance-served e02e4296d --instance-tip 3be2babacc34c7127dcb7109c00e277b8a8ba0e8 \
+    < "$TMP/running" >/dev/null 2>&1 || mrc=$?
+  if [ "$mrc" -eq 0 ]; then
+    ok "C13b the mutant REPRODUCES the vacuous green (rc=0) — C1 is not vacuous"
+  else
+    bad "C13b the mutant still red (rc=$mrc); C1 cannot be shown to discriminate"
+  fi
+else
+  bad "C13a the plant failed (before=$mut_arm_before after=$mut_arm_after removed=$mut_lines_gone) — C13b would measure nothing"
+fi
+
+echo ""
 echo "PART B — the workflow actually wires the conclusion to the job status"
 
 BODY="$TMP/check-step.sh"
@@ -106,6 +215,30 @@ b_has "B2 it passes the strand verdict"              "--stranded"
 b_has "B3 it passes the in-flight source"            "--in-flight-source"
 b_has "B4 it captures rc rather than dropping it"    "verdict_rc"
 b_has "B5 it still emits converged= for the reporter" "converged=\${converged}"
+# ── B9..B12, task-c5955c660c7b9e55 ─────────────────────────────────────────
+# The adjudicator can only tell a failed ATTEMPT from a run that was never going
+# to move the box if the WORKFLOW hands it those facts. A green Part C over a
+# step that passes neither flag is a green with no subject.
+b_has "B9 it passes this run's instance leg result"  "--instance-result"
+b_has "B10 it passes the instance leg's read state"  "--instance-state"
+b_has "B11 it names both shas for the red"           "--instance-served"
+b_has "B12 it records the leg's read state as a fact" "inst_state="
+
+# B13: the job must NOT gate itself on a leg having succeeded. That precondition
+# skipped the whole check when both deploy legs failed — a false green traded
+# for a silent one, which the row names as a wrong fix.
+cguard="$(python3 - "$WORKFLOW" <<'PYC'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+print(" ".join(str(d["jobs"]["convergence"]["if"]).split()))
+PYC
+)"
+case "$cguard" in
+  *"needs.control-plane.result == 'success'"*|*"needs.instance.result == 'success'"*)
+    bad "B13 convergence still skips itself unless a leg succeeded: $cguard" ;;
+  *"always()"*) ok "B13 convergence runs on every main run, leg results notwithstanding" ;;
+  *) bad "B13 convergence's if: no longer starts from always(): $cguard" ;;
+esac
 
 # ── B6, THE REGRESSION ITSELF ──────────────────────────────────────────────
 # The pre-fix step ended `exit 0` on its own line, unconditionally. If that ever

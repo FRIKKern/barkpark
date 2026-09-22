@@ -2017,9 +2017,14 @@ jobs:
     # green again and the anchor moves forward with it.
     name: Production serves the newest deploy-relevant main commit
     needs: [changes, control-plane, instance]
+    # NO LEG-SUCCESS PRECONDITION (task-c5955c660c7b9e55). This used to read
+    # `(control-plane success || instance success)`, which SKIPPED the whole
+    # check when both deploy legs failed — the exact moment an operator most
+    # needs it to speak. A skipped liveness check reads as "not applicable" and
+    # vanishes from the surface. It runs on every main run now and says CANNOT
+    # READ when it cannot look.
     if: >-
-      always() && github.ref == 'refs/heads/main' &&
-      (needs.control-plane.result == 'success' || needs.instance.result == 'success')
+      always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     outputs:
@@ -2116,22 +2121,31 @@ jobs:
           echo "::group::content instance"
           echo "instance leg result=${INSTANCE_RESULT} — the served commit is read from the public endpoint either way"
           inst_sha=""
+          # INST_STATE is this leg's read, kept as its own fact rather than
+          # re-derived from $detail later (task-c5955c660c7b9e55). The
+          # adjudicator needs to tell "the box is behind" from "the box would
+          # not say", and a substring match on prose cannot carry that.
+          inst_state=absent
           if body="$(bp_curl_body -s --max-time 15 https://guerrilla.barkpark.cloud/status.json)"; then
             inst_sha="$(printf '%s' "$body" | jq -er '.commit // empty' 2>/dev/null)" || inst_sha=""
           fi
           if [ -z "$inst_sha" ]; then
             echo "::warning::the content instance did not say what it serves — UNCHECKED, not green"
             detail="${detail}instance: UNCHECKED (/status.json gave no commit). "
+            inst_state=unchecked
           else
             bash scripts/deploy-convergence-check.sh converged \
               --label "content instance (guerrilla)" --target instance \
               --served "$inst_sha" --tip "$TIP" $OWED_ARGS
             case $? in
-              0) detail="${detail}instance: converged. " ;;
+              0) detail="${detail}instance: converged. "
+                 inst_state=converged ;;
               1) converged=false
-                 detail="${detail}instance: STRANDED (serving ${inst_sha}). " ;;
+                 detail="${detail}instance: STRANDED (serving ${inst_sha}). "
+                 inst_state=stranded ;;
               *) echo "::warning::the instance comparison could not be made — UNCHECKED, not green"
-                 detail="${detail}instance: UNCHECKED (the comparison refused). " ;;
+                 detail="${detail}instance: UNCHECKED (the comparison refused). "
+                 inst_state=unchecked ;;
             esac
           fi
           echo "::endgroup::"
@@ -2171,6 +2185,8 @@ jobs:
           bash scripts/deploy-convergence-check.sh adjudicate \
             --label "production" --stranded "$([ "$converged" = "false" ] && echo true || echo false)" \
             --unchecked "$unchecked" --in-flight-source "$IN_FLIGHT_SOURCE" \
+            --instance-result "$INSTANCE_RESULT" --instance-state "$inst_state" \
+            --instance-served "$inst_sha" --instance-tip "$TIP" \
             < "${flight_file}.other" || verdict_rc=$?
 
           echo "converged=${converged}" >> "$GITHUB_OUTPUT"
