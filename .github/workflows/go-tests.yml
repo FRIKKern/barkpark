@@ -241,6 +241,14 @@ on:
       # tiers.ex: internal/pdrender/elixir_parity_test.go pins the Go renderer's
       # tier table against the Elixir source's.
       - "api/lib/barkpark/portable_doc/tiers.ex"
+      # priv/tasks/dispatch_markers.json: internal/cli/tasks_dispatch_advisory_test.go
+      # reads this file from DISK (const serverDispatchMarkersPath) as the SOURCE OF
+      # TRUTH for the do-not-build vocabulary and its precedence, and refuses when the
+      # byte copy beside the test drifts from it. api/lib/barkpark/tasks/dispatchability.ex
+      # reads the same file at compile time, so an edit here changes both surfaces with
+      # NO .go diff — without this entry the drift refusal cannot fire on the very PR
+      # that breaks it (task-6d190e20dd3e8bb4; same rule as stage.ex above).
+      - "api/priv/tasks/dispatch_markers.json"
       # chat fixtures: internal/chat/fold_test.go + running_fold_test.go read
       # chat_fold_labels.json, rail_glyph_lock_test.go reads
       # chat_rail_agent_glyphs.json, and reduce_test.go reads every transcript

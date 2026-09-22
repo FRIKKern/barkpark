@@ -182,6 +182,130 @@ defmodule BarkparkCloud.ConsoleReaderCensus do
   end
 
   @doc """
+  WHERE a slug is read: every app.js site that made Side B count it, as
+  `{line_number, kind, excerpt}` tuples with `kind` in `:errors_key | :quoted`.
+
+  This exists because the rot arm's verdict is NOT derivable from the slug
+  alone. Side B counts a slug quoted ANYWHERE in app.js as read (see SIDE B
+  above), so a match is EITHER a reader that landed OR a slug quoted for an
+  unrelated purpose — and this census cannot tell the two apart. It CAN hand the
+  reader the sites, and it CAN separate out the one site class that is
+  unambiguous: a bare key of the curated `var ERRORS = {` map is a console
+  reader by construction.
+
+  Line numbers are 1-based over the ORIGINAL file: the comment stripper is a 1:1
+  line map, so a stripped line keeps its number.
+  """
+  @spec read_sites([binary()], binary()) :: [{pos_integer(), :errors_key | :quoted, binary()}]
+  def read_sites(js_lines, slug) do
+    quoted_re = ~r/["']#{Regex.escape(slug)}["']/
+    key_re = ~r/^\s*#{Regex.escape(slug)}:\s/
+    range = errors_block_range(js_lines)
+
+    js_lines
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {line, n} ->
+      cond do
+        in_range?(range, n) and Regex.match?(key_re, line) -> [{n, :errors_key, excerpt(line)}]
+        Regex.match?(quoted_re, line) -> [{n, :quoted, excerpt(line)}]
+        true -> []
+      end
+    end)
+  end
+
+  @doc """
+  THE ROT ARM'S FAILURE TEXT — built here, not inlined at the assertion, so that
+  a planted fixture can render the exact message a reader sees without redding
+  the real suite.
+
+  The message carries this module's own blind spot (a quoted slug counts as read
+  wherever it appears, so a match may be an unrelated purpose) and then forks per
+  slug on the only distinction the file can honestly make: an ERRORS bare key is
+  a CONFIRMED reader (delete the rows); a quoted-only match is UNCONFIRMED
+  (confirm a real reader first, or rename the colliding token and KEEP the rows).
+  """
+  @spec rot_arm_message([binary()], [binary()]) :: binary()
+  def rot_arm_message(rotted, js_lines) do
+    """
+    #{length(rotted)} classified code(s) are now READ by the console:
+
+    #{Enum.map_join(rotted, "\n", &"      #{&1}")}
+
+    BEFORE YOU DELETE ANY ROW — what this arm can and cannot see:
+
+          Side B counts a slug quoted ANYWHERE in app.js as read. A match is
+          therefore EITHER a reader that landed OR the slug quoted for an
+          UNRELATED purpose, and this file CANNOT distinguish the two. A real
+          console reader must be CONFIRMED to consume the code before ANY
+          @classified row for it is deleted. Deleting rows on a string
+          coincidence silently destroys the coverage this census exists to hold.
+
+          The sites below make that confirmation a glance: a fetch / route /
+          error-dispatch site on the code is a reader; a UI token, a state name,
+          a CSS class or any other literal that merely SPELLS the slug is not.
+
+    #{Enum.map_join(rotted, "\n\n", &slug_verdict(&1, js_lines))}
+    """
+  end
+
+  defp slug_verdict(slug, js_lines) do
+    sites = read_sites(js_lines, slug)
+    confirmed? = Enum.any?(sites, fn {_n, kind, _t} -> kind == :errors_key end)
+
+    where =
+      case sites do
+        [] ->
+          "          (no site located by the site scanner — find it by hand; do NOT\n" <>
+            "          delete a row on a match you could not locate)"
+
+        _ ->
+          Enum.map_join(sites, "\n", fn {n, kind, text} ->
+            "          app.js:#{n}  [#{site_label(kind)}]\n            #{text}"
+          end)
+      end
+
+    verdict =
+      if confirmed? do
+        "          VERDICT: READER CONFIRMED. A bare `#{slug}:` key of the curated\n" <>
+          "          `var ERRORS = {` map is a console reader by construction, so this\n" <>
+          "          is the GOOD direction. Delete EVERY @classified row for `#{slug}`\n" <>
+          "          in the SAME diff as the reader."
+      else
+        "          VERDICT: UNCONFIRMED — CONFIRM BEFORE DELETING. Every site above is\n" <>
+          "          a quoted literal, which Side B counts as read wherever it appears.\n" <>
+          "          Read them. If one really consumes this refusal code, delete every\n" <>
+          "          @classified row for `#{slug}` in the same diff. If they are\n" <>
+          "          unrelated tokens that merely spell `#{slug}`, KEEP the rows and\n" <>
+          "          rename the colliding token instead — that is the fix."
+      end
+
+    "      #{slug}\n#{where}\n\n#{verdict}"
+  end
+
+  defp site_label(:errors_key), do: "ERRORS map key — a curated console reader"
+  defp site_label(:quoted), do: "quoted literal — purpose unknown to this census"
+
+  defp errors_block_range(js_lines) do
+    case Enum.find_index(js_lines, &Regex.match?(@errors_open, &1)) do
+      nil ->
+        nil
+
+      start ->
+        rest = Enum.drop(js_lines, start)
+        len = Enum.find_index(rest, &Regex.match?(@errors_close, &1)) || length(rest)
+        {start + 1, start + len}
+    end
+  end
+
+  defp in_range?(nil, _n), do: false
+  defp in_range?({lo, hi}, n), do: n >= lo and n <= hi
+
+  defp excerpt(line) do
+    t = line |> String.trim() |> String.replace(~r/\s+/, " ")
+    if String.length(t) > 140, do: String.slice(t, 0, 139) <> "…", else: t
+  end
+
+  @doc """
   THE D881 SEAL — classified rows whose reason still literally reads "READER OWED"
   (SPACE-only, case-insensitive), returned as sorted unique codes.
 
@@ -1534,18 +1658,16 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
   end
 
   test "the rot arm: a CLASSIFIED code that gains a reader must leave the map" do
+    js_lines = Census.source!(@app_js, "app.js") |> Census.strip_js_comments()
     rotted = Census.rotted(read(), classified_codes())
 
-    assert rotted == [], """
-    #{length(rotted)} classified code(s) are now READ by the console:
-
-    #{Enum.map_join(rotted, "\n", &"      #{&1}")}
-
-    This is the GOOD direction: a reader landed for a code the map called unread.
-    Delete EVERY @classified row for each code above in the same diff as the
-    reader — the map's whole value is that it never describes a state that has
-    stopped being true.
-    """
+    # The message is built by Census.rot_arm_message/2 — it carries this file's
+    # OWN blind spot (a quoted slug counts as read wherever it appears) and the
+    # app.js sites, because "a reader landed, delete the rows" is CATASTROPHIC
+    # advice when the match is a token collision. 2026-09-22: a group-view state
+    # spelled "conflict" collided with the seven /v1/internal settle rows; the
+    # correct fix was renaming the state to "roster-conflict", not deleting rows.
+    assert rotted == [], Census.rot_arm_message(rotted, js_lines)
   end
 
   test "THE SEAL (D881): no CLASSIFIED row still reads READER OWED" do
@@ -1631,6 +1753,65 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
            "a synthetic READER OWED row injected into a LOCAL classified list did " <>
              "NOT surface through reader_owed/1 — the seal guard has gone vacuous " <>
              "and its green proves nothing"
+  end
+
+  test "the rot arm's GUIDANCE forks on planted fixtures: real reader vs token collision" do
+    # Two planted app.js fixtures for the SAME classified slug. The arm fires on
+    # both (it is not weakened); only the guidance differs, and it differs on the
+    # one distinction this census can honestly make.
+    collision = [
+      ~s|var ERRORS = {|,
+      ~s|  forbidden: "You do not have access to this.",|,
+      ~s|};|,
+      ~s|function groupLabel(state) {|,
+      ~s|  if (state === "conflict") return "Roster conflict";|,
+      ~s|}|
+    ]
+
+    reader = [
+      ~s|var ERRORS = {|,
+      ~s|  forbidden: "You do not have access to this.",|,
+      ~s|  conflict: "That job has already settled.",|,
+      ~s|};|
+    ]
+
+    # Both fixtures DO trip the arm — the mutation is real in both directions.
+    assert Census.rotted(
+             Census.quoted_slugs(collision) |> MapSet.union(Census.errors_keyset(collision)),
+             MapSet.new(["conflict"])
+           ) == ["conflict"]
+
+    assert Census.rotted(
+             Census.quoted_slugs(reader) |> MapSet.union(Census.errors_keyset(reader)),
+             MapSet.new(["conflict"])
+           ) == ["conflict"]
+
+    collision_msg = Census.rot_arm_message(["conflict"], collision)
+    reader_msg = Census.rot_arm_message(["conflict"], reader)
+
+    # [0] Both messages carry the moduledoc blind spot at RUNTIME.
+    for msg <- [collision_msg, reader_msg] do
+      assert msg =~ "Side B counts a slug quoted ANYWHERE in app.js as read"
+      assert msg =~ "UNRELATED purpose"
+      assert msg =~ "CANNOT distinguish the two"
+      assert msg =~ "must be CONFIRMED to consume the code before ANY"
+    end
+
+    # [1] Both print WHERE, with a line number and the source line itself.
+    assert collision_msg =~ "app.js:5  [quoted literal — purpose unknown to this census]"
+    assert collision_msg =~ ~s|if (state === "conflict") return "Roster conflict";|
+    assert reader_msg =~ "app.js:3  [ERRORS map key — a curated console reader]"
+    assert reader_msg =~ ~s|conflict: "That job has already settled.",|
+
+    # [2] The verdicts fork, and each EXCLUDES the other.
+    assert collision_msg =~ "VERDICT: UNCONFIRMED — CONFIRM BEFORE DELETING"
+    assert collision_msg =~ "KEEP the rows and"
+    assert collision_msg =~ "rename the colliding token instead"
+    refute collision_msg =~ "VERDICT: READER CONFIRMED"
+
+    assert reader_msg =~ "VERDICT: READER CONFIRMED"
+    assert reader_msg =~ "Delete EVERY @classified row for `conflict`"
+    refute reader_msg =~ "VERDICT: UNCONFIRMED"
   end
 
   test "FAIL-CLOSED: a missing source, an empty extraction, a lost ERRORS map all raise by name" do

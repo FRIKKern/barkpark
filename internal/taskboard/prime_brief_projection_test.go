@@ -106,7 +106,7 @@ func TestLiveBoardPrimeAsksForTheBriefProjection(t *testing.T) {
 	srv := rec.server(t)
 	defer srv.Close()
 
-	fetch := newSnapshotFetcher()
+	fetch := newSnapshotFetcher("", "")
 	if _, _, err := fetch(newClient(srv.URL)); err != nil {
 		t.Fatalf("live fetch: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestBriefEventTailIsRebuiltAcrossTicks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	fetch := newSnapshotFetcher()
+	fetch := newSnapshotFetcher("", "")
 	var snap Snapshot
 	for i := 0; i < 3; i++ {
 		s, _, err := fetch(newClient(srv.URL))

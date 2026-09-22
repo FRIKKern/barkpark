@@ -304,7 +304,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
 		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
-		fetch:         newSnapshotFetcher(),
+		fetch:         newSnapshotFetcher(cfg.CacheDir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset)),
 		fetchEvents:   FetchTaskEvents,
 		tick:          tea.Tick,
 		build:         BuildBoard,
