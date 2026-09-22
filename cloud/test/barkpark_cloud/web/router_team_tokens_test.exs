@@ -312,6 +312,14 @@ defmodule BarkparkCloud.Web.RouterTeamTokensTest do
   ## Context boundary — a "pat" route never touches a session row
 
   describe "context fence" do
+    # MEASURED under mutation (task-f35dda7bbecbcd35, 2026-09-22): deleting
+    # `context: "pat"` from `Accounts.revoke_team_personal_access_token/2`'s
+    # `get_by` left this WHOLE FILE green — 17 tests, 0 failures. The session
+    # test below is why: `create_user_session_token/2` goes through
+    # `UserToken.changeset/2`, whose cast list has no `:team_id`, so the row
+    # lands with `team_id: nil` and the `team_id: tid` half of the same `get_by`
+    # already refuses it. It pins the 404, it does not pin WHICH fence produced
+    # it. Kept as the realistic case; the test after it is the one that reds.
     test "a SESSION token id is not revocable through the team-tokens route" do
       %{team: team, owner: owner, member: member} = team_with_members()
       {:ok, _plain} = Accounts.create_user_session_token(member)
@@ -325,6 +333,42 @@ defmodule BarkparkCloud.Web.RouterTeamTokensTest do
 
       conn = call(:delete, "/v1/teams/#{team.id}/tokens/#{row.id}", nil, session(owner))
       assert conn.status == 404
+    end
+
+    test "a non-PAT token carrying THIS TEAM'S team_id is 404 — `context:` alone refusing" do
+      %{team: team, owner: owner, member: member} = team_with_members()
+      {_p, real_pat} = pat(member, team)
+
+      # `team_id` goes on the STRUCT because the generic changeset cannot cast
+      # it; the context is "sse", a real context of this table. Every field this
+      # row shares with a PAT is shared, so the ONE thing between it and the
+      # route is `context: "pat"`.
+      {:ok, decoy} =
+        %BarkparkCloud.Accounts.UserToken{team_id: team.id}
+        |> BarkparkCloud.Accounts.UserToken.changeset(%{
+          user_id: member.id,
+          context: "sse",
+          token_hash: "not-a-pat-#{System.unique_integer([:positive])}",
+          expires_at:
+            DateTime.utc_now() |> DateTime.add(300, :second) |> DateTime.truncate(:microsecond)
+        })
+        |> BarkparkCloud.Repo.insert()
+
+      # Precondition asserted, not assumed: the decoy really does carry the
+      # team_id, so `team_id:` cannot be what refuses it.
+      assert decoy.team_id == team.id
+
+      conn = call(:delete, "/v1/teams/#{team.id}/tokens/#{decoy.id}", nil, session(owner))
+      assert conn.status == 404
+
+      # And it survives unstamped.
+      assert %BarkparkCloud.Accounts.UserToken{revoked_at: nil} =
+               BarkparkCloud.Repo.get(BarkparkCloud.Accounts.UserToken, decoy.id)
+
+      # HAPPY-PATH CONTROL, same body: a real PAT on the same team through the
+      # same route is 200, so the 404 above is the fence and not a dead route.
+      assert call(:delete, "/v1/teams/#{team.id}/tokens/#{real_pat.id}", nil, session(owner)).status ==
+               200
     end
   end
 end
