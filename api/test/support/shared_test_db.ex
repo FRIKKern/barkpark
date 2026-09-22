@@ -393,9 +393,18 @@ defmodule Barkpark.SharedTestDb do
      WHERE a.datname = current_database()
        AND a.pid <> pg_backend_pid()
        AND a.backend_type = 'client backend'
-       AND a.backend_start < clock_timestamp() - ($1::bigint * interval '1 millisecond')
+       AND a.backend_start < #{runtime_start_expr()}
     """
   end
+
+  @doc """
+  The SQL expression naming the instant this BEAM started, in the database's own
+  time base, from the uptime in `$1`. THE INVARIANT LIVES HERE: `clock_timestamp()`
+  and the uptime advance together, so this expression names a FIXED instant no
+  matter how long the run has been going. Public so a test can assert that
+  directly on the shipped expression rather than on a copy of it.
+  """
+  def runtime_start_expr, do: "clock_timestamp() - ($1::bigint * interval '1 millisecond')"
 
   defp concurrent_backends(repo, uptime_ms) do
     %{rows: [[count]]} =

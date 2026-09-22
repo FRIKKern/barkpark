@@ -320,6 +320,37 @@ defmodule Barkpark.SharedTestDbTest do
                "(pool #{new_from_pool}, late #{new_from_late})"
     end
 
+    test "THE INVARIANT: the reference instant does not move as the run gets older" do
+      # The defect this replaces was duration-DEPENDENT, so the property to
+      # prove is duration-INDEPENDENCE, on the shipped expression itself.
+      read = fn ->
+        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+          %{rows: [[now_s, ref_s]]} =
+            Ecto.Adapters.SQL.query!(
+              Barkpark.Repo,
+              "SELECT extract(epoch from clock_timestamp())::float8, " <>
+                "extract(epoch from (#{SharedTestDb.runtime_start_expr()}))::float8",
+              [:erlang.statistics(:wall_clock) |> elem(0)]
+            )
+
+          {now_s, ref_s}
+        end)
+      end
+
+      {now1, ref1} = read.()
+      Process.sleep(1200)
+      {now2, ref2} = read.()
+
+      # NON-VACUITY: the window really elapsed. Without this, a frozen clock
+      # would satisfy the drift assertion below for the wrong reason.
+      assert now2 - now1 >= 1.0,
+             "less than a second elapsed between the two reads (#{now2 - now1}s); nothing was measured"
+
+      assert abs(ref2 - ref1) < 0.25,
+             "the runtime-start reference moved #{abs(ref2 - ref1)}s over a 1.2s window; " <>
+               "a reference that drifts with elapsed time is the defect this replaces"
+    end
+
     test "a backend that genuinely predates this runtime IS counted, and reaches assess/1" do
       # Positive arm on the REAL statement: claim a zero uptime, which places
       # the reference instant at NOW — after our pool opened. Our own backends
