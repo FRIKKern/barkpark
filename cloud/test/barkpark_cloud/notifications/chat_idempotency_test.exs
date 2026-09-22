@@ -92,6 +92,12 @@ defmodule BarkparkCloud.Notifications.ChatIdempotencyTest do
                "add it, do not skip it"
 
       for {file, mod} <- shapers do
+        # `Code.ensure_loaded?/1` FIRST: `function_exported?/3` answers false for
+        # a module that simply has not been loaded yet, so without this the
+        # assertion passes or fails by which other test module ran first. It did
+        # exactly that — green alone, red inside the 590-test run.
+        assert Code.ensure_loaded?(mod), "#{file} does not compile to #{inspect(mod)}"
+
         assert function_exported?(mod, :shape, 4),
                "#{file} does not export shape/4 — it cannot be handed a delivery id"
       end
