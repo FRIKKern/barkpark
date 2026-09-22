@@ -361,6 +361,12 @@ for canary in app.css app.js; do
 done
 
 echo ">> Chrome: $CHROME_BIN"
+# THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Every PNG below comes
+# out of ONE engine. D168 asserted a cross-browser property off a green like
+# this one and stood for four waves until a hand-driven Firefox refuted it
+# (D904). browser-axis-census.mjs derives the engine from find_chrome()'s own
+# candidates and reds if this line disagrees with them.
+echo ">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green."
 echo ">> Shooting into: $OUT"
 echo ">> Census (derived from scenarios.mjs): $SCEN_DEEP of $SCEN_TOTAL scenarios carry a deepLink; $SCEN_MODAL declare a modal driver"
 

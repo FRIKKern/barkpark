@@ -2046,6 +2046,12 @@ function legA() {
 
   const rawMedia = (css.match(/@media/g) || []).length;
   out(`>> source     ${rel(CSS_PATH)} · ${rel(HTML_PATH)}\n`);
+  // THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Everything below
+  // is measured in ONE engine. D168 asserted a cross-browser property off a
+  // green like this one and stood for four waves until a hand-driven Firefox
+  // refuted it (D904). browser-axis-census.mjs derives the engine from this
+  // file's own discovery candidates and reds if this line disagrees with them.
+  out(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
   out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css names a breakpoint INSIDE a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)\n`);
   out(`>> axis       ${rep.breakpoints.length} breakpoints [${rep.breakpoints.join(",")}] -> ${rep.widths.length} boundary widths [${rep.widths.join(",")}]\n`);
   out(`>> screens    ${rep.views.length} registered views · ${rep.cells} scenario x route cells covering ${COVERED_VIEWS.length}\n`);
