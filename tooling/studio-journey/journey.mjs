@@ -334,8 +334,8 @@ function parseArgs(argv) {
   // not free, and the desk-row census needs none of it. An unknown letter is a
   // GUARD, never a silently narrower run.
   opts.legs = String(opts.legs).toLowerCase().replace(/[\s,]/g, "");
-  if (!/^[abc]+$/.test(opts.legs) || new Set(opts.legs).size !== opts.legs.length) {
-    throw new Error(`--legs wants some subset of "abc", each letter at most once (got "${opts.legs}")`);
+  if (!/^[abcd]+$/.test(opts.legs) || new Set(opts.legs).size !== opts.legs.length) {
+    throw new Error(`--legs wants some subset of "abcd", each letter at most once (got "${opts.legs}")`);
   }
   if (opts.selfTestSite && !["good", "rot"].includes(opts.selfTestSite)) {
     throw new Error(`--self-test-site must be good or rot (got ${opts.selfTestSite})`);
@@ -361,13 +361,19 @@ const USAGE = `journey — browser proof that a person can ADD A THING in the St
   --keep              do NOT delete the document LEG A created (default: it
                       self-cleans, so a re-run never litters the dataset)
   --dataset <ds>      dataset to drive (default ${DATASET})
-  --legs <abc>        run only these legs (default abc). \`--legs c\` is the
+  --legs <abcd>       run only these legs (default abc — LEG D is OPT-IN). \`--legs c\` is the
                       desk-row census ALONE: it never creates a document, so it
                       is the mode for a shared/production host. When a runs, it
                       establishes the session; when it does not, a minimal AUTH
                       beat mints the same ticket and asserts the same admin
                       discriminator first — a census of an anonymous desk is not
-                      a census of the desk.
+                      a census of the desk. \`--legs d\` is the COLD-LOAD PRESS
+                      FLOOR: ten consecutive cold loads, one deliberately-early
+                      press each, plus the ref-src second-press probe. It is NOT
+                      in the default because it costs ten full navigations, and
+                      because it REFUSES to publish a latency on a host whose
+                      load average is at or above 0.20 per core — printing the
+                      load it refused at. That refusal is a RESULT, not an error.
 
   exit 0 clean · 1 a LEG A product failure · 2 environment/usage guard
 `;
@@ -2355,6 +2361,520 @@ async function pressCensusRow(page, rec, deadline) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  LEG D — THE COLD-LOAD PRESS FLOOR (report-only, and it REFUSES under load)
+// ─────────────────────────────────────────────────────────────────────────────
+//  spd-b19-lane4-quiet-host-floor. Three waves filed this leg and none of them
+//  ran it, for one reason: THE HOST WAS NEVER QUIET. Wave 19's verify round
+//  never saw load fall below 8.05 on 10 cores and watched it peak at 40.81, and
+//  it REFUSED to publish any number it took there. This leg makes that refusal
+//  MECHANICAL instead of editorial — the instrument itself declines to name a
+//  latency it cannot stand behind, and prints the load it declined at.
+//
+//  WHAT THE LEG MEASURES
+//    1. THE FLOOR. Ten CONSECUTIVE COLD LOADS, one press each on a Structure
+//       row, every latency quoted. The press is EARLY BY CONSTRUCTION: the
+//       moment the row is dispatchable the leg presses, with no socket gate and
+//       no settle. Prior runs measured 9/10, 9/10, 9/10 and 5/6 and failed
+//       DETERMINISTICALLY ON THE EARLIEST PRESS EVERY TIME (11–48ms after
+//       load) — so a harness that lets iteration 1 be the only fast one is
+//       measuring its own warm-up, not the seam. Here every iteration is fast.
+//    2. THE UNATTRIBUTED GAP. `readyState === "complete"` → the row being
+//       dispatchable was measured at 5056–5067ms, 28 times, with an 11ms spread
+//       that load jitter does not explain, while in-page truth said the row was
+//       present the whole time. If it survives on a quiet host it is a THIRD
+//       failure mode — a main-thread freeze in which clicks are QUEUED rather
+//       than dropped — and it is absent from wave 18's ledger of five. The leg
+//       re-takes it and quotes the spread either way.
+//    3. THE REF-SRC NO-OP (c3). See `refSrcProbe`.
+//
+//  THE FRAME-COUNT TRAP, STATED IN THE CODE BECAUSE THE ROW REQUIRES IT
+//  (spd-b19-lane4-quiet-host-floor c4). THE ORACLE FOR "WAS THIS PRESS SENT"
+//  MATCHES `"type":"click"` AND NEVER COUNTS FRAMES. `phx_join`, the heartbeat
+//  and WidthBucket's own hook push all ride the same `/live/websocket`, so a
+//  DISCARDED press reads as TWO FRAMES while sending no click — a frame count
+//  is confounded by construction and would report a dropped press as sent. The
+//  match lives in `Page.open`'s `Network.webSocketFrameSent` subscription
+//  (`data.indexOf('"type":"click"') === -1` → not a press) and the verdict lives
+//  in `wireVerdict`, whose `frames` field counts ONLY frames that already
+//  matched. Nothing in this leg reads a raw frame total, and nothing may.
+//
+//  WHAT IS ALREADY PURCHASED AND IS NOT RE-DERIVED HERE. A discarded press puts
+//  ZERO `"type":"click"` frames on the socket — 4/4, against a same-run positive
+//  control of 32/32 answered presses that DID emit one; the source-level reason
+//  is `pushWithReply`'s reject before any channel push; and the drop is SILENT.
+//  `phx-connected` is REFUTED as the discriminator IN BOTH DIRECTIONS (31/31
+//  presses landed while `connected === false` and 29 of them were honoured; the
+//  one probe that carried `phx-loading` is the one that was dropped) because the
+//  class is applied post-mount-diff at view.js:618. So this leg does not gate on
+//  the class and does not re-litigate the frame question — it presses early,
+//  reads the typed oracle, and reports.
+//
+//  REPORT-ONLY. Like LEG B and LEG C this leg never moves the exit code: it is a
+//  measurement of an open defect on a shared host, and converting a slow host
+//  into a product FAIL is the exact fabrication this epic exists to stop.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHAT THIS LEG MEASURED — FOUR RUNS, ALL AGAINST
+//  https://guerrilla.barkpark.cloud, each with its own PRE/POST served-commit
+//  stamp that MATCHED:
+//
+//    3431a82a0 (0.2.26.4036) 13:26Z cold · load 4.62→4.84 on 10 cores
+//    3431a82a0               13:28Z warm · load 4.87→4.65
+//    fe1ef0aaf (0.2.26.4041) 13:49Z cold · load 8.72→10.10
+//    fe1ef0aaf               13:51Z warm · load 8.54→9.32
+//
+//  THE LATENCIES BELOW ARE NOT PUBLISHED AS THE FLOOR — the host was loaded on
+//  all four and the leg refused every time, exactly as designed. They are
+//  quoted ONLY to carry the verdicts that survive a loaded host BY DIRECTION.
+//
+//  READ THE PROVENANCE STAMP, NOT A CURL YOU TYPED. The first write-up of these
+//  runs reported the served commit as `ca4534461` and the status as
+//  `operational` with no `codelists` component — and then reported BOTH as
+//  corrections to a brief that had said `3431a82a0` and `degraded (codelists)`.
+//  The brief was right. `ca4534461` is PROD's sha (89.167.28.206), read from a
+//  hand-typed curl at the micro-block IP, while every one of these runs drove
+//  guerrilla and stamped `3431a82a0` PRE and POST in its own `run.provenance`.
+//  Two "findings" that resolved to one cause: a number taken two commands from
+//  the source, reported over the instrument's own reading. The harness already
+//  had the answer in the file it wrote.
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE ~5.06s GAP IS REFUTED, AND NOT AS A LOAD ARTEFACT. Measured
+//  readyState=complete → a dispatchable press: 0–2ms, FORTY iterations out of
+//  forty, across both arms and BOTH SERVED BUILDS, at load 4.6 through 10.1.
+//  The prior observation was 5056–5067ms, 28 times, with an ELEVEN MILLISECOND
+//  SPREAD.
+//
+//  The refutation is load-proof because load is MONOTONE UPWARD on a wait: a
+//  gap that reads 2ms at load 10.1 cannot read 5056ms at load 2.0. A quiet host
+//  could only make it smaller, and it is already 2ms. So this verdict does not
+//  need the quiet window the FLOOR number needs — and it now holds across a
+//  build boundary as well, which no single-commit reading could have shown.
+//
+//  AND THE THIRD READING IS THE RIGHT ONE. The row framed this as a binary — a
+//  real third failure mode, or a load artefact — and it is NEITHER. An 11ms
+//  spread on a 5056ms value is the signature of a CONSTANT, not of a
+//  measurement: host load produces spreads in the hundreds of milliseconds (see
+//  the answer latencies below, 455–761ms on the same runs), and 5056–5067ms is
+//  ~5000ms of something fixed plus ~60ms of work. The gap was an artefact of
+//  the PRIOR INSTRUMENT — a ~5s constant in the harness that observed it — and
+//  in-page truth already said so at the time: the row was present the whole
+//  time (row:true at 851ms) and `[data-phx-main].className` was empty. There is
+//  no third failure mode here, and nothing queues.
+//
+//  THE EARLY-PRESS DROP DID NOT REPRODUCE ON EITHER BUILD. 40/40 presses
+//  ANSWERED, every one of them wire=SENT — so on both served commits the socket
+//  has joined before the row is hit-testable, and `pushWithReply` never gets the
+//  chance to reject. Answer latency 455–1071ms; press placed 229–537ms (cold)
+//  and 139–270ms (warm) into the load. This is 40/40 at loads from 4.6 to 10.1,
+//  and the same monotone argument applies to the RELIABILITY claim (a quiet host
+//  cannot answer fewer presses than a loaded one) — but NOT to the latency
+//  numbers, which stay unpublished.
+//
+//  THE 11–48ms FAILING PRESS IS UNREACHABLE FROM HERE. The earliest press this
+//  leg can physically place is ~139ms (warm) / ~229ms (cold), because before
+//  that the row has no hit box. A press recorded at 11ms was therefore pressing
+//  something not yet laid out — which is a fact about THAT harness, not about
+//  the seam. See FLOOR_COLD.
+//
+//  THE REF-SRC NO-OP REPRODUCES, NATURALLY, ON THE DEPLOYED STUDIO. The probe
+//  caught `data-phx-ref-src` still on the element from the control press (arm
+//  source NATURAL, ALL FOUR runs, both builds), and the second press read NOT SENT against a
+//  same-run control that read SENT. Signature: wire NOT SENT · 0 exceptions ·
+//  the DOM deltas are the CONTROL press's answer landing late and are printed
+//  as context, never as the verdict.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// THE QUIET FLOOR. "under ~2.0 on 10 cores" is the row's own wording, so the
+// threshold is expressed as a FRACTION OF CORES and rendered back into the 10-core
+// number: 2.0/10 cores = 0.20 runnable per core. A 10-core desk therefore refuses
+// above 2.0 exactly as written, and the same constant means the same thing on a
+// 4-core CI runner instead of silently becoming 5x stricter there.
+const QUIET_LOAD_PER_CORE = Number(process.env.QUIET_LOAD_PER_CORE || 0.20);
+const FLOOR_ITERATIONS = Number(process.env.FLOOR_ITERATIONS || 10);
+const FLOOR_PRESS_CAP = Number(process.env.FLOOR_PRESS_CAP_MS || 15000); // a press's effect
+const FLOOR_READY_CAP = Number(process.env.FLOOR_READY_CAP_MS || 30000); // readyState + row
+
+// COLD AND EARLY PULL IN OPPOSITE DIRECTIONS, and that is a finding rather than
+// a knob. MEASURED against guerrilla (served 3431a82a0 and fe1ef0aaf,
+// 2026-09-22, PRE/POST stamped and matched on every run): with the cache
+// DISABLED the row is not hit-testable until 229–537ms, so the earliest press
+// this leg can physically place is ~230ms into the load. The presses that
+// failed deterministically in the prior runs landed at 11–48ms — which is only
+// REACHABLE ON A WARM LOAD, where the desk's JS and CSS come out of the memory
+// cache and the row paints before the socket has any chance to join. So "press
+// early" and "load cold" are not the same axis: FLOOR_COLD=1 measures the
+// cold-load floor and FLOOR_COLD=0 measures the 11–48ms window the drops were
+// observed in. Both arms are needed and neither subsumes the other.
+const FLOOR_COLD = process.env.FLOOR_COLD !== "0";
+
+/** The host reading, taken from the clock rather than remembered. `quiet` is the
+ *  ONE field callers may branch on; `load1` and `cores` are printed so a refusal
+ *  names the number it refused at, which is what makes the refusal a result. */
+function hostLoad() {
+  const cores = os.cpus().length || 1;
+  const [load1, load5, load15] = os.loadavg();
+  const ceiling = QUIET_LOAD_PER_CORE * cores;
+  return {
+    at: new Date().toISOString(),
+    cores, load1, load5, load15,
+    ceiling: Number(ceiling.toFixed(2)),
+    per_core: Number((load1 / cores).toFixed(3)),
+    quiet: load1 < ceiling,
+  };
+}
+
+const loadLine = (l) =>
+  `load ${l.load1.toFixed(2)} / ${l.load5.toFixed(2)} / ${l.load15.toFixed(2)} on ${l.cores} cores ` +
+  `(${l.per_core.toFixed(3)}/core; the quiet ceiling is ${l.ceiling.toFixed(2)}) — ${l.quiet ? "QUIET" : "LOADED"}`;
+
+const FLOOR_ROW = "#item-paper";
+
+/** Was the press ANSWERED, by this row's own identity? `aria-current` on THIS
+ *  element, or the URL newly carrying THIS row's id. Never a count — LEG C's
+ *  `#item-counts-decoy` exists because a pane count credited a dead row with its
+ *  neighbour's answer 900ms later. */
+const FLOOR_ANSWERED = `(function(){
+  var el = document.querySelector(${JSON.stringify(FLOOR_ROW)});
+  var owned = !!(el && el.hasAttribute("aria-current"));
+  var urled = location.pathname.indexOf("/studio/paper") !== -1;
+  return owned || urled;
+})()`;
+
+/** Is the row DISPATCHABLE — present, laid out, and hit-testable at its centre?
+ *  Presence alone is not dispatchability: a row with a zero box cannot receive a
+ *  synthetic mouse event, and the 5.06s gap is precisely a claim about the
+ *  distance between "present" (in-page truth said `row:true` at 851ms) and
+ *  "pressable". So this predicate is the one the gap is measured against, and it
+ *  reports WHICH of the two conditions is missing rather than a bare false. */
+const FLOOR_DISPATCHABLE = `(function(){
+  var el = document.querySelector(${JSON.stringify(FLOOR_ROW)});
+  if (!el) return { present:false, boxed:false, hit:false };
+  var r = el.getBoundingClientRect();
+  var boxed = r.width > 0 && r.height > 0;
+  if (!boxed) return { present:true, boxed:false, hit:false };
+  var t = document.elementFromPoint(r.left + r.width/2, r.top + r.height/2);
+  return { present:true, boxed:true, hit: !!(t && (t === el || el.contains(t))) };
+})()`;
+
+/** ONE COLD LOAD, pressed early on purpose. Returns a record that is decidable
+ *  either way — a press that was never possible says so rather than reading as a
+ *  zero. */
+async function floorIteration(page, ctx, i, pressCap) {
+  const rec = { i, load_before: hostLoad(), load_after: null, discarded: null };
+  // COLD MEANS COLD. Without this the second iteration serves the desk's JS and
+  // CSS out of the memory cache and measures a warm parse, which is exactly the
+  // "iteration 1 was the fast one" artefact this leg was written to remove.
+  rec.cold = FLOOR_COLD;
+  try { await page.cdp.send("Network.setCacheDisabled", { cacheDisabled: FLOOR_COLD }, page.sid); } catch { /* the leg still runs warm-ish */ }
+
+  const t0 = Date.now();
+  await page.goto(ctx.base + DESK_PATH);
+  rec.nav_ms = Date.now() - t0;
+  rec.doc_status = page.lastDocument?.status ?? null;
+
+  const ready = await poll(async () => (await page.evaluate('document.readyState')) === "complete" || null, FLOOR_READY_CAP, "readyState complete");
+  rec.ready_ms = ready.value ? Date.now() - t0 : null;
+  const tReady = Date.now();
+
+  const disp = await poll(async () => {
+    const d = await page.evaluate(FLOOR_DISPATCHABLE);
+    rec.last_dispatch_probe = d && !d.__throw ? d : null;
+    return d && !d.__throw && d.present && d.boxed && d.hit ? d : null;
+  }, FLOOR_READY_CAP, "the Structure row became dispatchable");
+  rec.dispatchable_ms = disp.value ? Date.now() - t0 : null;
+  // THE NUMBER THE ROW ASKED FOR: readyState=complete → a dispatchable press.
+  rec.gap_ms = ready.value && disp.value ? Date.now() - tReady : null;
+
+  if (!disp.value) {
+    rec.outcome = "NO ROW";
+    rec.detail = `the Structure row never became dispatchable within ${ms(FLOOR_READY_CAP)} (last probe ${JSON.stringify(rec.last_dispatch_probe)})`;
+    rec.load_after = hostLoad();
+    return rec;
+  }
+
+  // PRESS NOW. No socket gate, no settle, no "let the mount land" — the early
+  // press IS the measurement.
+  const mark = page.wireMark();
+  const exMark = page.exceptionMark();
+  rec.press_at_ms = Date.now() - t0;
+  const hit = await page.click(FLOOR_ROW);
+  rec.click_timing = page.clickTiming || null;
+  const tPress = Date.now();
+  if (!hit) {
+    rec.outcome = "NOT PRESSED";
+    rec.detail = "the row had no hit box at press time";
+    rec.load_after = hostLoad();
+    return rec;
+  }
+
+  const answered = await poll(async () => (await page.evaluate(FLOOR_ANSWERED)) === true || null, pressCap, "the press was answered");
+  rec.latency_ms = answered.value ? Date.now() - tPress : null;
+  rec.wire = page.wireVerdict(mark);
+  rec.exceptions = page.exceptionsSince(exMark);
+  rec.outcome = answered.value ? "ANSWERED" : "UNANSWERED";
+  rec.detail = answered.value
+    ? `answered ${rec.latency_ms}ms after a press placed ${rec.press_at_ms}ms into the load · ${rec.wire.verdict}`
+    : `NO answer within ${ms(pressCap)} of a press placed ${rec.press_at_ms}ms into the load · ${rec.wire.detail}`;
+  rec.load_after = hostLoad();
+  return rec;
+}
+
+/** The spread, over the iterations that are ALLOWED to contribute. An iteration
+ *  whose load crossed the ceiling while it ran is DISCARDED BY NAME rather than
+ *  averaged through — averaging a loaded sample into a quiet set is how a
+ *  refusal becomes a number. */
+function spread(values) {
+  const xs = values.filter((v) => typeof v === "number").sort((a, b) => a - b);
+  if (!xs.length) return null;
+  const mid = Math.floor(xs.length / 2);
+  return {
+    n: xs.length,
+    min: xs[0],
+    max: xs[xs.length - 1],
+    median: xs.length % 2 ? xs[mid] : Math.round((xs[mid - 1] + xs[mid]) / 2),
+    range: xs[xs.length - 1] - xs[0],
+    all: xs,
+  };
+}
+
+/** THE PHX_REF_SRC SECOND-PRESS NO-OP (c3), as its own probe, with a CONTROL.
+ *
+ *  LiveView stamps `data-phx-ref-src` on an element while its event is in
+ *  flight, `syncPendingAttrs` CARRIES IT ACROSS a re-render, and `bindClick`
+ *  ends `!r.hasAttribute(N) && this.debounce(…)` with N = "data-phx-ref-src".
+ *  So a second press on a row whose first press is still outstanding is
+ *  discarded IN THE CLIENT: no frame, no exception, no flash, no server trace.
+ *  The digest says this shape ALONE reproduces the owner's report, and it had
+ *  never been exercised as its own probe.
+ *
+ *  TWO ARMS, AND THE CONTROL IS THE POINT. An instrument that only ever sees the
+ *  stamped press cannot tell "the press was suppressed" from "the tap is dead":
+ *    ARM CONTROL  press the row with NO ref-src → the oracle must say SENT.
+ *    ARM STAMPED  press the SAME row with ref-src present → NOT SENT.
+ *  A run in which both arms agree has measured nothing and says so.
+ *
+ *  NATURAL vs SYNTHETIC, LABELLED. The probe first tries to catch the attribute
+ *  in its natural in-flight window. That window can close faster than a CDP
+ *  round trip, so when it does the probe stamps the attribute itself — which is
+ *  what LiveView writes, byte for byte — and RECORDS WHICH ARM IT GOT. A
+ *  synthetic stamp proves the client's early return; it does not prove the
+ *  window is reachable by hand, and the record never claims it does. */
+async function refSrcProbe(page, ctx) {
+  const out = { row: FLOOR_ROW, control: null, stamped: null, natural_window: null, source: null };
+
+  await page.goto(ctx.base + DESK_PATH);
+  await poll(async () => {
+    const d = await page.evaluate(FLOOR_DISPATCHABLE);
+    return d && !d.__throw && d.hit ? d : null;
+  }, FLOOR_READY_CAP, "the row became dispatchable");
+  // Let the socket join before the CONTROL arm: the control's job is to prove
+  // the tap CAN say SENT, and a control that races the join would refute itself
+  // for the OTHER reason (`pushWithReply`'s no-connection reject) and read as a
+  // ref-src suppression. This is the one press in this file that is deliberately
+  // NOT early.
+  await poll(async () => {
+    const s = await page.evaluate(`(function(){var m=document.querySelector("[data-phx-main]");return m&&m.classList.contains("phx-connected")?"y":null;})()`);
+    return s || null;
+  }, SETTLE_CAP, "the socket joined");
+
+  // ── ARM CONTROL ────────────────────────────────────────────────────────────
+  const cMark = page.wireMark();
+  await page.click(FLOOR_ROW);
+  // The natural window, read IMMEDIATELY after the press and before any poll:
+  // whether LiveView's own stamp is observable from here at all is itself a
+  // finding, and a probe that looked for it later would answer "no" for the
+  // wrong reason.
+  out.natural_window = await page.evaluate(
+    `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});` +
+      `return el?{present:true,ref_src:el.getAttribute("data-phx-ref-src"),ref:el.getAttribute("data-phx-ref"),cls:el.className}:{present:false};})()`,
+  );
+  await pause(POLL_TICK);
+  out.control = page.wireVerdict(cMark);
+
+  // ── ARM STAMPED ────────────────────────────────────────────────────────────
+  const natural = !!(out.natural_window && out.natural_window.ref_src);
+  if (!natural) {
+    const wrote = await page.evaluate(
+      `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});if(!el)return false;` +
+        `el.setAttribute("data-phx-ref-src", el.closest("[data-phx-main]")?el.closest("[data-phx-main]").id:"phx-synthetic");return true;})()`,
+    );
+    out.source = wrote === true ? "SYNTHETIC — the natural in-flight window had already closed when the probe looked, so the probe wrote the attribute LiveView writes and pressed again" : "UNAVAILABLE";
+  } else {
+    out.source = "NATURAL — the attribute was still on the element from the control press";
+  }
+  const sMark = page.wireMark();
+  const sExMark = page.exceptionMark();
+  const before = await page.evaluate(
+    `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});` +
+      `return {aria:el?el.getAttribute("aria-current"):null,href:location.href,cls:el?el.className:null};})()`,
+  );
+  await page.click(FLOOR_ROW);
+  await pause(POLL_TICK * 3);
+  out.stamped = page.wireVerdict(sMark);
+  const after = await page.evaluate(
+    `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});` +
+      `return {aria:el?el.getAttribute("aria-current"):null,href:location.href,cls:el?el.className:null};})()`,
+  );
+  out.exceptions = page.exceptionsSince(sExMark);
+  out.dom_before = before;
+  out.dom_after = after;
+  // THE OBSERVABLE SIGNATURE, spelled out rather than left to a reader to infer
+  // from two verdict strings.
+  //
+  // AND THE DOM FIELDS ARE THE WEAK ONES, WHICH THIS RUN DEMONSTRATED. On the
+  // /good/ fixture the second-press window reads "aria-current changed · URL
+  // changed" — and neither change is the second press's. They are the CONTROL
+  // press's answer landing late (the fixture patches the URL at 400ms and grows
+  // the pane at 900ms, modelling the 2.4s measured on guerrilla). A probe that
+  // read the DOM delta as the suppressed press's effect would report the exact
+  // opposite of the truth. THE LOAD-BEARING FIELD IS THE WIRE — did a
+  // `"type":"click"` frame leave the socket — and the DOM fields are printed as
+  // CONTEXT, never as the verdict. That is the same rule LEG C's
+  // `#item-counts-decoy` enforces one level up: an effect that does not NAME the
+  // press cannot be credited to it.
+  out.signature =
+    `second press on a row carrying data-phx-ref-src: wire=${out.stamped?.verdict} · ` +
+    `exceptions=${(out.exceptions || []).length} · ` +
+    `className ${before?.cls === after?.cls ? "UNCHANGED" : "changed"} · ` +
+    `aria-current ${before?.aria === after?.aria ? "UNCHANGED" : "changed"} · ` +
+    `URL ${before?.href === after?.href ? "UNCHANGED" : "changed"} · ` +
+    `control arm (same row, no ref-src) = ${out.control?.verdict} ` +
+    `[the three DOM fields are CONTEXT, not the verdict: the control press's answer lands inside ` +
+    `this window, so a "changed" there is usually the FIRST press arriving late]`;
+  return out;
+}
+
+async function legD(page, ctx, ledger, run, opts) {
+  // The fixture narrows both of these. Ten iterations at a 15s answer cap is
+  // 150s of self-test when every early press is (correctly) dropped, and a
+  // self-test nobody will sit through is a self-test that stops being run.
+  const iters = Number(opts?.floorIterations ?? FLOOR_ITERATIONS);
+  const pressCap = Number(opts?.floorPressCap ?? FLOOR_PRESS_CAP);
+  const before = hostLoad();
+  process.stdout.write(`>> LEG D  uptime BEFORE: ${loadLine(before)}\n`);
+
+  const iterations = [];
+  for (let i = 1; i <= iters; i++) {
+    const rec = await floorIteration(page, ctx, i, pressCap);
+    // THE DISCARD RULE, applied per iteration and NAMED. An iteration that began
+    // or ended above the ceiling contributes to NOTHING — not the spread, not the
+    // median, not a sentence. It is kept in the record so the discard is visible.
+    if (!rec.load_before.quiet || !(rec.load_after && rec.load_after.quiet)) {
+      rec.discarded = `DISCARDED — host load crossed the quiet ceiling during this iteration ` +
+        `(before ${rec.load_before.load1.toFixed(2)}, after ${rec.load_after ? rec.load_after.load1.toFixed(2) : "n/a"}, ceiling ${before.ceiling.toFixed(2)})`;
+    }
+    iterations.push(rec);
+    process.stdout.write(
+      `   D${String(i).padStart(2, "0")} ${(rec.outcome || "?").padEnd(10)} ` +
+      `nav ${String(rec.nav_ms ?? "-").padStart(6)}ms · ready ${String(rec.ready_ms ?? "-").padStart(6)}ms · ` +
+      `gap ${String(rec.gap_ms ?? "-").padStart(6)}ms · press@${String(rec.press_at_ms ?? "-").padStart(6)}ms · ` +
+      `answer ${String(rec.latency_ms ?? "-").padStart(6)}ms · wire ${(rec.wire?.verdict || "-")}` +
+      `${rec.discarded ? "  [DISCARDED: load]" : ""}\n`,
+    );
+  }
+
+  const refsrc = await refSrcProbe(page, ctx);
+  const after = hostLoad();
+  process.stdout.write(`>> LEG D  uptime AFTER:  ${loadLine(after)}\n`);
+
+  // EVERY ITERATION MUST BE DECIDABLE. This — not the answer rate — is what the
+  // FLOOR beat's status is about, and the distinction is load-bearing: the
+  // answer rate is a PRODUCT number this leg refuses to publish on a loaded
+  // host, so hanging the beat's verdict on it would make the beat mean one
+  // thing when the host is quiet and another when it is not. "NO ROW" and "NOT
+  // PRESSED" are the instrument failing to measure; UNANSWERED is a measurement.
+  const undecidable = iterations.filter((r) => r.outcome !== "ANSWERED" && r.outcome !== "UNANSWERED");
+  const kept = iterations.filter((r) => !r.discarded);
+  const answered = kept.filter((r) => r.outcome === "ANSWERED");
+  const floor = {
+    cold: FLOOR_COLD,
+    quiet_ceiling: before.ceiling,
+    load_before: before, load_after: after,
+    quiet_throughout: before.quiet && after.quiet && iterations.every((r) => !r.discarded),
+    iterations,
+    kept: kept.length, discarded: iterations.length - kept.length,
+    answered: answered.length,
+    latency_spread: spread(answered.map((r) => r.latency_ms)),
+    gap_spread: spread(kept.map((r) => r.gap_ms)),
+    press_offset_spread: spread(kept.map((r) => r.press_at_ms)),
+    refsrc,
+    frame_oracle:
+      "MATCHES \"type\":\"click\" AND NEVER COUNTS FRAMES — phx_join, the heartbeat and the " +
+      "WidthBucket hook push share /live/websocket, so a frame TOTAL reads two frames for a " +
+      "press that sent no click. See Page.open's webSocketFrameSent subscription.",
+  };
+  run.floor = floor;
+
+  // ── THE VERDICT, AND THE REFUSAL IS ONE ────────────────────────────────────
+  // A number taken above the ceiling is the load, not the code. Three waves have
+  // now declined to publish one; this is the first time the instrument declines
+  // on its own, with the observed load attached. A refusal is a COMPLETE result
+  // for this leg — it is not a PENDING and it is not a FAIL, because nothing
+  // about the product was learned or impugned.
+  if (!floor.quiet_throughout) {
+    floor.verdict = "REFUSED";
+    ledger.add(
+      "FLOOR", undecidable.length === 0 ? PASS : FAIL,
+      `REFUSED, and the refusal is the result. The quiet floor is ${before.ceiling.toFixed(2)} on ` +
+        `${before.cores} cores (${QUIET_LOAD_PER_CORE}/core); this host read ${before.load1.toFixed(2)} before and ` +
+        `${after.load1.toFixed(2)} after, with ${iterations.length - kept.length} of ${iterations.length} iterations ` +
+        `crossing the ceiling WHILE THEY RAN. Every latency below was still recorded and is printed, and NONE of it ` +
+        `is published as a number: per measure-on-a-quiet-host a press latency taken here is the host's, not the ` +
+        `code's. Re-run with the host idle. (The MECHANISM beats — the wire oracle and the ref-src probe — are ` +
+        `load-independent and DO stand: a frame either left the socket or it did not.)`,
+      [
+        check("uptime BEFORE", PASS, loadLine(before)),
+        check("uptime AFTER", PASS, loadLine(after)),
+        check("iterations run", PASS, `${iterations.length} · ${kept.length} kept · ${iterations.length - kept.length} DISCARDED by the load rule`),
+        check("every iteration decidable", undecidable.length === 0 ? PASS : FAIL, `${iterations.length - undecidable.length}/${iterations.length} produced ANSWERED or UNANSWERED`),
+        check("latency PUBLISHED", PENDING, "withheld — the host was loaded"),
+      ],
+      { gating: false },
+    );
+  } else {
+    floor.verdict = "MEASURED";
+    const ls = floor.latency_spread, gs = floor.gap_spread;
+    ledger.add(
+      "FLOOR", undecidable.length === 0 && kept.length > 0 ? PASS : FAIL,
+      `MEASURED on a quiet host: ${answered.length}/${kept.length} early presses answered · ` +
+        `answer latency ${ls ? `${ls.min}–${ls.max}ms (median ${ls.median})` : "n/a"} · ` +
+        `readyState→dispatchable gap ${gs ? `${gs.min}–${gs.max}ms (median ${gs.median}, range ${gs.range})` : "n/a"} · ` +
+        `presses placed ${floor.press_offset_spread ? `${floor.press_offset_spread.min}–${floor.press_offset_spread.max}ms` : "n/a"} into the load`,
+      [
+        check("uptime BEFORE", PASS, loadLine(before)),
+        check("uptime AFTER", PASS, loadLine(after)),
+        check("every iteration decidable", undecidable.length === 0 ? PASS : FAIL, `${iterations.length - undecidable.length}/${iterations.length} produced ANSWERED or UNANSWERED`),
+        check("early presses answered", PASS, `${answered.length}/${kept.length} — REPORTED, NOT GATED: an early press being dropped is the DEFECT under measurement, so reddening on it would make this leg red on exactly the finding it exists to record`),
+        check("the ~5.06s gap", PASS, gs ? `re-taken: ${gs.min}–${gs.max}ms over ${gs.n} quiet iterations (range ${gs.range}ms)` : "no quiet iteration produced one"),
+      ],
+      { gating: false },
+    );
+  }
+
+  // The ref-src probe stands on its own and is NOT load-gated: "did a frame
+  // leave the socket" is a binary the host's load cannot move.
+  const armsDiffer = refsrc.control?.verdict === "SENT" && refsrc.stamped?.verdict === "NOT SENT";
+  const readable = refsrc.control?.verdict !== "CANNOT READ" && refsrc.stamped?.verdict !== "CANNOT READ";
+  ledger.add(
+    "REFSRC",
+    !readable ? FAIL : armsDiffer ? PASS : FAIL,
+    !readable
+      ? `the wire tap had NO READING for at least one arm, so this probe measured nothing: ${refsrc.control?.detail || ""} / ${refsrc.stamped?.detail || ""}`
+      : armsDiffer
+        ? `${refsrc.signature} · arm source: ${refsrc.source}`
+        : `THE TWO ARMS AGREE (${refsrc.control?.verdict} / ${refsrc.stamped?.verdict}), so this run cannot tell a suppressed press from a dead tap — that is an INSTRUMENT verdict, not a product one. ${refsrc.signature}`,
+    [
+      check("control arm (no ref-src) SENT", refsrc.control?.verdict === "SENT" ? PASS : FAIL, refsrc.control?.detail || "(none)"),
+      check("stamped arm NOT SENT", refsrc.stamped?.verdict === "NOT SENT" ? PASS : FAIL, refsrc.stamped?.detail || "(none)"),
+      check("silent (no exception)", (refsrc.exceptions || []).length === 0 ? PASS : FAIL, `${(refsrc.exceptions || []).length} exception(s)`),
+      check("arm source", PASS, refsrc.source || "(unknown)"),
+    ],
+    { gating: false },
+  );
+  return floor;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  the fixture (--self-test) — a miniature Barkpark, zero dependencies
 // ─────────────────────────────────────────────────────────────────────────────
 // It serves BOTH honest sites from one process. `/good/` hydrates its canvas
@@ -3214,6 +3734,10 @@ async function journeyOne(cdp, ctx, opts) {
     // it back. It presses nothing that creates a document, so the litter sweep
     // below still holds after it.
     if (legs.has("c")) await legC(page, ctx, ledger, run);
+    // LEG D LAST, for the same reason LEG C is late and one more: it NAVIGATES
+    // TEN TIMES, so anything it ran before would have its page torn out from
+    // under it. It creates nothing, so the litter sweep below still holds.
+    if (legs.has("d")) await legD(page, ctx, ledger, run, opts);
   } catch (err) {
     if (err instanceof Guard) throw err;
     // A harness-side throw must still produce a ledger: the beats that already
@@ -3266,9 +3790,18 @@ const FOSSIL_BEATS = FOSSILS.map((f) => `FOSSIL/${f.docId.slice(-8)}`);
 const withFossils = (base, verdict) =>
   Object.assign({}, base, Object.fromEntries(FOSSIL_BEATS.map((b) => [b, verdict])));
 
+// LEG D's TWO BEATS ARE THE SAME ON BOTH SITES, and that is deliberate rather
+// than lazy. FLOOR's status asks ONLY "was every iteration decidable" — the
+// answer rate is reported and never gated (see legD) — so it is PASS wherever
+// the row exists, and on the fixture that is both sites. REFSRC is a pure
+// CLIENT-side fact: the control press (no ref-src, socket joined) must put a
+// `"type":"click"` frame on the wire and the stamped press must not, and the
+// fixture transcribes both of the shipped client's drop gates, so both arms
+// fire offline on every run regardless of which site is serving. A site-shaped
+// expectation here would be a coincidence dressed as coverage.
 const SELF_TEST_EXPECT = {
-  good: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: PASS, TYPE: PASS, PERSIST: PASS, RELOAD: PASS, CENSUS: PASS }, PASS),
-  rot: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: FAIL, TYPE: PENDING, PERSIST: PENDING, RELOAD: PENDING, CENSUS: FAIL }, FAIL),
+  good: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: PASS, TYPE: PASS, PERSIST: PASS, RELOAD: PASS, CENSUS: PASS, FLOOR: PASS, REFSRC: PASS }, PASS),
+  rot: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: FAIL, TYPE: PENDING, PERSIST: PENDING, RELOAD: PENDING, CENSUS: FAIL, FLOOR: PASS, REFSRC: PASS }, FAIL),
 };
 
 // ── THE CENSUS, ROW BY ROW ───────────────────────────────────────────────────
@@ -3394,7 +3927,15 @@ async function selfTest(opts) {
       for (const site of sites) {
         const base = `http://127.0.0.1:${port}/${site}`;
         const ctx = { base, token: FIXTURE_TOKEN, dataset: opts.dataset };
-        const r = await journeyOne(cdp, ctx, opts);
+        // LEG D IS FORCED ON OFFLINE, and that is the only way it is asserted at
+        // all: it is opt-in against a deployment (ten navigations), so a fixture
+        // run that inherited the default `abc` would leave FLOOR and REFSRC
+        // unproduced — and the coverage guard below only reds on a beat that IS
+        // produced and unnamed, never on a leg that quietly stopped running.
+        // Narrowed to 3 iterations at a 3s answer cap: the fixture drops every
+        // early press ON PURPOSE (its socket joins at 700ms), so a 15s cap would
+        // spend 150s proving what 9s proves.
+        const r = await journeyOne(cdp, ctx, { ...opts, legs: opts.legs + (opts.legs.includes("d") ? "" : "d"), floorIterations: 3, floorPressCap: 3000 });
         process.stdout.write(report(r.ledger, { base, mode: `FIXTURE/${site}`, wall: r.wall, pre: r.pre, post: r.post }));
         results[site] = r.ledger.statuses();
         censuses[site] = r.run.census || null;
