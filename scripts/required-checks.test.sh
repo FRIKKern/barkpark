@@ -3468,13 +3468,13 @@ S6_OUT="$(bash "$GEN" "${SYNARGS_RED[@]}" "${ACK[@]}" --explain 2>&1 || true)"
 if grep -qF "exclude  $SYNAGG  — S5 RED ON MAIN" <<<"$S6_OUT"; then
   ok "the aggregator itself is excluded S5 RED ON MAIN (the precondition the demotion hangs off)"
 else
-  bad "'$SYNAGG' was not excluded as S5 RED ON MAIN — section 15's premise is gone: $(grep -F "$SYNAGG" <<<"$S6_OUT" | head -1)"
+  bad "'$SYNAGG' was not excluded as S5 RED ON MAIN — section 15's premise is gone: $(grep -m1 -F "$SYNAGG" <<<"$S6_OUT")"
 fi
 for leaf in "$SYNL1" "$SYNL2"; do
   if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($SYNAGG)" <<<"$S6_OUT"; then
     ok "S6 demotes '$leaf', naming the aggregator that took it down"
   else
-    bad "S6 did not demote '$leaf': $(grep -F "$leaf" <<<"$S6_OUT" | head -1)"
+    bad "S6 did not demote '$leaf': $(grep -m1 -F "$leaf" <<<"$S6_OUT")"
   fi
 done
 
@@ -3866,7 +3866,7 @@ fi
 if grep -qF "exclude  $SYNAGG  — S7 EXCLUDED BY DECISION" <<<"$S7_OUT"; then
   ok "…and S7 holds it out anyway, on a stated ground, with no mechanical stage left to do it"
 else
-  bad "the aggregator was not held by S7 on a green fixture: $(grep -F "$SYNAGG  —" <<<"$S7_OUT" | head -1)"
+  bad "the aggregator was not held by S7 on a green fixture: $(grep -m1 -F "$SYNAGG  —" <<<"$S7_OUT")"
 fi
 # S6 must key on the EXCLUSION, not on the stage that produced it: with the hold
 # moved from S5 to S7 the leaves must still go down, not up.
@@ -3874,7 +3874,7 @@ for leaf in "$SYNL1" "$SYNL2"; do
   if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($SYNAGG)" <<<"$S7_OUT"; then
     ok "S6 still demotes '$leaf' under an S7 hold — the demotion keys on the exclusion, not on S5"
   else
-    bad "S6 did not demote '$leaf' under S7: $(grep -F "$leaf" <<<"$S7_OUT" | head -1)"
+    bad "S6 did not demote '$leaf' under S7: $(grep -m1 -F "$leaf" <<<"$S7_OUT")"
   fi
 done
 
