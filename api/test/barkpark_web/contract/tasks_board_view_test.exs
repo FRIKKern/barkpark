@@ -16,6 +16,12 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
 
     * KEY SET — the board card carries what the board's `taskWire` decode
       reads (`internal/taskboard/fetch.go`) and does NOT carry `content`.
+    * THE SEAM — the key set is not hand-copied: it is PARSED out of
+      `internal/taskboard/fetch.go` and checked against the live card, so
+      dropping a field the Go consumer decodes reds HERE, on the producer.
+    * CONTENT DIGEST — the bounded stand-in for the deleted echo: the
+      per-criterion marks and the completeness booleans the board reads on the
+      ROW path, which a `{met,total}` fraction cannot rebuild.
     * NO DRIFT — the board body is the DEFAULT body with exactly one key
       removed per card, proved by equality against the default response rather
       than by a second hand-written expectation. A projection that quietly
@@ -147,6 +153,21 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
       # law the full card follows).
       assert %{"met" => 1, "total" => 2} = card["criteria_progress"]
 
+      # content_digest — the ONE key the board card adds, and the reason the
+      # projection is adoptable at all: `criteria_progress` is a FRACTION, and
+      # the board's ladder (components.go, criteriaLadder) needs ONE STATE PER
+      # RUNG. The fixture's two criteria are met + unmet-with-attempts, so the
+      # marks must read exactly "ma".
+      # prose_content's two criteria are [met] and [unmet, no attempts], so the
+      # marks read "mo". The "a" rung (an unmet criterion carrying a recorded
+      # attempt) has its own case in the content_digest describe block below.
+      assert %{
+               "criteria_marks" => "mo",
+               "has_description" => true,
+               "has_dependencies" => false,
+               "has_paper" => false
+             } = card["content_digest"]
+
       # THE POINT OF THE VIEW.
       refute Map.has_key?(card, "content"),
              "the board card must not carry the content echo — that echo IS the 100 MB"
@@ -189,10 +210,28 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
 
       assert length(default["docs"]) == 4
 
-      # EQUALITY, not a spot check: every key except `content` must survive with
-      # the same value, in the same row order, and no key may be ADDED.
+      # EQUALITY, not a spot check: every key except `content` must survive
+      # with the same value, in the same row order, and the ONLY key that may
+      # be added is `content_digest`.
+      #
+      # WHY THIS ASSERTION CHANGED (task-9289217dc43ad78f). It used to read
+      # `stripped == board["docs"]` — "no key may be ADDED". That was the
+      # right assertion for a projection defined as a bare subtraction, and the
+      # bare subtraction was not adoptable by the board: it took `content` away
+      # while the board reads `content` on the ROW path for every row. Widening
+      # it to ONE named key is deliberate, and the shape is still equality, not
+      # a spot check: any SECOND added key, or any changed value, still reds.
       stripped = Enum.map(default["docs"], &Map.delete(&1, "content"))
-      assert stripped == board["docs"]
+      board_less_digest = Enum.map(board["docs"], &Map.delete(&1, "content_digest"))
+      assert stripped == board_less_digest
+
+      assert Enum.all?(board["docs"], &Map.has_key?(&1, "content_digest")),
+             "every board card carries content_digest — an ABSENT digest cannot be " <>
+               "told from a server too old to emit one"
+
+      refute Enum.any?(default["docs"], &Map.has_key?(&1, "content_digest")),
+             "the digest is the board card's stand-in for the echo; the full card " <>
+               "still has the echo and must not carry a second copy of the same facts"
 
       # The envelope around the cards is untouched too.
       assert default["page"] == board["page"]
@@ -208,6 +247,257 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
       mk_task!(uniq("board-fullalias-row"), scope, prose_content(phase))
 
       assert docs_at(conn, phase, "")["docs"] == docs_at(conn, phase, "&view=full")["docs"]
+    end
+  end
+
+  # ── ARM 2b: the producer/consumer seam ────────────────────────
+
+  # THIS IS A PRODUCER/CONSUMER PAIR, NOT A MIRROR, AND IT HAS DRIFTED ONCE.
+  # Elixir owns the wire shape; Go decodes it into typed structs; and until
+  # task-9289217dc43ad78f nothing on the producer side asserted conformance the
+  # other way. That is exactly how a FALSE sentence about the consumer ("the
+  # board fetches a row's prose separately when a pane opens") survived in the
+  # producer's own comment while the Go side documented the opposite in
+  # writing, and how a projection shipped that its only intended consumer could
+  # not adopt.
+  #
+  # So the key list below is NOT hand-copied. It is PARSED out of the consumer
+  # (`internal/taskboard/fetch.go`), which makes dropping a field the board
+  # decodes a RED on the producer's own test run.
+  @fetch_go Path.expand("../../../../internal/taskboard/fetch.go", __DIR__)
+
+  # `content` is the one decoded field the board card deliberately does NOT
+  # carry — it is the whole point of the view, and `content_digest` is its
+  # bounded stand-in. Any OTHER exclusion would have to be added here, in the
+  # open, with a reason.
+  @deliberately_absent ~w(content)
+
+  # Pulls the `json:"name"` tags out of one Go struct literal. Returns [] when
+  # the struct is not found, which is why every caller below proves the parse
+  # saw something first — an empty read must never pass as "nothing missing".
+  defp go_json_tags(source, struct_name) do
+    case Regex.run(~r/type #{struct_name} struct \{\n(.*?)\n\}\n/s, source) do
+      [_, body] ->
+        ~r/`json:"([a-z_]+)"`/
+        |> Regex.scan(body)
+        |> Enum.map(fn [_, tag] -> tag end)
+        |> Enum.uniq()
+
+      _ ->
+        []
+    end
+  end
+
+  defp missing_keys(card, keys), do: Enum.reject(keys, &Map.has_key?(card, &1))
+
+  describe "the producer/consumer seam" do
+    test "the board card carries every field the Go consumer decodes", %{
+      conn: conn,
+      scope: scope
+    } do
+      assert File.exists?(@fetch_go),
+             "the consumer this projection exists for is not at #{@fetch_go} — this test " <>
+               "cannot assert conformance against a file it cannot read"
+
+      source = File.read!(@fetch_go)
+      wire_tags = go_json_tags(source, "taskWire")
+      digest_tags = go_json_tags(source, "contentDigest")
+
+      # POSITIVE CONTROL ON THE PARSE. A regex that matched nothing would make
+      # every assertion below vacuously true over an empty list, which is the
+      # exact way a guard like this rots. Prove it SAW the consumer first.
+      assert length(wire_tags) >= 15,
+             "parsed only #{length(wire_tags)} json tags out of taskWire (#{inspect(wire_tags)}) — " <>
+               "the parse, not the projection, is what this run measured"
+
+      for expected <-
+            ~w(doc_id rev title lifecycle_status criteria_progress content content_digest) do
+        assert expected in wire_tags,
+               "taskWire parse did not see #{expected}; got #{inspect(wire_tags)}"
+      end
+
+      assert Enum.sort(digest_tags) ==
+               ~w(criteria_marks has_dependencies has_description has_paper),
+             "contentDigest parse = #{inspect(digest_tags)}"
+
+      phase = uniq("board-seam")
+      mk_task!(uniq("board-seam-row"), scope, prose_content(phase))
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+
+      required = wire_tags -- @deliberately_absent
+
+      assert missing_keys(card, required) == [],
+             "the board card is missing #{inspect(missing_keys(card, required))}, which " <>
+               "#{Path.relative_to_cwd(@fetch_go)} decodes. Either the projection dropped a " <>
+               "field its consumer reads, or the consumer stopped reading it — fix ONE side " <>
+               "and this test tells you which."
+
+      for tag <- @deliberately_absent do
+        refute Map.has_key?(card, tag),
+               "#{tag} is listed as deliberately absent but the card carries it"
+      end
+
+      assert missing_keys(card["content_digest"], digest_tags) == [],
+             "content_digest is missing #{inspect(missing_keys(card["content_digest"], digest_tags))}"
+    end
+
+    # POSITIVE CONTROL ON THE ASSERTION ITSELF. The check above passes; this
+    # proves it can FAIL — that it is looking at the card, not at nothing.
+    test "…and that check can SEE a dropped field", %{conn: conn, scope: scope} do
+      source = File.read!(@fetch_go)
+      wire_tags = go_json_tags(source, "taskWire") -- @deliberately_absent
+
+      phase = uniq("board-seam-control")
+      mk_task!(uniq("board-seam-control-row"), scope, prose_content(phase))
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+
+      assert missing_keys(card, wire_tags) == []
+
+      # Drop ONE field the consumer decodes, exactly as a regressed projection
+      # would, and the same predicate must name it.
+      assert missing_keys(Map.delete(card, "priority"), wire_tags) == ["priority"]
+
+      assert missing_keys(Map.delete(card, "criteria_progress"), wire_tags) == [
+               "criteria_progress"
+             ]
+
+      # …and on the digest.
+      digest_tags = go_json_tags(source, "contentDigest")
+
+      assert missing_keys(Map.delete(card["content_digest"], "has_paper"), digest_tags) ==
+               ["has_paper"]
+    end
+  end
+
+  # ── ARM 2c: the digest's omission law ────────────────────────
+
+  describe "content_digest" do
+    test "criteria_marks is OMITTED on a row with no criteria, never an empty string", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("board-nocrit")
+
+      mk_task!(uniq("board-nocrit-row"), scope, %{
+        "parent_id" => phase,
+        "acceptance_criteria" => [],
+        "description" => "a row that has not been given criteria yet"
+      })
+
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+
+      # The law criteria_progress follows (wire §4): omit the segment, never
+      # render "0/0" — an empty marks string is the same ambiguity wearing a
+      # different type.
+      refute Map.has_key?(card, "criteria_progress")
+      refute Map.has_key?(card["content_digest"], "criteria_marks")
+
+      # …and the digest itself is STILL there, because "this row has no
+      # criteria" and "this server does not emit a digest" must not look alike.
+      assert %{"has_description" => true} = card["content_digest"]
+    end
+
+    test "the booleans are the inputs ScoreCompleteness consumes, not the prose", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("board-digest-booleans")
+
+      mk_task!(uniq("board-digest-full"), scope, %{
+        "parent_id" => phase,
+        "description" => "  a real description  ",
+        "dependencies" => ["task-blocker"],
+        "design_doc" => "/papers/the-design",
+        "acceptance_criteria" => [
+          %{"criterion" => "met", "met" => true, "evidence" => "PR #1"},
+          %{"criterion" => "missed", "met" => false, "attempts" => [%{"note" => "not yet"}]},
+          %{"criterion" => "untouched", "met" => false}
+        ]
+      })
+
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+
+      assert card["content_digest"] == %{
+               "criteria_marks" => "mao",
+               "has_description" => true,
+               "has_dependencies" => true,
+               "has_paper" => true
+             }
+
+      # The prose the booleans were derived from is NOT on the wire.
+      body =
+        conn |> authed() |> get("/v1/tasks?parent=#{phase}&view=board") |> Map.get(:resp_body)
+
+      refute body =~ "a real description"
+      refute body =~ "/papers/the-design"
+      refute body =~ "not yet"
+    end
+
+    test "a blank description and a whitespace-only one are both FALSE", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("board-digest-blank")
+
+      mk_task!(uniq("board-digest-blank-row"), scope, %{
+        "parent_id" => phase,
+        "description" => "   ",
+        "dependencies" => [],
+        "papers" => []
+      })
+
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+
+      assert card["content_digest"]["has_description"] == false
+      assert card["content_digest"]["has_dependencies"] == false
+      assert card["content_digest"]["has_paper"] == false
+    end
+
+    test "has_paper is true from content.papers as well as design_doc", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("board-digest-papers")
+
+      mk_task!(uniq("board-digest-papers-row"), scope, %{
+        "parent_id" => phase,
+        "papers" => ["/papers/some-paper"]
+      })
+
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+      assert card["content_digest"]["has_paper"] == true
+    end
+
+    test "one mark per entry, and only a MAP attempt earns the amber rung", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("board-digest-shapes")
+
+      # NOTE ON WHAT IS NOT HERE. The wider tolerance contract — a `met` of
+      # "yes", a non-list `attempts`, a non-map entry — cannot be exercised
+      # through this door: `Barkpark.Tasks.Validation` REFUSES those writes
+      # ("criterion 1 has a non-boolean `met`"), so a row carrying them cannot
+      # be created over the API. That tolerance is asserted where the shapes
+      # are reachable, at the unit level, in
+      # test/barkpark/tasks/criteria_test.exs ("marks/1 — the compact
+      # per-criterion state sequence").
+      mk_task!(uniq("board-digest-shapes-row"), scope, %{
+        "parent_id" => phase,
+        "acceptance_criteria" => [
+          %{"criterion" => "sealed", "met" => true, "evidence" => "PR #1"},
+          %{"criterion" => "an honest miss", "met" => false, "attempts" => [%{"note" => "no"}]},
+          %{"criterion" => "an empty attempts list", "met" => false, "attempts" => []},
+          %{"criterion" => "untouched", "met" => false}
+        ]
+      })
+
+      assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
+
+      # One character per entry, so the sequence always tracks
+      # criteria_progress.total — the board's ladder draws one rung per mark.
+      assert card["content_digest"]["criteria_marks"] == "maoo"
+      assert card["criteria_progress"] == %{"met" => 1, "total" => 4}
     end
   end
 

@@ -127,6 +127,75 @@ defmodule Barkpark.Tasks.Criteria do
   defp worded_merge_gate?(_), do: false
 
   @doc """
+  The COMPACT PER-CRITERION STATE SEQUENCE — one character per acceptance
+  criterion, in checklist order — for a caller that must render the
+  per-criterion ladder without shipping the criteria themselves.
+
+      "m"  MET            — `met` is EXACTLY boolean `true` (`met?/1`)
+      "a"  ATTEMPTED      — unmet, but carrying at least one well-formed
+                            honest-miss entry in `attempts[]` (charter D8)
+      "o"  OPEN           — unmet and untouched
+
+  WHY THIS EXISTS. `progress/1` answers `%{met: m, total: t}` — a FRACTION
+  with no per-item state — and the board's ladder
+  (`internal/taskboard/components.go`, `criteriaLadder`) draws one rung per
+  criterion off each item's own state. A fraction cannot rebuild a ladder, so
+  a projection that drops `content.acceptance_criteria` collapses every row's
+  ladder unless it carries this sequence beside the fraction. It carries NO
+  criterion text, NO evidence and NO attempt notes — which is the entire
+  point: it is bounded at one byte per criterion.
+
+  THE "a" PREDICATE MIRRORS THE CONSUMER EXACTLY. `decodeAttempts`
+  (`internal/taskboard/fetch.go`) keeps an attempt only when the entry is a
+  MAP; a non-list `attempts`, or a list of scalars, decodes to no attempts and
+  therefore to no amber rung. This function applies the same rule, so the
+  sequence and a full-view decode of the same row agree rung for rung.
+
+  Same omission law as `progress/1`: `nil` for absent, empty or non-list
+  criteria — the caller omits the segment, never an empty string.
+  """
+  @spec marks(Document.t() | map() | nil) :: binary() | nil
+  def marks(%Document{content: content}), do: marks(content)
+
+  def marks(%{} = content) do
+    content
+    |> fetch(:acceptance_criteria)
+    |> marks_of_list()
+  end
+
+  def marks(_), do: nil
+
+  @doc """
+  `marks/1` over a raw `acceptance_criteria` value. Same tolerance contract:
+  `nil` for anything but a non-empty list.
+  """
+  @spec marks_of_list(term()) :: binary() | nil
+  def marks_of_list(list) when is_list(list) and list != [] do
+    Enum.map_join(list, "", &mark/1)
+  end
+
+  def marks_of_list(_), do: nil
+
+  defp mark(entry) do
+    cond do
+      met?(entry) -> "m"
+      attempted?(entry) -> "a"
+      true -> "o"
+    end
+  end
+
+  # An attempt counts only when it is a MAP — the exact tolerance of the Go
+  # consumer's decodeAttempts, which skips every non-map element.
+  defp attempted?(%{} = entry) do
+    case fetch(entry, :attempts) do
+      list when is_list(list) -> Enum.any?(list, &is_map/1)
+      _ -> false
+    end
+  end
+
+  defp attempted?(_), do: false
+
+  @doc """
   Fetches the entry at `index` from a raw `acceptance_criteria` list, or `nil`
   when the list or the index is unusable. Lets a guard ask "is the row I am
   about to flip a merge gate?" without duplicating list-shape tolerance.
