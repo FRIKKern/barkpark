@@ -5767,6 +5767,10 @@
     notifDeliverySelfScoped = !canManage;
     if (notifDeliverySelfScoped) notifDeliveryFilter.channel = null;
     box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });
+    // The `.set-matrix` this paint just created is a fresh element: in a
+    // no-timeline engine its cue is a measured class, so it has to be measured
+    // HERE. Ahead of every role branch below, each of which returns early.
+    edgeCueSync();
 
     // cch-w39-s1 — the unknown arm's own wiring, ahead of every role branch
     // below. The header's test-email action is a MUTATION, so it stays hidden
@@ -7407,6 +7411,72 @@
     sb.classList.toggle("is-nav-clipped", below > 1);
   }
 
+  // ── THE NO-TIMELINE ENGINES' EDGE CUE (cch-bl-scroll-driven-cue-firefox-
+  //    fallback) ───────────────────────────────────────────────────────────────
+  // Two horizontal scrollers carry a scroll-driven edge fade — `.set-matrix`
+  // (W12, `--set-matrix-fade`) and `.archive-resurrect .cli-chip-code` (W15-S2,
+  // `--archive-cli-fade`). In Chrome and Safari that idiom is right and stays:
+  // with nothing to scroll the timeline is inactive, so the cue is 0px BY
+  // CONSTRUCTION rather than by a class somebody has to remember to toggle.
+  //
+  // FIREFOX DOES NOT SHIP SCROLL-DRIVEN ANIMATIONS, AND THIS WAS DRIVEN, NOT
+  // READ OFF A RELEASE NOTE. Firefox 156.0.1, WebDriver BiDi, the committed
+  // preview fixtures: `--set-matrix-fade` computes **0px** at 768/430/390 in
+  // both themes while the matrix is genuinely clipped (scrollWidth 520 vs
+  // clientWidth 446/356/316), and `--archive-cli-fade` computes **0px** at
+  // 390/430 while the chip is clipped (367 vs 290/330). The SAME instrument on
+  // the SAME page with `layout.css.scroll-driven-animations.enabled=true` reads
+  // 48px and 32px — so the 0px is the engine, not the probe.
+  //
+  // AND THE OBVIOUS FALLBACK IS A DEAD RULE. The failure is not "the property
+  // keeps its initial value": Gecko DROPS the unsupported `animation-timeline`
+  // declaration, so the animation attaches to the DOCUMENT timeline instead,
+  // runs to `finished`, and `animation-fill-mode: both` PINS the property to the
+  // `to` keyframe — which is 0px. An animation's effect value outranks a plain
+  // declaration in the cascade, so a bare `@supports not (animation-timeline:
+  // scroll()) { --set-matrix-fade: 48px }` computes **0px** and paints nothing.
+  // Measured in that same Firefox, in one evaluation: plain declaration -> 0px,
+  // the same declaration plus `animation-name: none` -> 48px. app.css's
+  // `@supports` block carries that cancellation; this function supplies the
+  // STATE it keys on.
+  //
+  // MEASURED, NOT INFERRED — navStripCue's ruling, same predicate, same 1px
+  // floor, for the same reason: both surfaces are painted by JS after load.
+  // PLURAL BY CONSTRUCTION: an archives panel renders one chip PER ARCHIVED ROW,
+  // so this walks `querySelectorAll` and cues each row on its own geometry. A
+  // singleton read here would cue row one and leave every other row silent.
+  var EDGE_CUES = [
+    { sel: ".set-matrix", cls: "is-matrix-clipped" },
+    { sel: ".archive-resurrect .cli-chip-code", cls: "is-cli-clipped" },
+  ];
+
+  function edgeCueSync() {
+    if (!document.querySelectorAll) return;
+    for (var i = 0; i < EDGE_CUES.length; i++) {
+      var els = document.querySelectorAll(EDGE_CUES[i].sel);
+      for (var j = 0; j < els.length; j++) {
+        var el = els[j];
+        if (!el.classList || typeof el.classList.toggle !== "function") continue;
+        // scrollWidth - clientWidth - scrollLeft, with navStripCue's 1px floor:
+        // sub-pixel layout leaves a fraction beyond the edge on a scroller that
+        // is visibly at its end, and a fade that never retracts is a promise of
+        // more that is not kept.
+        el.classList.toggle(EDGE_CUES[i].cls, el.scrollWidth - el.clientWidth - el.scrollLeft > 1);
+      }
+    }
+  }
+
+  function wireEdgeCues() {
+    if (typeof document.addEventListener !== "function") return;
+    // CAPTURE PHASE. `scroll` does not bubble, so a delegated listener only sees
+    // a descendant scroller during capture — and capture is what makes ONE
+    // listener survive every repaint of both surfaces, which a per-element
+    // listener wired at paint time would not.
+    document.addEventListener("scroll", edgeCueSync, true);
+    if (typeof window.addEventListener === "function") window.addEventListener("resize", edgeCueSync);
+    edgeCueSync();
+  }
+
   function wireNavStripCue() {
     var sb = document.querySelector && document.querySelector(".sidebar");
     if (!sb || typeof sb.addEventListener !== "function") return;
@@ -9031,6 +9101,9 @@
       // narrow its residue sentence with.
       archiveStore = archiveStoreFromModel(model);
       panel.innerHTML = archivesPanelHtml(model);
+      // Every `.cli-chip-code` in this panel is new DOM; in a no-timeline
+      // engine its cue is a measured class. See edgeCueSync.
+      edgeCueSync();
       var retry = panel.querySelector("[data-archives-retry]");
       if (retry) retry.addEventListener("click", loadArchives);
       wireArchiveResurrect(panel, model);
@@ -29530,6 +29603,7 @@
       else if (foldMq.addListener) foldMq.addListener(onFold);
     }
     wireNavStripCue();
+    wireEdgeCues();
     $("#fleet-refresh").addEventListener("click", function () { loadFleet(parseHash().filter || null); });
     $("#sites-refresh").addEventListener("click", loadSites);
     $("#activity-refresh").addEventListener("click", loadActivity);
