@@ -10,6 +10,21 @@ export function clipboardPastePolicy(view, event, slice) {
   if (plain) return text ? { plain: true } : {
     blocked: "The clipboard has no plain text. Copy text to paste, or paste an image file without Shift.",
   };
+  if (files.length === 1 && html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const images = [...doc.body.querySelectorAll("img")];
+    const image = images[0];
+    const onlyImageWrappers = [...doc.body.querySelectorAll("*")].every(el =>
+      /^(IMG|DIV|SPAN|P|FIGURE)$/.test(el.tagName));
+    // Browsers supply HTML and a file for one copied image. Its source is only
+    // compared as text; the actual bytes still go through the host uploader.
+    const imageText = image && [image.getAttribute("src"), image.getAttribute("alt")]
+      .filter(Boolean).map(value => value.trim());
+    if (images.length === 1 && onlyImageWrappers && !doc.body.textContent.trim() &&
+        (!text.trim() || imageText.includes(text.trim()))) {
+      return { imageAlt: image.getAttribute("alt") || null };
+    }
+  }
   if (files.length && (html.trim() || text.trim())) return {
     blocked: "The clipboard contains both image files and formatted content or text. Paste text with Ctrl+Shift+V, or drag the image files into the editor separately.",
   };

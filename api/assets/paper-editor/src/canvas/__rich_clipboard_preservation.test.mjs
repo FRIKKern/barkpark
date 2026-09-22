@@ -48,6 +48,12 @@ try {
  await test('file-only paste retains the host upload path',async(c,batches,uploads)=>{
   paste(c,{files:[file()]});await new Promise(resolve=>setTimeout(resolve,0));assert.equal(uploads(),1);const blocks=c.recoverySnapshot().blocks;assert.equal(blocks[0].content[0].value,seed[0].content[0].value);assert.equal(blocks[1].type,'image');assert.equal(blocks[1].src,'/media/uploaded.png');
  });
+ for(const text of ['', 'Important diagram', 'https://example.test/diagram.png']) await test('one image file with equivalent HTML uses upload and preserves alt',async(c,batches,uploads)=>{
+  paste(c,{html:'<div>'+image+'</div>',text,files:[file()]});await new Promise(resolve=>setTimeout(resolve,0));assert.equal(uploads(),1);const b=c.recoverySnapshot().blocks.find(b=>b.type==='image');assert.equal(b.src,'/media/uploaded.png');assert.equal(b.alt,'Important diagram');assert.equal(c.querySelector('[data-bp-paste-notice]'),null);
+ });
+ for(const html of [image+image,'<a href="https://example.test/meaningful-link">'+image+'</a>','<figure>'+image+'<figcaption>Caption text</figcaption></figure>']) await test('distinct images and rich metadata are not silently discarded',(c,batches,uploads)=>{
+  paste(c,{html,files:[file()]});assert.deepEqual(c.recoverySnapshot().blocks,seed);assert.equal(uploads(),0);assert.match(c.textContent,/Nothing was pasted/);
+ });
  await test('native image wrapper remains a represented image',c=>{
   paste(c,{html:'<figure data-bp-type="image" data-src="/media/existing.png" data-alt="Existing"><img src="/media/existing.png" alt="Existing"></figure>'});const b=c.recoverySnapshot().blocks.find(b=>b.type==='image');assert.equal(b.src,'/media/existing.png');assert.equal(b.alt,'Existing');
  });

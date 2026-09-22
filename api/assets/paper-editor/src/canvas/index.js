@@ -1967,15 +1967,15 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _onPaste(view, _event, slice) {
+    const policy = this._editable ? clipboardPastePolicy(view, _event, slice) : null;
     if (this._editable) {
-      const policy = clipboardPastePolicy(view, _event, slice);
       if (policy?.blocked) {
         this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
         return true;
       }
       if (policy?.plain && !isFigureSingletonCanvas(this)) return false;
     }
-    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event)) return true;
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event, policy?.imageAlt)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
@@ -2005,10 +2005,10 @@ class BpPaperCanvas extends HTMLElement {
     return [...(list || [])].filter((f) => f && typeof f.type === "string" && f.type.startsWith("image/"));
   }
 
-  _pasteImageFiles(view, event) {
+  _pasteImageFiles(view, event, imageAlt = null) {
     const files = BpPaperCanvas._imageFiles(event && event.clipboardData && event.clipboardData.files);
     if (!files.length) return false;
-    this._insertImageFiles(view, files, null);
+    this._insertImageFiles(view, files, null, imageAlt);
     return true;
   }
 
@@ -2022,7 +2022,7 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
-  _insertImageFiles(view, files, atPos) {
+  _insertImageFiles(view, files, atPos, imageAlt = null) {
     const { state } = view;
     const imageType = state.schema.nodes.bpImage;
     if (!imageType) return;
@@ -2032,7 +2032,7 @@ class BpPaperCanvas extends HTMLElement {
     const tr = state.tr;
     const nodes = files.map((file) => {
       const key = "up-" + (++this._uploadSeq) + "-" + Date.now().toString(36);
-      const alt = String(file.name || "image").replace(/\.[a-z0-9]+$/i, "");
+      const alt = imageAlt ?? String(file.name || "image").replace(/\.[a-z0-9]+$/i, "");
       let previewUrl = null;
       try { previewUrl = URL.createObjectURL(file); } catch (_) {}
       return { key, file, node: imageType.create({ bpId: null, bpType: "image", src: null, alt, uploading: true, previewUrl, uploadKey: key }) };
