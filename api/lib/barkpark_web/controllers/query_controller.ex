@@ -80,13 +80,14 @@ defmodule BarkparkWeb.QueryController do
   # `Postgrex.Error`, an `Ecto.QueryError`, an `ArgumentError` from a bad filter
   # — propagates exactly as it did before.
   #
-  # BLAST RADIUS, STATED. This covers `GET /v1/data/query/:dataset/:type` and
-  # NOTHING ELSE in this controller. `backlinks/2`, `related/2` and `counts/2`
-  # are DELIBERATELY NOT WRAPPED and still raise as they did. (The
-  # document-show door was in that list too until
-  # pds-bl-census-load-read-path found it was the census's own FALLBACK door —
-  # see the `:doc_show` region at `show_doc/5`.) The `:query_index` fault seam
-  # below is this region's only site, and a sibling
+  # BLAST RADIUS, STATED. This region covers `GET /v1/data/query/:dataset/:type`
+  # and NOTHING ELSE. It originally recorded `backlinks/2`, `related/2`,
+  # `counts/2` and the document-show door as DELIBERATELY NOT WRAPPED; all of
+  # them have since been brought to this same arm — show_doc/5 by
+  # pds-bl-census-read-path-500-under-load, and the rest (plus `tag_browse/2`
+  # and `tag_docs/2`, which this comment never knew about) by
+  # task-410d4f889ee526c1 via `read_region/3`. The `:query_index` fault seam
+  # below is still this region's only site, and a sibling
   # seam in `TasksController` pins the untouched graph doors the same way
   # #15489's `:upsert_prev_doc_lookup` seam pinned `upsert_document/4`.
   defp query_index(conn, dataset, type, params) do
@@ -132,6 +133,54 @@ defmodule BarkparkWeb.QueryController do
       _ ->
         :ok
     end
+  end
+
+  # ─── THE SAME CLASSIFICATION AT THE FIVE REMAINING READ DOORS (task-410d4f889ee526c1) ───
+  #
+  # THE RESIDUE THE TWO REGIONS ABOVE NAMED. `query_index/4` and `show_doc/5`
+  # each stated their blast radius and each named the doors left outside it.
+  # Those doors are in the SAME controller, answer the SAME pool fault, and
+  # were still rendering it as 500 `internal_error` — which
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` does not treat as
+  # transient, so a caller that retries transient failures does NOT retry
+  # these. A census or gate that reaches one of them during a degraded-pool
+  # minute reads a hard, permanent failure wearing a generic sentence.
+  #
+  # THE DOOR SET IS DERIVED, NOT INHERITED. Every public action in this
+  # controller that can reach storage: `index/2` and `show/2` (already inside
+  # their regions), and `backlinks/2`, `related/2`, `counts/2`, `tag_browse/2`
+  # and `tag_docs/2` — FIVE, not the three the filing named. `tag_browse/2` and
+  # `tag_docs/2` post-date the comments above and were never on anyone's list.
+  #
+  # ONE REGION HELPER, BECAUSE THE ARGUMENT IS IDENTICAL AT ALL FIVE. Each door
+  # is a single storage region — `Content.Graph.reverse_referencers/2`,
+  # `Content.Related.related_documents/3`, the `published_type_counts/2`
+  # aggregate, `Content.TagDistribution.per_type/3`, `Content.docs_with_tag/4`
+  # — and at every one of them the caller's remedy is the same: resend.
+  #
+  # NARROW ON PURPOSE. `rescue e in DBConnection.ConnectionError` matches that
+  # ONE struct. A bare `rescue`, or one that also took `Ecto.QueryError`, would
+  # make the storage fault this exists to make LEGIBLE indistinguishable from a
+  # bug in the query. Every other exception propagates exactly as before.
+  #
+  # NO FAIL-OPEN. The arm returns an `{:error, …}` tuple and can never return a
+  # 200. These five doors all answer a COUNT or a LIST, so the trap here is the
+  # empty one: `{backlinks: [], count: 0}` read as "this document has no
+  # backlinks" is a false answer a caller cannot tell from a true one. They
+  # also all hide existence with 404, so degrading into not-found would be the
+  # same lie in the other direction. Both are asserted, per door.
+  defp read_region(site, where, fun) when is_function(fun, 0) do
+    inject_read_fault!(site)
+    fun.()
+  rescue
+    e in DBConnection.ConnectionError ->
+      Logger.error(
+        "BarkparkWeb.QueryController.#{where}: the database connection was lost mid-read " <>
+          "— answering 503 storage_unavailable/connection_unavailable. " <>
+          "exception=#{Exception.message(e)}"
+      )
+
+      {:error, {:connection_unavailable, :read, read_fault_message(e)}}
   end
 
   defp query_index!(conn, dataset, type, params) do
@@ -272,12 +321,17 @@ defmodule BarkparkWeb.QueryController do
   """
   def backlinks(conn, %{"dataset" => dataset, "id" => id}) do
     if preview?(conn) or authed?(conn) do
-      backlinks = Content.Graph.reverse_referencers(id, [dataset: dataset] ++ scope_opts(conn))
+      # See `read_region/3`: a pool checkout refused here used to render as an
+      # opaque, NON-retryable 500. `{backlinks: [], count: 0}` would be worse —
+      # a caller cannot tell it from "this document is referenced by nothing".
+      read_region(:backlinks, "backlinks/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
+        backlinks = Content.Graph.reverse_referencers(id, [dataset: dataset] ++ scope_opts(conn))
 
-      json(conn, %{
-        result: %{backlinks: backlinks, count: length(backlinks)},
-        syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
-      })
+        json(conn, %{
+          result: %{backlinks: backlinks, count: length(backlinks)},
+          syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -297,17 +351,22 @@ defmodule BarkparkWeb.QueryController do
   """
   def related(conn, %{"dataset" => dataset, "id" => id} = params) do
     if preview?(conn) or authed?(conn) do
-      related =
-        Content.Related.related_documents(
-          id,
-          dataset,
-          [limit: parse_int(params["limit"], 10)] ++ scope_opts(conn)
-        )
+      # See `read_region/3`. Both legs of the fusion (the tags_meta SQL and
+      # `reverse_referencers/2`) can be refused a checkout, and an empty
+      # `related` list is indistinguishable from a genuinely unrelated document.
+      read_region(:related, "related/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
+        related =
+          Content.Related.related_documents(
+            id,
+            dataset,
+            [limit: parse_int(params["limit"], 10)] ++ scope_opts(conn)
+          )
 
-      json(conn, %{
-        result: %{related: related, count: length(related)},
-        syncTags: ["bp:ds:#{dataset}:related:#{id}"]
-      })
+        json(conn, %{
+          result: %{related: related, count: length(related)},
+          syncTags: ["bp:ds:#{dataset}:related:#{id}"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -353,12 +412,17 @@ defmodule BarkparkWeb.QueryController do
         refuse_perspective(conn, unsupported_perspective(params))
 
       true ->
-        json(conn, %{
-          ok: true,
-          dataset: dataset,
-          perspective: "published",
-          counts: published_type_counts(conn, dataset)
-        })
+        # See `read_region/3`. The FROZEN shape's `counts` map is the trap: a
+        # pool checkout refused mid-aggregate must not render as `{}`, which a
+        # caller reads as "this dataset is empty".
+        read_region(:counts, "counts/2 (dataset=#{inspect(dataset)})", fn ->
+          json(conn, %{
+            ok: true,
+            dataset: dataset,
+            perspective: "published",
+            counts: published_type_counts(conn, dataset)
+          })
+        end)
     end
   end
 
@@ -437,15 +501,20 @@ defmodule BarkparkWeb.QueryController do
   """
   def tag_browse(conn, %{"dataset" => dataset} = params) do
     if preview?(conn) or authed?(conn) do
-      rows =
-        Content.TagDistribution.per_type(parse_types(params["type"]), dataset, scope_opts(conn))
+      # See `read_region/3`. This door is NOT in either older region's stated
+      # blast radius because it did not exist when they were written — it was
+      # found by enumerating the module, not by reading a list.
+      read_region(:tag_browse, "tag_browse/2 (dataset=#{inspect(dataset)})", fn ->
+        rows =
+          Content.TagDistribution.per_type(parse_types(params["type"]), dataset, scope_opts(conn))
 
-      tags = regroup_tag_rows(rows)
+        tags = regroup_tag_rows(rows)
 
-      json(conn, %{
-        result: %{tags: tags, count: length(tags)},
-        syncTags: ["bp:ds:#{dataset}:tags"]
-      })
+        json(conn, %{
+          result: %{tags: tags, count: length(tags)},
+          syncTags: ["bp:ds:#{dataset}:tags"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -469,18 +538,22 @@ defmodule BarkparkWeb.QueryController do
   """
   def tag_docs(conn, %{"dataset" => dataset, "tag" => tag} = params) do
     if preview?(conn) or authed?(conn) do
-      docs =
-        Content.docs_with_tag(
-          tag,
-          parse_types(params["type"]),
-          dataset,
-          [order: :strength, published_only: true] ++ scope_opts(conn)
-        )
+      # See `read_region/3`. Same derivation as `tag_browse/2`; an empty
+      # `documents` list here says "no document carries this tag".
+      read_region(:tag_docs, "tag_docs/2 (dataset=#{inspect(dataset)} tag=#{inspect(tag)})", fn ->
+        docs =
+          Content.docs_with_tag(
+            tag,
+            parse_types(params["type"]),
+            dataset,
+            [order: :strength, published_only: true] ++ scope_opts(conn)
+          )
 
-      json(conn, %{
-        result: %{tag: tag, documents: docs, count: length(docs)},
-        syncTags: ["bp:ds:#{dataset}:tags:#{tag}"]
-      })
+        json(conn, %{
+          result: %{tag: tag, documents: docs, count: length(docs)},
+          syncTags: ["bp:ds:#{dataset}:tags:#{tag}"]
+        })
+      end)
     else
       {:error, :not_found}
     end
@@ -598,9 +671,10 @@ defmodule BarkparkWeb.QueryController do
   # was DELETED. Any other exception propagates exactly as before.
   #
   # BLAST RADIUS, STATED. `GET /v1/data/doc/:dataset/:type/:doc_id` (and its
-  # `/w/:ws/p/:project` mirror) and NOTHING else. `backlinks/2`, `related/2`
-  # and `counts/2` remain unwrapped and still raise; the `:doc_show` seam is
-  # the only new site.
+  # `/w/:ws/p/:project` mirror) and NOTHING else; the `:doc_show` seam is this
+  # region's only site. `backlinks/2`, `related/2` and `counts/2` were listed
+  # here as still raising — task-410d4f889ee526c1 closed them, and the two
+  # tag doors this comment never enumerated, through `read_region/3`.
   defp show_doc(conn, dataset, type, doc_id, params) do
     show_doc!(conn, dataset, type, doc_id, params)
   rescue
