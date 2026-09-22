@@ -35384,3 +35384,211 @@ test("cch-r21m DEFECT-D: a FAILED PROVISION labels its empty address slot, never
       "a failed-state address slot opened with an em dash again");
   }
 });
+
+// ═══ PDF-D11 GROUP VIEW (pdf-bl-fleet-group-view) ═══════════════════════════
+// The 7-state catalogue, one preview scenario per state, and the criterion the
+// surface exists to honour: "no second source of truth for online".
+//
+// THE PIN ROSTER IS DERIVED, NOT TYPED TWICE. Every per-state assertion below
+// walks `groupAxis(hooks)`, whose axis IS `hooks.GROUP_VIEW_STATES` — app.js's
+// own enumeration — and which throws rather than narrowing when a state has no
+// scenario, a scenario names no state, or a scenario has stopped producing the
+// state it is filed under. An eighth state added to app.js therefore reds HERE
+// (no scenario) instead of quietly going unmeasured, which is the only thing
+// that makes a per-state test more than decoration.
+import {
+  groupAxis as GV_AXIS, groupControls as GV_CONTROLS,
+  GROUP_FIXTURE as GV_FIXTURE, GROUP_NOW_MS as GV_NOW, GROUP_MAIN as GV_MAIN,
+} from "./__preview__/group-view-scenarios.mjs";
+
+test("PDF-D11: GROUP_VIEW_STATES is the 7-state catalogue, in precedence order", () => {
+  assert.deepEqual([...hooks.GROUP_VIEW_STATES],
+    ["empty", "conflict", "blocked", "offline", "provisioning", "cap-hit", "working"]);
+});
+
+test("PDF-D11 c[0]: every catalogue state has a preview scenario that PRODUCES it — the axis refuses, it does not narrow", () => {
+  const axis = GV_AXIS(hooks);
+  // The axis covers the catalogue exactly, in its order — asserted against the
+  // shipped array rather than a copy of it, so the two cannot drift apart.
+  // Both sides re-realmed with a spread: `hooks.GROUP_VIEW_STATES` is a vm
+  // sandbox array, so a raw deepEqual fails on the PROTOTYPE while the values
+  // match — the file's standing idiom.
+  assert.deepEqual([...axis.map((s) => s.state)], [...hooks.GROUP_VIEW_STATES]);
+  assert.equal(axis.length, 7, "the D11 catalogue is seven states");
+
+  // …and the refusal is REAL. A hook bag carrying one extra state has no
+  // scenario for it, and groupAxis must throw rather than return the six it
+  // can cover. Without this arm "the axis refuses" is a claim about a branch
+  // nothing has ever taken.
+  assert.throws(
+    () => GV_AXIS({ ...hooks, GROUP_VIEW_STATES: [...hooks.GROUP_VIEW_STATES, "zz_uncovered"] }),
+    /catalogue states with no preview scenario: zz_uncovered/,
+    "groupAxis accepted a catalogue state it had no scenario for");
+  assert.throws(
+    () => GV_AXIS({ ...hooks, GROUP_VIEW_STATES: ["working"] }),
+    /preview scenarios naming no catalogue state/,
+    "groupAxis accepted a corpus wider than the catalogue");
+  assert.throws(
+    () => GV_AXIS({ ...hooks, GROUP_VIEW_STATES: [] }),
+    /no subject/, "groupAxis accepted an empty axis, which is the vacuous green it exists to forbid");
+});
+
+test("PDF-D11 c[0]: each state's scenario renders ITS state — the data attribute, the badge class and the copy", () => {
+  for (const sc of GV_AXIS(hooks)) {
+    const html = hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now);
+    assert.ok(html.includes('data-group-state="' + sc.state + '"'),
+      `scenario ${sc.key} did not render data-group-state="${sc.state}"`);
+    assert.ok(html.includes("group-state--" + sc.state),
+      `scenario ${sc.key} reached no painted badge class for "${sc.state}"`);
+    assert.ok(!html.includes("group-state--unknown"),
+      `scenario ${sc.key} fell through to the unknown badge — a catalogue state with no branch`);
+    const label = hooks.groupViewStateCopy(sc.state).label;
+    assert.ok(html.includes(">" + label + "<"),
+      `scenario ${sc.key} did not print its own label "${label}"`);
+  }
+});
+
+test("PDF-D11 c[0]: every catalogue state reaches its OWN badge branch — a state added without one reds by name", () => {
+  // groupStateBadgeHtml's seven arms are written out rather than composed from
+  // the state string, because __css_check E3 refuses a concatenated modifier
+  // (`"group-state group-state--" + state`) — that difference is FORCED by the
+  // checker, not chosen. This walk is what keeps the forced duplication honest.
+  for (const state of hooks.GROUP_VIEW_STATES) {
+    const badge = hooks.groupStateBadgeHtml(state);
+    assert.ok(badge.includes('class="group-state group-state--' + state + '"'),
+      `GROUP_VIEW_STATES carries "${state}" but groupStateBadgeHtml has no branch for it`);
+  }
+  // The control: the else arm exists and is distinguishable, so the walk above
+  // is measuring branch COVERAGE and not just "the function returns a string".
+  assert.ok(hooks.groupStateBadgeHtml("zz_not_a_state").includes("group-state--unknown"));
+});
+
+// ── Criterion [1]: ONE source of truth for "online" ─────────────────────────
+
+test("PDF-D11 c[1] CONTROL: a beat 47 minutes past its OWN ttl_s still reads WORKING — the server owns staleness, not this page", () => {
+  const ctl = GV_CONTROLS(hooks).find((c) => c.key === "working-stale-beat");
+  assert.ok(ctl, "the working-stale-beat control is missing from the corpus");
+
+  // The precondition, asserted rather than assumed: the beat really is past the
+  // budget. Without this the test below is a verdict about a row it never
+  // measured — it would pass just as happily on a FRESH beat.
+  const row = ctl.roster.find((r) => r.worker === "muscle-1");
+  const ageMs = hooks.rosterBeatAgeMs(row, ctl.now);
+  assert.ok(ageMs > row.ttl_s * 1000 * 10,
+    `the control's beat is only ${Math.round(ageMs / 1000)}s old against a ${row.ttl_s}s budget — it is not stale enough to discriminate`);
+  assert.equal(row.status, "working", "the control's STORED status must be a live one, or nothing is being overruled");
+
+  // The verdict: the group reads what the SERVER wrote, not what the clock
+  // suggests. A console that grew a second deriver off last_seen says "offline".
+  assert.equal(hooks.groupViewState(hooks.groupSupportCells(ctl.supports, ctl.roster, ctl.now)), "working");
+
+  // And the age is still SHOWN — the point is that it is rendered as an
+  // observation and obeyed by nothing, not that it is hidden.
+  const html = hooks.groupViewHtml(ctl.main, ctl.supports, ctl.roster, ctl.now);
+  assert.match(html, /Beat 47m ago \(budget 120s\)/,
+    "the operator can no longer SEE the stale beat beside the budget it blew");
+});
+
+test("PDF-D11 c[1] MUTATION: break presenceChip's online derivation and the group surface breaks WITH it — there is no second decider", () => {
+  // The only way to prove a second source of truth is ABSENT is to break the
+  // first one and watch everything downstream move. If groupViewState had its
+  // own liveness opinion, these states would survive the mutation.
+  const ANCHOR = '      online: s !== "offline", // PDF-D89: online is DERIVED, never stored';
+  const MUTANT = '      online: false, // MUTANT';
+  assert.equal(APP_SRC_FOR_MUTATION.split(ANCHOR).length - 1, 1,
+    "presenceChip's online derivation is no longer uniquely anchored — the mutation cannot be trusted");
+  const mutant = evalApp(APP_SRC_FOR_MUTATION.replace(ANCHOR, MUTANT)).hooks;
+
+  // The mutation LANDED (the one-decider check itself).
+  assert.equal(mutant.presenceChip({ status: "working" }).online, false);
+  assert.equal(hooks.presenceChip({ status: "working" }).online, true);
+
+  // Every state whose derivation reaches liveness moves. `empty`, `conflict`
+  // and `blocked` are named EXEMPT: they are decided before any online read
+  // (no supports / an unattributable roster / a box asking for attention), so
+  // their survival is the derivation's precedence order holding, not a second
+  // source hiding.
+  const EXEMPT = new Set(["empty", "conflict", "blocked"]);
+  const moved = [];
+  for (const sc of GV_AXIS(hooks)) {
+    const after = mutant.groupViewState(mutant.groupSupportCells(sc.supports, sc.roster, sc.now));
+    if (EXEMPT.has(sc.state)) {
+      assert.equal(after, sc.state, `${sc.state} is decided above the online read and must not move`);
+      continue;
+    }
+    if (after !== sc.state) moved.push(`${sc.state}->${after}`);
+  }
+  // offline and provisioning are already the no-online states; working and
+  // cap-hit are the two that can only be reached THROUGH presenceChip, and both
+  // must collapse to offline.
+  assert.deepEqual(moved.sort(), ["cap-hit->offline", "working->offline"],
+    "a liveness-bearing state survived presenceChip being broken — something else is deciding online");
+});
+
+test("PDF-D11 c[1]: capacity renders BOTH stored shapes, and the legacy string never counts as zero free slots", () => {
+  const working = GV_AXIS(hooks).find((s) => s.state === "working");
+  const html = hooks.groupViewHtml(working.main, working.supports, working.roster, working.now);
+  assert.match(html, /heavy · 2\/4 slots free · \$20 budget/, "the validated capacity object did not render");
+  assert.match(html, /1 task/, "the legacy free-text capacity did not render");
+
+  // The legacy shape carries no number, so it answers null — a fabricated 0
+  // would drag a legacy box into cap-hit and tell the operator the group is
+  // saturated when nobody said so.
+  assert.equal(hooks.rosterSlotsFree("1 task"), null);
+  assert.equal(hooks.rosterSlotsFree({ slots_free: 0, slots_total: 1 }), 0);
+  assert.equal(hooks.rosterSlotsFree({ size_class: "light" }), null);
+  assert.equal(hooks.rosterSlotsFree(null), null);
+});
+
+test("PDF-D11 c[1]: a roster read that never landed says so — never a fabricated Offline per box", () => {
+  const ctl = GV_CONTROLS(hooks).find((c) => c.key === "roster-unreachable");
+  assert.equal(ctl.roster, null, "the control must carry a FAILED read, not an empty one");
+  const html = hooks.groupViewHtml(ctl.main, ctl.supports, ctl.roster, ctl.now);
+  assert.match(html, /No heartbeat yet/, "a failed roster read painted something other than the honest unknown");
+  assert.doesNotMatch(html, /fleet-presence--offline/,
+    "a read that never landed was rendered as a box that answered Offline");
+  // The GROUP is still honestly offline: nothing can be claimed.
+  assert.equal(hooks.groupViewState(hooks.groupSupportCells(ctl.supports, ctl.roster, ctl.now)), "offline");
+});
+
+test("PDF-D11: two supports on one roster identity is a CONFLICT, and the collision is named", () => {
+  const sc = GV_AXIS(hooks).find((s) => s.state === "conflict");
+  const cells = hooks.groupSupportCells(sc.supports, sc.roster, sc.now);
+  assert.deepEqual([...hooks.groupRosterConflicts(cells)], ["muscle-1"]);
+  // Two boxes, ONE roster row — the collision, not a missing row.
+  assert.equal(sc.supports.length, 2);
+  assert.equal(sc.roster.length, 1);
+  // A support that matches no row is NOT a conflict — it is the honest unknown.
+  const lone = hooks.groupSupportCells([sc.supports[0]], [], sc.now);
+  assert.deepEqual([...hooks.groupRosterConflicts(lone)], []);
+});
+
+test("PDF-D11: the group surface paints NO presence chip of its own — it calls the shipped renderer", () => {
+  // The status cell must be presenceChipHtml's bytes, or the group view is a
+  // second renderer that will drift from the fleet card's vocabulary.
+  const sc = GV_AXIS(hooks).find((s) => s.state === "working");
+  const cells = hooks.groupSupportCells(sc.supports, sc.roster, sc.now);
+  for (const c of cells) {
+    assert.ok(hooks.groupSupportRowHtml(c).includes(hooks.presenceChipHtml(c.row)),
+      `the group row for ${c.name} did not embed presenceChipHtml's own markup`);
+  }
+});
+
+test("PDF-D11: the empty state is the group's own sentence, not an empty table", () => {
+  const html = hooks.groupViewHtml(GV_MAIN, [], [], GV_NOW);
+  assert.ok(html.includes('data-group-state="empty"'));
+  assert.ok(html.includes("group-empty"));
+  assert.ok(!html.includes("group-table"), "the empty group still rendered a header row for nothing");
+});
+
+test("PDF-D11: rosterBeatAgeMs is total over junk and never renders a beat in the future", () => {
+  assert.equal(hooks.rosterBeatAgeMs(null, GV_NOW), null);
+  assert.equal(hooks.rosterBeatAgeMs({}, GV_NOW), null);
+  assert.equal(hooks.rosterBeatAgeMs({ last_seen: "not a date" }, GV_NOW), null);
+  assert.equal(hooks.rosterBeatAgeMs({ last_seen: 12345 }, GV_NOW), null);
+  // A box whose clock runs ahead of the browser's clamps to 0 rather than
+  // printing "Beat -4s ago".
+  assert.equal(hooks.rosterBeatAgeMs({ last_seen: GV_FIXTURE.now }, GV_NOW - 5000), 0);
+  assert.equal(hooks.rosterStalenessText(null, GV_NOW), "No beat recorded");
+  assert.equal(hooks.rosterStalenessText({ last_seen: GV_FIXTURE.now }, GV_NOW), "Beat 0s ago");
+});
