@@ -3492,12 +3492,46 @@ fi
 # as a contradiction. Acknowledging it is what lets the assertion below read the
 # emit — and it is also the shape of the accident: the flags name exactly the
 # three contexts a missing demotion pass would have registered.
-# No `--expect-promoted` is needed any more: the synthetic leaves are names the
-# COMMITTED spec has never carried on either list, so the mutant promoting them
-# is a plain addition rather than the required/excluded contradiction §14b
-# refuses. The acknowledgement flags went with the live fixture.
+# THE ACKNOWLEDGEMENTS ARE DERIVED, NEVER LISTED (and this is the same lesson
+# the fixture itself is here for). The mutant necessarily promotes every leaf of
+# every aggregator the shipped run demotes — today that includes the three real
+# `Security gate` leaves the committed spec holds out, which §14b correctly
+# refuses as a required/excluded CONTRADICTION. Typing those three names here
+# would put the live workflow straight back into this section by the back door:
+# a venue edit changes which real leaves the mutant promotes, and a hard-coded
+# list reds with a message naming neither the workflow nor the edit. So the
+# mutant is run ONCE as a probe and its own `STALE` lines become the flags —
+# whatever they turn out to be, including none at all.
+NOS6_PROBE="$(bash "$NOS6" "${SYNARGS_RED[@]}" "${ACK[@]}" --out "$TMP/nos6-probe.json" 2>&1 || true)"
+NOS6_ACK=()
+while IFS= read -r _nos6n; do
+  [ -n "$_nos6n" ] || continue
+  NOS6_ACK+=(--expect-promoted "$_nos6n")
+done <<EOF
+$(sed -n 's/^  STALE \(.*\)  \[this run SELECTED it as REQUIRED.*$/\1/p' <<<"$NOS6_PROBE")
+EOF
+# …and the derivation is CHECKED, not narrated. Every name it produced must be
+# one the COMMITTED spec actually holds out — that is what `STALE` means — and
+# the flag count must be twice the name count, because a `--expect-promoted`
+# that lost its value would silently acknowledge the WRONG name.
+NOS6_STALE_N="$(sed -n 's/^  STALE \(.*\)  \[this run SELECTED it as REQUIRED.*$/\1/p' <<<"$NOS6_PROBE" | grep -c . || true)"
+NOS6_ACK_BAD=""
+# The array is 0-indexed and alternates flag/value, so the VALUES are the odd
+# slots — reading the even ones would compare "--expect-promoted" to the ledger.
+_nos6i=1
+while [ "$_nos6i" -lt "${#NOS6_ACK[@]}" ]; do
+  _nos6n="${NOS6_ACK[$_nos6i]}"
+  jq -e --arg c "$_nos6n" '[.exclusions[].context] | index($c)' "$SPEC" >/dev/null 2>&1 \
+    || NOS6_ACK_BAD="$NOS6_ACK_BAD [$_nos6n]"
+  _nos6i=$((_nos6i + 2))
+done
+if [ "${#NOS6_ACK[@]}" -eq "$((NOS6_STALE_N * 2))" ] && [ -z "$NOS6_ACK_BAD" ]; then
+  ok "the mutant's own refusal supplies its acknowledgements: $NOS6_STALE_N name(s) read off its \`STALE\` lines, every one of them a context the committed spec holds out, none typed here — a venue edit changes this number instead of reddening the section"
+else
+  bad "the derived acknowledgements do not add up (${#NOS6_ACK[@]} flags for $NOS6_STALE_N name(s); not committed exclusions:${NOS6_ACK_BAD:- none}) — the emit below would acknowledge the wrong names"
+fi
 emit_spec "$TMP/nos6-spec.json" \
-  bash "$NOS6" "${SYNARGS_RED[@]}" "${ACK[@]}" \
+  bash "$NOS6" "${SYNARGS_RED[@]}" "${ACK[@]}" ${NOS6_ACK[@]+"${NOS6_ACK[@]}"} \
   --out "$TMP/nos6-spec.json" || true
 if jq -e --arg l1 "$SYNL1" --arg l2 "$SYNL2" \
      '[.protection.required_status_checks.checks[].context] as $c
