@@ -745,7 +745,20 @@
 # rule heads, sidecar baseline is 1357 (+1)") with MISSES 0, which is what makes this
 # an unrecorded ADD rather than a parity defect — the distinction the ratchet's own
 # failure text says to confirm before bumping.
-1358
+#
+# 1358 -> 1359, +1 authored rule head, console-w28 (the Cloudflare connection card
+# and its account echo): `.brand-cloudflare`, the picker/roster tile for the third
+# CONNECTABLE provider kind. ONE plain class selector in the top-level cascade — no
+# media query, no nesting, nothing the CSSOM parses differently from the authored
+# text. The wave's other two app.css edits add NO head: `--provider-cloudflare` is a
+# declaration inside the two existing :root token blocks, and `flex-wrap: wrap` is a
+# declaration added to the existing `.prov-connect-picker` rule (the 9px page
+# overflow overflow-guard.mjs found at 320px once the picker held three segments).
+# NOT arithmetic: 1359 is what cssom-parity.mjs PRINTED on this branch ("1359 authored
+# rule heads, sidecar baseline is 1358 (+1)") against Chrome 153.0.8010.53 / node
+# v22.22.0, with MISSES 0 and MULTISET DEFICITS 0 — which is what makes this an
+# unrecorded ADD rather than a parity defect.
+1359
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout

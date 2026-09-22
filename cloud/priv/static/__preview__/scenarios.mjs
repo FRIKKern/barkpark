@@ -2170,7 +2170,35 @@ const settingsProviderCapabilities = {
 const connectedProviders = [
   { id: "prov_h1", kind: "hetzner", label: "main", team_id: IDS.team, inserted_at: tMinus(86400 * 9) },
   { id: "prov_a1", kind: "azure", label: "prod-sub", team_id: IDS.team, inserted_at: tMinus(3600 * 5) },
+  // console-w28 — cloudflare is the THIRD connectable kind (router.ex
+  // `@connectable_kinds ~w(hetzner azure cloudflare)`) and it belongs in the
+  // all-connected roster, or this fixture stops being all-connected the moment
+  // the console learns the kind, and the rotation state it exists to paint
+  // silently becomes a first-connect. Its row is the same five-key shape: the
+  // server's provider row has no health field for ANY kind.
+  { id: "prov_c1", kind: "cloudflare", label: "edge", team_id: IDS.team, inserted_at: tMinus(3600 * 2) },
 ];
+
+// ── console-w28: GET /v1/providers/:kind/identity (D899) ─────────────────────
+// WHICH cloud account a connection points at, read out of the ALREADY-STORED
+// credential with zero upstream calls. The per-kind defaults below are
+// `provider_identity/2`'s own arms, so a scenario that carries no
+// `providerIdentity` fixture still gets the answer the live server derives:
+//
+//   hetzner    — a PROJECT-scoped token; the API exposes no project identity
+//                resource, so the absence is permanent and stated.
+//   azure      — the stored subscription_id, absent when none was stored.
+//   cloudflare — the stored account_id. Cloudflare.Client's five callbacks name
+//                no account, so this is an ECHO of what was typed, never a
+//                verified fact — `source: "stored"` says exactly that.
+const PROVIDER_IDENTITY_DEFAULTS = {
+  hetzner: { label: "Project", value: null, source: "unavailable",
+    reason: "Hetzner doesn't report which project this token belongs to." },
+  azure: { label: "Subscription", value: null, source: "unavailable",
+    reason: "This connection didn't store a subscription ID." },
+  cloudflare: { label: "Account", value: null, source: "unavailable",
+    reason: "This connection didn't store an account ID." },
+};
 
 // ── domain status (GET /v1/barkparks/:id/domain-status — a DNS-pending host) ──
 // A platform host mid-propagation: DNS hasn't resolved (the failed front rung
@@ -5406,6 +5434,15 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // console-w28 — the Cloudflare connection DID store an account_id, so this
+      // is the one scenario in the corpus where the identity slot can paint its
+      // KNOWN state. `source: "stored"` is the whole honesty of the shape: the
+      // value is the echo of what was typed at connect time, and nothing on the
+      // server ever asks Cloudflare whose account a token belongs to.
+      providerIdentity: {
+        cloudflare: { label: "Account", value: "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+          source: "stored", reason: null },
+      },
       // cch-w2-revoke-oracle-round2 — THE SAME console-side fixture
       // providers-member already carries (see its comment for why
       // connected:true cannot come from the live control plane), moved onto the
@@ -7594,6 +7631,25 @@ export function route(name, method, path, state, body) {
   // honest 404 no_provider (a managed launch) → the line is OMITTED, exactly as
   // live. MUST precede the /v1/ catch-all (its 200 {} would also omit, but then
   // no scenario could pin the priced state).
+  // console-w28: the identity read. It must precede the /v1/ catch-all, whose
+  // 200 {} the console reads as "this control plane doesn't report which account
+  // a connection points at" — honest, but it makes every scenario unable to
+  // paint a KNOWN identity. A scenario carries `providerIdentity` keyed by kind,
+  // EITHER as a full {status, body} response (so a 502 credential_unreadable is
+  // expressible) or as the bare identity map; absent → the per-kind default
+  // above, which is the arm the live server derives.
+  const provIdentity = p.match(/^\/v1\/providers\/([^/]+)\/identity$/);
+  if (method === "GET" && provIdentity) {
+    const kind = provIdentity[1];
+    const row = (listOf(d, state, "providers") || []).filter((x) => (x.kind || "") === kind)[0];
+    if (!row) return { status: 404, body: { error: "no_provider" } };
+    const fixture = (d.providerIdentity || {})[kind];
+    if (fixture && typeof fixture === "object" && "status" in fixture) return fixture;
+    const identity = fixture || PROVIDER_IDENTITY_DEFAULTS[kind] || null;
+    return { status: 200,
+      body: { provider: { kind: row.kind, label: row.label, identity: identity } } };
+  }
+
   if (method === "GET" && /^\/v1\/providers\/[^/]+\/catalog$/.test(p)) {
     return d.catalog
       ? { status: 200, body: d.catalog }

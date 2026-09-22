@@ -89,9 +89,13 @@ const EXPECT = [
   { f: "loadProviders", p: '"/v1/providers"', v: "guarded",
     proof: [/data-providers-retry/],
     why: "cch-w67-s4: !ok arm speaks + Retry; the roster/empty state renders only from a 200" },
-  { f: "loadProviderIdentity", p: '"/v1/providers/" + encodeURIComponent(kind) + "/overview"', v: "guarded",
-    proof: [/providerIdentityModel\(r\.ok && r\.data \? r\.data : null\)/],
-    why: "a null model paints the honest couldn't-read state, never a blank" },
+  // console-w28: the PATH moved /overview -> /identity (the purpose-built D899
+  // route: @connectable_kinds, zero upstream calls) and the !ok arm gained a
+  // branch, so this row is RE-STATED, not deleted. Same function, same verdict,
+  // a proof that matches the arm as it now reads.
+  { f: "loadProviderIdentity", p: '"/v1/providers/" + encodeURIComponent(kind) + "/identity"', v: "guarded",
+    proof: [/providerIdentityModel\(r\.ok \? d : \(d && d\.error \? d : null\)\)/],
+    why: "the !ok arm hands the model the server's error body when there is one (so a 502 credential_unreadable keeps its own sentence) and null otherwise; both paint an honest stated state, never a blank" },
   { f: "loadCapabilityMatrix", p: '"/v1/providers/capabilities"', v: "guarded",
     proof: [/capabilityMatrixModel\(r\.ok && r\.data \? r\.data : null\)/],
     why: "a null model renders the matrix's own unknown state" },
