@@ -3137,3 +3137,40 @@ to avoid a collision.*
   (`:861`), classic `studio_components/editor.ex:552` (`:367`), graph `live/studio/graph_view.ex:113` (correct),
   sheet `live/studio/sheet_grid.ex:2589` (`:2478`). Six roots, exactly as D42 corrected D29 — cite the roster by
   name, never by the line.
+
+## spd inspector-scrim amendment (THE 860px SCRIM GENERATOR IS RETIRED, 2026-09-22) — D272
+
+*Numbered D272, following D271. This records a retirement that already shipped; it does not authorise one.*
+
+- **D272 — THE `@container panel (max-width: 860px)` INSPECTOR SCRIM GENERATOR AND ALL FOUR OF ITS
+  SUPPRESSORS ARE RETIRED TOGETHER.** Landed by task-aeb351758966b019. The ruling this records was already
+  unanimous across every bucket before the code caught up: D127 → D170 → D155 → D175/D187 each removed the
+  scrim from one more state, and D175/D187 removed the last one. The honest expression of a unanimous ruling
+  is **zero rules**, not one unreachable rule held down by four cancellations.
+
+- **FOUR SUPPRESSORS, NOT FIVE.** The count was DERIVED from the file, not inherited: the inbound report from
+  infra #19673 said five and the fixture copied four, and the fixture was the artefact alleged to be wrong.
+  Four is the measured number. A count taken from the party whose own work is under question is a lead.
+
+- **THE GENERATOR WAS UNREACHABLE AND POTENT.** Both halves matter. A forced-container control read `none` in
+  8 of 8 bucket × user-opened cells on BOTH sides of the threshold (861px and 860px), so it was unreachable in
+  every shipped state — and it still reddened under mutation, which is what kept the four suppressors from
+  being decoration. "Dead code" without that second half would have been an overclaim.
+
+- **THE COMMENT AT root.html.heex:2360-2366 WAS A SECOND DEFECT, and this is the part worth carrying.** It
+  claimed to be a CONTROL "proving the scrim generator is live code rather than a dead rule". All three of its
+  clauses were false: 860px was not `""`; "verified at both 1280 and 1440" is impossible, since D170 is
+  unconditional at wide so both readings are identical with the generator present or deleted; and it did not
+  "fail loudly if the generator is deleted". It was not a control that could not fail — it was a **comment
+  asserting a property the instrument it described explicitly disclaims**. A control is a run, never a sentence.
+
+- **THE REPLACEMENT REFUSES RATHER THAN PASSES.** The retired apparatus (a playwright control, its fixture, and
+  the drift check tying them) went with its subject because **its ability to fail was parasitic on the dead
+  generator** — its self-test had to delete a suppressor before it could red. `scripts/studio-scrim-abolition-check.mjs`
+  replaces it: no browser, no fixture, 10/10 self-test arms, and two liveness gates that REFUSE an unreadable
+  sheet instead of passing it. For an absence assertion this is the whole game, because a dead parser passes
+  for free. Net −1237 lines.
+
+- **KNOWN GAP, recorded rather than quietly closed.** D210's wave table at `:1395` still names the deleted
+  control. Those are dated records of runs that already happened and are left standing: rewriting history to
+  match today's code would destroy the evidence that the runs occurred.
