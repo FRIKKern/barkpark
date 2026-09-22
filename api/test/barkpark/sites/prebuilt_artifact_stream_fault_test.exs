@@ -202,10 +202,20 @@ defmodule Barkpark.Sites.PrebuiltArtifactStreamFaultTest do
       assert result.calls == @fire_at
       assert result.delivered == @delivered_before_fault
 
-      assert {:raised, :error, unquote(error), stacktrace} = result.outcome,
+      # BIND FIRST, then assert on a boolean. `assert pattern = expr, message`
+      # evaluates the match as an ordinary `=`, so a mismatch raises MatchError
+      # and this message never prints — on exactly the path it was written for.
+      # That matters most HERE: if this arm ever reds it is because someone
+      # widened the catch, and what they need to read is the sentence below, not
+      # `no match of right hand side value: {:returned, {:error, "E_...", ...}}`.
+      outcome = result.outcome
+
+      assert match?({:raised, :error, unquote(error), _}, outcome),
              "#{unquote(error)} is a bug in this module or its caller, never a verdict about " <>
                "the archive. Typing it would file a bug under the caller's bytes. Got: " <>
-               inspect(result.outcome)
+               inspect(outcome)
+
+      {:raised, :error, _kind, stacktrace} = outcome
 
       assert drain_frame(stacktrace),
              "the crash must come from inside drain/3 — if it does not, the injector fired " <>
