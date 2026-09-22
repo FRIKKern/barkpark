@@ -183,6 +183,19 @@ jobs:
       # that compared almost nothing is the exact shape this lane had. N is in
       # the step log and is the answer to "did the scheduled run measure
       # anything?"
+      # THE SWEEP PREDICATE, OFFLINE AND WITHOUT A BROWSER
+      # (task-d582be9d064f35dc). journey.mjs DELETES documents on a live host,
+      # and until this step the only thing asserting the predicate that decides
+      # which ones was the browser self-test below — which needs Chrome, takes
+      # ninety seconds, and for the whole life of the harness could not
+      # reproduce the defect at all, because its fixture never gave a draft a
+      # title and the real server does. This runs first and it runs cheap: if it
+      # reds, the predicate is wrong and nothing downstream is worth reading.
+      # node-test-floor.mjs rather than bare `node --test`, because a zero-match
+      # glob is an exit-0 green.
+      - name: Sweep predicate (offline, both directions)
+        run: node scripts/node-test-floor.mjs --floor 1 tooling/studio-journey/sweep-predicate.test.mjs
+
       - name: Self-test (healthy fixture green, rotten fixture red)
         env:
           CHROME: /usr/bin/google-chrome
