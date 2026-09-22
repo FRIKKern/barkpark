@@ -279,6 +279,46 @@ costs a full per-row cap against the `LEG_C_BUDGET`. `/good/`'s unrenderable pag
 shipped shape (`main.bp-paper-shell`, **no** `.bp-paper-editor`), so reverting the
 region list re-reds LEG B offline.
 
+## LEG D — the cold-load press floor, and its refusal
+
+`--legs d`, **opt-in** (it costs ten full navigations) and **report-only**.
+Ten consecutive loads, one press each on the Structure row, placed **as early as
+the row is physically pressable** — present, boxed, and hit-testable at its
+centre, with no socket gate and no settle. Every latency is quoted; the
+`readyState=complete → dispatchable` gap is timed per iteration; and the
+`data-phx-ref-src` second-press no-op is exercised as its own probe with a
+control arm.
+
+**The leg refuses.** `QUIET_LOAD_PER_CORE` (default `0.20`, i.e. 2.00 on ten
+cores) is read off the clock before and after the run and on every iteration.
+An iteration that began or ended at or above the ceiling is **discarded by
+name**, never averaged through, and if any iteration crosses, the `FLOOR` beat
+publishes **no latency at all** and prints the load it refused at. That refusal
+is a complete result: a press latency taken on a loaded host is the host's
+number, not the code's. The *mechanism* beats — did a `"type":"click"` frame
+leave the socket — are load-independent and still stand.
+
+`FLOOR` **is not graded on the answer rate.** Its status asks only whether every
+iteration was *decidable* (`ANSWERED` or `UNANSWERED`, never `NO ROW`). Grading
+it on the rate would make the beat red on precisely the defect it exists to
+record, and would make it mean one thing on a quiet host and another on a loaded
+one.
+
+**The frame-count trap, and it is why this leg reads a typed oracle.** The
+question "was this press sent" is answered by **matching `"type":"click"`** on
+`/live/websocket` and **never by counting frames**: `phx_join`, the heartbeat and
+the `WidthBucket` hook push all ride the same socket, so a *discarded* press
+reads as two frames while sending no click. The match lives in `Page.open`'s
+`Network.webSocketFrameSent` subscription; `wireVerdict`'s `frames` field counts
+only frames that already matched. Nothing in this leg reads a raw total.
+
+**Cold and early pull in opposite directions.** `FLOOR_COLD=1` (the default)
+disables the HTTP cache per iteration so iteration 2 is not measuring a warm
+parse — but on a cold load the row is not hit-testable until ~230ms, so the
+earliest press is ~230ms in. `FLOOR_COLD=0` serves the desk warm and reaches
+~140ms. The 11–48ms presses that failed deterministically in earlier runs are
+only reachable warm. Both arms are needed; neither subsumes the other.
+
 ## Not a merge gate
 
 `.github/workflows/studio-journey-smoke.yml` runs the self-test on PRs and the

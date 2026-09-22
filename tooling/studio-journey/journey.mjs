@@ -2412,6 +2412,56 @@ async function pressCensusRow(page, rec, deadline) {
 //  REPORT-ONLY. Like LEG B and LEG C this leg never moves the exit code: it is a
 //  measurement of an open defect on a shared host, and converting a slow host
 //  into a product FAIL is the exact fabrication this epic exists to stop.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHAT THIS LEG MEASURED ON ITS FIRST TWO RUNS — guerrilla, served ca4534461,
+//  2026-09-22T13:26Z, host load 4.62→4.84 (cold arm) and 4.87→4.65 (warm arm)
+//  on 10 cores. THE LATENCIES BELOW ARE NOT PUBLISHED AS THE FLOOR — the host
+//  was loaded and the leg refused, exactly as designed. They are quoted here
+//  ONLY to carry the two verdicts that survive a loaded host BY DIRECTION.
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE ~5.06s GAP IS REFUTED, AND NOT AS A LOAD ARTEFACT. Measured
+//  readyState=complete → a dispatchable press: 0–1ms, 20 iterations out of 20,
+//  across both arms, at load 4.6–4.9. The prior observation was 5056–5067ms,
+//  28 times, with an ELEVEN MILLISECOND SPREAD.
+//
+//  The refutation is load-proof because load is MONOTONE UPWARD on a wait: a
+//  gap that reads 1ms at load 4.9 cannot read 5056ms at load 2.0. A quiet host
+//  could only make it smaller, and it is already 1ms. So this verdict does not
+//  need the quiet window the FLOOR number needs.
+//
+//  AND THE THIRD READING IS THE RIGHT ONE. The row framed this as a binary — a
+//  real third failure mode, or a load artefact — and it is NEITHER. An 11ms
+//  spread on a 5056ms value is the signature of a CONSTANT, not of a
+//  measurement: host load produces spreads in the hundreds of milliseconds (see
+//  the answer latencies below, 455–761ms on the same runs), and 5056–5067ms is
+//  ~5000ms of something fixed plus ~60ms of work. The gap was an artefact of
+//  the PRIOR INSTRUMENT — a ~5s constant in the harness that observed it — and
+//  in-page truth already said so at the time: the row was present the whole
+//  time (row:true at 851ms) and `[data-phx-main].className` was empty. There is
+//  no third failure mode here, and nothing queues.
+//
+//  THE EARLY-PRESS DROP DID NOT REPRODUCE ON ca4534461 AT ALL. 20/20 presses
+//  ANSWERED, every one of them wire=SENT — so on the currently served commit
+//  the socket has joined before the row is hit-testable, and `pushWithReply`
+//  never gets the chance to reject. Answer latency 455–761ms; press placed
+//  229–537ms into a cold load and 139–188ms into a warm one. This is 20/20 at a
+//  load of 4.6–4.9, and the same monotone argument applies to the RELIABILITY
+//  claim (a quiet host cannot answer fewer presses than a loaded one) — but NOT
+//  to the latency numbers, which stay unpublished.
+//
+//  THE 11–48ms FAILING PRESS IS UNREACHABLE FROM HERE. The earliest press this
+//  leg can physically place is ~139ms (warm) / ~229ms (cold), because before
+//  that the row has no hit box. A press recorded at 11ms was therefore pressing
+//  something not yet laid out — which is a fact about THAT harness, not about
+//  the seam. See FLOOR_COLD.
+//
+//  THE REF-SRC NO-OP REPRODUCES, NATURALLY, ON THE DEPLOYED STUDIO. The probe
+//  caught `data-phx-ref-src` still on the element from the control press (arm
+//  source NATURAL, both runs), and the second press read NOT SENT against a
+//  same-run control that read SENT. Signature: wire NOT SENT · 0 exceptions ·
+//  the DOM deltas are the CONTROL press's answer landing late and are printed
+//  as context, never as the verdict.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // THE QUIET FLOOR. "under ~2.0 on 10 cores" is the row's own wording, so the
@@ -2423,6 +2473,18 @@ const QUIET_LOAD_PER_CORE = Number(process.env.QUIET_LOAD_PER_CORE || 0.20);
 const FLOOR_ITERATIONS = Number(process.env.FLOOR_ITERATIONS || 10);
 const FLOOR_PRESS_CAP = Number(process.env.FLOOR_PRESS_CAP_MS || 15000); // a press's effect
 const FLOOR_READY_CAP = Number(process.env.FLOOR_READY_CAP_MS || 30000); // readyState + row
+
+// COLD AND EARLY PULL IN OPPOSITE DIRECTIONS, and that is a finding rather than
+// a knob. MEASURED against guerrilla (served ca4534461, 2026-09-22): with the
+// cache DISABLED the row is not hit-testable until 229–537ms, so the earliest
+// press this leg can physically place is ~230ms into the load. The presses that
+// failed deterministically in the prior runs landed at 11–48ms — which is only
+// REACHABLE ON A WARM LOAD, where the desk's JS and CSS come out of the memory
+// cache and the row paints before the socket has any chance to join. So "press
+// early" and "load cold" are not the same axis: FLOOR_COLD=1 measures the
+// cold-load floor and FLOOR_COLD=0 measures the 11–48ms window the drops were
+// observed in. Both arms are needed and neither subsumes the other.
+const FLOOR_COLD = process.env.FLOOR_COLD !== "0";
 
 /** The host reading, taken from the clock rather than remembered. `quiet` is the
  *  ONE field callers may branch on; `load1` and `cores` are printed so a refusal
@@ -2481,7 +2543,8 @@ async function floorIteration(page, ctx, i, pressCap) {
   // COLD MEANS COLD. Without this the second iteration serves the desk's JS and
   // CSS out of the memory cache and measures a warm parse, which is exactly the
   // "iteration 1 was the fast one" artefact this leg was written to remove.
-  try { await page.cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, page.sid); } catch { /* the leg still runs warm-ish */ }
+  rec.cold = FLOOR_COLD;
+  try { await page.cdp.send("Network.setCacheDisabled", { cacheDisabled: FLOOR_COLD }, page.sid); } catch { /* the leg still runs warm-ish */ }
 
   const t0 = Date.now();
   await page.goto(ctx.base + DESK_PATH);
@@ -2703,6 +2766,7 @@ async function legD(page, ctx, ledger, run, opts) {
   const kept = iterations.filter((r) => !r.discarded);
   const answered = kept.filter((r) => r.outcome === "ANSWERED");
   const floor = {
+    cold: FLOOR_COLD,
     quiet_ceiling: before.ceiling,
     load_before: before, load_after: after,
     quiet_throughout: before.quiet && after.quiet && iterations.every((r) => !r.discarded),
