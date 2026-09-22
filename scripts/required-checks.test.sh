@@ -2731,6 +2731,7 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # these two lines to paste.
         --expect-unrendered "Dispatch (scrim paths)"
         --expect-unrendered "Studio scrim abolition check"
+        --expect-unrendered "Studio scrim threshold control"
         # deploy-prod-microblock-staleness.yml jobs `prod-microblock-selftest` (:66),
         # `prod-microblock-read` (:124) and `prod-microblock-report-scheduled-failure`
         # (:150). The workflow landed AFTER both `generated_from_shas`, so the frozen
