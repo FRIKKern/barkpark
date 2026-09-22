@@ -635,8 +635,42 @@ defmodule BarkparkWeb.TasksController.Params do
     doc
     |> render_doc(:brief)
     |> Map.put(:child_count, total)
+    |> put_brief_marker(content)
     |> put_brief_dispatch(total, live_child_counts, key)
     |> put_brief_upstream(content, live_parents)
+  end
+
+  # ── THE AUTHOR-WRITTEN HALF OF THE SAME KEY (task-46e82dc40c385ed2) ──────
+  #
+  # `put_brief_dispatch/4` and `put_brief_upstream/3` below both INFER a
+  # verdict from an edge. This one reads an imperative the row's author wrote
+  # AT a dispatcher — "DO NOT commission a builder for c0", "OWNER-GATED" —
+  # which until now lived only under `content.*` and was therefore invisible to
+  # every lead triaging off `bp task ready`, whose projection carries no
+  # `content` at all. That is the whole defect: 9 of 22 unclaimed ready rows on
+  # one fence carried such a marker, and a builder was dispatched at one of
+  # them and had to refuse.
+  #
+  # FIRST IN THE CHAIN, AND IT OUTRANKS BOTH EDGE RULES. An author's explicit
+  # refusal is a stronger statement than an inferred `delegated`, and the two
+  # functions below now both no-op on a card that already carries the key, so
+  # one card is one verdict. `Barkpark.Tasks.Dispatchability` owns the rule and
+  # the vocabulary lives in ONE file (`api/priv/tasks/dispatch_markers.json`),
+  # read at compile time there and byte-pinned to the Go copy from the CLI
+  # side — this function only decides whether the key rides.
+  #
+  # ADDITIVE, and that is the negative arm: `classify_markers/1` answers nil
+  # for every row with no marker (136 of 150 open rows measured 2026-09-22), so
+  # those cards stay byte-identical. The hostile 50-card byte tripwire below is
+  # untouched in the WORST CASE too: the key is shared, so a card can still
+  # carry exactly one dispatch value, and `"forbidden"` is the same 9
+  # characters as the `"delegated"` that tripwire already prices (`"deferred"`
+  # is 8, one shorter than that).
+  defp put_brief_marker(map, content) do
+    case Dispatchability.classify_markers(content) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
   end
 
   # THE UMBRELLA MARKER (task-52f4f3aff99c64d5), additive and pruned, same law
@@ -666,6 +700,11 @@ defmodule BarkparkWeb.TasksController.Params do
   # not measure. nil means UNMEASURED and omits the key entirely — a caller
   # that has not paid for the live query says nothing rather than something
   # false.
+  # task-46e82dc40c385ed2: an author-written marker already on the card WINS —
+  # `put_brief_marker/2` ran first and its verdict is not an inference. Same
+  # law `put_brief_upstream/3` already carries one clause down.
+  defp put_brief_dispatch(%{dispatch: _} = map, _total, _live_child_counts, _key), do: map
+
   defp put_brief_dispatch(map, _total, nil, _key), do: map
 
   defp put_brief_dispatch(map, total, live_child_counts, key) do
