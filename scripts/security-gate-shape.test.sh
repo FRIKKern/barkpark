@@ -941,13 +941,35 @@ else
 fi
 
 # M2 — one class rots while the total stays right (the half that a bare row
-#      count can never see, and the half that actually drifted this time)
-sed 's/^#\([[:space:]]*\)census: Traversal.FileModule=.*/#\1census: Traversal.FileModule=18/' "$WF" > "$CENSUS_MUT/m2.yml"
-d="$(census_diff "$CENSUS_MUT/m2.yml" "$CENSUS_BL")"
-if has "$d" "Traversal.FileModule"; then
-  ok "MUTANT per-class: a drifted class fires even with the total correct"
+#      count can never see, and the half that actually drifted this time).
+#
+#      THE CLASS IS DERIVED FROM THE TABLE, NEVER TYPED. This arm used to sed
+#      for the literal `Traversal.FileModule`, and when api #19726 emptied that
+#      detector out of api/.sobelow-skips the correcting PR deleted the row --
+#      at which point the sed matched nothing, the mutant was byte-identical to
+#      the original, and the arm could not fire. It was caught only because the
+#      `no` branch reds; a mutation arm that silently matches nothing is the
+#      same vacuous green this whole case exists to prevent. An enumeration is
+#      a snapshot of the roster; the rule is "whatever per-class row is there".
+mut_class="$(sed -n 's/^#[[:space:]]*census:[[:space:]]*\([A-Za-z][A-Za-z0-9._]*\)=.*/\1/p' "$WF" \
+  | grep -vx 'total' | head -1)"
+if [ -z "$mut_class" ]; then
+  no "MUTANT per-class: the table declares no per-class row to mutate — nothing to prove"
 else
-  no "MUTANT per-class: a drifted class did NOT fire"
+  sed "s/^#\([[:space:]]*\)census: ${mut_class}=.*/#\1census: ${mut_class}=18/" "$WF" > "$CENSUS_MUT/m2.yml"
+  # PLANT CHECK: the mutation must actually have changed the file. Without it a
+  # sed that matches nothing yields a mutant equal to the original and the arm
+  # below would be asserting against an unmutated table.
+  if cmp -s "$WF" "$CENSUS_MUT/m2.yml"; then
+    no "MUTANT per-class: the plant did not change the table (class '${mut_class}' did not sed) — the arm would have proven nothing"
+  else
+    d="$(census_diff "$CENSUS_MUT/m2.yml" "$CENSUS_BL")"
+    if has "$d" "$mut_class"; then
+      ok "MUTANT per-class: a drifted class fires even with the total correct (mutated '${mut_class}', derived from the table)"
+    else
+      no "MUTANT per-class: a drifted class did NOT fire (mutated '${mut_class}')"
+    fi
+  fi
 fi
 
 # M3 — the baseline gains a row and nobody updates the table

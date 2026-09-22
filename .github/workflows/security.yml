@@ -49,13 +49,10 @@ name: security
 #     per-class — `grep -v '^[[:space:]]*$' api/.sobelow-skips |
 #                  sed 's/:.*//' | sort | uniq -c`
 #
-#     census: total=24
+#     census: total=9
 #     census: Config.CSRF=6
 #     census: Config.HTTPS=1
-#     census: DOS.StringToAtom=4
-#     census: Traversal.FileModule=9
-#     census: XSS.Raw=3
-#     census: XSS.SendResp=1
+#     census: XSS.Raw=2
 #
 #   2. mix-audit  — dependency CVE scan over mix.lock. No continue-on-error, so
 #                   a red DOES fail `Security gate` — but `Security gate` is not
