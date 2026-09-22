@@ -7636,3 +7636,53 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .modal-root:has(#support-form) .modal-actions,
   .modal-root:has(#cancel-go) .modal-actions { flex-wrap: wrap; row-gap: var(--space-2); }
 }
+
+/* ═══ PDF-D11 GROUP VIEW (pdf-bl-fleet-group-view) — a main plus its supports
+   as one surface, under the 7-state catalogue
+   (empty|conflict|blocked|offline|provisioning|cap-hit|working). The per-row
+   status cell reuses .fleet-presence above: the group view paints no chip of
+   its own, because "online" has exactly one renderer as it has exactly one
+   deriver. One static class per state (__css_check E3). ═══ */
+.group-view { display: flex; flex-direction: column; gap: 10px; }
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.group-title { margin: 0; }
+.group-detail { margin: 0; color: var(--muted-text); font-size: 13px; }
+.group-empty { margin: 0; color: var(--muted-text); font-size: 13.5px; }
+
+/* The group's ONE state badge. */
+.group-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; padding: 2px 8px;
+  border-radius: 999px; border: 1px solid var(--border);
+}
+.group-state--empty { color: var(--muted-text); }
+.group-state--conflict { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--blocked { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--offline { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.group-state--provisioning { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.group-state--cap-hit { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--working { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.group-state--unknown { color: var(--muted-text); }
+
+/* The per-support table. A CSS grid rather than a <table> so the status cell
+   can carry the presence chip's own inline-flex layout unchanged. */
+.group-table { display: flex; flex-direction: column; }
+.group-row {
+  display: grid; gap: 10px; align-items: center;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  border-top: 1px solid var(--border); padding: 8px 0;
+}
+.group-row--head { border-top: 0; color: var(--muted-text); font-size: 12px; font-weight: 600; }
+.group-cell { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.group-cell--name { font-weight: 600; color: var(--text); text-decoration: none; }
+.group-cell--name:hover { text-decoration: underline; }
+.group-cell--status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.group-cell--cap { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); }
+.group-cell--beat { color: var(--muted-text); font-size: 12.5px; }
+.group-cell--task { color: var(--muted-text); }
+
+/* Narrow: the five-column grid becomes stacked pairs rather than five slivers. */
+@media (max-width: 899px) {
+  .group-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .group-row--head { display: none; }
+}
