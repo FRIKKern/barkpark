@@ -26,13 +26,18 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
 
     * ARM 1 — the set lives inside `_paOnPress`. Mutation: delete it. The
       pressed row is never marked, and `sets the state on press` reds.
-    * ARM 2 — the clear lives inside `_paRelease`, which is the SINGLE release
-      path (settle, ref-drop, detach, the 16 ms refusal, the 8 s ceiling,
-      pagehide, destroyed all funnel through it). Two mutations: delete it, and
-      — the one that matters — MOVE it into `_paSettle`. Moving it keeps the
-      literal in the file, so a whole-sheet `grep` stays green while a REFUSED
-      press is left stuck busy forever. `clears the state on release` reds on
-      both.
+    * ARM 2 — the clear lives inside `_paDropPending`, which is the SINGLE
+      place a pending press is dropped: `_paRelease` (settle, ref-drop, detach,
+      the 16 ms refusal, the 8 s ceiling) delegates to it, and so does the
+      navigation teardown that keeps its word and therefore cannot go through
+      `_paRelease` at all (task-3f18da89b058b886). BINDING THE ARM TO THE DROP
+      RATHER THAN TO THE SAY IS THE POINT: an ending that must not touch the
+      region must still un-busy the row, and only `_paDropPending` is on both
+      kinds of ending. Three mutations: delete the clear; MOVE it into
+      `_paSettle` — which keeps the literal in the file, so a whole-sheet `grep`
+      stays green while a REFUSED press is left stuck busy forever; and cut
+      `_paRelease`'s delegation, which would leave every ordinary ending busy.
+      `clears the state on release` reds on all three.
 
   Deliberately NOT asserted: ref timing, real AT output, or that the bar is
   visible to a human eye. Those need a real LiveSocket and a real browser and
@@ -48,6 +53,7 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
 
   @set ~S|p.el.setAttribute("aria-busy", "true");|
   @clear ~S|if (prev && prev.el) prev.el.removeAttribute("aria-busy");|
+  @delegates ~S|this._paDropPending(false);|
 
   defp sheet, do: File.read!(@root)
 
@@ -71,8 +77,13 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
   # ARM 1: is the pending state SET on the pressed element, inside _paOnPress?
   defp sets_on_press?(s), do: String.contains?(member_body(s, "_paOnPress(ev) {"), @set)
 
-  # ARM 2: is it CLEARED inside _paRelease — the one path every ending shares?
-  defp clears_on_release?(s), do: String.contains?(member_body(s, "_paRelease(text) {"), @clear)
+  # ARM 2: is it CLEARED inside _paDropPending — the one path every ending
+  # shares, INCLUDING the navigation teardown that keeps its word and so never
+  # reaches `_paRelease`? And does `_paRelease` still go through it?
+  defp clears_on_release?(s) do
+    String.contains?(member_body(s, "_paDropPending(keepFade) {"), @clear) and
+      String.contains?(member_body(s, "_paRelease(text) {"), @delegates)
+  end
 
   describe "the pressed row carries the state (ARM 1: set on press)" do
     test "the hook stamps aria-busy on the pressed control" do
@@ -99,6 +110,13 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
 
       refute clears_on_release?(mutant),
              "this check cannot lose, so it is not a check"
+    end
+
+    test "MUTATION — cut _paRelease's delegation: every ordinary ending leaves the row busy" do
+      mutant = String.replace(sheet(), @delegates, "")
+
+      refute clears_on_release?(mutant),
+             "the clear can sit in a helper nothing calls and this check would not notice"
     end
 
     test "MUTATION — MOVE the clear into _paSettle: still reds, though the literal survives" do
