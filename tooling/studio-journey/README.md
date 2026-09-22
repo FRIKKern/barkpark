@@ -319,6 +319,24 @@ earliest press is ~230ms in. `FLOOR_COLD=0` serves the desk warm and reaches
 ~140ms. The 11–48ms presses that failed deterministically in earlier runs are
 only reachable warm. Both arms are needed; neither subsumes the other.
 
+**The refusal is per-field, and the direction is why.** It would be tidier to
+withhold everything a loaded host touched, and the tidiness would be wrong. Load
+is **monotone upward** on a wait. `latency_ms` is a *product* number — load
+inflates it, so publishing it under load misleads *in the direction of the
+claim*, and it stays withheld. `gap_ms` is a claim that a **5-second phenomenon
+is absent** — load can only make it *bigger*, so a 2ms reading at load 10.1 is
+***a fortiori***, stronger than the same 2ms on an idle box. It is **published
+over all iterations**, with each iteration's load attached. A uniform rule is
+easier to trust when the fields are alike; these are not — one measures the
+system, the other measures an absence — so the difference is written down *at
+the field*, with the argument, rather than inherited as a rule.
+
+**Every null says which null it is.** `gap_spread: null` once meant either
+"withheld by design" or "nothing was measured", indistinguishable by inspection
+— and that ambiguity is what let a hand-computed figure be read as an instrument
+reading. Every spread now ships a `_status` string, and `floor.disclosure`
+indexes each field's policy in one line.
+
 **Read `run.provenance`, not a curl you typed.** Every run stamps the served
 commit PRE and POST into the run object it writes. The first write-up of these
 runs reported the served commit from a hand-typed `curl` at the prod micro-block

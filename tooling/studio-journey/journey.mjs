@@ -2409,6 +2409,32 @@ async function pressCensusRow(page, rec, deadline) {
 //  the class and does not re-litigate the frame question — it presses early,
 //  reads the typed oracle, and reports.
 //
+//  THE REFUSAL IS PER-FIELD, AND THE DIRECTION IS WHY. It would be tidier to
+//  withhold everything a loaded host touched, and that tidiness would be wrong.
+//  Load is MONOTONE UPWARD on a wait. So:
+//
+//    · `latency_ms` is a PRODUCT number. Load inflates it, so a number published
+//      under load misleads IN THE DIRECTION OF THE CLAIM — the press reads
+//      slower than the code is. WITHHELD. This is the leg's whole reason to
+//      exist and it does not bend.
+//
+//    · `gap_ms` is a claim that a 5-SECOND PHENOMENON IS ABSENT. Load can only
+//      make it BIGGER, so a 2ms reading at load 10.1 is A FORTIORI — STRONGER
+//      than the same 2ms on an idle box, not weaker. Withholding it would
+//      discard good evidence in the one direction where load cannot hurt the
+//      conclusion. PUBLISHED OVER ALL ITERATIONS, load attached to each.
+//
+//  A uniform rule is easier to trust when the fields are alike. These are not:
+//  one measures the system, the other measures an absence. The difference is
+//  written down AT THE FIELD, with this argument, so the next reader checks the
+//  reasoning instead of inheriting a rule.
+//
+//  AND EVERY NULL SAYS WHICH NULL IT IS. `gap_spread: null` once meant either
+//  "withheld by design" or "nothing was measured" — indistinguishable by
+//  inspection, and that ambiguity is exactly what let a hand-computed figure be
+//  read as an instrument reading. Every spread now ships a `_status` string, and
+//  `floor.disclosure` indexes the policy of each field in one line.
+//
 //  REPORT-ONLY. Like LEG B and LEG C this leg never moves the exit code: it is a
 //  measurement of an open defect on a shared host, and converting a slow host
 //  into a product FAIL is the exact fabrication this epic exists to stop.
@@ -2786,17 +2812,85 @@ async function legD(page, ctx, ledger, run, opts) {
   const undecidable = iterations.filter((r) => r.outcome !== "ANSWERED" && r.outcome !== "UNANSWERED");
   const kept = iterations.filter((r) => !r.discarded);
   const answered = kept.filter((r) => r.outcome === "ANSWERED");
+  const quietThroughout = before.quiet && after.quiet && iterations.every((r) => !r.discarded);
+
+  // ── WHICH FIELDS THE LOAD RULE GOVERNS, AND WHY THEY DIFFER ────────────────
+  //
+  // THE DISCARD RULE IS NOT UNIFORM ACROSS THESE THREE FIELDS, DELIBERATELY. A
+  // uniform rule is easier to trust when the fields are alike, and these are
+  // not: one measures the system under test, the others measure the ABSENCE of
+  // something. Treating them the same is the kind of uniformity that LOOKS
+  // principled while quietly discarding good evidence.
+  //
+  //   latency_ms      A PRODUCT NUMBER. A loaded host inflates it, so publishing
+  //                   it under load misleads IN THE DIRECTION OF THE CLAIM —
+  //                   the press looks slower than the code is. WITHHELD under
+  //                   load, which is the whole point of this leg.
+  //
+  //   gap_ms          A CLAIM THAT A 5-SECOND PHENOMENON IS ABSENT. Load is
+  //                   MONOTONE UPWARD on a wait, so it can only make this
+  //                   number BIGGER. A 2ms gap read at load 10.1 is therefore
+  //                   A FORTIORI — it is STRONGER evidence than the same 2ms at
+  //                   load 2.0, not weaker. Discarding it under load would
+  //                   withhold evidence in the one direction where load cannot
+  //                   hurt the conclusion. PUBLISHED OVER ALL ITERATIONS, with
+  //                   each iteration's load attached in `iterations[]`.
+  //
+  //   press_at_ms     The same shape: "how early could a press be placed". Load
+  //                   can only make it LATER, so an early press under load is a
+  //                   fortiori early. PUBLISHED OVER ALL ITERATIONS.
+  //
+  // AND A NULL MUST SAY WHICH NULL IT IS. `gap_spread: null` previously meant
+  // either "withheld by design" or "nothing was measured", and the two are
+  // indistinguishable by inspection — that ambiguity is what let a reader take a
+  // hand-computed figure for an instrument reading. Every spread now ships a
+  // `_status` string naming its policy and, when null, WHICH null it is.
+  const gapSpread = spread(iterations.map((r) => r.gap_ms));
+  const pressSpread = spread(iterations.map((r) => r.press_at_ms));
+  const latencySpread = quietThroughout ? spread(answered.map((r) => r.latency_ms)) : null;
+  const crossed = iterations.length - kept.length;
+
   const floor = {
     cold: FLOOR_COLD,
     quiet_ceiling: before.ceiling,
     load_before: before, load_after: after,
-    quiet_throughout: before.quiet && after.quiet && iterations.every((r) => !r.discarded),
+    quiet_throughout: quietThroughout,
     iterations,
-    kept: kept.length, discarded: iterations.length - kept.length,
+    kept: kept.length, discarded: crossed,
     answered: answered.length,
-    latency_spread: spread(answered.map((r) => r.latency_ms)),
-    gap_spread: spread(kept.map((r) => r.gap_ms)),
-    press_offset_spread: spread(kept.map((r) => r.press_at_ms)),
+
+    latency_spread: latencySpread,
+    latency_spread_status: quietThroughout
+      ? `PUBLISHED — the host stayed under ${before.ceiling.toFixed(2)} throughout, over ${answered.length} answered iteration(s)`
+      : `WITHHELD BY THE LOAD RULE — ${crossed} of ${iterations.length} iteration(s) crossed the quiet ceiling ` +
+        `(${before.ceiling.toFixed(2)} on ${before.cores} cores). THIS NULL MEANS WITHHELD, NOT UNMEASURED: press ` +
+        `latency is a PRODUCT number a loaded host inflates, so publishing it here would mislead in the direction ` +
+        `of the claim. The per-iteration values are in floor.iterations[].latency_ms with each iteration's own load.`,
+
+    gap_spread: gapSpread,
+    gap_spread_status: gapSpread
+      ? `PUBLISHED OVER ALL ${iterations.length} ITERATIONS, INCLUDING THE ${crossed} THE LOAD RULE DISCARDED FOR ` +
+        `LATENCY — and that is not an inconsistency. Load is MONOTONE UPWARD on a wait, so it can only make this ` +
+        `number bigger: a ${gapSpread.max}ms gap read at load ${before.load1.toFixed(2)} is A FORTIORI evidence ` +
+        `that the ~5.06s readyState-to-dispatchable gap is not there. Each iteration carries its own load in ` +
+        `floor.iterations[].load_before/load_after.`
+      : `NOT MEASURED — no iteration produced a gap_ms at all (the row never became dispatchable, or readyState ` +
+        `never completed). THIS NULL MEANS UNMEASURED, NOT WITHHELD.`,
+
+    press_offset_spread: pressSpread,
+    press_offset_spread_status: pressSpread
+      ? `PUBLISHED OVER ALL ${iterations.length} ITERATIONS. Same direction as gap_spread: load can only make a ` +
+        `press LATER, so an early press under load is a fortiori early.`
+      : `NOT MEASURED — no iteration placed a press. THIS NULL MEANS UNMEASURED, NOT WITHHELD.`,
+
+    // The one-line index, so nobody has to infer a policy from a null.
+    disclosure: {
+      latency_spread: quietThroughout ? "LOAD-PUBLISHED (host was quiet)" : "LOAD-WITHHELD (product number; load inflates it)",
+      gap_spread: "LOAD-PUBLISHED ALWAYS (absence claim; load is monotone upward, so a reading under load is a fortiori)",
+      press_offset_spread: "LOAD-PUBLISHED ALWAYS (same direction as gap_spread)",
+      refsrc: "LOAD-INDEPENDENT (a frame either left the socket or it did not)",
+      "iterations[]": "ALWAYS RECORDED IN FULL, discarded or not, each with its own load_before/load_after",
+    },
     refsrc,
     frame_oracle:
       "MATCHES \"type\":\"click\" AND NEVER COUNTS FRAMES — phx_join, the heartbeat and the " +
@@ -2818,16 +2912,23 @@ async function legD(page, ctx, ledger, run, opts) {
       `REFUSED, and the refusal is the result. The quiet floor is ${before.ceiling.toFixed(2)} on ` +
         `${before.cores} cores (${QUIET_LOAD_PER_CORE}/core); this host read ${before.load1.toFixed(2)} before and ` +
         `${after.load1.toFixed(2)} after, with ${iterations.length - kept.length} of ${iterations.length} iterations ` +
-        `crossing the ceiling WHILE THEY RAN. Every latency below was still recorded and is printed, and NONE of it ` +
-        `is published as a number: per measure-on-a-quiet-host a press latency taken here is the host's, not the ` +
-        `code's. Re-run with the host idle. (The MECHANISM beats — the wire oracle and the ref-src probe — are ` +
-        `load-independent and DO stand: a frame either left the socket or it did not.)`,
+        `crossing the ceiling WHILE THEY RAN. THE PRESS LATENCY IS WITHHELD — per measure-on-a-quiet-host a press ` +
+        `latency taken here is the host's, not the code's, and publishing it would mislead in the direction of the ` +
+        `claim. Re-run with the host idle for THAT number. · BUT THE GAP IS PUBLISHED, over all ${iterations.length} ` +
+        `iterations: ${floor.gap_spread ? `${floor.gap_spread.min}–${floor.gap_spread.max}ms (median ${floor.gap_spread.median}, n=${floor.gap_spread.n})` : "not measured"}. ` +
+        `Load is MONOTONE UPWARD on a wait, so it can only make a gap BIGGER — a reading taken here is A FORTIORI, ` +
+        `not tainted, and discarding it would withhold evidence in the one direction load cannot hurt. · The ` +
+        `MECHANISM beats — the wire oracle and the ref-src probe — are load-independent and DO stand: a frame ` +
+        `either left the socket or it did not.`,
       [
         check("uptime BEFORE", PASS, loadLine(before)),
         check("uptime AFTER", PASS, loadLine(after)),
         check("iterations run", PASS, `${iterations.length} · ${kept.length} kept · ${iterations.length - kept.length} DISCARDED by the load rule`),
         check("every iteration decidable", undecidable.length === 0 ? PASS : FAIL, `${iterations.length - undecidable.length}/${iterations.length} produced ANSWERED or UNANSWERED`),
-        check("latency PUBLISHED", PENDING, "withheld — the host was loaded"),
+        check("the ~5.06s gap", PASS, floor.gap_spread
+          ? `PUBLISHED over all ${iterations.length} iterations (${floor.gap_spread.min}–${floor.gap_spread.max}ms, range ${floor.gap_spread.range}ms) — a fortiori under load`
+          : "not measured"),
+        check("latency PUBLISHED", PENDING, `WITHHELD by the load rule — ${floor.latency_spread_status}`),
       ],
       { gating: false },
     );
@@ -2845,7 +2946,7 @@ async function legD(page, ctx, ledger, run, opts) {
         check("uptime AFTER", PASS, loadLine(after)),
         check("every iteration decidable", undecidable.length === 0 ? PASS : FAIL, `${iterations.length - undecidable.length}/${iterations.length} produced ANSWERED or UNANSWERED`),
         check("early presses answered", PASS, `${answered.length}/${kept.length} — REPORTED, NOT GATED: an early press being dropped is the DEFECT under measurement, so reddening on it would make this leg red on exactly the finding it exists to record`),
-        check("the ~5.06s gap", PASS, gs ? `re-taken: ${gs.min}–${gs.max}ms over ${gs.n} quiet iterations (range ${gs.range}ms)` : "no quiet iteration produced one"),
+        check("the ~5.06s gap", PASS, gs ? `re-taken: ${gs.min}–${gs.max}ms over all ${gs.n} iterations (range ${gs.range}ms)` : "no iteration produced one"),
       ],
       { gating: false },
     );
