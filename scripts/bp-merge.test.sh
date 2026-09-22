@@ -1380,9 +1380,13 @@ sig_row "90 a touching PR with a SUCCESS verdict passes" 0 "concluded success"
 # be flagged by the very scanner it drives. Each candidate is confirmed with a
 # SINGLE-FILE scan (0.1s) rather than a whole-tree one (36.9s measured).
 _sitepath=""; _sitefile=""
+# A TEMP FILE, not `< <(…)`: process substitution is a bashism, and under `sh`
+# the redirect is a parse error that leaves the loop comparing NOTHING — the
+# vacuous green scripts/.posix-vacuous-green-census exists to refuse. (It
+# refused this very line on head 07bcc0eae, which is the census doing its job.)
 _cands=()
-while IFS= read -r _c; do [ -n "$_c" ] && _cands+=("$_c"); done < <(
-  grep -rlE '\|[[:space:]]*head[[:space:]]' "$ROOT/scripts" 2>/dev/null || true )
+grep -rlE '\|[[:space:]]*head[[:space:]]' "$ROOT/scripts" > "$SIG_TMP/cands.txt" 2>/dev/null || true
+while IFS= read -r _c; do [ -n "$_c" ] && _cands+=("$_c"); done < "$SIG_TMP/cands.txt"
 for _c in "${_cands[@]}"; do
   _o="$(bash "$ROOT/scripts/pipefail-sigpipe-scan.sh" --min-confidence high "$_c" 2>/dev/null || true)"
   _sitepath="$(grep -m1 -oE "^$ROOT/[^:]+:[0-9]+:" <<<"$_o" || true)"
