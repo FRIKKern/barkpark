@@ -1177,12 +1177,19 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 132 — RE-DERIVED 2026-09-22 (task-d81214d47470141d), which adds ONE arm:
+          #   `PRECONDITION: a tree BEHIND origin/main is refused, with the count named`.
+          #   `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs` -> 132,
+          #   and `node --test` printed `# tests 132` on this tree. The history BELOW is left
+          #   exactly as it was: those numerals quote dated runs and earlier PRs, and rewriting
+          #   them to match today's pin would fabricate a CI line nobody ever printed. Only the
+          #   LIVE numerals — the two comparisons, the self-test and the two echoes — move.
           # PIN 131 — RE-DERIVED 2026-09-11 in #17906 (which adds two staleness arms; #17828 had added ten
           # transitive-roster arms) from this file's own registrations, and the
           # derivation is BOTH counts because they differ:
-          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 131
+          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 132
           #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 147
-          # 131 is the pin, and the CI run agrees: main run 34647939447 printed
+          # 131 was the pin then, and that CI run agrees: main run 34647939447 printed
           # `seal predicate tests: 131 tests` on 2026-09-11. The 16-line gap is NOT nested or loop-generated
           # registrations: every extra line is a `RegExp.prototype.test(` call
           # inside an assertion or a comment quoting one (lines 149, 261, 1045,
@@ -1224,14 +1231,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 131 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 131 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 132 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 132 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 131 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 131 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 131 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 132 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 132 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 132 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 131 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 132 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"

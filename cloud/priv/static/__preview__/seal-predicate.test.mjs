@@ -153,6 +153,34 @@ export function objectDatabaseRefusal(root) {
   const head = spawnSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' });
   if (head.status !== 0 || !/^[0-9a-f]{40}$/.test(head.stdout.trim()))
     return `seal-predicate.test.mjs: the git object database at ${root} holds no commit at HEAD (rev-parse rc ${head.status}) — an initialised repository with an EMPTY history reads as a checkout to every probe but answers nothing about ancestry; ${how}`;
+  // FOURTH CASE (task-d81214d47470141d). The three probes above ask whether the
+  // tree is a checkout. This one asks whether it is a checkout the SUBJECT will
+  // agree to measure. `seal-predicate.mjs`'s own `assertRepoNotBehindOriginMain()`
+  // THROWS `Infra` when `git rev-list --count HEAD..origin/main` is non-zero, for
+  // a reason it states at length: clause (b) reads guard files off THIS tree while
+  // the ancestry leg reads origin/main, so a stale tree scores today's register
+  // against an older tree. That refusal is correct. What was missing is that the
+  // SUITE did not share it: every live-path test spawned the predicate, the
+  // predicate refused, and the refusal surfaced as N assertion failures that read
+  // like product defects instead of one precondition refusal.
+  //
+  // MEASURED, same bytes, two trees, on 2026-09-22: a worktree 1 commit behind
+  // origin/main ran 131/131 and failed 39; a worktree at origin/main ran 131/131
+  // and failed 5. The roster was intact in both — `# tests 131` either way — so
+  // nothing here is about the suite's SIZE. And because main moves while a 132 s
+  // run is in flight and the predicate re-probes per spawn, the count also moves
+  // WITHIN one run, which is what made the spread (0, 26, 37, 38 across five runs)
+  // look like a load flake and correlate with wall time. Longer run, more chance
+  // main moved; the wall time is a CONFOUND, not the cause.
+  //
+  // FAIL-OPEN on an unreadable probe, deliberately, and the same way the predicate
+  // does: a tree with no `origin/main` ref (a fresh clone of a fork, an offline
+  // box) must still be able to run this suite. Only a SUCCESSFUL count greater
+  // than zero refuses.
+  const behind = spawnSync('git', ['-C', root, 'rev-list', '--count', 'HEAD..origin/main'], { encoding: 'utf8' });
+  const behindN = behind.status === 0 && /^[0-9]+$/.test(behind.stdout.trim()) ? Number(behind.stdout.trim()) : 0;
+  if (behindN > 0)
+    return `seal-predicate.test.mjs: ${root} is ${behindN} commit(s) BEHIND origin/main (\`git rev-list --count HEAD..origin/main\` = ${behindN}); seal-predicate.mjs refuses this tree with Infra \`--repo … is ${behindN} commit(s) BEHIND origin/main\`, so every live-path test here would measure THAT refusal instead of the subject and report it as an assertion failure (measured 2026-09-22: 1 behind -> 39 reds, at origin/main -> 5, roster intact at 131 both ways); bring the tree to origin/main (\`git fetch origin main && git merge --ff-only origin/main\`) and re-run; ${how}`;
   return null;
 }
 
@@ -233,6 +261,42 @@ test('PRECONDITION: an initialised repository with an EMPTY history is refused t
   const top = spawnSync('git', ['-C', empty, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
   assert.equal(top.status, 0, 'this IS a git work tree — which is exactly why probe 1 cannot catch it');
   assert.match(objectDatabaseRefusal(empty), /holds no commit at HEAD \(rev-parse rc \d+\)/);
+});
+
+test('PRECONDITION: a tree BEHIND origin/main is refused, with the count named (task-d81214d47470141d)', () => {
+  // Probes 1-3 all PASS on this fixture — it is a real work tree, at its top level,
+  // with a commit at HEAD — which is exactly why none of them could catch the shape
+  // that produced the "load flake". Built offline: two commits, an `origin/main` ref
+  // at the second, HEAD at the first.
+  const behind = tmp('seal-pred-behind-');
+  assert.equal(spawnSync('git', ['-C', behind, 'init', '-q', '-b', 'main']).status, 0, 'git init failed, so this control measured nothing');
+  for (const [name, body] of [['a.txt', 'one'], ['b.txt', 'two']]) {
+    writeFileSync(join(behind, name), body);
+    assert.equal(spawnSync('git', ['-C', behind, 'add', name]).status, 0);
+    assert.equal(spawnSync('git', ['-C', behind, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', name]).status, 0);
+  }
+  const tip = spawnSync('git', ['-C', behind, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  assert.equal(spawnSync('git', ['-C', behind, 'update-ref', 'refs/remotes/origin/main', tip]).status, 0);
+  assert.equal(spawnSync('git', ['-C', behind, 'checkout', '-q', 'HEAD~1']).status, 0);
+
+  // THE CONTROL'S OWN PRECONDITIONS, asserted rather than assumed: the other three
+  // probes must be silent here, or this arm would pass for one of their reasons.
+  const top = spawnSync('git', ['-C', behind, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  assert.equal(top.status, 0, 'it IS a work tree — probe 1 cannot catch it');
+  const head = spawnSync('git', ['-C', behind, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' });
+  assert.match(head.stdout.trim(), /^[0-9a-f]{40}$/, 'it HAS a commit at HEAD — probe 3 cannot catch it');
+  const n = spawnSync('git', ['-C', behind, 'rev-list', '--count', 'HEAD..origin/main'], { encoding: 'utf8' });
+  assert.equal(n.stdout.trim(), '1', 'the fixture really is exactly 1 behind, or the message below proves nothing');
+
+  const msg = objectDatabaseRefusal(behind);
+  assert.notEqual(msg, null, 'a tree behind origin/main must be REFUSED, not run: the predicate throws Infra on it, so every live-path test would measure that refusal as an assertion failure');
+  assert.match(msg, /is 1 commit\(s\) BEHIND origin\/main/, 'the refusal names the COUNT, so a reader can act on it');
+
+  // THE OTHER POLARITY, on the same fixture: fast-forward onto origin/main and the
+  // refusal must go away. Without this the arm would pass for a tree that is simply
+  // unreadable, and the probe would be a one-way ratchet rather than a measurement.
+  assert.equal(spawnSync('git', ['-C', behind, 'merge', '--ff-only', '-q', 'origin/main']).status, 0);
+  assert.equal(objectDatabaseRefusal(behind), null, 'at origin/main the same tree passes — the probe reads the DISTANCE, not the directory');
 });
 
 test('PRECONDITION: a directory INSIDE the work tree but below its top is refused by name', () => {
