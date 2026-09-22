@@ -1049,18 +1049,26 @@ function isTableStart(lines, i) {
 }
 
 function scanTable(lines, i) {
-  const head = splitTableRow(lines[i]).map((c) => tokenizeInline(c));
+  const alignments = splitTableRow(lines[i + 1]).map((delimiter) =>
+    delimiter.startsWith(":") && delimiter.endsWith(":") ? "center"
+      : delimiter.endsWith(":") ? "right" : null,
+  );
+  const cell = (value, column) => {
+    const content = tokenizeInline(value);
+    return alignments[column] ? { content, align: alignments[column] } : content;
+  };
+  const head = splitTableRow(lines[i]).map(cell);
   const width = head.length;
   const rows = [];
   let j = i + 2;
   while (j < lines.length && isTableRowLine(lines[j]) && !startsNewBlock(lines[j])) {
     const cells = splitTableRow(lines[j]);
     while (cells.length < width) cells.push("");
-    rows.push(cells.slice(0, width).map((c) => tokenizeInline(c)));
+    rows.push(cells.slice(0, width).map(cell));
     j += 1;
   }
   // The server refuses a table with no body rows; a header-only paste gets one empty row.
-  if (rows.length === 0) rows.push(Array.from({ length: width }, () => []));
+  if (rows.length === 0) rows.push(Array.from({ length: width }, (_, column) => cell("", column)));
   return { block: { id: mintId(), type: "table", head, rows }, next: j };
 }
 
