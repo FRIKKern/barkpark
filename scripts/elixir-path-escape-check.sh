@@ -754,6 +754,211 @@ test-sigilcwd	0
 lib-rootattr	0
 test-rootattr	0'
 
+# ---------------------------------------------------------------------------
+# THE ZERO-CENSUS PROOF — a floor of 0 proves NOTHING, so prove the door
+# ---------------------------------------------------------------------------
+# The floor table above buys blindness detection only for idioms with a live
+# population: a door whose count falls below its floor reds. TWELVE of the rows
+# have floor 0 and population 0, and for those the floor is inert by
+# construction — `0 < 0` is false however broken the door is. That is the fault
+# task-c605ea24bbe5066c names: the census line `idiom test-rootconcat: 0
+# read(s) (floor 0)` CANNOT DISTINGUISH "nobody in this repo writes that form"
+# from "this door's grep stopped matching anything at all", and the script
+# printed `OK: every repo-root read … is dispatched on.` over both. A guard
+# that cannot tell its own blindness from the world's cleanliness is not
+# reporting a measurement, it is reporting a coincidence.
+#
+# So every idiom whose LIVE census is 0 is proven on a SYNTHETIC case before
+# --check is allowed to succeed: the fixture below is written into a throwaway
+# tree, the scanner is re-run against it through ELIXIR_PATH_ESCAPE_ROOT (the
+# same door, the same greps, no mutation and no second implementation), and the
+# idiom's tag MUST come back. If it does not, the door is blind and the run
+# reds by name.
+#
+# THIS IS A PREDICATE, NOT A LIST. The set it proves is derived every run from
+# the live census — `got == 0` — so an idiom that goes quiet tomorrow is
+# proven tomorrow without anyone remembering to add it, and an idiom that gains
+# a real population stops paying for a proof it no longer needs. The only
+# enumeration is the FIXTURE REGISTRY, and the predicate polices that too: a
+# zero-census idiom with NO fixture REFUSES rather than passing, so adding a
+# door without a fixture cannot ship as silent coverage. That is the difference
+# from "add the missing idiom to the list" — the rule, not the roster, is what
+# fires.
+#
+# WHY NOT ONLY THE HARNESS: elixir-path-escape-check.test.sh has an arm for
+# eleven of the twelve (cases 3c-3k) — `lib-rootattr` had none anywhere, which
+# is exactly what an off-to-the-side enumeration of arms does over time. The
+# mapping "idiom -> the arm that proves it" lived in nobody's head and in no
+# code. Here it is a field lookup the run itself performs.
+#
+# `<idiom><TAB><fixture path under the synthetic root><TAB><source, \n-escaped>`
+# Every fixture reads a DISTINCT probe target under `probe/` so a tag can never
+# be credited to another fixture's read.
+ELIXIR_ESCAPE_IDIOM_FIXTURE='test-rootpipe	api/test/barkpark/probe_rootpipe_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  def r, do: @repo_root |> Path.join("probe/rootpipe.json") |> File.read!()
+test-rootlist	api/test/barkpark/probe_rootlist_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  def r, do: File.read!(Path.join([@repo_root, "probe/rootlist.json"]))
+test-rootinterp	api/test/barkpark/probe_rootinterp_test.exs	  @repo_root Path.expand("../../..#{""}", __DIR__)\n  @bad Path.join(@repo_root, "probe/rootinterp.json")
+test-rootbase	api/test/barkpark/probe_rootbase_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  @bad Path.expand("probe/rootbase.json", @repo_root)
+test-rootmulti	api/test/barkpark/probe_rootmulti_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  def r do\n    Path.join(\n      @repo_root,\n      "probe/rootmulti.json"\n    )\n  end
+test-rootconcat	api/test/barkpark/probe_rootconcat_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  @bad Path.join(@repo_root, "probe" <> "/rootconcat.json")
+test-rootchain	api/test/barkpark/probe_rootchain_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  @sub Path.join(@repo_root, "probe")\n  @bad Path.join(@sub, "rootchain.json")
+test-rootexec	api/test/barkpark/probe_rootexec_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  def r do\n    System.cmd("cat", ["probe/rootexec.json"], cd: @repo_root)\n  end
+test-sigildir	api/test/barkpark/probe_sigildir_test.exs	  @a Path.expand(~s(../../../probe/sigildir.json), __DIR__)
+test-sigilcwd	api/test/barkpark/probe_sigilcwd_test.exs	  @a Path.expand(~S{../../probe/sigilcwd.json}, __DIR__)
+test-rootattr	api/test/barkpark/probe_rootattr_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  @mirrors [\n    "probe/testrootattr.json"\n  ]\n  def read_all, do: Enum.map(@mirrors, fn m -> File.read!(Path.join(@repo_root, m)) end)
+lib-rootattr	api/lib/barkpark/probe_rootattr.ex	  @repo_root Path.expand("../../..", __DIR__)\n  @mirrors [\n    "probe/librootattr.json"\n  ]\n  def read_all, do: Enum.map(@mirrors, fn m -> File.read!(Path.join(@repo_root, m)) end)
+lib-root	api/lib/barkpark/probe_root.ex	  @repo_root Path.expand("../../..", __DIR__)\n  @bad Path.join(@repo_root, "probe/libroot.json")
+test-root	api/test/barkpark/probe_root_test.exs	  @repo_root Path.expand("../../..", __DIR__)\n  @bad Path.join(@repo_root, "probe/testroot.json")'
+
+# Print the fixture source for one idiom, or nothing if it has none.
+idiom_fixture_row() {
+  printf '%s\n' "$ELIXIR_ESCAPE_IDIOM_FIXTURE" | awk -F'\t' -v k="$1" '$1 == k { print; exit }'
+}
+
+# Plant every named idiom's fixture in a throwaway tree, run THIS scanner
+# against it, and print `<idiom><TAB>SEEN|BLIND|NO-FIXTURE`.
+#
+# The proof runs the production door, not a copy: `--list-escapes` with
+# ELIXIR_PATH_ESCAPE_ROOT is the same list_escapes the census uses. A door
+# deleted from list_escapes therefore reds here as well as in the harness.
+prove_idioms() {
+  local want row fx_path fx_src rows tmp rc
+  want="$1"
+  [ -n "$want" ] || return 0
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/elixir-path-escape-proof.XXXXXX")"
+  mkdir -p "$tmp/api/lib/barkpark" "$tmp/api/test/barkpark" "$tmp/probe"
+  while IFS= read -r idiom; do
+    [ -n "$idiom" ] || continue
+    row="$(idiom_fixture_row "$idiom")"
+    if [ -z "$row" ]; then
+      printf '%s\tNO-FIXTURE\n' "$idiom"
+      continue
+    fi
+    fx_path="${row#*	}"
+    fx_src="${fx_path#*	}"
+    fx_path="${fx_path%%	*}"
+    mkdir -p "$tmp/$(dirname -- "$fx_path")"
+    printf '%b\n' "$fx_src" >"$tmp/$fx_path"
+  done <<EOF
+$want
+EOF
+  # The probe targets must EXIST: several doors drop a resolved path that is
+  # not a file on disk, so a proof against an empty tree would report every
+  # door blind and teach nothing.
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    : >"$tmp/probe/$t"
+  done <<'EOF'
+rootpipe.json
+rootlist.json
+rootinterp.json
+rootbase.json
+rootmulti.json
+rootconcat.json
+rootchain.json
+rootexec.json
+sigildir.json
+sigilcwd.json
+testrootattr.json
+librootattr.json
+libroot.json
+testroot.json
+EOF
+  # Full ROWS, not just the tag column. A tag is credited to an idiom only when
+  # it arrives ATTRIBUTED TO THAT IDIOM'S OWN FIXTURE FILE: several fixtures are
+  # tagged by more than one door (a sigil literal resolves under both bases), so
+  # a bare tag match would let one fixture certify a door it never exercised —
+  # the vacuous pass this proof exists to refuse.
+  rows="$(ELIXIR_PATH_ESCAPE_ROOT="$tmp" bash "${BASH_SOURCE[0]}" --list-escapes 2>/dev/null)" || rc=$?
+  while IFS= read -r idiom; do
+    [ -n "$idiom" ] || continue
+    row="$(idiom_fixture_row "$idiom")"
+    if [ -z "$row" ]; then
+      continue
+    fi
+    fx_path="${row#*	}"
+    fx_path="${fx_path%%	*}"
+    if awk -F'\t' -v k="$idiom" -v f="$fx_path" '$3 == k && $2 == f { hit = 1 } END { exit !hit }' <<<"$rows"; then
+      printf '%s\tSEEN\n' "$idiom"
+    else
+      printf '%s\tBLIND\n' "$idiom"
+    fi
+  done <<EOF
+$want
+EOF
+  rm -rf "$tmp"
+}
+
+# ---------------------------------------------------------------------------
+# THE UNSEEN-FORM ARM — an honest "I cannot resolve this" beats a silent OK
+# ---------------------------------------------------------------------------
+# Every door above resolves a path by finding a STRING LITERAL in the source.
+# A read whose path expression carries no literal at the read site —
+# `Path.expand(rel, __DIR__)`, or `Path.expand("../../../" <> rel, __DIR__)` —
+# is not a read this scanner resolved and then declared safe; it is a read this
+# scanner never saw. The original incident (task-c605ea24bbe5066c) was exactly
+# that shape, and the script's output was indistinguishable from a clean tree.
+#
+# So the sites are ENUMERATED AND PRINTED, every run, whatever the verdict. The
+# `OK:` line below is scoped to what the scanner could resolve, and a site with
+# no static binding anywhere in its own file — nothing the doors can reach —
+# REFUSES rather than passing.
+#
+# `<file><TAB><line><TAB><operand><TAB><backing>` where backing is the in-file
+# construct that ties the operand to literals the doors DO see:
+#   list      `for rel <- ["a", "b"]`     / `Enum.map(["a"], fn rel ->`
+#   attr      `@mirrors [...]` + the operand bound off it (the shape-8 door)
+#   literal   `rel = "…"`
+#   param     `defp f(rel, …)` — the call sites carry the literals
+#   NONE      nothing: the scanner cannot see this read, and says so.
+unresolvable_sites() {
+  local hits f ln expr operand backing base
+  hits="$(cd -- "$REPO_ROOT" && grep -rEn \
+    -e 'Path\.(expand|absname)\([[:space:]]*[a-z_][A-Za-z0-9_]*[[:space:]]*,' \
+    -e 'Path\.(expand|absname|join)\([^)]*<>[[:space:]]*[a-z_@][A-Za-z0-9_]*' \
+    --include='*.ex' --include='*.exs' api/lib api/test 2>/dev/null | LC_ALL=C sort)"
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    f="${hit%%:*}"
+    ln="${hit#*:}"
+    expr="${ln#*:}"
+    ln="${ln%%:*}"
+    # the operand: the identifier the path expression leans on.
+    operand="$(printf '%s\n' "$expr" | grep -Eo 'Path\.(expand|absname)\([[:space:]]*[a-z_][A-Za-z0-9_]*|<>[[:space:]]*[a-z_@][A-Za-z0-9_]*' | head -1)"
+    operand="${operand##*[ (>]}"
+    [ -n "$operand" ] || continue
+    backing=NONE
+    if grep -Eq "(for|<-)[[:space:]]*${operand}[[:space:]]*<-[[:space:]]*\[|fn[[:space:]]+${operand}[[:space:]]*->" "$REPO_ROOT/$f" 2>/dev/null; then
+      backing=list
+    fi
+    if [ "$backing" = NONE ] && grep -Eq "${operand}[[:space:]]*<-[[:space:]]*@[a-z_]|Enum\.[a-z_]+\(@[a-z_]+,[[:space:]]*fn[[:space:]]+${operand}" "$REPO_ROOT/$f" 2>/dev/null; then
+      backing=attr
+    fi
+    if [ "$backing" = NONE ] && grep -Eq "^[[:space:]]*${operand}[[:space:]]*=[[:space:]]*[\"~]" "$REPO_ROOT/$f" 2>/dev/null; then
+      backing=literal
+    fi
+    if [ "$backing" = NONE ] && grep -Eq "^[[:space:]]*defp?[[:space:]]+[a-z_][A-Za-z0-9_!?]*\([^)]*\<${operand}\>" "$REPO_ROOT/$f" 2>/dev/null; then
+      backing=param
+    fi
+    # THE BASE half. This arm's subject is repo-root ESCAPES, and an escape is
+    # resolved against one of two bases (see HOW AN ESCAPE IS RESOLVED): the
+    # file's own directory (`__DIR__`) or an anchor attribute. A site whose
+    # BASE is itself a runtime value — `Path.expand(p, caller_dir)` in
+    # plugin.ex's `__using__`, where `p` arrives from the CALLING module's
+    # opts — cannot be located at all, but it is also not a statement about
+    # repo-root reads. It is REPORTED (silence is the defect) and does not
+    # refuse: a required gate that reds for the wrong reason costs more than
+    # one that misses, and this file's own case 3j says so.
+    case "$expr" in
+      *__DIR__*) base=anchored ;;
+      *', @'*) base=anchored ;;
+      *) base=dynamic ;;
+    esac
+    printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "$operand" "$backing" "$base"
+  done <<EOF
+$hits
+EOF
+}
+
 # ELIXIR_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
 # repo gives the identical verdict.
@@ -1991,12 +2196,19 @@ echo "elixir-path-escape-check: $count distinct repo-root read(s) resolved from 
 # `api/test` from the find used to exit 0.
 by_idiom="$(printf '%s\n' "$census" | cut -f1,3 | sed '/^$/d' | sort -u)"
 thin=0
+zero_idioms=""
 while IFS= read -r row; do
   [ -n "$row" ] || continue
   idiom="${row%%	*}"
   floor="${row##*	}"
   got="$(printf '%s\n' "$by_idiom" | awk -F'\t' -v k="$idiom" '$2 == k' | wc -l | tr -d ' ')"
   echo "elixir-path-escape-check:   idiom $idiom: $got read(s) (floor $floor)"
+  if [ "$got" -eq 0 ]; then
+    # A ZERO population is the one count this table cannot judge: `0 < 0` is
+    # false however broken the door is. Collect it for the synthetic proof.
+    zero_idioms="$zero_idioms$idiom
+"
+  fi
   if [ "$got" -lt "$floor" ]; then
     thin=$((thin + 1))
     echo "::error::elixir-path-escape-check: idiom '$idiom' resolved only $got repo-root read(s), floor is $floor." >&2
@@ -2016,6 +2228,45 @@ while IFS= read -r idiom; do
 done <<EOF
 $(printf '%s\n' "$by_idiom" | cut -f2 | sort -u)
 EOF
+
+# ---- THE ZERO-CENSUS PROOF ------------------------------------------------
+# `got == 0` is the predicate: whatever the floor says, a door that resolved
+# nothing on the live tree has told us nothing about itself. Prove it on a
+# synthetic case or refuse. See ELIXIR_ESCAPE_IDIOM_FIXTURE for why this is a
+# rule over the live census and not a second roster to keep in sync.
+if [ -n "$zero_idioms" ] && [ -n "${ELIXIR_PATH_ESCAPE_ROOT:-}" ]; then
+  # SCOPED TO A SELF-SCAN, AND SAID OUT LOUD. The proof is a statement about
+  # the SCANNER, so it belongs to the run that scans the scanner's own
+  # checkout. Under ELIXIR_PATH_ESCAPE_ROOT the tree is a three-file fixture
+  # where nearly every idiom is legitimately zero, and a door the fixture was
+  # built to delete must red on the fixture's OWN assertion, not on this one —
+  # the harness proves a door load-bearing by deleting it and watching the read
+  # go quiet. So the proof steps aside there and SAYS it stepped aside: a check
+  # that skips in silence is the fault this file is named after.
+  echo "elixir-path-escape-check: zero-census proof SKIPPED — ELIXIR_PATH_ESCAPE_ROOT is set, so this is a fixture scan, not a self-scan. The doors are proven by the run that scans this checkout (and by cases 11a-11c of the harness, which run a COPY of this script as its own checkout)."
+elif [ -n "$zero_idioms" ]; then
+  echo "elixir-path-escape-check: $(printf '%s\n' "$zero_idioms" | sed '/^$/d' | wc -l | tr -d ' ') idiom(s) resolved ZERO reads on this tree — proving each door on a synthetic case (a floor of 0 cannot)."
+  while IFS= read -r prow; do
+    [ -n "$prow" ] || continue
+    pidiom="${prow%%	*}"
+    pverdict="${prow##*	}"
+    case "$pverdict" in
+      SEEN)
+        echo "elixir-path-escape-check:   idiom $pidiom: 0 live read(s), detector PROVEN on a synthetic case"
+        ;;
+      BLIND)
+        thin=$((thin + 1))
+        echo "::error::elixir-path-escape-check: idiom '$pidiom' resolved 0 reads on this tree AND did not fire on its own synthetic fixture — this door is BLIND, not idle. Its zero was never coverage." >&2
+        ;;
+      NO-FIXTURE)
+        thin=$((thin + 1))
+        echo "::error::elixir-path-escape-check: idiom '$pidiom' resolved 0 reads and has NO entry in ELIXIR_ESCAPE_IDIOM_FIXTURE — nothing distinguishes an unused idiom from a broken detector, so this run REFUSES rather than counting it as coverage. Add a fixture that its door must tag." >&2
+        ;;
+    esac
+  done <<EOF
+$(prove_idioms "$zero_idioms")
+EOF
+fi
 
 if [ "$thin" -gt 0 ]; then
   # NO POPULATION NUMBER HERE. This message used to read "the measured
@@ -2132,4 +2383,65 @@ MSG
 fi
 
 echo "elixir-path-escape-check: $fam_n glob-consumed famil(ies) derived from $ELIXIR_FAMILY_SOURCE_N declared program(s), all dispatched whole."
-echo "OK: every repo-root read from api/lib + api/test is dispatched on."
+
+# ---------------------------------------------------------------------------
+# THE UNSEEN-FORM ARM — say "I cannot resolve this", never nothing
+# ---------------------------------------------------------------------------
+# Everything above is a statement about reads the scanner RESOLVED. It has
+# never been a statement about reads it could not. A path expression carrying
+# no literal at the read site — `Path.expand(rel, __DIR__)`, or the
+# `Path.expand("../../../" <> rel, __DIR__)` that opened
+# task-c605ea24bbe5066c — produces the same output as a tree with no such site
+# at all: silence, then `OK:`. A guard whose "I saw nothing" and "I cannot see"
+# print identically is reporting a coincidence.
+#
+# So every such site is PRINTED, every run, pass or fail, and the `OK:` line is
+# scoped to what was resolvable. A site whose operand has no static binding
+# anywhere in its own file — nothing any door can reach — REFUSES: an
+# unresolvable read reported as OK is the defect this arm exists to end.
+unseen="$(unresolvable_sites)"
+unseen_n="$(printf '%s\n' "$unseen" | sed '/^$/d' | wc -l | tr -d ' ')"
+unseen_blind=0
+if [ "$unseen_n" -gt 0 ]; then
+  echo "elixir-path-escape-check: $unseen_n path expression(s) carry NO literal at the read site — the scanner CANNOT resolve these directly:"
+  while IFS= read -r urow; do
+    [ -n "$urow" ] || continue
+    uf="${urow%%	*}"
+    urest="${urow#*	}"
+    uln="${urest%%	*}"
+    urest="${urest#*	}"
+    uop="${urest%%	*}"
+    urest="${urest#*	}"
+    uback="${urest%%	*}"
+    ubase="${urest##*	}"
+    if [ "$uback" = NONE ] && [ "$ubase" = dynamic ]; then
+      echo "elixir-path-escape-check:   cannot see directly: $uf:$uln via '$uop' — and its BASE is a runtime value too, so this read has no static location at all. Not a repo-root escape claim either way; reported, not counted."
+    elif [ "$uback" = NONE ]; then
+      unseen_blind=$((unseen_blind + 1))
+      echo "::error::elixir-path-escape-check: CANNOT SEE this read: $uf:$uln builds its path from '$uop', and nothing in that file binds '$uop' to a literal any door can reach. This read is NOT covered by the census above — it was never in it." >&2
+    else
+      echo "elixir-path-escape-check:   cannot see directly: $uf:$uln via '$uop' — reached instead through its $uback binding (the literals the doors DO see live there, not here)"
+    fi
+  done <<EOF
+$unseen
+EOF
+fi
+
+if [ "$unseen_blind" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+The Elixir suite reads path(s) this scanner cannot statically resolve, and the
+census above says nothing about them. Historically that printed as OK — two
+reads of js/packages/react/src/blocks/sheet.ts and
+apps/mobile/src/papers/portabledoc/blocks/sheet.tsx sat undispatched-on inside
+`OK: every repo-root read … is dispatched on.` (task-c605ea24bbe5066c).
+
+Fix: spell the path out as a literal at the read site, or bind it to a module
+attribute list the shape-8 door resolves. Do NOT widen this arm's greps to
+make the site disappear — an unresolvable read is a fact about the code, and
+the honest output is this refusal.
+MSG
+  exit 1
+fi
+
+echo "OK: every repo-root read from api/lib + api/test that this scanner can RESOLVE is dispatched on; $unseen_n site(s) it cannot resolve are named above."
