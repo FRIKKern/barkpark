@@ -16,6 +16,15 @@ globalThis.cancelAnimationFrame=window.cancelAnimationFrame.bind(window);
 globalThis.CSS||={escape:String};window.BP_PAPER_EDITOR_NO_INJECT=true;
 await import('./index.js');
 const seed=[{id:'origin',type:'paragraph',content:[{type:'text',value:'Before after'}]},{id:'reference',type:'paragraph',content:[{type:'link',href:'https://example.org/#origin',children:[{type:'text',value:'Reference stays'}]}]}];
+{
+ const canvas=document.createElement('bp-paper-canvas');canvas.blocks=[{id:'task',type:'list',task:true,ordered:false,items:[{checked:false,content:[{type:'text',value:'Read preserves history'}]}]}];canvas.acknowledgedSaves=true;document.body.append(canvas);
+ try{
+  const before=JSON.parse(JSON.stringify(canvas._editor.state.doc.toJSON()));
+  canvas.recoverySnapshot();
+  assert.deepEqual(JSON.parse(JSON.stringify(canvas._editor.state.doc.toJSON())),before,'recovery projection must never mutate live nested schema attrs');
+  console.log('PASS recovery projection preserves live schema attributes');
+ }finally{canvas.remove();}
+}
 const c=document.createElement('bp-paper-canvas');c.blocks=structuredClone(seed);c.acknowledgedSaves=true;document.body.append(c);
 const batches=[];c.addEventListener('bp-canvas-ops',e=>batches.push(e.detail));
 const save=()=>{c.flushPendingChanges();const b=batches.at(-1);assert.ok(b);c.acknowledgeOps(b.seq,true);return structuredClone(c.blocks);};
