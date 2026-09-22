@@ -5421,9 +5421,19 @@ export const SCENARIOS = {
       //
       // IT RIDES AN EXISTING KEY ON PURPOSE. A NEW `SCENARIOS` key is refused
       // by breakpoint-sweep.mjs's census — "UNLISTED scenario … no cell renders
-      // it and SCENARIO_RESIDUE does not carry it", exit 2 — and that file is
+      // it and SCENARIO_RESIDUE does not carry it", exit 2 — and that file was
       // outside this slice's fence. Filed as
       // cch-w23-bl-real-hetzner-remediation-scenario.
+      //
+      // RESOLVED (cch-w23-bl-real-hetzner-remediation-scenario) WITHOUT a new
+      // key and WITHOUT touching the census: `route()` now takes the POSTed
+      // body, so `providerConnect` may be a per-KIND map and one scenario can
+      // answer every clause of `connect_remediation/1`. `providers-unverified`
+      // below carries hetzner/azure/_default verbatim; this flat response stays
+      // exactly as it is because it IS the filed reproduction — the azure
+      // sentence on the geometry the defect was measured at — and a fixture
+      // that still answers the old flat shape is the proof that the new arm did
+      // not break the old one.
       providerConnect: {
         status: 422,
         body: {
@@ -5435,7 +5445,7 @@ export const SCENARIOS = {
     },
   },
   "providers-unverified": {
-    label: "Providers — the connect card's verify-before-save remediation (server names the exact console fix)",
+    label: "Providers — the connect card's verify-before-save remediation, PER PROVIDER KIND: the server's real 169-character Hetzner clause, its 275-character Azure clause and the provider-agnostic fallback, all verbatim from connect_remediation/1",
     authed: true,
     deepLink: "#settings/providers",
     data: {
@@ -5446,11 +5456,56 @@ export const SCENARIOS = {
       // POST /v1/providers preflight fails → ALL causes collapse to the single
       // provider_unverified + the server-owned remediation string, rendered
       // verbatim in-card when the operator clicks Verify & connect.
+      //
+      // ── cch-w23-bl-real-hetzner-remediation-scenario: PER KIND, AND EVERY
+      //    SENTENCE IS THE SERVER'S ────────────────────────────────────────────
+      // This key used to carry ONE 168-character string that no clause of
+      // `connect_remediation/1` has ever produced — a paraphrase of the hetzner
+      // sentence, invented by the corpus and then driven by
+      // overflow-guard.mjs's W23 leg as if it were the server's copy. It was
+      // honestly LABELLED as a paraphrase, which is why nothing was certified
+      // falsely; it was still a made-up string standing in for a real one.
+      //
+      // It could not simply be corrected, because a fixture carried ONE
+      // `providerConnect` response and `route()` never saw the POST body — so
+      // the string was a property of the SCENARIO, not of the KIND, and the
+      // 275-character azure clause already had to ride `providers-empty`. The
+      // 5th `body` argument of `route()` (this file) plus mock.js's parse of
+      // `init.body` removes that limit; this map is the first consumer.
+      //
+      // The three sentences below are `connect_remediation/1` VERBATIM
+      // (cloud/lib/barkpark_cloud/failure_copy.ex). They are NOT free to drift:
+      // breakpoint-sweep.test.mjs extracts the clauses from that file and reds
+      // if any `providerConnect` remediation in this corpus is not one of them,
+      // so this is a locked mirror rather than a second hand-typed copy.
+      // Re-derive the lengths, never quote them:
+      //   node -e 'const s=require("fs").readFileSync("cloud/lib/barkpark_cloud/failure_copy.ex","utf8");
+      //            const re=/def\s+connect_remediation\(\s*(?:"([a-z0-9_]+)"|_kind)\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"/g;
+      //            let m; while((m=re.exec(s))) console.log(m[1]||"_kind", m[2].length)'
       providerConnect: {
-        status: 422,
-        body: {
-          error: "provider_unverified",
-          remediation: "We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, revoke the old token, then generate a fresh Read & Write token for this project.",
+        hetzner: {
+          status: 422,
+          body: {
+            error: "provider_unverified",
+            // connect_remediation("hetzner") — 169 chars, VERBATIM. The kind this scenario's connect card arms first, and the string the W23 overflow leg now drives as its SHORT cell.
+            remediation: "We couldn't reach Hetzner with that API token. Create a fresh Read & Write token in the Hetzner Cloud Console \u2192 your project \u2192 Security \u2192 API tokens, then paste it here.",
+          },
+        },
+        azure: {
+          status: 422,
+          body: {
+            error: "provider_unverified",
+            // connect_remediation("azure") — 275 chars, VERBATIM. The LONGEST clause the server can send; `providers-empty` carries the same sentence as the filed reproduction geometry.
+            remediation: "We couldn't authenticate to Azure with those details. In the Azure Portal \u2192 App registrations \u2192 your app, re-check the Directory (tenant) ID, Application (client) ID and Subscription ID, and that the client secret under Certificates & secrets hasn't expired \u2014 then reconnect.",
+          },
+        },
+        _default: {
+          status: 422,
+          body: {
+            error: "provider_unverified",
+            // connect_remediation("_kind") — 88 chars, VERBATIM. The provider-agnostic fallback: an unknown kind, or a body this harness could not parse, gets the sentence the server gives it — never a silent 201.
+            remediation: "We couldn't verify those credentials with the provider. Double-check them and try again.",
+          },
         },
       },
     },
@@ -6755,7 +6810,14 @@ function githubOf(d, state) {
 //   stateless arm of every `if (state)` is dead code that only a new caller can
 //   revive, and a route added on the assumption that the browser is stateless
 //   will be wrong in the browser first.
-export function route(name, method, path, state) {
+//   `body` is an OPTIONAL 5th arg: the PARSED request body
+//   (cch-w23-bl-real-hetzner-remediation-scenario). Before it, route() never
+//   saw what the caller POSTed, so an answer could only ever be a property of
+//   the SCENARIO — one `providerConnect` response per fixture — and the corpus
+//   could hold exactly one of `connect_remediation/1`'s four clauses. Callers
+//   that omit it keep every existing arm's behaviour unchanged; the only arm
+//   that reads it is /v1/providers POST.
+export function route(name, method, path, state, body) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
   // Strip any absolute origin first (mock.js extracts pathname; smoke passes
@@ -7435,7 +7497,27 @@ export function route(name, method, path, state) {
     return { status: 200, body: { providers: listOf(d, state, "providers") } };
   }
   if (p === "/v1/providers" && method === "POST") {
-    return d.providerConnect || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
+    // cch-w23-bl-real-hetzner-remediation-scenario — PER-KIND, because the
+    // server's remediation is a property of the PROVIDER KIND and of nothing
+    // else. `connect_remediation/1` (cloud/lib/barkpark_cloud/failure_copy.ex)
+    // has four clauses; until route() was handed the POSTed body a fixture
+    // could carry exactly ONE of them, so the corpus held the azure clause
+    // verbatim and, for hetzner, a 168-character string the server has never
+    // emitted. That is the limit this arm removes.
+    //
+    // `providerConnect` is EITHER a flat { status, body } response — the shape
+    // every earlier fixture uses, still honoured verbatim — OR a map keyed by
+    // provider kind with an optional `_default`. The discriminator is `status`:
+    // a response always carries one, a kind map never does. An unmatched kind
+    // with no `_default` falls to the benign 201, exactly as an absent fixture
+    // always has.
+    const pc = d.providerConnect;
+    if (pc && typeof pc === "object" && !("status" in pc)) {
+      const kind = (body && typeof body === "object" && body.kind) || "";
+      return pc[kind] || pc._default ||
+        { status: 201, body: { provider: { kind: kind || "hetzner", label: "main" } } };
+    }
+    return pc || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
   }
   // Disconnect is a per-KIND destroy (the server deletes every credential of that
   // kind), so the roster shrinks by the row whose kind matches — not by id.

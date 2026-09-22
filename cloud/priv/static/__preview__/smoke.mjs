@@ -778,10 +778,22 @@ function bootScenario(name, opts) {
     const method = (init && init.method) || "GET";
     const p = String(url);
     calls.push({ method, path: p.split("?")[0] });
+    // cch-w23-bl-real-hetzner-remediation-scenario — the POSTED BYTES reach
+    // route()'s optional 5th arg, the browser twin of the same parse in
+    // mock.js. Without it this stub could not drive a per-KIND fixture and the
+    // corpus would still be able to answer only one remediation per scenario.
+    // Unreadable JSON is passed as UNDEFINED rather than guessed at.
+    let sentBody;
+    const rawBody = (init && init.body) || null;
+    if (typeof rawBody === "string") {
+      try { sentBody = JSON.parse(rawBody); } catch (e) { sentBody = undefined; }
+    } else if (rawBody && typeof rawBody === "object") {
+      sentBody = rawBody;
+    }
     // Routed at LANDING time, not at call time, so a deferred response still
     // reflects whatever the fixture state is when it actually answers.
     const answer = () => {
-      const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
+      const res = route(name, method, p, fixtureState, sentBody) || { status: 404, body: { error: "not_found" } };
       // extraMembership (cch-w43-s6), smoke-only and defaulting OFF: APPEND one
       // further membership to the teams[] a 200 /v1/me already answers with.
       //
@@ -4657,7 +4669,7 @@ const EXPECTATIONS = {
     },
   },
   "providers-unverified": {
-    what: "the connect card's remediation slot + the server-owned remediation copy verbatim (node-pinned)",
+    what: "the connect card's remediation slot + the server-owned remediation copy verbatim, PER KIND (node-pinned): hetzner, azure and the no-kind fallback are three DIFFERENT server sentences off one fixture",
     check(reg, hooks) {
       const connect = (reg.get("provider-connect") || {}).innerHTML || "";
       assert.ok(connect.includes("cred-remediation"), "the connect card carries the remediation slot (filled on submit)");
@@ -4665,12 +4677,41 @@ const EXPECTATIONS = {
       // node-pinned: the scenario's POST returns the single provider_unverified
       // + a remediation string, and remediationCopy() extracts it verbatim (never
       // routed through friendly(), which drops .remediation).
-      const res = route("providers-unverified", "POST", "/v1/providers");
+      //
+      // cch-w23-bl-real-hetzner-remediation-scenario — THE KIND IS SENT NOW.
+      // This call used to pass no body, because route() had no 5th argument, so
+      // one scenario could answer exactly one string and the corpus's "hetzner"
+      // remediation was a paraphrase nothing on the server emits. The kind now
+      // rides the POST body and the fixture answers per kind; the three arms
+      // below must be three DIFFERENT sentences, or the per-kind seam is
+      // decoration.
+      const res = route("providers-unverified", "POST", "/v1/providers", null, { kind: "hetzner" });
       assert.equal(res.status, 422, "connect preflight fails");
       assert.equal(res.body.error, "provider_unverified", "all causes collapse to one provider_unverified");
       const copy = hooks.remediationCopy(res.body);
-      assert.ok(copy && copy.includes("Hetzner Cloud console"), "the server remediation names the exact console fix, verbatim");
+      // CASING IS EVIDENCE, and this line is where the paraphrase showed. The
+      // probe read "Hetzner Cloud console" — lower-case c — which is what the
+      // corpus's INVENTED sentence spelled. The server's own clause says
+      // "Hetzner Cloud Console" (a product name), so the moment the real string
+      // landed this assertion reddened: the guard had been pinned to the
+      // paraphrase's wording, not the server's.
+      assert.ok(copy && copy.includes("Hetzner Cloud Console"), "the server remediation names the exact console fix, verbatim");
       assert.equal(hooks.friendly(res.body, "fallback").indexOf(copy), -1, "friendly() provably drops the remediation");
+
+      const azure = route("providers-unverified", "POST", "/v1/providers", null, { kind: "azure" });
+      assert.equal(azure.status, 422, "the azure arm fails preflight too");
+      const azureCopy = hooks.remediationCopy(azure.body);
+      assert.ok(azureCopy && azureCopy.includes("Azure Portal"),
+        "the azure kind gets the AZURE clause — a per-kind map that answered one sentence for every kind would be the limit this seam removed, still in place");
+
+      // NO KIND → the provider-agnostic clause, never a silent 201 and never
+      // one of the named sentences. This is also the control that proves the
+      // three arms above were selected BY THE BODY and not by the scenario.
+      const anon = route("providers-unverified", "POST", "/v1/providers");
+      assert.equal(anon.status, 422, "a body-less POST still fails preflight — the fallback is a REMEDIATION, not a success");
+      const anonCopy = hooks.remediationCopy(anon.body);
+      assert.equal(new Set([copy, azureCopy, anonCopy]).size, 3,
+        "hetzner / azure / fallback did not resolve to three distinct server sentences — the per-kind arm is not selecting on the body");
     },
   },
   "providers-member": {

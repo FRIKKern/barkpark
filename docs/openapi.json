@@ -7269,10 +7269,9 @@
         ],
         "requestBody": {
           "content": {
-            "application/octet-stream": {
+            "application/json": {
               "schema": {
-                "format": "binary",
-                "type": "string"
+                "$ref": "#/components/schemas/Document"
               }
             }
           },
@@ -11162,10 +11161,9 @@
         ],
         "requestBody": {
           "content": {
-            "application/octet-stream": {
+            "application/json": {
               "schema": {
-                "format": "binary",
-                "type": "string"
+                "$ref": "#/components/schemas/Document"
               }
             }
           },

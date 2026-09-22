@@ -636,12 +636,18 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
   # ── PubSub ──────────────────────────────────────────────────────────────────
 
   describe "write-through — broadcasts" do
-    test "the refreshed paper broadcasts on the dataset topic" do
+    test "the refreshed paper broadcasts on the dataset's document-list stream" do
       sheet = create_sheet("wt-ps", "one")
       pub_id = Content.published_id(sheet.doc_id)
       paper = create_paper("wt-paper-ps", [sheet_block(pub_id)])
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      # Unscoped writes land in the Default workspace, whose frames ride its
+      # keyed topic; join the stream the way a Default-tenant consumer does.
+      :ok =
+        Barkpark.Content.Broadcast.subscribe_documents(
+          @dataset,
+          Barkpark.Tenancy.get_default_workspace().id
+        )
 
       {:ok, _} =
         Content.upsert_document(

@@ -100,8 +100,13 @@ defmodule Barkpark.Media.Storage.MediaFile do
       name: :media_files_path_dataset_id_index
     )
     # FK-abort containment: all three tenancy columns are real Postgres FKs
-    # (migrations 20260527110100 + 20260527131000, default-derived names
-    # media_files_<col>_fkey). Without these, a reference to a vanished row —
+    # (columns from migrations 20260527110100 + 20260527131000, default-derived
+    # names media_files_<col>_fkey). Follow those two migrations alone and you
+    # get the WRONG delete action: 20260527160000_cascade_content_on_scope_delete
+    # later set all three to `on_delete: :delete_all` (SQL `ON DELETE CASCADE`),
+    # which is still what ships — a scope delete reaps the media row rather than
+    # leaving it behind with NULL scope columns.
+    # Without these constraints, a reference to a vanished row —
     # a workspace/project deleted concurrently mid-upload, or a cross-instance
     # blob push carrying a foreign id — raises Ecto.ConstraintError (500) out
     # of Repo.insert instead of returning {:error, changeset}.

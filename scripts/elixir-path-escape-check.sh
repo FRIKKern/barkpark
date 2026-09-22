@@ -71,9 +71,23 @@
 #   elixir-path-escape-check.sh --selftest      # run the harness
 #   elixir-path-escape-check.sh --list-escapes  # print the resolved census
 #   elixir-path-escape-check.sh --print-floors  # print the per-idiom floors
+#   elixir-path-escape-check.sh --print-families # <program>TAB<derived glob>
 #   elixir-path-escape-check.sh --print-set compile|test
 #   elixir-path-escape-check.sh --match compile|test   # changed paths on stdin
 #                                                      # -> prints true|false
+#   elixir-path-escape-check.sh --match test --literal # the LITERAL half only
+#   elixir-path-escape-check.sh --print-set test --literal
+#
+# `--literal` answers a DIFFERENT question from the bare form, and the two must
+# never be conflated. The bare form answers what the DISPATCHER must run: every
+# path in the declared lists PLUS every member of a derived family, because a
+# change to any of them can change what an api test reads. `--literal` answers
+# who TYPED a path into a list — the snapshot half, the half that can rot and
+# that a human is answerable for. A consumer asking "is this declaration dead?"
+# must ask the literal form: a family member nobody executes is not a dead
+# declaration, it is the derivation working. scripts/pds-door-census.sh is that
+# consumer (its leg B), and getting this wrong reclassified 43 ledger-disposed
+# instruments as DEAD-DECLARATION in one commit.
 #
 # `--print-set` / `--match` are consumed by the elixir.yml dispatcher, so the
 # workflow and this ratchet can never disagree about what the path sets are.
@@ -84,7 +98,14 @@ set -euo pipefail
 # THE DECLARED PATH SETS (charter D31 — TWO sets, deliberately)
 # ---------------------------------------------------------------------------
 # Glob grammar, deliberately tiny: `dir/**` = that directory and everything
-# under it; anything else = one exact file path. No other wildcards.
+# under it; a `*` inside a segment matches any run of non-`/` characters
+# (`scripts/pds-*.sh`); anything else = one exact file path. No other wildcards.
+#
+# THE `*` FORM IS NOT FOR HAND-WRITING. Nothing in the two lists below uses it:
+# it exists so DERIVED FAMILIES (see derived_family_globs, far below) can be
+# expressed at all. A hand-written `scripts/*` would be the over-inclusion the
+# templates/** and tooling/** notes refuse; a derived `scripts/pds-*.sh` is the
+# consuming script's OWN enumeration read back out of it.
 #
 # COMPILE set — paths that can change what the compiler produces. Gates the
 # prod-compile job and the perf bench (and, being a subset of the test set,
@@ -769,7 +790,19 @@ norm_path() {
   printf '%s' "$NP"
 }
 
-# glob (dir/** or an exact path) -> anchored ERE
+# glob (dir/**, a `*` inside a segment, or an exact path) -> anchored ERE
+#
+# The THREE forms, and why the middle one exists at all: `dir/**` is a tree,
+# an exact path is a file, and `a/b-*.ext` is a FAMILY — the shape a consuming
+# program enumerates from the tree and that no list of today's members can
+# stand in for (task-ac7392fa242a09ef: nine `scripts/pds-*` files were named
+# individually here while scripts/pds-door-census.sh enumerates the GLOB, so
+# the tenth file dispatched `test=false` and the required gate greened over a
+# skipped suite while the same test reddened main).
+#
+# `**` is substituted through a placeholder rather than directly: a naive
+# `s/\*\*/.*/` followed by `s/\*/[^\/]*/` would re-rewrite the `*` it just
+# emitted and turn `.*` into `.[^/]*`.
 glob_to_ere() {
   local g="$1" body
   case "$g" in
@@ -777,10 +810,192 @@ glob_to_ere() {
       body="${g%/**}"
       printf '^%s(/|$)' "$(printf '%s' "$body" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
       ;;
+    *'*'*)
+      printf '^%s$' "$(printf '%s' "$g" |
+        sed -e 's/[][\\.^$+?(){}|]/\\&/g' \
+            -e 's/\*\*/@@ELIXIRDSTAR@@/g' \
+            -e 's,\*,[^/]*,g' \
+            -e 's,@@ELIXIRDSTAR@@,.*,g')"
+      ;;
     *)
       printf '^%s$' "$(printf '%s' "$g" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
       ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# DERIVED FAMILIES — the half of the test set that is READ, not written
+# ---------------------------------------------------------------------------
+# WHY (task-ac7392fa242a09ef, SELECTOR GAP #2, measured on 97271476d).
+#
+# The two lists above are resolved LITERALS: the census reads
+# `"../../../scripts/pds-door-census.sh"` out of
+# api/test/barkpark/pds_door_census_test.exs and demands that exact path be
+# declared. That is correct as far as it goes and it stops one layer short of
+# the truth, because the declared script then enumerates a GLOB of its own:
+#
+#     scripts/pds-door-census.sh:554
+#       for g in 'scripts/pds-*.sh' 'scripts/pds-*.exs' 'tooling/pds/*.mjs'
+#
+# So the api test's real input is the FAMILY, and nine of its members happened
+# to be named in ELIXIR_TEST_ONLY_PATHS one at a time. deploy #19577 added the
+# tenth (scripts/pds-secret-scan.sh + scripts/pds-secret-scan_test.sh), which
+# no entry matched: the dispatcher computed `test=false`, mix-test SKIPPED, the
+# required `Elixir gate` reported SUCCESS over zero tests (run 35532446963),
+# and then api/test/barkpark/pds_door_census_test.exs reddened main's push arm
+# at 19:36Z for the change the PR gate had just greened. An enumeration is a
+# snapshot; the consumer's rule is a glob.
+#
+# THE RULE, and it is a rule rather than a list: every program ALREADY DECLARED
+# in the sets above is read back, and every path family it ENUMERATES FROM THE
+# TREE becomes a declared glob. The base case is the literal census — a script
+# an api test shells cannot stay undeclared, because --check reds on it — so
+# this is a one-step transitive closure over a set the ratchet already forces
+# to be complete, not a second hand-list to keep in sync. Add an eleventh
+# scripts/pds-* file and nothing here changes: the glob already covers it,
+# INCLUDING before the file exists on disk, which is the whole point (the
+# dispatcher answers about a path set, not about a directory listing).
+#
+# ENUMERATES FROM THE TREE is the discriminator, and it is what keeps this from
+# swallowing the repo. A glob is credited only when it appears on a line that
+# also carries an enumeration verb — `for x in`, `ls`, `Path.wildcard`,
+# `compgen -G`, `glob.glob`, `globSync`, `readdir` — and never from a comment.
+# Measured on 97271476d, the unfiltered form credited `scripts/**` (out of this
+# very file's own prose) and `deploy/**`, `api/**`, `cloud/**`, `internal/**`
+# out of scripts/check-deployyml-filters.sh, which does not enumerate them at
+# all: it string-compares deploy.yml's path filters. The verb filter drops all
+# of those and leaves five families from four programs:
+#
+#     scripts/check-doc-budgets.sh           docs/cards/*.md
+#     scripts/pds-door-census.sh             scripts/pds-*.sh
+#     scripts/pds-door-census.sh             scripts/pds-*.exs
+#     scripts/pds-door-census.sh             tooling/pds/*.mjs
+#     scripts/pds-elixir-receipt-census.exs  api/lib/**/*.ex
+#     scripts/pds-live-hetzner-placement-group.sh  internal/cli/hetzner_*.go
+#
+# A LAST-SEGMENT GUARD refuses a family whose final segment is a bare `*`
+# (`scripts/*`, `docs/*`): that is a tree, it is spelled `dir/**`, and deciding
+# to dispatch the whole Elixir suite on every edit under a top-level directory
+# is a judgement a human makes in the lists above, never one this extractor
+# makes silently.
+#
+# IT CANNOT SILENTLY GO EMPTY — the two failure directions are separated
+# because they are not the same failure:
+#   * SOURCES present, ZERO families derived. The extractor has gone blind (a
+#     regex rotted, the verb list stopped matching). Everything refuses, exit 2.
+#     This is the case a `|| true` would have turned into a green.
+#   * ZERO sources present. The family root is not a Barkpark checkout — the
+#     dispatcher's PIN ROOT is literally an empty directory holding one file
+#     (elixir.yml: `mkdir -p "$pinroot/scripts"`), and the harness's fixture
+#     repos are the same shape. Refusing here would exit 2 inside the
+#     dispatcher and DEADLOCK every PR, which is the documented failure the pin
+#     block itself refuses to cause. So `--match test` FAILS CLOSED — it
+#     answers `true`, runs the suite, and says on stderr why — while `--check`,
+#     which only ever runs against the real checkout from elixir.yml's
+#     unfiltered path-escape job, refuses outright.
+# Fail-closed is the only safe polarity here: the bug being fixed is a SKIP.
+#
+# THE FAMILY ROOT IS THE WORKING TREE, not $REPO_ROOT. $REPO_ROOT is the
+# CENSUS root and the harness retargets it at synthetic fixtures; the declared
+# sets are a property of the repo, so re-deriving them against a fixture would
+# make every fixture case answer about a tree with no programs in it.
+ELIXIR_FAMILY_ROOT="${ELIXIR_FAMILY_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
+[ -n "$ELIXIR_FAMILY_ROOT" ] || ELIXIR_FAMILY_ROOT="$REPO_ROOT"
+
+# One line of a program credits the globs on it only if it enumerates.
+ELIXIR_FAMILY_ENUM_VERBS='for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]|(^|[[:space:]])ls[[:space:]]|Path\.wildcard|compgen[[:space:]]+-G|glob\.glob|globSync|readdir'
+# A family must be rooted in a real top-level tree of this repo.
+ELIXIR_FAMILY_ROOTS='scripts|tooling|deploy|design|docs|web|js|internal|cmd|templates|api|cloud|apps|config'
+
+# Prints the programs the derivation reads — declared exact-file entries that
+# exist in the working tree and are source text. Sorted, deduped.
+derived_family_sources() {
+  local g
+  {
+    printf '%s\n%s\n' "$ELIXIR_COMPILE_PATHS" "$ELIXIR_TEST_ONLY_PATHS"
+  } | while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    case "$g" in
+      *'*'*) continue ;;                       # a tree entry enumerates nothing
+      *.sh | *.exs | *.ex | *.py | *.mjs | *.js) ;;
+      *) continue ;;
+    esac
+    [ -f "$ELIXIR_FAMILY_ROOT/$g" ] || continue
+    # NEVER THIS FILE OR ITS HARNESS. A program cannot be a source of its own
+    # declarations: the globs in the lists above and in this prose are the
+    # DECLARATION, not an enumeration, and crediting them made the unfiltered
+    # extractor swallow `scripts/**` out of this very comment block. It is also
+    # what tells a checkout from the dispatcher's PIN ROOT, which holds exactly
+    # this one file and would otherwise look like a tree with one program in it.
+    case "${g##*/}" in
+      elixir-path-escape-check.sh | elixir-path-escape-check.test.sh) continue ;;
+    esac
+    printf '%s\n' "$g"
+  done | LC_ALL=C sort -u
+}
+
+# The two-stage derivation, kept out of a subshell so its STATE is readable.
+# `derived_family_globs` is called from inside `$(set_globs test)`, which is a
+# subshell — anything it assigned would be lost — so the state lives in
+# globals computed ONCE by `family_derive`, before any mode runs.
+ELIXIR_FAMILY_SOURCES=""
+ELIXIR_FAMILY_SOURCE_N=0
+ELIXIR_FAMILY_GLOBS=""
+ELIXIR_FAMILY_BLIND=""
+
+family_derive() {
+  local src
+  ELIXIR_FAMILY_SOURCES="$(derived_family_sources)"
+  ELIXIR_FAMILY_SOURCE_N="$(printf '%s\n' "$ELIXIR_FAMILY_SOURCES" | sed '/^$/d' | wc -l | tr -d ' ')"
+  if [ "$ELIXIR_FAMILY_SOURCE_N" -eq 0 ]; then
+    ELIXIR_FAMILY_GLOBS=""
+    ELIXIR_FAMILY_BLIND=root
+    return 0
+  fi
+  ELIXIR_FAMILY_GLOBS="$(
+    while IFS= read -r src; do
+      [ -n "$src" ] || continue
+      grep -v '^[[:space:]]*#' "$ELIXIR_FAMILY_ROOT/$src" |
+        grep -E "$ELIXIR_FAMILY_ENUM_VERBS" |
+        grep -oE "($ELIXIR_FAMILY_ROOTS)/[A-Za-z0-9_./*-]*\*[A-Za-z0-9_./*-]*" || true
+    done <<EOF
+$ELIXIR_FAMILY_SOURCES
+EOF
+  )"
+  # Strip trailing punctuation a prose line leaves behind (`scripts/pds-*.`
+  # out of `scripts/pds-*.{sh,exs}`), drop the bare-`*` last segment — that is
+  # a tree, spelled `dir/**`, and never this extractor's call — then dedupe.
+  ELIXIR_FAMILY_GLOBS="$(
+    printf '%s\n' "$ELIXIR_FAMILY_GLOBS" |
+      sed -e 's/[.:,;]$//' -e '/^$/d' |
+      grep -Ev '/\*$' |
+      LC_ALL=C sort -u || true
+  )"
+  if [ -z "$ELIXIR_FAMILY_GLOBS" ]; then
+    ELIXIR_FAMILY_BLIND=extractor
+  else
+    ELIXIR_FAMILY_BLIND=
+  fi
+}
+
+derived_family_globs() {
+  [ -z "$ELIXIR_FAMILY_GLOBS" ] || printf '%s\n' "$ELIXIR_FAMILY_GLOBS"
+}
+
+# The enumeration-verb lines of one program, as a STRING. Callers then ask
+# `grep -qF … <<<"$lines"` rather than ending a pipeline in `grep -q` (house
+# D37: -q exits on the first match, the writer takes SIGPIPE, pipefail promotes
+# 141 and the match that DID occur reads as a miss).
+family_enum_lines() {
+  grep -v '^[[:space:]]*#' "$ELIXIR_FAMILY_ROOT/$1" |
+    grep -E "$ELIXIR_FAMILY_ENUM_VERBS" || true
+}
+
+# A member of a family that CANNOT be on disk. This is what proves the
+# dispatcher answers about the rule and not about a directory listing: the
+# whole incident was a file that did not exist when the set was last written.
+family_probe_member() {
+  printf '%s' "$1" | sed -e 's,\*\*,zz-elixir-family-probe,g' -e 's,\*,zz-elixir-family-probe,g'
 }
 
 # Validate BEFORE any command substitution. An `exit 2` raised inside `$(...)`
@@ -789,6 +1004,21 @@ glob_to_ere() {
 # answer `true` for everything, silently running the full suite (or, on the
 # other polarity of a future caller, skipping it). The harness caught exactly
 # that; this check is the fix.
+# A third positional that is neither absent nor `--literal` is a REFUSAL, never
+# a silently-ignored token: the two halves answer different questions and a
+# caller that meant one and got the other is the whole hazard this flag exists
+# to remove.
+half_arg() {
+  case "${1:-}" in
+    '') printf 'whole' ;;
+    --literal) printf 'literal' ;;
+    *)
+      echo "elixir-path-escape-check: unknown flag '$1' (want --literal)" >&2
+      exit 2
+      ;;
+  esac
+}
+
 assert_set_name() {
   case "$1" in
     compile | test) ;;
@@ -799,11 +1029,25 @@ assert_set_name() {
   esac
 }
 
+# $2, when it is the literal string `literal`, suppresses the derived half.
+# Any other value (including absent) keeps it. Spelled as an equality test and
+# not as a `case` default so a typo'd caller gets the FULL set — the answer that
+# over-runs the Elixir job — rather than the narrow one that would skip it.
 set_globs() {
   assert_set_name "$1"
+  local half="${2:-whole}"
   case "$1" in
     compile) printf '%s\n' "$ELIXIR_COMPILE_PATHS" ;;
-    test) printf '%s\n%s\n' "$ELIXIR_COMPILE_PATHS" "$ELIXIR_TEST_ONLY_PATHS" ;;
+    test)
+      printf '%s\n%s\n' "$ELIXIR_COMPILE_PATHS" "$ELIXIR_TEST_ONLY_PATHS"
+      # THE DERIVED HALF. Test-set only: a family is something a test READS at
+      # runtime through a program it shells, never an @external_resource the
+      # compiler binds. Appended, never substituted — the exact-file entries
+      # the census resolves are the BASE CASE this derivation closes over.
+      if [ "$half" != 'literal' ]; then
+        derived_family_globs
+      fi
+      ;;
   esac
 }
 
@@ -818,7 +1062,7 @@ set_ere() {
     if [ -n "$out" ]; then out="$out|"; fi
     out="$out$(glob_to_ere "$g")"
   done <<EOF
-$(set_globs "$1")
+$(set_globs "$1" "${2:-whole}")
 EOF
   # Belt and braces: an empty ERE matches EVERY line. Never return one.
   if [ -z "$out" ]; then
@@ -1612,10 +1856,76 @@ is_exempt() {
 
 mode="${1:---check}"
 
+# Derive ONCE, before any mode reads a path set. Both blind states are named
+# here rather than at each use site, so no mode can quietly disagree about what
+# "the derivation failed" means.
+family_derive
+
+family_blind_note() {
+  case "$ELIXIR_FAMILY_BLIND" in
+    root)
+      echo "elixir-path-escape-check: NO declared program found under ELIXIR_FAMILY_ROOT=$ELIXIR_FAMILY_ROOT — the glob-family derivation cannot run here (a pin root or a fixture tree, not a checkout)." >&2
+      ;;
+    extractor)
+      echo "elixir-path-escape-check: $ELIXIR_FAMILY_SOURCE_N declared program(s) read and ZERO path families derived — the extractor has gone blind." >&2
+      ;;
+  esac
+}
+
+# THE TWO BLIND STATES GET TWO ANSWERS, and the split is the whole contract.
+#
+#   extractor — programs were read and ZERO families came back. Rot: a regex
+#     died, the verb list stopped matching. Never survivable, every mode
+#     exits 2. This is the silent-empty the criterion refuses.
+#   root — there is no program to read. The family root is not a Barkpark
+#     checkout: the harness's fixture repos are this shape and so is the
+#     dispatcher's PIN ROOT (elixir.yml: `mkdir -p "$pinroot/scripts"`, one
+#     file in it). Exiting 2 here would deadlock every PR from inside the
+#     dispatcher, which the pin block explicitly declines to do, and forcing
+#     `true` would make every fixture answer `test=true` for a docs-only diff.
+#     So: WARN, contribute no derived half, and let `--check` refuse — which
+#     is teeth, not a shrug, because `--check` runs from elixir.yml's
+#     UNFILTERED `path-escape` job on every PR and against the real checkout.
+#     In production `--match` never reaches this state: the dispatcher's cwd is
+#     the head checkout even when the SCRIPT comes from the pin root.
+if [ "$ELIXIR_FAMILY_BLIND" = extractor ]; then
+  family_blind_note
+  exit 2
+fi
+if [ "$ELIXIR_FAMILY_BLIND" = root ] && [ "$mode" != --check ]; then
+  family_blind_note
+fi
+
 case "$mode" in
+  --print-families)
+    # `<program><TAB><family>`, re-derived on every run. The harness drives
+    # this so its arms can never certify a family nobody enumerates.
+    while IFS= read -r __g; do
+      [ -n "$__g" ] || continue
+      while IFS= read -r __s; do
+        [ -n "$__s" ] || continue
+        __lines="$(family_enum_lines "$__s")"
+        if grep -qF -- "$__g" <<<"$__lines"; then
+          printf '%s\t%s\n' "$__s" "$__g"
+        fi
+      done <<EOF
+$ELIXIR_FAMILY_SOURCES
+EOF
+    done <<EOF
+$ELIXIR_FAMILY_GLOBS
+EOF
+    exit 0
+    ;;
+
   --print-set)
     assert_set_name "${2:?--print-set needs compile|test}"
-    set_globs "$2"
+    # ON ITS OWN LINE, NEVER NESTED IN THE CALL. `half_arg`'s refusal is an
+    # `exit 2` from a command substitution, i.e. a SUBSHELL: written inline as
+    # an argument its status is discarded, and a bogus flag printed the error to
+    # stderr and then answered `false` with rc=0 — a refusal that answers is
+    # worse than no refusal at all.
+    half="$(half_arg "${3:-}")"
+    set_globs "$2" "$half"
     exit 0
     ;;
 
@@ -1625,7 +1935,8 @@ case "$mode" in
     # can never disagree about what a path set contains.
     want="${2:?--match needs compile|test}"
     assert_set_name "$want"
-    ere="$(set_ere "$want")"
+    half="$(half_arg "${3:-}")"
+    ere="$(set_ere "$want" "$half")"
     if grep -Eq -- "$ere"; then
       echo "true"
     else
@@ -1659,7 +1970,7 @@ case "$mode" in
 
   *)
     echo "elixir-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-families|--print-set SET [--literal]|--match SET [--literal]]" >&2
     exit 2
     ;;
 esac
@@ -1754,4 +2065,71 @@ MSG
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# THE FAMILY ARM — a glob-consumed family must be dispatched WHOLE
+# ---------------------------------------------------------------------------
+# The census arm above proves every LITERAL an api test carries is declared.
+# This one proves the layer under it: for every family a declared program
+# enumerates from the tree, a member that IS NOT ON DISK must still match the
+# test set. A probe member is the only honest way to ask — the incident was a
+# file the set predated, and any path already in the tree would let a
+# nine-file hand list answer correctly and prove nothing.
+#
+# MUTATION, both directions, run before this landed:
+#   * remove `derived_family_globs` from set_globs and leave the nine
+#     `scripts/pds-*` literals as the only coverage ->
+#     "::error::... UNDECLARED glob-consumed family: scripts/pds-*.sh", exit 1.
+#   * restore it -> "OK: 5 glob-consumed famil(ies) ... dispatched whole.",
+#     exit 0.
+# The producer (set_globs) and the checker (this loop) read the SAME
+# derivation, which is deliberate: the failure mode that would hide — both
+# halves deleted together — is caught one layer up by the `extractor` refusal,
+# which exits 2 before any mode runs.
+if [ "$ELIXIR_FAMILY_BLIND" = root ]; then
+  family_blind_note
+  echo "::error::elixir-path-escape-check: the ratchet runs against the real checkout; a family root with no declared program in it is a broken invocation, not a tree without families." >&2
+  exit 2
+fi
+
+fam_uncovered=0
+fam_n=0
+while IFS= read -r fam; do
+  [ -n "$fam" ] || continue
+  fam_n=$((fam_n + 1))
+  probe="$(family_probe_member "$fam")"
+  if grep -Eq -- "$test_ere" <<<"$probe"; then
+    continue
+  fi
+  fam_uncovered=$((fam_uncovered + 1))
+  echo "::error::elixir-path-escape-check: UNDECLARED glob-consumed family: $fam" >&2
+  echo "    a member that is not on disk ($probe) does NOT match the test path set" >&2
+  while IFS= read -r fsrc; do
+    [ -n "$fsrc" ] || continue
+    fam_lines="$(family_enum_lines "$fsrc")"
+    if grep -qF -- "$fam" <<<"$fam_lines"; then
+      echo "    enumerated by: $fsrc" >&2
+    fi
+  done <<EOF
+$ELIXIR_FAMILY_SOURCES
+EOF
+done <<EOF
+$ELIXIR_FAMILY_GLOBS
+EOF
+
+if [ "$fam_uncovered" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+A program this script already declares enumerates a path FAMILY from the tree,
+and the dispatcher does not dispatch on the whole family — only on the members
+that happened to be named one at a time. The NEXT member added to that family
+skips the Elixir suite and the required gate reports green over zero tests,
+which is exactly what run 35532446963 did (task-ac7392fa242a09ef).
+
+Fix: do NOT add the new file to ELIXIR_TEST_ONLY_PATHS. The families are
+DERIVED — see derived_family_globs above. Restore the derivation instead.
+MSG
+  exit 1
+fi
+
+echo "elixir-path-escape-check: $fam_n glob-consumed famil(ies) derived from $ELIXIR_FAMILY_SOURCE_N declared program(s), all dispatched whole."
 echo "OK: every repo-root read from api/lib + api/test is dispatched on."

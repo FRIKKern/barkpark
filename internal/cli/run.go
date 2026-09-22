@@ -3313,6 +3313,13 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	payload := unwrapResult(respBody)
 
+	// Document listings get their `_id` mirrored to `doc_id` and a `count` when
+	// the envelope carries none — one place, so the single-page passthrough and
+	// the stitched `--all` walk (both of which land here) emit the SAME shape.
+	// Every other command's body is returned byte-identical; see
+	// doc_listing_row_id_key.go.
+	payload = enrichDocListingRows(cmd, payload)
+
 	// Handoff-card shape: a 2xx object carrying a non-empty string "quickstart"
 	// (the ticket-key mint / rotate receipt) prints that block verbatim as the
 	// primary human output — the 2-minute-onboarding card the operator forwards.

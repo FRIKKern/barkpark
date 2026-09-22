@@ -206,6 +206,11 @@ defmodule Barkpark.Sync.Pusher do
   # anything else degrades to `:transient` — never `String.to_atom/1` on
   # arbitrary input (that is an unbounded-atom DoS on the ~1M atom limit).
   @spec reason_atom(String.t()) :: :fenced_off | :stale_claim | :resource_conflict | :transient
+  # The whitelist in the `when` guard above is the whole safety argument: only
+  # the three pre-existing atoms can be created, so the atom table cannot grow.
+  # Inline rather than a line-pinned `.sobelow-skips` row — the fingerprint is
+  # keyed on the line number and any edit above shifts it.
+  # sobelow_skip ["DOS.StringToAtom"]
   def reason_atom(r) when r in ~w(fenced_off stale_claim resource_conflict),
     do: String.to_atom(r)
 

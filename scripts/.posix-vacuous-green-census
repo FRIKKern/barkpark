@@ -27,12 +27,12 @@ scripts/check-doc-budgets.sh|2|truncated-red|2026-09-11|parse error at line 451,
 scripts/cloud-console-gate-shape.test.sh|0|honest-green|2026-09-11|cmd-subst error at line 698 costs only an `ok` message's cell count; all 73 assertions ran, 73 passed/0 failed under BOTH sh and bash; diff vs bash control = 2 cosmetic lines
 scripts/crown-reconcile.sh|3|refused-red|2026-09-11|stub PATH; `CONFIG: no way to read the crown` fires long before the `<(` at line 1370
 scripts/doc-gates-paths-parity-check.sh|2|truncated-red|2026-09-11|cmd-subst error at line 331 kills it, no output
+scripts/echo-json-parse-guard.test.sh|0|honest-green|2026-09-21|its ONLY `<(` is PROSE: line 213 holds the token inside a double-quoted `ok` message ("neither the pipe form nor the <(...) form"), so there is no process substitution for POSIX mode to choke on and an interpreter guard would refuse for a reason this file does not have. RAN to completion under /bin/sh (bash 3.2.57(1) in POSIX mode): exit 0, 27 stdout lines, `15 passed / 0 failed`. BASH CONTROL: exit 0, 27 stdout lines, `15 passed / 0 failed`, and `diff` of the two stdouts is BYTE-IDENTICAL (zero lines) - nothing was skipped, so the green is honest rather than truncated. Measured 2026-09-21 on origin/main 3ccfa1234 (task-9749e764d87bb59d).
 scripts/failure-copy-scrub-order-check.sh|2|truncated-red|2026-09-11|parse error at line 212, no output
 scripts/go-format-drift-ceiling.sh|2|truncated-red|2026-09-11|cmd-subst error at line 72 kills it, no output
 scripts/hex-audit-oracle.sh|3|completed-red|2026-09-11|146 stdout lines, byte-identical to the bash control which also exits 3
 scripts/main-verdict-presence.sh|2|truncated-red|2026-09-11|parse error at line 343, no output
 scripts/pds-draft-twin-sweep.sh|2|truncated-red|2026-09-11|stub PATH; parse error at line 379, no output
-scripts/pds-read-preflight-audit.sh|2|truncated-red|2026-09-11|stub PATH; parse error at line 155, no output
 scripts/pds-record-parity.sh|2|truncated-red|2026-09-11|parse error at line 861 after 2 stdout lines
 scripts/pds-secret-scan.sh|2|truncated-red|2026-09-11|parse error at line 151, no output
 scripts/pds-window-sentinel_test.sh|2|truncated-red|2026-09-11|cmd-subst error at line 49, no output

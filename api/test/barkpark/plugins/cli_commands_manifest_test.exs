@@ -850,6 +850,53 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
         assert flags["set"]["repeatable"]
       end
     end
+
+    # scaffy-backlog-doc-patch-file-flag. doc.patch was the LAST document write
+    # verb declaring only --set, so `bp doc patch <type> <id> --file p.json`
+    # exited 2 "unknown flag --file" and a multi-kilobyte structured patch had
+    # to fall back to raw HTTP /v1/data/mutate.
+    #
+    # doc.patch is NOT a create-family verb and must never be added to that
+    # gate: it is the ONLY served command carrying `set_key`, so its file body
+    # is a SET MAP that the Go client (internal/cli/run.go, PR #18616) routes
+    # UNDER `patch.set` rather than merging flat into the document object. The
+    # end-to-end proof that the served manifest produces that body lives in
+    # internal/cli/doc_patch_file_body_e2e_test.go.
+    test "doc.patch declares the same file-or-stdin body flag as its create siblings" do
+      command =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Enum.find(&(&1["id"] == "doc.patch"))
+
+      assert command, "doc.patch is not in the manifest"
+      flags = Map.new(command["flags"], &{&1["name"], &1})
+
+      file_flag = flags["file"]
+
+      assert file_flag,
+             "doc.patch declares no --file flag, so `bp doc patch <type> <id> --file p.json` " <>
+               "is an unknown-flag usage error and a multi-KB structured patch is unreachable " <>
+               "from the CLI"
+
+      # type "file" is what makes the Go client READ the path (or stdin for -)
+      # instead of sending the literal string; a plain "string" would ship the
+      # filename as a field value.
+      assert file_flag["type"] == "file"
+      refute file_flag["repeatable"]
+      assert file_flag["summary"] =~ "JSON object"
+      assert file_flag["summary"] =~ "stdin"
+
+      # --set stays, and stays repeatable: the flag is ADDITIVE, every existing
+      # `--set k=v` invocation must keep working.
+      assert flags["set"]["type"] == "string"
+      assert flags["set"]["repeatable"]
+
+      # The declaration must not move authorization or the mutation it performs.
+      assert command["auth_tier"] == "write"
+      assert command["mutation_op"] == "patch"
+      assert command["set_key"] == "set"
+      assert command["http"]["method"] == "POST"
+      assert command["http"]["path_template"] == "/v1/data/mutate/:dataset"
+    end
   end
 
   describe "core access (airdrop-grant) verbs" do
