@@ -168,44 +168,6 @@ emit("needs_count", len(needs))
 coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(needs))))
-# ── THE POST-GREEN REPORTER CATEGORY (cch-w44) ─────────────────────────────
-# A SECOND shape of job that legitimately cannot live in `needs`, exempt for the
-# same structural reason as the post-verdict reporter above: wiring it in is a
-# CYCLE, not a choice somebody declined to make.
-#
-# WHY IT EXISTS. Until this slice the aggregator's nothing-ran disclosure was a
-# single `::notice::`. Measured 2026-09-16 on PR #18693's head 22dc98ba7 (a
-# docs-only diff): `Console gate | success | title=null | summary=null |
-# text=null | ann=1` against `ann=0` for a head that really ran the harness —
-# the empty green and the measured green differ by exactly one annotation, and
-# GitHub keeps only the first 10 annotations per level per step and drops the
-# rest without a word. A check-run NAME is not rationed, so the disclosure is
-# now ALSO rendered as one, and rendering a name needs a job of its own.
-#
-# A job is a post-green reporter iff ALL FOUR hold. This is STRICTER than the
-# blanket `coe_jobs = ""` it replaces, not laxer: that pin banned a population,
-# this one bans a population AND demands four structural properties AND an
-# exact roster.
-#   (1) needs == [<the aggregator>] EXACTLY — the cycle, again;
-#   (2) its `if:` is EXACTLY always() — it reports on every conclusion and
-#       gates none of them. Anything narrower is a job pretending to report;
-#   (3) it IS continue-on-error — so it can never turn a verdict red and the
-#       exemption costs the aggregator nothing. Note this is the OPPOSITE
-#       requirement to the post-verdict reporter, which is granted its
-#       exemption precisely BECAUSE it keeps its exit-1: that one must be able
-#       to lose, this one must be unable to win or lose anything;
-#   (4) NO job lists it in `needs`. A failed continue-on-error job reads
-#       `success` through `needs.<job>.result` — that is the entire hazard of
-#       (3), and this clause removes its consumer rather than trusting one.
-_needed_by = {n for _j in jobs.values() for n in (_j.get("needs") or [])}
-def post_green_shape(name, j):
-    return (list(j.get("needs") or []) == [AGG]
-            and str(j.get("if", "")).strip() == "always()"
-            and j.get("continue-on-error") is True
-            and name not in _needed_by)
-post_green = {n for n, j in jobs.items() if post_green_shape(n, j)}
-emit("post_green_reporters", ",".join(sorted(post_green)))
-emit("coe_not_reporter", ",".join(sorted(set(coe) - post_green)))
 
 # THE POST-VERDICT CATEGORY. Exactly one shape of blocking job legitimately
 # cannot live in `needs`: a reporter that runs AFTER the aggregator concluded,
@@ -459,15 +421,7 @@ for s in cloud console; do
   assert_fact "$s" agg_present True
   assert_fact "$s" agg_matrix False
   assert_fact "$s" agg_if "always()"
-  # See the post-green reporter block in the emitter: the blanket
-  # `coe_jobs = ""` is replaced by a predicate plus an exact roster, which is
-  # strictly stronger. cloud.yml has no such reporter; console-harness.yml has
-  # exactly one, and a second must cost a human editing this line.
-  assert_fact "$s" coe_not_reporter ""
-  case "$s" in
-    cloud) assert_fact "$s" post_green_reporters "" ;;
-    console) assert_fact "$s" post_green_reporters "console-gate-subject" ;;
-  esac
+  assert_fact "$s" coe_jobs ""
   assert_fact "$s" coe_in_needs ""
   assert_fact "$s" blocking_not_in_needs ""
   assert_fact "$s" post_verdict_jobs "report-main-failure"
@@ -750,7 +704,7 @@ for pair in "cloud:$WFDIR/cloud.yml:cloud-gate" "console:$WFDIR/console-harness.
   # the controls: a round-trip alone changes nothing
   mutant "$L" "$P" "$A" clean blocking_not_in_needs ""
   mutant "$L" "$P" "$A" clean gate_if_mismatch ""
-  mutant "$L" "$P" "$A" clean coe_not_reporter ""
+  mutant "$L" "$P" "$A" clean coe_jobs ""
   mutant_grid "$L" "$P" "$A" clean
   # DIRECTION 1 (the filing's own words): softening the skipped arm reds it.
   mutant_grid "$L" "$P" "$A" soften-skip
@@ -783,10 +737,10 @@ wf = yaml.safe_load(open(sys.argv[1]))
 print(next(n for n in wf["jobs"][sys.argv[2]]["needs"] if n != "changes"))
 PY
   )"
-  # A continue-on-error job is named by coe_not_reporter AND, because it is no longer
+  # A continue-on-error job is named by coe_jobs AND, because it is no longer
   # `blocking`, it silently LEAVES the mirror set. Both are pinned so nobody
   # later reads the mirror guard's silence as cover.
-  mutant "$L" "$P" "$A" coe coe_not_reporter "$( \
+  mutant "$L" "$P" "$A" coe coe_jobs "$( \
     python3 - "$P" "$A" <<'PY'
 import sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
