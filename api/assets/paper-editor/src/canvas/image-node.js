@@ -87,6 +87,10 @@ export const Image = Node.create({
       previewUrl: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
       uploadError: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
       uploadKey: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
+      // Native history carries deliberate field choices while an upload settles.
+      // These flags are transient, like uploadKey, and never enter PortableDoc.
+      uploadSrcEdited: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
+      uploadAltEdited: { default: null, parseHTML: () => null, renderHTML: () => ({}) },
       // Every other block key (height, unknown) verbatim, as JSON.
       bpRest: {
         default: null,
@@ -233,6 +237,7 @@ export const Image = Node.create({
       // Debounced write-back of the two inputs to the node attrs: one setNodeMarkup
       // per settled edit → onUpdate → run-convert emits one patch-block{src, alt}.
       let writeTimer = null;
+      const editedUploadFields = new Set();
       const commitWrite = () => {
         if (typeof getPos !== "function") return;
         const pos = getPos();
@@ -243,17 +248,22 @@ export const Image = Node.create({
         const nextAlt = altInput.value === "" ? null : altInput.value;
         const parsedWidth = parseInt(widthInput.value, 10);
         const nextWidth = Number.isFinite(parsedWidth) && parsedWidth >= 16 ? parsedWidth : null;
-        if ((cur.attrs.src || null) === nextSrc && (cur.attrs.alt || null) === nextAlt && (cur.attrs.width ?? null) === nextWidth) return;
+        const uploadSrcEdited = cur.attrs.uploadSrcEdited || (cur.attrs.uploadKey && editedUploadFields.has("src")) || null;
+        const uploadAltEdited = cur.attrs.uploadAltEdited || (cur.attrs.uploadKey && editedUploadFields.has("alt")) || null;
+        editedUploadFields.clear();
+        if (cur.attrs.uploadSrcEdited === uploadSrcEdited && cur.attrs.uploadAltEdited === uploadAltEdited && (cur.attrs.src || null) === nextSrc && (cur.attrs.alt || null) === nextAlt && (cur.attrs.width ?? null) === nextWidth) return;
         editor
           .chain()
           .command(({ tr }) => {
-            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, src: nextSrc, alt: nextAlt, width: nextWidth });
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, src: nextSrc, alt: nextAlt, width: nextWidth, uploadSrcEdited, uploadAltEdited });
             return true;
           })
           .run();
       };
-      const scheduleWrite = () => {
+      const scheduleWrite = (event) => {
         if (!editor.isEditable) return;
+        if (event.target === srcInput) editedUploadFields.add("src");
+        if (event.target === altInput) editedUploadFields.add("alt");
         if (writeTimer) clearTimeout(writeTimer);
         writeTimer = setTimeout(() => {
           writeTimer = null;

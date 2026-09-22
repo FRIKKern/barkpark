@@ -55,6 +55,20 @@ try{
   paste();let pos;c._editor.state.doc.descendants((n,p)=>{if(n.type.name==='bpImage')pos=p;});const n=image();c._editor.view.dispatch(c._editor.state.tr.setNodeMarkup(pos,undefined,{...n.attrs,alt:'Human alt',src:'/media/human.png'}));c._editor.commands.setTextSelection(3);c._editor.commands.insertContent('typed');const selection=c._editor.state.selection.toJSON(),text=c._editor.state.doc.textContent;
   requests[0].resolve({src:'/media/result.png',alt:'Uploader alt'});await tick();assert.equal(image().attrs.src,'/media/human.png');assert.equal(image().attrs.alt,'Human alt');assert.equal(c._editor.state.doc.textContent,text);assert.deepEqual(c._editor.state.selection.toJSON(),selection);
  });
+ await test('actual URL clear and alt return-to-original remain human choices',async({c,requests,paste,image})=>{
+  paste();
+  const edit=(selector,value)=>{const input=c.querySelector(selector);input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));};
+  edit('.bp-canvas-image-src','/media/manual.png');edit('.bp-canvas-image-src','');
+  edit('.bp-canvas-image-alt','Human alt');edit('.bp-canvas-image-alt','picture');
+  requests[0].resolve({src:'/media/upload.png',alt:'Server alt'});await tick();
+  assert.equal(image().attrs.src,null);assert.equal(image().attrs.alt,'picture');assert.equal(image().attrs.uploading,null);
+ });
+ await test('completion flushes uncommitted island input without serializing intent flags',async({c,requests,paste,image,blocks})=>{
+  paste();const input=c.querySelector('.bp-canvas-image-alt');input.value='Still typing';input.dispatchEvent(new Event('input',{bubbles:true}));
+  requests[0].resolve({src:'/media/upload.png',alt:'Server alt'});await tick();
+  assert.equal(image().attrs.alt,'Still typing');assert.equal(c.querySelector('.bp-canvas-image-alt').value,'Still typing');
+  assert.equal(image().attrs.src,'/media/upload.png');assert.equal(JSON.stringify(blocks()).includes('uploadAltEdited'),false);assert.equal(JSON.stringify(blocks()).includes('uploadSrcEdited'),false);
+ });
  await test('deletion and another upload identity do not consume old completion',async({c,requests,paste,blocks,image})=>{
   paste();c._editor.commands.undo();c._editor.commands.insertContent('Different human edit');paste();requests[0].resolve({src:'/media/old.png'});await tick();assert.equal(image().attrs.src,null);assert.equal(image().attrs.uploading,true);requests[1].resolve({src:'/media/new.png'});await tick();assert.equal(image().attrs.src,'/media/new.png');assert.equal(blocks().filter(b=>b.type==='image').length,1);assert.equal(requests.length,2);
  });

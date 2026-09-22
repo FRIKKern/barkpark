@@ -2061,13 +2061,17 @@ class BpPaperCanvas extends HTMLElement {
   _patchUploadNode(key, receipt) {
     const editor = this._editor;
     if (!editor || editor.isDestroyed || receipt.editor !== editor) return;
-    const hit = this._findUploadNode(key);
+    let hit = this._findUploadNode(key);
+    if (!hit) return;
+    // Flush the image island before its async repaint can replace draft inputs.
+    editor.view.nodeDOM(hit.pos)?.dispatchEvent(new CustomEvent("bp-flush-node"));
+    hit = this._findUploadNode(key);
     if (!hit) return;
     const patch = { ...receipt.patch };
     // A person may edit the URL or alt while the request is in flight.
     // Completion owns the pending upload, not those subsequent edits.
-    if (hit.node.attrs.src) delete patch.src;
-    if (hit.node.attrs.alt !== receipt.initialAlt) delete patch.alt;
+    if (hit.node.attrs.src || hit.node.attrs.uploadSrcEdited) delete patch.src;
+    if (hit.node.attrs.uploadAltEdited || hit.node.attrs.alt !== receipt.initialAlt) delete patch.alt;
     editor.view.dispatch(editor.state.tr
       .setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, ...patch })
       .setMeta("addToHistory", false));
