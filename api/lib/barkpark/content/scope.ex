@@ -196,8 +196,6 @@ defmodule Barkpark.Content.Scope do
   """
   @spec scope_to_workspace_or_global(Ecto.Queryable.t(), binary() | nil, binary() | nil) ::
           Ecto.Queryable.t()
-  # @canonical capability:tenancy-scope aka:scope_workspace,workspace_scope,scope_to_workspace doc:docs/contracts/tenancy.md
-  #
   # PROJECT-PINNED, WORKSPACE-UNPINNED (task-ab5da5c4faf1a04c). A caller that
   # resolved a PROJECT but no workspace is not a global caller — it named a
   # tenant, just by the narrower key. Before this clause the nil-workspace arm
@@ -216,6 +214,7 @@ defmodule Barkpark.Content.Scope do
   # workspace, so `project_id` alone is a COMPLETE tenancy key — narrowing on
   # it loses nothing the workspace clause would have added, and it matches the
   # strictness the two-key arm below already has.
+  # @canonical capability:tenancy-scope aka:scope_workspace,workspace_scope,scope_to_workspace doc:docs/contracts/tenancy.md
   def scope_to_workspace_or_global(query, nil, project_id) when is_binary(project_id),
     do: where(query, [x], x.project_id == ^project_id)
 
