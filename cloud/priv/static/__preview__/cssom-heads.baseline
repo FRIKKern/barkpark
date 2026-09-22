@@ -719,7 +719,7 @@
 # 1331 -> 1357, +26 authored rule heads, ZERO removed. All 26 are the `.group-*`
 # block appended at the tail of app.css: .group-view / -head / -title / -detail /
 # -empty, the .group-state badge plus its EIGHT static state modifiers (empty,
-# conflict, blocked, offline, provisioning, cap-hit, working and the unreachable-
+# roster-conflict, blocked, offline, provisioning, cap-hit, working and the unreachable-
 # today `unknown` else arm, which __css_check E2 requires painted because app.js
 # emits its literal), .group-table / .group-row / .group-row--head / .group-cell
 # and its five column modifiers incl. .group-cell--name:hover, and the two
