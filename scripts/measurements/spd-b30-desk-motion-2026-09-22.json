@@ -1,0 +1,958 @@
+{
+  "generated_at": "2026-09-22T14:51:02.774Z",
+  "instrument": "scripts/studio-desk-motion-probe.mjs",
+  "contract": "prints a motion reading in two emulated motion regimes, or exits non-zero naming the guard that failed — no gate authority",
+  "task": "spd-b30-instrument-coverage-one-document-one-path (criterion 3)",
+  "platform": "darwin arm64",
+  "engine": "Chromium only — see coverage_boundary",
+  "browser_policy": "bundled",
+  "browser_version": "147.0.7727.15",
+  "playwright_version": "1.59.1",
+  "playwright_resolved_from": "/Volumes/SATECHI/github/barkpark/js/package.json",
+  "node_version": "v22.22.0",
+  "viewport_px": 1280,
+  "selectors": [
+    {
+      "sel": ".pane-column",
+      "why": "root.html.heex, the .pane-column rule — transition: width/min-width/max-width var(--dur-1) ease"
+    },
+    {
+      "sel": ".pane-column--collapsed",
+      "why": "root.html.heex, the .pane-column--collapsed rule — the same box transition plus background"
+    },
+    {
+      "sel": ".pane-column--collapsed > *",
+      "why": "root.html.heex — animation: bp-pane-strip-in var(--dur-1) ease-out both"
+    },
+    {
+      "sel": ".pane-item",
+      "why": "root.html.heex, the .pane-item rule — declares transition: all var(--dur-1)"
+    },
+    {
+      "sel": ".pane-doc-item",
+      "why": "a desk row the census presses"
+    },
+    {
+      "sel": ".editor-panel",
+      "why": "the panel the matrix measures the reading column inside"
+    },
+    {
+      "sel": ".editor-panel-main.bp-paper-body",
+      "why": "THE reading column — the @container the 720px gate sits on"
+    },
+    {
+      "sel": ".bp-paper-surface",
+      "why": "THE measured surface — if this moves, every matrix row is a transient"
+    },
+    {
+      "sel": ".bp-doc-sidebar",
+      "why": "root.html.heex claims the narrow/phone sidebar switch is instant (grep: \"the switch between them is\")"
+    },
+    {
+      "sel": ".bp-update-dot",
+      "why": "root.html.heex — bp-update-pulse, the one animation with its own reduce arm"
+    }
+  ],
+  "provenance": {
+    "read_at": "2026-09-22T14:50:57.059Z",
+    "host": "https://guerrilla.barkpark.cloud",
+    "commit": "f703de669",
+    "version": "0.2.26.4043",
+    "app_status": "degraded",
+    "method": "GET <base>/status.json over HTTPS — the commit the APP process reports. Weaker than studio-desk-measure.mjs's ssh read (it cannot see the blue/green slot) and named as such rather than dressed up as the same thing."
+  },
+  "provenance_post": {
+    "read_at": "2026-09-22T14:51:02.774Z",
+    "host": "https://guerrilla.barkpark.cloud",
+    "commit": "f703de669",
+    "version": "0.2.26.4043",
+    "app_status": "degraded",
+    "method": "GET <base>/status.json over HTTPS — the commit the APP process reports. Weaker than studio-desk-measure.mjs's ssh read (it cannot see the blue/green slot) and named as such rather than dressed up as the same thing."
+  },
+  "provenance_bracket": {
+    "matched": true,
+    "mismatches": [],
+    "method": "GET <base>/status.json over HTTPS — the commit the APP process reports. Weaker than studio-desk-measure.mjs's ssh read (it cannot see the blue/green slot) and named as such rather than dressed up as the same thing.",
+    "window_ms": 5715
+  },
+  "emulation_control": {
+    "no_preference_arm_reports_reduce": false,
+    "reduce_arm_reports_reduce": true,
+    "ok": true,
+    "what": "prefers-reduced-motion emulated by the browser (playwright context reducedMotion), and matchMedia read back in the page. Without this the two arms could be the same arm."
+  },
+  "non_vacuity_guard": {
+    "ok": true,
+    "first_moving_element": {
+      "desk": {
+        "selector": ".pane-column",
+        "why": "transition",
+        "value": "0.15s, 0.15s, 0.15s"
+      },
+      "paper": {
+        "selector": ".pane-column",
+        "why": "transition",
+        "value": "0.15s, 0.15s, 0.15s, 0.15s"
+      }
+    },
+    "what": "at least one probed selector must match an element AND report a non-zero duration in the no-preference arm. A probe that matched nothing prints \"0s everywhere\" in the same shape as a desk with no motion, and that is how the .pane-column comment in root.html.heex came to claim 0s on every desk element while line 1384 declares a transition."
+  },
+  "arms": {
+    "no_preference": {
+      "emulated_reduced_motion": "no-preference",
+      "document": {
+        "slug": "akerbrygge-status-2026-09-10",
+        "path": "/w/default/p/default/d/production/studio/paper/akerbrygge-status-2026-09-10"
+      },
+      "surfaces": {
+        "desk": {
+          "selectors": [
+            {
+              "selector": ".pane-column",
+              "why": "root.html.heex, the .pane-column rule — transition: width/min-width/max-width var(--dur-1) ease",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "width, min-width, max-width",
+                  "transition_duration": "0.15s, 0.15s, 0.15s",
+                  "transition_delay": "0s, 0s, 0s",
+                  "transition_timing_function": "ease, ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-column--collapsed",
+              "why": "root.html.heex, the .pane-column--collapsed rule — the same box transition plus background",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".pane-column--collapsed > *",
+              "why": "root.html.heex — animation: bp-pane-strip-in var(--dur-1) ease-out both",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".pane-item",
+              "why": "root.html.heex, the .pane-item rule — declares transition: all var(--dur-1)",
+              "match_count": 7,
+              "sampled": [
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-doc-item",
+              "why": "a desk row the census presses",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".editor-panel",
+              "why": "the panel the matrix measures the reading column inside",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".editor-panel-main.bp-paper-body",
+              "why": "THE reading column — the @container the 720px gate sits on",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".bp-paper-surface",
+              "why": "THE measured surface — if this moves, every matrix row is a transient",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".bp-doc-sidebar",
+              "why": "root.html.heex claims the narrow/phone sidebar switch is instant (grep: \"the switch between them is\")",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".bp-update-dot",
+              "why": "root.html.heex — bp-update-pulse, the one animation with its own reduce arm",
+              "match_count": 0,
+              "sampled": []
+            }
+          ],
+          "reduce_matches": false,
+          "no_preference_matches": true,
+          "scrollbar_width_px": 0,
+          "inner_width": 1280,
+          "width_bucket_stamped": "wide",
+          "url": "/w/default/p/default/d/production/studio"
+        },
+        "paper": {
+          "selectors": [
+            {
+              "selector": ".pane-column",
+              "why": "root.html.heex, the .pane-column rule — transition: width/min-width/max-width var(--dur-1) ease",
+              "match_count": 2,
+              "sampled": [
+                {
+                  "transition_property": "background, width, min-width, max-width",
+                  "transition_duration": "0.15s, 0.15s, 0.15s, 0.15s",
+                  "transition_delay": "0s, 0s, 0s, 0s",
+                  "transition_timing_function": "ease, ease, ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "width, min-width, max-width",
+                  "transition_duration": "0.15s, 0.15s, 0.15s",
+                  "transition_delay": "0s, 0s, 0s",
+                  "transition_timing_function": "ease, ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-column--collapsed",
+              "why": "root.html.heex, the .pane-column--collapsed rule — the same box transition plus background",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "background, width, min-width, max-width",
+                  "transition_duration": "0.15s, 0.15s, 0.15s, 0.15s",
+                  "transition_delay": "0s, 0s, 0s, 0s",
+                  "transition_timing_function": "ease, ease, ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-column--collapsed > *",
+              "why": "root.html.heex — animation: bp-pane-strip-in var(--dur-1) ease-out both",
+              "match_count": 2,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "bp-pane-strip-in",
+                  "animation_duration": "0.15s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "bp-pane-strip-in",
+                  "animation_duration": "0.15s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-item",
+              "why": "root.html.heex, the .pane-item rule — declares transition: all var(--dur-1)",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".pane-doc-item",
+              "why": "a desk row the census presses",
+              "match_count": 100,
+              "sampled": [
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".editor-panel",
+              "why": "the panel the matrix measures the reading column inside",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".editor-panel-main.bp-paper-body",
+              "why": "THE reading column — the @container the 720px gate sits on",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".bp-paper-surface",
+              "why": "THE measured surface — if this moves, every matrix row is a transient",
+              "match_count": 2,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".bp-doc-sidebar",
+              "why": "root.html.heex claims the narrow/phone sidebar switch is instant (grep: \"the switch between them is\")",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".bp-update-dot",
+              "why": "root.html.heex — bp-update-pulse, the one animation with its own reduce arm",
+              "match_count": 0,
+              "sampled": []
+            }
+          ],
+          "reduce_matches": false,
+          "no_preference_matches": true,
+          "scrollbar_width_px": 0,
+          "inner_width": 1280,
+          "width_bucket_stamped": "wide",
+          "url": "/w/default/p/default/d/production/studio/paper/akerbrygge-status-2026-09-10"
+        }
+      },
+      "browser_version": "147.0.7727.15"
+    },
+    "reduce": {
+      "emulated_reduced_motion": "reduce",
+      "document": {
+        "slug": "akerbrygge-status-2026-09-10",
+        "path": "/w/default/p/default/d/production/studio/paper/akerbrygge-status-2026-09-10"
+      },
+      "surfaces": {
+        "desk": {
+          "selectors": [
+            {
+              "selector": ".pane-column",
+              "why": "root.html.heex, the .pane-column rule — transition: width/min-width/max-width var(--dur-1) ease",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "background",
+                  "transition_duration": "0.15s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-column--collapsed",
+              "why": "root.html.heex, the .pane-column--collapsed rule — the same box transition plus background",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".pane-column--collapsed > *",
+              "why": "root.html.heex — animation: bp-pane-strip-in var(--dur-1) ease-out both",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".pane-item",
+              "why": "root.html.heex, the .pane-item rule — declares transition: all var(--dur-1)",
+              "match_count": 7,
+              "sampled": [
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-doc-item",
+              "why": "a desk row the census presses",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".editor-panel",
+              "why": "the panel the matrix measures the reading column inside",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".editor-panel-main.bp-paper-body",
+              "why": "THE reading column — the @container the 720px gate sits on",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".bp-paper-surface",
+              "why": "THE measured surface — if this moves, every matrix row is a transient",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".bp-doc-sidebar",
+              "why": "root.html.heex claims the narrow/phone sidebar switch is instant (grep: \"the switch between them is\")",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".bp-update-dot",
+              "why": "root.html.heex — bp-update-pulse, the one animation with its own reduce arm",
+              "match_count": 0,
+              "sampled": []
+            }
+          ],
+          "reduce_matches": true,
+          "no_preference_matches": false,
+          "scrollbar_width_px": 0,
+          "inner_width": 1280,
+          "width_bucket_stamped": "wide",
+          "url": "/w/default/p/default/d/production/studio"
+        },
+        "paper": {
+          "selectors": [
+            {
+              "selector": ".pane-column",
+              "why": "root.html.heex, the .pane-column rule — transition: width/min-width/max-width var(--dur-1) ease",
+              "match_count": 2,
+              "sampled": [
+                {
+                  "transition_property": "background",
+                  "transition_duration": "0.15s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background",
+                  "transition_duration": "0.15s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-column--collapsed",
+              "why": "root.html.heex, the .pane-column--collapsed rule — the same box transition plus background",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "background",
+                  "transition_duration": "0.15s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-column--collapsed > *",
+              "why": "root.html.heex — animation: bp-pane-strip-in var(--dur-1) ease-out both",
+              "match_count": 2,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".pane-item",
+              "why": "root.html.heex, the .pane-item rule — declares transition: all var(--dur-1)",
+              "match_count": 0,
+              "sampled": []
+            },
+            {
+              "selector": ".pane-doc-item",
+              "why": "a desk row the census presses",
+              "match_count": 100,
+              "sampled": [
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "background, border-color",
+                  "transition_duration": "0.15s, 0.15s",
+                  "transition_delay": "0s, 0s",
+                  "transition_timing_function": "ease, ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".editor-panel",
+              "why": "the panel the matrix measures the reading column inside",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".editor-panel-main.bp-paper-body",
+              "why": "THE reading column — the @container the 720px gate sits on",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".bp-paper-surface",
+              "why": "THE measured surface — if this moves, every matrix row is a transient",
+              "match_count": 2,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                },
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".bp-doc-sidebar",
+              "why": "root.html.heex claims the narrow/phone sidebar switch is instant (grep: \"the switch between them is\")",
+              "match_count": 1,
+              "sampled": [
+                {
+                  "transition_property": "all",
+                  "transition_duration": "0s",
+                  "transition_delay": "0s",
+                  "transition_timing_function": "ease",
+                  "animation_name": "none",
+                  "animation_duration": "0s",
+                  "animation_iteration_count": "1",
+                  "scroll_behavior": "auto"
+                }
+              ]
+            },
+            {
+              "selector": ".bp-update-dot",
+              "why": "root.html.heex — bp-update-pulse, the one animation with its own reduce arm",
+              "match_count": 0,
+              "sampled": []
+            }
+          ],
+          "reduce_matches": true,
+          "no_preference_matches": false,
+          "scrollbar_width_px": 0,
+          "inner_width": 1280,
+          "width_bucket_stamped": "wide",
+          "url": "/w/default/p/default/d/production/studio/paper/akerbrygge-status-2026-09-10"
+        }
+      },
+      "browser_version": "147.0.7727.15"
+    }
+  },
+  "reduce_changed": {
+    "desk": [
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_property",
+        "no_preference": "width, min-width, max-width",
+        "reduce": "background"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_duration",
+        "no_preference": "0.15s, 0.15s, 0.15s",
+        "reduce": "0.15s"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_delay",
+        "no_preference": "0s, 0s, 0s",
+        "reduce": "0s"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_timing_function",
+        "no_preference": "ease, ease, ease",
+        "reduce": "ease"
+      }
+    ],
+    "paper": [
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_property",
+        "no_preference": "background, width, min-width, max-width",
+        "reduce": "background"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_duration",
+        "no_preference": "0.15s, 0.15s, 0.15s, 0.15s",
+        "reduce": "0.15s"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_delay",
+        "no_preference": "0s, 0s, 0s, 0s",
+        "reduce": "0s"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 0,
+        "property": "transition_timing_function",
+        "no_preference": "ease, ease, ease, ease",
+        "reduce": "ease"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 1,
+        "property": "transition_property",
+        "no_preference": "width, min-width, max-width",
+        "reduce": "background"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 1,
+        "property": "transition_duration",
+        "no_preference": "0.15s, 0.15s, 0.15s",
+        "reduce": "0.15s"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 1,
+        "property": "transition_delay",
+        "no_preference": "0s, 0s, 0s",
+        "reduce": "0s"
+      },
+      {
+        "selector": ".pane-column",
+        "element_index": 1,
+        "property": "transition_timing_function",
+        "no_preference": "ease, ease, ease",
+        "reduce": "ease"
+      },
+      {
+        "selector": ".pane-column--collapsed",
+        "element_index": 0,
+        "property": "transition_property",
+        "no_preference": "background, width, min-width, max-width",
+        "reduce": "background"
+      },
+      {
+        "selector": ".pane-column--collapsed",
+        "element_index": 0,
+        "property": "transition_duration",
+        "no_preference": "0.15s, 0.15s, 0.15s, 0.15s",
+        "reduce": "0.15s"
+      },
+      {
+        "selector": ".pane-column--collapsed",
+        "element_index": 0,
+        "property": "transition_delay",
+        "no_preference": "0s, 0s, 0s, 0s",
+        "reduce": "0s"
+      },
+      {
+        "selector": ".pane-column--collapsed",
+        "element_index": 0,
+        "property": "transition_timing_function",
+        "no_preference": "ease, ease, ease, ease",
+        "reduce": "ease"
+      },
+      {
+        "selector": ".pane-column--collapsed > *",
+        "element_index": 0,
+        "property": "animation_name",
+        "no_preference": "bp-pane-strip-in",
+        "reduce": "none"
+      },
+      {
+        "selector": ".pane-column--collapsed > *",
+        "element_index": 0,
+        "property": "animation_duration",
+        "no_preference": "0.15s",
+        "reduce": "0s"
+      },
+      {
+        "selector": ".pane-column--collapsed > *",
+        "element_index": 1,
+        "property": "animation_name",
+        "no_preference": "bp-pane-strip-in",
+        "reduce": "none"
+      },
+      {
+        "selector": ".pane-column--collapsed > *",
+        "element_index": 1,
+        "property": "animation_duration",
+        "no_preference": "0.15s",
+        "reduce": "0s"
+      }
+    ]
+  },
+  "ruling": {
+    "live_transition_exists": true,
+    "reduced_motion_reaches_it": true,
+    "computed_style_properties_changed_under_reduce": 20,
+    "measured_surfaces": [
+      "desk (root, 1280px)",
+      "paper (drilled, 1280px)"
+    ],
+    "statement": "A live transition EXISTS on the desk (.pane-column), so reduced-motion coverage is warranted and is what this run adds: both regimes measured, 20 computed property value(s) differ between them."
+  }
+}
