@@ -1526,6 +1526,8 @@ textarea.bp-canvas-island__input { resize: vertical; }
 }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
+/* Header and row-header cells are editable text too: preserve stored newlines. */
+bp-paper-canvas .ProseMirror .bp-table__th { white-space: pre-wrap; }
 
 [data-bp-text-boundary] {
   margin-block: 12px;
