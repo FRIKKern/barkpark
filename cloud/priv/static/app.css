@@ -151,7 +151,6 @@
   --ok-strong: hsl(151.96 71.81% 23.22%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
-  --provider-cloudflare: #c2600f;
   /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-
      invariant, so :root only; the reduced-motion collapse is at the end of
      this region. */
@@ -199,7 +198,6 @@
   --ok-strong: hsl(152.92 60% 60.94%);
   --provider-hetzner: #f0728a;
   --provider-azure: #4aa3e0;
-  --provider-cloudflare: #f6821f;
 }
 /* instance-lifecycle glyph tones — colour READ THROUGH the state's status
    role (Decision 7: identity is never a state voice); theme-invariant since
@@ -1566,16 +1564,27 @@ select.form-input {
 }
 .choice-ico.sm { width: 24px; height: 24px; font-size: 11px; display: inline-grid; vertical-align: middle; margin-right: 8px; }
 
-/* brand tiles — provider colours, not shipped logos. The CONNECTABLE kinds
-   (hetzner, azure, cloudflare) read from the shared --provider-* identity
-   tokens (S4) so the picker tile, the fleet provider chip, and the CLI glyph
-   all tint from ONE source; the not-yet-wired providers keep their raw brand
-   hues until they graduate. Cloudflare joined the tokened set when it became
-   connectable (console-w28) — it has no fleet chip (nothing is ever HOSTED on
-   Cloudflare) but it does own a picker tile and a roster row. */
+/* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
+   the shared --provider-* identity tokens (S4) so the picker tile, the fleet
+   provider chip, and the CLI glyph all tint from ONE source; the not-yet-wired
+   providers keep their raw brand hues until they graduate.
+
+   CLOUDFLARE IS A RAW HUE ON PURPOSE (console-w28), on the same shelf as the
+   three below rather than in the tokened family above, and this is the second
+   answer to the question — the first was a --provider-cloudflare token, which
+   design/emit-fence.test.mjs refused and was right to. design/tokens.json's
+   `color.provider` family says "a third provider is a new row here", and it
+   emits into TWO artifacts: the --provider-<kind> custom properties in this
+   file's GENERATED block AND `GenProviderMark` AdaptiveColors in the Go CLI
+   chrome sibling (internal/semrole/chrome_gen.go). That family exists so the
+   picker tile, the FLEET PROVIDER CHIP and the CLI GLYPH tint from one source.
+   Cloudflare has exactly one of those three: nothing is ever HOSTED on
+   Cloudflare, so `providerChipHtml` returns "" for it and no CLI glyph marks
+   it. A row there would emit a zero-consumer Go token — the precise hygiene
+   defect that family's own note records retiring eleven of (GR29/GR37). */
 .brand-hetzner { background: var(--provider-hetzner); }
 .brand-azure { background: var(--provider-azure); }
-.brand-cloudflare { background: var(--provider-cloudflare); }
+.brand-cloudflare { background: #f6821f; }
 .brand-do { background: #0080ff; }
 .brand-aws { background: #232f3e; }
 .brand-vultr { background: #007bfc; }

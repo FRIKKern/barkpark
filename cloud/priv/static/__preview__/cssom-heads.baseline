@@ -750,10 +750,16 @@
 # and its account echo): `.brand-cloudflare`, the picker/roster tile for the third
 # CONNECTABLE provider kind. ONE plain class selector in the top-level cascade — no
 # media query, no nesting, nothing the CSSOM parses differently from the authored
-# text. The wave's other two app.css edits add NO head: `--provider-cloudflare` is a
-# declaration inside the two existing :root token blocks, and `flex-wrap: wrap` is a
-# declaration added to the existing `.prov-connect-picker` rule (the 9px page
-# overflow overflow-guard.mjs found at 320px once the picker held three segments).
+# text, and it carries a RAW HEX rather than a `--provider-*` token: a token row would
+# have to live in design/tokens.json's `color.provider` family, which also emits
+# GenProviderMark into the Go CLI chrome, and Cloudflare has no CLI glyph and no fleet
+# chip. A first pass DID hand-write `--provider-cloudflare` into this file's GENERATED
+# token block; design/emit-fence.test.mjs refused it (`emit --check` printed
+# `DRIFT cloud SPA`) and the hue moved to __css_check's ALLOW_RAW_COLORS beside
+# .brand-do / .brand-aws / .brand-vultr. The wave's other app.css edit adds NO head
+# either: `flex-wrap: wrap` is a declaration added to the existing
+# `.prov-connect-picker` rule (the 9px page overflow overflow-guard.mjs found at 320px
+# once the picker held three segments).
 # NOT arithmetic: 1359 is what cssom-parity.mjs PRINTED on this branch ("1359 authored
 # rule heads, sidecar baseline is 1358 (+1)") against Chrome 153.0.8010.53 / node
 # v22.22.0, with MISSES 0 and MULTISET DEFICITS 0 — which is what makes this an
