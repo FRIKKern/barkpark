@@ -19,7 +19,9 @@
 //
 // It runs FULLY OFFLINE: a `file://` fixture, the repo's own playwright, no
 // deployed build, no ssh, no network. Prior art and the resolution ladder:
-// scripts/studio-scrim-threshold-control.mjs.
+// scripts/studio-scrim-threshold-control.mjs, RETIRED 2026-09-22 with the
+// scrim it measured (task task-aeb351758966b019) — the ladder below is the
+// surviving copy, so read it here rather than chasing a deleted file.
 //
 // ── NOTHING IS COPIED ────────────────────────────────────────────────────────
 // Both halves of the guard are EXTRACTED FROM root.html.heex at run time, at
@@ -74,7 +76,8 @@ const die = (msg) => { throw new ControlError(msg); };
 
 // ── playwright ───────────────────────────────────────────────────────────────
 // A worktree has no node_modules, but --git-common-dir points at the primary
-// clone that does. Same ladder as studio-scrim-threshold-control.mjs.
+// clone that does. This was studio-scrim-threshold-control.mjs's ladder; that
+// file is gone, so this is now the reference copy.
 function resolvePlaywright() {
   const tried = [];
   const candidates = [];
