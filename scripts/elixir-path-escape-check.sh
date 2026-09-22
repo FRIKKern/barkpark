@@ -911,7 +911,7 @@ EOF
 #   param     `defp f(rel, …)` — the call sites carry the literals
 #   NONE      nothing: the scanner cannot see this read, and says so.
 unresolvable_sites() {
-  local hits f ln expr operand backing
+  local hits f ln expr operand backing base
   hits="$(cd -- "$REPO_ROOT" && grep -rEn \
     -e 'Path\.(expand|absname)\([[:space:]]*[a-z_][A-Za-z0-9_]*[[:space:]]*,' \
     -e 'Path\.(expand|absname|join)\([^)]*<>[[:space:]]*[a-z_@][A-Za-z0-9_]*' \
@@ -939,7 +939,21 @@ unresolvable_sites() {
     if [ "$backing" = NONE ] && grep -Eq "^[[:space:]]*defp?[[:space:]]+[a-z_][A-Za-z0-9_!?]*\([^)]*\<${operand}\>" "$REPO_ROOT/$f" 2>/dev/null; then
       backing=param
     fi
-    printf '%s\t%s\t%s\t%s\n' "$f" "$ln" "$operand" "$backing"
+    # THE BASE half. This arm's subject is repo-root ESCAPES, and an escape is
+    # resolved against one of two bases (see HOW AN ESCAPE IS RESOLVED): the
+    # file's own directory (`__DIR__`) or an anchor attribute. A site whose
+    # BASE is itself a runtime value — `Path.expand(p, caller_dir)` in
+    # plugin.ex's `__using__`, where `p` arrives from the CALLING module's
+    # opts — cannot be located at all, but it is also not a statement about
+    # repo-root reads. It is REPORTED (silence is the defect) and does not
+    # refuse: a required gate that reds for the wrong reason costs more than
+    # one that misses, and this file's own case 3j says so.
+    case "$expr" in
+      *__DIR__*) base=anchored ;;
+      *', @'*) base=anchored ;;
+      *) base=dynamic ;;
+    esac
+    printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "$operand" "$backing" "$base"
   done <<EOF
 $hits
 EOF
@@ -2220,7 +2234,17 @@ EOF
 # nothing on the live tree has told us nothing about itself. Prove it on a
 # synthetic case or refuse. See ELIXIR_ESCAPE_IDIOM_FIXTURE for why this is a
 # rule over the live census and not a second roster to keep in sync.
-if [ -n "$zero_idioms" ]; then
+if [ -n "$zero_idioms" ] && [ -n "${ELIXIR_PATH_ESCAPE_ROOT:-}" ]; then
+  # SCOPED TO A SELF-SCAN, AND SAID OUT LOUD. The proof is a statement about
+  # the SCANNER, so it belongs to the run that scans the scanner's own
+  # checkout. Under ELIXIR_PATH_ESCAPE_ROOT the tree is a three-file fixture
+  # where nearly every idiom is legitimately zero, and a door the fixture was
+  # built to delete must red on the fixture's OWN assertion, not on this one —
+  # the harness proves a door load-bearing by deleting it and watching the read
+  # go quiet. So the proof steps aside there and SAYS it stepped aside: a check
+  # that skips in silence is the fault this file is named after.
+  echo "elixir-path-escape-check: zero-census proof SKIPPED — ELIXIR_PATH_ESCAPE_ROOT is set, so this is a fixture scan, not a self-scan. The doors are proven by the run that scans this checkout (and by cases 7a-7c of the harness, which run a COPY of this script as its own checkout)."
+elif [ -n "$zero_idioms" ]; then
   echo "elixir-path-escape-check: $(printf '%s\n' "$zero_idioms" | sed '/^$/d' | wc -l | tr -d ' ') idiom(s) resolved ZERO reads on this tree — proving each door on a synthetic case (a floor of 0 cannot)."
   while IFS= read -r prow; do
     [ -n "$prow" ] || continue
@@ -2359,4 +2383,65 @@ MSG
 fi
 
 echo "elixir-path-escape-check: $fam_n glob-consumed famil(ies) derived from $ELIXIR_FAMILY_SOURCE_N declared program(s), all dispatched whole."
-echo "OK: every repo-root read from api/lib + api/test is dispatched on."
+
+# ---------------------------------------------------------------------------
+# THE UNSEEN-FORM ARM — say "I cannot resolve this", never nothing
+# ---------------------------------------------------------------------------
+# Everything above is a statement about reads the scanner RESOLVED. It has
+# never been a statement about reads it could not. A path expression carrying
+# no literal at the read site — `Path.expand(rel, __DIR__)`, or the
+# `Path.expand("../../../" <> rel, __DIR__)` that opened
+# task-c605ea24bbe5066c — produces the same output as a tree with no such site
+# at all: silence, then `OK:`. A guard whose "I saw nothing" and "I cannot see"
+# print identically is reporting a coincidence.
+#
+# So every such site is PRINTED, every run, pass or fail, and the `OK:` line is
+# scoped to what was resolvable. A site whose operand has no static binding
+# anywhere in its own file — nothing any door can reach — REFUSES: an
+# unresolvable read reported as OK is the defect this arm exists to end.
+unseen="$(unresolvable_sites)"
+unseen_n="$(printf '%s\n' "$unseen" | sed '/^$/d' | wc -l | tr -d ' ')"
+unseen_blind=0
+if [ "$unseen_n" -gt 0 ]; then
+  echo "elixir-path-escape-check: $unseen_n path expression(s) carry NO literal at the read site — the scanner CANNOT resolve these directly:"
+  while IFS= read -r urow; do
+    [ -n "$urow" ] || continue
+    uf="${urow%%	*}"
+    urest="${urow#*	}"
+    uln="${urest%%	*}"
+    urest="${urest#*	}"
+    uop="${urest%%	*}"
+    urest="${urest#*	}"
+    uback="${urest%%	*}"
+    ubase="${urest##*	}"
+    if [ "$uback" = NONE ] && [ "$ubase" = dynamic ]; then
+      echo "elixir-path-escape-check:   cannot see directly: $uf:$uln via '$uop' — and its BASE is a runtime value too, so this read has no static location at all. Not a repo-root escape claim either way; reported, not counted."
+    elif [ "$uback" = NONE ]; then
+      unseen_blind=$((unseen_blind + 1))
+      echo "::error::elixir-path-escape-check: CANNOT SEE this read: $uf:$uln builds its path from '$uop', and nothing in that file binds '$uop' to a literal any door can reach. This read is NOT covered by the census above — it was never in it." >&2
+    else
+      echo "elixir-path-escape-check:   cannot see directly: $uf:$uln via '$uop' — reached instead through its $uback binding (the literals the doors DO see live there, not here)"
+    fi
+  done <<EOF
+$unseen
+EOF
+fi
+
+if [ "$unseen_blind" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+The Elixir suite reads path(s) this scanner cannot statically resolve, and the
+census above says nothing about them. Historically that printed as OK — two
+reads of js/packages/react/src/blocks/sheet.ts and
+apps/mobile/src/papers/portabledoc/blocks/sheet.tsx sat undispatched-on inside
+`OK: every repo-root read … is dispatched on.` (task-c605ea24bbe5066c).
+
+Fix: spell the path out as a literal at the read site, or bind it to a module
+attribute list the shape-8 door resolves. Do NOT widen this arm's greps to
+make the site disappear — an unresolvable read is a fact about the code, and
+the honest output is this refusal.
+MSG
+  exit 1
+fi
+
+echo "OK: every repo-root read from api/lib + api/test that this scanner can RESOLVE is dispatched on; $unseen_n site(s) it cannot resolve are named above."
