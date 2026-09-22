@@ -89,8 +89,12 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   Body: `{"name": string}` (required, non-empty). The stored label is
   `fleet-support-<name>`; the token is bound to the admin's resolved workspace
-  (falling back to the seeded Default via `Auth.create_token/5`) on the
-  `production` dataset.
+  on the `production` dataset. That resolution happens UPSTREAM, in the
+  pipeline: `DeriveWorkspaceFromToken` reads the caller's own workspace off
+  their token and `AssignDefaultScope` stamps the seeded Default only when the
+  caller's token carries none. `Auth.create_token/5` itself no longer has any
+  Default fallback (task-e0e6454b8b2045ae) — it binds exactly the workspace it
+  is handed, and a `nil` there mints WORKSPACE-LESS with no membership.
 
   201 → `{"token": raw, "token_id": id, "name": name}`.
   """
@@ -170,9 +174,10 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   # (2) OBJECT AUTHZ, through the canonical chokepoint. Deliberately NOT a
   # `target.workspace_id == caller_workspace_id` equality: a token's
-  # `workspace_id` is a BACKFILL DEFAULT (`Auth.create_token/5` falls back to the
-  # seeded Default when none is supplied), so equality would read as a tenancy
-  # statement it does not make. Membership ROLE is the grant.
+  # `workspace_id` is, on a great many rows, a BACKFILL DEFAULT stamped by the
+  # pipeline's `AssignDefaultScope` (and, before task-e0e6454b8b2045ae, by a
+  # fallback inside `Auth.create_token/5` that is now gone), so equality would
+  # read as a tenancy statement it does not make. Membership ROLE is the grant.
   defp workspace_admin?(conn, workspace_id) do
     actor = conn.assigns[:api_token]
 

@@ -71,7 +71,16 @@ defmodule BarkparkWeb.PaperAccessControllerTest do
 
   defp make_token!(name, perms) do
     raw = "eol-access-#{name}-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, name, @dataset, perms)
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        name,
+        @dataset,
+        perms,
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {token, raw}
   end
 

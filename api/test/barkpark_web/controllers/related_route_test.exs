@@ -19,7 +19,13 @@ defmodule BarkparkWeb.RelatedRouteTest do
   @token "related-route-token"
 
   setup do
-    Barkpark.Auth.create_token(@token, "dev", @dataset, ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      @token,
+      "dev",
+      @dataset,
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
 

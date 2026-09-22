@@ -38,7 +38,14 @@ defmodule BarkparkWeb.WallRefusalLeavesNoDraftTest do
   @title "Backfill the denormalized main tag column onto every published document row"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", @dataset, ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      @dataset,
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     register_task_schemas!()
     LabelFixtures.register_tags!(@dataset)
     :ok

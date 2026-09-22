@@ -22,11 +22,21 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
 
   setup do
-    # create_token/4 with no explicit workspace_id binds to the seeded Default
-    # Workspace AND inserts a membership — so this token is a member of
-    # "default" only.
+    # A member of the Default workspace ONLY — the baseline this file's
+    # cross-tenant guard is measured against. Named explicitly since
+    # task-e0e6454b8b2045ae: `create_token/5` no longer resolves a nil
+    # workspace to the Default one, so a 4-arity mint here would be
+    # workspace-less and "default" would drop out of the list below.
     raw = "ws-list-token-#{System.unique_integer([:positive])}"
-    {:ok, token} = Auth.create_token(raw, "ws list", "test", ["read", "write"])
+
+    {:ok, token} =
+      Auth.create_token(
+        raw,
+        "ws list",
+        "test",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # A SECOND workspace the caller IS additionally made a member of — proves
     # the list surfaces every membership, not just Default.

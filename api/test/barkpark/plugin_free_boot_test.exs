@@ -637,8 +637,31 @@ defmodule Barkpark.PluginFreeBootTest do
 
       raw_token = "barkpark-plugin-free-wall-#{System.unique_integer([:positive])}"
 
+      # THE WORKSPACE IS NAMED, NOT FALLEN INTO (task-e0e6454b8b2045ae).
+      # This mint used to be bare 4-arity, and `Auth.create_token/5`'s own
+      # `|| default_workspace_id()` fallback silently handed the token a
+      # Tenancy.Membership in whatever workspace held the default seat. That
+      # fallback is gone, so a bare mint is now genuinely WORKSPACE-LESS and
+      # the (untouched, pre-existing) write-scope guard in
+      # `Barkpark.Content.WriteScope` refuses the flat /v1/data/mutate write
+      # `workspace_scope_required` with `details.workspaces => []` — before the
+      # core unknown_tag wall this test exists to prove is ever reached.
+      #
+      # THIS IS FIXTURE PLUMBING, NOT THE SUBJECT. The fresh-install admin mint
+      # (`Barkpark.Seeds.Clean.mint_admin_token!/2`) already passes
+      # `scope.workspace_id` explicitly, as does every other production caller
+      # of create_token/5, so no real fresh install can produce the empty
+      # `workspaces` list seen here — only a test that skipped the argument. The
+      # token is bound to the SAME workspace the fixture doc above was created
+      # in, which is what the bare mint was accidentally getting all along.
       {:ok, _} =
-        Barkpark.Auth.create_token(raw_token, "plugin-free-wall", "test", ["read", "write"])
+        Barkpark.Auth.create_token(
+          raw_token,
+          "plugin-free-wall",
+          "test",
+          ["read", "write"],
+          ws.id
+        )
 
       conn =
         BarkparkWeb.ConnCase.scoped_conn()

@@ -41,7 +41,15 @@ defmodule BarkparkWeb.TaskAdjudicationTripleRoundTripTest do
   @token "barkpark-test-adjudication-round-trip-token"
 
   setup %{conn: conn} do
-    {:ok, _} = Auth.create_token(@token, "adjudication round trip", "test", ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @token,
+        "adjudication round trip",
+        "test",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
