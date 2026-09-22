@@ -1,0 +1,2166 @@
+{
+ "generated_from": "tooling/studio-flake-census/census.py (v2)",
+ "supersedes": "campaign scratchpad studio-s29-a1/RESULT.json (v1) \u2014 REFUTED, see README.md",
+ "files_scanned": 1921,
+ "sites": 68,
+ "by_verdict": {
+  "MASKED-BY-BARRIER": 58,
+  "RACING-ONE-HOP": 6,
+  "RACING-MULTI-HOP": 1,
+  "SETTLED-MULTI-HOP": 3
+ },
+ "by_hops": {
+  "1": 64,
+  "3": 4
+ },
+ "by_chain": {
+  "CH-CHAT": 37,
+  "CH-PAPEROP": 27,
+  "CH-TREE": 4
+ },
+ "multi_hop_sites": 4,
+ "one_hop_sites": 64,
+ "rows": [
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_flat_default_scope_test.exs",
+   "line": 252,
+   "name": "test \"a send from an AUTHORIZED principal still creates a Default-owned session\", %{",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 262,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello\"})",
+   "trig_expr_closes": 262,
+   "trigger_helpers": [],
+   "assert_line": 270,
+   "assert_src": "created = Repo.get!(StudioChatSession, session_id)",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     263,
+     "render("
+    ],
+    [
+     265,
+     ":sys.get_state("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_flat_scope_test.exs",
+   "line": 97,
+   "name": "test \"a session created from the flat socket is owned by B, not Default\", %{",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 107,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello\"})",
+   "trig_expr_closes": 107,
+   "trigger_helpers": [],
+   "assert_line": 119,
+   "assert_src": "created = Repo.get!(StudioChatSession, session_id)",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     108,
+     "render("
+    ],
+    [
+     115,
+     ":sys.get_state("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 1896,
+   "name": "test \"a mid-turn submit is NOT dropped \u2014 it echoes with a \u29d7 queued badge and persists queued=true\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 1898,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"first turn\"})",
+   "trig_expr_closes": 1898,
+   "trigger_helpers": [],
+   "assert_line": 1912,
+   "assert_src": "queued_rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.metadata[\"queued\"] == true))",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     1900,
+     "turn_active_status?("
+    ],
+    [
+     1902,
+     "render_submit("
+    ],
+    [
+     1911,
+     "store_id("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 1896,
+   "name": "test \"a mid-turn submit is NOT dropped \u2014 it echoes with a \u29d7 queued badge and persists queued=true\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 1902,
+   "trig": "html = render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"second turn\"})",
+   "trig_expr_closes": 1902,
+   "trigger_helpers": [],
+   "assert_line": 1912,
+   "assert_src": "queued_rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.metadata[\"queued\"] == true))",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     1911,
+     "store_id("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 1933,
+   "name": "test \"a failed mid-turn (queued) dispatch withdraws the echo and restores the draft verbatim (D24)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 1946,
+   "trig": "html = render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"keep me too\"})",
+   "trig_expr_closes": 1946,
+   "trigger_helpers": [],
+   "assert_line": 1961,
+   "assert_src": "assert StudioChat.list_messages(store_id(view)) == []",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     1952,
+     "render("
+    ],
+    [
+     1957,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2096,
+   "name": "test \"a confirmed mode echo keeps the switch and posts no revert line\", %{view: view} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2097,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 2097,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 2110,
+   "assert_src": "assert StudioChat.get_session(store_id(view)).mode == \"acceptEdits\"",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     2099,
+     "render_change("
+    ],
+    [
+     2100,
+     "pending_mode_req("
+    ],
+    [
+     2104,
+     "render("
+    ],
+    [
+     2109,
+     "lv_assigns("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 5,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2113,
+   "name": "test \"an empty mode echo reverts the optimistic selector + posts an honest line\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2115,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 2115,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 2131,
+   "assert_src": "assert StudioChat.get_session(store_id(view)).mode == \"plan\"",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     2119,
+     "render_change("
+    ],
+    [
+     2122,
+     "pending_mode_req("
+    ],
+    [
+     2127,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 4,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2147,
+   "name": "test \"a stale ack from a superseded rapid switch is ignored (no mis-revert)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2149,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 2149,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 2172,
+   "assert_src": "assert StudioChat.get_session(store_id(view)).mode == \"auto\"",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     2152,
+     "render_change("
+    ],
+    [
+     2153,
+     "pending_mode_req("
+    ],
+    [
+     2154,
+     "render_change("
+    ],
+    [
+     2155,
+     "pending_mode_req("
+    ],
+    [
+     2162,
+     "render("
+    ],
+    [
+     2168,
+     "render("
+    ],
+    [
+     2171,
+     "lv_assigns("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 8,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2402,
+   "name": "test \"sending an image stores a pointer (no base64 in the DB), renders inline, no /media route\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2420,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"look at this\"})",
+   "trig_expr_closes": 2420,
+   "trigger_helpers": [],
+   "assert_line": 2434,
+   "assert_src": "user_msg =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     2425,
+     "render("
+    ],
+    [
+     2432,
+     "store_id("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2446,
+   "name": "test \"a non-image payload is refused by the shared store seam, never persisted\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2460,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"look at this\"})",
+   "trig_expr_closes": 2460,
+   "trigger_helpers": [],
+   "assert_line": 2466,
+   "assert_src": "user_msg =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     2461,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2665,
+   "name": "test \"a fresh send mints a session, patches to its url, and persists the user message\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2670,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello there\"})",
+   "trig_expr_closes": 2670,
+   "trigger_helpers": [],
+   "assert_line": 2680,
+   "assert_src": "roles = StudioChat.list_messages(sid) |> Enum.map(&{&1.role, &1.source_markdown})",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     2675,
+     "store_id("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2712,
+   "name": "test \"a result frame records usage metrics onto the session\", %{conn: conn} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2714,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"measure me\"})",
+   "trig_expr_closes": 2714,
+   "trigger_helpers": [],
+   "assert_line": 2730,
+   "assert_src": "s = StudioChat.get_session(sid)",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     2715,
+     "store_id("
+    ],
+    [
+     2717,
+     "send_frame("
+    ],
+    [
+     2729,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3057,
+   "name": "test \"an ask persists a pending row and raises the 'needs you' sidebar pill\", %{conn: conn} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3059,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"act\"})",
+   "trig_expr_closes": 3059,
+   "trigger_helpers": [],
+   "assert_line": 3079,
+   "assert_src": "assert StudioChat.get_session(sid).pending_approvals == 1",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     3060,
+     "store_id("
+    ],
+    [
+     3062,
+     "send_frame("
+    ],
+    [
+     3074,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3085,
+   "name": "test \"resolving an ask clears the persisted pending count and the pill\", %{conn: conn} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3087,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"act\"})",
+   "trig_expr_closes": 3087,
+   "trigger_helpers": [],
+   "assert_line": 3103,
+   "assert_src": "assert StudioChat.get_session(sid).pending_approvals == 1",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     3088,
+     "store_id("
+    ],
+    [
+     3090,
+     "send_frame("
+    ],
+    [
+     3102,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3248,
+   "name": "test \"the CLI's post-plan default flip is INERT in the LiveView (the Recorder owns that seam)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3250,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3250,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3251,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3287,
+   "name": "test \"an unrecognized init permissionMode is surfaced but NEVER adopted (charter D52)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3289,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3289,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3290,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3308,
+   "name": "test \"a fail-closed echo (disarmed bypass spawning plan) is quiet and keeps the stored bypass\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3310,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3310,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3318,
+   "assert_src": "assert StudioChat.get_session(sid).mode == \"bypassPermissions\"",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     3311,
+     "store_id("
+    ],
+    [
+     3314,
+     "render_change("
+    ],
+    [
+     3316,
+     "render_change("
+    ],
+    [
+     3317,
+     "render_click("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 5,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3337,
+   "name": "test \"an init echoing the SAME mode does not churn the selector or the store\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3339,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3339,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3350,
+   "assert_src": "assert StudioChat.get_session(sid).mode == \"plan\"",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     3340,
+     "store_id("
+    ],
+    [
+     3348,
+     "render("
+    ],
+    [
+     3349,
+     "lv_assigns("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 4,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3426,
+   "name": "test \"approving a plan publishes a real published Paper and the card links to it\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3428,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3428,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3460,
+   "assert_src": "row = Enum.find(StudioChat.list_messages(sid), &(&1.metadata[\"request_id\"] == \"plan-pub\"))",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     3429,
+     "store_id("
+    ],
+    [
+     3432,
+     "render("
+    ],
+    [
+     3437,
+     "render_click("
+    ],
+    [
+     3445,
+     "await("
+    ],
+    [
+     3454,
+     "await("
+    ],
+    [
+     3454,
+     "render("
+    ],
+    [
+     3455,
+     "render("
+    ]
+   ],
+   "settles": [
+    [
+     3445,
+     "await(fn ->"
+    ],
+    [
+     3454,
+     "await(fn -> render(view) =~ \"published as Paper\" end)"
+    ]
+   ],
+   "barrier_count": 8,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3488,
+   "name": "test \"keep planning creates NO paper \u2014 a rejected plan stays chat ephemera\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3490,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3490,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3491,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 3509,
+   "name": "test \"an ordinary tool approval creates NO paper (only :plan projects)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 3511,
+   "trig": "spawn_silent_session(view)",
+   "trig_expr_closes": 3511,
+   "trigger_helpers": [
+    "spawn_silent_session"
+   ],
+   "assert_line": 3534,
+   "assert_src": "assert Content.get_paper(PlanPapers.slug_for(sid, \"appr-1\"), \"production\") == nil",
+   "w1_barriers": [
+    [
+     330,
+     "session_pid("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     3512,
+     "store_id("
+    ],
+    [
+     3530,
+     "render("
+    ],
+    [
+     3531,
+     "render_click("
+    ],
+    [
+     3533,
+     "Process.sleep("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 5,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 5442,
+   "name": "test \"a >4 KB result recorded for real still renders its chip when the session reopens\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 5462,
+   "trig": "render_submit(element(live_view, \"form[phx-submit=send]\"), %{\"message\" => \"go\"})",
+   "trig_expr_closes": 5462,
+   "trigger_helpers": [],
+   "assert_line": 5472,
+   "assert_src": "row =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     5463,
+     "store_id("
+    ],
+    [
+     5464,
+     "send_tool_use("
+    ],
+    [
+     5465,
+     "send_frame("
+    ],
+    [
+     5467,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 4,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6503,
+   "name": "test \"picking a model persists the choice and confirms honestly\", %{view: view} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6504,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello\"})",
+   "trig_expr_closes": 6504,
+   "trigger_helpers": [],
+   "assert_line": 6507,
+   "assert_src": "html = render_change(element(view, ~s(form[phx-change=set-model])), %{\"model\" => \"opus\"})",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     6505,
+     "store_id("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6513,
+   "name": "test \"an unknown model value fail-closes to the CLI default\", %{view: view} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6514,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello\"})",
+   "trig_expr_closes": 6514,
+   "trigger_helpers": [],
+   "assert_line": 6521,
+   "assert_src": "assert StudioChat.get_session(sid).model_choice == nil",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     6515,
+     "store_id("
+    ],
+    [
+     6518,
+     "render_change("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6553,
+   "name": "test \"picking a tier persists it and confirms honestly\", %{view: view} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6554,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello\"})",
+   "trig_expr_closes": 6554,
+   "trigger_helpers": [],
+   "assert_line": 6561,
+   "assert_src": "assert StudioChat.get_session(sid).effort_choice == \"high\"",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     6555,
+     "store_id("
+    ],
+    [
+     6557,
+     "render_change("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6564,
+   "name": "test \"an unknown tier fail-closes to the CLI default\", %{view: view} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6565,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hello\"})",
+   "trig_expr_closes": 6565,
+   "trigger_helpers": [],
+   "assert_line": 6572,
+   "assert_src": "assert StudioChat.get_session(sid).effort_choice == nil",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     6566,
+     "store_id("
+    ],
+    [
+     6569,
+     "render_change("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6611,
+   "name": "test \"arming persists bypass and posts the honest, non-live line (no set_mode steer)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6613,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hi\"})",
+   "trig_expr_closes": 6613,
+   "trigger_helpers": [],
+   "assert_line": 6620,
+   "assert_src": "html = render_click(element(view, ~s(button[phx-click=arm-bypass])))",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     6615,
+     "store_id("
+    ],
+    [
+     6617,
+     "render_change("
+    ],
+    [
+     6619,
+     "render_change("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6801,
+   "name": "test \"the store never lies on reopen-of-live: the pending approval stays pending and answerable\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6803,
+   "trig": "{_viewA, sid, _owner} = start_live_session_with_pending(conn, \"req-answer\")",
+   "trig_expr_closes": 6803,
+   "trigger_helpers": [
+    "start_live_session_with_pending"
+   ],
+   "assert_line": 6806,
+   "assert_src": "assert StudioChat.get_session(sid).pending_approvals == 1",
+   "w1_barriers": [
+    [
+     6745,
+     "store_id("
+    ],
+    [
+     6746,
+     "session_pid("
+    ],
+    [
+     6748,
+     "send_frame("
+    ],
+    [
+     6760,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 4,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6863,
+   "name": "test \"a send after the live owner died never holds a dead session pid (no phantom, not stuck)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6865,
+   "trig": "{view, sid, owner} = start_live_session_with_pending(conn, \"req-gone\")",
+   "trig_expr_closes": 6865,
+   "trigger_helpers": [
+    "start_live_session_with_pending"
+   ],
+   "assert_line": 6870,
+   "assert_src": "before = StudioChat.get_session(sid).message_count",
+   "w1_barriers": [
+    [
+     6745,
+     "store_id("
+    ],
+    [
+     6746,
+     "session_pid("
+    ],
+    [
+     6748,
+     "send_frame("
+    ],
+    [
+     6760,
+     "render("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     6869,
+     "await("
+    ],
+    [
+     6869,
+     "lv_assigns("
+    ]
+   ],
+   "settles": [
+    [
+     6869,
+     "await(fn -> lv_assigns(view)[:status] == :offline end)"
+    ]
+   ],
+   "barrier_count": 6,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6863,
+   "name": "test \"a send after the live owner died never holds a dead session pid (no phantom, not stuck)\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6876,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"still there?\"})",
+   "trig_expr_closes": 6876,
+   "trigger_helpers": [],
+   "assert_line": 6886,
+   "assert_src": "assert StudioChat.get_session(sid).message_count in [before, before + 1]",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     6882,
+     "session_pid("
+    ],
+    [
+     6884,
+     "lv_assigns("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 7156,
+   "name": "test \"a spawn failure withdraws the echo, restores the words verbatim, and leaves no orphan message row\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 7162,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"keep my words\"})",
+   "trig_expr_closes": 7162,
+   "trigger_helpers": [],
+   "assert_line": 7177,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     7164,
+     "render("
+    ],
+    [
+     7171,
+     "render("
+    ],
+    [
+     7172,
+     "lv_assigns("
+    ],
+    [
+     7173,
+     "turn_active_status?("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 4,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 7512,
+   "name": "test \"a sticky draft round-trips across a session switch and clears on send\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 7520,
+   "trig": "render_change(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"unfinished A thought\"})",
+   "trig_expr_closes": 7520,
+   "trigger_helpers": [],
+   "assert_line": 7527,
+   "assert_src": "assert StudioChat.get_session(a).draft == \"unfinished A thought\"",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     7522,
+     "render_patch("
+    ],
+    [
+     7523,
+     "render_patch("
+    ],
+    [
+     7526,
+     "lv_assigns("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/composite_test.exs",
+   "line": 120,
+   "name": "test \"an inner composite change \u2192 handle_info({:paper_op,\u2026}) persists the merged value\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 138,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-price\"] form), %{",
+   "trig_expr_closes": 141,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 145,
+   "assert_src": "block = Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1[\"id\"] == \"c-price\"))",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     143,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/composite_test.exs",
+   "line": 158,
+   "name": "test \"an inner localizedText change persists the merged %{lang => text} value\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 167,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-blurb\"] form), %{",
+   "trig_expr_closes": 170,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 174,
+   "assert_src": "block = Content.paper_blocks(@composite_slug, @dataset) |> Enum.find(&(&1[\"id\"] == \"c-blurb\"))",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     172,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/composite_test.exs",
+   "line": 180,
+   "name": "test \"an inner codelist change persists the selected code\", %{conn: conn} do",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 192,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-audience\"] form), %{\"value\" => \"02\"})",
+   "trig_expr_closes": 192,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 196,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     194,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/composite_test.exs",
+   "line": 294,
+   "name": "test \"an inner-change on a composite element subfield inside an arrayOf updates the right nested value + persists\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 308,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-contributors\"] form), %{",
+   "trig_expr_closes": 310,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 314,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     312,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/composite_test.exs",
+   "line": 330,
+   "name": "test \"editing two subfields of the same arrayOf composite element in one change merges both\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 339,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-contributors\"] form), %{",
+   "trig_expr_closes": 342,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 346,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     344,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/composite_test.exs",
+   "line": 361,
+   "name": "test \"an inner-change with an oversized bracket index is ignored and does not OOM the BEAM\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 374,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-contributors\"] form), %{",
+   "trig_expr_closes": 377,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 385,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     379,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/legacy_tag_writeloss_test.exs",
+   "line": 80,
+   "name": "test \"a legacy bare-string tag row keeps its name when a subfield is first edited\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 100,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-tags\"] form), %{\"[0].strength\" => \"80\"})",
+   "trig_expr_closes": 100,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 104,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     102,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/legacy_tag_writeloss_test.exs",
+   "line": 221,
+   "name": "test \"a scalar arrayOf keeps its bare strings \u2014 reconstitution never fires for a non-composite element\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 230,
+   "trig": "flush_form(view, ~s([data-block-id=\"c-keywords\"] form), %{\"[1]\" => \"sweden\"})",
+   "trig_expr_closes": 230,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 234,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     232,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/slash_menu_and_codelist_test.exs",
+   "line": 229,
+   "name": "test \"Edit mode renders the flat CodelistField <select> bound to the registry\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 245,
+   "trig": "flush_form(view, ~s([data-block-id=\"cl-flat\"] form), %{\"value\" => \"05\"})",
+   "trig_expr_closes": 245,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 249,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     247,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_caps_derive_op_latency_test.exs",
+   "line": 345,
+   "name": "test \"the component route (handle_info \u2192 paper_pane_op/2) costs exactly one derive\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 361,
+   "trig": "render_hook(target, \"inner-change\", values)",
+   "trig_expr_closes": 361,
+   "trigger_helpers": [],
+   "assert_line": 374,
+   "assert_src": "assert stored_value(slug) == %{\"amount\" => \"301\", \"currency\" => \"NOK\"}",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     363,
+     "render_hook("
+    ],
+    [
+     369,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 2,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_caps_derive_op_latency_test.exs",
+   "line": 345,
+   "name": "test \"the component route (handle_info \u2192 paper_pane_op/2) costs exactly one derive\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 363,
+   "trig": "render_hook(target, \"inner-flush\", %{",
+   "trig_expr_closes": 367,
+   "trigger_helpers": [],
+   "assert_line": 374,
+   "assert_src": "assert stored_value(slug) == %{\"amount\" => \"301\", \"currency\" => \"NOK\"}",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     369,
+     "render("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_paper_op_principal_gate_test.exs",
+   "line": 172,
+   "name": "test \"LEGACY per-block editor: the cid-targeted inner-change is refused, and so is paper-op\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 207,
+   "trig": "inner_change(view, %{\"amount\" => \"299\", \"currency\" => \"USD\"})",
+   "trig_expr_closes": 207,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 211,
+   "assert_src": "after_component_event = stored_value(slug)",
+   "w1_barriers": [
+    [
+     165,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_paper_op_principal_gate_test.exs",
+   "line": 215,
+   "name": "test \"DEFAULT canvas editor: the same cid route is refused there too\", %{conn: conn} do",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 229,
+   "trig": "inner_change(view, %{\"amount\" => \"299\", \"currency\" => \"USD\"})",
+   "trig_expr_closes": 229,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 231,
+   "assert_src": "after_component_event = stored_value(slug)",
+   "w1_barriers": [
+    [
+     165,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_paper_op_principal_gate_test.exs",
+   "line": 340,
+   "name": "test \"a principal-LESS socket is NOT denied \u2014 the write still lands\", %{conn: conn} do",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 354,
+   "trig": "inner_change(view, %{\"amount\" => \"299\", \"currency\" => \"USD\"})",
+   "trig_expr_closes": 354,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 356,
+   "assert_src": "assert stored_value(slug) == %{\"amount\" => \"299\", \"currency\" => \"USD\"}",
+   "w1_barriers": [
+    [
+     165,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_caps_readonly_share_test.exs",
+   "line": 284,
+   "name": "test \"the component route no longer writes \u2014 stored block UNCHANGED, deny flash raised\", %{",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 305,
+   "trig": "inner_change(view, @attempt)",
+   "trig_expr_closes": 305,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 309,
+   "assert_src": "after_component_event = stored_value(ws, proj, slug)",
+   "w1_barriers": [
+    [
+     211,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_caps_readonly_share_test.exs",
+   "line": 314,
+   "name": "test \"a PROJECT-scoped write grant is refused the same way (grant breadth is not the reason)\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 324,
+   "trig": "inner_change(view, @attempt)",
+   "trig_expr_closes": 324,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 326,
+   "assert_src": "after_component_event = stored_value(ws, proj, slug)",
+   "w1_barriers": [
+    [
+     211,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_caps_readonly_share_test.exs",
+   "line": 334,
+   "name": "test \"no longer writes a DIFFERENT paper on the same desk\", %{conn: conn, ws: ws, proj: proj} do",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 359,
+   "trig": "inner_change(view, %{\"amount\" => \"ESCALATED\", \"currency\" => \"NOK\"})",
+   "trig_expr_closes": 359,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 361,
+   "assert_src": "stored_other = stored_value(ws, proj, \"w43-other-doc\")",
+   "w1_barriers": [
+    [
+     211,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_caps_readonly_share_test.exs",
+   "line": 369,
+   "name": "test \"NEGATIVE: an identical setup with a READ-only grant is still refused\", %{",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 389,
+   "trig": "inner_change(view, @attempt)",
+   "trig_expr_closes": 389,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 391,
+   "assert_src": "stored_negative_control = stored_value(ws, proj, slug)",
+   "w1_barriers": [
+    [
+     211,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_caps_readonly_share_test.exs",
+   "line": 395,
+   "name": "test \"POSITIVE: an admin MEMBER (share_access nil) still writes\", %{",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 418,
+   "trig": "inner_change(view, @attempt)",
+   "trig_expr_closes": 418,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 420,
+   "assert_src": "stored_positive_control = stored_value(ws, proj, slug)",
+   "w1_barriers": [
+    [
+     211,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_grant_grade_doc_escalation_test.exs",
+   "line": 305,
+   "name": "test \"REFUTED: stored(other) is unchanged, and the READ REACH that makes that meaningful is asserted\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 316,
+   "trig": "inner_change(view, @other_slug, @escalated)",
+   "trig_expr_closes": 316,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 318,
+   "assert_src": "stored_after = stored_value(ws, proj, @other_slug)",
+   "w1_barriers": [
+    [
+     243,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w43_grant_grade_doc_escalation_test.exs",
+   "line": 392,
+   "name": "test \"writes through BOTH seams \u2014 so the refusals above are containment, not a dead editor\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 399,
+   "trig": "inner_change(view, @granted_slug, @legit)",
+   "trig_expr_closes": 399,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 400,
+   "assert_src": "assert stored_value(ws, proj, @granted_slug) == @legit",
+   "w1_barriers": [
+    [
+     243,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+   "line": 275,
+   "name": "test \"is DENIED writing the NON-granted doc \u2014 stored bytes UNCHANGED\", %{",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 286,
+   "trig": "inner_change(view, @escalated)",
+   "trig_expr_closes": 286,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 290,
+   "assert_src": "stored_non_granted_doc = stored_value(ws, proj, @other_slug)",
+   "w1_barriers": [
+    [
+     236,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+   "line": 302,
+   "name": "test \"writes, and the stored bytes CHANGE\", %{conn: conn, ws: ws, proj: proj} do",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 309,
+   "trig": "inner_change(view, @legit)",
+   "trig_expr_closes": 309,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 311,
+   "assert_src": "after_write = stored_value(ws, proj, @granted_slug)",
+   "w1_barriers": [
+    [
+     236,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+   "line": 320,
+   "name": "test \"a plain MEMBER (role write, no admin) writes an arbitrary doc on the desk\", %{",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 338,
+   "trig": "inner_change(view, @legit)",
+   "trig_expr_closes": 338,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 340,
+   "assert_src": "stored_member_write = stored_value(ws, proj, @other_slug)",
+   "w1_barriers": [
+    [
+     236,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+   "line": 372,
+   "name": "test \"the door arm SUBSTITUTED OUT of shared/paper.ex admits the escalation it refuses\", %{",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 447,
+   "trig": "inner_change(view, @escalated)",
+   "trig_expr_closes": 447,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 453,
+   "assert_src": "assert stored_value(ws, proj, @other_slug) == @escalated",
+   "w1_barriers": [
+    [
+     236,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w45_grant_door_arms_test.exs",
+   "line": 406,
+   "name": "test \"same string from both, and save_status is what tells them apart\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 441,
+   "trig": "inner_change(door_view, @escalated)",
+   "trig_expr_closes": 441,
+   "trigger_helpers": [
+    "inner_change"
+   ],
+   "assert_line": 443,
+   "assert_src": "flash_b = flash_error(door_view)",
+   "w1_barriers": [
+    [
+     271,
+     "render("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "MASKED-BY-BARRIER"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/slash_menu_and_codelist_test.exs",
+   "line": 256,
+   "name": "test \"Edit mode hosts the TreeCodelistField for a variant:tree codelist block\",",
+   "chains": [
+    "CH-TREE"
+   ],
+   "hops": 3,
+   "trig_line": 282,
+   "trig": "~s([data-block-id=\"cl-tree\"] button[phx-click=\"tree_node_select\"][phx-value-code=\"FB\"])",
+   "trig_expr_closes": 282,
+   "trigger_helpers": [],
+   "assert_line": 290,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [
+    [
+     284,
+     "render_click("
+    ],
+    [
+     286,
+     "render("
+    ],
+    [
+     288,
+     "flush_form("
+    ]
+   ],
+   "settles": [],
+   "barrier_count": 3,
+   "masked_where": "TEST-BLOCK",
+   "verdict": "RACING-MULTI-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2684,
+   "name": "test \"streaming deltas never write to the store; completion does\", %{conn: conn} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2686,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"start\"})",
+   "trig_expr_closes": 2686,
+   "trigger_helpers": [],
+   "assert_line": 2687,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 0,
+   "masked_where": null,
+   "verdict": "RACING-ONE-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 2779,
+   "name": "test \"the first successful turn kicks an async AI title that lands in the sidebar\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 2784,
+   "trig": "element(view, \"form[phx-submit=send]\"),",
+   "trig_expr_closes": 2784,
+   "trigger_helpers": [],
+   "assert_line": 2788,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 0,
+   "masked_where": null,
+   "verdict": "RACING-ONE-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 6673,
+   "name": "test \"a background session's card shows working + its current tool line\", %{conn: conn} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 6675,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"mine\"})",
+   "trig_expr_closes": 6675,
+   "trigger_helpers": [],
+   "assert_line": 6677,
+   "assert_src": "other = Ecto.UUID.generate()",
+   "w1_barriers": [],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 0,
+   "masked_where": null,
+   "verdict": "RACING-ONE-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 7512,
+   "name": "test \"a sticky draft round-trips across a session switch and clears on send\",",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 7530,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"actually send\"})",
+   "trig_expr_closes": 7530,
+   "trigger_helpers": [],
+   "assert_line": 7531,
+   "assert_src": "assert StudioChat.get_session(a).draft == nil",
+   "w1_barriers": [],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 0,
+   "masked_where": null,
+   "verdict": "RACING-ONE-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/chat_live_test.exs",
+   "line": 8388,
+   "name": "test \"the first send stamps the created session's owner_workspace_id (D43h)\", %{conn: conn} do",
+   "chains": [
+    "CH-CHAT"
+   ],
+   "hops": 1,
+   "trig_line": 8392,
+   "trig": "render_submit(element(view, \"form[phx-submit=send]\"), %{\"message\" => \"hi\"})",
+   "trig_expr_closes": 8392,
+   "trigger_helpers": [],
+   "assert_line": 8394,
+   "assert_src": "sid = store_id(view)",
+   "w1_barriers": [],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 0,
+   "masked_where": null,
+   "verdict": "RACING-ONE-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/paper_editor/slash_menu_and_codelist_test.exs",
+   "line": 256,
+   "name": "test \"Edit mode hosts the TreeCodelistField for a variant:tree codelist block\",",
+   "chains": [
+    "CH-PAPEROP"
+   ],
+   "hops": 1,
+   "trig_line": 288,
+   "trig": "flush_form(view, ~s([data-block-id=\"cl-tree\"] form), %{\"value\" => \"FB\"})",
+   "trig_expr_closes": 288,
+   "trigger_helpers": [
+    "flush_form"
+   ],
+   "assert_line": 290,
+   "assert_src": "block =",
+   "w1_barriers": [],
+   "w2_barriers": [],
+   "settles": [],
+   "barrier_count": 0,
+   "masked_where": null,
+   "verdict": "RACING-ONE-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_tree_codelist_write_gate_test.exs",
+   "line": 275,
+   "name": "test \"the chain is refused and persisted state is unchanged\", %{conn: conn} do",
+   "chains": [
+    "CH-TREE"
+   ],
+   "hops": 3,
+   "trig_line": 292,
+   "trig": "tree_node_select(view, @forged_code)",
+   "trig_expr_closes": 292,
+   "trigger_helpers": [
+    "tree_node_select"
+   ],
+   "assert_line": 295,
+   "assert_src": "assert stored_value(slug) == @old_code",
+   "w1_barriers": [
+    [
+     236,
+     "settle!("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     294,
+     "flash_error("
+    ]
+   ],
+   "settles": [
+    [
+     236,
+     "settle!(view, label: \"tree_node_select/2\")"
+    ]
+   ],
+   "barrier_count": 2,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "SETTLED-MULTI-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_tree_codelist_write_gate_test.exs",
+   "line": 298,
+   "name": "test \"the hop itself is stopped \u2014 PaperFieldBlock's own value never takes the forged code\",",
+   "chains": [
+    "CH-TREE"
+   ],
+   "hops": 3,
+   "trig_line": 312,
+   "trig": "tree_node_select(view, @forged_code)",
+   "trig_expr_closes": 312,
+   "trigger_helpers": [
+    "tree_node_select"
+   ],
+   "assert_line": 322,
+   "assert_src": "assert stored_value(slug) == @old_code",
+   "w1_barriers": [
+    [
+     236,
+     "settle!("
+    ]
+   ],
+   "w2_barriers": [
+    [
+     321,
+     "field_block_state("
+    ]
+   ],
+   "settles": [
+    [
+     236,
+     "settle!(view, label: \"tree_node_select/2\")"
+    ]
+   ],
+   "barrier_count": 2,
+   "masked_where": "TRIGGER-HELPER+TEST-BLOCK",
+   "verdict": "SETTLED-MULTI-HOP"
+  },
+  {
+   "file": "api/test/barkpark_web/live/studio/pds_w42_tree_codelist_write_gate_test.exs",
+   "line": 327,
+   "name": "test \"a writer's row select still travels the whole chain to the store\", %{conn: conn} do",
+   "chains": [
+    "CH-TREE"
+   ],
+   "hops": 3,
+   "trig_line": 338,
+   "trig": "tree_node_select(view, @forged_code)",
+   "trig_expr_closes": 338,
+   "trigger_helpers": [
+    "tree_node_select"
+   ],
+   "assert_line": 343,
+   "assert_src": "assert stored_value(slug) == @forged_code",
+   "w1_barriers": [
+    [
+     236,
+     "settle!("
+    ]
+   ],
+   "w2_barriers": [],
+   "settles": [
+    [
+     236,
+     "settle!(view, label: \"tree_node_select/2\")"
+    ]
+   ],
+   "barrier_count": 1,
+   "masked_where": "TRIGGER-HELPER",
+   "verdict": "SETTLED-MULTI-HOP"
+  }
+ ]
+}
